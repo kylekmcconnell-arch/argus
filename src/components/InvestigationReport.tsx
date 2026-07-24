@@ -65,6 +65,58 @@ const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
 const MAX_FOUNDER_AUDITS = 5;
 
+type TeamIdentity = {
+  name?: string;
+  handle?: string;
+  linkedin?: string;
+};
+
+function normalizedTeamIdentity(value?: string): string {
+  return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function teamIdentityKeys(person: TeamIdentity): Set<string> {
+  const keys = new Set<string>();
+  const handle = normalizedTeamIdentity(person.handle?.replace(/^@/, ""));
+  const linkedin = (person.linkedin ?? "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "")
+    .toLowerCase();
+  const nameTokens = (person.name ?? "")
+    .replace(/^@/, "")
+    .trim()
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const compactName = nameTokens.join("");
+
+  if (handle) keys.add(`person:${handle}`);
+  if (linkedin) keys.add(`linkedin:${linkedin}`);
+  if (compactName) keys.add(`person:${compactName}`);
+  if (nameTokens.length >= 2) {
+    keys.add(`person:${nameTokens[0]}${nameTokens[nameTokens.length - 1]}`);
+  }
+  return keys;
+}
+
+function sameTeamIdentity(a: TeamIdentity, b: TeamIdentity): boolean {
+  const aKeys = teamIdentityKeys(a);
+  return [...teamIdentityKeys(b)].some((key) => aKeys.has(key));
+}
+
+function humanTeamName(current: TeamIdentity, incoming: TeamIdentity): string {
+  const currentName = current.name ?? "";
+  const incomingName = incoming.name ?? "";
+  const currentLooksLikeHandle = currentName.startsWith("@")
+    || (!/[\s._-]/.test(currentName)
+      && normalizedTeamIdentity(currentName) === normalizedTeamIdentity(current.handle));
+  const incomingLooksLikeHandle = incomingName.startsWith("@")
+    || (!/[\s._-]/.test(incomingName)
+      && normalizedTeamIdentity(incomingName) === normalizedTeamIdentity(incoming.handle));
+  if (currentLooksLikeHandle && incomingName && !incomingLooksLikeHandle) return incomingName;
+  return currentName || incomingName;
+}
+
 function ReportSectionHeading({
   index,
   title,
@@ -330,26 +382,19 @@ export function InvestigationReport({
   const teamUnified: { name: string; handle?: string; role: string; linkedin?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
     type TeamRow = { name: string; handle?: string; role: string; linkedin?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
     const map = new Map<string, TeamRow>();
-    const normalizedName = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const findExisting = (person: { name: string; handle?: string; linkedin?: string }) => {
-      const handleKey = person.handle?.replace(/^@/, "").toLowerCase();
-      const linkedinKey = person.linkedin?.replace(/^https?:\/\//, "").replace(/\/$/, "").toLowerCase();
-      const nameKey = normalizedName(person.name);
-      return [...map.entries()].find(([, row]) =>
-        (handleKey && row.handle?.replace(/^@/, "").toLowerCase() === handleKey)
-        || (linkedinKey && row.linkedin?.replace(/^https?:\/\//, "").replace(/\/$/, "").toLowerCase() === linkedinKey)
-        || (nameKey && normalizedName(row.name) === nameKey));
+      return [...map.entries()].find(([, row]) => sameTeamIdentity(row, person));
     };
     const add = (person: TeamRow) => {
       const existing = findExisting(person);
       if (!existing) {
-        map.set(person.handle?.replace(/^@/, "").toLowerCase() || normalizedName(person.name), person);
+        map.set([...teamIdentityKeys(person)][0] ?? person.name.toLowerCase(), person);
         return;
       }
       const [key, row] = existing;
       map.set(key, {
         ...row,
-        name: row.name || person.name,
+        name: humanTeamName(row, person),
         handle: row.handle ?? person.handle,
         linkedin: row.linkedin ?? person.linkedin,
         role: !row.role || /^team$/i.test(row.role) ? person.role : row.role,
@@ -397,16 +442,30 @@ export function InvestigationReport({
   // The full team, from EVERY source: site names, site-linked handles, project
   // bio handles, X-content team, and the web/LinkedIn dig — merged into one list.
   const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
-    const map = new Map<string, { name: string; handle?: string; role?: string; linkedin?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }>();
-    const k = (h?: string | null, n?: string) => (h ? h.replace(/^@/, "").toLowerCase() : (n ?? "").toLowerCase());
-    for (const m of teamUnified) map.set(k(m.handle, m.name), { name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, developerProfiles: m.developerProfiles, source: m.source });
-    for (const f of founders) {
-      const key = k(f.handle, f.name);
-      const ex = map.get(key);
-      if (ex) { if (!ex.handle && f.handle) ex.handle = f.handle; }
-      else map.set(key, { name: f.name, handle: f.handle ?? undefined, source: f.source === "site" ? "site" : "project account" });
+    type TeamPerson = { name: string; handle?: string; role?: string; linkedin?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
+    const people: TeamPerson[] = [];
+    const add = (person: TeamPerson) => {
+      const existing = people.find((candidate) => sameTeamIdentity(candidate, person));
+      if (!existing) {
+        people.push(person);
+        return;
+      }
+      existing.name = humanTeamName(existing, person);
+      existing.handle ??= person.handle;
+      existing.linkedin ??= person.linkedin;
+      existing.role = !existing.role || /^team$/i.test(existing.role) ? person.role : existing.role;
+      existing.developerProfiles ??= person.developerProfiles;
+      if (!existing.source.split(" + ").includes(person.source)) {
+        existing.source = `${existing.source} + ${person.source}`;
+      }
+    };
+    for (const m of teamUnified) {
+      add({ name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, developerProfiles: m.developerProfiles, source: m.source });
     }
-    return [...map.values()];
+    for (const f of founders) {
+      add({ name: f.name, handle: f.handle ?? undefined, source: f.source === "site" ? "site" : "project account" });
+    }
+    return people;
   })();
   const advisors = (projectAccount?.evidence.testimonials ?? []).filter((t) => t.claimed_relationship === "advisor");
   const advisorChip = (v?: string): { label: string; color: string } => {

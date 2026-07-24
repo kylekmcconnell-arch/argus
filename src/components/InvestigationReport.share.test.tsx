@@ -252,6 +252,69 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).not.toContain("Nik Rae Falco");
   });
 
+  it("merges handle-only team rows with the same people's full names", () => {
+    render(investigation({
+      siteUrl: "https://venice.ai",
+      projectAccount: {
+        handle: "@askvenice",
+        display_name: "Venice",
+        avatar: "",
+        bio: "Private generative AI",
+        followers: "0",
+        joined: "",
+        identity_note: "",
+        headline: "Project account",
+        live: true,
+        notableFollowers: [],
+        contradictions: [],
+        checkRuns: [{ checkId: "identity-resolution", label: "Identity", status: "confirmed" }],
+        webTeam: [
+          {
+            name: "Erik Voorhees",
+            handle: "@erikvoorhees",
+            role: "Founder & CEO",
+            source: "official team page",
+            sourceUrl: "https://venice.ai/about",
+            provider: "team-page",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          },
+          {
+            name: "Teana Baker-Taylor",
+            role: "Co-Founder & Chief Operating Officer",
+            source: "official team page",
+            sourceUrl: "https://venice.ai/about",
+            provider: "team-page",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          },
+        ],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 80,
+          identity_confidence: "Confirmed",
+          roles: [],
+        },
+        evidence: {
+          ventures: [],
+          testimonials: [],
+          advised: [],
+          associates: [
+            { associate_key: "@erikvoorhees", relation: "team: Founder & CEO" },
+            { associate_key: "@teanataylor", relation: "team: Co-founder and COO" },
+          ],
+          wallets: [],
+          promotions: [],
+        },
+        graph: { nodes: [], edges: [] },
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+    }));
+
+    expect(container.textContent).toContain("Built by Erik Voorhees, Teana Baker-Taylor");
+    expect(container.textContent).toContain("Team & founders (2)");
+    expect(container.textContent).not.toContain("Team & founders (4)");
+  });
+
   it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
     harness.graph = {
       nodes: [
