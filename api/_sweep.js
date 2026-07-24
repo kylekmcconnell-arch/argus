@@ -166,6 +166,79 @@ function subjectConnections(handle, contributions, max = 12) {
   return [...byOther.entries()].map(([, v]) => ({ other: v.label, otherVerdict: v.verdict, ties: [...v.ties.values()], direct: v.direct })).filter((x) => x.ties.length > 0 || x.direct).sort((a, b) => Number(b.direct) - Number(a.direct) || b.ties.length - a.ties.length).slice(0, max);
 }
 
+// src/lib/priceHistory.ts
+var NETWORK = {
+  solana: "solana",
+  ethereum: "eth",
+  eth: "eth",
+  bsc: "bsc",
+  base: "base",
+  arbitrum: "arbitrum",
+  polygon: "polygon_pos",
+  "polygon_pos": "polygon_pos",
+  avalanche: "avax",
+  avax: "avax",
+  optimism: "optimism",
+  fantom: "ftm",
+  sui: "sui",
+  ton: "ton",
+  tron: "tron",
+  blast: "blast",
+  sei: "sei-evm"
+};
+var GT = "https://api.geckoterminal.com/api/v2";
+function record(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+async function gt(path) {
+  try {
+    const r = await fetch(`${GT}${path}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(8e3)
+    });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+async function topPool(network, address) {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
+  const rows = record(d).data;
+  const first = Array.isArray(rows) ? record(rows[0]) : {};
+  const attributes = record(first.attributes);
+  const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
+  return id ? id.replace(`${network}_`, "") : null;
+}
+async function fetchPriceHistory(address, chain, pairAddress) {
+  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
+  if (!network || !address) return null;
+  const pool = pairAddress || await topPool(network, address);
+  if (!pool) return null;
+  for (const timeframe of ["day", "hour"]) {
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
+    const rawList = record(record(record(d).data).attributes).ohlcv_list;
+    const list = Array.isArray(rawList) ? rawList.filter((row) => Array.isArray(row) && row.length >= 5 && row.every((value) => typeof value === "number")) : [];
+    if (list.length < 3) continue;
+    const rows = [...list].sort((a, b) => a[0] - b[0]);
+    const points = rows.map((r) => r[4]).filter((n) => typeof n === "number" && n > 0);
+    if (points.length < 3) continue;
+    const first = points[0];
+    const last = points[points.length - 1];
+    const peak = Math.max(...points);
+    return {
+      points,
+      first,
+      last,
+      peak,
+      changePct: first > 0 ? (last - first) / first * 100 : 0,
+      drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
+      timeframe,
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  return null;
+}
+
 // src/token/sources.ts
 var GOPLUS_CHAIN = {
   ethereum: "1",
@@ -782,11 +855,12 @@ async function runTokenAudit(input, emit, opts) {
   step({ phase: "Screen", label: "Deployer forensics", detail: "Screening deployer + top holders against OFAC, and tracing the deployer's funding provenance on Arkham\u2026", tone: "neutral" });
   const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
   const deployerRiskFn = opts?.screenDeployerRisk ?? screenDeployerRisk;
-  const [sanctionsScreen, deployerRisk] = await Promise.all([
+  const [sanctionsScreen, deployerRisk, priceHistory] = await Promise.all([
     screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
-    deployer ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0)
+    deployer ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0),
+    fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null)
   ]);
   if (deployerRisk?.available && deployerRisk.paths.length) {
     for (const p of deployerRisk.paths.slice(0, 3)) {
@@ -831,6 +905,7 @@ async function runTokenAudit(input, emit, opts) {
     vol24,
     ageDays,
     priceChange: pair.priceChange,
+    ...priceHistory ? { priceHistory } : {},
     verdict,
     score,
     capApplied,

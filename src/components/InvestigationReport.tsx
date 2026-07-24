@@ -24,6 +24,8 @@ import { Counterparties } from "./Counterparties";
 import { RiskPaths } from "./RiskPaths";
 import { Holdings } from "./Holdings";
 import { TokenSparkline } from "./TokenSparkline";
+import { TokenSnapshotVisuals } from "./TokenSnapshotVisuals";
+import { UsageVisuals } from "./UsageVisuals";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
@@ -36,6 +38,7 @@ import {
   ArrowClockwise,
   ArrowLeft,
   Briefcase,
+  ChartLineUp,
   ClipboardText,
   Database,
   DotsThree,
@@ -177,6 +180,9 @@ export function InvestigationReport({
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
   );
+  const loadCurrentIntelligence = () => {
+    if (versionContext) setCurrentIntelligenceVersionId(versionContext.reportVersionId);
+  };
   const persistencePending = !versionContext && inv.persistence?.state === "pending";
   const persistenceFailed = !versionContext && inv.persistence?.state === "failed";
   const panelCostToken = !versionContext && inv.persistence?.state === "persisted"
@@ -507,7 +513,7 @@ export function InvestigationReport({
               snapshotVersion={versionContext.version}
               capturedAt={versionContext.createdAt}
               currentIntelligenceEnabled={currentIntelligenceEnabled}
-              onLoadCurrentIntelligence={() => setCurrentIntelligenceVersionId(versionContext.reportVersionId)}
+              onLoadCurrentIntelligence={loadCurrentIntelligence}
             />
           </div>
         )}
@@ -703,6 +709,7 @@ export function InvestigationReport({
               { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
               ...(showProjectBasicFacts ? [{ href: "#investigation-basic-facts" as const, label: "Key facts", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
+              { href: "#investigation-visuals", label: "Visuals", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#investigation-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
               ...((teamPeople.length > 0 || advisors.length > 0) ? [{ href: "#investigation-team" as const, label: "Team", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
               ...(invGraph && invGraph.nodes.length > 1 ? [{ href: "#investigation-relationships" as const, label: "Relationships", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
@@ -744,9 +751,64 @@ export function InvestigationReport({
           </div>
         )}
 
+        <div id="investigation-visuals" className="report-section scroll-mt-28 mt-7">
+          <ReportSectionHeading
+            index="03 · Visual intelligence"
+            title="What the scan captured"
+            description="Frozen market, ownership, and protocol charts remain visible with the report. Live refreshes are labeled separately and never alter the stored result."
+          />
+          <div className="mt-3 space-y-3">
+            <TokenSnapshotVisuals token={token} />
+            {(projectAccount?.protocolTvl || projectAccount?.protocolFees || projectAccount?.holderProfile) && (
+              <UsageVisuals
+                tvl={projectAccount.protocolTvl}
+                fees={projectAccount.protocolFees}
+                holders={projectAccount.holderProfile}
+              />
+            )}
+            <section className="panel px-4 py-4 sm:px-5" aria-labelledby="investigation-price-history-title">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="eyebrow">{token.priceHistory ? "Frozen price series" : "Current price series"}</p>
+                  <h3 id="investigation-price-history-title" className="mt-1 text-[16px] font-semibold tracking-tight text-ink">
+                    Price history
+                  </h3>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+                    {token.priceHistory
+                      ? `Saved with this scan${token.priceHistory.capturedAt ? ` on ${token.priceHistory.capturedAt.slice(0, 10)}` : ""}.`
+                      : "This older snapshot did not store the historical series. A live refresh can load it without changing the verdict."}
+                  </p>
+                </div>
+                <span className={`chip ${token.priceHistory ? "tint-pass" : showCurrentIntelligence ? "tint-caution" : ""}`}>
+                  {token.priceHistory ? "CAPTURED WITH SCAN" : showCurrentIntelligence ? "LIVE REFRESH" : "REFRESH PAUSED"}
+                </span>
+              </div>
+              <div className="mt-4">
+                {token.priceHistory || showCurrentIntelligence ? (
+                  <TokenSparkline
+                    address={token.address}
+                    chain={token.chain}
+                    pairAddress={token.pairAddress}
+                    history={token.priceHistory}
+                  />
+                ) : (
+                  <div className="panel-inset flex flex-col gap-3 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="max-w-2xl text-[11.5px] leading-relaxed text-ink-dim">
+                      Load the current GeckoTerminal series as a clearly marked supplement to this immutable snapshot.
+                    </p>
+                    <button type="button" onClick={loadCurrentIntelligence} className="btn-chip tint-signal min-h-10 shrink-0">
+                      Refresh price history
+                    </button>
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+
         <div className="report-section mt-7">
           <ReportSectionHeading
-            index="03 · Evidence"
+            index="04 · Evidence"
             title="Token, ownership, and operator record"
             description="The on-chain result and the people behind it are shown together before deeper enrichment."
           />
@@ -764,12 +826,6 @@ export function InvestigationReport({
               <span>mc <span className="mono text-ink-dim">{money(token.mcap)}</span></span>
               <span>chain <span className="mono text-ink-dim capitalize">{token.chain}</span></span>
             </div>
-            {/* price history — the shape of the chart IS forensic context (pump, dump, drawdown) */}
-            {showCurrentIntelligence && (
-              <div className="mt-3 border-t border-line/60 pt-2.5">
-                <TokenSparkline address={token.address} chain={token.chain} pairAddress={token.pairAddress} />
-              </div>
-            )}
             {/* CEX listings — real centralized-exchange listings are a strong legitimacy signal */}
             {token.cg?.cexNames && token.cg.cexNames.length > 0 ? (
               <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-line/60 pt-2">
@@ -870,7 +926,7 @@ export function InvestigationReport({
         {(teamPeople.length > 0 || advisors.length > 0) && (
           <div id="investigation-team" className="report-section scroll-mt-28 mt-7">
             <ReportSectionHeading
-              index="04 · People"
+              index="05 · People"
               title="Team and named relationships"
               description="Every person remains tied to the source that connected them to the project."
             />
@@ -977,7 +1033,7 @@ export function InvestigationReport({
         {invGraph && invGraph.nodes.length > 1 && (
           <div id="investigation-relationships" className="report-section scroll-mt-28 mt-7">
             <ReportSectionHeading
-              index="05 · Relationships"
+              index="06 · Relationships"
               title="How the subjects connect"
               description="The graph and its readable ledger expose links without turning proximity into guilt."
             />
@@ -1034,7 +1090,7 @@ export function InvestigationReport({
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="report-section mt-7">
           <ReportSectionHeading
-            index="06 · Sources & checks"
+            index="07 · Sources & checks"
             title="What ARGUS checked"
             description="Terminal outcomes, unresolved paths, and findings remain inspectable at check level."
           />

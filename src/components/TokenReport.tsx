@@ -513,13 +513,17 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
 
         {/* price performance history */}
-        {showCurrentIntelligence && (
+        {(d.priceHistory || showCurrentIntelligence) && (
           <div className="mt-4 panel p-4">
             <div className="mb-2 flex items-baseline justify-between">
-              <div className="eyebrow">Current price performance</div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">live supplement · GeckoTerminal</div>
+              <div className="eyebrow">{d.priceHistory ? "Captured price performance" : "Current price performance"}</div>
+              <div className="text-[11px] uppercase tracking-wider text-ink-faint">
+                {d.priceHistory
+                  ? `saved with scan${d.priceHistory.capturedAt ? ` · ${d.priceHistory.capturedAt.slice(0, 10)}` : ""}`
+                  : "live supplement · GeckoTerminal"}
+              </div>
             </div>
-            <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} />
+            <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} history={d.priceHistory} />
           </div>
         )}
 

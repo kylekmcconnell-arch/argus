@@ -229,6 +229,7 @@ describe("investigation exact sharing", () => {
     expect(hrefs).toEqual([
       "#report-summary",
       "#report-risks",
+      "#investigation-visuals",
       "#investigation-evidence",
       "#investigation-team",
       "#investigation-relationships",
@@ -242,6 +243,68 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("Recorded outcomes");
     expect(container.textContent).toContain("Open questions");
     expect(container.querySelector('[role="progressbar"][aria-label="Evidence coverage"]')).not.toBeNull();
+  });
+
+  it("renders frozen visual intelligence on a snapshot without enabling live panels", () => {
+    render(investigation({
+      token: {
+        ...token(),
+        priceChange: { m5: 0.3, h1: -1.2, h6: 2.4, h24: 5.8 },
+        priceHistory: {
+          points: [1, 1.2, 1.1, 1.4],
+          first: 1,
+          last: 1.4,
+          peak: 1.4,
+          changePct: 40,
+          drawdownPct: 0,
+          timeframe: "day",
+          capturedAt: "2026-07-23T22:50:55.000Z",
+        },
+        axes: [{ key: "T1", label: "Liquidity & lock", score: 20, weight: 24, rationale: "Deep liquidity." }],
+      },
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000144",
+        reportVersionId,
+        version: 4,
+        completenessState: "complete",
+        attestationState: "analyst_submitted",
+        methodologyVersion: null,
+        createdAt: "2026-07-23T22:50:55.000Z",
+        checks: [],
+      },
+    }));
+
+    expect(container.textContent).toContain("What the scan captured");
+    expect(container.textContent).toContain("Market and ownership structure");
+    expect(container.textContent).toContain("Saved with this scan on 2026-07-23");
+    expect(harness.livePanel.mock.calls.filter(([name]) => name === "sparkline")).toHaveLength(1);
+    expect(harness.livePanel.mock.calls.some(([name]) => name === "project-research")).toBe(false);
+    expect(harness.livePanel.mock.calls.some(([name]) => name === "on-chain")).toBe(false);
+  });
+
+  it("offers a clearly labeled live price refresh for older snapshots", async () => {
+    render(investigation({
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000144",
+        reportVersionId,
+        version: 2,
+        completenessState: "complete",
+        attestationState: "analyst_submitted",
+        methodologyVersion: null,
+        createdAt: "2026-07-10T12:00:00.000Z",
+        checks: [],
+      },
+    }));
+
+    expect(harness.livePanel.mock.calls.some(([name]) => name === "sparkline")).toBe(false);
+    const refresh = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Refresh price history");
+    expect(refresh).toBeDefined();
+    await act(async () => refresh?.click());
+
+    expect(harness.livePanel.mock.calls.some(([name]) => name === "sparkline")).toBe(true);
+    expect(harness.livePanel.mock.calls.some(([name]) => name === "project-research")).toBe(true);
+    expect(harness.livePanel.mock.calls.some(([name]) => name === "on-chain")).toBe(false);
   });
 
   it("shares the exact immutable investigation version being reviewed", async () => {

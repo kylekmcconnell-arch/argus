@@ -331,7 +331,7 @@ describe("private person report evidence boundary", () => {
 
     expect(harness.livePanel.mock.calls.map(([panel]) => panel)).not.toContain("ring-alert");
     const loadOverlay = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Load current intelligence");
+      .find((button) => button.textContent?.trim() === "Refresh live intelligence");
     expect(loadOverlay).toBeDefined();
     act(() => loadOverlay?.click());
 

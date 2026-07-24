@@ -79,14 +79,14 @@ export function SnapshotEvidenceControl({
         ) : (
           <>
             <p className="w-full text-[11.5px] leading-relaxed text-ink-faint sm:ml-1 sm:min-w-52 sm:flex-1">
-              Current intelligence panels are paused. Live panels are not part of the stored verdict.
+              Captured charts are shown below. Live refreshes are paused and remain outside the stored verdict.
             </p>
             <button
               type="button"
               onClick={loadCurrentIntelligence}
               className="btn-chip tint-signal shrink-0"
             >
-              Load current intelligence
+              Refresh live intelligence
             </button>
           </>
         )}

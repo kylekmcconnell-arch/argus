@@ -35,11 +35,11 @@ describe("SnapshotEvidenceControl", () => {
   it("keeps current panels paused behind an explicit snapshot control", () => {
     expect(container.querySelector("section")?.getAttribute("aria-label")).toBe("Snapshot v4 evidence mode");
     expect(container.textContent).toContain("SNAPSHOT v4");
-    expect(container.textContent).toContain("Current intelligence panels are paused.");
-    expect(container.textContent).toContain("not part of the stored verdict");
+    expect(container.textContent).toContain("Captured charts are shown below.");
+    expect(container.textContent).toContain("Live refreshes are paused");
     expect(container.querySelector("time")?.getAttribute("dateTime")).toBe("2026-07-11T14:30:00.000Z");
     expect(container.querySelector("time")?.textContent).toContain("captured");
-    expect(container.querySelector<HTMLButtonElement>("button")?.textContent?.trim()).toBe("Load current intelligence");
+    expect(container.querySelector<HTMLButtonElement>("button")?.textContent?.trim()).toBe("Refresh live intelligence");
     expect(container.querySelector("[role='status']")).toBeNull();
   });
 

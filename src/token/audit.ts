@@ -9,6 +9,7 @@ import type { ReportPersistenceContext, ReportVersionContext } from "../lib/repo
 import type { TraceStep } from "../data/evidence";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { tokenEntityKey, walletEntityKey } from "../graph/network";
+import { fetchPriceHistory, type PriceHistory } from "../lib/priceHistory";
 import {
   dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
   type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo,
@@ -61,6 +62,8 @@ export interface TokenDossier {
   address: string; chain: string; dexId: string; pairAddress?: string; symbol: string; name: string;
   imageUrl?: string; priceUsd?: number; mcap?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
   priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
+  /** Frozen GeckoTerminal series captured during the scan for snapshot-safe rendering. */
+  priceHistory?: PriceHistory;
   verdict: string; score: number | null; capApplied: string | null; headline: string;
   axes: TokenAxis[];
   safety: NormalizedSafety;
@@ -675,11 +678,12 @@ async function runTokenAudit(
   step({ phase: "Screen", label: "Deployer forensics", detail: "Screening deployer + top holders against OFAC, and tracing the deployer's funding provenance on Arkham…", tone: "neutral" });
   const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
   const deployerRiskFn = opts?.screenDeployerRisk ?? screenDeployerRisk;
-  const [sanctionsScreen, deployerRisk] = await Promise.all([
+  const [sanctionsScreen, deployerRisk, priceHistory] = await Promise.all([
     screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
     deployer ? deployerRiskFn(deployer).catch(() => undefined) : Promise.resolve(undefined),
+    fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null),
   ]);
   if (deployerRisk?.available && deployerRisk.paths.length) {
     // Every path Arkham returns is already a risk exposure. Surface both
@@ -727,6 +731,7 @@ async function runTokenAudit(
     address, chain, dexId: pair.dexId, pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
     mcap: fdv, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
+    ...(priceHistory ? { priceHistory } : {}),
     verdict, score, capApplied, headline, axes, safety: s, socials,
     projectX, deployer, topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
     sanctionsScreen,

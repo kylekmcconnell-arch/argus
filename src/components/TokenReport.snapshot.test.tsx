@@ -244,7 +244,7 @@ describe("token report supplemental evidence boundary", () => {
     render(dossier({ versionContext }));
 
     expect(container.textContent).toContain("SNAPSHOT v2");
-    expect(container.textContent).toContain("Current intelligence panels are paused");
+    expect(container.textContent).toContain("Captured charts are shown below");
     expect(harness.livePanel).not.toHaveBeenCalled();
     expect(harness.secondOpinion).not.toHaveBeenCalled();
     expect(harness.serviceAlert).not.toHaveBeenCalled();
@@ -259,7 +259,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(copiedReport).not.toContain("audited live");
 
     const load = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("Load current intelligence"));
+      .find((button) => button.textContent?.includes("Refresh live intelligence"));
     expect(load).toBeDefined();
     act(() => load?.click());
 

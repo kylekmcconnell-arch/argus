@@ -268,6 +268,27 @@ function fixtureFetch(state: FixtureFetchState): typeof fetch {
       }
     }
 
+    if (url.hostname === "api.geckoterminal.com" && /\/pools\/fixture-(?:clean|honeypot)-pair\/ohlcv\/day$/.test(url.pathname)) {
+      const clean = url.pathname.includes("fixture-clean-pair");
+      return json({
+        data: {
+          attributes: {
+            ohlcv_list: clean
+              ? [
+                  [3, 1.2, 1.3, 1.1, 1.25],
+                  [2, 1.1, 1.2, 1, 1.2],
+                  [1, 1, 1.1, 0.9, 1],
+                ]
+              : [
+                  [3, 0.000004, 0.000004, 0.000001, 0.000001],
+                  [2, 0.000006, 0.000006, 0.000004, 0.000004],
+                  [1, 0.00001, 0.00001, 0.000006, 0.000008],
+                ],
+          },
+        },
+      });
+    }
+
     state.unexpectedUrls.push(rawUrl);
     return json({ error: "release canary blocked an unrecognized URL" }, 599);
   };
@@ -296,6 +317,7 @@ function tokenResult(input: {
   const pass = input.dossier.verdict === input.verdict
     && input.dossier.capApplied === input.cap
     && input.dossier.safetyChecked
+    && (input.dossier.priceHistory?.points.length ?? 0) >= 3
     && !presentation.final
     && presentation.displayVerdict === expectedPublicDisplay
     && (input.verdict !== "PASS" || presentation.secondarySignal?.includes("PRELIMINARY MODEL SIGNAL") === true)
@@ -308,8 +330,8 @@ function tokenResult(input: {
     actual: `${input.dossier.verdict} ${input.dossier.score ?? "N/A"}/100 · cap ${input.dossier.capApplied ?? "none"} · public ${presentation.resultLabel} ${presentation.displayVerdict}`,
     pass,
     detail: pass
-      ? "The real token scorer consumed only intercepted fixture responses and preserved fail-closed presentation semantics."
-      : "Token scoring, cap selection, or public readiness presentation drifted.",
+      ? "The real token scorer consumed only intercepted fixture responses, froze price history, and preserved fail-closed presentation semantics."
+      : "Token scoring, frozen price history, cap selection, or public readiness presentation drifted.",
   };
 }
 

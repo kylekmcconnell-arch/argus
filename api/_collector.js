@@ -2082,11 +2082,11 @@ var compatiblePressClaim = (left, right) => {
 };
 function isStrictFundScaleArtifact(value, peers = [], context = {}) {
   const now = context.now ?? /* @__PURE__ */ new Date();
-  const record2 = asRecord(value);
-  if (!record2 || !Number.isFinite(now.getTime()) || !structurallyStrictFundScaleArtifact(record2, now, context)) return false;
-  if (record2.sourceClass !== "independent_press") return true;
-  if (typeof record2.fundScaleSourceCount !== "number" || record2.fundScaleSourceCount < 2) return false;
-  const compatible = [record2, ...peers.map(asRecord).filter((peer) => Boolean(peer))].filter((peer, index, rows) => rows.indexOf(peer) === index).filter((peer) => peer.sourceClass === "independent_press" && structurallyStrictFundScaleArtifact(peer, now, context) && compatiblePressClaim(record2, peer));
+  const record3 = asRecord(value);
+  if (!record3 || !Number.isFinite(now.getTime()) || !structurallyStrictFundScaleArtifact(record3, now, context)) return false;
+  if (record3.sourceClass !== "independent_press") return true;
+  if (typeof record3.fundScaleSourceCount !== "number" || record3.fundScaleSourceCount < 2) return false;
+  const compatible = [record3, ...peers.map(asRecord).filter((peer) => Boolean(peer))].filter((peer, index, rows) => rows.indexOf(peer) === index).filter((peer) => peer.sourceClass === "independent_press" && structurallyStrictFundScaleArtifact(peer, now, context) && compatiblePressClaim(record3, peer));
   const domains = /* @__PURE__ */ new Set();
   const hashes = /* @__PURE__ */ new Set();
   const prose = /* @__PURE__ */ new Set();
@@ -3953,9 +3953,9 @@ var eligibleAxesFor = (section, value, axisCatalog2, sourceArtifactPeers = [], s
   const allowed = new Set(eligible);
   return [...new Set(axisCatalog2.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
 };
-var recordText = (record2, keys, max) => {
+var recordText = (record3, keys, max) => {
   for (const key of keys) {
-    const value = record2[key];
+    const value = record3[key];
     if (typeof value === "string" && value.trim()) return clip(value.trim(), max);
   }
   return void 0;
@@ -4013,35 +4013,35 @@ var sanitizeArtifactUrls = (value, depth = 0) => {
   }
   return sanitized;
 };
-var verificationFor = (section, record2, sourceArtifactPeers = [], subjectHandle, profile) => {
+var verificationFor = (section, record3, sourceArtifactPeers = [], subjectHandle, profile) => {
   if (section === "axisGaps") return "unavailable";
   if (section === "checkOutcomes") {
-    const status = recordText(record2, ["status"], 40)?.toLowerCase();
+    const status = recordText(record3, ["status"], 40)?.toLowerCase();
     if (status === "confirmed" || status === "finding") return "verified";
     if (status === "checked-empty") return "checked_empty";
     if (status === "unavailable" || status === "unknown" || status === "stale" || status === "not-applicable") return "unavailable";
   }
   if (section === "findings") {
-    const status = recordText(record2, ["verification_status"], 40)?.toLowerCase();
-    if (status === "verified" && record2.artifact_verified === true) return "verified";
+    const status = recordText(record3, ["verification_status"], 40)?.toLowerCase();
+    if (status === "verified" && record3.artifact_verified === true) return "verified";
     if (status === "reported") return "reported";
   }
   if (section === "sourceArtifacts") {
-    const match = recordText(record2, ["match"], 40);
-    const kind = recordText(record2, ["kind"], 80);
+    const match = recordText(record3, ["match"], 40);
+    const kind = recordText(record3, ["kind"], 80);
     if (kind === "portfolio_relationship") {
       if (match === "relationship_confirmed") return "verified";
       if (match === "candidate") return "reported";
       return "unavailable";
     }
     if (kind === "fund_scale") {
-      return isStrictFundScaleArtifact(record2, sourceArtifactPeers, { subjectHandle, profile }) ? "verified" : "unavailable";
+      return isStrictFundScaleArtifact(record3, sourceArtifactPeers, { subjectHandle, profile }) ? "verified" : "unavailable";
     }
     if (kind === "trust_graph") {
-      if (record2.coverageState === "unavailable" || match === "observed") return "unavailable";
+      if (record3.coverageState === "unavailable" || match === "observed") return "unavailable";
       if (match === "screened_clear" || match === "no_match") return "checked_empty";
-      const contentHash = recordText(record2, ["contentHash"], 64);
-      const sourceContentHash = recordText(record2, ["sourceContentHash"], 64);
+      const contentHash = recordText(record3, ["contentHash"], 64);
+      const sourceContentHash = recordText(record3, ["sourceContentHash"], 64);
       if (match === "risk_signal" && /^[a-f0-9]{64}$/i.test(contentHash ?? "") && /^[a-f0-9]{64}$/i.test(sourceContentHash ?? "")) {
         return "verified";
       }
@@ -4051,31 +4051,31 @@ var verificationFor = (section, record2, sourceArtifactPeers = [], subjectHandle
     if (match === "candidate") return "reported";
   }
   if (section === "trustGraphScreen") {
-    if (record2.status === "incomplete") return "unavailable";
-    const connections = Array.isArray(record2.connections) ? record2.connections : [];
+    if (record3.status === "incomplete") return "unavailable";
+    const connections = Array.isArray(record3.connections) ? record3.connections : [];
     const qualifiedConnections = connections.filter((candidate) => {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
       const connection = candidate;
       return connection.qualified === true && Array.isArray(connection.ties) && connection.ties.length > 0;
     });
-    if (record2.status === "clear" && qualifiedConnections.length === 0) return "checked_empty";
+    if (record3.status === "clear" && qualifiedConnections.length === 0) return "checked_empty";
     if (qualifiedConnections.length > 0) return "verified";
     return "unavailable";
   }
   if (section === "projectToken" || section === "ventureToken") {
-    return record2.verified === true && (record2.verification === "official_x" || record2.verification === "official_domain") ? "verified" : "unavailable";
+    return record3.verified === true && (record3.verification === "official_x" || record3.verification === "official_domain") ? "verified" : "unavailable";
   }
   if (section === "basicFacts") {
-    const status = recordText(record2, ["status"], 40)?.toLowerCase();
-    return record2.artifact_verified === true && (status === "verified" || status === "corroborated") ? "verified" : status === "lead" ? "reported" : "unavailable";
+    const status = recordText(record3, ["status"], 40)?.toLowerCase();
+    return record3.artifact_verified === true && (status === "verified" || status === "corroborated") ? "verified" : status === "lead" ? "reported" : "unavailable";
   }
   return "observed";
 };
-var counterEligibleAxesFor = (section, record2, verification, eligibleAxes) => {
+var counterEligibleAxesFor = (section, record3, verification, eligibleAxes) => {
   if (verification !== "verified") return [];
-  if (section === "findings" && typeof record2.polarity === "number" && record2.polarity < 0) return [...eligibleAxes];
-  if (section === "sourceArtifacts" && record2.match === "risk_signal") return [...eligibleAxes];
-  if (section === "trustGraphScreen" && (record2.severity === "caution" || record2.severity === "avoid")) return [...eligibleAxes];
+  if (section === "findings" && typeof record3.polarity === "number" && record3.polarity < 0) return [...eligibleAxes];
+  if (section === "sourceArtifacts" && record3.match === "risk_signal") return [...eligibleAxes];
+  if (section === "trustGraphScreen" && (record3.severity === "caution" || record3.severity === "avoid")) return [...eligibleAxes];
   return [];
 };
 var DIRECT_SECTIONS = /* @__PURE__ */ new Set(["profile", "profileAuthenticity", "projectToken", "findings", "wallets", "promotions", "recentActivity"]);
@@ -4228,7 +4228,7 @@ function extractScoringEvidenceCatalog(json, axisCatalog2) {
   if (!Array.isArray(packet.evidenceCatalog) || !packet.evidenceCatalog.every(isAxisEvidenceRecord)) return [];
   if (axisCatalog2 && axisCatalog2.length > 0 && packet.schema_version !== 5) return [];
   const catalog = packet.evidenceCatalog;
-  const byId = new Map(catalog.map((record2) => [record2.artifactId, record2]));
+  const byId = new Map(catalog.map((record3) => [record3.artifactId, record3]));
   if (byId.size !== catalog.length) return [];
   const strictCatalog = packet.schema_version === 5;
   const requestedAxes = axisCatalog2 && axisCatalog2.length > 0 && new Set(axisCatalog2.map(({ axis }) => axis)).size === axisCatalog2.length ? [...axisCatalog2] : void 0;
@@ -4265,10 +4265,10 @@ function extractScoringEvidenceCatalog(json, axisCatalog2) {
   for (const section of [...SCORING_ARRAY_SECTIONS, "axisGaps"]) {
     if (Array.isArray(packet[section])) packet[section].forEach((value) => inspect(section, value));
   }
-  return represented.size === catalog.length ? catalog.map((record2) => ({
-    ...record2,
-    eligibleAxes: [...record2.eligibleAxes],
-    ...record2.counterEligibleAxes ? { counterEligibleAxes: [...record2.counterEligibleAxes] } : {}
+  return represented.size === catalog.length ? catalog.map((record3) => ({
+    ...record3,
+    eligibleAxes: [...record3.eligibleAxes],
+    ...record3.counterEligibleAxes ? { counterEligibleAxes: [...record3.counterEligibleAxes] } : {}
   })) : [];
 }
 var pruneTrustGraphPacket = (packet) => {
@@ -4394,8 +4394,8 @@ function serializeAnalystEvidencePacket(input, options) {
     }
     const source2 = options.includeInvestigativeLeads ? rawSource : rawSource.filter((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return true;
-      const record2 = item;
-      return record2.evidence_origin !== "model_lead" && record2.artifact_verified !== false;
+      const record3 = item;
+      return record3.evidence_origin !== "model_lead" && record3.artifact_verified !== false;
     });
     const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source2, options.axisCatalog ? source2.length : limit) : section === "checkOutcomes" ? retainCheckOutcomes(source2, limit) : source2.slice(0, limit);
     const included = selected.map((item) => section === "sourceArtifacts" ? compactSourceArtifact(item) : compactObject(item)).filter((item) => item !== void 0);
@@ -6601,8 +6601,8 @@ async function checkFollow(source2, target) {
     const nested = asRecord2(d.data);
     const records = Object.keys(nested).length ? [nested, d] : [d];
     const pick = (...keys) => {
-      for (const record2 of records) {
-        for (const k of keys) if (typeof record2[k] === "boolean") return record2[k];
+      for (const record3 of records) {
+        for (const k of keys) if (typeof record3[k] === "boolean") return record3[k];
       }
       return null;
     };
@@ -8421,9 +8421,9 @@ async function enrichPersonViaMonid(params, fetcher = fetch) {
   if (!outcome.ok) return { outcome: "error", note: outcome.note };
   const data = outcome.data;
   if (!data || typeof data !== "object" || Array.isArray(data)) return { outcome: "no_match" };
-  const record2 = data;
-  if (!isNonEmptyString(record2.full_name) && !isNonEmptyString(record2.id)) return { outcome: "no_match" };
-  return { outcome: "match", record: record2 };
+  const record3 = data;
+  if (!isNonEmptyString(record3.full_name) && !isNonEmptyString(record3.id)) return { outcome: "no_match" };
+  return { outcome: "match", record: record3 };
 }
 
 // server/adapters/peopledatalabs.ts
@@ -20391,6 +20391,79 @@ function runAudit(rawHandle, emit, options) {
   return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
 }
 
+// src/lib/priceHistory.ts
+var NETWORK = {
+  solana: "solana",
+  ethereum: "eth",
+  eth: "eth",
+  bsc: "bsc",
+  base: "base",
+  arbitrum: "arbitrum",
+  polygon: "polygon_pos",
+  "polygon_pos": "polygon_pos",
+  avalanche: "avax",
+  avax: "avax",
+  optimism: "optimism",
+  fantom: "ftm",
+  sui: "sui",
+  ton: "ton",
+  tron: "tron",
+  blast: "blast",
+  sei: "sei-evm"
+};
+var GT = "https://api.geckoterminal.com/api/v2";
+function record2(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+async function gt(path) {
+  try {
+    const r = await fetch(`${GT}${path}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(8e3)
+    });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+async function topPool(network, address) {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
+  const rows = record2(d).data;
+  const first = Array.isArray(rows) ? record2(rows[0]) : {};
+  const attributes = record2(first.attributes);
+  const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
+  return id ? id.replace(`${network}_`, "") : null;
+}
+async function fetchPriceHistory(address, chain, pairAddress) {
+  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
+  if (!network || !address) return null;
+  const pool = pairAddress || await topPool(network, address);
+  if (!pool) return null;
+  for (const timeframe of ["day", "hour"]) {
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
+    const rawList = record2(record2(record2(d).data).attributes).ohlcv_list;
+    const list = Array.isArray(rawList) ? rawList.filter((row) => Array.isArray(row) && row.length >= 5 && row.every((value) => typeof value === "number")) : [];
+    if (list.length < 3) continue;
+    const rows = [...list].sort((a, b) => a[0] - b[0]);
+    const points = rows.map((r) => r[4]).filter((n) => typeof n === "number" && n > 0);
+    if (points.length < 3) continue;
+    const first = points[0];
+    const last = points[points.length - 1];
+    const peak = Math.max(...points);
+    return {
+      points,
+      first,
+      last,
+      peak,
+      changePct: first > 0 ? (last - first) / first * 100 : 0,
+      drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
+      timeframe,
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  return null;
+}
+
 // src/token/audit.ts
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
 async function screenDeployerRisk(address, fetchImpl = fetch) {
@@ -20858,11 +20931,12 @@ async function runTokenAudit(input, emit, opts) {
   step({ phase: "Screen", label: "Deployer forensics", detail: "Screening deployer + top holders against OFAC, and tracing the deployer's funding provenance on Arkham\u2026", tone: "neutral" });
   const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
   const deployerRiskFn = opts?.screenDeployerRisk ?? screenDeployerRisk;
-  const [sanctionsScreen, deployerRisk] = await Promise.all([
+  const [sanctionsScreen, deployerRisk, priceHistory] = await Promise.all([
     screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
-    deployer ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0)
+    deployer ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0),
+    fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null)
   ]);
   if (deployerRisk?.available && deployerRisk.paths.length) {
     for (const p of deployerRisk.paths.slice(0, 3)) {
@@ -20907,6 +20981,7 @@ async function runTokenAudit(input, emit, opts) {
     vol24,
     ageDays,
     priceChange: pair.priceChange,
+    ...priceHistory ? { priceHistory } : {},
     verdict,
     score,
     capApplied,
