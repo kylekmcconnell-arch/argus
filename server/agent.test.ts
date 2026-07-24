@@ -4210,6 +4210,33 @@ describe("analyst verdict integrity", () => {
     );
   });
 
+  it("recovers a stringified contradiction array returned inside the tool contract", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      content: [{
+        type: "tool_use",
+        name: "record_contradictions",
+        input: {
+          contradictions: JSON.stringify([{
+            claim: "The subject says liquidity is locked.",
+            conflict: "The collected contract record shows the lock expired.",
+            severity: "high",
+            confidence: "high",
+          }]),
+        },
+      }],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 20, output_tokens: 10 },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    await expect(scanContradictions("@subject", "{}")).resolves.toEqual([{
+      claim: "The subject says liquidity is locked.",
+      conflict: "The collected contract record shows the lock expired.",
+      severity: "high",
+      confidence: "high",
+    }]);
+  });
+
   it("skips contradiction analysis when the route has entered its finalization reserve", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const fetchMock = vi.fn();
@@ -5520,7 +5547,7 @@ describe("analyst verdict integrity", () => {
         artifact_verified: true,
       }],
     }, catalog);
-    const fetchMock = vi.fn(async (_input: string | URL | Request) => new Response(JSON.stringify({      type: "error",
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({      type: "error",
       error: { type: "invalid_request_error", message: "Credit balance is too low." },
     }), { status: 400, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);

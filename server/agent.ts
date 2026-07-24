@@ -490,7 +490,17 @@ export async function scanContradictions(
     timeoutMs,
   );
   if (!r) return null;
-  if (!Array.isArray(r.contradictions)) {
+  const contradictions = (() => {
+    if (Array.isArray(r.contradictions)) return r.contradictions;
+    if (typeof r.contradictions !== "string") return null;
+    try {
+      const parsed: unknown = JSON.parse(r.contradictions);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  })();
+  if (!contradictions) {
     // Tool schemas are a contract, but providers can still return malformed
     // tool input. Contradiction analysis is advisory and must never abort the
     // governing scorer or discard an otherwise complete project audit.
@@ -501,7 +511,7 @@ export async function scanContradictions(
     }));
     return null;
   }
-  return r.contradictions
+  return contradictions
     .filter((candidate): candidate is {
       claim: string;
       conflict: string;

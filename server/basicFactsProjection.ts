@@ -324,8 +324,16 @@ function mergeProjectedFact(evidence: CollectedEvidence, fact: BasicFact): Basic
     existing.push(fact);
     return fact;
   }
-  const known = new Set(same.sources.map((candidate) => candidate.url));
-  same.sources.push(...fact.sources.filter((candidate) => !known.has(candidate.url)));
+  const authoritativeIdentityProjection = fact.predicate === "official_identity"
+    && fact.sources.some((candidate) => candidate.sourceClass === "official_subject");
+  const retainedSources = authoritativeIdentityProjection
+    ? same.sources.filter((candidate) =>
+      candidate.sourceClass === "official_subject"
+      || candidate.sourceClass === "official_counterparty"
+      || candidate.sourceClass === "regulatory_or_onchain")
+    : same.sources;
+  const mergedSources = [...fact.sources, ...retainedSources];
+  same.sources = [...new Map(mergedSources.map((candidate) => [candidate.url, candidate])).values()];
   // A deterministic projection may add support, but it cannot erase a frozen
   // conflict that was established by competing values or sources.
   if (same.status !== "conflicted") same.status = "verified";
@@ -333,6 +341,18 @@ function mergeProjectedFact(evidence: CollectedEvidence, fact: BasicFact): Basic
   // merges onto a recall-only fact, the merged fact regains floor eligibility.
   if (fact.floorEligible !== false && same.floorEligible === false) delete same.floorEligible;
   return same;
+}
+
+const PROJECT_PRODUCT_LANGUAGE = /\b(?:app|application|borrow|build|chain|coins?|develop|exchange|launch|launchpad|lend|marketplace|network|operate|payments?|platform|protocol|provide|stake|tokens?|trade|trading|wallet)\b/i;
+
+function projectProductFromProfileBio(bio: string): string | null {
+  const cleaned = bio
+    .replace(/\s+(?:at|via)\s+https?:\/\/\S+\s*$/i, "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length < 10 || cleaned.length > 240 || !PROJECT_PRODUCT_LANGUAGE.test(cleaned)) return null;
+  return cleaned;
 }
 
 function reconcileQuestionLedger(evidence: CollectedEvidence, facts: readonly BasicFact[]): void {
@@ -435,6 +455,20 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       [officialProfileSource],
       evidence.profile.handle,
     ));
+    const profileProduct = projectProductFromProfileBio(evidence.profile.bio);
+    if (profileProduct) {
+      const productFact = makeFact(
+        evidence,
+        "product",
+        profileProduct,
+        [officialProfileSource],
+        "first-party project description",
+      );
+      // The official profile can answer what the project says it does, but a
+      // self-description alone must never lift a score floor.
+      productFact.floorEligible = false;
+      projected.push(productFact);
+    }
   }
 
   if (

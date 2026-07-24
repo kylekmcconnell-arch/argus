@@ -564,6 +564,22 @@ function isPublishableSubjectFinding(finding: ReportFinding, subject: string): b
     && normalizedEntityHandle(scope.target_entity_key) === normalizedEntityHandle(subject);
 }
 
+function actionableInvestigativeLead(finding: ReportFinding): boolean {
+  if (finding.artifact_verified === true && finding.evidence_origin !== "model_lead") return true;
+  const source = safeSourceLink(finding.source_url);
+  if (!source) return false;
+  try {
+    const url = new URL(source.href);
+    const path = url.pathname.toLowerCase();
+    return path !== "/search"
+      && !path.startsWith("/search/")
+      && !url.searchParams.has("q")
+      && !url.searchParams.has("query");
+  } catch {
+    return false;
+  }
+}
+
 function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable_findings"] }) {
   if (!findings.length) return null;
   return (
@@ -1266,11 +1282,90 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
   const seen = new Set<string>();
   return [...(dossier.webTeamLeads ?? []), ...inferred].filter((member) => {
     if (!meaningfulTeamMember(member)) return false;
+    // A model-only name with no stable identity locator is not an actionable
+    // candidate. Showing generic names makes unrelated search snippets look
+    // like team evidence and gives the reader no way to verify them.
+    if (!member.handle?.trim() && !member.linkedin?.trim()) return false;
     const key = [member.name, member.handle ?? "", member.linkedin ?? "", member.role, member.source].join("|").toLowerCase();
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+const REPORT_PROJECT_PRODUCT_LANGUAGE = /\b(?:app|application|borrow|build|chain|coins?|develop|exchange|launch|launchpad|lend|marketplace|network|operate|payments?|platform|protocol|provide|stake|tokens?|trade|trading|wallet)\b/i;
+
+function reportProjectProductFromBio(bio?: string): string | null {
+  const cleaned = (bio ?? "")
+    .replace(/\s+(?:at|via)\s+https?:\/\/\S+\s*$/i, "")
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (cleaned.length < 10 || cleaned.length > 240 || !REPORT_PROJECT_PRODUCT_LANGUAGE.test(cleaned)) return null;
+  return cleaned;
+}
+
+function isExactOfficialXProfile(url: string | undefined, handle: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    const path = parsed.pathname.replace(/\/+$/, "").toLowerCase();
+    return (host === "x.com" || host === "twitter.com")
+      && path === `/${handle.replace(/^@/, "").toLowerCase()}`;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Frozen payloads stay immutable. This read-time publication projection only
+ * removes unrelated identity citations and materializes a first-party product
+ * answer already present in the stored provider-resolved X profile.
+ */
+function reportBasicFacts(dossier: Dossier, audience: "project" | "investor" | "founder" | "person"): BasicFactView[] {
+  const facts = (dossier.basicFacts ?? []).map((fact): BasicFactView => {
+    if (fact.predicate !== "official_identity") return fact;
+    const sources = fact.sources ?? [];
+    const hasOfficialProfile = sources.some((source) => isExactOfficialXProfile(source.url, dossier.handle));
+    if (!hasOfficialProfile) return fact;
+    return {
+      ...fact,
+      sources: sources.filter((source) =>
+        isExactOfficialXProfile(source.url, dossier.handle)
+        || source.sourceClass === "official_subject"
+        || source.sourceClass === "official_counterparty"
+        || source.sourceClass === "regulatory_or_onchain"),
+    };
+  });
+  if (
+    audience !== "project"
+    || facts.some((fact) =>
+      canonicalBasicFactPredicate(fact.predicate) === "product"
+      && (fact.status === "verified" || fact.status === "corroborated"))
+    || dossier.profile_collection_state !== "resolved"
+    || dossier.profile_provider !== "twitterapi"
+  ) return facts;
+  const product = reportProjectProductFromBio(dossier.bio);
+  if (!product) return facts;
+  const handle = dossier.handle.replace(/^@/, "");
+  return [...facts, {
+    factId: `profile-product:${handle.toLowerCase()}`,
+    predicate: "product",
+    value: product,
+    normalizedValue: product.toLowerCase(),
+    qualifier: "first-party project description",
+    status: "verified",
+    critical: true,
+    sources: [{
+      url: `https://x.com/${encodeURIComponent(handle)}`,
+      title: "Official X profile",
+      sourceClass: "official_subject",
+      relation: "supports",
+      excerpt: `${dossier.display_name} (${dossier.handle}): ${dossier.bio}`,
+      provider: "twitterapi",
+    }],
+  }];
 }
 
 // What this run actually cost, from the provider ledger frozen with the
@@ -1407,7 +1502,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const unmatchedPortfolioLeadCount = portfolioLeads.filter((lead) =>
     !verifiedPortfolioProjectKeys.has(lead.projectName.trim().toLowerCase())).length;
   const roles = report.roles as SubjectClass[];
-  const basicFacts: BasicFactView[] = f.basicFacts ?? [];
   const basicFactLeads: BasicFactLeadView[] = f.basicFactLeads ?? [];
   const ledgerAudience = f.basicFactQuestionLedger?.[0]?.audience;
   const basicFactsAudience = ledgerAudience === "project"
@@ -1420,9 +1514,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           ? "project" as const
           : roles.includes(SubjectClass.INVESTOR)
             ? "investor" as const
-            : roles.includes(SubjectClass.FOUNDER)
+          : roles.includes(SubjectClass.FOUNDER)
               ? "founder" as const
               : "person" as const;
+  const basicFacts = reportBasicFacts(f, basicFactsAudience);
   const basicFactResearchAttempted = basicFacts.length > 0
     || basicFactLeads.length > 0
     || (f.basicFactQuestionLedger?.length ?? 0) > 0;
@@ -1604,7 +1699,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       candidate.finding_type === finding.finding_type
       && candidate.claim === finding.claim
       && candidate.source_url === finding.source_url,
-    ) === index);
+    ) === index)
+    .filter(actionableInvestigativeLead);
   const quarantinedRelatedHandles = new Set(quarantinedLegacyFindings
     .map((finding) => normalizedEntityHandle(findingTarget(finding)))
     .filter((target): target is string => Boolean(target && target !== normalizedEntityHandle(report.handle))));
@@ -2039,7 +2135,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const argusEdgeMetrics = [
     { label: "Verified facts", value: verifiedDecisionFactCount, detail: "source-backed answers" },
     { label: "Decision sources", value: citedDecisionSourceKeys.size, detail: "bound to the verdict" },
-    { label: "Conflicts tested", value: conflictSignalCount, detail: "not averaged away" },
+    { label: "Conflicts captured", value: conflictSignalCount, detail: "stored in this snapshot" },
     { label: "Relationship records", value: relationshipRecordCount, detail: "people and graph links" },
     { label: "Open questions", value: decisionQuestionCount, detail: "worth verifying" },
   ] as const;
@@ -3409,13 +3505,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
-          <div className="min-w-0 lg:col-span-2">
-            <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">
-              <Card className="p-2">
-                <TrustGraph nodes={visibleGraphNodes} edges={visibleGraphEdges} connections={showTrustGraphSupplemental ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} />
-              </Card>
-            </Section>
-          </div>
+          {(visibleGraphEdges.length > 0 || (showTrustGraphSupplemental && connections.length > 0)) && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">
+                <Card className="p-2">
+                  <TrustGraph nodes={visibleGraphNodes} edges={visibleGraphEdges} connections={showTrustGraphSupplemental ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} />
+                </Card>
+              </Section>
+            </div>
+          )}
 
           {/* ask-the-report chat — grounded in this person's own evidence */}
           <div className="min-w-0 lg:col-span-2">
@@ -3452,7 +3550,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {investigativeLeads.length > 0 && (
           <div id="investigative-leads" className="scroll-mt-28">
             <Section title="Worth a second look" kicker="items about related people and companies · never counted in this score">
-              <InvestigativeLeadsLedger leads={investigativeLeads} subject={report.handle} />
+              <details className="panel px-4 py-3">
+                <summary className="cursor-pointer text-[12.5px] font-medium text-ink-dim">
+                  Review {investigativeLeads.length} unverified follow-up lead{investigativeLeads.length === 1 ? "" : "s"}
+                </summary>
+                <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+                  These leads are excluded from the verdict. Expand them only when you want to continue the investigation.
+                </p>
+                <div className="mt-3">
+                  <InvestigativeLeadsLedger leads={investigativeLeads} subject={report.handle} />
+                </div>
+              </details>
             </Section>
           </div>
         )}

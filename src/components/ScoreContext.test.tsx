@@ -76,10 +76,10 @@ describe("ProviderFailureNotice", () => {
         { provider: "claude", op: "basic-facts-search", failed: 3 },
       ]} />);
     });
-    expect(container.textContent).toContain("5 provider calls ended in failure during this scan.");
+    expect(container.textContent).toContain("2 evidence operations could not complete after 5 failed attempts.");
     expect(container.textContent).not.toContain("no fallback provider");
     expect(container.textContent).toContain("claude · record_verdict · http_400 credit balance too low");
-    expect(container.textContent).toContain("may be incomplete");
+    expect(container.textContent).toContain("remain disclosed below");
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
   });
 

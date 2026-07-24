@@ -115,18 +115,20 @@ export function ProviderFailureNotice({ failures }: {
   failures?: Array<{ provider: string; op: string; failed: number; meta?: string }>;
 }) {
   if (!failures?.length) return null;
-  const total = failures.reduce((sum, line) => sum + line.failed, 0);
+  const totalAttempts = failures.reduce((sum, line) => sum + line.failed, 0);
+  const operationCount = failures.length;
   return (
     <div className="finding tint-avoid mt-3 px-4 py-3" role="alert">
       <p className="text-[12.5px] font-medium text-ink">
-        {total} provider call{total === 1 ? "" : "s"} ended in failure during this scan.
+        {operationCount} evidence operation{operationCount === 1 ? "" : "s"} could not complete
+        {totalAttempts > operationCount ? ` after ${totalAttempts} failed attempts` : ""}.
       </p>
       <p className="mono mt-1 text-[10.5px] leading-relaxed text-ink-dim">
         {failures.slice(0, 5).map((line) => `${line.provider} · ${line.op}${line.meta ? ` · ${line.meta.slice(0, 70)}` : ""}`).join("  |  ")}
         {failures.length > 5 ? `  |  +${failures.length - 5} more` : ""}
       </p>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-        Affected evidence lanes may be incomplete. Fix the provider and rescan to fill the gap.
+        The affected lanes remain disclosed below. Rescan after those sources recover to fill the gaps.
       </p>
     </div>
   );

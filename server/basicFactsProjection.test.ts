@@ -140,6 +140,65 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(evidence.basicFacts?.some((fact) => fact.value === "Unverified Person")).toBe(false);
   });
 
+  it("uses the resolved project profile for identity and product without retaining namesake citations", () => {
+    const evidence = emptyEvidence("@ponsdotfamily");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile = {
+      ...evidence.profile,
+      display_name: "Pons",
+      bio: "Launch coins on Robinhood via https://t.co/example",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-23T23:11:00.000Z",
+    };
+    evidence.basicFacts = [{
+      factId: "namesake-identity",
+      subjectKey: "@ponsdotfamily",
+      predicate: "official_identity",
+      value: "Pons",
+      normalizedValue: "pons",
+      status: "corroborated",
+      critical: true,
+      sources: [{
+        url: "https://ponstherapy.com/",
+        title: "PoNS portable neuromodulation stimulator",
+        sourceClass: "independent_press",
+        relation: "supports",
+        excerpt: "PoNS is a portable neuromodulation stimulator.",
+        contentHash: "a".repeat(64),
+        capturedAt: "2026-07-23T23:10:00.000Z",
+        provider: "public-web",
+        artifactVerified: true,
+      }, {
+        url: "https://pons1945.com/",
+        title: "Pons olive oil",
+        sourceClass: "independent_press",
+        relation: "supports",
+        excerpt: "Pons produces olive oil.",
+        contentHash: "b".repeat(64),
+        capturedAt: "2026-07-23T23:10:00.000Z",
+        provider: "public-web",
+        artifactVerified: true,
+      }],
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    }];
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const identity = evidence.basicFacts.find((fact) => fact.predicate === "official_identity");
+    expect(identity?.sources.map((candidate) => candidate.url)).toEqual(["https://x.com/ponsdotfamily"]);
+    const product = evidence.basicFacts.find((fact) => fact.predicate === "product");
+    expect(product).toMatchObject({
+      value: "Launch coins on Robinhood",
+      status: "verified",
+      floorEligible: false,
+      providerProjection: true,
+    });
+    expect(product?.sources.map((candidate) => candidate.url)).toEqual(["https://x.com/ponsdotfamily"]);
+  });
+
   it("does not treat a self-authored person profile as verified identity by itself", () => {
     const evidence = emptyEvidence("@person");
     evidence.roles = [SubjectClass.FOUNDER];

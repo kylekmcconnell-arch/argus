@@ -2452,7 +2452,17 @@ ${evidenceJson}`;
     timeoutMs
   );
   if (!r) return null;
-  if (!Array.isArray(r.contradictions)) {
+  const contradictions = (() => {
+    if (Array.isArray(r.contradictions)) return r.contradictions;
+    if (typeof r.contradictions !== "string") return null;
+    try {
+      const parsed = JSON.parse(r.contradictions);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  })();
+  if (!contradictions) {
     console.warn("[agent-runtime]", JSON.stringify({
       tool: "record_contradictions",
       state: "invalid_result_shape",
@@ -2460,7 +2470,7 @@ ${evidenceJson}`;
     }));
     return null;
   }
-  return r.contradictions.filter((candidate) => {
+  return contradictions.filter((candidate) => {
     if (!candidate || typeof candidate !== "object") return false;
     const contradiction = candidate;
     return typeof contradiction.claim === "string" && contradiction.claim.trim().length > 0 && typeof contradiction.conflict === "string" && contradiction.conflict.trim().length > 0;
@@ -17057,11 +17067,19 @@ function mergeProjectedFact(evidence, fact) {
     existing.push(fact);
     return fact;
   }
-  const known = new Set(same.sources.map((candidate) => candidate.url));
-  same.sources.push(...fact.sources.filter((candidate) => !known.has(candidate.url)));
+  const authoritativeIdentityProjection = fact.predicate === "official_identity" && fact.sources.some((candidate) => candidate.sourceClass === "official_subject");
+  const retainedSources = authoritativeIdentityProjection ? same.sources.filter((candidate) => candidate.sourceClass === "official_subject" || candidate.sourceClass === "official_counterparty" || candidate.sourceClass === "regulatory_or_onchain") : same.sources;
+  const mergedSources = [...fact.sources, ...retainedSources];
+  same.sources = [...new Map(mergedSources.map((candidate) => [candidate.url, candidate])).values()];
   if (same.status !== "conflicted") same.status = "verified";
   if (fact.floorEligible !== false && same.floorEligible === false) delete same.floorEligible;
   return same;
+}
+var PROJECT_PRODUCT_LANGUAGE = /\b(?:app|application|borrow|build|chain|coins?|develop|exchange|launch|launchpad|lend|marketplace|network|operate|payments?|platform|protocol|provide|stake|tokens?|trade|trading|wallet)\b/i;
+function projectProductFromProfileBio(bio) {
+  const cleaned = bio.replace(/\s+(?:at|via)\s+https?:\/\/\S+\s*$/i, "").replace(/https?:\/\/\S+/gi, "").replace(/\s+/g, " ").trim();
+  if (cleaned.length < 10 || cleaned.length > 240 || !PROJECT_PRODUCT_LANGUAGE.test(cleaned)) return null;
+  return cleaned;
 }
 function reconcileQuestionLedger(evidence, facts) {
   const singletonPredicates = /* @__PURE__ */ new Set(["official_identity"]);
@@ -17127,6 +17145,18 @@ function projectProviderBackedBasicFacts(evidence) {
       [officialProfileSource],
       evidence.profile.handle
     ));
+    const profileProduct = projectProductFromProfileBio(evidence.profile.bio);
+    if (profileProduct) {
+      const productFact = makeFact(
+        evidence,
+        "product",
+        profileProduct,
+        [officialProfileSource],
+        "first-party project description"
+      );
+      productFact.floorEligible = false;
+      projected.push(productFact);
+    }
   }
   if (officialProfileSource && evidence.roles.includes("FOUNDER" /* FOUNDER */) && evidence.profile.identity_confidence !== "SuspectedImpersonation") {
     const existingVerifiedSources = (evidence.basicFacts ?? []).filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")).flatMap((fact) => fact.sources).filter((candidate) => candidate.relation === "supports" && candidate.provider !== "twitterapi" && candidate.url !== officialProfileSource.url);

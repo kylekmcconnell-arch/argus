@@ -128,12 +128,107 @@ describe("private person report evidence boundary", () => {
     expect((candidatesCard()?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(1);
     expect(candidatesCard()?.textContent).toContain("candidate @jane_founder");
 
-    // Legacy persisted dossiers without webTeamLeads still derive the lead client-side.
-    const { webTeamLeads: _omitted, ...legacy } = dossier;
+    // A legacy sanitized row no longer has the model-supplied handle. It fails
+    // closed instead of resurfacing an unverifiable name-only candidate.
+    const legacy = { ...dossier, webTeamLeads: undefined };
     act(() => {
       root.render(<Report dossier={legacy} onReset={() => {}} onAudit={() => {}} />);
     });
-    expect((candidatesCard()?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(1);
+    expect((candidatesCard()?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(0);
+  });
+
+  it("hides model-only team names that have no stable identity locator", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      webTeam: [],
+      webTeamLeads: [{
+        name: "Dr. Unrelated Executive",
+        role: "President and CEO",
+        source: "Generic web research",
+        evidence: "An unrelated company page used the same short project name.",
+        provider: "grok",
+        evidence_origin: "model_lead" as const,
+        artifact_verified: false,
+      }],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.textContent).not.toContain("Dr. Unrelated Executive");
+    expect(container.textContent).not.toContain("Investigative team candidates");
+  });
+
+  it("cleans namesake citations and answers the project product from the frozen official profile", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      handle: "@ponsdotfamily",
+      display_name: "Pons",
+      bio: "Launch coins on Robinhood via https://t.co/example",
+      profile_collection_state: "resolved" as const,
+      profile_provider: "twitterapi",
+      report: {
+        ...base.report,
+        handle: "@ponsdotfamily",
+        roles: ["PROJECT"],
+        governing_role: "PROJECT",
+      },
+      basicFacts: [{
+        factId: "pons-identity",
+        subjectKey: "@ponsdotfamily",
+        predicate: "official_identity",
+        value: "Pons",
+        normalizedValue: "pons",
+        status: "verified" as const,
+        critical: true,
+        sources: [{
+          url: "https://ponstherapy.com/",
+          title: "PoNS portable neuromodulation stimulator",
+          sourceClass: "independent_press" as const,
+          relation: "supports" as const,
+          excerpt: "PoNS is a medical device.",
+          contentHash: "a".repeat(64),
+          capturedAt: "2026-07-23T23:10:00.000Z",
+          provider: "public-web",
+          artifactVerified: true,
+        }, {
+          url: "https://pons1945.com/",
+          title: "Pons olive oil",
+          sourceClass: "independent_press" as const,
+          relation: "supports" as const,
+          excerpt: "Pons produces olive oil.",
+          contentHash: "b".repeat(64),
+          capturedAt: "2026-07-23T23:10:00.000Z",
+          provider: "public-web",
+          artifactVerified: true,
+        }, {
+          url: "https://x.com/ponsdotfamily",
+          title: "Official X profile",
+          sourceClass: "official_subject" as const,
+          relation: "supports" as const,
+          excerpt: "Pons (@ponsdotfamily): Launch coins on Robinhood.",
+          contentHash: "c".repeat(64),
+          capturedAt: "2026-07-23T23:11:00.000Z",
+          provider: "twitterapi",
+          artifactVerified: true,
+        }],
+        evidence_origin: "deterministic" as const,
+        artifact_verified: true,
+        provider: "public-web",
+      }],
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Launch coins on Robinhood");
+    expect(container.textContent).not.toContain("PoNS portable neuromodulation stimulator");
+    expect(container.textContent).not.toContain("Pons olive oil");
+    expect(container.querySelector('a[href="https://x.com/ponsdotfamily"]')).not.toBeNull();
   });
 
   it("renders never-collected follow and acknowledgment checks as unchecked instead of affirmative negatives", () => {
