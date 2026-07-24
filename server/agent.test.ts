@@ -5547,9 +5547,13 @@ describe("analyst verdict integrity", () => {
         artifact_verified: true,
       }],
     }, catalog);
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({      type: "error",
-      error: { type: "invalid_request_error", message: "Credit balance is too low." },
-    }), { status: 400, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      void input;
+      return new Response(JSON.stringify({
+        type: "error",
+        error: { type: "invalid_request_error", message: "Credit balance is too low." },
+      }), { status: 400, headers: { "content-type": "application/json" } });
+    });
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);

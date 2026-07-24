@@ -3105,7 +3105,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
 
         {/* signature modules */}
-        <div className="lg:columns-2 lg:gap-3">
+        <div className="2xl:columns-2 2xl:gap-3">
           {evidence.wallets.length > 0 && (
             <div className="mb-3 min-w-0 break-inside-avoid">
               <Section title="Wallets & on-chain links" kicker="addresses tied to them · ranked by attribution strength">
