@@ -1326,20 +1326,33 @@ function isExactOfficialXProfile(url: string | undefined, handle: string): boole
  * answer already present in the stored provider-resolved X profile.
  */
 function reportBasicFacts(dossier: Dossier, audience: "project" | "investor" | "founder" | "person"): BasicFactView[] {
-  const projected = (dossier.basicFacts ?? []).map((fact): BasicFactView => {
-    if (fact.predicate !== "official_identity") return fact;
-    const sources = fact.sources ?? [];
-    const hasOfficialProfile = sources.some((source) => isExactOfficialXProfile(source.url, dossier.handle));
-    if (!hasOfficialProfile) return fact;
-    return {
-      ...fact,
-      sources: sources.filter((source) =>
-        isExactOfficialXProfile(source.url, dossier.handle)
-        || source.sourceClass === "official_subject"
+  const projected = (dossier.basicFacts ?? [])
+    .filter((fact) => {
+      if (audience !== "project" || canonicalBasicFactPredicate(fact.predicate) !== "official_token") return true;
+      if (dossier.projectToken?.verified) return true;
+      // Compatibility repair for frozen reports created before official-token
+      // corroboration was tightened. Multiple press articles may preserve a
+      // useful ticker lead, but without a first-party/counterparty/on-chain
+      // binding they must not render as an answered official-token fact.
+      return (fact.sources ?? []).some((source) =>
+        source.sourceClass === "official_subject"
         || source.sourceClass === "official_counterparty"
-        || source.sourceClass === "regulatory_or_onchain"),
-    };
-  });
+        || source.sourceClass === "regulatory_or_onchain");
+    })
+    .map((fact): BasicFactView => {
+      if (fact.predicate !== "official_identity") return fact;
+      const sources = fact.sources ?? [];
+      const hasOfficialProfile = sources.some((source) => isExactOfficialXProfile(source.url, dossier.handle));
+      if (!hasOfficialProfile) return fact;
+      return {
+        ...fact,
+        sources: sources.filter((source) =>
+          isExactOfficialXProfile(source.url, dossier.handle)
+          || source.sourceClass === "official_subject"
+          || source.sourceClass === "official_counterparty"
+          || source.sourceClass === "regulatory_or_onchain"),
+      };
+    });
   const hasStrongerFundingFact = projected.some((fact) =>
     canonicalBasicFactPredicate(fact.predicate) === "funding"
     && fact.providerProjection !== true
@@ -1526,7 +1539,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     : ledgerAudience === "investor"
       ? "investor" as const
       : ledgerAudience === "person"
-        ? roles.includes(SubjectClass.FOUNDER) ? "founder" as const : "person" as const
+        ? roles.includes(SubjectClass.PROJECT)
+          ? "project" as const
+          : roles.includes(SubjectClass.INVESTOR)
+            ? "investor" as const
+            : roles.includes(SubjectClass.FOUNDER)
+              ? "founder" as const
+              : "person" as const
         : roles.includes(SubjectClass.PROJECT)
           ? "project" as const
           : roles.includes(SubjectClass.INVESTOR)

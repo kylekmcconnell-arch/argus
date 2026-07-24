@@ -3579,6 +3579,51 @@ WBTC is an ERC-20 wrapped token issued by BitGo. Coinbase customers can trade WB
       .toEqual(expect.objectContaining({ status: "unanswered", answerRefs: [] }));
   });
 
+  it("keeps a press-repeated project ticker as a lead until an official token binding exists", async () => {
+    const { ctx, evidence } = context("https://ponsfamily.com");
+    ctx.handle = "@ponsdotfamily";
+    evidence.profile.handle = "@ponsdotfamily";
+    evidence.profile.display_name = "Pons";
+    const firstUrl = "https://press-one.example/pons-token";
+    const secondUrl = "https://press-two.example/pons-token";
+    const passage = "PONS is the official token of the Pons launchpad.";
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [
+        lead({
+          subject: "Pons",
+          predicate: "official_token",
+          value: "PONS",
+          questionId: "project.official_token",
+          excerpt: passage,
+          sourceUrl: firstUrl,
+          candidateUrls: [secondUrl],
+        }),
+      ],
+      repair: async () => [],
+      fetchSource: fetchDocuments({
+        [firstUrl]: document({
+          url: firstUrl,
+          host: "press-one.example",
+          text: `<p>${passage}</p>`,
+          contentHash: "7".repeat(64),
+        }),
+        [secondUrl]: document({
+          url: secondUrl,
+          host: "press-two.example",
+          text: `<p>${passage}</p>`,
+          contentHash: "8".repeat(64),
+        }),
+      }),
+    });
+
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "official_token")).toBe(false);
+    expect(evidence.basicFactLeads?.some((candidate) =>
+      candidate.predicate === "official_token" && candidate.value === "PONS")).toBe(true);
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "project.official_token"))
+      .toEqual(expect.objectContaining({ status: "unanswered", answerRefs: [] }));
+  });
+
   it("treats overlapping network lists as corroboration, not conflict", () => {
     expect(overlappingNetworkAnswers([
       "Ethereum, Polygon, Avalanche, BNB Chain, Fantom",

@@ -11839,6 +11839,7 @@ function resolveBasicFactCandidates(candidates) {
       }];
     }
     if (rows[0]?.predicate === "public_security" && !official) continue;
+    if (rows[0]?.predicate === "official_token" && !official) continue;
     if (!official && independentHosts.size < 2) {
       strictFailures.push(rows);
       continue;

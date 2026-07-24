@@ -231,6 +231,114 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelector('a[href="https://x.com/ponsdotfamily"]')).not.toBeNull();
   });
 
+  it("uses the verified project role when an early question ledger was opened as a person", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      display_name: "Drift Protocol",
+      report: {
+        ...base.report,
+        roles: ["PROJECT"],
+        governing_role: "PROJECT",
+      },
+      basicFacts: [{
+        factId: "drift-identity",
+        subjectKey: "@driftprotocol",
+        predicate: "official_identity",
+        value: "Drift Protocol",
+        normalizedValue: "drift protocol",
+        status: "verified" as const,
+        critical: true,
+        sources: [{
+          url: "https://www.drift.trade/",
+          title: "Official site and X account binding",
+          sourceClass: "official_subject" as const,
+          relation: "supports" as const,
+          excerpt: "Drift Protocol links to @driftprotocol.",
+          contentHash: "d".repeat(64),
+          capturedAt: "2026-07-24T07:12:00.000Z",
+          provider: "public-web",
+          artifactVerified: true,
+        }],
+        evidence_origin: "deterministic" as const,
+        artifact_verified: true,
+        provider: "public-web",
+      }],
+      basicFactQuestionLedger: [{
+        questionId: "person.official_identity",
+        audience: "person",
+        batch: "identity",
+        predicate: "official_identity",
+        question: "Who is this person?",
+        critical: true,
+        status: "answered",
+        answerRefs: ["drift-identity"],
+        providerRuns: [{ phase: "primary", provider: "public-web", state: "succeeded" }],
+      }],
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("What is the project's official identity?");
+    expect(container.textContent).not.toContain("Who is this person?");
+  });
+
+  it("does not publish a legacy press-only ticker as the project's official token", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      display_name: "Pons",
+      report: {
+        ...base.report,
+        roles: ["PROJECT"],
+        governing_role: "PROJECT",
+      },
+      projectToken: undefined,
+      basicFacts: [{
+        factId: "press-only-token",
+        subjectKey: "@ponsdotfamily",
+        predicate: "official_token",
+        value: "PRESSONLY",
+        normalizedValue: "pressonly",
+        status: "corroborated" as const,
+        critical: true,
+        sources: [{
+          url: "https://press-one.example/pons-token",
+          title: "Pons token article",
+          sourceClass: "independent_press" as const,
+          relation: "supports" as const,
+          excerpt: "PRESSONLY is described as the Pons token.",
+          contentHash: "e".repeat(64),
+          capturedAt: "2026-07-24T05:38:00.000Z",
+          provider: "public-web",
+          artifactVerified: true,
+        }, {
+          url: "https://press-two.example/pons-token",
+          title: "Second Pons token article",
+          sourceClass: "independent_press" as const,
+          relation: "supports" as const,
+          excerpt: "PRESSONLY is described as the Pons token.",
+          contentHash: "f".repeat(64),
+          capturedAt: "2026-07-24T05:39:00.000Z",
+          provider: "public-web",
+          artifactVerified: true,
+        }],
+        evidence_origin: "deterministic" as const,
+        artifact_verified: true,
+        provider: "public-web",
+      }],
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.querySelector('[aria-label="Key verified answers"]')?.textContent ?? "")
+      .not.toContain("PRESSONLY");
+  });
+
   it("lets corroborated funding govern a conflicting aggregator projection", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {

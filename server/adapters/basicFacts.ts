@@ -3403,6 +3403,12 @@ export function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[]
     // regulator. Two news articles may corroborate a reported claim, but they
     // cannot authoritatively establish the instrument or its listing.
     if (rows[0]?.predicate === "public_security" && !official) continue;
+    // Repetition in the press can establish that a ticker is being discussed,
+    // but it cannot establish that the asset is the project's official token.
+    // That identity-critical relationship requires the subject/counterparty's
+    // own fetched source here, or the separate canonical-token adapter's
+    // official-X/domain binding projected later in the pipeline.
+    if (rows[0]?.predicate === "official_token" && !official) continue;
     if (!official && independentHosts.size < 2) {
       strictFailures.push(rows);
       continue;
