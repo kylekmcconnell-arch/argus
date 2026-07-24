@@ -65,17 +65,61 @@ function money(n?: number): string {
 }
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
-function VerdictPill({ verdict, score }: { verdict: string; score: number | null }) {
-  const m = verdictMeta(verdict);
-  const fail = verdict === "FAIL";
+function StatusPill({
+  label,
+  color,
+  score,
+  fail = false,
+  large = false,
+}: {
+  label: string;
+  color: string;
+  score: number | null;
+  fail?: boolean;
+  large?: boolean;
+}) {
   return (
     <span
-      className={`verdict-pill ${fail ? "tint-fail" : "tint-var"}`}
-      style={fail ? undefined : ({ "--tint": m.color } as React.CSSProperties)}
+      className={`verdict-pill ${large ? "verdict-pill-lg" : ""} ${fail ? "tint-fail" : "tint-var"}`}
+      style={fail ? undefined : ({ "--tint": color } as React.CSSProperties)}
     >
-      {m.label}{typeof score === "number" ? ` ${score}` : ""}
+      {label}{typeof score === "number" ? ` ${score}` : ""}
     </span>
   );
+}
+
+function VerdictPill({ verdict, score, large = false }: { verdict: string; score: number | null; large?: boolean }) {
+  const m = verdictMeta(verdict);
+  return (
+    <StatusPill
+      label={m.label}
+      color={m.color}
+      score={score}
+      fail={verdict === "FAIL"}
+      large={large}
+    />
+  );
+}
+
+function ProjectAccountStatusPill({
+  reviewOpen,
+  verdict,
+  score,
+}: {
+  reviewOpen: boolean;
+  verdict?: string;
+  score: number | null;
+}) {
+  if (reviewOpen || !verdict) {
+    return (
+      <StatusPill
+        label="Review open"
+        color="var(--color-caution)"
+        score={null}
+      />
+    );
+  }
+  return <VerdictPill verdict={verdict} score={score} />;
 }
 
 function Card({ title, children, accent }: { title: string; children: React.ReactNode; accent?: string }) {
@@ -187,9 +231,19 @@ export function InvestigationReport({
   const projectPositiveNeedsQualification = Boolean(
     projectAccount?.report.composite_verdict === "PASS" && projectReadiness?.status !== "ready",
   );
-  const presentedProjectVerdict = projectPositiveNeedsQualification
-    ? "INCOMPLETE"
-    : projectAccount?.report.composite_verdict;
+  const projectReviewOpen = Boolean(
+    projectPositiveNeedsQualification || projectAccount?.report.composite_verdict === "INCOMPLETE",
+  );
+  const presentedProjectVerdict = projectAccount?.report.composite_verdict;
+  const projectAccountHeadline = projectAccount?.headline
+    .replace(/^Investigation incomplete:\s*/i, "Project account review remains open: ")
+    .replace(/the analyst did not return one valid score for every required axis/gi, "one or more required scoring axes did not produce a valid result");
+  const marketCap = token.mcap ?? token.cg?.mcapUsd ?? undefined;
+  const establishedAsset = Boolean(
+    (token.cg?.rank != null && token.cg.rank <= 250)
+    || (marketCap != null && marketCap >= 100_000_000)
+    || (token.cg?.cexCount != null && token.cg.cexCount >= 10),
+  );
   const projectSourceBackedVentures = (projectAccount?.evidence.ventures ?? [])
     .filter((venture) => venture.evidence_origin !== "model_lead" && venture.artifact_verified === true);
   const projectUnverifiedVentureCount = (projectAccount?.evidence.ventures ?? [])
@@ -387,10 +441,10 @@ export function InvestigationReport({
                 {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
               </button>
             )}
-            {onReAudit && (
+            {onReAudit && readiness.status === "ready" && (
               <button onClick={onReAudit} title="Run this investigation again with current evidence" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
                 <ArrowClockwise size={16} weight="duotone" aria-hidden="true" />
-                {readiness.status === "ready" ? "Rescan" : "Retry scan"}
+                Rescan
               </button>
             )}
           </div>
@@ -427,95 +481,147 @@ export function InvestigationReport({
         {showCurrentIntelligence && <RingAlert handle={"$" + token.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
         {/* headline */}
         <div className="mt-6">
-          <div className="flex flex-wrap items-center gap-3">
-            {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-xl border border-line object-cover" />}
+          <div className="flex flex-wrap items-end gap-3">
+            {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-11 w-11 shrink-0 rounded-xl border border-line object-cover soft-shadow" />}
             <div>
               <p className="eyebrow">Token investigation</p>
-              <h1 className="display-sm mt-0.5 text-[26px] text-ink">{`$${token.symbol}`}</h1>
+              <h1 className="display-sm mt-0.5 text-[30px] leading-none text-ink sm:text-[34px]">{`$${token.symbol}`}</h1>
             </div>
-            {canShare && <CopyTldrButton base={tldrBase} mint={mintShareUrl} className="ml-auto" />}
+            {establishedAsset && (
+              <span className="chip tint-signal mb-0.5">
+                Established market
+              </span>
+            )}
+            {canShare && <CopyTldrButton base={tldrBase} mint={mintShareUrl} className="mb-0.5 ml-auto" />}
           </div>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.85fr)]">
-            <section className="panel p-4" aria-label="Observed token risk">
-              <div className="flex flex-wrap items-center gap-2">
+          <div className="investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+            <section className="panel investigation-hero-card flex flex-col p-5" aria-label="Observed token risk">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="eyebrow">Observed token risk</span>
-                <VerdictPill verdict={token.verdict} score={token.score} />
+                <VerdictPill verdict={token.verdict} score={token.score} large />
               </div>
-              <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
-                This is the model result from the evidence that completed. It is kept separate from whether every required diligence gate finished.
+              <p className="mt-4 text-[13px] leading-relaxed text-ink-dim">
+                The model result from evidence that completed. It is deliberately separate from whether every required safety gate finished.
               </p>
-              <ScoreContextStrip
-                subjectRef={token.address}
-                score={token.score}
-                peerKind="token"
-                align="start"
-              />
+              <div className="mt-auto border-t border-line/70 pt-3">
+                <p className="mono text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Model result ≠ clearance</p>
+                <ScoreContextStrip
+                  subjectRef={token.address}
+                  score={token.score}
+                  peerKind="token"
+                  align="start"
+                />
+              </div>
             </section>
 
             <section
-              className="finding tint-var p-4"
+              className="panel investigation-hero-card investigation-readiness-card flex flex-col p-5 tint-var"
               style={{ "--tint": readinessColor } as React.CSSProperties}
               aria-label="Investigation readiness"
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="chip tint-var" style={{ "--tint": readinessColor } as React.CSSProperties}>
-                  {readinessLabel}
-                </span>
-                <span className="mono text-[11px] text-ink-faint">
-                  {readiness.successful}/{readiness.applicable} outcomes · {readiness.coveragePercent}%
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="eyebrow">Decision readiness</span>
+                <StatusPill label={readinessLabel} color={readinessColor} score={null} large />
               </div>
-              <h2 className="mt-2 text-[15px] font-semibold text-ink">
+              <h2 className="mt-4 text-[17px] font-semibold leading-snug text-ink">
                 {requiredGapChecks.length
                   ? `${requiredGapChecks.length} required safety ${requiredGapChecks.length === 1 ? "gate is" : "gates are"} still open`
                   : readiness.title}
               </h2>
-              <p className="mt-1.5 text-[12px] leading-relaxed text-ink-dim">
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
                 {requiredGapChecks.length
-                  ? `${requiredGapChecks.map((check) => check.label).join(", ")} must record a terminal outcome before clearance. ${enrichmentGapChecks.length} other enrichment ${enrichmentGapChecks.length === 1 ? "path remains" : "paths remain"} disclosed below.`
-                  : readiness.guidance}
+                  ? "The observed risk result remains visible, but ARGUS will not infer clearance without the required terminal outcome."
+                  : "Every required safety screen has a recorded outcome. Remaining open paths are disclosed as enrichment, not hidden as false certainty."}
               </p>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <a href="#investigation-methodology" className="text-[12px] font-medium text-signal-lift underline-offset-2 hover:underline">
-                  Review all checks
-                </a>
-                {onReAudit && readiness.status !== "ready" && (
-                  <button type="button" onClick={onReAudit} className="btn-secondary min-h-9 px-3 text-[12px]">
-                    Retry required scan
-                  </button>
-                )}
+              <div className="mt-auto pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">Evidence outcomes</span>
+                  <span className="mono text-[11px] text-ink-dim">
+                    {readiness.successful}/{readiness.applicable} · {readiness.coveragePercent}%
+                  </span>
+                </div>
+                <progress
+                  className="readiness-progress mt-2"
+                  value={readiness.coveragePercent}
+                  max={100}
+                  aria-label={`Evidence outcomes recorded: ${readiness.coveragePercent}%`}
+                />
               </div>
+            </section>
+
+            <section className="panel investigation-hero-card investigation-market-card p-5 lg:col-span-2 xl:col-span-1" aria-label="Market scale">
+              <div className="flex items-center justify-between gap-3">
+                <span className="eyebrow">Market scale</span>
+                {establishedAsset && <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-signal-lift">Established asset</span>}
+              </div>
+              <div className="mt-4">
+                <p className="display-sm text-[27px] leading-none text-ink">{money(marketCap)}</p>
+                <p className="mono mt-1.5 text-[10px] uppercase tracking-[0.1em] text-ink-faint">Market capitalization</p>
+              </div>
+              <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 xl:grid-cols-2" aria-label="Market scale details">
+                <div>
+                  <dt className="stat-label">CoinGecko rank</dt>
+                  <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg.rank}` : "N/A"}</dd>
+                </div>
+                <div>
+                  <dt className="stat-label">Liquidity</dt>
+                  <dd className="stat-value mt-1">{money(token.liquidityUsd)}</dd>
+                </div>
+                <div>
+                  <dt className="stat-label">CEX markets</dt>
+                  <dd className="stat-value mt-1">{token.cg?.cexCount ?? "N/A"}</dd>
+                </div>
+                <div>
+                  <dt className="stat-label">Holders</dt>
+                  <dd className="stat-value mt-1">{token.safety.holderCount ? token.safety.holderCount.toLocaleString() : "N/A"}</dd>
+                </div>
+              </dl>
+              <p className="mono mt-5 border-t border-line/70 pt-3 text-[10.5px] uppercase tracking-[0.08em] text-signal-lift">
+                Scale builds confidence · it never waives safety
+              </p>
             </section>
           </div>
 
-          <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5" aria-label="Market scale">
-            <div className="stat-tile">
-              <dt className="stat-label">CoinGecko rank</dt>
-              <dd className="stat-value mt-1">{token.cg?.rank ? `#${token.cg.rank}` : "N/A"}</dd>
+          <section
+            className="panel clearance-boundary mt-3 flex flex-col gap-4 p-4 tint-var sm:flex-row sm:items-center sm:justify-between"
+            style={{ "--tint": readinessColor } as React.CSSProperties}
+            aria-label="Clearance boundary"
+          >
+            <div>
+              <p className="eyebrow">{requiredGapChecks.length ? "Required safety gate" : "Clearance boundary"}</p>
+              <h2 className="mt-1 text-[14px] font-semibold text-ink">
+                {requiredGapChecks.length
+                  ? `${requiredGapChecks.map((check) => check.label).join(", ")} must record a terminal outcome before clearance.`
+                  : "All required safety gates recorded."}
+              </h2>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+                {requiredGapChecks.length
+                  ? `${enrichmentGapChecks.length} additional enrichment ${enrichmentGapChecks.length === 1 ? "path remains" : "paths remain"} disclosed separately.`
+                  : `${enrichmentGapChecks.length} enrichment ${enrichmentGapChecks.length === 1 ? "path remains" : "paths remain"} open; ${enrichmentGapChecks.length === 1 ? "it does" : "they do"} not withhold clearance.`}
+              </p>
             </div>
-            <div className="stat-tile">
-              <dt className="stat-label">Market cap</dt>
-              <dd className="stat-value mt-1">{money(token.mcap ?? token.cg?.mcapUsd ?? undefined)}</dd>
+            <div className="flex shrink-0 flex-wrap items-center gap-3">
+              <a href="#investigation-methodology" className="text-[12px] font-medium text-signal-lift underline-offset-2 hover:underline">
+                Review all checks
+              </a>
+              {onReAudit && readiness.status !== "ready" && (
+                <button type="button" onClick={onReAudit} className="btn-primary min-h-10 px-3 text-[12px] font-medium">
+                  <ArrowClockwise size={15} weight="duotone" aria-hidden="true" />
+                  Retry required scan
+                </button>
+              )}
             </div>
-            <div className="stat-tile">
-              <dt className="stat-label">Liquidity</dt>
-              <dd className="stat-value mt-1">{money(token.liquidityUsd)}</dd>
-            </div>
-            <div className="stat-tile">
-              <dt className="stat-label">CEX markets</dt>
-              <dd className="stat-value mt-1">{token.cg?.cexCount ?? "N/A"}</dd>
-            </div>
-            <div className="stat-tile col-span-2 sm:col-span-1">
-              <dt className="stat-label">Holders</dt>
-              <dd className="stat-value mt-1">{token.safety.holderCount ? token.safety.holderCount.toLocaleString() : "N/A"}</dd>
-            </div>
-          </dl>
+          </section>
 
           {projectAccount && (
             <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-ink-dim">
               <span className="eyebrow">Project account</span>
-              <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
+              <ProjectAccountStatusPill
+                reviewOpen={projectReviewOpen}
+                verdict={presentedProjectVerdict}
+                score={projectReviewOpen ? null : projectAccount.report.governing_score}
+              />
               {projectReadiness && <span>{projectReadiness.successful}/{projectReadiness.applicable} outcomes recorded</span>}
             </div>
           )}
@@ -641,7 +747,11 @@ export function InvestigationReport({
                 <div className="mt-1 flex items-center justify-between gap-2">
                   <span className="mono text-[12.5px] text-ink">{projectX}</span>
                   {projectAccount ? (
-                    <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
+                    <ProjectAccountStatusPill
+                      reviewOpen={projectReviewOpen}
+                      verdict={presentedProjectVerdict}
+                      score={projectReviewOpen ? null : projectAccount.report.governing_score}
+                    />
                   ) : (
                     <button onClick={() => auditFounder(projectX)} disabled={spent >= MAX_FOUNDER_AUDITS} className="btn-chip tint-signal shrink-0 disabled:opacity-40">
                       {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "audit →"}
@@ -814,7 +924,11 @@ export function InvestigationReport({
               <div className="flex flex-wrap items-center gap-2">
                 <Avatar src={projectAccount.avatar_url || token.imageUrl || xAvatar(projectAccount.handle)} letter={initial(projectAccount.handle)} size={28} rounded="rounded-lg" letterClass="text-[12px]" />
                 <span className="text-[13.5px] font-medium text-ink">{projectAccount.display_name || projectAccount.handle}</span>
-                <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
+                <ProjectAccountStatusPill
+                  reviewOpen={projectReviewOpen}
+                  verdict={presentedProjectVerdict}
+                  score={projectReviewOpen ? null : projectAccount.report.governing_score}
+                />
                 <span className="ml-auto text-[11px] text-ink-faint">{projectAccount.followers} followers · joined {projectAccount.joined}</span>
               </div>
               {/* why the score landed where it did */}
@@ -826,7 +940,7 @@ export function InvestigationReport({
                 <button onClick={onOpenProjectAccount} className="btn-chip tint-signal ml-auto">why this score · full report →</button>
               </div>
               {projectAccount.bio && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{projectAccount.bio}</p>}
-              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink">{projectAccount.headline}</p>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink">{projectAccountHeadline}</p>
               {projectAccount.evidence.ventures.length > 0 && (
                 <div className="mt-2 border-t border-line/60 pt-2">
                   <div className="eyebrow">Source-backed ventures & affiliations</div>

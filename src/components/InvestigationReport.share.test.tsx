@@ -185,7 +185,11 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("Observed token risk");
     expect(container.textContent).toContain("PASS 84");
     expect(container.textContent).toContain("SCAN BLOCKED");
+    expect(container.textContent).toContain("Model result ≠ clearance");
+    expect(container.textContent).toContain("Required safety gate");
+    expect(container.textContent).toContain("Market scale");
     expect(container.textContent).toContain("1 required safety gate is still open");
+    expect(container.querySelector<HTMLProgressElement>('progress[aria-label="Evidence outcomes recorded: 53%"]')?.value).toBe(53);
     expect(container.textContent).toContain("Why ARGUS reaches PASS");
     expect(container.textContent).not.toContain("Why ARGUS reaches INCOMPLETE");
     expect(container.textContent).not.toContain("Investigation incomplete");

@@ -182,6 +182,61 @@
   background: var(--color-panel);
   box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent);
 }
+
+/* Investigation hero: three equal decision lanes. Risk, readiness, and market
+   scale stay visually distinct without collapsing into one ambiguous verdict. */
+.investigation-hero-card {
+  min-height: 232px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-ink) 4%, transparent),
+    0 22px 52px -42px color-mix(in oklab, var(--color-void) 92%, transparent);
+}
+.investigation-readiness-card {
+  border-color: color-mix(in oklab, var(--tint) 42%, var(--color-line));
+  background:
+    radial-gradient(560px 240px at 100% 0%, color-mix(in oklab, var(--tint) 13%, transparent), transparent 68%),
+    linear-gradient(180deg, color-mix(in oklab, var(--tint) 7%, var(--color-panel)) 0%, var(--color-panel) 72%);
+}
+.investigation-market-card {
+  border-color: color-mix(in oklab, var(--color-signal) 42%, var(--color-line));
+  background:
+    radial-gradient(620px 270px at 100% 0%, color-mix(in oklab, var(--color-signal) 18%, transparent), transparent 68%),
+    linear-gradient(180deg, color-mix(in oklab, var(--color-signal) 6%, var(--color-panel)) 0%, var(--color-panel) 74%);
+}
+.clearance-boundary {
+  border-color: color-mix(in oklab, var(--tint) 34%, var(--color-line));
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--tint) 9%, var(--color-panel)) 0%, var(--color-panel) 68%);
+}
+.readiness-progress {
+  display: block;
+  width: 100%;
+  height: 5px;
+  appearance: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--color-line-2) 52%, transparent);
+}
+.readiness-progress::-webkit-progress-bar {
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--color-line-2) 52%, transparent);
+}
+.readiness-progress::-webkit-progress-value {
+  border-radius: 9999px;
+  background: var(--tint, var(--color-signal));
+}
+.readiness-progress::-moz-progress-bar {
+  border-radius: 9999px;
+  background: var(--tint, var(--color-signal));
+}
+
+:root[data-theme="light"] .investigation-hero-card {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
+    0 22px 52px -42px color-mix(in oklab, var(--color-ink) 28%, transparent);
+}
 /* Borderless interior zone (a wash, not a box). */
 .panel-inset {
   border-radius: 6px;
