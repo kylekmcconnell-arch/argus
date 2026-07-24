@@ -113,7 +113,24 @@ const CG_PLATFORM: Record<string, string> = {
   optimism: "optimistic-ethereum", avalanche: "avalanche", fantom: "fantom",
 };
 const CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
-export interface CgInfo { listed: boolean; rank: number | null; mcapUsd: number | null; marketCount: number; cexCount: number; cexNames: string[]; homepage: string | null; twitter: string | null; image: string | null; description: string | null; }
+export interface CgInfo {
+  listed: boolean;
+  rank: number | null;
+  mcapUsd: number | null;
+  marketCount: number;
+  cexCount: number;
+  cexNames: string[];
+  homepage: string | null;
+  twitter: string | null;
+  image: string | null;
+  description: string | null;
+  /** CoinGecko lifetime high, frozen with the token scan when available. */
+  ath?: {
+    priceUsd: number | null;
+    date: string | null;
+    drawdownPct: number | null;
+  } | null;
+}
 
 interface CoinGeckoTicker {
   market?: { name?: string; identifier?: string };
@@ -124,7 +141,12 @@ interface CoinGeckoResponse {
   links?: { homepage?: unknown[]; twitter_screen_name?: unknown };
   image?: { large?: string; small?: string; thumb?: string };
   market_cap_rank?: number;
-  market_data?: { market_cap?: { usd?: number } };
+  market_data?: {
+    market_cap?: { usd?: number };
+    ath?: { usd?: number };
+    ath_date?: { usd?: string };
+    ath_change_percentage?: { usd?: number };
+  };
   description?: { en?: unknown };
 }
 
@@ -153,7 +175,9 @@ const CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bit
 export async function coingeckoToken(chain: string, address: string): Promise<CgInfo | null> {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
+      signal: AbortSignal.timeout(8_000),
+    });
     if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
     if (!res.ok) return null;
     const d = (await res.json()) as CoinGeckoResponse;
@@ -170,7 +194,29 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
     const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
     const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
     const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image, description: cleanBlurb(d.description?.en) };
+    const athPrice = d.market_data?.ath?.usd;
+    const athDate = d.market_data?.ath_date?.usd;
+    const athDrawdown = d.market_data?.ath_change_percentage?.usd;
+    const ath = athPrice != null || athDate != null || athDrawdown != null
+      ? {
+          priceUsd: typeof athPrice === "number" && Number.isFinite(athPrice) ? athPrice : null,
+          date: typeof athDate === "string" && athDate.trim() ? athDate : null,
+          drawdownPct: typeof athDrawdown === "number" && Number.isFinite(athDrawdown) ? athDrawdown : null,
+        }
+      : null;
+    return {
+      listed: true,
+      rank: d.market_cap_rank ?? null,
+      mcapUsd: d.market_data?.market_cap?.usd ?? null,
+      marketCount: markets.size,
+      cexCount: cex.size,
+      cexNames,
+      homepage,
+      twitter,
+      image,
+      description: cleanBlurb(d.description?.en),
+      ath,
+    };
   } catch {
     return null;
   }

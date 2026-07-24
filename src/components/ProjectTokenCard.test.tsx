@@ -69,14 +69,17 @@ describe("ProjectTokenCard", () => {
     expect(container.textContent).toContain("Token and market");
     expect(container.textContent).toContain("$JUP");
     expect(container.textContent).toContain("CoinGecko #89");
-    expect(container.textContent).toContain("$620M");
-    expect(container.textContent).toContain("Frozen with this investigation");
+    expect(container.textContent).toContain("$620.00M");
+    expect(container.textContent).toContain("From captured peak");
     expect(container.textContent).toContain("Official site");
     expect(harness.sparkline).toHaveBeenCalledWith(expect.objectContaining({
       address: token.address,
       chain: "solana",
       pairAddress: "credible-jup-usdc-pool",
-      history: token.history,
+      history: expect.objectContaining({
+        ...token.history,
+        capturedAt: token.capturedAt,
+      }),
     }));
 
     const action = [...container.querySelectorAll("button")]
@@ -89,7 +92,7 @@ describe("ProjectTokenCard", () => {
     const withoutHistory = { ...token, history: undefined };
     act(() => root.render(<ProjectTokenCard token={withoutHistory} showCurrentIntelligence={false} />));
 
-    expect(container.textContent).toContain("No price history was frozen in this snapshot");
+    expect(container.textContent).toContain("Refresh the current market overlay");
     expect(harness.sparkline).not.toHaveBeenCalled();
   });
 });

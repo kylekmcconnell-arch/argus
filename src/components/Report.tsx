@@ -2607,7 +2607,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               token={f.projectToken}
               chains={f.projectToken.deployedChains}
               showCurrentIntelligence={showCurrentIntelligence}
+              refreshCurrentMarket={currentIntelligenceEnabled}
               onAudit={onAudit}
+              onLoadCurrentIntelligence={versionContext
+                ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
+                : undefined}
             />
           </div>
         )}

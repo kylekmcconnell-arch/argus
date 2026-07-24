@@ -209,7 +209,12 @@ function coingeckoFixture(address: string): Response {
   if (address === HONEYPOT_TOKEN_ADDRESS) return json({}, 404);
   return json({
     market_cap_rank: 100,
-    market_data: { market_cap: { usd: 100_000_000 } },
+    market_data: {
+      market_cap: { usd: 100_000_000 },
+      ath: { usd: 5 },
+      ath_date: { usd: "2025-01-01T00:00:00.000Z" },
+      ath_change_percentage: { usd: -75 },
+    },
     links: {
       homepage: ["https://safe.canary.invalid"],
       twitter_screen_name: "canary_safe",
@@ -318,6 +323,7 @@ function tokenResult(input: {
     && input.dossier.capApplied === input.cap
     && input.dossier.safetyChecked
     && (input.dossier.priceHistory?.points.length ?? 0) >= 3
+    && (input.verdict !== "PASS" || input.dossier.cg?.ath?.drawdownPct === -75)
     && !presentation.final
     && presentation.displayVerdict === expectedPublicDisplay
     && (input.verdict !== "PASS" || presentation.secondarySignal?.includes("PRELIMINARY MODEL SIGNAL") === true)
@@ -330,8 +336,8 @@ function tokenResult(input: {
     actual: `${input.dossier.verdict} ${input.dossier.score ?? "N/A"}/100 · cap ${input.dossier.capApplied ?? "none"} · public ${presentation.resultLabel} ${presentation.displayVerdict}`,
     pass,
     detail: pass
-      ? "The real token scorer consumed only intercepted fixture responses, froze price history, and preserved fail-closed presentation semantics."
-      : "Token scoring, frozen price history, cap selection, or public readiness presentation drifted.",
+      ? "The real token scorer consumed only intercepted fixture responses, froze price history plus lifetime ATH context, and preserved fail-closed presentation semantics."
+      : "Token scoring, frozen market history, cap selection, or public readiness presentation drifted.",
   };
 }
 

@@ -4,7 +4,7 @@ import { TrustGraph } from "./TrustGraph";
 import { verdictMeta } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
-import { TokenSparkline } from "./TokenSparkline";
+import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
@@ -162,6 +162,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
   );
+  const loadCurrentIntelligence = () => {
+    if (versionContext) setCurrentIntelligenceVersionId(versionContext.reportVersionId);
+  };
   const persistencePending = !versionContext && livePersistence?.state === "pending";
   const persistenceFailed = !versionContext && livePersistence?.state === "failed";
   const panelCostToken = !versionContext && livePersistence?.state === "persisted"
@@ -356,7 +359,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               snapshotVersion={versionContext.version}
               capturedAt={versionContext.createdAt}
               currentIntelligenceEnabled={currentIntelligenceEnabled}
-              onLoadCurrentIntelligence={() => setCurrentIntelligenceVersionId(versionContext.reportVersionId)}
+              onLoadCurrentIntelligence={loadCurrentIntelligence}
             />
           </div>
         )}
@@ -498,34 +501,14 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         <div id="token-evidence" className="scroll-mt-28" aria-hidden="true" />
 
-        {/* price momentum */}
-        {d.priceChange && (
-          <div className="mt-4 grid grid-cols-4 gap-2">
-            {([["5m", d.priceChange.m5], ["1h", d.priceChange.h1], ["6h", d.priceChange.h6], ["24h", d.priceChange.h24]] as [string, number | undefined][]).map(([l, v]) => (
-              <div key={l} className="stat-tile text-center">
-                <div className="stat-label">{l}</div>
-                <div className="mono mt-0.5 text-[13.5px]" style={{ color: v == null ? "var(--color-ink-faint)" : v >= 0 ? "var(--color-pass)" : "var(--color-avoid)" }}>
-                  {v == null ? "N/A" : (v > 0 ? "+" : "") + v.toFixed(1) + "%"}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* price performance history */}
-        {(d.priceHistory || showCurrentIntelligence) && (
-          <div className="mt-4 panel p-4">
-            <div className="mb-2 flex items-baseline justify-between">
-              <div className="eyebrow">{d.priceHistory ? "Captured price performance" : "Current price performance"}</div>
-              <div className="text-[11px] uppercase tracking-wider text-ink-faint">
-                {d.priceHistory
-                  ? `saved with scan${d.priceHistory.capturedAt ? ` · ${d.priceHistory.capturedAt.slice(0, 10)}` : ""}`
-                  : "live supplement · GeckoTerminal"}
-              </div>
-            </div>
-            <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} history={d.priceHistory} />
-          </div>
-        )}
+        <div className="mt-4">
+          <MarketPerformancePanel
+            token={d}
+            showCurrentIntelligence={showCurrentIntelligence}
+            refreshCurrentMarket={currentIntelligenceEnabled}
+            onLoadCurrentIntelligence={loadCurrentIntelligence}
+          />
+        </div>
 
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         {showCurrentIntelligence && panelCostToken && (

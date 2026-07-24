@@ -394,7 +394,7 @@ describe("decision-safe person report presentation", () => {
     expect(tokenSection).not.toBeNull();
     expect(decisionSummary).not.toBeNull();
     expect(tokenSection?.textContent).toContain("$JUP");
-    expect(tokenSection?.textContent).toContain("$620M");
+    expect(tokenSection?.textContent).toContain("$620.00M");
     expect(tokenSection?.querySelector("svg polygon")).not.toBeNull();
     expect(tokenSection!.compareDocumentPosition(decisionSummary!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

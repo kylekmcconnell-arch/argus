@@ -1,19 +1,14 @@
 import { ArrowSquareOut, ChartLineUp, ShieldCheck } from "@phosphor-icons/react";
 import type { ProjectTokenSnapshot } from "../data/evidence";
-import { usdCompact } from "../lib/format";
-import { TokenSparkline } from "./TokenSparkline";
-
-const price = (value?: number) => {
-  if (value == null || !Number.isFinite(value)) return "N/A";
-  if (value < 0.01) return `$${value.toPrecision(3)}`;
-  return `$${value.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
-};
+import { MarketPerformancePanel } from "./MarketPerformancePanel";
 
 export function ProjectTokenCard({
   token,
   chains,
   showCurrentIntelligence,
+  refreshCurrentMarket,
   onAudit,
+  onLoadCurrentIntelligence,
 }: {
   token: ProjectTokenSnapshot;
   /**
@@ -23,21 +18,15 @@ export function ProjectTokenCard({
    */
   chains?: string[];
   showCurrentIntelligence: boolean;
+  refreshCurrentMarket?: boolean;
   onAudit?: (query: string) => void;
+  onLoadCurrentIntelligence?: () => void;
 }) {
   const verifiedBy = token.verification === "official_x" ? "official X account" : "official project domain";
-  const captured = new Date(token.capturedAt);
   const chainList = chains?.length
     ? [token.chain, ...chains]
       .filter(Boolean)
       .filter((chain, index, all) => all.findIndex((candidate) => candidate.toLowerCase() === chain.toLowerCase()) === index)
-    : null;
-  const supplyDenominator = typeof token.maxSupply === "number" && token.maxSupply > 0
-    ? token.maxSupply
-    : typeof token.totalSupply === "number" && token.totalSupply > 0 ? token.totalSupply : null;
-  const circulatingPct = supplyDenominator !== null
-    && typeof token.circulatingSupply === "number" && token.circulatingSupply > 0
-    ? Math.min(100, Math.round((token.circulatingSupply / supplyDenominator) * 100))
     : null;
   const chainDisplay = chainList
     ? chainList.length > 3
@@ -75,45 +64,18 @@ export function ProjectTokenCard({
         </div>
       </div>
 
-      <dl className="grid grid-cols-2 gap-px bg-line sm:grid-cols-3 lg:grid-cols-6">
-        {([
-          ["Price", price(token.priceUsd), "", null],
-          ["Market cap", usdCompact(token.marketCapUsd), "", null],
-          ["Fully diluted", usdCompact(token.fdvUsd), "", circulatingPct !== null ? `${circulatingPct}% of supply circulating` : null],
-          ["24h volume", usdCompact(token.volume24hUsd), "", null],
-          ["DEX liquidity", usdCompact(token.liquidityUsd), "", null],
-          [chainList ? `Chains (${chainList.length})` : "Chain", chainDisplay, "capitalize", chainList ? "matched by CoinGecko id, not by name" : null],
-        ] as const).map(([label, value, extra, sub]) => (
-          <div key={label} className="bg-panel px-4 py-3">
-            <dt className="stat-label">{label}</dt>
-            <dd className={`stat-value mt-1 font-semibold ${extra}`} title={chainList && label.startsWith("Chains") ? `${chainList.join(", ")} · protocol footprint per DeFiLlama TVL` : undefined}>{value}</dd>
-            {sub && <dd className="mt-0.5 text-[10px] leading-snug text-ink-faint tabular-nums">{sub}</dd>}
-          </div>
-        ))}
-      </dl>
-
-      <div className="px-5 py-4">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <div className="eyebrow">Price history</div>
-            <p className="mt-0.5 text-[11px] text-ink-faint">
-              {token.history ? "Frozen with this investigation" : "Current supplemental market overlay"}
-            </p>
-          </div>
-          <span className="mono text-[10px] text-ink-faint">
-            {Number.isFinite(captured.getTime()) ? `captured ${captured.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : "capture time unavailable"}
-          </span>
-        </div>
-        {token.history ? (
-          <TokenSparkline address={token.address} chain={token.chain} pairAddress={token.pairAddress} history={token.history} />
-        ) : showCurrentIntelligence ? (
-          <TokenSparkline address={token.address} chain={token.chain} pairAddress={token.pairAddress} />
-        ) : (
-          <p className="text-[12.5px] text-ink-faint">No price history was frozen in this snapshot. Load current intelligence to request the live market overlay.</p>
-        )}
+      <div className="px-3 py-3 sm:px-4 sm:py-4">
+        <MarketPerformancePanel
+          projectToken={token}
+          showCurrentIntelligence={showCurrentIntelligence}
+          refreshCurrentMarket={refreshCurrentMarket}
+          onLoadCurrentIntelligence={onLoadCurrentIntelligence}
+          embedded
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-line/70 bg-panel-2/30 px-5 py-3">
+        <span className="chip normal-case tracking-normal">{chainDisplay}</span>
         <span className="mono break-all text-[11px] text-ink-faint">{token.address}</span>
         {onAudit && (
           <button type="button" onClick={() => onAudit(token.address)} className="btn-chip tint-signal ml-auto min-h-10 gap-1.5 font-medium">

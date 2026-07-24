@@ -504,6 +504,18 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
   const circulatingSupply = finiteNumber(market.circulating_supply);
   const totalSupply = finiteNumber(market.total_supply);
   const maxSupply = finiteNumber(market.max_supply);
+  const athPrice = isRecord(market.ath) ? finiteNumber(market.ath.usd) : undefined;
+  const athDateRaw = isRecord(market.ath_date) ? cleanText(market.ath_date.usd) : "";
+  const athDrawdown = isRecord(market.ath_change_percentage)
+    ? finiteNumber(market.ath_change_percentage.usd)
+    : undefined;
+  const ath = athPrice !== undefined || athDateRaw || athDrawdown !== undefined
+    ? {
+        ...(athPrice !== undefined ? { priceUsd: athPrice } : {}),
+        ...(athDateRaw ? { date: athDateRaw } : {}),
+        ...(athDrawdown !== undefined ? { drawdownPct: athDrawdown } : {}),
+      }
+    : undefined;
   const id = cleanText(details.id);
   const name = cleanText(details.name);
   const symbol = cleanText(details.symbol).toUpperCase();
@@ -539,6 +551,7 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     ...totalSupply !== undefined ? { totalSupply } : {},
     ...maxSupply !== undefined ? { maxSupply } : {},
     ...pair ? { liquidityUsd: pair.liquidityUsd, pairAddress: pair.pairAddress } : {},
+    ...ath ? { ath } : {},
     ...history ? { history } : {},
   };
   ctx.evidence.projectToken = snapshot;

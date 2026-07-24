@@ -296,7 +296,9 @@ var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitge
 async function coingeckoToken(chain, address) {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
+      signal: AbortSignal.timeout(8e3)
+    });
     if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
     if (!res.ok) return null;
     const d = await res.json();
@@ -309,7 +311,27 @@ async function coingeckoToken(chain, address) {
     const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
     const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
     const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image, description: cleanBlurb(d.description?.en) };
+    const athPrice = d.market_data?.ath?.usd;
+    const athDate = d.market_data?.ath_date?.usd;
+    const athDrawdown = d.market_data?.ath_change_percentage?.usd;
+    const ath = athPrice != null || athDate != null || athDrawdown != null ? {
+      priceUsd: typeof athPrice === "number" && Number.isFinite(athPrice) ? athPrice : null,
+      date: typeof athDate === "string" && athDate.trim() ? athDate : null,
+      drawdownPct: typeof athDrawdown === "number" && Number.isFinite(athDrawdown) ? athDrawdown : null
+    } : null;
+    return {
+      listed: true,
+      rank: d.market_cap_rank ?? null,
+      mcapUsd: d.market_data?.market_cap?.usd ?? null,
+      marketCount: markets.size,
+      cexCount: cex.size,
+      cexNames,
+      homepage,
+      twitter,
+      image,
+      description: cleanBlurb(d.description?.en),
+      ath
+    };
   } catch {
     return null;
   }

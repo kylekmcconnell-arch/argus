@@ -40,6 +40,9 @@ const details = (overrides: Record<string, unknown> = {}) => ({
     market_cap: { usd: 500_000_000 },
     fully_diluted_valuation: { usd: 750_000_000 },
     total_volume: { usd: 40_000_000 },
+    ath: { usd: 4.75 },
+    ath_date: { usd: "2025-01-06T00:00:00.000Z" },
+    ath_change_percentage: { usd: -89.47 },
   },
   ...overrides,
 });
@@ -97,6 +100,11 @@ describe("verified project-token collection", () => {
       volume24hUsd: 40_000_000,
       liquidityUsd: 5_000_000,
       pairAddress: "pool-valid",
+      ath: {
+        priceUsd: 4.75,
+        date: "2025-01-06T00:00:00.000Z",
+        drawdownPct: -89.47,
+      },
       providers: ["coingecko", "dexscreener", "geckoterminal"],
       history: {
         points: [0.4, 0.6, 0.5],

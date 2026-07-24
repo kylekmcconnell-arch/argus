@@ -203,7 +203,13 @@ function ForensicAxes({ token }: { token: TokenDossier }) {
   );
 }
 
-export function TokenSnapshotVisuals({ token }: { token: TokenDossier }) {
+export function TokenSnapshotVisuals({
+  token,
+  showPriceMomentum = true,
+}: {
+  token: TokenDossier;
+  showPriceMomentum?: boolean;
+}) {
   const hasPriceMomentum = token.priceChange && Object.values(token.priceChange)
     .some((value) => typeof value === "number" && Number.isFinite(value));
   return (
@@ -221,7 +227,7 @@ export function TokenSnapshotVisuals({ token }: { token: TokenDossier }) {
         <span className="chip tint-pass">CAPTURED WITH SCAN</span>
       </header>
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        {hasPriceMomentum && token.priceChange && <PriceMomentum priceChange={token.priceChange} />}
+        {showPriceMomentum && hasPriceMomentum && token.priceChange && <PriceMomentum priceChange={token.priceChange} />}
         <HolderDistribution token={token} />
         <LiquidityControl safety={token.safety} />
         <ForensicAxes token={token} />

@@ -353,6 +353,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...(ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {}),
+      ...(ev.projectToken.ath ? { ath: { ...ev.projectToken.ath } } : {}),
       ...(ev.projectToken.history ? {
         history: { ...ev.projectToken.history, points: [...ev.projectToken.history.points] },
       } : {}),

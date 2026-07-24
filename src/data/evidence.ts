@@ -180,6 +180,12 @@ export interface ProjectTokenSnapshot {
   maxSupply?: number;
   liquidityUsd?: number;
   pairAddress?: string;
+  /** CoinGecko lifetime high, captured with the canonical-token snapshot. */
+  ath?: {
+    priceUsd?: number;
+    date?: string;
+    drawdownPct?: number;
+  };
   history?: {
     points: number[];
     first: number;

@@ -23,8 +23,8 @@ import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
 import { Counterparties } from "./Counterparties";
 import { RiskPaths } from "./RiskPaths";
 import { Holdings } from "./Holdings";
-import { TokenSparkline } from "./TokenSparkline";
 import { TokenSnapshotVisuals } from "./TokenSnapshotVisuals";
+import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { UsageVisuals } from "./UsageVisuals";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
@@ -758,7 +758,14 @@ export function InvestigationReport({
             description="Frozen market, ownership, and protocol charts remain visible with the report. Live refreshes are labeled separately and never alter the stored result."
           />
           <div className="mt-3 space-y-3">
-            <TokenSnapshotVisuals token={token} />
+            <MarketPerformancePanel
+              token={token}
+              projectToken={projectAccount?.projectToken}
+              showCurrentIntelligence={showCurrentIntelligence}
+              refreshCurrentMarket={currentIntelligenceEnabled}
+              onLoadCurrentIntelligence={loadCurrentIntelligence}
+            />
+            <TokenSnapshotVisuals token={token} showPriceMomentum={false} />
             {(projectAccount?.protocolTvl || projectAccount?.protocolFees || projectAccount?.holderProfile) && (
               <UsageVisuals
                 tvl={projectAccount.protocolTvl}
@@ -766,43 +773,6 @@ export function InvestigationReport({
                 holders={projectAccount.holderProfile}
               />
             )}
-            <section className="panel px-4 py-4 sm:px-5" aria-labelledby="investigation-price-history-title">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="eyebrow">{token.priceHistory ? "Frozen price series" : "Current price series"}</p>
-                  <h3 id="investigation-price-history-title" className="mt-1 text-[16px] font-semibold tracking-tight text-ink">
-                    Price history
-                  </h3>
-                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
-                    {token.priceHistory
-                      ? `Saved with this scan${token.priceHistory.capturedAt ? ` on ${token.priceHistory.capturedAt.slice(0, 10)}` : ""}.`
-                      : "This older snapshot did not store the historical series. A live refresh can load it without changing the verdict."}
-                  </p>
-                </div>
-                <span className={`chip ${token.priceHistory ? "tint-pass" : showCurrentIntelligence ? "tint-caution" : ""}`}>
-                  {token.priceHistory ? "CAPTURED WITH SCAN" : showCurrentIntelligence ? "LIVE REFRESH" : "REFRESH PAUSED"}
-                </span>
-              </div>
-              <div className="mt-4">
-                {token.priceHistory || showCurrentIntelligence ? (
-                  <TokenSparkline
-                    address={token.address}
-                    chain={token.chain}
-                    pairAddress={token.pairAddress}
-                    history={token.priceHistory}
-                  />
-                ) : (
-                  <div className="panel-inset flex flex-col gap-3 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="max-w-2xl text-[11.5px] leading-relaxed text-ink-dim">
-                      Load the current GeckoTerminal series as a clearly marked supplement to this immutable snapshot.
-                    </p>
-                    <button type="button" onClick={loadCurrentIntelligence} className="btn-chip tint-signal min-h-10 shrink-0">
-                      Refresh price history
-                    </button>
-                  </div>
-                )}
-              </div>
-            </section>
           </div>
         </div>
 

@@ -276,13 +276,15 @@ describe("investigation exact sharing", () => {
 
     expect(container.textContent).toContain("What the scan captured");
     expect(container.textContent).toContain("Market and ownership structure");
-    expect(container.textContent).toContain("Saved with this scan on 2026-07-23");
+    expect(container.textContent).toContain("CAPTURED JUL 23, 2026");
+    expect(container.textContent).toContain("From captured peak");
     expect(harness.livePanel.mock.calls.filter(([name]) => name === "sparkline")).toHaveLength(1);
     expect(harness.livePanel.mock.calls.some(([name]) => name === "project-research")).toBe(false);
     expect(harness.livePanel.mock.calls.some(([name]) => name === "on-chain")).toBe(false);
   });
 
   it("offers a clearly labeled live price refresh for older snapshots", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 404 })));
     render(investigation({
       versionContext: {
         caseId: "00000000-0000-4000-8000-000000000144",
@@ -298,7 +300,7 @@ describe("investigation exact sharing", () => {
 
     expect(harness.livePanel.mock.calls.some(([name]) => name === "sparkline")).toBe(false);
     const refresh = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Refresh price history");
+      .find((button) => button.textContent?.includes("Refresh market data"));
     expect(refresh).toBeDefined();
     await act(async () => refresh?.click());
 
