@@ -140,6 +140,33 @@ function sourceLabel(source: BasicFactSourceView, url: string): string {
   }
 }
 
+function cleanSourceTitle(value?: string): string {
+  return plainLanguageSummary((value ?? "")
+    .replace(/&#0*39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim());
+}
+
+function leadSourceLabel(lead: BasicFactLeadView, url: string, index: number): string {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    if (hostname === "linkedin.com" || hostname.endsWith(".linkedin.com")) {
+      if (/^\/company\//i.test(parsed.pathname)) return "LinkedIn company page";
+      if (/^\/in\//i.test(parsed.pathname)) return "LinkedIn profile";
+      return "LinkedIn";
+    }
+  } catch {
+    // safeHttpUrl already guards rendered links; retain the generic label.
+  }
+  const title = index === 0 ? cleanSourceTitle(lead.sourceTitle) : "";
+  return title || `Candidate source ${index + 1}`;
+}
+
 /**
  * Deterministic provider captures repeat across scans with only the numbers
  * moving ("$2.40B market cap · captured 07-22" then "$2.36B · captured
@@ -348,8 +375,16 @@ function answerFor(fact: BasicFactView): string {
   return plainLanguageSummary(answer);
 }
 
-// The four answers an investor scans first. Everything else compresses.
-const KEY_PREDICATES = new Set(["official_identity", "official_token", "traction", "funding"]);
+// The answers an investor scans first. Identity includes who founded the
+// project and who runs it now, not just its name and token.
+const KEY_PREDICATES = new Set([
+  "official_identity",
+  "founder",
+  "executive",
+  "official_token",
+  "traction",
+  "funding",
+]);
 
 /**
  * A shield line renders only when the strongest source is one the subject
@@ -552,6 +587,22 @@ function factRows(
 }
 
 function leadRows(facts: readonly BasicFactView[], leads: readonly BasicFactLeadView[]): BasicFactLeadView[] {
+  const confirmedPredicates = new Set<string>();
+  const confirmedValues = new Map<string, Set<string>>();
+  for (const fact of facts) {
+    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
+    const predicate = canonicalBasicFactPredicate(fact.predicate);
+    confirmedPredicates.add(predicate);
+    const values = Array.isArray(fact.value)
+      ? fact.value
+      : [fact.value ?? fact.normalizedValue];
+    const normalized = confirmedValues.get(predicate) ?? new Set<string>();
+    for (const value of values) {
+      const comparable = canonicalBasicFactComparisonValue(predicate, displayValue(value));
+      if (comparable) normalized.add(comparable);
+    }
+    confirmedValues.set(predicate, normalized);
+  }
   const rows: BasicFactLeadView[] = [
     ...facts.filter((fact) => fact.status === "lead").map((fact) => ({
       predicate: fact.predicate,
@@ -565,7 +616,13 @@ function leadRows(facts: readonly BasicFactView[], leads: readonly BasicFactLead
   const seen = new Set<string>();
   return rows.filter((lead) => {
     if (!lead?.predicate) return false;
-    const key = `${canonicalBasicFactPredicate(lead.predicate)}:${displayValue(lead.value).toLowerCase()}`;
+    const predicate = canonicalBasicFactPredicate(lead.predicate);
+    const comparable = canonicalBasicFactComparisonValue(predicate, displayValue(lead.value));
+    // A confirmed singleton answer makes alternate discovery copies noise.
+    // Repeatable people stay visible until that exact person is confirmed.
+    if (SINGLE_VALUE_PREDICATES.has(predicate) && confirmedPredicates.has(predicate)) return false;
+    if (comparable && confirmedValues.get(predicate)?.has(comparable)) return false;
+    const key = `${predicate}:${comparable || displayValue(lead.value).toLowerCase()}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -886,7 +943,9 @@ export function BasicFactsPanel({
                 <span className="mt-0.5 block text-[10.5px] text-ink-faint">Not confirmed and not used in the score</span>
               </span>
             </span>
-            <span className="chip tint-caution shrink-0 normal-case tracking-normal">{discoveryLeads.length} leads</span>
+            <span className="chip tint-caution shrink-0 normal-case tracking-normal">
+              {discoveryLeads.length} {discoveryLeads.length === 1 ? "lead" : "leads"}
+            </span>
           </summary>
           <ul className="mt-3 grid gap-2 border-t border-caution/20 pt-3 sm:grid-cols-2">
             {discoveryLeads.map((lead, index) => {
@@ -899,21 +958,32 @@ export function BasicFactsPanel({
                 ? `${leadValue} · ${leadQualifier}`
                 : leadValue;
               return (
-                <li key={`${lead.predicate}:${displayValue(lead.value)}:${index}`} className="panel-inset px-3 py-2.5">
+                <li key={`${lead.predicate}:${displayValue(lead.value)}:${index}`} className="panel-inset min-w-0 overflow-hidden px-3 py-2.5">
                   <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-[10px] uppercase tracking-[0.11em] text-ink-faint">{basicFactQuestionFor(lead.predicate, audience)}</p>
-                      <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{leadAnswer || "Candidate answer not recorded"}</p>
+                      <p className="mt-1 break-words text-[12.5px] leading-relaxed text-ink-dim">{leadAnswer || "Candidate answer not recorded"}</p>
                     </div>
                     <span className="chip tint-caution shrink-0 normal-case tracking-normal">Possible lead</span>
                   </div>
                   {urls.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {urls.slice(0, 3).map((url, urlIndex) => (
-                        <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="btn-chip min-h-8 tint-caution normal-case tracking-normal">
-                          {urlIndex === 0 && lead.sourceTitle?.trim() ? plainLanguageSummary(lead.sourceTitle) : `Candidate source ${urlIndex + 1}`} <ArrowSquareOut aria-hidden="true" size={12} weight="bold" />
+                    <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">
+                      {urls.slice(0, 3).map((url, urlIndex) => {
+                        const label = leadSourceLabel(lead, url, urlIndex);
+                        return (
+                        <a
+                          key={url}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={cleanSourceTitle(lead.sourceTitle) || label}
+                          className="btn-chip min-h-8 min-w-0 max-w-full overflow-hidden tint-caution normal-case tracking-normal"
+                        >
+                          <span className="truncate">{label}</span>
+                          <ArrowSquareOut aria-hidden="true" size={12} weight="bold" className="shrink-0" />
                         </a>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </li>

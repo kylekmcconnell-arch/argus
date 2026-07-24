@@ -255,6 +255,102 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).not.toContain("Nik Rae Falco");
   });
 
+  it("promotes domain-bound LinkedIn leadership while keeping a different unconfirmed role as a lead", () => {
+    render(investigation({
+      siteUrl: "https://venice.ai",
+      projectAccount: {
+        handle: "@askvenice",
+        display_name: "Venice",
+        avatar: "",
+        bio: "Private generative AI",
+        followers: "0",
+        joined: "",
+        identity_note: "",
+        headline: "Project account",
+        live: true,
+        notableFollowers: [],
+        contradictions: [],
+        checkRuns: [{ checkId: "identity-resolution", label: "Identity", status: "confirmed" }],
+        basicFactLeads: [
+          {
+            predicate: "official_identity",
+            value: "Venice",
+            sourceUrl: "https://www.linkedin.com/company/venice-ai/",
+            sourceTitle: "Venice.ai | LinkedIn",
+          },
+          {
+            predicate: "founder",
+            value: "Erik Voorhees",
+            sourceUrl: "https://www.linkedin.com/in/erikvoorhees/",
+          },
+          {
+            predicate: "founder",
+            value: "Jesse Proudman",
+            sourceUrl: "https://www.linkedin.com/in/jesseproudman/",
+          },
+          {
+            predicate: "product",
+            value: "Private AI",
+            sourceUrl: "https://example.com/venice-product",
+          },
+        ],
+        webTeam: [
+          {
+            name: "Erik Voorhees",
+            role: "Founder and CEO",
+            linkedin: "https://www.linkedin.com/in/erikvoorhees/",
+            source: "Monid/Akta leadership record",
+            sourceUrl: "https://venice.ai",
+            provider: "monid",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          },
+          {
+            name: "Jesse Proudman",
+            role: "President and CTO",
+            linkedin: "https://www.linkedin.com/in/jesseproudman/",
+            source: "Monid/Akta leadership record",
+            sourceUrl: "https://venice.ai",
+            provider: "monid",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          },
+        ],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 80,
+          identity_confidence: "Confirmed",
+          roles: [],
+        },
+        evidence: {
+          ventures: [],
+          testimonials: [],
+          advised: [],
+          associates: [],
+          wallets: [],
+          promotions: [],
+        },
+        graph: { nodes: [], edges: [] },
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+    }));
+
+    const facts = container.querySelector("#investigation-basic-facts");
+    const keyAnswers = facts?.querySelector('[aria-label="Key verified answers"]');
+    const leads = facts?.querySelector('[aria-label="Unverified basic fact leads"]');
+    expect(keyAnswers?.textContent).toContain("Venice");
+    expect(keyAnswers?.textContent).toContain("Erik Voorhees");
+    expect(keyAnswers?.textContent).toContain("Jesse Proudman");
+    expect(leads?.textContent).toContain("Private AI");
+    expect(leads?.textContent).not.toContain("Erik Voorhees");
+    expect(leads?.textContent).toContain("Jesse Proudman");
+    expect(leads?.textContent).toContain("Who founded it?");
+    expect(leads?.textContent).not.toContain("Venice.ai");
+    expect([...facts!.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')].map((link) => link.href)).toEqual(expect.arrayContaining([
+      "https://www.linkedin.com/in/erikvoorhees/",
+      "https://www.linkedin.com/in/jesseproudman/",
+    ]));
+  });
+
   it("merges handle-only team rows with the same people's full names", () => {
     render(investigation({
       siteUrl: "https://venice.ai",

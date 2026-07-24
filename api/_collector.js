@@ -17792,6 +17792,18 @@ function source(input) {
     artifactVerified: true
   };
 }
+function normalizedPublicProfileUrl(value) {
+  const candidate = value?.trim();
+  if (!candidate) return null;
+  const absolute = /^https?:\/\//i.test(candidate) ? candidate : /^(?:www\.)?linkedin\.com\//i.test(candidate) ? `https://${candidate}` : null;
+  if (!absolute) return null;
+  try {
+    const parsed = new URL(absolute);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
 function makeFact(evidence, predicate, value, sources, qualifier) {
   const subjectKey = evidence.profile.handle;
   return {
@@ -17984,21 +17996,38 @@ function projectProviderBackedBasicFacts(evidence) {
   }
   const teamKeys = /* @__PURE__ */ new Set();
   for (const member of evidence.roles.includes("PROJECT" /* PROJECT */) ? evidence.webTeam ?? [] : []) {
-    if (member.artifact_verified !== true || member.evidence_origin !== "deterministic" || member.provider !== "team-page" && member.provider !== "twitterapi" || !member.sourceUrl || !member.name.trim()) continue;
-    const predicate = /\b(?:co[- ]?founder|founder|creator)\b/i.test(member.role) ? "founder" : /\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(member.role) ? "executive" : null;
-    if (!predicate) continue;
+    if (member.artifact_verified !== true || member.evidence_origin !== "deterministic" || member.provider !== "team-page" && member.provider !== "twitterapi" && member.provider !== "monid" || !member.sourceUrl || !member.name.trim()) continue;
+    const predicates = [];
+    if (/\b(?:co[- ]?founder|founder|creator)\b/i.test(member.role)) predicates.push("founder");
+    if (/\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(member.role)) predicates.push("executive");
+    if (!predicates.length) continue;
     const identityKey = member.handle?.replace(/^@/, "").toLowerCase() || normalizeValue(member.name);
-    if (teamKeys.has(identityKey)) continue;
-    teamKeys.add(identityKey);
-    const excerpt = member.evidence?.trim() || `${member.name} is listed as ${member.role} by the project's fetched ${member.source}.`;
-    projected.push(makeFact(evidence, predicate, member.name.trim(), [source({
+    const excerpt = member.provider === "monid" ? `${member.name} is listed as ${member.role} in a professional record for the company matched to the project's official website.${member.evidence ? ` ${member.evidence}` : ""}` : member.evidence?.trim() || `${member.name} is listed as ${member.role} by the project's fetched ${member.source}.`;
+    const sources = [source({
       url: member.sourceUrl,
-      title: member.source || "Project team source",
+      title: member.provider === "monid" ? "Company record matched to official website" : member.source || "Project team source",
       excerpt,
       capturedAt,
       provider: member.provider,
-      sourceClass: member.provider === "twitterapi" || isOfficialUrl(member.sourceUrl, officialHost(evidence)) ? "official_subject" : "other_public"
-    })], member.role));
+      sourceClass: member.provider === "monid" ? "other_public" : member.provider === "twitterapi" || isOfficialUrl(member.sourceUrl, officialHost(evidence)) ? "official_subject" : "other_public"
+    })];
+    const linkedin = member.provider === "monid" ? normalizedPublicProfileUrl(member.linkedin) : null;
+    if (linkedin) {
+      sources.push(source({
+        url: linkedin,
+        title: "LinkedIn profile",
+        excerpt,
+        capturedAt,
+        provider: "monid",
+        sourceClass: "other_public"
+      }));
+    }
+    for (const predicate of predicates) {
+      const teamKey = `${predicate}:${identityKey}`;
+      if (teamKeys.has(teamKey)) continue;
+      teamKeys.add(teamKey);
+      projected.push(makeFact(evidence, predicate, member.name.trim(), sources, member.role));
+    }
   }
   const token = evidence.roles.includes("PROJECT" /* PROJECT */) ? evidence.projectToken : void 0;
   if (token?.verified) {
@@ -18092,6 +18121,22 @@ function projectProviderBackedBasicFacts(evidence) {
   const isFounderSubject = evidence.roles.includes("FOUNDER" /* FOUNDER */);
   const enrichmentOfficialWebsite = isProject ? evidence.projectToken?.homepage ?? evidence.profile.website : evidence.companyEnrichment?.requestedDomain;
   const domainBoundEnrichment = evidence.companyEnrichment && companyEnrichmentMatchesOfficialDomain(evidence.companyEnrichment, enrichmentOfficialWebsite) ? evidence.companyEnrichment : void 0;
+  const hasConfirmedIdentity = (evidence.basicFacts ?? []).some((fact) => fact.predicate === "official_identity" && (fact.status === "verified" || fact.status === "corroborated") && fact.artifact_verified === true);
+  if (isProject && domainBoundEnrichment?.name.trim() && !officialProfileSource && !hasConfirmedIdentity) {
+    projected.push(makeFact(
+      evidence,
+      "official_identity",
+      domainBoundEnrichment.name.trim(),
+      [source({
+        url: domainBoundEnrichment.sourceUrl,
+        title: "Company record matched to official website",
+        excerpt: `${domainBoundEnrichment.name} is the company record matched to the project's verified official domain.`,
+        capturedAt: domainBoundEnrichment.capturedAt,
+        provider: "monid",
+        sourceClass: "other_public"
+      })]
+    ));
+  }
   const enrichmentRecord = domainBoundEnrichment?.funding && domainBoundEnrichment.funding.rounds.length ? domainBoundEnrichment : void 0;
   const hasStrongerFundingFact = (evidence.basicFacts ?? []).some((fact) => fact.predicate === "funding" && fact.providerProjection !== true && (fact.status === "verified" || fact.status === "corroborated") && fact.sources.some((candidate) => candidate.artifactVerified === true && candidate.provider !== "defillama" && candidate.provider !== "monid" && candidate.relation === "supports"));
   const fundingFact = !hasStrongerFundingFact && isProject && evidence.protocolFunding && evidence.protocolFunding.rounds.length ? {
@@ -18358,23 +18403,40 @@ function projectProviderBackedBasicFacts(evidence) {
       `canonical token of ${ventureToken.ventureName}`
     ));
   }
-  const founderProfile = isProject ? domainBoundEnrichment?.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title)) : void 0;
-  if (founderProfile?.name.trim() && domainBoundEnrichment) {
-    const prior = founderProfile.priorCompanies.filter(Boolean).slice(0, 3).join(", ");
-    projected.push(makeFact(
-      evidence,
-      "founder",
-      founderProfile.name.trim(),
-      [source({
-        url: founderProfile.linkedin || domainBoundEnrichment.sourceUrl,
-        title: founderProfile.linkedin ? "LinkedIn (Monid/Akta management record)" : "Monid/Akta management record",
-        excerpt: `${founderProfile.name} is ${founderProfile.title} of ${domainBoundEnrichment.name}${prior ? `; previously at ${prior}` : ""}${founderProfile.startYear ? ` (since ${founderProfile.startYear})` : ""}.`,
+  for (const person of isProject ? domainBoundEnrichment?.management ?? [] : []) {
+    const name = person.name.trim();
+    if (!name) continue;
+    const predicates = [];
+    if (/\b(?:co[- ]?founder|founder|creator)\b/i.test(person.title)) predicates.push("founder");
+    if (/\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(person.title)) predicates.push("executive");
+    if (!predicates.length) continue;
+    const prior = person.priorCompanies.filter(Boolean).slice(0, 3).join(", ");
+    const excerpt = `${name} is listed as ${person.title} in a professional record for ${domainBoundEnrichment.name}, matched to the project's official website${prior ? `; previously at ${prior}` : ""}${person.startYear ? ` (since ${person.startYear})` : ""}.`;
+    const sources = [source({
+      url: domainBoundEnrichment.sourceUrl,
+      title: "Company record matched to official website",
+      excerpt,
+      capturedAt: domainBoundEnrichment.capturedAt,
+      provider: "monid",
+      sourceClass: "other_public"
+    })];
+    const linkedin = normalizedPublicProfileUrl(person.linkedin ?? void 0);
+    if (linkedin) {
+      sources.push(source({
+        url: linkedin,
+        title: "LinkedIn profile",
+        excerpt,
         capturedAt: domainBoundEnrichment.capturedAt,
         provider: "monid",
         sourceClass: "other_public"
-      })],
-      founderProfile.title
-    ));
+      }));
+    }
+    for (const predicate of predicates) {
+      const teamKey = `${predicate}:${normalizeValue(name)}`;
+      if (teamKeys.has(teamKey)) continue;
+      teamKeys.add(teamKey);
+      projected.push(makeFact(evidence, predicate, name, sources, person.title));
+    }
   }
   const materialized = projected.map((fact) => mergeProjectedFact(evidence, fact));
   reconcileQuestionLedger(evidence, materialized);

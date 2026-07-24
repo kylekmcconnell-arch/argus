@@ -55,7 +55,7 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     expect(traction?.value).toContain("total value locked");
   });
 
-  it("falls back to Monid/Akta for funding + mints the founder from the management record", () => {
+  it("uses every domain-matched Monid/Akta leader and keeps LinkedIn as supporting data", () => {
     const evidence = projectEvidence();
     evidence.companyEnrichment = {
       name: "Aave",
@@ -69,7 +69,10 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
         rounds: [{ date: "2020-10-12", round: "Strategic", amountUsd: 25_000_000, leadInvestors: ["Blockchain Capital"], otherInvestors: [] }],
         leadInvestors: ["Blockchain Capital"],
       },
-      management: [{ name: "Stani Kulechov", title: "CEO and Founder", priorCompanies: ["ETHLend"], linkedin: "https://www.linkedin.com/in/stani-kulechov", startYear: "2017" }],
+      management: [
+        { name: "Stani Kulechov", title: "CEO and Founder", priorCompanies: ["ETHLend"], linkedin: "https://www.linkedin.com/in/stani-kulechov", startYear: "2017" },
+        { name: "Aave Operator", title: "COO", priorCompanies: [], linkedin: "linkedin.com/in/aave-operator", startYear: "2021" },
+      ],
       firmographic: { legalName: "Aave Labs", foundedYear: "2020", headcountRange: "101-250", ownership: "Venture Growth Investor Backed" },
       sourceUrl: "https://aave.com",
       capturedAt: "2026-07-14T00:00:00.000Z",
@@ -77,6 +80,18 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     projectProviderBackedBasicFacts(evidence);
     const founder = evidence.basicFacts?.find((fact) => fact.predicate === "founder" && fact.value === "Stani Kulechov");
     expect(founder).toBeTruthy();
+    expect(founder?.sources.map((source) => source.url)).toEqual([
+      "https://aave.com",
+      "https://www.linkedin.com/in/stani-kulechov",
+    ]);
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "executive"
+      && fact.value === "Stani Kulechov"
+      && fact.qualifier === "CEO and Founder")).toBe(true);
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "executive"
+      && fact.value === "Aave Operator"
+      && fact.sources.some((source) => source.url === "https://linkedin.com/in/aave-operator"))).toBe(true);
     const funding = evidence.basicFacts?.find((fact) => fact.predicate === "funding");
     expect(funding?.value).toContain("$49.0M");
   });

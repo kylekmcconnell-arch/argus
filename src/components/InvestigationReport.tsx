@@ -72,6 +72,93 @@ type TeamIdentity = {
   linkedin?: string;
 };
 
+function urlMatchesProjectDomain(url: string | undefined, projectDomain: string | null): boolean {
+  if (!url || !projectDomain) return false;
+  try {
+    const sourceHost = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    return sourceHost === projectDomain
+      || sourceHost.endsWith(`.${projectDomain}`)
+      || projectDomain.endsWith(`.${sourceHost}`);
+  } catch {
+    return false;
+  }
+}
+
+function normalizedPublicUrl(value?: string): string | null {
+  const candidate = value?.trim();
+  if (!candidate) return null;
+  const absolute = /^https?:\/\//i.test(candidate)
+    ? candidate
+    : /^(?:www\.)?linkedin\.com\//i.test(candidate)
+      ? `https://${candidate}`
+      : null;
+  if (!absolute) return null;
+  try {
+    const parsed = new URL(absolute);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function projectLeadershipPredicates(role: string): Array<"founder" | "executive"> {
+  const predicates: Array<"founder" | "executive"> = [];
+  if (/\b(?:co[- ]?founder|founder|creator)\b/i.test(role)) predicates.push("founder");
+  if (/\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(role)) predicates.push("executive");
+  return predicates;
+}
+
+/**
+ * Older saved reports already contain the safe Monid roster rows, but predate
+ * their basic-fact projection. Reuse only deterministic rows whose company
+ * record is tied to the verified project domain. Name-only matches never pass.
+ */
+function domainBoundLeadershipFacts(
+  projectAccount: Investigation["projectAccount"],
+  projectDomain: string | null,
+): BasicFactView[] {
+  if (!projectAccount || !projectDomain) return [];
+  return (projectAccount.webTeam ?? []).flatMap((member) => {
+    if (
+      member.provider !== "monid"
+      || member.artifact_verified !== true
+      || member.evidence_origin !== "deterministic"
+      || !member.name?.trim()
+      || !urlMatchesProjectDomain(member.sourceUrl, projectDomain)
+    ) return [];
+    const linkedin = normalizedPublicUrl(member.linkedin);
+    const excerpt = `${member.name} is listed as ${member.role} in a professional record for the company matched to ${projectDomain}.`;
+    const sources: NonNullable<BasicFactView["sources"]> = [{
+      url: member.sourceUrl,
+      title: "Company record matched to official website",
+      excerpt,
+      relation: "supports",
+      provider: "monid",
+      sourceClass: "other_public",
+    }];
+    if (linkedin) {
+      sources.push({
+        url: linkedin,
+        title: "LinkedIn profile",
+        excerpt,
+        relation: "supports",
+        provider: "monid",
+        sourceClass: "other_public",
+      });
+    }
+    return projectLeadershipPredicates(member.role).map((predicate) => ({
+      factId: `domain-roster:${predicate}:${normalizedTeamIdentity(member.name)}`,
+      predicate,
+      value: member.name.trim(),
+      qualifier: member.role,
+      status: "verified" as const,
+      critical: predicate === "founder",
+      providerProjection: true,
+      sources,
+    }));
+  });
+}
+
 function normalizedTeamIdentity(value?: string): string {
   return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -367,22 +454,41 @@ export function InvestigationReport({
   const ghOrg = (recon?.socials ?? [])
     .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
     .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
-  const projectBasicFacts = rawProjectBasicFacts.filter((fact) => {
+  const retainedProjectBasicFacts = rawProjectBasicFacts.filter((fact) => {
     const monidSources = (fact.sources ?? []).filter((source) =>
       source.provider === "monid" || /Monid\/Akta/i.test(source.title ?? ""));
     if (!fact.providerProjection || !monidSources.length) return true;
     if (!projectDomain) return false;
-    return monidSources.some((source) => {
-      try {
-        const sourceHost = new URL(source.url ?? "").hostname.replace(/^www\./, "").toLowerCase();
-        return sourceHost === projectDomain
-          || sourceHost.endsWith(`.${projectDomain}`)
-          || projectDomain.endsWith(`.${sourceHost}`);
-      } catch {
-        return false;
-      }
-    });
+    return monidSources.some((source) => urlMatchesProjectDomain(source.url, projectDomain));
   });
+  const hasConfirmedProjectIdentity = retainedProjectBasicFacts.some((fact) =>
+    fact.predicate === "official_identity"
+    && (fact.status === "verified" || fact.status === "corroborated"));
+  const confirmedProjectIdentity: BasicFactView[] = !hasConfirmedProjectIdentity
+    && projectAccount?.report.identity_confidence === "Confirmed"
+    && projectAccount.display_name?.trim()
+    ? [{
+        factId: "confirmed-project-account-identity",
+        predicate: "official_identity",
+        value: projectAccount.display_name.trim(),
+        qualifier: projectAccount.handle,
+        status: "verified",
+        critical: true,
+        providerProjection: true,
+        sources: [{
+          url: `https://x.com/${projectAccount.handle.replace(/^@/, "")}`,
+          title: "Official project profile",
+          relation: "supports",
+          provider: "twitterapi",
+          sourceClass: "official_subject",
+        }],
+      }]
+    : [];
+  const projectBasicFacts = [
+    ...retainedProjectBasicFacts,
+    ...confirmedProjectIdentity,
+    ...domainBoundLeadershipFacts(projectAccount, projectDomain),
+  ];
   const showProjectBasicFacts = Boolean(projectAccount)
     || projectBasicFacts.length > 0
     || projectBasicFactLeads.length > 0;
@@ -418,15 +524,7 @@ export function InvestigationReport({
     }
     for (const p of projectAccount?.webTeam ?? []) {
       if (p.provider === "monid") {
-        if (!projectDomain || !p.sourceUrl) continue;
-        try {
-          const sourceHost = new URL(p.sourceUrl).hostname.replace(/^www\./, "").toLowerCase();
-          if (sourceHost !== projectDomain
-            && !sourceHost.endsWith(`.${projectDomain}`)
-            && !projectDomain.endsWith(`.${sourceHost}`)) continue;
-        } catch {
-          continue;
-        }
+        if (!urlMatchesProjectDomain(p.sourceUrl, projectDomain)) continue;
       }
       add({
         name: p.name,

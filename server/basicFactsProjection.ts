@@ -250,6 +250,23 @@ function source(input: {
   };
 }
 
+function normalizedPublicProfileUrl(value?: string): string | null {
+  const candidate = value?.trim();
+  if (!candidate) return null;
+  const absolute = /^https?:\/\//i.test(candidate)
+    ? candidate
+    : /^(?:www\.)?linkedin\.com\//i.test(candidate)
+      ? `https://${candidate}`
+      : null;
+  if (!absolute) return null;
+  try {
+    const parsed = new URL(absolute);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function makeFact(
   evidence: CollectedEvidence,
   predicate: BasicFactPredicate,
@@ -545,31 +562,48 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     if (
       member.artifact_verified !== true
       || member.evidence_origin !== "deterministic"
-      || (member.provider !== "team-page" && member.provider !== "twitterapi")
+      || (member.provider !== "team-page" && member.provider !== "twitterapi" && member.provider !== "monid")
       || !member.sourceUrl
       || !member.name.trim()
     ) continue;
-    const predicate: BasicFactPredicate | null = /\b(?:co[- ]?founder|founder|creator)\b/i.test(member.role)
-      ? "founder"
-      : /\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(member.role)
-        ? "executive"
-        : null;
-    if (!predicate) continue;
+    const predicates: BasicFactPredicate[] = [];
+    if (/\b(?:co[- ]?founder|founder|creator)\b/i.test(member.role)) predicates.push("founder");
+    if (/\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(member.role)) predicates.push("executive");
+    if (!predicates.length) continue;
     const identityKey = member.handle?.replace(/^@/, "").toLowerCase() || normalizeValue(member.name);
-    if (teamKeys.has(identityKey)) continue;
-    teamKeys.add(identityKey);
-    const excerpt = member.evidence?.trim()
-      || `${member.name} is listed as ${member.role} by the project's fetched ${member.source}.`;
-    projected.push(makeFact(evidence, predicate, member.name.trim(), [source({
+    const excerpt = member.provider === "monid"
+      ? `${member.name} is listed as ${member.role} in a professional record for the company matched to the project's official website.${member.evidence ? ` ${member.evidence}` : ""}`
+      : member.evidence?.trim()
+        || `${member.name} is listed as ${member.role} by the project's fetched ${member.source}.`;
+    const sources = [source({
       url: member.sourceUrl,
-      title: member.source || "Project team source",
+      title: member.provider === "monid" ? "Company record matched to official website" : member.source || "Project team source",
       excerpt,
       capturedAt,
       provider: member.provider,
-      sourceClass: member.provider === "twitterapi" || isOfficialUrl(member.sourceUrl, officialHost(evidence))
-        ? "official_subject"
-        : "other_public",
-    })], member.role));
+      sourceClass: member.provider === "monid"
+        ? "other_public"
+        : member.provider === "twitterapi" || isOfficialUrl(member.sourceUrl, officialHost(evidence))
+          ? "official_subject"
+          : "other_public",
+    })];
+    const linkedin = member.provider === "monid" ? normalizedPublicProfileUrl(member.linkedin) : null;
+    if (linkedin) {
+      sources.push(source({
+        url: linkedin,
+        title: "LinkedIn profile",
+        excerpt,
+        capturedAt,
+        provider: "monid",
+        sourceClass: "other_public",
+      }));
+    }
+    for (const predicate of predicates) {
+      const teamKey = `${predicate}:${identityKey}`;
+      if (teamKeys.has(teamKey)) continue;
+      teamKeys.add(teamKey);
+      projected.push(makeFact(evidence, predicate, member.name.trim(), sources, member.role));
+    }
   }
 
   const token = evidence.roles.includes(SubjectClass.PROJECT) ? evidence.projectToken : undefined;
@@ -720,6 +754,30 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     && companyEnrichmentMatchesOfficialDomain(evidence.companyEnrichment, enrichmentOfficialWebsite)
     ? evidence.companyEnrichment
     : undefined;
+  const hasConfirmedIdentity = (evidence.basicFacts ?? []).some((fact) =>
+    fact.predicate === "official_identity"
+    && (fact.status === "verified" || fact.status === "corroborated")
+    && fact.artifact_verified === true);
+  if (
+    isProject
+    && domainBoundEnrichment?.name.trim()
+    && !officialProfileSource
+    && !hasConfirmedIdentity
+  ) {
+    projected.push(makeFact(
+      evidence,
+      "official_identity",
+      domainBoundEnrichment.name.trim(),
+      [source({
+        url: domainBoundEnrichment.sourceUrl,
+        title: "Company record matched to official website",
+        excerpt: `${domainBoundEnrichment.name} is the company record matched to the project's verified official domain.`,
+        capturedAt: domainBoundEnrichment.capturedAt,
+        provider: "monid",
+        sourceClass: "other_public",
+      })],
+    ));
+  }
   const enrichmentRecord = domainBoundEnrichment?.funding
     && domainBoundEnrichment.funding.rounds.length
     ? domainBoundEnrichment
@@ -1061,27 +1119,44 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     ));
   }
 
-  // Monid/Akta management → founder identity (the "people behind it"). Conservative:
-  // only a clearly-labelled founder/CEO profile.
-  const founderProfile = isProject
-    ? domainBoundEnrichment?.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title))
-    : undefined;
-  if (founderProfile?.name.trim() && domainBoundEnrichment) {
-    const prior = founderProfile.priorCompanies.filter(Boolean).slice(0, 3).join(", ");
-    projected.push(makeFact(
-      evidence,
-      "founder",
-      founderProfile.name.trim(),
-      [source({
-        url: founderProfile.linkedin || domainBoundEnrichment.sourceUrl,
-        title: founderProfile.linkedin ? "LinkedIn (Monid/Akta management record)" : "Monid/Akta management record",
-        excerpt: `${founderProfile.name} is ${founderProfile.title} of ${domainBoundEnrichment.name}${prior ? `; previously at ${prior}` : ""}${founderProfile.startYear ? ` (since ${founderProfile.startYear})` : ""}.`,
-        capturedAt: domainBoundEnrichment.capturedAt,
+  // The domain-bound private-company record is also a direct projection
+  // fallback. In the full collector these people are merged into webTeam
+  // first; keeping this path makes the fact projection complete and testable
+  // even when it is invoked on the provider record alone.
+  for (const person of isProject ? domainBoundEnrichment?.management ?? [] : []) {
+    const name = person.name.trim();
+    if (!name) continue;
+    const predicates: BasicFactPredicate[] = [];
+    if (/\b(?:co[- ]?founder|founder|creator)\b/i.test(person.title)) predicates.push("founder");
+    if (/\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(person.title)) predicates.push("executive");
+    if (!predicates.length) continue;
+    const prior = person.priorCompanies.filter(Boolean).slice(0, 3).join(", ");
+    const excerpt = `${name} is listed as ${person.title} in a professional record for ${domainBoundEnrichment!.name}, matched to the project's official website${prior ? `; previously at ${prior}` : ""}${person.startYear ? ` (since ${person.startYear})` : ""}.`;
+    const sources = [source({
+      url: domainBoundEnrichment!.sourceUrl,
+      title: "Company record matched to official website",
+      excerpt,
+      capturedAt: domainBoundEnrichment!.capturedAt,
+      provider: "monid",
+      sourceClass: "other_public",
+    })];
+    const linkedin = normalizedPublicProfileUrl(person.linkedin ?? undefined);
+    if (linkedin) {
+      sources.push(source({
+        url: linkedin,
+        title: "LinkedIn profile",
+        excerpt,
+        capturedAt: domainBoundEnrichment!.capturedAt,
         provider: "monid",
         sourceClass: "other_public",
-      })],
-      founderProfile.title,
-    ));
+      }));
+    }
+    for (const predicate of predicates) {
+      const teamKey = `${predicate}:${normalizeValue(name)}`;
+      if (teamKeys.has(teamKey)) continue;
+      teamKeys.add(teamKey);
+      projected.push(makeFact(evidence, predicate, name, sources, person.title));
+    }
   }
 
   const materialized = projected.map((fact) => mergeProjectedFact(evidence, fact));

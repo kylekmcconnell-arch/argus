@@ -130,6 +130,77 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).toContain("Funding announcement");
   });
 
+  it("removes leads already answered by confirmed facts while keeping unmatched people visible", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[
+            {
+              predicate: "official_identity",
+              value: "Venice",
+              status: "verified",
+              sources: [{ url: "https://x.com/askvenice", relation: "supports" }],
+            },
+            {
+              predicate: "founder",
+              value: "Erik Voorhees",
+              qualifier: "Founder and CEO",
+              status: "verified",
+              sources: [{ url: "https://venice.ai", relation: "supports" }],
+            },
+          ]}
+          leads={[
+            {
+              predicate: "official_identity",
+              value: "Venice",
+              sourceUrl: "https://www.linkedin.com/company/venice-ai/",
+              sourceTitle: "Venice.ai | LinkedIn",
+            },
+            {
+              predicate: "founder",
+              value: "Erik Voorhees",
+              sourceUrl: "https://www.linkedin.com/in/erikvoorhees/",
+            },
+            {
+              predicate: "founder",
+              value: "Jesse Proudman",
+              sourceUrl: "https://www.linkedin.com/in/jesseproudman/",
+            },
+          ]}
+        />,
+      );
+    });
+
+    const leadArea = container.querySelector('[aria-label="Unverified basic fact leads"]');
+    expect(leadArea?.textContent).toContain("Jesse Proudman");
+    expect(leadArea?.textContent).not.toContain("Erik Voorhees");
+    expect(leadArea?.textContent).not.toContain("Venice.ai");
+    expect(leadArea?.textContent).toContain("1 lead");
+    expect(container.querySelector('[aria-label="Key verified answers"]')?.textContent).toContain("Erik Voorhees");
+  });
+
+  it("contains long source buttons and gives LinkedIn links short plain labels", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          leads={[{
+            predicate: "founder",
+            value: "Candidate founder",
+            sourceUrl: "https://www.linkedin.com/in/candidate-founder/",
+            sourceTitle: "Private AI: Venice.ai, led by crypto vet Erik Voorhees and Seattle&#039;s long professional biography",
+          }]}
+        />,
+      );
+    });
+
+    const leadCard = container.querySelector('[aria-label="Unverified basic fact leads"] li');
+    const sourceLink = leadCard?.querySelector<HTMLAnchorElement>('a[target="_blank"]');
+    expect(leadCard?.className).toContain("overflow-hidden");
+    expect(sourceLink?.className).toContain("max-w-full");
+    expect(sourceLink?.textContent).toContain("LinkedIn profile");
+    expect(sourceLink?.textContent).not.toContain("&#039;");
+  });
+
   it("renders only supplied questions for a non-project subject", () => {
     act(() => {
       root.render(
