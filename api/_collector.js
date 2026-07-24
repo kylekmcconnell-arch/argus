@@ -9568,7 +9568,7 @@ var MAX_REPAIR_QUESTIONS = 8;
 var MAX_PROJECT_REPAIR_QUESTIONS = 9;
 var MAX_REPAIR_PROVIDER_CALLS = 8;
 var DISCOVERY_TIMEOUT_MS = 9e4;
-var RESEARCH_CACHE_VERSION = "v8";
+var RESEARCH_CACHE_VERSION = "v9";
 var SENSITIVE_URL_PARAM3 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 var PREDICATES = /* @__PURE__ */ new Set([
   "official_identity",
@@ -10566,7 +10566,7 @@ function aggregateDiscovery(provider, batches) {
 }
 function questionSearchGroups(questions, phase) {
   const batches = ["identity", "track_record", "structure_risk"];
-  const isolateQuestion = (question) => phase === "repair" || supportsExplicitEmptyBasicFact(question.predicate) && questions.length === 1;
+  const isolateQuestion = (question) => phase === "repair" || phase === "primary" && question.audience === "project" && question.predicate === "funding" || supportsExplicitEmptyBasicFact(question.predicate) && questions.length === 1;
   const grouped = batches.flatMap((batch) => {
     const selected = questions.filter((question) => question.batch === batch && !isolateQuestion(question));
     return selected.length ? [{ key: batch, batch, questions: selected, questionSpecific: false }] : [];

@@ -35,7 +35,7 @@ const MAX_REPAIR_PROVIDER_CALLS = 8;
 // tight enough that slow calls timed out and fell back to Grok (erasing the cost
 // win). Discovery batches run in parallel, well inside the ~390s budget.
 const DISCOVERY_TIMEOUT_MS = 90_000;
-const RESEARCH_CACHE_VERSION = "v8";
+const RESEARCH_CACHE_VERSION = "v9";
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 const PREDICATES = new Set<BasicFactPredicate>([
@@ -1315,10 +1315,19 @@ function questionSearchGroups(
   // A repair pass exists because a broad batch did not produce a verified
   // answer. Give every remaining critical question its own search context so
   // the scout cannot spend the whole response on an easier neighboring fact.
+  // Company funding is isolated during the primary project pass too. Funding
+  // announcements are easy to bury in a broad track-record batch, and a
+  // provider projection that merely says "one round" is not enough to explain
+  // the amount, stage, valuation, date, or investors.
   // Asset questions retain that isolation when explicitly invoked alone
   // because only a question-attributable search may record completed-empty.
   const isolateQuestion = (question: BasicFactsResearchQuestion): boolean =>
     phase === "repair"
+    || (
+      phase === "primary"
+      && question.audience === "project"
+      && question.predicate === "funding"
+    )
     || (supportsExplicitEmptyBasicFact(question.predicate) && questions.length === 1);
   const grouped = batches.flatMap((batch): QuestionSearchGroup[] => {
     const selected = questions.filter((question) =>

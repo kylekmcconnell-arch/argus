@@ -97,7 +97,7 @@ describe("basic-facts lead parsing", () => {
       cacheWrite: async () => undefined,
     });
 
-    expect(requestBodies).toHaveLength(3);
+    expect(requestBodies).toHaveLength(4);
     const prompts = requestBodies.map((body) =>
       promptText((body.messages as Array<{ content?: unknown }> | undefined)?.[0]?.content));
     expect(prompts.every((prompt) => prompt.includes(
@@ -610,7 +610,7 @@ describe("critical-gap search recovery", () => {
     const grokCalls = fetchMock.mock.calls.filter(([input]) =>
       String(input) === "https://api.x.ai/v1/responses").length;
 
-    expect(result.detail).toContain("primary grok:completed_empty");
+    expect(result.detail).toContain("primary grok:partial");
     expect(new Set(primaryRuns.map((run) => run.provider))).toEqual(new Set(["grok"]));
     expect(primaryRuns.some((run) => run.provider === "claude-web-search")).toBe(false);
     expect(anthropicCalls).toBeGreaterThan(0);
@@ -861,6 +861,38 @@ describe("critical-gap search recovery", () => {
       "project.product": "completed_empty",
       "project.funding": "completed_empty",
     });
+  });
+
+  it("gives project funding its own official-site search during primary discovery", async () => {
+    const { ctx } = context("https://venice.ai/home");
+    const prompts: string[] = [];
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
+      prompts.push(promptText(body.messages?.[0]?.content));
+      return new Response(JSON.stringify({
+        content: [{ type: "text", text: '{"facts":[]}' }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          server_tool_use: { web_search_requests: 1 },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const questions = basicFactsResearchQuestions(ctx).filter((question) =>
+      question.predicate === "product" || question.predicate === "funding");
+
+    await discoverBasicFactLeadsDetailed(ctx, {
+      request,
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    }, questions, "primary");
+
+    expect(request).toHaveBeenCalledTimes(2);
+    const fundingPrompt = prompts.find((prompt) => prompt.includes("[project.funding]"));
+    expect(fundingPrompt).toContain("question-specific company-funding search");
+    expect(fundingPrompt).toContain("site:venice.ai");
+    expect(fundingPrompt).not.toContain("[project.product]");
   });
 
   it("retries one malformed hosted-search response before giving up the gap", async () => {
