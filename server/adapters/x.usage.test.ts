@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getCost, withCostLedger } from "../cost";
-import { checkFollow, clearLastTweetsMemo, collectCorpus, getLastPostAt, getRecentPosts, getRecentPostsMeta, grokSearch, handleHistory, notableFollowers, searchAdverseSignals } from "./x";
+import {
+  checkFollow,
+  clearLastTweetsMemo,
+  collectCorpus,
+  getLastPostAt,
+  getProfile,
+  getRecentPosts,
+  getRecentPostsMeta,
+  grokSearch,
+  handleHistory,
+  notableFollowers,
+  publicXAccountState,
+  searchAdverseSignals,
+} from "./x";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -14,6 +27,39 @@ describe("X provider attempt accounting", () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+  });
+
+  it("preserves X's public suspended state instead of flattening it to a missing profile", async () => {
+    const state = await publicXAccountState("@driftprotocol", vi.fn().mockResolvedValue(new Response(`
+      <main>
+        <h2>Account suspended</h2>
+        <script>window.__DATA__={"unavailable_reason":"Suspended"}</script>
+      </main>
+    `, { status: 200 })) as unknown as typeof fetch);
+
+    expect(state).toEqual(expect.objectContaining({
+      handle: "@driftprotocol",
+      accountStatus: "suspended",
+      statusSourceUrl: "https://x.com/driftprotocol",
+    }));
+    expect(state?.statusCapturedAt).toEqual(expect.any(String));
+  });
+
+  it("falls through from a provider 404 to the exact public X terminal state", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ status: "error", message: "user not found" }, 404))
+      .mockResolvedValueOnce(new Response("<h2>Account suspended</h2>", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const profile = await getProfile("@driftprotocol");
+
+    expect(profile).toEqual(expect.objectContaining({
+      handle: "@driftprotocol",
+      accountStatus: "suspended",
+    }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1][0])).toBe("https://x.com/driftprotocol");
   });
 
   it("counts the rejected Grok compatibility call and successful retry", async () => {

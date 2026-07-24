@@ -42,6 +42,16 @@ export interface SubjectProfile {
   profile_provider?: string;
   /** Capture time for the provider-returned profile. */
   profile_captured_at?: string;
+  /**
+   * Operational state of the exact official X handle. This is deliberately
+   * separate from identity resolution: an official site can still prove which
+   * account belongs to a project even when X has suspended that account.
+   */
+  x_account_status?: "active" | "suspended" | "unavailable";
+  /** Public X profile URL used to establish the frozen account state. */
+  x_account_status_source_url?: string;
+  /** Capture time for the public account-state observation. */
+  x_account_status_captured_at?: string;
 }
 
 export interface AxisInput {
@@ -253,7 +263,14 @@ export interface ProtocolTvlSnapshot {
   /** Governance identifiers as listed by DeFiLlama (curated listing metadata). */
   governanceIds?: string[];
   /** Security incidents recorded in the same DeFiLlama document; frozen with the positives so evidence use is never selective. */
-  hacks?: Array<{ date: string | null; amountUsd: number | null; returnedFunds: boolean; classification: string | null }>;
+  hacks?: Array<{
+    date: string | null;
+    amountUsd: number | null;
+    returnedFunds: boolean;
+    returnedAmountUsd?: number | null;
+    classification: string | null;
+    technique?: string | null;
+  }>;
   sourceUrl: string;
   capturedAt: string;
 }
@@ -499,6 +516,7 @@ export type BasicFactPredicate =
   | "network"
   | "legal_entity"
   | "legal_regulatory_event"
+  | "security_incident"
   | "funding"
   | "investor"
   | "partnership"

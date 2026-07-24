@@ -3,6 +3,7 @@ import {
   collectProtocolFees,
   collectProtocolFunding,
   collectProtocolTvl,
+  defiLlamaLookupName,
   defiLlamaSlug,
   describeFunding,
   formatTvlUsd,
@@ -114,6 +115,47 @@ describe("collectProtocolTvl", () => {
     expect(seen).toContain("/protocol/aave-v3");
     expect(out.available).toBe(true);
   });
+
+  it("freezes incident technique and numeric recovery state from the same protocol record", async () => {
+    const out = await collectProtocolTvl("Drift", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({
+        name: "Drift",
+        gecko_id: "drift-protocol",
+        hacks: [
+          {
+            date: 1_775_001_600,
+            amount: 295_000_000,
+            returnedFunds: null,
+            classification: "Infrastructure",
+            technique: "Compromised Admin + Fake Token Price Manipulation",
+          },
+          {
+            date: 1_652_227_200,
+            amount: 14_500_000,
+            returnedFunds: 14_500_000,
+            classification: "Protocol Logic",
+            technique: "realized PnL withdrawal bug",
+          },
+        ],
+      }))),
+    });
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.hacks).toEqual([
+      expect.objectContaining({
+        date: "2026-04-01",
+        amountUsd: 295_000_000,
+        returnedFunds: false,
+        returnedAmountUsd: null,
+        classification: "Infrastructure",
+        technique: "Compromised Admin + Fake Token Price Manipulation",
+      }),
+      expect.objectContaining({
+        returnedFunds: true,
+        returnedAmountUsd: 14_500_000,
+      }),
+    ]);
+  });
 });
 
 describe("defiLlamaSlug", () => {
@@ -121,6 +163,12 @@ describe("defiLlamaSlug", () => {
     expect(defiLlamaSlug("Aave V3")).toBe("aave-v3");
     expect(defiLlamaSlug("  Curve!!  Finance ")).toBe("curve-finance");
     expect(defiLlamaSlug("Uniswap")).toBe("uniswap");
+  });
+
+  it("removes only the generic Protocol suffix used by CoinGecko display names", () => {
+    expect(defiLlamaLookupName("Drift Protocol")).toBe("Drift");
+    expect(defiLlamaLookupName("Protocol Labs")).toBe("Protocol Labs");
+    expect(defiLlamaLookupName("Aave")).toBe("Aave");
   });
 });
 

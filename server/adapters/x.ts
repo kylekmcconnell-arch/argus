@@ -299,12 +299,67 @@ async function twFetch(url: string, key: string, tries = 2): Promise<Response | 
 // ── twitterapi.io: profile ───────────────────────────────────────────────
 export interface XProfile {
   handle: string;
+  accountStatus?: "active" | "suspended" | "unavailable";
+  statusSourceUrl?: string;
+  statusCapturedAt?: string;
   name?: string;
   bio?: string;
   followers?: number;
   createdAt?: string;
   website?: string;
   image?: string; // real X profile photo URL (more reliable than an unavatar guess)
+}
+
+/**
+ * X's public, logged-out profile HTML contains a server-rendered terminal
+ * account state. Probe it only after the licensed profile provider fails, so
+ * a suspended account is not flattened into a generic provider outage.
+ */
+export async function publicXAccountState(
+  handle: string,
+  fetcher: typeof fetch = fetch,
+): Promise<Pick<XProfile, "handle" | "accountStatus" | "statusSourceUrl" | "statusCapturedAt"> | null> {
+  const u = handle.replace(/^@/, "");
+  const statusSourceUrl = `https://x.com/${encodeURIComponent(u)}`;
+  let response: Response;
+  try {
+    response = await fetcher(statusSourceUrl, {
+      headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/3.0; account-state check)" },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    recordCall("x-public", "account-state", 0, `${u} · transport_error`, "failed");
+    return null;
+  }
+  if (!response.ok) {
+    recordCall("x-public", "account-state", 0, `${u} · http_${response.status}`, "failed");
+    return null;
+  }
+  let html: string;
+  try {
+    html = await response.text();
+  } catch {
+    recordCall("x-public", "account-state", 0, `${u} · unreadable`, "failed");
+    return null;
+  }
+  const suspended = /\bAccount suspended\b/i.test(html)
+    || /unavailable_reason\s*[:=]\s*["']Suspended["']/i.test(html)
+    || /unavailable_reason\\?["']?\s*:\s*\\?["']Suspended\\?["']/i.test(html);
+  const unavailable = suspended
+    || /\bThis account (?:doesn['’]t|does not) exist\b/i.test(html)
+    || /unavailable_reason\s*[:=]\s*["'](?:NotFound|Unavailable|Deactivated)["']/i.test(html);
+  if (!unavailable) {
+    recordCall("x-public", "account-state", 0, `${u} · no_terminal_state`, "succeeded");
+    return null;
+  }
+  const accountStatus = suspended ? "suspended" : "unavailable";
+  recordCall("x-public", "account-state", 0, `${u} · ${accountStatus}`, "succeeded");
+  return {
+    handle: `@${u}`,
+    accountStatus,
+    statusSourceUrl,
+    statusCapturedAt: new Date().toISOString(),
+  };
 }
 
 // The project's own website is the biggest un-mined lead on a project account —
@@ -330,20 +385,25 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await twFetch(url, key);
-      if (!res || !res.ok) return null;
+      if (!res || !res.ok) return await publicXAccountState(`@${u}`);
       const d = (await res.json()) as any;
       if (d?.status === "error" || d?.data === null) {
         if (attempt === 0) { await new Promise((r) => setTimeout(r, 1500)); continue; }
-        return null;
+        return await publicXAccountState(`@${u}`);
       }
       const p = d.data ?? d;
-      if (!p || (p.name == null && p.followers == null && p.followers_count == null && p.description == null)) return null;
+      if (!p || (p.name == null && p.followers == null && p.followers_count == null && p.description == null)) {
+        return await publicXAccountState(`@${u}`);
+      }
       // twitterapi returns the avatar under a few shapes; take the first, and ask
       // for the full-size image (Twitter serves a 48px "_normal" by default).
       const rawImg = p.profilePicture ?? p.profile_image_url_https ?? p.profile_image_url ?? p.profile_image;
       const image = typeof rawImg === "string" ? rawImg.replace(/_normal\.(jpg|jpeg|png|gif|webp)$/i, "_400x400.$1") : undefined;
       return {
         handle: "@" + u,
+        accountStatus: "active",
+        statusSourceUrl: `https://x.com/${encodeURIComponent(u)}`,
+        statusCapturedAt: new Date().toISOString(),
         name: p.name,
         bio: p.description,
         followers: p.followers ?? p.followers_count,
@@ -1260,11 +1320,18 @@ export const xAdapter: Adapter = {
     //    already resolve the follower count (so a busy/empty bio still gets it).
     const haveProfile = ctx.evidence.profile.followers && ctx.evidence.profile.followers !== "N/A";
     const haveOfficialAvatar = ctx.evidence.profile.avatar_source_state != null;
-    const prof = haveProfile && haveOfficialAvatar ? null : await getProfile(ctx.handle);
-    if (prof) {
+    const haveTerminalAccountState = ctx.evidence.profile.x_account_status === "suspended"
+      || ctx.evidence.profile.x_account_status === "unavailable";
+    const prof = (haveProfile && haveOfficialAvatar) || haveTerminalAccountState
+      ? null
+      : await getProfile(ctx.handle);
+    if (prof?.accountStatus === "active") {
       ctx.evidence.profile.profile_collection_state = "resolved";
       ctx.evidence.profile.profile_provider = "twitterapi";
       ctx.evidence.profile.profile_captured_at = new Date().toISOString();
+      ctx.evidence.profile.x_account_status = "active";
+      ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
+      ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
       ctx.evidence.profile.website = canonicalPublicProfileWebsite(prof.website)
@@ -1283,6 +1350,22 @@ export const xAdapter: Adapter = {
         }
       }
       ctx.emit({ phase: "P0 · Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle}, ${fmtFollowers(prof.followers)} followers`, source: "twitterapi.io", tone: "neutral" });
+    } else if (prof) {
+      ctx.evidence.profile.profile_collection_state = "unavailable";
+      ctx.evidence.profile.profile_provider = "twitterapi";
+      ctx.evidence.profile.profile_captured_at = undefined;
+      ctx.evidence.profile.x_account_status = prof.accountStatus;
+      ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
+      ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
+      ctx.emit({
+        phase: "P0 · Intake",
+        label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
+        detail: prof.accountStatus === "suspended"
+          ? `${prof.handle} currently renders X's terminal Account suspended state. Identity discovery continues through the official site and other public records.`
+          : `${prof.handle} currently has no live public X profile. Identity discovery continues through the official site and other public records.`,
+        source: "x.com",
+        tone: "warn",
+      });
     }
 
     // recent posts (skip if already pulled upstream for claim extraction)

@@ -64,7 +64,13 @@ import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adapters/projectToken";
 import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
-import { collectProtocolAuditLinks, collectProtocolFees, collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
+import {
+  collectProtocolAuditLinks,
+  collectProtocolFees,
+  collectProtocolFunding,
+  collectProtocolTvl,
+  defiLlamaLookupName,
+} from "./adapters/defiLlama";
 import { collectHolderProfile } from "./adapters/tokenHolders";
 import { collectUpcomingUnlocks } from "./adapters/tokenUnlocks";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
@@ -403,12 +409,46 @@ function asRoles(roles: string[]): SubjectClass[] {
   return out;
 }
 
+export function recordOfficialXAccountStatusFinding(evidence: CollectedEvidence): boolean {
+  if (evidence.profile.x_account_status !== "suspended") return false;
+  const sourceUrl = evidence.profile.x_account_status_source_url;
+  const capturedAt = evidence.profile.x_account_status_captured_at;
+  if (!sourceUrl || !capturedAt) return false;
+  if (evidence.findings.some((finding) =>
+    finding.finding_type === "OfficialXAccountSuspended"
+    && finding.source_url === sourceUrl,
+  )) return false;
+  evidence.findings.push({
+    finding_type: "OfficialXAccountSuspended",
+    claim: `${evidence.profile.handle} rendered X's terminal Account suspended state when checked on ${capturedAt.slice(0, 10)}. The official-site identity binding can remain valid, but the project's primary social channel is unavailable. X does not publicly state the underlying reason on this page, so suspension alone is not evidence of fraud.`,
+    source_url: sourceUrl,
+    source_date: capturedAt,
+    source_author: "x.com",
+    verification_status: "Verified",
+    independent_source_count: 1,
+    polarity: -1,
+    evidence_origin: "deterministic",
+    artifact_verified: true,
+    provider: "x-public",
+    finding_scope: {
+      scope: "direct_subject",
+      target_entity_key: evidence.profile.handle,
+      target_entity_type: evidence.roles.includes(SubjectClass.PROJECT) ? "project" : "person",
+      relationship_to_subject: "self",
+    },
+  });
+  return true;
+}
+
 async function resolveProfile(ctx: CollectContext): Promise<void> {
   const prof = await xProfile(ctx.handle);
-  if (prof) {
+  if (prof?.accountStatus === "active") {
     ctx.evidence.profile.profile_collection_state = "resolved";
     ctx.evidence.profile.profile_provider = "twitterapi";
     ctx.evidence.profile.profile_captured_at = new Date().toISOString();
+    ctx.evidence.profile.x_account_status = "active";
+    ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
+    ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
     if (prof.image) {
       ctx.evidence.profile.avatar_url = prof.image; // official X image source for the frozen integrity screen
@@ -425,6 +465,22 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
       if (!isNaN(d.getTime())) ctx.evidence.profile.joined = d.toLocaleString("en-US", { month: "short", year: "numeric" });
     }
     ctx.emit({ phase: "P0 · Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} · ${ctx.evidence.profile.followers} followers · joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
+  } else if (prof) {
+    ctx.evidence.profile.profile_collection_state = "unavailable";
+    ctx.evidence.profile.profile_provider = "twitterapi";
+    ctx.evidence.profile.profile_captured_at = undefined;
+    ctx.evidence.profile.x_account_status = prof.accountStatus;
+    ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
+    ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
+    ctx.emit({
+      phase: "P0 · Intake",
+      label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
+      detail: prof.accountStatus === "suspended"
+        ? `${prof.handle} currently renders X's terminal Account suspended state. Continuing through the verified official site and public records.`
+        : `${prof.handle} currently has no live public X profile. Continuing through the verified official site and public records.`,
+      source: "x.com",
+      tone: "warn",
+    });
   } else {
     ctx.evidence.profile.profile_collection_state = "unavailable";
     ctx.evidence.profile.profile_provider = "twitterapi";
@@ -1822,6 +1878,56 @@ export function recordProjectTokenDrawdownFinding(evidence: CollectedEvidence): 
   return true;
 }
 
+/**
+ * Promote DeFiLlama's frozen protocol-incident rows into standalone verified
+ * counter-evidence. These records describe security/control failure, not fraud
+ * by the project, so they never trigger a misconduct hard cap by themselves.
+ */
+export function recordProtocolSecurityIncidentFindings(evidence: CollectedEvidence): number {
+  const protocol = evidence.protocolTvl;
+  if (!protocol?.hacks?.length) return 0;
+  let recorded = 0;
+  for (const incident of [...protocol.hacks]
+    .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")))
+    .slice(0, 5)) {
+    const sourceDate = incident.date ?? protocol.capturedAt;
+    const duplicate = evidence.findings.some((finding) =>
+      finding.finding_type === "ProtocolSecurityIncident"
+      && finding.source_url === protocol.sourceUrl
+      && finding.source_date === sourceDate);
+    if (duplicate) continue;
+    const amount = incident.amountUsd ? `$${(incident.amountUsd / 1_000_000).toFixed(incident.amountUsd % 1_000_000 === 0 ? 0 : 1)}M` : "an unquantified";
+    const classification = incident.classification ? `${incident.classification.toLowerCase()} ` : "";
+    const technique = incident.technique ? ` Technique recorded: ${incident.technique}.` : "";
+    const recovery = incident.returnedFunds
+      ? incident.returnedAmountUsd
+        ? ` DeFiLlama records $${(incident.returnedAmountUsd / 1_000_000).toFixed(incident.returnedAmountUsd % 1_000_000 === 0 ? 0 : 1)}M returned.`
+        : " DeFiLlama records the funds as returned."
+      : " DeFiLlama does not record returned funds for this incident.";
+    evidence.findings.push({
+      finding_type: "ProtocolSecurityIncident",
+      claim: `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`,
+      source_url: protocol.sourceUrl,
+      source_date: sourceDate,
+      source_author: "defillama",
+      verification_status: "Verified",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "defillama",
+      finding_scope: {
+        scope: "direct_subject",
+        target_entity_key: evidence.profile.handle,
+        target_entity_type: "project",
+        relationship_to_subject: "self",
+      },
+    });
+    recorded += 1;
+  }
+  return recorded;
+}
+
 // ── Phase 3.5: adverse-signal sweep, manipulation-tooling flag, cross-project
 //    overlap ("the Venn"). This is the playbook's core: for the subject AND every
 //    project/associate discovered, hunt real rug/scam/drain complaints; flag a
@@ -2499,12 +2605,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     // no longer published INCOMPLETE for a missing backing axis.
     if (evidence.projectToken?.verified) {
       const projectName = evidence.projectToken.name;
+      const protocolLookupName = defiLlamaLookupName(projectName);
       const capturedAt = evidence.projectToken.capturedAt;
       try {
         const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome, unlocksOutcome] = await Promise.all([
-          collectProtocolTvl(projectName),
-          collectProtocolFunding(projectName),
-          collectProtocolFees(projectName),
+          collectProtocolTvl(protocolLookupName),
+          collectProtocolFunding(protocolLookupName),
+          collectProtocolFees(protocolLookupName),
           // Float control (free, keyless): who holds the supply, is the LP
           // locked. Answers the reader's dump/rug question for project tokens.
           evidence.projectToken.address
@@ -2531,6 +2638,17 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         }
         if (tvlIdentityMatched) {
           evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
+          const incidentCount = recordProtocolSecurityIncidentFindings(evidence);
+          if (incidentCount > 0) {
+            const newest = evidence.protocolTvl.hacks?.[0];
+            emit({
+              phase: "Token",
+              label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recorded`,
+              detail: `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` · $${(newest.amountUsd / 1_000_000).toFixed(0)}M` : ""} · frozen as verified counter-evidence, separate from misconduct.`,
+              source: "defillama",
+              tone: "warn",
+            });
+          }
           if (tvlOutcome.value.chains.length) {
             evidence.projectToken = { ...evidence.projectToken, deployedChains: tvlOutcome.value.chains };
           }
@@ -2557,7 +2675,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         // bounded fetches must degrade to a skipped enrichment, never a
         // stalled audit.
         {
-          const auditLinks = await collectProtocolAuditLinks(projectName);
+          const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
           const auditsResult = await withWallClockBox(
             collectSecurityAudits(
               projectName,
@@ -2610,6 +2728,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       }
     }
     evidence.roles = providerBackedRoles(evidence);
+    recordOfficialXAccountStatusFinding(evidence);
     await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);
   }

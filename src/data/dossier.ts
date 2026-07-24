@@ -44,6 +44,9 @@ export interface Dossier {
   profile_collection_state?: CollectedEvidence["profile"]["profile_collection_state"];
   profile_provider?: string;
   profile_captured_at?: string;
+  x_account_status?: CollectedEvidence["profile"]["x_account_status"];
+  x_account_status_source_url?: string;
+  x_account_status_captured_at?: string;
   followers: string;
   joined: string;
   days_since_post?: number;
@@ -315,6 +318,9 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,
+    x_account_status: ev.profile.x_account_status,
+    x_account_status_source_url: ev.profile.x_account_status_source_url,
+    x_account_status_captured_at: ev.profile.x_account_status_captured_at,
     followers: ev.profile.followers,
     joined: ev.profile.joined,
     days_since_post: ev.profile.days_since_post,

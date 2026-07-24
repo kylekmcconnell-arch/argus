@@ -1399,6 +1399,7 @@ const compactObject = (value: unknown, depth = 0): unknown => {
 const SCORING_PROFILE_FIELDS = [
   "handle", "display_name", "resolved_name", "bio", "website",
   "profile_collection_state", "profile_provider", "profile_captured_at",
+  "x_account_status", "x_account_status_source_url", "x_account_status_captured_at",
   "last_post_at", "days_since_post",
 ] as const;
 
@@ -1726,6 +1727,14 @@ export function deriveProjectStrengthBands(
   const earlyStage = PROJECT_EARLY_STAGE.test(productStageText)
     && !PROJECT_MATURE_STAGE.test(productStageText);
   const catalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog);
+  const severeUnrecoveredProtocolIncident = catalog.some((artifact) => {
+    if (artifact.operation !== "findings:ProtocolSecurityIncident") return false;
+    const text = `${artifact.title} ${artifact.excerpt ?? ""}`;
+    const amount = text.match(/\$([\d.]+)\s*([BM])\b/i);
+    if (!amount || !/\bdoes not record returned funds\b/i.test(text)) return false;
+    const amountUsd = Number(amount[1]) * (amount[2].toUpperCase() === "B" ? 1_000_000_000 : 1_000_000);
+    return Number.isFinite(amountUsd) && amountUsd >= 10_000_000;
+  });
   const limitingByAxis = new Map(projectAxes.map(({ axis }) => [axis, catalog
     .filter((artifact) => isVerifiedCounterArtifact(artifact, axis))
     .map((artifact) => artifact.artifactId)]));
@@ -1798,10 +1807,13 @@ export function deriveProjectStrengthBands(
   let p2Tier: ProjectStrengthTier = repositoryFacts.length || productProof ? "emerging" : "none";
   if (!earlyStage && repositoryFacts.length > 0 && productProof) p2Tier = "solid";
   if (!earlyStage && repositoryFacts.length > 0 && productProof && (auditFacts.length > 0 || productPress.length >= 2)) p2Tier = "exceptional";
+  if (severeUnrecoveredProtocolIncident && (p2Tier === "solid" || p2Tier === "exceptional")) p2Tier = "emerging";
+  if (severeUnrecoveredProtocolIncident && (p2FloorTier === "solid" || p2FloorTier === "exceptional")) p2FloorTier = "emerging";
   setBand("P2_product_substance", p2Tier, [
     ...(repositoryFacts.length ? ["verified public repository"] : []),
     ...(productProof ? ["source-backed product operation"] : []),
     ...(earlyStage ? ["explicit early-stage product marker"] : []),
+    ...(severeUnrecoveredProtocolIncident ? ["material protocol security incident without a recorded full recovery caps product substance at emerging"] : []),
   ], artifactIds(p2Anchors), p2FloorTier);
 
   const tokenDisclosures = [...tokenDisclosureFacts];
@@ -1835,8 +1847,10 @@ export function deriveProjectStrengthBands(
   const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0
     ? assessmentArtifactFor("P3_token_conduct", "project-token-identity")
     : null;
-  const p3FinalTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3CeilingTier;
-  const p3FinalFloorTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3FloorTier;
+  let p3FinalTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3CeilingTier;
+  let p3FinalFloorTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3FloorTier;
+  if (severeUnrecoveredProtocolIncident && (p3FinalTier === "solid" || p3FinalTier === "exceptional")) p3FinalTier = "emerging";
+  if (severeUnrecoveredProtocolIncident && (p3FinalFloorTier === "solid" || p3FinalFloorTier === "exceptional")) p3FinalFloorTier = "emerging";
   setBand("P3_token_conduct", p3FinalTier, [
     ...(verifiedToken ? ["canonical token verified"] : []),
     ...(!token && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : []),
@@ -1847,6 +1861,7 @@ export function deriveProjectStrengthBands(
     ...(auditFacts.length
       ? ["verified security review"]
       : selfAttestedAuditorCount >= 2 ? [`${selfAttestedAuditorCount} reputable auditors attested on the official security page`] : []),
+    ...(severeUnrecoveredProtocolIncident ? ["material protocol security incident without a recorded full recovery caps token and control evidence at emerging"] : []),
   ], [
     ...artifactIds([...(token ? [token] : []), ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
     ...(p3Assessment ? [p3Assessment.artifactId] : []),
@@ -2153,6 +2168,10 @@ const FINDING_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   // distinct from a promoted-token collapse so the report never implies that
   // market drawdown by itself proves misconduct.
   ProjectTokenDrawdown: ["P5_traction_and_liveness"],
+  // Being exploited is evidence of a security/control failure, not proof that
+  // the project committed fraud. Keep it off reputation and hard-cap axes.
+  ProtocolSecurityIncident: ["P2_product_substance", "P3_token_conduct"],
+  OfficialXAccountSuspended: ["P5_traction_and_liveness", "P6_transparency_integrity"],
   CadenceDecay: ["F4_build_substance", "P5_traction_and_liveness", "ME3_conduct_reputation"],
   TrustGraphConnection: SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
   AdvisoryRug: ["F5_reputation_integrity", "AD2_advised_outcomes", "AD4_advisory_conduct", "AD5_reputation_fud"],
@@ -2258,6 +2277,7 @@ const PROJECT_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   repositories: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
   traction: ["P5_traction_and_liveness"],
   legal_regulatory_event: ["P6_transparency_integrity"],
+  security_incident: ["P2_product_substance", "P3_token_conduct"],
 };
 
 const FOUNDER_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
@@ -2680,6 +2700,10 @@ const counterEligibleAxesFor = (
     section === "findings"
     && typeof record.polarity === "number"
     && record.polarity < 0
+  ) return [...eligibleAxes];
+  if (
+    section === "basicFacts"
+    && recordText(record, ["predicate"], 80)?.toLowerCase() === "security_incident"
   ) return [...eligibleAxes];
   if (
     section === "sourceArtifacts"

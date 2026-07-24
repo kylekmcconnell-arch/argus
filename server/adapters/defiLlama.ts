@@ -22,6 +22,17 @@ export function defiLlamaSlug(name: string): string {
     .replace(/^-|-$/g, "");
 }
 
+/**
+ * CoinGecko commonly names an asset "{Brand} Protocol" while DeFiLlama uses
+ * the shorter brand slug (Drift Protocol -> drift). Strip only that generic
+ * suffix. The caller still has to join the returned protocol document to the
+ * already verified canonical CoinGecko id before accepting any evidence.
+ */
+export function defiLlamaLookupName(name: string): string {
+  const normalized = name.trim();
+  return normalized.replace(/\s+protocol$/i, "").trim() || normalized;
+}
+
 type ProtocolDocument = {
   name?: unknown;
   symbol?: unknown;
@@ -84,7 +95,10 @@ export interface ProtocolHackRecord {
   amountUsd: number | null;
   /** whether the record states the funds were returned */
   returnedFunds: boolean;
+  /** absolute USD returned, when DeFiLlama records a numeric recovery */
+  returnedAmountUsd: number | null;
   classification: string | null;
+  technique: string | null;
 }
 
 export interface ProtocolTvl {
@@ -212,12 +226,19 @@ export async function collectProtocolTvl(
 
   const hacks: ProtocolHackRecord[] = (Array.isArray(data.hacks) ? data.hacks : [])
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
-    .map((entry) => ({
-      date: typeof entry.date === "number" ? new Date(entry.date * 1000).toISOString().slice(0, 10) : null,
-      amountUsd: typeof entry.amount === "number" && entry.amount > 0 ? Math.round(entry.amount) : null,
-      returnedFunds: entry.returnedFunds === true,
-      classification: typeof entry.classification === "string" ? entry.classification : null,
-    }));
+    .map((entry) => {
+      const returnedAmountUsd = typeof entry.returnedFunds === "number" && entry.returnedFunds > 0
+        ? Math.round(entry.returnedFunds)
+        : null;
+      return {
+        date: typeof entry.date === "number" ? new Date(entry.date * 1000).toISOString().slice(0, 10) : null,
+        amountUsd: typeof entry.amount === "number" && entry.amount > 0 ? Math.round(entry.amount) : null,
+        returnedFunds: entry.returnedFunds === true || returnedAmountUsd !== null,
+        returnedAmountUsd,
+        classification: typeof entry.classification === "string" ? entry.classification : null,
+        technique: typeof entry.technique === "string" ? entry.technique : null,
+      };
+    });
 
   recordCall("defillama", "tvl", 0, `${slug} · tvl_${Math.round(tvlUsd)}`, "succeeded");
   return {

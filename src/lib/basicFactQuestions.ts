@@ -17,7 +17,7 @@ export interface BasicFactQuestionOutcomeInput {
 
 export type BasicFactQuestionOutcome = "answered" | "checked_empty" | "unresolved";
 
-const EXPLICIT_EMPTY_PREDICATES = new Set(["official_token", "public_security"]);
+const EXPLICIT_EMPTY_PREDICATES = new Set(["official_token", "public_security", "security_incident"]);
 
 /** Only an explicit completed-empty pass establishes that no answer was found. */
 export function basicFactQuestionOutcome(
@@ -44,6 +44,8 @@ export function explicitEmptyBasicFactAnswer(predicate: string): string {
       return "No verified official crypto token was found in this snapshot.";
     case "public_security":
       return "No verified public security was found in this snapshot.";
+    case "security_incident":
+      return "No material security incident was verified in the bounded public-source search.";
     default:
       return "No verified answer was found in the completed search.";
   }
@@ -59,6 +61,7 @@ const PROJECT_QUESTIONS: readonly BasicFactQuestionDefinition[] = [
   ["official_token", "Does it have an official token?"],
   ["network", "Which networks does it run on?"],
   ["legal_entity", "Which legal entity is responsible?"],
+  ["security_incident", "What hacks, exploits, losses, and recovery outcomes are documented?"],
   ["funding", "How much funding has it raised?"],
   ["investor", "Who funded it?"],
   ["partnership", "Which material partners or integrations are verified?"],
@@ -147,6 +150,12 @@ const PREDICATE_ALIASES: Record<string, string> = {
   fundraising: "funding",
   security_audits: "audit",
   audits: "audit",
+  hack: "security_incident",
+  hacks: "security_incident",
+  exploit: "security_incident",
+  exploits: "security_incident",
+  security_event: "security_incident",
+  security_events: "security_incident",
   github: "repository",
   repositories: "repository",
   usage: "traction",

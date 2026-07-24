@@ -15,6 +15,7 @@ const CRITICAL = new Set<BasicFactPredicate>([
   "founder",
   "executive",
   "official_token",
+  "security_incident",
 ]);
 
 const FOUNDER_ROLE = /\b(?:co[- ]?)?founder\b|\bcreator\b/i;
@@ -776,10 +777,9 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     projected.push(projectedFundingFact);
   }
 
-  // On-chain TVL → traction (P5). Hack records from the same DeFiLlama
-  // document ride in the same excerpt: consuming a document for score-lifting
-  // positives while dropping its incident records would be selective
-  // evidence use.
+  // On-chain TVL → traction (P5). Security incidents from the same document
+  // become standalone negative facts below. A $295M exploit must never be
+  // buried inside the source excerpt for an otherwise positive TVL metric.
   const tvlSnapshot = isProject ? evidence.protocolTvl : undefined;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
     const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
@@ -791,9 +791,6 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         ? "steady vs 30 days ago"
         : `${tvlTrendPct > 0 ? "up" : "down"} ${Math.abs(tvlTrendPct)}% vs 30 days ago`;
     const historySince = tvlSnapshot.firstRecordedAt ? ` TVL history since ${tvlSnapshot.firstRecordedAt.slice(0, 4)}.` : "";
-    const hackNote = tvlSnapshot.hacks?.length
-      ? ` DeFiLlama also records ${tvlSnapshot.hacks.length} security incident${tvlSnapshot.hacks.length === 1 ? "" : "s"}${tvlSnapshot.hacks[0].amountUsd ? `, including ${formatUsd(tvlSnapshot.hacks[0].amountUsd)}${tvlSnapshot.hacks[0].date ? ` in ${tvlSnapshot.hacks[0].date.slice(0, 4)}` : ""}${tvlSnapshot.hacks[0].returnedFunds ? " (funds returned)" : ""}` : ""}.`
-      : "";
     projected.push(makeFact(
       evidence,
       "traction",
@@ -801,13 +798,42 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       [source({
         url: tvlSnapshot.sourceUrl,
         title: "DeFiLlama TVL record",
-        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""}${tvlTrendPhrase ? `, ${tvlTrendPhrase}` : ""} (DeFiLlama on-chain snapshot).${historySince}${hackNote}`,
+        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""}${tvlTrendPhrase ? `, ${tvlTrendPhrase}` : ""} (DeFiLlama on-chain snapshot).${historySince}`,
         capturedAt: tvlSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain",
       })],
       `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`,
     ));
+    for (const incident of [...(tvlSnapshot.hacks ?? [])]
+      .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")))
+      .slice(0, 5)) {
+      const incidentDate = incident.date ?? "date not recorded";
+      const amount = incident.amountUsd ? formatUsd(incident.amountUsd) : "amount not recorded";
+      const classification = incident.classification ? ` · ${incident.classification}` : "";
+      const technique = incident.technique ? ` · ${incident.technique}` : "";
+      const recovery = incident.returnedFunds
+        ? incident.returnedAmountUsd
+          ? `${formatUsd(incident.returnedAmountUsd)} recorded returned`
+          : "funds recorded returned"
+        : "return status not recorded";
+      const incidentFact = makeFact(
+        evidence,
+        "security_incident",
+        `${incidentDate} · ${amount} security incident${classification}${technique} · ${recovery}`,
+        [source({
+          url: tvlSnapshot.sourceUrl,
+          title: "DeFiLlama protocol incident record",
+          excerpt: `DeFiLlama records a ${amount} ${incident.classification?.toLowerCase() ?? "protocol"} security incident affecting ${tvlSnapshot.name} on ${incidentDate}${incident.technique ? ` using ${incident.technique}` : ""}; ${recovery}.`,
+          capturedAt: tvlSnapshot.capturedAt,
+          provider: "defillama",
+          sourceClass: "other_public",
+        })],
+        `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`,
+      );
+      incidentFact.floorEligible = false;
+      projected.push(incidentFact);
+    }
     // Governance identifiers -> P6 disclosure. Snapshot spaces are off-chain
     // voting and anyone can create one; only the eip155 governor entry is an
     // on-chain contract. Curated listing metadata, hence other_public.

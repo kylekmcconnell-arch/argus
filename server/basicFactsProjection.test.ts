@@ -745,6 +745,43 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(tvl?.sources[0].excerpt).toContain("up 6% vs 30 days ago");
   });
 
+  it("projects protocol hacks as standalone critical facts instead of burying them in TVL prose", () => {
+    const evidence = emptyEvidence("@driftprotocol");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.protocolTvl = {
+      slug: "drift",
+      name: "Drift",
+      symbol: "DRIFT",
+      tvlUsd: 100_000_000,
+      chains: ["Solana"],
+      chainBreakdown: [{ chain: "Solana", tvlUsd: 100_000_000 }],
+      geckoId: "drift-protocol",
+      hacks: [{
+        date: "2026-04-01",
+        amountUsd: 295_000_000,
+        returnedFunds: false,
+        returnedAmountUsd: null,
+        classification: "Infrastructure",
+        technique: "Compromised Admin + Fake Token Price Manipulation",
+      }],
+      sourceUrl: "https://defillama.com/protocol/drift",
+      capturedAt: "2026-07-24T12:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const incident = evidence.basicFacts?.find((fact) => fact.predicate === "security_incident");
+    const tvl = evidence.basicFacts?.find((fact) => fact.predicate === "traction");
+    expect(incident).toEqual(expect.objectContaining({
+      status: "verified",
+      critical: true,
+      floorEligible: false,
+    }));
+    expect(incident?.value).toContain("2026-04-01 · $295M security incident");
+    expect(incident?.value).toContain("Compromised Admin");
+    expect(tvl?.sources[0].excerpt).not.toContain("security incident");
+  });
+
   it("mints a citable, floor-ineligible fact from multi-firm audit attestation", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];

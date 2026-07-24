@@ -217,6 +217,106 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
   );
 }
 
+function frozenDateLabel(value?: string | null): string {
+  if (!value) return "date not recorded";
+  const parsed = Date.parse(value.length === 10 ? `${value}T00:00:00Z` : value);
+  if (!Number.isFinite(parsed)) return value;
+  return new Date(parsed).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * Material operational risks belong beside the subject identity and verdict,
+ * not buried in a TVL excerpt or rendered as "N/A followers."
+ */
+function CriticalSubjectAlerts({ dossier }: { dossier: Dossier }) {
+  const incidents = [...(dossier.protocolTvl?.hacks ?? [])]
+    .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")));
+  const incident = incidents[0];
+  const xStatus = dossier.x_account_status === "suspended" || dossier.x_account_status === "unavailable"
+    ? dossier.x_account_status
+    : null;
+  if (!incident && !xStatus) return null;
+
+  const incidentSource = safeSourceLink(dossier.protocolTvl?.sourceUrl);
+  const xSource = safeSourceLink(dossier.x_account_status_source_url);
+  const incidentRecovery = incident?.returnedFunds
+    ? incident.returnedAmountUsd
+      ? `${usdCompact(incident.returnedAmountUsd)} recorded returned`
+      : "Funds recorded returned"
+    : "Return status not recorded";
+
+  return (
+    <div
+      className="order-2 border-t border-avoid/30 bg-avoid/[0.035] px-5 py-4 lg:order-none"
+      role="alert"
+      aria-label="Material subject risk alerts"
+    >
+      <div className={`grid gap-3 ${incident && xStatus ? "md:grid-cols-2" : ""}`}>
+        {incident && (
+          <article className="rounded-xl border border-avoid/35 bg-panel/70 p-3.5">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-avoid/35 bg-avoid/10 text-avoid">
+                <WarningCircle aria-hidden="true" size={17} weight="fill" />
+              </span>
+              <div className="min-w-0">
+                <div className="eyebrow text-avoid">Major protocol security incident</div>
+                <p className="mt-1 text-[14px] font-semibold leading-snug text-ink">
+                  {incident.amountUsd ? usdCompact(incident.amountUsd) : "Unquantified loss"} · {frozenDateLabel(incident.date)}
+                </p>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
+                  {[incident.classification, incident.technique].filter(Boolean).join(" · ") || "Protocol security incident"}
+                  <span className="text-ink-faint"> · {incidentRecovery}</span>
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
+                  {incidents.length > 1 && <span>{incidents.length} incidents recorded</span>}
+                  {incidentSource && (
+                    <a href={incidentSource.href} target="_blank" rel="noreferrer" className="text-signal-lift underline-offset-2 hover:underline">
+                      Review incident source
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </article>
+        )}
+        {xStatus && (
+          <article className="rounded-xl border border-avoid/35 bg-panel/70 p-3.5">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-avoid/35 bg-avoid/10 text-avoid">
+                <XCircle aria-hidden="true" size={17} weight="fill" />
+              </span>
+              <div className="min-w-0">
+                <div className="eyebrow text-avoid">
+                  {xStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable"}
+                </div>
+                <p className="mt-1 text-[14px] font-semibold leading-snug text-ink">{dossier.handle}</p>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
+                  {xStatus === "suspended"
+                    ? "X currently renders a terminal Account suspended state. The official-site identity binding remains separate, but the project's primary social channel is unavailable."
+                    : "No live public X profile was available. Treat follower count, join date, and posting cadence as unavailable rather than zero."}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
+                  <span>checked {frozenDateLabel(dossier.x_account_status_captured_at)}</span>
+                  {xSource && (
+                    <a href={xSource.href} target="_blank" rel="noreferrer" className="text-signal-lift underline-offset-2 hover:underline">
+                      Open X account state
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </article>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Collapses long evidence lists behind a "View all" toggle. Nothing is
  * removed from the record: the full list stays in the DOM (print and
@@ -1548,6 +1648,7 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
 export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void }) {
   const { role } = useArgusAuth();
   const f = dossier;
+  const hasTerminalXState = f.x_account_status === "suspended" || f.x_account_status === "unavailable";
   const { report, graph, founderSummary, evidence } = dossier;
   const fundScaleProfile = {
     handle: f.handle,
@@ -2671,11 +2772,19 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       <RoleIcon role={r} size={13} /> {ROLE_META[r].label}
                     </span>
                   ))}
-                  <span className="text-[12.5px] text-ink-faint"><span className="text-ink-dim">{f.followers}</span> followers</span>
-                  <span className="text-[12.5px] text-ink-faint">joined {f.joined}</span>
+                  {hasTerminalXState ? (
+                    <span className="text-[12.5px] font-medium text-avoid">X profile metrics unavailable</span>
+                  ) : (
+                    <>
+                      <span className="text-[12.5px] text-ink-faint"><span className="text-ink-dim">{f.followers}</span> followers</span>
+                      <span className="text-[12.5px] text-ink-faint">joined {f.joined}</span>
+                    </>
+                  )}
                   {typeof f.days_since_post === "number" && (
                     <span className={`text-[12.5px] ${f.days_since_post >= 21 ? "font-medium text-avoid" : "text-ink-faint"}`}>
-                      {f.days_since_post === 0 ? "posted today" : f.days_since_post === 1 ? "posted yesterday" : `last posted ${f.days_since_post}d ago`}
+                      {hasTerminalXState
+                        ? `last observed post ${f.days_since_post}d ago`
+                        : f.days_since_post === 0 ? "posted today" : f.days_since_post === 1 ? "posted yesterday" : `last posted ${f.days_since_post}d ago`}
                     </span>
                   )}
                 </div>
@@ -2729,8 +2838,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </dl>
           </div>
 
+          <CriticalSubjectAlerts dossier={f} />
+
           <div
-            className="order-2 flex flex-wrap items-center gap-5 border-t border-line/60 px-5 py-5 max-sm:grid max-sm:items-start max-sm:gap-4"
+            className="order-3 flex flex-wrap items-center gap-5 border-t border-line/60 px-5 py-5 max-sm:grid max-sm:items-start max-sm:gap-4 lg:order-none"
             aria-label="Decision readiness result"
           >
             <div className="shrink-0 text-center max-sm:flex max-sm:items-center max-sm:gap-3 max-sm:text-left">

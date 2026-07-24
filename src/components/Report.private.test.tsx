@@ -55,6 +55,52 @@ function decisionBasisText(): string {
 }
 
 describe("private person report evidence boundary", () => {
+  it("surfaces a material protocol incident and suspended official X account beside the verdict", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier: Dossier = {
+      ...base,
+      handle: "@driftprotocol",
+      display_name: "Drift Protocol",
+      followers: "N/A",
+      joined: "N/A",
+      x_account_status: "suspended",
+      x_account_status_source_url: "https://x.com/driftprotocol",
+      x_account_status_captured_at: "2026-07-24T12:00:00.000Z",
+      protocolTvl: {
+        slug: "drift",
+        name: "Drift",
+        symbol: "DRIFT",
+        tvlUsd: 100_000_000,
+        chains: ["Solana"],
+        chainBreakdown: [{ chain: "Solana", tvlUsd: 100_000_000 }],
+        geckoId: "drift-protocol",
+        hacks: [{
+          date: "2026-04-01",
+          amountUsd: 295_000_000,
+          returnedFunds: false,
+          returnedAmountUsd: null,
+          classification: "Infrastructure",
+          technique: "Compromised Admin + Fake Token Price Manipulation",
+        }],
+        sourceUrl: "https://defillama.com/protocol/drift",
+        capturedAt: "2026-07-24T12:00:00.000Z",
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const alert = container.querySelector('[aria-label="Material subject risk alerts"]');
+    expect(alert?.textContent).toContain("Major protocol security incident");
+    expect(alert?.textContent).toContain("$295M");
+    expect(alert?.textContent).toContain("Apr 1, 2026");
+    expect(alert?.textContent).toContain("Official X account suspended");
+    expect(container.textContent).toContain("X profile metrics unavailable");
+    expect(alert?.querySelector('a[href="https://x.com/driftprotocol"]')).not.toBeNull();
+    expect(alert?.querySelector('a[href="https://defillama.com/protocol/drift"]')).not.toBeNull();
+  });
+
   it("renders model-only team identities as leads and excludes them from grounded report chat", () => {
     const base = buildReport(SUBJECTS[1]);
     const modelVenture = {

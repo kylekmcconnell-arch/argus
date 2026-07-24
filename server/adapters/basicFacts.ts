@@ -28,12 +28,13 @@ const DISCOVERY_RETRY_DELAY_MS = 350;
 const MAX_LEADS = 28;
 const MAX_SOURCES = 32;
 const MAX_REPAIR_QUESTIONS = 8;
+const MAX_PROJECT_REPAIR_QUESTIONS = 9;
 const MAX_REPAIR_PROVIDER_CALLS = 8;
 // Claude web_search runs several searches server-side then synthesizes; 50s was
 // tight enough that slow calls timed out and fell back to Grok (erasing the cost
 // win). Discovery batches run in parallel, well inside the ~390s budget.
 const DISCOVERY_TIMEOUT_MS = 90_000;
-const RESEARCH_CACHE_VERSION = "v7";
+const RESEARCH_CACHE_VERSION = "v8";
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 const PREDICATES = new Set<BasicFactPredicate>([
@@ -56,6 +57,7 @@ const PREDICATES = new Set<BasicFactPredicate>([
   "network",
   "legal_entity",
   "legal_regulatory_event",
+  "security_incident",
   "governance",
   "control",
   "conflict_of_interest",
@@ -70,6 +72,7 @@ const PREDICATES = new Set<BasicFactPredicate>([
 const CRITICAL_PREDICATES = new Set<BasicFactPredicate>([
   "official_identity", "current_role", "product", "founder", "executive",
   "track_record", "official_token", "public_security", "funding", "investor", "partnership",
+  "security_incident",
 ]);
 
 /**
@@ -101,6 +104,7 @@ const LEAD_COVERAGE_CATEGORIES: readonly (readonly BasicFactPredicate[])[] = [
   ["governance"],
   ["control", "conflict_of_interest"],
   ["legal_regulatory_event"],
+  ["security_incident"],
   ["repository"],
   ["funding", "investor", "partnership"],
   ["network"],
@@ -185,6 +189,7 @@ const PROJECT_QUESTIONS: readonly QuestionTemplate[] = [
   { batch: "track_record", predicate: "traction", question: "What concrete, dated usage, revenue, volume, users, fees, TVL, or adoption metrics are public?", critical: true },
   { batch: "structure_risk", predicate: "legal_entity", question: "Which legal entity is responsible for the project?", critical: true },
   { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events are publicly documented, who are they attributed to, and what is each event's current stated status?" },
+  { batch: "structure_risk", predicate: "security_incident", question: "What material hacks, exploits, breaches, thefts, user losses, emergency pauses, or recovery outcomes are publicly documented? Return each event with an exact date, amount, attribution, current status, and direct source.", critical: true },
   { batch: "structure_risk", predicate: "governance", question: "What formal governance process is documented?", critical: true },
   { batch: "structure_risk", predicate: "control", question: "Who has practical control through ownership, boards, voting power, admin keys, multisigs, or treasury authority?" },
   { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" },
@@ -248,7 +253,7 @@ const REPAIR_PRIORITY: Record<BasicFactsResearchAudience, readonly BasicFactPred
   ],
   project: [
     "official_identity", "founder", "executive", "product",
-    "official_token", "traction", "audit", "legal_entity",
+    "security_incident", "official_token", "traction", "audit", "legal_entity",
     "network", "launched", "funding", "repository", "governance",
   ],
   investor: [
@@ -263,8 +268,9 @@ const REPAIR_PRIORITY: Record<BasicFactsResearchAudience, readonly BasicFactPred
 function boundedRepairQuestions(
   questions: readonly BasicFactsResearchQuestion[],
 ): BasicFactsResearchQuestion[] {
-  if (questions.length <= MAX_REPAIR_QUESTIONS) return questions.slice();
   const audience = questions[0]?.audience ?? "person";
+  const limit = audience === "project" ? MAX_PROJECT_REPAIR_QUESTIONS : MAX_REPAIR_QUESTIONS;
+  if (questions.length <= limit) return questions.slice();
   const priorities = REPAIR_PRIORITY[audience];
   const rank = new Map(priorities.map((predicate, index) => [predicate, index]));
   return questions
@@ -273,7 +279,7 @@ function boundedRepairQuestions(
       (rank.get(left.question.predicate) ?? Number.MAX_SAFE_INTEGER)
       - (rank.get(right.question.predicate) ?? Number.MAX_SAFE_INTEGER)
       || left.index - right.index)
-    .slice(0, MAX_REPAIR_QUESTIONS)
+    .slice(0, limit)
     .map(({ question }) => question);
 }
 type ClaudeContentBlock = {
@@ -1832,6 +1838,7 @@ const PREDICATE_PATTERNS: Record<BasicFactPredicate, RegExp> = {
   network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on|(?:on|for)\s+(?:the\s+)?(?:ethereum|solana|polygon|arbitrum|optimism|avalanche|base|bnb(?:\s+chain)?|bitcoin|cosmos|sui|aptos|near|tron|ton|polkadot|cardano))\b/i,
   legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
   legal_regulatory_event: /\b(?:lawsuit|litigation|sued|complaint|settlement|settled|judgment|investigation|enforcement|regulator|regulatory|sec|cftc|doj|ftc|charges?|indictment|dismissed|pending|resolved)\b/i,
+  security_incident: /\b(?:hack(?:ed|s)?|exploit(?:ed|s)?|security incident|breach(?:ed)?|drain(?:ed|s)?|stolen|theft|compromis(?:e|ed)|loss(?:es)?|emergency pause|recovery|relaunch)\b/i,
   governance: /\b(?:governance|governed|dao|proposal|vote|voting|council|multisig|multi-sig)\b/i,
   control: /\b(?:controls?|ownership|owner|voting power|board seat|director|admin keys?|multisig|multi-sig|signatory|treasury authority)\b/i,
   conflict_of_interest: /\b(?:conflict of interest|related[- ]party|self[- ]dealing|financial interest|disclosed interest|recusal|recused)\b/i,
@@ -3281,6 +3288,7 @@ const MULTI_VALUE_PREDICATES = new Set<BasicFactPredicate>([
   "current_role", "prior_role", "education", "founder", "executive", "founded",
   "launched", "exit", "track_record", "product", "funding", "investor", "partnership", "governance",
   "public_security", "legal_entity", "legal_regulatory_event", "control", "conflict_of_interest",
+  "security_incident",
   "tokenomics", "vesting", "treasury",
   "audit", "repository", "traction",
   // A protocol deploys to many networks: several individually verified

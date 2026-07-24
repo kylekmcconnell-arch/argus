@@ -1150,6 +1150,9 @@ function assembleDossier(ev, live) {
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,
+    x_account_status: ev.profile.x_account_status,
+    x_account_status_source_url: ev.profile.x_account_status_source_url,
+    x_account_status_captured_at: ev.profile.x_account_status_captured_at,
     followers: ev.profile.followers,
     joined: ev.profile.joined,
     days_since_post: ev.profile.days_since_post,
@@ -3055,6 +3058,9 @@ var SCORING_PROFILE_FIELDS = [
   "profile_collection_state",
   "profile_provider",
   "profile_captured_at",
+  "x_account_status",
+  "x_account_status_source_url",
+  "x_account_status_captured_at",
   "last_post_at",
   "days_since_post"
 ];
@@ -3296,6 +3302,14 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   ].join(" ");
   const earlyStage = PROJECT_EARLY_STAGE.test(productStageText) && !PROJECT_MATURE_STAGE.test(productStageText);
   const catalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog2);
+  const severeUnrecoveredProtocolIncident = catalog.some((artifact) => {
+    if (artifact.operation !== "findings:ProtocolSecurityIncident") return false;
+    const text2 = `${artifact.title} ${artifact.excerpt ?? ""}`;
+    const amount = text2.match(/\$([\d.]+)\s*([BM])\b/i);
+    if (!amount || !/\bdoes not record returned funds\b/i.test(text2)) return false;
+    const amountUsd = Number(amount[1]) * (amount[2].toUpperCase() === "B" ? 1e9 : 1e6);
+    return Number.isFinite(amountUsd) && amountUsd >= 1e7;
+  });
   const limitingByAxis = new Map(projectAxes.map(({ axis }) => [axis, catalog.filter((artifact) => isVerifiedCounterArtifact(artifact, axis)).map((artifact) => artifact.artifactId)]));
   const assessmentArtifactFor = (axis, checkId) => catalog.find((artifact) => artifact.operation === `checkOutcomes:${checkId}` && isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis)) ?? null;
   const bands = {};
@@ -3334,18 +3348,23 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   let p2Tier = repositoryFacts.length || productProof ? "emerging" : "none";
   if (!earlyStage && repositoryFacts.length > 0 && productProof) p2Tier = "solid";
   if (!earlyStage && repositoryFacts.length > 0 && productProof && (auditFacts.length > 0 || productPress.length >= 2)) p2Tier = "exceptional";
+  if (severeUnrecoveredProtocolIncident && (p2Tier === "solid" || p2Tier === "exceptional")) p2Tier = "emerging";
+  if (severeUnrecoveredProtocolIncident && (p2FloorTier === "solid" || p2FloorTier === "exceptional")) p2FloorTier = "emerging";
   setBand("P2_product_substance", p2Tier, [
     ...repositoryFacts.length ? ["verified public repository"] : [],
     ...productProof ? ["source-backed product operation"] : [],
-    ...earlyStage ? ["explicit early-stage product marker"] : []
+    ...earlyStage ? ["explicit early-stage product marker"] : [],
+    ...severeUnrecoveredProtocolIncident ? ["material protocol security incident without a recorded full recovery caps product substance at emerging"] : []
   ], artifactIds(p2Anchors), p2FloorTier);
   const tokenDisclosures = [...tokenDisclosureFacts];
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0].filter(Boolean).length;
   const p3CeilingTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditExceptionalCeiling ? "exceptional" : moderateMarket ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
   const p3FloorTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
   const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 ? assessmentArtifactFor("P3_token_conduct", "project-token-identity") : null;
-  const p3FinalTier = p3Assessment ? "assessed_null" : p3CeilingTier;
-  const p3FinalFloorTier = p3Assessment ? "assessed_null" : p3FloorTier;
+  let p3FinalTier = p3Assessment ? "assessed_null" : p3CeilingTier;
+  let p3FinalFloorTier = p3Assessment ? "assessed_null" : p3FloorTier;
+  if (severeUnrecoveredProtocolIncident && (p3FinalTier === "solid" || p3FinalTier === "exceptional")) p3FinalTier = "emerging";
+  if (severeUnrecoveredProtocolIncident && (p3FinalFloorTier === "solid" || p3FinalFloorTier === "exceptional")) p3FinalFloorTier = "emerging";
   setBand("P3_token_conduct", p3FinalTier, [
     ...verifiedToken ? ["canonical token verified"] : [],
     ...!token && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : [],
@@ -3353,7 +3372,8 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...moderateMarket ? ["measured market activity"] : [],
     ...governanceFacts.length ? ["verified token governance"] : [],
     ...tokenDisclosures.length ? ["verified token economic disclosure"] : [],
-    ...auditFacts.length ? ["verified security review"] : selfAttestedAuditorCount >= 2 ? [`${selfAttestedAuditorCount} reputable auditors attested on the official security page`] : []
+    ...auditFacts.length ? ["verified security review"] : selfAttestedAuditorCount >= 2 ? [`${selfAttestedAuditorCount} reputable auditors attested on the official security page`] : [],
+    ...severeUnrecoveredProtocolIncident ? ["material protocol security incident without a recorded full recovery caps token and control evidence at emerging"] : []
   ], [
     ...artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
     ...p3Assessment ? [p3Assessment.artifactId] : []
@@ -3661,6 +3681,10 @@ var FINDING_AXIS_ELIGIBILITY = {
   // distinct from a promoted-token collapse so the report never implies that
   // market drawdown by itself proves misconduct.
   ProjectTokenDrawdown: ["P5_traction_and_liveness"],
+  // Being exploited is evidence of a security/control failure, not proof that
+  // the project committed fraud. Keep it off reputation and hard-cap axes.
+  ProtocolSecurityIncident: ["P2_product_substance", "P3_token_conduct"],
+  OfficialXAccountSuspended: ["P5_traction_and_liveness", "P6_transparency_integrity"],
   CadenceDecay: ["F4_build_substance", "P5_traction_and_liveness", "ME3_conduct_reputation"],
   TrustGraphConnection: SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
   AdvisoryRug: ["F5_reputation_integrity", "AD2_advised_outcomes", "AD4_advisory_conduct", "AD5_reputation_fud"],
@@ -3801,7 +3825,8 @@ var PROJECT_BASIC_FACT_AXIS_ELIGIBILITY = {
   repository: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
   repositories: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
   traction: ["P5_traction_and_liveness"],
-  legal_regulatory_event: ["P6_transparency_integrity"]
+  legal_regulatory_event: ["P6_transparency_integrity"],
+  security_incident: ["P2_product_substance", "P3_token_conduct"]
 };
 var FOUNDER_BASIC_FACT_AXIS_ELIGIBILITY = {
   official_identity: ["F1_identity_verifiability"],
@@ -4091,6 +4116,7 @@ var verificationFor = (section, record3, sourceArtifactPeers = [], subjectHandle
 var counterEligibleAxesFor = (section, record3, verification, eligibleAxes) => {
   if (verification !== "verified") return [];
   if (section === "findings" && typeof record3.polarity === "number" && record3.polarity < 0) return [...eligibleAxes];
+  if (section === "basicFacts" && recordText(record3, ["predicate"], 80)?.toLowerCase() === "security_incident") return [...eligibleAxes];
   if (section === "sourceArtifacts" && record3.match === "risk_signal") return [...eligibleAxes];
   if (section === "trustGraphScreen" && (record3.severity === "caution" || record3.severity === "avoid")) return [...eligibleAxes];
   return [];
@@ -6338,6 +6364,45 @@ async function twFetch(url, key, tries = 2) {
   }
   return null;
 }
+async function publicXAccountState(handle, fetcher = fetch) {
+  const u = handle.replace(/^@/, "");
+  const statusSourceUrl = `https://x.com/${encodeURIComponent(u)}`;
+  let response;
+  try {
+    response = await fetcher(statusSourceUrl, {
+      headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/3.0; account-state check)" },
+      signal: AbortSignal.timeout(1e4)
+    });
+  } catch {
+    recordCall("x-public", "account-state", 0, `${u} \xB7 transport_error`, "failed");
+    return null;
+  }
+  if (!response.ok) {
+    recordCall("x-public", "account-state", 0, `${u} \xB7 http_${response.status}`, "failed");
+    return null;
+  }
+  let html;
+  try {
+    html = await response.text();
+  } catch {
+    recordCall("x-public", "account-state", 0, `${u} \xB7 unreadable`, "failed");
+    return null;
+  }
+  const suspended = /\bAccount suspended\b/i.test(html) || /unavailable_reason\s*[:=]\s*["']Suspended["']/i.test(html) || /unavailable_reason\\?["']?\s*:\s*\\?["']Suspended\\?["']/i.test(html);
+  const unavailable = suspended || /\bThis account (?:doesn['’]t|does not) exist\b/i.test(html) || /unavailable_reason\s*[:=]\s*["'](?:NotFound|Unavailable|Deactivated)["']/i.test(html);
+  if (!unavailable) {
+    recordCall("x-public", "account-state", 0, `${u} \xB7 no_terminal_state`, "succeeded");
+    return null;
+  }
+  const accountStatus = suspended ? "suspended" : "unavailable";
+  recordCall("x-public", "account-state", 0, `${u} \xB7 ${accountStatus}`, "succeeded");
+  return {
+    handle: `@${u}`,
+    accountStatus,
+    statusSourceUrl,
+    statusCapturedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
 function pickWebsite(p) {
   const cands = [
     p?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url,
@@ -6357,21 +6422,26 @@ async function getProfile2(handle) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await twFetch(url, key);
-      if (!res || !res.ok) return null;
+      if (!res || !res.ok) return await publicXAccountState(`@${u}`);
       const d = await res.json();
       if (d?.status === "error" || d?.data === null) {
         if (attempt === 0) {
           await new Promise((r) => setTimeout(r, 1500));
           continue;
         }
-        return null;
+        return await publicXAccountState(`@${u}`);
       }
       const p = d.data ?? d;
-      if (!p || p.name == null && p.followers == null && p.followers_count == null && p.description == null) return null;
+      if (!p || p.name == null && p.followers == null && p.followers_count == null && p.description == null) {
+        return await publicXAccountState(`@${u}`);
+      }
       const rawImg = p.profilePicture ?? p.profile_image_url_https ?? p.profile_image_url ?? p.profile_image;
       const image = typeof rawImg === "string" ? rawImg.replace(/_normal\.(jpg|jpeg|png|gif|webp)$/i, "_400x400.$1") : void 0;
       return {
         handle: "@" + u,
+        accountStatus: "active",
+        statusSourceUrl: `https://x.com/${encodeURIComponent(u)}`,
+        statusCapturedAt: (/* @__PURE__ */ new Date()).toISOString(),
         name: p.name,
         bio: p.description,
         followers: p.followers ?? p.followers_count,
@@ -6994,11 +7064,15 @@ var xAdapter = {
   async run(ctx) {
     const haveProfile = ctx.evidence.profile.followers && ctx.evidence.profile.followers !== "N/A";
     const haveOfficialAvatar = ctx.evidence.profile.avatar_source_state != null;
-    const prof = haveProfile && haveOfficialAvatar ? null : await getProfile2(ctx.handle);
-    if (prof) {
+    const haveTerminalAccountState = ctx.evidence.profile.x_account_status === "suspended" || ctx.evidence.profile.x_account_status === "unavailable";
+    const prof = haveProfile && haveOfficialAvatar || haveTerminalAccountState ? null : await getProfile2(ctx.handle);
+    if (prof?.accountStatus === "active") {
       ctx.evidence.profile.profile_collection_state = "resolved";
       ctx.evidence.profile.profile_provider = "twitterapi";
       ctx.evidence.profile.profile_captured_at = (/* @__PURE__ */ new Date()).toISOString();
+      ctx.evidence.profile.x_account_status = "active";
+      ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
+      ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
       ctx.evidence.profile.website = canonicalPublicProfileWebsite(prof.website) ?? ctx.evidence.profile.website;
@@ -7016,6 +7090,20 @@ var xAdapter = {
         }
       }
       ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle}, ${fmtFollowers(prof.followers)} followers`, source: "twitterapi.io", tone: "neutral" });
+    } else if (prof) {
+      ctx.evidence.profile.profile_collection_state = "unavailable";
+      ctx.evidence.profile.profile_provider = "twitterapi";
+      ctx.evidence.profile.profile_captured_at = void 0;
+      ctx.evidence.profile.x_account_status = prof.accountStatus;
+      ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
+      ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
+      ctx.emit({
+        phase: "P0 \xB7 Intake",
+        label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
+        detail: prof.accountStatus === "suspended" ? `${prof.handle} currently renders X's terminal Account suspended state. Identity discovery continues through the official site and other public records.` : `${prof.handle} currently has no live public X profile. Identity discovery continues through the official site and other public records.`,
+        source: "x.com",
+        tone: "warn"
+      });
     }
     if (!ctx.evidence.recentActivity.length) {
       const posts = await getRecentPosts(ctx.handle);
@@ -7804,7 +7892,7 @@ function analyzeCadence(posts, now) {
 }
 
 // src/lib/basicFactQuestions.ts
-var EXPLICIT_EMPTY_PREDICATES = /* @__PURE__ */ new Set(["official_token", "public_security"]);
+var EXPLICIT_EMPTY_PREDICATES = /* @__PURE__ */ new Set(["official_token", "public_security", "security_incident"]);
 function basicFactQuestionOutcome(entry) {
   if (!entry) return "unresolved";
   if (entry.status === "answered") return "answered";
@@ -7823,6 +7911,7 @@ var PROJECT_QUESTIONS = [
   ["official_token", "Does it have an official token?"],
   ["network", "Which networks does it run on?"],
   ["legal_entity", "Which legal entity is responsible?"],
+  ["security_incident", "What hacks, exploits, losses, and recovery outcomes are documented?"],
   ["funding", "How much funding has it raised?"],
   ["investor", "Who funded it?"],
   ["partnership", "Which material partners or integrations are verified?"],
@@ -7899,6 +7988,12 @@ var PREDICATE_ALIASES = {
   fundraising: "funding",
   security_audits: "audit",
   audits: "audit",
+  hack: "security_incident",
+  hacks: "security_incident",
+  exploit: "security_incident",
+  exploits: "security_incident",
+  security_event: "security_incident",
+  security_events: "security_incident",
   github: "repository",
   repositories: "repository",
   usage: "traction",
@@ -7913,6 +8008,10 @@ function canonicalBasicFactPredicate(value) {
 var API_BASE = "https://api.llama.fi";
 function defiLlamaSlug(name) {
   return name.trim().toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+function defiLlamaLookupName(name) {
+  const normalized4 = name.trim();
+  return normalized4.replace(/\s+protocol$/i, "").trim() || normalized4;
 }
 async function fetchProtocol(slug, fetcher) {
   const url = `${API_BASE}/protocol/${encodeURIComponent(slug)}`;
@@ -7992,12 +8091,17 @@ async function collectProtocolTvl(projectName2, options = {}) {
       trend.push({ date: latestIso, tvlUsd: Math.round(tvlUsd) });
     }
   }
-  const hacks = (Array.isArray(data.hacks) ? data.hacks : []).filter((entry) => Boolean(entry) && typeof entry === "object").map((entry) => ({
-    date: typeof entry.date === "number" ? new Date(entry.date * 1e3).toISOString().slice(0, 10) : null,
-    amountUsd: typeof entry.amount === "number" && entry.amount > 0 ? Math.round(entry.amount) : null,
-    returnedFunds: entry.returnedFunds === true,
-    classification: typeof entry.classification === "string" ? entry.classification : null
-  }));
+  const hacks = (Array.isArray(data.hacks) ? data.hacks : []).filter((entry) => Boolean(entry) && typeof entry === "object").map((entry) => {
+    const returnedAmountUsd = typeof entry.returnedFunds === "number" && entry.returnedFunds > 0 ? Math.round(entry.returnedFunds) : null;
+    return {
+      date: typeof entry.date === "number" ? new Date(entry.date * 1e3).toISOString().slice(0, 10) : null,
+      amountUsd: typeof entry.amount === "number" && entry.amount > 0 ? Math.round(entry.amount) : null,
+      returnedFunds: entry.returnedFunds === true || returnedAmountUsd !== null,
+      returnedAmountUsd,
+      classification: typeof entry.classification === "string" ? entry.classification : null,
+      technique: typeof entry.technique === "string" ? entry.technique : null
+    };
+  });
   recordCall("defillama", "tvl", 0, `${slug} \xB7 tvl_${Math.round(tvlUsd)}`, "succeeded");
   return {
     available: true,
@@ -9191,9 +9295,10 @@ var DISCOVERY_RETRY_DELAY_MS = 350;
 var MAX_LEADS = 28;
 var MAX_SOURCES = 32;
 var MAX_REPAIR_QUESTIONS = 8;
+var MAX_PROJECT_REPAIR_QUESTIONS = 9;
 var MAX_REPAIR_PROVIDER_CALLS = 8;
 var DISCOVERY_TIMEOUT_MS = 9e4;
-var RESEARCH_CACHE_VERSION = "v7";
+var RESEARCH_CACHE_VERSION = "v8";
 var SENSITIVE_URL_PARAM3 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 var PREDICATES = /* @__PURE__ */ new Set([
   "official_identity",
@@ -9215,6 +9320,7 @@ var PREDICATES = /* @__PURE__ */ new Set([
   "network",
   "legal_entity",
   "legal_regulatory_event",
+  "security_incident",
   "governance",
   "control",
   "conflict_of_interest",
@@ -9236,7 +9342,8 @@ var CRITICAL_PREDICATES = /* @__PURE__ */ new Set([
   "public_security",
   "funding",
   "investor",
-  "partnership"
+  "partnership",
+  "security_incident"
 ]);
 var LEAD_COVERAGE_CATEGORIES = [
   ["official_identity"],
@@ -9257,6 +9364,7 @@ var LEAD_COVERAGE_CATEGORIES = [
   ["governance"],
   ["control", "conflict_of_interest"],
   ["legal_regulatory_event"],
+  ["security_incident"],
   ["repository"],
   ["funding", "investor", "partnership"],
   ["network"],
@@ -9291,6 +9399,7 @@ var PROJECT_QUESTIONS2 = [
   { batch: "track_record", predicate: "traction", question: "What concrete, dated usage, revenue, volume, users, fees, TVL, or adoption metrics are public?", critical: true },
   { batch: "structure_risk", predicate: "legal_entity", question: "Which legal entity is responsible for the project?", critical: true },
   { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events are publicly documented, who are they attributed to, and what is each event's current stated status?" },
+  { batch: "structure_risk", predicate: "security_incident", question: "What material hacks, exploits, breaches, thefts, user losses, emergency pauses, or recovery outcomes are publicly documented? Return each event with an exact date, amount, attribution, current status, and direct source.", critical: true },
   { batch: "structure_risk", predicate: "governance", question: "What formal governance process is documented?", critical: true },
   { batch: "structure_risk", predicate: "control", question: "Who has practical control through ownership, boards, voting power, admin keys, multisigs, or treasury authority?" },
   { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" },
@@ -9365,6 +9474,7 @@ var REPAIR_PRIORITY = {
     "founder",
     "executive",
     "product",
+    "security_incident",
     "official_token",
     "traction",
     "audit",
@@ -9391,11 +9501,12 @@ var REPAIR_PRIORITY = {
   ]
 };
 function boundedRepairQuestions(questions) {
-  if (questions.length <= MAX_REPAIR_QUESTIONS) return questions.slice();
   const audience = questions[0]?.audience ?? "person";
+  const limit = audience === "project" ? MAX_PROJECT_REPAIR_QUESTIONS : MAX_REPAIR_QUESTIONS;
+  if (questions.length <= limit) return questions.slice();
   const priorities = REPAIR_PRIORITY[audience];
   const rank = new Map(priorities.map((predicate, index) => [predicate, index]));
-  return questions.map((question, index) => ({ question, index })).sort((left, right) => (rank.get(left.question.predicate) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.question.predicate) ?? Number.MAX_SAFE_INTEGER) || left.index - right.index).slice(0, MAX_REPAIR_QUESTIONS).map(({ question }) => question);
+  return questions.map((question, index) => ({ question, index })).sort((left, right) => (rank.get(left.question.predicate) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.question.predicate) ?? Number.MAX_SAFE_INTEGER) || left.index - right.index).slice(0, limit).map(({ question }) => question);
 }
 function researchAudience(ctx) {
   if (ctx.evidence.roles.some((role) => String(role) === "PROJECT")) return "project";
@@ -10550,6 +10661,7 @@ var PREDICATE_PATTERNS = {
   network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on|(?:on|for)\s+(?:the\s+)?(?:ethereum|solana|polygon|arbitrum|optimism|avalanche|base|bnb(?:\s+chain)?|bitcoin|cosmos|sui|aptos|near|tron|ton|polkadot|cardano))\b/i,
   legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
   legal_regulatory_event: /\b(?:lawsuit|litigation|sued|complaint|settlement|settled|judgment|investigation|enforcement|regulator|regulatory|sec|cftc|doj|ftc|charges?|indictment|dismissed|pending|resolved)\b/i,
+  security_incident: /\b(?:hack(?:ed|s)?|exploit(?:ed|s)?|security incident|breach(?:ed)?|drain(?:ed|s)?|stolen|theft|compromis(?:e|ed)|loss(?:es)?|emergency pause|recovery|relaunch)\b/i,
   governance: /\b(?:governance|governed|dao|proposal|vote|voting|council|multisig|multi-sig)\b/i,
   control: /\b(?:controls?|ownership|owner|voting power|board seat|director|admin keys?|multisig|multi-sig|signatory|treasury authority)\b/i,
   conflict_of_interest: /\b(?:conflict of interest|related[- ]party|self[- ]dealing|financial interest|disclosed interest|recusal|recused)\b/i,
@@ -11689,6 +11801,7 @@ var MULTI_VALUE_PREDICATES = /* @__PURE__ */ new Set([
   "legal_regulatory_event",
   "control",
   "conflict_of_interest",
+  "security_incident",
   "tokenomics",
   "vesting",
   "treasury",
@@ -17240,7 +17353,8 @@ var CRITICAL = /* @__PURE__ */ new Set([
   "product",
   "founder",
   "executive",
-  "official_token"
+  "official_token",
+  "security_incident"
 ]);
 var FOUNDER_ROLE = /\b(?:co[- ]?)?founder\b|\bcreator\b/i;
 var CURRENT_AUTHORITY_ROLE = /\b(?:co[- ]?)?founder\b|\b(?:chief\s+executive\s+officer|ceo|chair(?:man|woman)?|president|owner|managing\s+partner|general\s+partner|director|head|lead)\b/i;
@@ -17755,7 +17869,6 @@ function projectProviderBackedBasicFacts(evidence) {
     const tvlTrendPct = typeof tvlSnapshot.change30dPct === "number" ? tvlSnapshot.change30dPct : null;
     const tvlTrendPhrase = tvlTrendPct === null ? null : Math.abs(tvlTrendPct) < 1 ? "steady vs 30 days ago" : `${tvlTrendPct > 0 ? "up" : "down"} ${Math.abs(tvlTrendPct)}% vs 30 days ago`;
     const historySince = tvlSnapshot.firstRecordedAt ? ` TVL history since ${tvlSnapshot.firstRecordedAt.slice(0, 4)}.` : "";
-    const hackNote = tvlSnapshot.hacks?.length ? ` DeFiLlama also records ${tvlSnapshot.hacks.length} security incident${tvlSnapshot.hacks.length === 1 ? "" : "s"}${tvlSnapshot.hacks[0].amountUsd ? `, including ${formatUsd2(tvlSnapshot.hacks[0].amountUsd)}${tvlSnapshot.hacks[0].date ? ` in ${tvlSnapshot.hacks[0].date.slice(0, 4)}` : ""}${tvlSnapshot.hacks[0].returnedFunds ? " (funds returned)" : ""}` : ""}.` : "";
     projected.push(makeFact(
       evidence,
       "traction",
@@ -17763,13 +17876,36 @@ function projectProviderBackedBasicFacts(evidence) {
       [source({
         url: tvlSnapshot.sourceUrl,
         title: "DeFiLlama TVL record",
-        excerpt: `${tvlSnapshot.name} holds ${formatUsd2(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""}${tvlTrendPhrase ? `, ${tvlTrendPhrase}` : ""} (DeFiLlama on-chain snapshot).${historySince}${hackNote}`,
+        excerpt: `${tvlSnapshot.name} holds ${formatUsd2(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""}${tvlTrendPhrase ? `, ${tvlTrendPhrase}` : ""} (DeFiLlama on-chain snapshot).${historySince}`,
         capturedAt: tvlSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain"
       })],
       `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`
     ));
+    for (const incident of [...tvlSnapshot.hacks ?? []].sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? ""))).slice(0, 5)) {
+      const incidentDate = incident.date ?? "date not recorded";
+      const amount = incident.amountUsd ? formatUsd2(incident.amountUsd) : "amount not recorded";
+      const classification = incident.classification ? ` \xB7 ${incident.classification}` : "";
+      const technique = incident.technique ? ` \xB7 ${incident.technique}` : "";
+      const recovery = incident.returnedFunds ? incident.returnedAmountUsd ? `${formatUsd2(incident.returnedAmountUsd)} recorded returned` : "funds recorded returned" : "return status not recorded";
+      const incidentFact = makeFact(
+        evidence,
+        "security_incident",
+        `${incidentDate} \xB7 ${amount} security incident${classification}${technique} \xB7 ${recovery}`,
+        [source({
+          url: tvlSnapshot.sourceUrl,
+          title: "DeFiLlama protocol incident record",
+          excerpt: `DeFiLlama records a ${amount} ${incident.classification?.toLowerCase() ?? "protocol"} security incident affecting ${tvlSnapshot.name} on ${incidentDate}${incident.technique ? ` using ${incident.technique}` : ""}; ${recovery}.`,
+          capturedAt: tvlSnapshot.capturedAt,
+          provider: "defillama",
+          sourceClass: "other_public"
+        })],
+        `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`
+      );
+      incidentFact.floorEligible = false;
+      projected.push(incidentFact);
+    }
     if (tvlSnapshot.governanceIds?.length) {
       const snapshotSpace = tvlSnapshot.governanceIds.find((id) => id.startsWith("snapshot:"))?.slice("snapshot:".length);
       const onchainGovernor = tvlSnapshot.governanceIds.find((id) => id.startsWith("eip155:"));
@@ -18728,12 +18864,44 @@ function asRoles(roles) {
   }
   return out;
 }
+function recordOfficialXAccountStatusFinding(evidence) {
+  if (evidence.profile.x_account_status !== "suspended") return false;
+  const sourceUrl = evidence.profile.x_account_status_source_url;
+  const capturedAt = evidence.profile.x_account_status_captured_at;
+  if (!sourceUrl || !capturedAt) return false;
+  if (evidence.findings.some(
+    (finding) => finding.finding_type === "OfficialXAccountSuspended" && finding.source_url === sourceUrl
+  )) return false;
+  evidence.findings.push({
+    finding_type: "OfficialXAccountSuspended",
+    claim: `${evidence.profile.handle} rendered X's terminal Account suspended state when checked on ${capturedAt.slice(0, 10)}. The official-site identity binding can remain valid, but the project's primary social channel is unavailable. X does not publicly state the underlying reason on this page, so suspension alone is not evidence of fraud.`,
+    source_url: sourceUrl,
+    source_date: capturedAt,
+    source_author: "x.com",
+    verification_status: "Verified",
+    independent_source_count: 1,
+    polarity: -1,
+    evidence_origin: "deterministic",
+    artifact_verified: true,
+    provider: "x-public",
+    finding_scope: {
+      scope: "direct_subject",
+      target_entity_key: evidence.profile.handle,
+      target_entity_type: evidence.roles.includes("PROJECT" /* PROJECT */) ? "project" : "person",
+      relationship_to_subject: "self"
+    }
+  });
+  return true;
+}
 async function resolveProfile(ctx) {
   const prof = await getProfile2(ctx.handle);
-  if (prof) {
+  if (prof?.accountStatus === "active") {
     ctx.evidence.profile.profile_collection_state = "resolved";
     ctx.evidence.profile.profile_provider = "twitterapi";
     ctx.evidence.profile.profile_captured_at = (/* @__PURE__ */ new Date()).toISOString();
+    ctx.evidence.profile.x_account_status = "active";
+    ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
+    ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
     if (prof.image) {
       ctx.evidence.profile.avatar_url = prof.image;
@@ -18750,6 +18918,20 @@ async function resolveProfile(ctx) {
       if (!isNaN(d.getTime())) ctx.evidence.profile.joined = d.toLocaleString("en-US", { month: "short", year: "numeric" });
     }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} \xB7 ${ctx.evidence.profile.followers} followers \xB7 joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
+  } else if (prof) {
+    ctx.evidence.profile.profile_collection_state = "unavailable";
+    ctx.evidence.profile.profile_provider = "twitterapi";
+    ctx.evidence.profile.profile_captured_at = void 0;
+    ctx.evidence.profile.x_account_status = prof.accountStatus;
+    ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
+    ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
+    ctx.emit({
+      phase: "P0 \xB7 Intake",
+      label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
+      detail: prof.accountStatus === "suspended" ? `${prof.handle} currently renders X's terminal Account suspended state. Continuing through the verified official site and public records.` : `${prof.handle} currently has no live public X profile. Continuing through the verified official site and public records.`,
+      source: "x.com",
+      tone: "warn"
+    });
   } else {
     ctx.evidence.profile.profile_collection_state = "unavailable";
     ctx.evidence.profile.profile_provider = "twitterapi";
@@ -19725,6 +19907,41 @@ function recordProjectTokenDrawdownFinding(evidence) {
   });
   return true;
 }
+function recordProtocolSecurityIncidentFindings(evidence) {
+  const protocol = evidence.protocolTvl;
+  if (!protocol?.hacks?.length) return 0;
+  let recorded = 0;
+  for (const incident of [...protocol.hacks].sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? ""))).slice(0, 5)) {
+    const sourceDate = incident.date ?? protocol.capturedAt;
+    const duplicate = evidence.findings.some((finding) => finding.finding_type === "ProtocolSecurityIncident" && finding.source_url === protocol.sourceUrl && finding.source_date === sourceDate);
+    if (duplicate) continue;
+    const amount = incident.amountUsd ? `$${(incident.amountUsd / 1e6).toFixed(incident.amountUsd % 1e6 === 0 ? 0 : 1)}M` : "an unquantified";
+    const classification = incident.classification ? `${incident.classification.toLowerCase()} ` : "";
+    const technique = incident.technique ? ` Technique recorded: ${incident.technique}.` : "";
+    const recovery = incident.returnedFunds ? incident.returnedAmountUsd ? ` DeFiLlama records $${(incident.returnedAmountUsd / 1e6).toFixed(incident.returnedAmountUsd % 1e6 === 0 ? 0 : 1)}M returned.` : " DeFiLlama records the funds as returned." : " DeFiLlama does not record returned funds for this incident.";
+    evidence.findings.push({
+      finding_type: "ProtocolSecurityIncident",
+      claim: `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`,
+      source_url: protocol.sourceUrl,
+      source_date: sourceDate,
+      source_author: "defillama",
+      verification_status: "Verified",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "defillama",
+      finding_scope: {
+        scope: "direct_subject",
+        target_entity_key: evidence.profile.handle,
+        target_entity_type: "project",
+        relationship_to_subject: "self"
+      }
+    });
+    recorded += 1;
+  }
+  return recorded;
+}
 var handleFrom = (s) => s?.match(/@([A-Za-z0-9_]{2,30})/)?.[1];
 function adverseSignalToFinding(sig) {
   const hasCandidateArtifact = !!sig.source_url;
@@ -20263,12 +20480,13 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     await projectTokenPass();
     if (evidence.projectToken?.verified) {
       const projectName2 = evidence.projectToken.name;
+      const protocolLookupName = defiLlamaLookupName(projectName2);
       const capturedAt = evidence.projectToken.capturedAt;
       try {
         const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome, unlocksOutcome] = await Promise.all([
-          collectProtocolTvl(projectName2),
-          collectProtocolFunding(projectName2),
-          collectProtocolFees(projectName2),
+          collectProtocolTvl(protocolLookupName),
+          collectProtocolFunding(protocolLookupName),
+          collectProtocolFees(protocolLookupName),
           // Float control (free, keyless): who holds the supply, is the LP
           // locked. Answers the reader's dump/rug question for project tokens.
           evidence.projectToken.address ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address) : Promise.resolve({ available: false, note: "no canonical token address" }),
@@ -20286,6 +20504,17 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         }
         if (tvlIdentityMatched) {
           evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
+          const incidentCount = recordProtocolSecurityIncidentFindings(evidence);
+          if (incidentCount > 0) {
+            const newest = evidence.protocolTvl.hacks?.[0];
+            emit({
+              phase: "Token",
+              label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recorded`,
+              detail: `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` \xB7 $${(newest.amountUsd / 1e6).toFixed(0)}M` : ""} \xB7 frozen as verified counter-evidence, separate from misconduct.`,
+              source: "defillama",
+              tone: "warn"
+            });
+          }
           if (tvlOutcome.value.chains.length) {
             evidence.projectToken = { ...evidence.projectToken, deployedChains: tvlOutcome.value.chains };
           }
@@ -20308,7 +20537,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           });
         }
         {
-          const auditLinks = await collectProtocolAuditLinks(projectName2);
+          const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
           const auditsResult = await withWallClockBox(
             collectSecurityAudits(
               projectName2,
@@ -20351,6 +20580,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       }
     }
     evidence.roles = providerBackedRoles(evidence);
+    recordOfficialXAccountStatusFinding(evidence);
     await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);
   }

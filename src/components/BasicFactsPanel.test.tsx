@@ -71,9 +71,9 @@ describe("BasicFactsPanel", () => {
 
     expect(container.querySelector("#basic-facts")).not.toBeNull();
     expect(container.querySelectorAll('ul[aria-label="Key verified answers"] > li, ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(2);
-    expect(container.querySelectorAll('ul[aria-label="Unresolved basic facts"] > li')).toHaveLength(13);
+    expect(container.querySelectorAll('ul[aria-label="Unresolved basic facts"] > li')).toHaveLength(14);
     expect(container.textContent).toContain("2 verified");
-    expect(container.textContent).toContain("13 questions");
+    expect(container.textContent).toContain("14 questions");
     expect(container.textContent).toContain("What does the project actually do?");
     expect(container.textContent).toContain("Still to confirm");
     expect(container.textContent).toContain("Corroborated");
