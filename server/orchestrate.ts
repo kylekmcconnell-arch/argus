@@ -973,7 +973,23 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     webTeam.splice(0, webTeam.length, ...coalescedTeam);
   }
   if (webTeam.length) {
-    ctx.emit({ phase: "P1 · Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
+    const groundedTeam = webTeam.filter((member) =>
+      member.artifact_verified === true && member.evidence_origin !== "model_lead");
+    ctx.emit(groundedTeam.length
+      ? {
+          phase: "P1 · Team",
+          label: "Team evidence verified",
+          detail: `${groundedTeam.length} project team identit${groundedTeam.length === 1 ? "y" : "ies"} passed first-party or deterministic verification: ${groundedTeam.slice(0, 6).map((member) => member.name + (member.handle ? ` ${member.handle}` : "")).join(", ")}.`,
+          source: "team-search",
+          tone: "good",
+        }
+      : {
+          phase: "P1 · Team",
+          label: "Team candidates withheld",
+          detail: `${webTeam.length} search candidate${webTeam.length === 1 ? "" : "s"} did not pass source verification and will not be presented as people behind the project.`,
+          source: "team-search",
+          tone: "warn",
+        });
     // A named team resolves the PROJECT's real-world identity even when the X
     // handle itself is a corporate/brand account (e.g. @VulcanForged). Without
     // this, a brand handle stays "Unverified" and the founder verdict gets

@@ -1082,6 +1082,32 @@ describe("analyst verdict integrity", () => {
     }, projectAxes, frozen)).not.toBeNull();
   });
 
+  it("accepts an unresolved operator narrative when a completed project team search found no verified person", () => {
+    const projectAxes: AnalystAxis[] = [
+      { axis: "P1_team_and_identity", weight: 16, role: "PROJECT" },
+    ];
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      checkOutcomes: [{
+        checkId: "project-team-identity",
+        status: "finding",
+        provider: "basic-facts-web",
+        note: "Bounded founder and executive searches completed, but no named operator passed source verification; the project brand is verified separately.",
+      }],
+    }, projectAxes));
+    const assessedNull = frozen.find((artifact) =>
+      artifact.operation === "checkOutcomes:project-team-identity")!;
+
+    expect(validateAnalystVerdict({
+      axes: [{
+        ...validAxis("P1_team_and_identity", 7, assessedNull.artifactId),
+        rationale: "The official project brand is verified, but the people operating it remain unresolved.",
+        gaps: ["Who are the named founders or executives operating the project?"],
+      }],
+      headline: "The project is active, but its operators remain publicly unresolved.",
+      identity_note: "The official project account is verified separately from the unresolved operator identity.",
+    }, projectAxes, frozen)).not.toBeNull();
+  });
+
   it("accepts exonerating and cross-axis team phrasing when the named team is grounded", () => {
     const projectAxes: AnalystAxis[] = [
       { axis: "P1_team_and_identity", weight: 16, role: "PROJECT" },

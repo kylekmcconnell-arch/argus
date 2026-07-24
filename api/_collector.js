@@ -2811,7 +2811,7 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onRej
     if (!ARTIFACT_ID.test(artifact.artifactId) || artifacts.has(artifact.artifactId) || artifact.contentHash !== artifact.artifactId.slice("art_v1_".length) || !Array.isArray(artifact.eligibleAxes)) return reject("invalid-evidence-catalog");
     artifacts.set(artifact.artifactId, artifact);
   }
-  const hasGroundedProjectTeam = expected.has("P1_team_and_identity") && evidenceCatalog.some((artifact) => artifact.eligibleAxes.includes("P1_team_and_identity") && isSubstantiveArtifact(artifact) && (artifact.section === "team" || artifact.section === "checkOutcomes" && artifact.operation === "checkOutcomes:project-team-identity"));
+  const hasGroundedProjectTeam = expected.has("P1_team_and_identity") && evidenceCatalog.some((artifact) => artifact.eligibleAxes.includes("P1_team_and_identity") && isSubstantiveArtifact(artifact) && artifact.section === "team");
   const rawAxisRow = (axis) => {
     if (Array.isArray(raw.axes)) {
       return raw.axes.find((candidate) => candidate && typeof candidate === "object" && !Array.isArray(candidate) && candidate.axis === axis);
@@ -18947,7 +18947,20 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     webTeam.splice(0, webTeam.length, ...coalescedTeam);
   }
   if (webTeam.length) {
-    ctx.emit({ phase: "P1 \xB7 Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
+    const groundedTeam = webTeam.filter((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
+    ctx.emit(groundedTeam.length ? {
+      phase: "P1 \xB7 Team",
+      label: "Team evidence verified",
+      detail: `${groundedTeam.length} project team identit${groundedTeam.length === 1 ? "y" : "ies"} passed first-party or deterministic verification: ${groundedTeam.slice(0, 6).map((member) => member.name + (member.handle ? ` ${member.handle}` : "")).join(", ")}.`,
+      source: "team-search",
+      tone: "good"
+    } : {
+      phase: "P1 \xB7 Team",
+      label: "Team candidates withheld",
+      detail: `${webTeam.length} search candidate${webTeam.length === 1 ? "" : "s"} did not pass source verification and will not be presented as people behind the project.`,
+      source: "team-search",
+      tone: "warn"
+    });
     const isLeader = (r) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
     const backedTeam = [...domain ? pageTeam : [], ...postRoleTeam].filter(
       (candidate) => webTeam.some(

@@ -1019,9 +1019,7 @@ export function validateAnalystVerdict(
     && evidenceCatalog.some((artifact) =>
       artifact.eligibleAxes.includes("P1_team_and_identity")
       && isSubstantiveArtifact(artifact)
-      && (artifact.section === "team"
-        || (artifact.section === "checkOutcomes"
-          && artifact.operation === "checkOutcomes:project-team-identity")));
+      && artifact.section === "team");
   const rawAxisRow = (axis: string): unknown => {
     if (Array.isArray(raw.axes)) {
       return raw.axes.find((candidate) =>
