@@ -49,8 +49,13 @@ result to DexScreener, requires both the exact provider-frozen X account and
 official domain, and freezes the contract, market, liquidity, volume, pool, and
 GeckoTerminal price history when that dual binding succeeds. A completed
 CoinGecko miss alone can no longer record a substantive "no token" outcome.
-The immutable v8 report remains a historical artifact; a fresh production scan
-is required to publish the corrected evidence.
+The immutable v8 report remains a historical artifact. Fresh production scan
+`PA-E1A58BD76AB945678401` published
+[Pons v9](https://argus-one-flax.vercel.app/?version=344b2202-5084-4f8d-abed-15bbc27576f2)
+as decision-ready `CAUTION 55`, with 7 of 7 applicable checks terminal and
+canonical `$PONS` usage verified. The saved report freezes the Robinhood
+contract plus approximately $32.0M market cap, $1.54M DEX liquidity, $5.76M
+24-hour volume, and a 12-day GeckoTerminal price series.
 
 ## Strengths retained
 

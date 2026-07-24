@@ -146,6 +146,7 @@ describe("MarketPerformancePanel", () => {
     expect(container.textContent).toContain("CANONICAL TOKEN");
     expect(container.textContent).toContain("Captured market scale");
     expect(container.textContent).toContain("These bars compare captured values");
+    expect(container.textContent).toContain("CoinGecko global rank");
     expect(harness.sparkline).toHaveBeenCalledWith(expect.objectContaining({
       address,
       pairAddress: "project-pool",
@@ -154,6 +155,26 @@ describe("MarketPerformancePanel", () => {
         capturedAt: project.capturedAt,
       }),
     }));
+  });
+
+  it("does not imply a CoinGecko rank source for a DEX-native token", () => {
+    act(() => root.render(
+      <MarketPerformancePanel
+        projectToken={projectToken({
+          coingeckoId: undefined,
+          rank: null,
+          chain: "robinhood",
+          sourceUrl: "https://dexscreener.com/robinhood/pons-pool",
+          providers: ["dexscreener", "geckoterminal"],
+        })}
+        showCurrentIntelligence={false}
+      />,
+    ));
+
+    expect(container.textContent).toContain("Market rank");
+    expect(container.textContent).toContain("Not captured");
+    expect(container.textContent).toContain("No global registry rank captured");
+    expect(container.textContent).not.toContain("CoinGecko global rank");
   });
 
   it("rejects a mismatched project token instead of lending its market record to the subject", () => {

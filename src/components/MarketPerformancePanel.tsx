@@ -102,6 +102,7 @@ export function MarketPerformancePanel({
   const address = projectToken?.address ?? token?.address ?? "";
   const chain = projectToken?.chain ?? token?.chain ?? "";
   const symbol = projectToken?.symbol ?? token?.symbol ?? "TOKEN";
+  const hasCoinGeckoRankContext = Boolean(projectToken?.coingeckoId || token?.cg);
   const headingId = `market-performance-${address.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16) || "token"}`;
   const pairAddress = projectToken?.pairAddress ?? projectToken?.history?.poolAddress ?? token?.pairAddress;
   const history = projectHistory(projectToken) ?? token?.priceHistory;
@@ -286,9 +287,15 @@ export function MarketPerformancePanel({
         <div className="bg-panel px-4 py-3.5">
           <dt className="stat-label">Market rank</dt>
           <dd className="mono mt-1 text-[22px] font-semibold leading-none text-ink tabular-nums">
-            {finite(rank) ? `#${rank.toLocaleString()}` : token?.cg?.listed === false ? "Not listed" : "Not captured"}
+            {finite(rank)
+              ? `#${rank.toLocaleString()}`
+              : hasCoinGeckoRankContext && token?.cg?.listed === false
+                ? "Not listed"
+                : "Not captured"}
           </dd>
-          <dd className="mt-1 text-[10.5px] text-ink-faint">CoinGecko global rank</dd>
+          <dd className="mt-1 text-[10.5px] text-ink-faint">
+            {hasCoinGeckoRankContext ? "CoinGecko global rank" : "No global registry rank captured"}
+          </dd>
         </div>
       </dl>
 
