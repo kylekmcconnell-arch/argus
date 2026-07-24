@@ -156,4 +156,31 @@ describe("Recent report controls", () => {
     expect(scroller?.contains(account ?? null)).toBe(true);
     expect(account?.className.split(/\s+/)).toContain("mt-4");
   });
+
+  it("keeps report navigation labeled while giving laptop reports a modestly narrower rail", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <Sidebar
+          onNav={() => undefined}
+          onAudit={() => undefined}
+          view="audit"
+        />,
+      );
+    });
+
+    const sidebar = container.querySelector<HTMLElement>('aside[data-sidebar-mode="report"]');
+    expect(sidebar).not.toBeNull();
+    expect(sidebar?.className.split(/\s+/)).toEqual(expect.arrayContaining(["lg:w-[196px]", "xl:w-[248px]"]));
+    expect(sidebar?.className.split(/\s+/)).not.toContain("lg:w-[72px]");
+
+    const investigationCanvas = [...(sidebar?.querySelectorAll<HTMLButtonElement>("nav button") ?? [])]
+      .find((button) => button.textContent?.includes("Investigation canvas"));
+    expect(investigationCanvas).toBeDefined();
+    expect(investigationCanvas?.querySelector("span.sr-only")).toBeNull();
+    expect(sidebar?.textContent).toContain("Recent cases");
+    expect(sidebar?.textContent).toContain("Kyle McConnell");
+  });
 });

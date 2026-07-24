@@ -177,3 +177,41 @@ final result: passed
 - Open design findings: none at P0, P1, or P2 in the reviewed flow.
 
 final result: passed
+
+## Report sidebar QA
+
+- Source visual truth: `docs/design-qa/report-sidebar/full-sidebar-target.jpg`
+- Original report defect: `docs/design-qa/report-sidebar/report-before.jpg`
+- Rendered implementation: `docs/design-qa/report-sidebar/report-after.jpg`
+- Full-view comparison: `docs/design-qa/report-sidebar/target-after-comparison.jpg`
+- Focused sidebar comparison: `docs/design-qa/report-sidebar/sidebar-focus-comparison.jpg`
+- Viewport: 1280 × 720 CSS pixels
+- Source and implementation pixels: 1280 × 720
+- Device pixel ratio: 1, with no density normalization required
+- State: authenticated owner, dark theme, report navigation, $VVV snapshot context
+
+### Fidelity review
+
+- Full-view: passed. The report regains the same labeled sidebar proportion as the established ARGUS shell, with no horizontal page overflow.
+- Typography: passed. Existing display, interface, and mono treatments are unchanged.
+- Spacing and layout: passed. Desktop is 248px at 1280px and above, report mode is 196px from 1024px through 1279px, and mobile remains a 248px drawer.
+- Colors and tokens: passed. Existing sidebar, ink, line, signal, and panel tokens are unchanged.
+- Assets and icons: passed. The ARGUS mark, Phosphor icons, and captured subject avatars remain unchanged.
+- Copy and content: passed. Navigation labels, Recent cases, utility labels, and verified account identity remain visible.
+
+### Interaction verification
+
+- Entity library opened and closed successfully.
+- Primary navigation controls remained semantic buttons and recent cases remained semantic links.
+- The browser recorded no console errors or warnings.
+- No horizontal overflow was present at the comparison viewport.
+- Mobile drawer behavior remains covered by the existing AppShell tests.
+
+### Iteration resolved
+
+- P1: the report forced a 72px icon-only rail at 1280px, removing navigation labels, group headings, recent-case context, and account identity.
+- Fix: report pages retain labeled navigation, use a modest 196px rail only on narrower desktop widths, and restore the standard 248px rail at 1280px and above.
+- Post-fix evidence: `docs/design-qa/report-sidebar/report-after.jpg` and `docs/design-qa/report-sidebar/sidebar-focus-comparison.jpg`.
+- P3: at 720px height, Recent cases remains reachable by scrolling, matching the established full-sidebar behavior.
+
+final result: passed

@@ -182,6 +182,7 @@ export function Sidebar({
   view,
   open,
   mobile = false,
+  compact: requestedCompact = false,
   onClose,
 }: {
   onNav: (t: NavTarget) => void;
@@ -191,12 +192,17 @@ export function Sidebar({
   view: NavTarget | "audit";
   open?: boolean;
   mobile?: boolean;
+  compact?: boolean;
   onClose?: () => void;
 }) {
   const auth = useArgusAuth();
   const drawerRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const compact = view === "audit" && !mobile;
+  // Reports need more canvas, but collapsing the rail to icons removes too much
+  // navigation context. Keep labels at every desktop width, use a modest laptop
+  // width for audit surfaces, and restore the full rail at xl.
+  const reportLayout = view === "audit" && !mobile;
+  const compact = requestedCompact && !mobile;
   const directoryActive = view === "founders" || view === "projects" || view === "kols" || view === "vcs";
   const [directoriesOpen, setDirectoriesOpen] = useState(false);
   const nav = (t: NavTarget) => { onNav(t); onClose?.(); };
@@ -294,8 +300,9 @@ export function Sidebar({
       aria-label={open && mobile ? "ARGUS navigation" : undefined}
       aria-hidden={mobile && !open ? true : undefined}
       inert={mobile && !open ? true : undefined}
+      data-sidebar-mode={reportLayout ? "report" : "standard"}
       className={`fixed inset-y-0 left-0 z-40 flex h-full w-[248px] shrink-0 flex-col border-r border-line-2 bg-sidebar transition-[transform,width] duration-200 lg:static lg:translate-x-0 ${
-        compact ? "lg:w-[72px]" : "lg:w-[248px]"
+        reportLayout ? "lg:w-[196px] xl:w-[248px]" : "lg:w-[248px]"
       } ${
         open ? "translate-x-0" : "-translate-x-full"
       }`}
