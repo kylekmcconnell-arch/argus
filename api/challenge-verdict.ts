@@ -26,6 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const verdict = s(body.verdict).slice(0, 20);
   const score = body.score == null ? "n/a" : String(body.score);
   const evidence = s(body.evidence).slice(0, 6000);
+  const question = s(body.question).trim().slice(0, 600);
   const panelToken = req.headers["x-argus-panel-token"];
   const panelTokenValue = Array.isArray(panelToken) ? panelToken[0] : panelToken;
   const panelCostVersionId = resolvePanelCostVersion(
@@ -65,10 +66,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         max_tokens: 900,
         system:
           "You are an ADVERSARIAL reviewer of a crypto due-diligence verdict. Your job is to try to BREAK the verdict, in BOTH directions, using ONLY the evidence provided. Never invent facts or assume anything not stated. " +
+          "Start with the user's specific concern. Say plainly whether the supplied evidence supports it, contradicts it, or cannot resolve it. Then judge whether that concern should change the verdict. " +
           "Argue (a) why the verdict may be TOO HARSH (a false positive: a name/ticker collision with a bad token, a renounced contract penalized for a capability it can't use, a legit project flagged by weak signals), and (b) why it may be TOO LENIENT (a false negative: a clean contract whose deployer/funding/holders/missing-docs undercut it, a signal the score didn't weigh). " +
           "If a direction has no real basis in the evidence, return no challenges for it. Do not manufacture doubt. Then recommend: uphold (verdict is well-supported), soften (too harsh), or harden (too lenient). Rate how confident the ORIGINAL verdict is after your scrutiny: low/medium/high. " +
           "Reply with ONLY compact JSON: {\"recommendation\":\"uphold|soften|harden\",\"confidence\":\"low|medium|high\",\"summary\":\"one sentence\",\"challenges\":[{\"direction\":\"too_harsh|too_lenient\",\"point\":\"specific, grounded in the evidence\"}]}",
-        messages: [{ role: "user", content: `Subject: ${subject || "(token)"}\nVerdict: ${verdict} (score ${score}/100)\n\nEvidence the verdict was based on:\n${evidence}\n\nTry to break this verdict in both directions, grounded only in the above.` }],
+        messages: [{
+          role: "user",
+          content: `Subject: ${subject || "(token)"}\nVerdict: ${verdict} (score ${score}/100)\n\nWhat the user wants to challenge:\n${question || "Whether the overall verdict is well supported."}\n\nEvidence the verdict was based on:\n${evidence}\n\nAddress the user's concern first, then test the verdict in both directions using only the evidence above.`,
+        }],
       }),
       signal: AbortSignal.timeout(26000),
     });

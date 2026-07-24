@@ -626,7 +626,7 @@ export function InvestigationReport({
                 <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
               </button>
             )}
-            <a href="#investigation-challenge" title="Ask a second model to look for reasons the score may be too high or too low" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
+            <a href="#investigation-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
               <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
             </a>
             <div className="hidden items-center gap-2 sm:flex">
