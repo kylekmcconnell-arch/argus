@@ -9978,7 +9978,19 @@ var OFFICIAL_SITE_HANDLE_SUFFIXES = /* @__PURE__ */ new Set([
   "sol",
   "xyz"
 ]);
-function officialSiteBindingCandidate(handle, sourceUrl, identityEvidence) {
+var OFFICIAL_SITE_BINDING_PREDICATES = /* @__PURE__ */ new Set([
+  "official_identity",
+  "official_token",
+  "product",
+  "legal_entity",
+  "governance",
+  "tokenomics",
+  "vesting",
+  "treasury",
+  "audit",
+  "repository"
+]);
+function officialSiteBindingCandidate(handle, sourceUrl) {
   let url;
   try {
     url = new URL(sourceUrl);
@@ -9995,13 +10007,15 @@ function officialSiteBindingCandidate(handle, sourceUrl, identityEvidence) {
   if (!brandKey || brandKey.length < 3 || !handleKey.startsWith(brandKey)) return null;
   const suffix = handleKey.slice(brandKey.length);
   if (suffix && !OFFICIAL_SITE_HANDLE_SUFFIXES.has(suffix)) return null;
-  const identityTails = suffix ? [suffix] : [...OFFICIAL_SITE_HANDLE_SUFFIXES].filter((candidate) => candidate !== "official");
-  const identityMatch = identityEvidence.match(new RegExp(
-    `\\b${escapedPattern(brandLabel)}(?:[\\s_-]+)(${identityTails.map(escapedPattern).join("|")})\\b`,
+  return { brandLabel, origin: url.origin, sourceUrl: url.toString(), suffix };
+}
+function literalOfficialSiteIdentity(candidate, documentText2) {
+  const identityTails = candidate.suffix ? [candidate.suffix] : [...OFFICIAL_SITE_HANDLE_SUFFIXES].filter((candidate2) => candidate2 !== "official");
+  const identityMatch = documentText2.match(new RegExp(
+    `\\b${escapedPattern(candidate.brandLabel)}(?:[\\s_-]+)(${identityTails.map(escapedPattern).join("|")})\\b`,
     "i"
   ));
-  const discoveredIdentity = identityMatch?.[0]?.replace(/[_-]+/g, " ").trim() ?? "";
-  return discoveredIdentity ? { identity: discoveredIdentity, origin: url.origin, sourceUrl: url.toString() } : null;
+  return identityMatch?.[0]?.replace(/[_-]+/g, " ").trim() || null;
 }
 function documentLinksExactHandle(document, handle) {
   const normalized4 = document.text.replace(/\\\//g, "/");
@@ -12580,42 +12594,40 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     if (canonicalOfficialWebsite(ctx.evidence.profile.website)) return [];
     const candidates = /* @__PURE__ */ new Map();
     for (const lead of leads) {
-      const candidate = officialSiteBindingCandidate(
-        ctx.handle,
-        lead.sourceUrl,
-        `${lead.value}
-${lead.excerpt}`
-      );
-      const key = candidate ? `${candidate.origin}
-${searchable(candidate.identity)}` : "";
+      if (!OFFICIAL_SITE_BINDING_PREDICATES.has(lead.predicate)) continue;
+      const candidate = officialSiteBindingCandidate(ctx.handle, lead.sourceUrl);
+      const key = candidate?.origin ?? "";
       if (candidate && !candidates.has(key)) candidates.set(key, candidate);
     }
     const recovered = [];
     for (const candidate of [...candidates.values()].slice(0, 4)) {
       const targets = [.../* @__PURE__ */ new Set([candidate.sourceUrl, `${candidate.origin}/`])];
       let boundDocument = null;
+      let boundIdentity = null;
       for (const target of targets) {
         const result = await fetchOnce(target);
-        if (result.status === "ok" && documentLinksExactHandle(result, ctx.handle) && looseContainsPhrase(result.text, candidate.identity)) {
+        const identity = result.status === "ok" ? literalOfficialSiteIdentity(candidate, result.text) : null;
+        if (result.status === "ok" && documentLinksExactHandle(result, ctx.handle) && identity) {
           boundDocument = result;
+          boundIdentity = identity;
           break;
         }
       }
-      if (!boundDocument) continue;
+      if (!boundDocument || !boundIdentity) continue;
       const officialScope = `${candidate.origin}/`;
       officialHosts = [.../* @__PURE__ */ new Set([...officialHosts, officialScope])];
-      aliases = [.../* @__PURE__ */ new Set([...aliases, candidate.identity])];
+      aliases = [.../* @__PURE__ */ new Set([...aliases, boundIdentity])];
       ctx.evidence.profile.website = officialScope;
       recovered.push({
-        subject: candidate.identity,
+        subject: boundIdentity,
         predicate: "official_identity",
-        value: candidate.identity,
+        value: boundIdentity,
         // The recovered binding proves a project identity even when the
         // unavailable X profile caused intake to begin on the person ledger.
         // Keep the claim on the project contract so person-only full-name
         // safeguards do not reject a valid first-party brand binding.
         questionId: "project.official_identity",
-        excerpt: candidate.identity,
+        excerpt: boundIdentity,
         sourceUrl: boundDocument.url,
         sourceTitle: "Official site and X account binding",
         evidence_origin: "deterministic_bootstrap",

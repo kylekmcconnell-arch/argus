@@ -959,7 +959,7 @@ describe("basic-facts source verification", () => {
         predicate: "official_token",
         value: "DRIFT",
         questionId: "person.official_token",
-        excerpt: "The Drift Protocol governance token empowers the Drift community.",
+        excerpt: "The Drift DAO Foundation is proud to unveil DAO and DRIFT governance token.",
         sourceUrl: officialUrl,
         sourceTitle: "Introducing DRIFT",
       })],

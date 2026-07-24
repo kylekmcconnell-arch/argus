@@ -997,11 +997,16 @@ const OFFICIAL_SITE_HANDLE_SUFFIXES = new Set([
   "app", "chain", "coin", "dao", "defi", "dex", "exchange", "finance",
   "foundation", "labs", "markets", "network", "official", "protocol", "sol", "xyz",
 ]);
+const OFFICIAL_SITE_BINDING_PREDICATES = new Set<BasicFactPredicate>([
+  "official_identity", "official_token", "product", "legal_entity",
+  "governance", "tokenomics", "vesting", "treasury", "audit", "repository",
+]);
 
 interface OfficialSiteBindingCandidate {
-  identity: string;
+  brandLabel: string;
   origin: string;
   sourceUrl: string;
+  suffix: string;
 }
 
 /**
@@ -1015,7 +1020,6 @@ interface OfficialSiteBindingCandidate {
 function officialSiteBindingCandidate(
   handle: string,
   sourceUrl: string,
-  identityEvidence: string,
 ): OfficialSiteBindingCandidate | null {
   let url: URL;
   try { url = new URL(sourceUrl); } catch { return null; }
@@ -1029,20 +1033,24 @@ function officialSiteBindingCandidate(
   if (!brandKey || brandKey.length < 3 || !handleKey.startsWith(brandKey)) return null;
   const suffix = handleKey.slice(brandKey.length);
   if (suffix && !OFFICIAL_SITE_HANDLE_SUFFIXES.has(suffix)) return null;
+  return { brandLabel, origin: url.origin, sourceUrl: url.toString(), suffix };
+}
+
+function literalOfficialSiteIdentity(
+  candidate: OfficialSiteBindingCandidate,
+  documentText: string,
+): string | null {
   // The identity must be literal source text. For drift.trade +
-  // @driftprotocol this extracts "Drift Protocol" from the cited passage; it
-  // never manufactures that display name from the handle or domain alone.
-  const identityTails = suffix
-    ? [suffix]
+  // @driftprotocol this extracts "Drift Protocol" from the freshly fetched
+  // page; it never manufactures that display name from the handle or domain.
+  const identityTails = candidate.suffix
+    ? [candidate.suffix]
     : [...OFFICIAL_SITE_HANDLE_SUFFIXES].filter((candidate) => candidate !== "official");
-  const identityMatch = identityEvidence.match(new RegExp(
-    `\\b${escapedPattern(brandLabel)}(?:[\\s_-]+)(${identityTails.map(escapedPattern).join("|")})\\b`,
+  const identityMatch = documentText.match(new RegExp(
+    `\\b${escapedPattern(candidate.brandLabel)}(?:[\\s_-]+)(${identityTails.map(escapedPattern).join("|")})\\b`,
     "i",
   ));
-  const discoveredIdentity = identityMatch?.[0]?.replace(/[_-]+/g, " ").trim() ?? "";
-  return discoveredIdentity
-    ? { identity: discoveredIdentity, origin: url.origin, sourceUrl: url.toString() }
-    : null;
+  return identityMatch?.[0]?.replace(/[_-]+/g, " ").trim() || null;
 }
 
 function documentLinksExactHandle(document: PublicTextDocument, handle: string): boolean {
@@ -4457,48 +4465,49 @@ export async function collectBasicFacts(
     const candidates = new Map<string, OfficialSiteBindingCandidate>();
     for (const lead of leads) {
       // Never invent the brand name from the handle or domain. Recovery needs
-      // a literal project identity in a cited passage, which is then checked on
-      // the fetched first-party page and bound to the exact X handle. This also
-      // covers an official-token lead whose passage explicitly says
-      // "Drift Protocol" even when search returned no site-hosted identity row.
-      const candidate = officialSiteBindingCandidate(
-        ctx.handle,
-        lead.sourceUrl,
-        `${lead.value}\n${lead.excerpt}`,
-      );
-      const key = candidate ? `${candidate.origin}\n${searchable(candidate.identity)}` : "";
+      // a cited first-party project/disclosure page to discover, followed by a
+      // literal identity phrase and exact X backlink on the freshly fetched
+      // page. Search snippets choose pages only; they never supply the identity.
+      if (!OFFICIAL_SITE_BINDING_PREDICATES.has(lead.predicate)) continue;
+      const candidate = officialSiteBindingCandidate(ctx.handle, lead.sourceUrl);
+      const key = candidate?.origin ?? "";
       if (candidate && !candidates.has(key)) candidates.set(key, candidate);
     }
     const recovered: BasicFactLead[] = [];
     for (const candidate of [...candidates.values()].slice(0, 4)) {
       const targets = [...new Set([candidate.sourceUrl, `${candidate.origin}/`])];
       let boundDocument: PublicTextDocument | null = null;
+      let boundIdentity: string | null = null;
       for (const target of targets) {
         const result = await fetchOnce(target);
+        const identity = result.status === "ok"
+          ? literalOfficialSiteIdentity(candidate, result.text)
+          : null;
         if (
           result.status === "ok"
           && documentLinksExactHandle(result, ctx.handle)
-          && looseContainsPhrase(result.text, candidate.identity)
+          && identity
         ) {
           boundDocument = result;
+          boundIdentity = identity;
           break;
         }
       }
-      if (!boundDocument) continue;
+      if (!boundDocument || !boundIdentity) continue;
       const officialScope = `${candidate.origin}/`;
       officialHosts = [...new Set([...officialHosts, officialScope])];
-      aliases = [...new Set([...aliases, candidate.identity])];
+      aliases = [...new Set([...aliases, boundIdentity])];
       ctx.evidence.profile.website = officialScope;
       recovered.push({
-        subject: candidate.identity,
+        subject: boundIdentity,
         predicate: "official_identity",
-        value: candidate.identity,
+        value: boundIdentity,
         // The recovered binding proves a project identity even when the
         // unavailable X profile caused intake to begin on the person ledger.
         // Keep the claim on the project contract so person-only full-name
         // safeguards do not reject a valid first-party brand binding.
         questionId: "project.official_identity",
-        excerpt: candidate.identity,
+        excerpt: boundIdentity,
         sourceUrl: boundDocument.url,
         sourceTitle: "Official site and X account binding",
         evidence_origin: "deterministic_bootstrap",
