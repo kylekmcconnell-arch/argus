@@ -229,6 +229,35 @@ export async function hydrateSharedLog(): Promise<void> {
     if (d?.available === false || !Array.isArray(d?.entries)) return;
     sharedCache = d.entries as LogEntry[];
     emitLogChange();
+    // "Recent cases" is a case navigator, not a record of whichever run this
+    // browser happened to see last. Fold the active immutable report outcome
+    // into the newest audit row so stale non-activated rescans cannot leave a
+    // wrong score or provisional badge in the rail.
+    try {
+      const { listReports } = await import("./reports");
+      const activeReports = await listReports();
+      for (const report of activeReports) {
+        const kind: AuditKind = report.kind === "person"
+          ? "person"
+          : report.kind === "site"
+            ? "site"
+            : "token";
+        const coverage = report.completenessState === "complete"
+          ? "complete"
+          : report.completenessState === "partial"
+            ? "provisional"
+            : report.completenessState === "failed"
+              ? "failed"
+              : undefined;
+        reconcileAuditOutcome(report.ref, kind, {
+          ...(typeof report.verdict === "string" ? { verdict: report.verdict } : {}),
+          ...(typeof report.score === "number" || report.score === null ? { score: report.score } : {}),
+          ...(coverage ? { coverage } : {}),
+        });
+      }
+    } catch {
+      /* the audit feed still works if the report library is temporarily unavailable */
+    }
     // Backfill: any LOCAL row the shared log has never seen (audits run before
     // sync existed, or that failed to sync) gets pushed up now — so server-side
     // maintenance (re-categorization, cleanups) can reach every audit, not just

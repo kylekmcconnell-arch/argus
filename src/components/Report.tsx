@@ -1573,6 +1573,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
     ?? report.role_reports[0];
   const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
+  // The compact founder summary is derived only from structured venture
+  // outcomes/backer arrays. When those arrays contain active ventures but no
+  // completed outcomes, the engine returns "Unproven" / "none" even if the
+  // cited founder axis documents a major operating outcome. Do not render that
+  // empty structured summary as if it contradicted the cited decision basis.
+  const displayFounderSummary = founderSummary
+    && (
+      founderSummary.repeat_backing.repeat_backers.length > 0
+      || !["FirstVenture", "Unproven"].includes(founderSummary.pattern)
+    )
+    ? founderSummary
+    : null;
   const decisionBasisSummary = buildDecisionBasis(governingRoleReport, f.axisEvidenceCatalog, f.axisCitationVersion);
   const evidenceBackedAxisCount = decisionBasisSummary.evidenceBacked;
   const routingUnresolved = roles.length === 0;
@@ -1996,14 +2008,23 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       };
     });
 
+  const notApplicableCheckIds = new Set(diligenceChecks
+    .filter((check) => check.status === "not-applicable")
+    .map((check) => check.checkId)
+    .filter((checkId): checkId is string => Boolean(checkId)));
   const axisGapArtifactQuestions: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows.flatMap((axis) =>
-    axis.gapArtifacts.map((artifact, index) => ({
-      id: `verify-axis-artifact-${axis.axis}-${index}`,
-      title: artifact.title,
-      detail: artifact.excerpt || `Source coverage is incomplete for ${diligenceAreaLabel(axis.axis).toLowerCase()}.`,
-      provenance: "Source unavailable",
-      href: axisHref(axis.axis),
-    })));
+    axis.gapArtifacts
+      // Older cited catalogs could retain an "unavailable" artifact even
+      // after the frozen checklist marked the same operation not applicable.
+      // It is auditable lineage, but it is not an investor follow-up.
+      .filter((artifact) => !notApplicableCheckIds.has(artifact.operation))
+      .map((artifact, index) => ({
+        id: `verify-axis-artifact-${axis.axis}-${index}`,
+        title: artifact.title,
+        detail: artifact.excerpt || `Source coverage is incomplete for ${diligenceAreaLabel(axis.axis).toLowerCase()}.`,
+        provenance: "Source unavailable",
+        href: axisHref(axis.axis),
+      })));
   const axisGapQuestions: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows.flatMap((axis) =>
     axis.gaps.map((gap, index) => ({
       id: `verify-axis-${axis.axis}-${index}`,
@@ -2190,12 +2211,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       .map((source) => source.url)
       .filter((url): url is string => Boolean(url))),
   ]);
-  const conflictSignalCount = visibleContradictions.length
-    + decisionBasisSummary.rows.filter((axis) => axis.counter.length > 0).length
+  const uniqueCounterSignalCount = new Set(
+    decisionBasisSummary.rows.flatMap((axis) => axis.counter.map((artifact) => artifact.artifactId)),
+  ).size;
+  const conflictSignalCount = Math.max(visibleContradictions.length, uniqueCounterSignalCount)
     + basicFacts.filter((fact) => fact.status === "conflicted").length;
   const relationshipRecordCount = connections.length + webTeam.length + (evidence.associates?.length ?? 0);
   const argusEdgeMetrics = [
-    { label: "Verified facts", value: verifiedDecisionFactCount, detail: "source-backed answers" },
+    ...(basicFactResearchAttempted
+      ? [{ label: "Verified facts", value: verifiedDecisionFactCount, detail: "source-backed answers" }]
+      : []),
     { label: "Decision sources", value: citedDecisionSourceKeys.size, detail: "bound to the verdict" },
     { label: "Conflicts captured", value: conflictSignalCount, detail: "stored in this snapshot" },
     { label: "Relationship records", value: relationshipRecordCount, detail: "people and graph links" },
@@ -2258,11 +2283,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   }
   {
     const tokenQuestion = heroLedgerEntry("official_token");
+    const tokenClaimObserved = Boolean(
+      f.projectToken
+      || basicFacts.some((fact) => canonicalBasicFactPredicate(fact.predicate) === "official_token")
+      || basicFactLeads.some((lead) => canonicalBasicFactPredicate(lead.predicate) === "official_token"),
+    );
     if (f.projectToken) {
       heroProofChips.push({ key: "token", label: "Token verified", value: `$${f.projectToken.symbol}`, tone: "pass", href: "#project-token", title: `Canonical token bound via ${f.projectToken.verification === "official_x" ? "the official X account" : "the official domain"}, never a name match.` });
     } else if (tokenQuestion && basicFactQuestionOutcome(tokenQuestion) === "checked_empty") {
       heroProofChips.push({ key: "token", label: "No official token", tone: "neutral", href: "#basic-facts", title: "A completed search found no verified official token." });
-    } else if (tokenQuestion) {
+    } else if (tokenQuestion && tokenClaimObserved) {
       heroProofChips.push({ key: "token", label: "Token identity unresolved", tone: "caution", href: "#verification-next", title: "Official-token candidacy is not resolved. This is the core scam vector; verify before capital moves." });
     }
   }
@@ -2451,6 +2481,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <SnapshotEvidenceControl
               snapshotVersion={versionContext.version}
               capturedAt={versionContext.createdAt}
+              subjectKind="person"
               currentIntelligenceEnabled={currentIntelligenceEnabled}
               onLoadCurrentIntelligence={() => setCurrentIntelligenceVersionId(versionContext.reportVersionId)}
             />
@@ -3416,14 +3447,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
-          {founderSummary && (
+          {displayFounderSummary && (
             <div className="mb-3 min-w-0 break-inside-avoid">
               <Section title="Founder pattern" kicker="outcomes + repeat backing">
                 <Card className="p-4">
                   <div className="flex items-center gap-4">
                     <div>
                       <div className="eyebrow">Pattern</div>
-                      <div className="mono text-[15px] font-medium text-ink">{founderSummary.pattern}</div>
+                      <div className="mono text-[15px] font-medium text-ink">{displayFounderSummary.pattern}</div>
                     </div>
                     <div className="h-8 w-px bg-line" />
                     <div>
@@ -3432,20 +3463,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                         className="mono text-[15px] font-medium"
                         style={{
                           color:
-                            founderSummary.repeat_backing.strength === "strong"
+                            displayFounderSummary.repeat_backing.strength === "strong"
                               ? "var(--color-pass)"
-                              : founderSummary.repeat_backing.strength === "weak"
+                              : displayFounderSummary.repeat_backing.strength === "weak"
                               ? "var(--color-caution)"
                               : "var(--color-ink-faint)",
                         }}
                       >
-                        {founderSummary.repeat_backing.strength}
+                        {displayFounderSummary.repeat_backing.strength}
                       </div>
                     </div>
                   </div>
-                  {founderSummary.repeat_backing.repeat_backers.length > 0 && (
+                  {displayFounderSummary.repeat_backing.repeat_backers.length > 0 && (
                     <p className="mt-2 text-[12.5px] text-ink-faint">
-                      Returning backers: <span className="text-ink-dim">{founderSummary.repeat_backing.repeat_backers.join(", ")}</span>
+                      Returning backers: <span className="text-ink-dim">{displayFounderSummary.repeat_backing.repeat_backers.join(", ")}</span>
                     </p>
                   )}
                 </Card>

@@ -512,6 +512,7 @@ export function InvestigationReport({
             <SnapshotEvidenceControl
               snapshotVersion={versionContext.version}
               capturedAt={versionContext.createdAt}
+              subjectKind="investigation"
               currentIntelligenceEnabled={currentIntelligenceEnabled}
               onLoadCurrentIntelligence={loadCurrentIntelligence}
             />

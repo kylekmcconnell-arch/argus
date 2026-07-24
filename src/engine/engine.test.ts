@@ -621,6 +621,16 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(res.applicable_classes).not.toContain(SubjectClass.INVESTOR);
   });
 
+  it("routes established protocol and named founder bio shapes without abstaining", () => {
+    const protocol = classifySubject("Trade perps on-chain. The decentralized exchange for Solana.");
+    expect(protocol.applicable_classes).toContain(SubjectClass.PROJECT);
+    expect(protocol.subject_class).not.toBeNull();
+
+    const founder = classifySubject("Co-founder of Solana. Building high-performance crypto infrastructure.");
+    expect(founder.applicable_classes).toContain(SubjectClass.FOUNDER);
+    expect(founder.subject_class).not.toBeNull();
+  });
+
   it("ADVISOR advised a rug with allocation -> capped", () => {
     const a = new Audit("@advisor_x", { subject_class: SubjectClass.ADVISOR });
     a.setIdentity("Confirmed");

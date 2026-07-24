@@ -1939,4 +1939,126 @@ describe("legacy person report coverage truth", () => {
     expect(container.textContent).toContain("Report saved");
     expect(container.textContent).not.toContain("1970");
   });
+
+  it("does not manufacture a founder token warning or empty outcome summary from absent structured claims", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const hash = "a".repeat(64);
+    const dossier = {
+      ...base,
+      founderSummary: {
+        pattern: "Unproven",
+        repeat_backing: {
+          strength: "none" as const,
+          repeat_backers: [],
+          from_successful_exit: false,
+        },
+      },
+      basicFacts: [{
+        factId: "public-security",
+        subjectKey: base.handle,
+        predicate: "public_security",
+        value: "NASDAQ: COIN",
+        normalizedValue: "nasdaq coin",
+        status: "verified",
+        critical: true,
+        sources: [{
+          url: "https://www.sec.gov/Archives/edgar/data/1679788/",
+          title: "SEC issuer record",
+          sourceClass: "regulatory_or_onchain",
+          relation: "supports",
+          excerpt: "Coinbase Global, Inc. trades on Nasdaq under COIN.",
+          contentHash: hash,
+          capturedAt: "2026-07-14T00:00:00.000Z",
+          provider: "sec-registry",
+          artifactVerified: true,
+        }],
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "public-web",
+      }],
+      basicFactQuestionLedger: [{
+        questionId: "founder.official_token",
+        audience: "person",
+        batch: "track_record",
+        predicate: "official_token",
+        question: "Is an official crypto token tied to a venture they control?",
+        critical: true,
+        status: "unanswered",
+        answerRefs: [],
+        providerRuns: [{ phase: "primary", provider: "test", state: "failed" }],
+      }],
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("NASDAQ: COIN");
+    expect(container.textContent).not.toContain("Token identity unresolved");
+    expect(container.textContent).not.toContain("Founder pattern");
+  });
+
+  it("keeps not-applicable cited operations out of investor follow-ups", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
+    const axis = Object.keys(governing.axes)[0]!;
+    const hash = "b".repeat(64);
+    const artifactId = `art_v1_${hash}`;
+    const roleReports = base.report.role_reports.map((role) => role !== governing
+      ? role
+      : {
+          ...role,
+          axes: {
+            ...role.axes,
+            [axis]: {
+              ...role.axes[axis],
+              evidenceRefs: [artifactId],
+              counterEvidenceRefs: [],
+              gaps: [],
+            },
+          },
+        });
+    const dossier = {
+      ...base,
+      report: { ...base.report, role_reports: roleReports },
+      axisCitationVersion: 1 as const,
+      axisEvidenceCatalog: [{
+        kind: "axis_evidence",
+        artifactId,
+        provider: "twitterapi",
+        operation: "promoted-token-performance",
+        section: "methodology",
+        title: "Promoted-token performance",
+        excerpt: "Not a KOL.",
+        contentHash: hash,
+        capturedAt: "2026-07-14T00:00:00.000Z",
+        verification: "unavailable",
+        relation: "supports",
+        scope: "direct_subject",
+        eligibleAxes: [axis],
+      }],
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000301",
+        reportVersionId: "00000000-0000-4000-8000-000000000302",
+        version: 4,
+        completenessState: "complete" as const,
+        attestationState: "server_collected" as const,
+        methodologyVersion: "argus-person-v5",
+        createdAt: "2026-07-14T00:00:00.000Z",
+        checks: [{
+          checkId: "promoted-token-performance",
+          label: "Promoted-token performance",
+          status: "not-applicable" as const,
+          note: "not a KOL",
+        }],
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.querySelector("#verification-next")?.textContent)
+      .not.toContain("Promoted-token performance");
+  });
 });

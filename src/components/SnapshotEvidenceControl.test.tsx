@@ -57,8 +57,23 @@ describe("SnapshotEvidenceControl", () => {
     // ship, so the reader is told a fresh run answers more -- while the frozen
     // verdict itself is explicitly unchanged.
     const note = container.querySelector("[role='note']");
-    expect(note?.textContent).toContain("predates engine upgrades");
+    expect(note?.textContent).toContain("predates upgrades");
     expect(note?.textContent).toContain("verdict is unchanged");
+  });
+
+  it("names person-specific upgrades without irrelevant token language", async () => {
+    await act(async () => root.render(
+      <SnapshotEvidenceControl
+        snapshotVersion={4}
+        capturedAt="2026-07-11T14:30:00.000Z"
+        subjectKind="person"
+      />,
+    ));
+
+    const note = container.querySelector("[role='note']")?.textContent ?? "";
+    expect(note).toContain("identity recall");
+    expect(note).toContain("role corroboration");
+    expect(note).not.toContain("float-control");
   });
 
   it("shows no staleness nudge on a post-upgrade snapshot", async () => {

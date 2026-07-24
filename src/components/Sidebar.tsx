@@ -302,7 +302,7 @@ export function Sidebar({
       inert={mobile && !open ? true : undefined}
       data-sidebar-mode={reportLayout ? "report" : "standard"}
       className={`fixed inset-y-0 left-0 z-40 flex h-full w-[248px] shrink-0 flex-col border-r border-line-2 bg-sidebar transition-[transform,width] duration-200 lg:static lg:translate-x-0 ${
-        reportLayout ? "lg:w-[196px] xl:w-[248px]" : "lg:w-[248px]"
+        "lg:w-[248px]"
       } ${
         open ? "translate-x-0" : "-translate-x-full"
       }`}

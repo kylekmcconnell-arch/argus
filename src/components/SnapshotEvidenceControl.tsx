@@ -3,6 +3,7 @@ import { useState } from "react";
 export interface SnapshotEvidenceControlProps {
   snapshotVersion: number;
   capturedAt: string;
+  subjectKind?: "person" | "token" | "investigation" | "site";
   currentIntelligenceEnabled?: boolean;
   onLoadCurrentIntelligence?: () => void;
 }
@@ -50,6 +51,7 @@ function predatesEngineUpgrades(capturedAt: string): boolean {
 export function SnapshotEvidenceControl({
   snapshotVersion,
   capturedAt,
+  subjectKind,
   currentIntelligenceEnabled,
   onLoadCurrentIntelligence,
 }: SnapshotEvidenceControlProps) {
@@ -97,8 +99,14 @@ export function SnapshotEvidenceControl({
           role="note"
           className="mt-2 border-t border-line/60 pt-2 text-[11.5px] leading-relaxed text-caution"
         >
-          This snapshot predates engine upgrades that verify substantially more (founder identity recall,
-          usage trends, float control). The frozen verdict is unchanged; a re-scan will answer more.
+          {subjectKind === "person"
+            ? "This snapshot predates upgrades to identity recall, role corroboration, and structured outcome checks."
+            : subjectKind === "token" || subjectKind === "investigation"
+              ? "This snapshot predates upgrades to canonical token binding, market history, and float-control checks."
+              : subjectKind === "site"
+                ? "This snapshot predates upgrades to site recovery, identity extraction, and source reconciliation."
+                : "This snapshot predates upgrades to identity recall, source reconciliation, and evidence coverage."}
+          {" "}The frozen verdict is unchanged; a re-scan will answer more.
         </p>
       ) : null}
     </section>

@@ -358,6 +358,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             <SnapshotEvidenceControl
               snapshotVersion={versionContext.version}
               capturedAt={versionContext.createdAt}
+              subjectKind="token"
               currentIntelligenceEnabled={currentIntelligenceEnabled}
               onLoadCurrentIntelligence={loadCurrentIntelligence}
             />

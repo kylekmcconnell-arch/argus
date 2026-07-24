@@ -157,7 +157,7 @@ describe("Recent report controls", () => {
     expect(account?.className.split(/\s+/)).toContain("mt-4");
   });
 
-  it("keeps report navigation labeled while giving laptop reports a modestly narrower rail", async () => {
+  it("keeps report navigation labeled at a stable desktop width", async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -173,7 +173,8 @@ describe("Recent report controls", () => {
 
     const sidebar = container.querySelector<HTMLElement>('aside[data-sidebar-mode="report"]');
     expect(sidebar).not.toBeNull();
-    expect(sidebar?.className.split(/\s+/)).toEqual(expect.arrayContaining(["lg:w-[196px]", "xl:w-[248px]"]));
+    expect(sidebar?.className.split(/\s+/)).toContain("lg:w-[248px]");
+    expect(sidebar?.className.split(/\s+/)).not.toContain("lg:w-[196px]");
     expect(sidebar?.className.split(/\s+/)).not.toContain("lg:w-[72px]");
 
     const investigationCanvas = [...(sidebar?.querySelectorAll<HTMLButtonElement>("nav button") ?? [])]

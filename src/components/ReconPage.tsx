@@ -305,6 +305,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
           <SnapshotEvidenceControl
             snapshotVersion={snapshotContext.version}
             capturedAt={snapshotContext.createdAt}
+            subjectKind="site"
             currentIntelligenceEnabled={currentIntelligenceEnabled}
             onLoadCurrentIntelligence={() => setCurrentIntelligenceEnabled(true)}
           />
