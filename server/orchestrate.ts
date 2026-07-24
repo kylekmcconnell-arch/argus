@@ -75,7 +75,10 @@ import { collectHolderProfile } from "./adapters/tokenHolders";
 import { collectUpcomingUnlocks } from "./adapters/tokenUnlocks";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { collectSecurityAudits } from "./adapters/securityAudits";
-import { collectCompanyEnrichment } from "./adapters/monid";
+import {
+  collectProjectCompanyEnrichment,
+  companyEnrichmentMatchesOfficialDomain,
+} from "./adapters/monid";
 import {
   hydrateOfficialProjectIdentityFromFacts,
   verifiedOfficialProjectIdentity,
@@ -2465,19 +2468,23 @@ interface RunAuditOptions {
  * "why isn't more of the team listed" gap without a new provider.
  */
 export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Emit): void {
-  if (evidence.companyEnrichment?.identityMatch !== "official_domain") {
+  const enrichment = evidence.companyEnrichment;
+  const officialWebsite = evidence.projectToken?.homepage
+    ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl
+    ?? enrichment?.requestedDomain;
+  if (!enrichment || !companyEnrichmentMatchesOfficialDomain(enrichment, officialWebsite)) {
     if (evidence.companyEnrichment?.management?.length) {
       emit({
         phase: "Team",
         label: "Leadership match rejected",
-        detail: `Monid matched ${evidence.companyEnrichment.name} by name only. Its people were excluded because the provider website did not match the project's official website.`,
+        detail: `Monid returned ${evidence.companyEnrichment.name}, but its company website did not match the project's verified official domain. Its people were excluded.`,
         source: "monid",
         tone: "warn",
       });
     }
     return;
   }
-  const management = evidence.companyEnrichment?.management ?? [];
+  const management = enrichment.management ?? [];
   if (!management.length) return;
   const webTeam = evidence.webTeam ?? (evidence.webTeam = []);
   const norm = (value?: string | null) => (value ?? "").trim().toLowerCase().replace(/^@/, "");
@@ -2507,7 +2514,7 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
       linkedin: person.linkedin ?? undefined,
       evidence: person.priorCompanies?.length ? `prior: ${person.priorCompanies.slice(0, 3).join(", ")}` : undefined,
       source: "Monid/Akta leadership record",
-      sourceUrl: evidence.companyEnrichment.sourceUrl,
+      sourceUrl: enrichment.sourceUrl,
       evidence_origin: "deterministic",
       artifact_verified: true,
       provider: "monid",
@@ -2761,12 +2768,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
             ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
           if (companyLookup) {
             const enrichment = await withWallClockBox(
-              collectCompanyEnrichment(companyLookup, {
+              collectProjectCompanyEnrichment(companyLookup, {
                 sections: ["funding_detail", "management_profile", "firmographic"],
+                officialName: projectName,
               }),
               MONID_ENRICHMENT_BUDGET_MS,
             );
-            if (enrichment?.available) {
+            if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, companyLookup)) {
               evidence.companyEnrichment = { ...enrichment.value, capturedAt };
               mergeManagementIntoWebTeam(evidence, emit);
             }
@@ -2956,12 +2964,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   ) {
     try {
       const enrichment = await withWallClockBox(
-        collectCompanyEnrichment(recoveredCompanyLookup, {
+        collectProjectCompanyEnrichment(recoveredCompanyLookup, {
           sections: ["funding_detail", "management_profile", "firmographic"],
+          officialName: evidence.profile.resolved_name ?? evidence.profile.display_name,
         }),
         MONID_ENRICHMENT_BUDGET_MS,
       );
-      if (enrichment?.available && enrichment.value.identityMatch === "official_domain") {
+      if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
         evidence.companyEnrichment = { ...enrichment.value, capturedAt: new Date().toISOString() };
         mergeManagementIntoWebTeam(evidence, emit);
       }
@@ -2989,13 +2998,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     });
     if (primaryVenture) {
       try {
-        const enrichment = await withWallClockBox(
-          collectCompanyEnrichment(primaryVenture.domain ?? primaryVenture.project_name.trim(), {
-            sections: ["funding_detail", "firmographic"],
-          }),
-          MONID_ENRICHMENT_BUDGET_MS,
-        );
-        if (enrichment?.available) {
+        const enrichment = primaryVenture.domain
+          ? await withWallClockBox(
+              collectProjectCompanyEnrichment(primaryVenture.domain, {
+                sections: ["funding_detail", "firmographic"],
+                officialName: primaryVenture.project_name.trim(),
+              }),
+              MONID_ENRICHMENT_BUDGET_MS,
+            )
+          : null;
+        if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, primaryVenture.domain)) {
           evidence.companyEnrichment = { ...enrichment.value, capturedAt: new Date().toISOString() };
         }
       } catch (error) {

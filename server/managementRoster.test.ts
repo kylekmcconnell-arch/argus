@@ -6,8 +6,11 @@ const enrichment = (management: Array<{ name: string; title: string; priorCompan
   name: "Uniswap Labs",
   uuid: "monid-uuid",
   identityMatch: "official_domain" as const,
+  requestedDomain: "uniswap.org",
+  matchedDomain: "uniswap.org",
+  matchMethod: "exact_host" as const,
   management,
-  sourceUrl: "https://monid.example/company/monid-uuid",
+  sourceUrl: "https://uniswap.org",
   capturedAt: "2026-07-23T00:00:00.000Z",
 });
 
@@ -27,7 +30,7 @@ describe("mergeManagementIntoWebTeam", () => {
       artifact_verified: true,
       evidence_origin: "deterministic",
       provider: "monid",
-      sourceUrl: "https://monid.example/company/monid-uuid",
+      sourceUrl: "https://uniswap.org",
       identity_link_evidence_origin: "deterministic",
     });
     expect(member?.evidence).toContain("BlackRock");
@@ -80,6 +83,29 @@ describe("mergeManagementIntoWebTeam", () => {
       sourceUrl: "https://venicetrim.com",
     };
     const emit = vi.fn();
+    mergeManagementIntoWebTeam(evidence, emit);
+
+    expect(evidence.webTeam ?? []).toHaveLength(0);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: "Leadership match rejected",
+      source: "monid",
+      tone: "warn",
+    }));
+  });
+
+  it("rejects a forged official-domain flag when the selected company website differs", () => {
+    const evidence = emptyEvidence("@driftprotocol");
+    evidence.profile.website = "https://drift.trade";
+    evidence.companyEnrichment = {
+      ...enrichment([
+        { name: "Marc Washington", title: "Founder", priorCompanies: [], linkedin: null, startYear: null },
+      ]),
+      requestedDomain: "drift.trade",
+      matchedDomain: "drifthair.com",
+      sourceUrl: "https://drifthair.com",
+    };
+    const emit = vi.fn();
+
     mergeManagementIntoWebTeam(evidence, emit);
 
     expect(evidence.webTeam ?? []).toHaveLength(0);

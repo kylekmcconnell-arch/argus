@@ -90,6 +90,12 @@ export interface CompanyEnrichment {
    * funding/firmographic research lead and cannot identify people.
    */
   identityMatch: "official_domain" | "name_only";
+  /** Official project/venture domain ARGUS asked Monid to resolve. */
+  requestedDomain?: string;
+  /** Website domain carried by the selected Monid company record. */
+  matchedDomain?: string;
+  /** Deterministic rule used to select the provider company. */
+  matchMethod?: "exact_host" | "parent_or_subdomain" | "exact_name" | "domain_label";
   funding?: FundingInfo;
   management?: ManagementPerson[];
   firmographic?: FirmographicInfo;
@@ -104,6 +110,13 @@ export type CompanyEnrichmentOutcome =
 export interface EnrichmentOptions {
   fetcher?: typeof fetch;
   sections?: string[];
+  /**
+   * Project reports must use `official_domain_only`. Name-only company matches
+   * are useful as research leads but are not identity proof.
+   */
+  identityPolicy?: "allow_name" | "official_domain_only";
+  /** Official display name used only to break a same-domain candidate tie. */
+  officialName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,34 +325,179 @@ function domainLabel(value: unknown): string {
   return normalizedCompanyName(host.split(".")[0]);
 }
 
+type CompanyMatchMethod = NonNullable<CompanyEnrichment["matchMethod"]>;
+type CompanyMatchDecision =
+  | {
+      company: any;
+      method: CompanyMatchMethod;
+      requestedDomain: string | null;
+      matchedDomain: string | null;
+      candidateCount: number;
+    }
+  | {
+      company: null;
+      reason: "no_match" | "ambiguous" | "official_domain_required";
+      requestedDomain: string | null;
+      candidateCount: number;
+    };
+
+function relatedOfficialHosts(expected: string, candidate: string): "exact_host" | "parent_or_subdomain" | null {
+  if (expected === candidate) return "exact_host";
+  if (expected.endsWith(`.${candidate}`) || candidate.endsWith(`.${expected}`)) {
+    return "parent_or_subdomain";
+  }
+  return null;
+}
+
+function logCompanyResolution(
+  event: "matched" | "rejected" | "provider_error",
+  details: Record<string, unknown>,
+): void {
+  if (process.env.NODE_ENV === "test") return;
+  console.info("[monid.company_resolution]", JSON.stringify({ event, ...details }));
+}
+
 /**
  * Resolve only an identity-bound company match.
  *
  * Provider search order is relevance-ranked, not identity proof. Falling back
  * to the first UUID can attach an unrelated namesake's funding and leadership
- * to the audited subject (for example SuperGemma -> Supergut). Accept an exact
- * website, an exact normalized name, or a query that exactly matches the
- * candidate's website label. Otherwise fail closed before paid enrichment.
+ * to the audited subject (for example SuperGemma -> Supergut). Project mode
+ * accepts only the official host or its parent/subdomain. Name mode accepts one
+ * unambiguous exact normalized name or website label. Tied candidates fail
+ * closed before paid enrichment.
  */
-function pickBestMatch(companies: any[], query: string): any | null {
+function pickBestMatch(
+  companies: any[],
+  query: string,
+  options: Pick<EnrichmentOptions, "identityPolicy" | "officialName">,
+): CompanyMatchDecision {
   const valid = companies.filter((company) => isNonEmptyString(company?.uuid));
-  if (!valid.length) return null;
   const queryHost = hostOf(query);
   const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
   const queryName = normalizedCompanyName(query);
-  if (queryLooksLikeHost) {
-    const byWebsite = valid.find((company) => hostOf(company?.website) === queryHost);
-    if (byWebsite) return byWebsite;
+  const officialName = normalizedCompanyName(options.officialName);
+  const domainOnly = options.identityPolicy === "official_domain_only";
+
+  if (domainOnly && !queryLooksLikeHost) {
+    return {
+      company: null,
+      reason: "official_domain_required",
+      requestedDomain: null,
+      candidateCount: valid.length,
+    };
   }
-  const byName = valid.find(
+  if (!valid.length) {
+    return {
+      company: null,
+      reason: "no_match",
+      requestedDomain: queryLooksLikeHost ? queryHost : null,
+      candidateCount: 0,
+    };
+  }
+
+  if (queryLooksLikeHost) {
+    const ranked = valid.flatMap((company) => {
+      const matchedDomain = hostOf(company?.website);
+      const method = matchedDomain ? relatedOfficialHosts(queryHost!, matchedDomain) : null;
+      if (!method) return [];
+      const exactName = officialName
+        && normalizedCompanyName(company?.name) === officialName;
+      return [{
+        company,
+        method,
+        matchedDomain,
+        score: (method === "exact_host" ? 100 : 80) + (exactName ? 10 : 0),
+      }];
+    }).sort((a, b) => b.score - a.score);
+    if (!ranked.length) {
+      return {
+        company: null,
+        reason: "no_match",
+        requestedDomain: queryHost,
+        candidateCount: valid.length,
+      };
+    }
+    if (ranked.length > 1 && ranked[0].score === ranked[1].score) {
+      return {
+        company: null,
+        reason: "ambiguous",
+        requestedDomain: queryHost,
+        candidateCount: valid.length,
+      };
+    }
+    return {
+      company: ranked[0].company,
+      method: ranked[0].method,
+      requestedDomain: queryHost,
+      matchedDomain: ranked[0].matchedDomain,
+      candidateCount: valid.length,
+    };
+  }
+
+  const exactNameMatches = valid.filter(
     (company) => normalizedCompanyName(company?.name) === queryName,
   );
-  if (byName) return byName;
-  if (!queryLooksLikeHost && queryName) {
-    const byWebsiteLabel = valid.find((company) => domainLabel(company?.website) === queryName);
-    if (byWebsiteLabel) return byWebsiteLabel;
+  if (exactNameMatches.length === 1) {
+    const company = exactNameMatches[0];
+    return {
+      company,
+      method: "exact_name",
+      requestedDomain: null,
+      matchedDomain: hostOf(company?.website),
+      candidateCount: valid.length,
+    };
   }
-  return null;
+  if (exactNameMatches.length > 1) {
+    return {
+      company: null,
+      reason: "ambiguous",
+      requestedDomain: null,
+      candidateCount: valid.length,
+    };
+  }
+  if (queryName) {
+    const labelMatches = valid.filter((company) => domainLabel(company?.website) === queryName);
+    if (labelMatches.length === 1) {
+      const company = labelMatches[0];
+      return {
+        company,
+        method: "domain_label",
+        requestedDomain: null,
+        matchedDomain: hostOf(company?.website),
+        candidateCount: valid.length,
+      };
+    }
+    if (labelMatches.length > 1) {
+      return {
+        company: null,
+        reason: "ambiguous",
+        requestedDomain: null,
+        candidateCount: valid.length,
+      };
+    }
+  }
+  return {
+    company: null,
+    reason: "no_match",
+    requestedDomain: null,
+    candidateCount: valid.length,
+  };
+}
+
+export function companyEnrichmentMatchesOfficialDomain(
+  enrichment: {
+    identityMatch?: CompanyEnrichment["identityMatch"];
+    requestedDomain?: string;
+    matchedDomain?: string;
+    sourceUrl: string;
+  },
+  officialWebsite?: string | null,
+): boolean {
+  if (enrichment.identityMatch !== "official_domain") return false;
+  const expected = hostOf(officialWebsite) ?? hostOf(enrichment.requestedDomain);
+  const matched = hostOf(enrichment.matchedDomain) ?? hostOf(enrichment.sourceUrl);
+  return Boolean(expected && matched && relatedOfficialHosts(expected, matched));
 }
 
 /** Akta date {day,month,year} → YYYY-MM-DD / YYYY-MM / YYYY / null. */
@@ -461,6 +619,20 @@ export async function collectCompanyEnrichment(
   if (!query) {
     return { available: false, reason: "no_match", note: "No company name or website supplied." };
   }
+  if (options.identityPolicy === "official_domain_only") {
+    const requestedDomain = hostOf(query);
+    if (!requestedDomain?.includes(".") || requestedDomain.includes(" ")) {
+      logCompanyResolution("rejected", {
+        reason: "official_domain_required",
+        queryType: "name",
+      });
+      return {
+        available: false,
+        reason: "no_match",
+        note: "Monid project resolution requires an official website domain.",
+      };
+    }
+  }
 
   const fetcher = options.fetcher ?? fetch;
   const sections = normalizeSections(options.sections);
@@ -474,13 +646,38 @@ export async function collectCompanyEnrichment(
   );
   if (!search.ok) {
     recordCall("monid", "company/search", 0, `search · ${search.note}`, "failed");
+    logCompanyResolution("provider_error", {
+      stage: "search",
+      queryDomain: hostOf(query),
+      note: search.note,
+    });
     return { available: false, reason: "unavailable", note: search.note };
   }
 
   const companies = companyList(search.data);
-  const chosen = pickBestMatch(companies, query);
+  const decision = pickBestMatch(companies, query, options);
+  if ("reason" in decision) {
+    recordCall("monid", "company/search", 0, `search · ${decision.reason}`, "succeeded");
+    logCompanyResolution("rejected", {
+      reason: decision.reason,
+      queryDomain: decision.requestedDomain,
+      candidateCount: decision.candidateCount,
+      candidateDomains: companies
+        .map((company) => hostOf(company?.website))
+        .filter((domain): domain is string => Boolean(domain))
+        .slice(0, 10),
+    });
+    return {
+      available: false,
+      reason: "no_match",
+      note: decision.reason === "ambiguous"
+        ? `Monid/Akta returned multiple equally strong companies for "${query}"; none was trusted.`
+        : `No Monid/Akta company matched "${query}".`,
+    };
+  }
+  const chosen = decision.company;
   const uuid = isNonEmptyString(chosen?.uuid) ? chosen.uuid.trim() : "";
-  if (!chosen || !uuid) {
+  if (!uuid) {
     recordCall("monid", "company/search", 0, "search · no_match", "succeeded");
     return {
       available: false,
@@ -489,6 +686,15 @@ export async function collectCompanyEnrichment(
     };
   }
   recordCall("monid", "company/search", 0, `search · matched ${uuid}`, "succeeded");
+  logCompanyResolution("matched", {
+    queryDomain: decision.requestedDomain,
+    selectedDomain: decision.matchedDomain,
+    selectedUuid: uuid,
+    selectedName: isNonEmptyString(chosen?.name) ? chosen.name.trim() : null,
+    officialName: isNonEmptyString(options.officialName) ? options.officialName.trim() : null,
+    matchMethod: decision.method,
+    candidateCount: decision.candidateCount,
+  });
 
   // 2) Paid enrichment via /v1/company/enrichment (~$0.125 per section).
   const enrichment = await startRun(
@@ -500,6 +706,13 @@ export async function collectCompanyEnrichment(
   const sectionMeta = `enrichment · ${sections.length} section(s) · ${uuid}`;
   if (!enrichment.ok) {
     recordCall("monid", "company/enrichment", 0, `${sectionMeta} · ${enrichment.note}`, "failed");
+    logCompanyResolution("provider_error", {
+      stage: "enrichment",
+      queryDomain: decision.requestedDomain,
+      selectedDomain: decision.matchedDomain,
+      selectedUuid: uuid,
+      note: enrichment.note,
+    });
     return { available: false, reason: "unavailable", note: enrichment.note };
   }
   // Charge for the sections actually requested (search is free, enrichment is not).
@@ -513,9 +726,7 @@ export async function collectCompanyEnrichment(
   const name = isNonEmptyString(chosen.name)
     ? chosen.name.trim()
     : firmographic?.legalName ?? query;
-  const queryHost = hostOf(query);
-  const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
-  const identityMatch = queryLooksLikeHost && hostOf(chosen.website) === queryHost
+  const identityMatch = decision.method === "exact_host" || decision.method === "parent_or_subdomain"
     ? "official_domain"
     : "name_only";
 
@@ -525,12 +736,30 @@ export async function collectCompanyEnrichment(
       name,
       uuid,
       identityMatch,
+      ...(decision.requestedDomain ? { requestedDomain: decision.requestedDomain } : {}),
+      ...(decision.matchedDomain ? { matchedDomain: decision.matchedDomain } : {}),
+      matchMethod: decision.method,
       ...(funding ? { funding } : {}),
       ...(management ? { management } : {}),
       ...(firmographic ? { firmographic } : {}),
       sourceUrl: websiteUrl(chosen.website) ?? "https://monid.ai",
     },
   };
+}
+
+/**
+ * Project-safe entry point. It refuses to search by company name and will not
+ * spend on enrichment unless one unambiguous Monid candidate carries the
+ * official project host (or its direct parent/subdomain).
+ */
+export function collectProjectCompanyEnrichment(
+  officialWebsite: string,
+  options: Omit<EnrichmentOptions, "identityPolicy"> = {},
+): Promise<CompanyEnrichmentOutcome> {
+  return collectCompanyEnrichment(officialWebsite, {
+    ...options,
+    identityPolicy: "official_domain_only",
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -771,9 +1000,14 @@ export async function collectCompanyNews(
       recordCall("monid", "company/search", 0, `news search · ${search.note}`, "failed");
       return { available: false, reason: "unavailable", note: search.note };
     }
-    const chosen = pickBestMatch(companyList(search.data), query);
+    const decision = pickBestMatch(companyList(search.data), query, {});
+    if ("reason" in decision) {
+      recordCall("monid", "company/search", 0, "news search · no_match", "succeeded");
+      return { available: false, reason: "no_match", note: `No Monid/Akta company matched "${query}".` };
+    }
+    const chosen = decision.company;
     const uuid = isNonEmptyString(chosen?.uuid) ? chosen.uuid.trim() : "";
-    if (!chosen || !uuid) {
+    if (!uuid) {
       recordCall("monid", "company/search", 0, "news search · no_match", "succeeded");
       return { available: false, reason: "no_match", note: `No Monid/Akta company matched "${query}".` };
     }

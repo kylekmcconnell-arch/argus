@@ -7,6 +7,7 @@ import {
   type BasicFactSource,
   type CollectedEvidence,
 } from "../src/data/evidence";
+import { companyEnrichmentMatchesOfficialDomain } from "./adapters/monid";
 
 const CRITICAL = new Set<BasicFactPredicate>([
   "official_identity",
@@ -712,9 +713,16 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // value-scoped to the venture name, so a person is never presented as having
   // raised the money themselves.
   const isFounderSubject = evidence.roles.includes(SubjectClass.FOUNDER);
-  const enrichmentRecord = evidence.companyEnrichment?.funding
-    && evidence.companyEnrichment.funding.rounds.length
+  const enrichmentOfficialWebsite = isProject
+    ? evidence.projectToken?.homepage ?? evidence.profile.website
+    : evidence.companyEnrichment?.requestedDomain;
+  const domainBoundEnrichment = evidence.companyEnrichment
+    && companyEnrichmentMatchesOfficialDomain(evidence.companyEnrichment, enrichmentOfficialWebsite)
     ? evidence.companyEnrichment
+    : undefined;
+  const enrichmentRecord = domainBoundEnrichment?.funding
+    && domainBoundEnrichment.funding.rounds.length
+    ? domainBoundEnrichment
     : undefined;
   const hasStrongerFundingFact = (evidence.basicFacts ?? []).some((fact) =>
     fact.predicate === "funding"
@@ -1056,20 +1064,19 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // Monid/Akta management → founder identity (the "people behind it"). Conservative:
   // only a clearly-labelled founder/CEO profile.
   const founderProfile = isProject
-    && evidence.companyEnrichment?.identityMatch === "official_domain"
-    ? evidence.companyEnrichment.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title))
+    ? domainBoundEnrichment?.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title))
     : undefined;
-  if (founderProfile?.name.trim() && evidence.companyEnrichment) {
+  if (founderProfile?.name.trim() && domainBoundEnrichment) {
     const prior = founderProfile.priorCompanies.filter(Boolean).slice(0, 3).join(", ");
     projected.push(makeFact(
       evidence,
       "founder",
       founderProfile.name.trim(),
       [source({
-        url: founderProfile.linkedin || evidence.companyEnrichment.sourceUrl,
+        url: founderProfile.linkedin || domainBoundEnrichment.sourceUrl,
         title: founderProfile.linkedin ? "LinkedIn (Monid/Akta management record)" : "Monid/Akta management record",
-        excerpt: `${founderProfile.name} is ${founderProfile.title} of ${evidence.companyEnrichment.name}${prior ? `; previously at ${prior}` : ""}${founderProfile.startYear ? ` (since ${founderProfile.startYear})` : ""}.`,
-        capturedAt: evidence.companyEnrichment.capturedAt,
+        excerpt: `${founderProfile.name} is ${founderProfile.title} of ${domainBoundEnrichment.name}${prior ? `; previously at ${prior}` : ""}${founderProfile.startYear ? ` (since ${founderProfile.startYear})` : ""}.`,
+        capturedAt: domainBoundEnrichment.capturedAt,
         provider: "monid",
         sourceClass: "other_public",
       })],

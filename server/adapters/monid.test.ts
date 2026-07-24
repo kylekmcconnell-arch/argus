@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { collectCompanyEnrichment, describeCompanyEnrichment, enrichPersonViaMonid } from "./monid";
+import {
+  collectCompanyEnrichment,
+  collectProjectCompanyEnrichment,
+  companyEnrichmentMatchesOfficialDomain,
+  describeCompanyEnrichment,
+  enrichPersonViaMonid,
+} from "./monid";
 
 const KEY = "MONID_API_KEY";
 let savedKey: string | undefined;
@@ -207,8 +213,129 @@ describe("collectCompanyEnrichment", () => {
     if (!out.available) throw new Error("expected available");
     expect(out.value.uuid).toBe("supergemma-uuid");
     expect(out.value.identityMatch).toBe("official_domain");
+    expect(out.value.requestedDomain).toBe("supergemma.ai");
+    expect(out.value.matchedDomain).toBe("supergemma.ai");
+    expect(out.value.matchMethod).toBe("exact_host");
     expect(out.value.sourceUrl).toBe("https://supergemma.ai");
     expect(selectedCompany).toBe("supergemma-uuid");
+  });
+
+  it("refuses a project lookup that supplies only a company name", async () => {
+    let calls = 0;
+    const fetcher = (() => {
+      calls += 1;
+      return Promise.resolve(jsonResponse(searchCompleted([])));
+    }) as unknown as typeof fetch;
+
+    const out = await collectProjectCompanyEnrichment("Drift Protocol", { fetcher });
+
+    expect(out.available).toBe(false);
+    if (out.available) throw new Error("expected unavailable");
+    expect(out.reason).toBe("no_match");
+    expect(out.note).toContain("official website domain");
+    expect(calls).toBe(0);
+  });
+
+  it("rejects an attacker-controlled host that merely contains the official domain", async () => {
+    let enrichmentCalls = 0;
+    const fetcher = ((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { endpoint?: string };
+      if (body.endpoint === "/v1/company/search") {
+        return Promise.resolve(jsonResponse(searchCompleted([
+          { uuid: "wrong-drift", name: "Drift Protocol", website: "drift.trade.evil.com" },
+        ])));
+      }
+      if (body.endpoint === "/v1/company/enrichment") enrichmentCalls += 1;
+      return Promise.resolve(jsonResponse(enrichmentCompleted({})));
+    }) as unknown as typeof fetch;
+
+    const out = await collectProjectCompanyEnrichment("https://drift.trade", { fetcher });
+
+    expect(out.available).toBe(false);
+    if (out.available) throw new Error("expected unavailable");
+    expect(out.reason).toBe("no_match");
+    expect(enrichmentCalls).toBe(0);
+  });
+
+  it("accepts the official root domain for an official app subdomain", async () => {
+    const out = await collectProjectCompanyEnrichment("https://app.drift.trade", {
+      officialName: "Drift Protocol",
+      fetcher: runFetcher({
+        search: searchCompleted([
+          { uuid: "drift-protocol", name: "Drift Protocol", website: "drift.trade" },
+        ]),
+        enrichment: enrichmentCompleted({ firmographic: { legal_name: "Drift Foundation" } }),
+      }),
+    });
+
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.identityMatch).toBe("official_domain");
+    expect(out.value.requestedDomain).toBe("app.drift.trade");
+    expect(out.value.matchedDomain).toBe("drift.trade");
+    expect(out.value.matchMethod).toBe("parent_or_subdomain");
+    expect(companyEnrichmentMatchesOfficialDomain(out.value, "https://app.drift.trade")).toBe(true);
+  });
+
+  it("fails closed when two Monid companies tie on the same official domain", async () => {
+    let enrichmentCalls = 0;
+    const fetcher = ((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { endpoint?: string };
+      if (body.endpoint === "/v1/company/search") {
+        return Promise.resolve(jsonResponse(searchCompleted([
+          { uuid: "drift-one", name: "Drift Labs", website: "drift.trade" },
+          { uuid: "drift-two", name: "Drift Holdings", website: "drift.trade" },
+        ])));
+      }
+      if (body.endpoint === "/v1/company/enrichment") enrichmentCalls += 1;
+      return Promise.resolve(jsonResponse(enrichmentCompleted({})));
+    }) as unknown as typeof fetch;
+
+    const out = await collectProjectCompanyEnrichment("https://drift.trade", { fetcher });
+
+    expect(out.available).toBe(false);
+    if (out.available) throw new Error("expected unavailable");
+    expect(out.reason).toBe("no_match");
+    expect(out.note).toContain("multiple equally strong companies");
+    expect(enrichmentCalls).toBe(0);
+  });
+
+  it("uses the verified project name only to break a same-domain tie", async () => {
+    let selectedCompany = "";
+    const fetcher = ((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        endpoint?: string;
+        input?: { queryParams?: { company?: string } };
+      };
+      if (body.endpoint === "/v1/company/search") {
+        return Promise.resolve(jsonResponse(searchCompleted([
+          { uuid: "drift-holdings", name: "Drift Holdings", website: "drift.trade" },
+          { uuid: "drift-protocol", name: "Drift Protocol", website: "drift.trade" },
+        ])));
+      }
+      if (body.endpoint === "/v1/company/enrichment") {
+        selectedCompany = body.input?.queryParams?.company ?? "";
+        return Promise.resolve(jsonResponse(enrichmentCompleted({})));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }) as unknown as typeof fetch;
+
+    const out = await collectProjectCompanyEnrichment("https://drift.trade", {
+      officialName: "Drift Protocol",
+      fetcher,
+    });
+
+    expect(out.available).toBe(true);
+    expect(selectedCompany).toBe("drift-protocol");
+  });
+
+  it("does not trust an official-domain flag when the stored domains disagree", () => {
+    expect(companyEnrichmentMatchesOfficialDomain({
+      identityMatch: "official_domain",
+      requestedDomain: "drift.trade",
+      matchedDomain: "drifthair.com",
+      sourceUrl: "https://drifthair.com",
+    }, "https://drift.trade")).toBe(false);
   });
 
   it("reports reason:'no_match' when search returns no companies", async () => {

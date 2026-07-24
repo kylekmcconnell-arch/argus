@@ -333,6 +333,12 @@ export interface CompanyEnrichmentSnapshot {
   name: string;
   uuid: string;
   identityMatch?: "official_domain" | "name_only";
+  /** Official project/venture domain ARGUS asked Monid to resolve. */
+  requestedDomain?: string;
+  /** Website domain carried by the selected Monid company record. */
+  matchedDomain?: string;
+  /** Deterministic rule that selected the company before paid enrichment. */
+  matchMethod?: "exact_host" | "parent_or_subdomain" | "exact_name" | "domain_label";
   funding?: {
     totalRaisedUsd: number | null;
     rounds: Array<{

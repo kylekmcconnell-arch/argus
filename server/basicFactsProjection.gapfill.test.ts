@@ -9,7 +9,7 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
   const projectEvidence = () => {
     const evidence = emptyEvidence("@aavetest");
     evidence.roles = [SubjectClass.PROJECT];
-    evidence.profile = { ...evidence.profile, display_name: "Aave" };
+    evidence.profile = { ...evidence.profile, display_name: "Aave", website: "https://aave.com" };
     return evidence;
   };
 
@@ -61,6 +61,9 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
       name: "Aave",
       uuid: "00005d7",
       identityMatch: "official_domain",
+      requestedDomain: "aave.com",
+      matchedDomain: "aave.com",
+      matchMethod: "exact_host",
       funding: {
         totalRaisedUsd: 49_000_000,
         rounds: [{ date: "2020-10-12", round: "Strategic", amountUsd: 25_000_000, leadInvestors: ["Blockchain Capital"], otherInvestors: [] }],
@@ -68,7 +71,7 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
       },
       management: [{ name: "Stani Kulechov", title: "CEO and Founder", priorCompanies: ["ETHLend"], linkedin: "https://www.linkedin.com/in/stani-kulechov", startYear: "2017" }],
       firmographic: { legalName: "Aave Labs", foundedYear: "2020", headcountRange: "101-250", ownership: "Venture Growth Investor Backed" },
-      sourceUrl: "https://akta.pro/company/00005d7",
+      sourceUrl: "https://aave.com",
       capturedAt: "2026-07-14T00:00:00.000Z",
     };
     projectProviderBackedBasicFacts(evidence);
@@ -78,20 +81,23 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     expect(funding?.value).toContain("$49.0M");
   });
 
-  it("mints a venture-scoped funding fact for a FOUNDER from the company record", () => {
+  it("mints a venture-scoped funding fact for a FOUNDER from a domain-bound company record", () => {
     const evidence = emptyEvidence("@stanitest");
     evidence.roles = [SubjectClass.FOUNDER];
     evidence.profile = { ...evidence.profile, display_name: "Stani" };
     evidence.companyEnrichment = {
       name: "Aave",
       uuid: "00005d7",
-      identityMatch: "name_only",
+      identityMatch: "official_domain",
+      requestedDomain: "aave.com",
+      matchedDomain: "aave.com",
+      matchMethod: "exact_host",
       funding: {
         totalRaisedUsd: 49_000_000,
         rounds: [{ date: "2020-10-12", round: "Strategic", amountUsd: 25_000_000, leadInvestors: ["Blockchain Capital"], otherInvestors: [] }],
         leadInvestors: ["Blockchain Capital"],
       },
-      sourceUrl: "https://akta.pro/company/00005d7",
+      sourceUrl: "https://aave.com",
       capturedAt: "2026-07-14T00:00:00.000Z",
     };
     projectProviderBackedBasicFacts(evidence);
@@ -103,6 +109,27 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     expect(funding?.qualifier).toBe("venture financing");
     expect(funding?.value).toContain("$49.0M disclosed");
     expect(funding?.floorEligible).toBe(false);
+  });
+
+  it("rejects Monid funding from a name-only venture match", () => {
+    const evidence = emptyEvidence("@stanitest");
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.companyEnrichment = {
+      name: "Aave",
+      uuid: "wrong-name-match",
+      identityMatch: "name_only",
+      funding: {
+        totalRaisedUsd: 49_000_000,
+        rounds: [{ date: "2020-10-12", round: "Strategic", amountUsd: 25_000_000, leadInvestors: ["Blockchain Capital"], otherInvestors: [] }],
+        leadInvestors: ["Blockchain Capital"],
+      },
+      sourceUrl: "https://unrelated.example",
+      capturedAt: "2026-07-14T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "funding")).toBe(false);
   });
 
   it("does not add an aggregator summary beside stronger funding evidence", () => {

@@ -8401,25 +8401,131 @@ function domainLabel(value) {
   if (!host || !host.includes(".")) return "";
   return normalizedCompanyName(host.split(".")[0]);
 }
-function pickBestMatch(companies, query) {
+function relatedOfficialHosts(expected, candidate) {
+  if (expected === candidate) return "exact_host";
+  if (expected.endsWith(`.${candidate}`) || candidate.endsWith(`.${expected}`)) {
+    return "parent_or_subdomain";
+  }
+  return null;
+}
+function logCompanyResolution(event, details) {
+  if (process.env.NODE_ENV === "test") return;
+  console.info("[monid.company_resolution]", JSON.stringify({ event, ...details }));
+}
+function pickBestMatch(companies, query, options) {
   const valid = companies.filter((company) => isNonEmptyString(company?.uuid));
-  if (!valid.length) return null;
   const queryHost = hostOf(query);
   const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
   const queryName = normalizedCompanyName(query);
-  if (queryLooksLikeHost) {
-    const byWebsite = valid.find((company) => hostOf(company?.website) === queryHost);
-    if (byWebsite) return byWebsite;
+  const officialName = normalizedCompanyName(options.officialName);
+  const domainOnly = options.identityPolicy === "official_domain_only";
+  if (domainOnly && !queryLooksLikeHost) {
+    return {
+      company: null,
+      reason: "official_domain_required",
+      requestedDomain: null,
+      candidateCount: valid.length
+    };
   }
-  const byName = valid.find(
+  if (!valid.length) {
+    return {
+      company: null,
+      reason: "no_match",
+      requestedDomain: queryLooksLikeHost ? queryHost : null,
+      candidateCount: 0
+    };
+  }
+  if (queryLooksLikeHost) {
+    const ranked = valid.flatMap((company) => {
+      const matchedDomain = hostOf(company?.website);
+      const method = matchedDomain ? relatedOfficialHosts(queryHost, matchedDomain) : null;
+      if (!method) return [];
+      const exactName = officialName && normalizedCompanyName(company?.name) === officialName;
+      return [{
+        company,
+        method,
+        matchedDomain,
+        score: (method === "exact_host" ? 100 : 80) + (exactName ? 10 : 0)
+      }];
+    }).sort((a, b) => b.score - a.score);
+    if (!ranked.length) {
+      return {
+        company: null,
+        reason: "no_match",
+        requestedDomain: queryHost,
+        candidateCount: valid.length
+      };
+    }
+    if (ranked.length > 1 && ranked[0].score === ranked[1].score) {
+      return {
+        company: null,
+        reason: "ambiguous",
+        requestedDomain: queryHost,
+        candidateCount: valid.length
+      };
+    }
+    return {
+      company: ranked[0].company,
+      method: ranked[0].method,
+      requestedDomain: queryHost,
+      matchedDomain: ranked[0].matchedDomain,
+      candidateCount: valid.length
+    };
+  }
+  const exactNameMatches = valid.filter(
     (company) => normalizedCompanyName(company?.name) === queryName
   );
-  if (byName) return byName;
-  if (!queryLooksLikeHost && queryName) {
-    const byWebsiteLabel = valid.find((company) => domainLabel(company?.website) === queryName);
-    if (byWebsiteLabel) return byWebsiteLabel;
+  if (exactNameMatches.length === 1) {
+    const company = exactNameMatches[0];
+    return {
+      company,
+      method: "exact_name",
+      requestedDomain: null,
+      matchedDomain: hostOf(company?.website),
+      candidateCount: valid.length
+    };
   }
-  return null;
+  if (exactNameMatches.length > 1) {
+    return {
+      company: null,
+      reason: "ambiguous",
+      requestedDomain: null,
+      candidateCount: valid.length
+    };
+  }
+  if (queryName) {
+    const labelMatches = valid.filter((company) => domainLabel(company?.website) === queryName);
+    if (labelMatches.length === 1) {
+      const company = labelMatches[0];
+      return {
+        company,
+        method: "domain_label",
+        requestedDomain: null,
+        matchedDomain: hostOf(company?.website),
+        candidateCount: valid.length
+      };
+    }
+    if (labelMatches.length > 1) {
+      return {
+        company: null,
+        reason: "ambiguous",
+        requestedDomain: null,
+        candidateCount: valid.length
+      };
+    }
+  }
+  return {
+    company: null,
+    reason: "no_match",
+    requestedDomain: null,
+    candidateCount: valid.length
+  };
+}
+function companyEnrichmentMatchesOfficialDomain(enrichment, officialWebsite) {
+  if (enrichment.identityMatch !== "official_domain") return false;
+  const expected = hostOf(officialWebsite) ?? hostOf(enrichment.requestedDomain);
+  const matched = hostOf(enrichment.matchedDomain) ?? hostOf(enrichment.sourceUrl);
+  return Boolean(expected && matched && relatedOfficialHosts(expected, matched));
 }
 function formatAktaDate(value) {
   if (!value || typeof value !== "object") return null;
@@ -8507,6 +8613,20 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
   if (!query) {
     return { available: false, reason: "no_match", note: "No company name or website supplied." };
   }
+  if (options.identityPolicy === "official_domain_only") {
+    const requestedDomain = hostOf(query);
+    if (!requestedDomain?.includes(".") || requestedDomain.includes(" ")) {
+      logCompanyResolution("rejected", {
+        reason: "official_domain_required",
+        queryType: "name"
+      });
+      return {
+        available: false,
+        reason: "no_match",
+        note: "Monid project resolution requires an official website domain."
+      };
+    }
+  }
   const fetcher = options.fetcher ?? fetch;
   const sections = normalizeSections(options.sections);
   const search = await startRun(
@@ -8517,12 +8637,32 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
   );
   if (!search.ok) {
     recordCall("monid", "company/search", 0, `search \xB7 ${search.note}`, "failed");
+    logCompanyResolution("provider_error", {
+      stage: "search",
+      queryDomain: hostOf(query),
+      note: search.note
+    });
     return { available: false, reason: "unavailable", note: search.note };
   }
   const companies = companyList(search.data);
-  const chosen = pickBestMatch(companies, query);
+  const decision = pickBestMatch(companies, query, options);
+  if ("reason" in decision) {
+    recordCall("monid", "company/search", 0, `search \xB7 ${decision.reason}`, "succeeded");
+    logCompanyResolution("rejected", {
+      reason: decision.reason,
+      queryDomain: decision.requestedDomain,
+      candidateCount: decision.candidateCount,
+      candidateDomains: companies.map((company) => hostOf(company?.website)).filter((domain) => Boolean(domain)).slice(0, 10)
+    });
+    return {
+      available: false,
+      reason: "no_match",
+      note: decision.reason === "ambiguous" ? `Monid/Akta returned multiple equally strong companies for "${query}"; none was trusted.` : `No Monid/Akta company matched "${query}".`
+    };
+  }
+  const chosen = decision.company;
   const uuid = isNonEmptyString(chosen?.uuid) ? chosen.uuid.trim() : "";
-  if (!chosen || !uuid) {
+  if (!uuid) {
     recordCall("monid", "company/search", 0, "search \xB7 no_match", "succeeded");
     return {
       available: false,
@@ -8531,6 +8671,15 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
     };
   }
   recordCall("monid", "company/search", 0, `search \xB7 matched ${uuid}`, "succeeded");
+  logCompanyResolution("matched", {
+    queryDomain: decision.requestedDomain,
+    selectedDomain: decision.matchedDomain,
+    selectedUuid: uuid,
+    selectedName: isNonEmptyString(chosen?.name) ? chosen.name.trim() : null,
+    officialName: isNonEmptyString(options.officialName) ? options.officialName.trim() : null,
+    matchMethod: decision.method,
+    candidateCount: decision.candidateCount
+  });
   const enrichment = await startRun(
     key,
     "/v1/company/enrichment",
@@ -8540,6 +8689,13 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
   const sectionMeta = `enrichment \xB7 ${sections.length} section(s) \xB7 ${uuid}`;
   if (!enrichment.ok) {
     recordCall("monid", "company/enrichment", 0, `${sectionMeta} \xB7 ${enrichment.note}`, "failed");
+    logCompanyResolution("provider_error", {
+      stage: "enrichment",
+      queryDomain: decision.requestedDomain,
+      selectedDomain: decision.matchedDomain,
+      selectedUuid: uuid,
+      note: enrichment.note
+    });
     return { available: false, reason: "unavailable", note: enrichment.note };
   }
   recordCall("monid", "company/enrichment", sections.length * PER_SECTION_USD, sectionMeta, "succeeded");
@@ -8548,21 +8704,28 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
   const management = sections.includes("management_profile") ? parseManagement(root.management_profile) : void 0;
   const firmographic = sections.includes("firmographic") ? parseFirmographic(root.firmographic) : void 0;
   const name = isNonEmptyString(chosen.name) ? chosen.name.trim() : firmographic?.legalName ?? query;
-  const queryHost = hostOf(query);
-  const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
-  const identityMatch = queryLooksLikeHost && hostOf(chosen.website) === queryHost ? "official_domain" : "name_only";
+  const identityMatch = decision.method === "exact_host" || decision.method === "parent_or_subdomain" ? "official_domain" : "name_only";
   return {
     available: true,
     value: {
       name,
       uuid,
       identityMatch,
+      ...decision.requestedDomain ? { requestedDomain: decision.requestedDomain } : {},
+      ...decision.matchedDomain ? { matchedDomain: decision.matchedDomain } : {},
+      matchMethod: decision.method,
       ...funding ? { funding } : {},
       ...management ? { management } : {},
       ...firmographic ? { firmographic } : {},
       sourceUrl: websiteUrl(chosen.website) ?? "https://monid.ai"
     }
   };
+}
+function collectProjectCompanyEnrichment(officialWebsite, options = {}) {
+  return collectCompanyEnrichment(officialWebsite, {
+    ...options,
+    identityPolicy: "official_domain_only"
+  });
 }
 async function startRunFor(provider, key, endpoint, input, fetcher) {
   let res;
@@ -17863,7 +18026,9 @@ function projectProviderBackedBasicFacts(evidence) {
   }
   const isProject = evidence.roles.includes("PROJECT" /* PROJECT */);
   const isFounderSubject = evidence.roles.includes("FOUNDER" /* FOUNDER */);
-  const enrichmentRecord = evidence.companyEnrichment?.funding && evidence.companyEnrichment.funding.rounds.length ? evidence.companyEnrichment : void 0;
+  const enrichmentOfficialWebsite = isProject ? evidence.projectToken?.homepage ?? evidence.profile.website : evidence.companyEnrichment?.requestedDomain;
+  const domainBoundEnrichment = evidence.companyEnrichment && companyEnrichmentMatchesOfficialDomain(evidence.companyEnrichment, enrichmentOfficialWebsite) ? evidence.companyEnrichment : void 0;
+  const enrichmentRecord = domainBoundEnrichment?.funding && domainBoundEnrichment.funding.rounds.length ? domainBoundEnrichment : void 0;
   const hasStrongerFundingFact = (evidence.basicFacts ?? []).some((fact) => fact.predicate === "funding" && fact.providerProjection !== true && (fact.status === "verified" || fact.status === "corroborated") && fact.sources.some((candidate) => candidate.artifactVerified === true && candidate.provider !== "defillama" && candidate.provider !== "monid" && candidate.relation === "supports"));
   const fundingFact = !hasStrongerFundingFact && isProject && evidence.protocolFunding && evidence.protocolFunding.rounds.length ? {
     rounds: evidence.protocolFunding.rounds.length,
@@ -18129,18 +18294,18 @@ function projectProviderBackedBasicFacts(evidence) {
       `canonical token of ${ventureToken.ventureName}`
     ));
   }
-  const founderProfile = isProject && evidence.companyEnrichment?.identityMatch === "official_domain" ? evidence.companyEnrichment.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title)) : void 0;
-  if (founderProfile?.name.trim() && evidence.companyEnrichment) {
+  const founderProfile = isProject ? domainBoundEnrichment?.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title)) : void 0;
+  if (founderProfile?.name.trim() && domainBoundEnrichment) {
     const prior = founderProfile.priorCompanies.filter(Boolean).slice(0, 3).join(", ");
     projected.push(makeFact(
       evidence,
       "founder",
       founderProfile.name.trim(),
       [source({
-        url: founderProfile.linkedin || evidence.companyEnrichment.sourceUrl,
+        url: founderProfile.linkedin || domainBoundEnrichment.sourceUrl,
         title: founderProfile.linkedin ? "LinkedIn (Monid/Akta management record)" : "Monid/Akta management record",
-        excerpt: `${founderProfile.name} is ${founderProfile.title} of ${evidence.companyEnrichment.name}${prior ? `; previously at ${prior}` : ""}${founderProfile.startYear ? ` (since ${founderProfile.startYear})` : ""}.`,
-        capturedAt: evidence.companyEnrichment.capturedAt,
+        excerpt: `${founderProfile.name} is ${founderProfile.title} of ${domainBoundEnrichment.name}${prior ? `; previously at ${prior}` : ""}${founderProfile.startYear ? ` (since ${founderProfile.startYear})` : ""}.`,
+        capturedAt: domainBoundEnrichment.capturedAt,
         provider: "monid",
         sourceClass: "other_public"
       })],
@@ -20407,19 +20572,21 @@ function downgradeFixtureEvidenceForLive(seed) {
   };
 }
 function mergeManagementIntoWebTeam(evidence, emit) {
-  if (evidence.companyEnrichment?.identityMatch !== "official_domain") {
+  const enrichment = evidence.companyEnrichment;
+  const officialWebsite = evidence.projectToken?.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? enrichment?.requestedDomain;
+  if (!enrichment || !companyEnrichmentMatchesOfficialDomain(enrichment, officialWebsite)) {
     if (evidence.companyEnrichment?.management?.length) {
       emit({
         phase: "Team",
         label: "Leadership match rejected",
-        detail: `Monid matched ${evidence.companyEnrichment.name} by name only. Its people were excluded because the provider website did not match the project's official website.`,
+        detail: `Monid returned ${evidence.companyEnrichment.name}, but its company website did not match the project's verified official domain. Its people were excluded.`,
         source: "monid",
         tone: "warn"
       });
     }
     return;
   }
-  const management = evidence.companyEnrichment?.management ?? [];
+  const management = enrichment.management ?? [];
   if (!management.length) return;
   const webTeam = evidence.webTeam ?? (evidence.webTeam = []);
   const norm3 = (value) => (value ?? "").trim().toLowerCase().replace(/^@/, "");
@@ -20449,7 +20616,7 @@ function mergeManagementIntoWebTeam(evidence, emit) {
       linkedin: person.linkedin ?? void 0,
       evidence: person.priorCompanies?.length ? `prior: ${person.priorCompanies.slice(0, 3).join(", ")}` : void 0,
       source: "Monid/Akta leadership record",
-      sourceUrl: evidence.companyEnrichment.sourceUrl,
+      sourceUrl: enrichment.sourceUrl,
       evidence_origin: "deterministic",
       artifact_verified: true,
       provider: "monid",
@@ -20647,12 +20814,13 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           const companyLookup = evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
           if (companyLookup) {
             const enrichment = await withWallClockBox(
-              collectCompanyEnrichment(companyLookup, {
-                sections: ["funding_detail", "management_profile", "firmographic"]
+              collectProjectCompanyEnrichment(companyLookup, {
+                sections: ["funding_detail", "management_profile", "firmographic"],
+                officialName: projectName2
               }),
               MONID_ENRICHMENT_BUDGET_MS
             );
-            if (enrichment?.available) {
+            if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, companyLookup)) {
               evidence.companyEnrichment = { ...enrichment.value, capturedAt };
               mergeManagementIntoWebTeam(evidence, emit);
             }
@@ -20785,12 +20953,13 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   if (!fixture && recoveredCompanyLookup && rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */) && evidence.companyEnrichment?.identityMatch !== "official_domain") {
     try {
       const enrichment = await withWallClockBox(
-        collectCompanyEnrichment(recoveredCompanyLookup, {
-          sections: ["funding_detail", "management_profile", "firmographic"]
+        collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+          sections: ["funding_detail", "management_profile", "firmographic"],
+          officialName: evidence.profile.resolved_name ?? evidence.profile.display_name
         }),
         MONID_ENRICHMENT_BUDGET_MS
       );
-      if (enrichment?.available && enrichment.value.identityMatch === "official_domain") {
+      if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
         evidence.companyEnrichment = { ...enrichment.value, capturedAt: (/* @__PURE__ */ new Date()).toISOString() };
         mergeManagementIntoWebTeam(evidence, emit);
       }
@@ -20809,13 +20978,14 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     });
     if (primaryVenture) {
       try {
-        const enrichment = await withWallClockBox(
-          collectCompanyEnrichment(primaryVenture.domain ?? primaryVenture.project_name.trim(), {
-            sections: ["funding_detail", "firmographic"]
+        const enrichment = primaryVenture.domain ? await withWallClockBox(
+          collectProjectCompanyEnrichment(primaryVenture.domain, {
+            sections: ["funding_detail", "firmographic"],
+            officialName: primaryVenture.project_name.trim()
           }),
           MONID_ENRICHMENT_BUDGET_MS
-        );
-        if (enrichment?.available) {
+        ) : null;
+        if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, primaryVenture.domain)) {
           evidence.companyEnrichment = { ...enrichment.value, capturedAt: (/* @__PURE__ */ new Date()).toISOString() };
         }
       } catch (error) {
