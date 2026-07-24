@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence, type BasicFact, type BasicFactPredicate } from "../src/data/evidence";
 import { SubjectClass } from "../src/engine";
 import type { CheckObservation, CollectContext } from "./adapters/types";
-import { collectProjectCoreEvidenceOutcomes, recordProjectTokenDrawdownFinding, tokenLifecycle } from "./orchestrate";
+import {
+  collectProjectCoreEvidenceOutcomes,
+  projectVerifiedBasicFacts,
+  recordProjectTokenDrawdownFinding,
+  tokenLifecycle,
+} from "./orchestrate";
 
 function context() {
   const evidence = emptyEvidence("@project");
@@ -124,7 +129,7 @@ describe("project core evidence outcomes", () => {
     }));
     expect(outcomes).toContainEqual(expect.objectContaining({
       id: "project-transparency",
-      status: "unavailable",
+      status: "finding",
       provider: "project-disclosure-collector",
     }));
   });
@@ -234,7 +239,7 @@ describe("project core evidence outcomes", () => {
 
     expect(outcomes).toContainEqual(expect.objectContaining({
       id: "project-transparency",
-      status: "unavailable",
+      status: "finding",
     }));
     expect(outcomes).not.toContainEqual(expect.objectContaining({
       id: "project-transparency",
@@ -252,6 +257,56 @@ describe("project core evidence outcomes", () => {
       status: "checked-empty",
       provider: "basic-facts-web",
       note: expect.stringContaining("explicit no-match"),
+    }));
+  });
+
+  it("separates a confirmed project brand from a completed no-team finding", () => {
+    const { ctx, evidence, outcomes } = context();
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.website = "https://project.example/";
+    evidence.profile.site_substance_status = "live";
+    evidence.basicFacts = [
+      verifiedFact("official_identity"),
+      verifiedFact("product"),
+    ];
+    evidence.basicFactQuestionLedger = [
+      {
+        questionId: "project.founder",
+        audience: "project",
+        batch: "identity",
+        predicate: "founder",
+        question: "Who founded it?",
+        critical: true,
+        status: "unanswered",
+        answerRefs: [],
+        providerRuns: [{ phase: "repair", provider: "test", state: "completed_empty" }],
+      },
+      {
+        questionId: "project.executive",
+        audience: "project",
+        batch: "identity",
+        predicate: "executive",
+        question: "Who operates it?",
+        critical: true,
+        status: "unanswered",
+        answerRefs: [],
+        providerRuns: [{ phase: "repair", provider: "test", state: "succeeded" }],
+      },
+    ];
+
+    projectVerifiedBasicFacts(ctx);
+
+    expect(evidence.profile.identity_confidence).toBe("Confirmed");
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: expect.stringContaining("operator identity remains a separate team finding"),
+    }));
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      id: "project-team-identity",
+      status: "finding",
+      note: expect.stringContaining("no named operator passed source verification"),
     }));
   });
 

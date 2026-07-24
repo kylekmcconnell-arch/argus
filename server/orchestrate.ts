@@ -1270,6 +1270,42 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
   );
   if (!facts.length) return;
 
+  const brandIdentity = facts.find((fact) =>
+    fact.predicate === "official_identity"
+    && fact.sources.some((source) => source.sourceClass === "official_subject"));
+  const officialWebsite = canonicalOfficialWebsite(ctx.evidence.profile.website);
+  const officialWebsiteSources = officialWebsite
+    ? facts.flatMap((fact) => fact.sources).filter((source) => {
+      if (source.sourceClass !== "official_subject") return false;
+      try {
+        const host = new URL(source.url).hostname.replace(/^www\./, "").toLowerCase();
+        return host === officialWebsite.domain || host.endsWith(`.${officialWebsite.domain}`);
+      } catch {
+        return false;
+      }
+    })
+    : [];
+  if (
+    brandIdentity
+    && officialWebsite
+    && ctx.evidence.profile.profile_collection_state === "resolved"
+    && ctx.evidence.profile.profile_provider === "twitterapi"
+    && (
+      ctx.evidence.profile.site_substance_status === "live"
+      || officialWebsiteSources.length > 0
+    )
+    && ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation"
+  ) {
+    ctx.evidence.profile.identity_confidence = "Confirmed";
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `project brand identity confirmed by the provider-resolved official X account and live official site ${officialWebsite.domain}; operator identity remains a separate team finding`,
+      provider: "twitterapi/basic-facts-web/site-fetch",
+      sourceCount: brandIdentity.sources.length + Math.max(1, officialWebsiteSources.length),
+    });
+  }
+
   const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const normHandle = (value: string) => value.trim().replace(/^@/, "").toLowerCase();
   const subjectHandle = normHandle(ctx.handle);
@@ -1362,6 +1398,23 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
       provider: "basic-facts-web",
       sourceCount: peopleSourceCount,
     });
+  } else {
+    const teamPredicates = ["founder", "executive"] as const;
+    const teamSearchCompleted = teamPredicates.every((predicate) =>
+      (ctx.evidence.basicFactQuestionLedger ?? []).some((entry) =>
+        entry.audience === "project"
+        && entry.predicate === predicate
+        && entry.status === "unanswered"
+        && entry.providerRuns.some((run) =>
+          run.state === "succeeded" || run.state === "completed_empty")));
+    if (teamSearchCompleted) {
+      ctx.recordCheck?.({
+        id: "project-team-identity",
+        status: "finding",
+        note: "bounded founder and executive searches completed against the official project record, but no named operator passed source verification; the project brand is verified separately",
+        provider: "basic-facts-web",
+      });
+    }
   }
 
   const products = facts.filter((fact) => fact.predicate === "product");
@@ -1685,14 +1738,24 @@ export function collectProjectCoreEvidenceOutcomes(
       note: "bounded disclosure search completed with an explicit no-match; no source-linked legal, governance, token-economic, repository, or security disclosure candidate was returned",
       provider: "basic-facts-web",
     });
+  } else if (
+    (ctx.evidence.basicFacts ?? []).length > 0
+    || (ctx.evidence.webTeam ?? []).length > 0
+    || ctx.evidence.profile.site_substance_status === "live"
+  ) {
+    ctx.recordCheck?.({
+      id: "project-transparency",
+      status: "finding",
+      note: "bounded disclosure verification completed against the fetched project record, but no legal, governance, token-economic, repository, or direct audit-report source passed verification; canonical token identity alone does not establish transparency",
+      provider: "project-disclosure-collector",
+    });
   } else {
-    // Canonical token identity is not a transparency attestation. Without a
-    // verified disclosure or explicit completed-empty search, the path remains
-    // unavailable rather than looking checked.
+    // Canonical token identity alone is not a transparency attestation and does
+    // not prove that a disclosure search had material to inspect.
     ctx.recordCheck?.({
       id: "project-transparency",
       status: "unavailable",
-      note: "no fetched governance or direct audit-report source passed verification; canonical token identity alone does not establish transparency",
+      note: "no fetched project record was available for bounded disclosure verification; canonical token identity alone does not establish transparency",
       provider: "project-disclosure-collector",
     });
   }
