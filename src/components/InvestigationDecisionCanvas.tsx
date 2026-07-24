@@ -133,13 +133,13 @@ export function InvestigationDecisionCanvas({
   const countervailingItems = favorable ? concerns : supports;
 
   return (
-    <section id="report-summary" className="report-section mt-6 scroll-mt-28">
+    <section id="report-summary" className="story-chapter report-section mt-6 scroll-mt-28">
       <header className="report-section-heading">
         <div>
-          <p className="eyebrow text-signal-lift">01 · Result</p>
-          <h2 className="mt-1 text-[20px] font-semibold tracking-tight text-ink">Why this result</h2>
-          <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-            The strongest evidence, the main concerns, and what still needs checking.
+          <p className="eyebrow text-signal-lift">01 · Short answer</p>
+          <h2 className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">The case in 30 seconds</h2>
+          <p className="story-chapter-description mt-2 max-w-2xl leading-relaxed text-ink-dim">
+            The strongest support, the main concerns, and the most important unanswered questions.
           </p>
         </div>
         <div className="shrink-0 text-left sm:text-right">

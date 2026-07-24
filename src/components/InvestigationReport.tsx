@@ -126,17 +126,19 @@ function ReportSectionHeading({
   index,
   title,
   description,
+  id,
 }: {
   index: string;
   title: string;
   description: string;
+  id?: string;
 }) {
   return (
-    <header className="report-section-heading">
+    <header className="report-section-heading" id={id}>
       <div>
         <p className="eyebrow text-signal-lift">{index}</p>
-        <h2 className="mt-1 text-[18px] font-semibold tracking-tight text-ink">{title}</h2>
-        <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">{description}</p>
+        <h2 className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">{title}</h2>
+        <p className="story-chapter-description mt-2 max-w-2xl leading-relaxed text-ink-dim">{description}</p>
       </div>
     </header>
   );
@@ -611,36 +613,36 @@ export function InvestigationReport({
       : "avoid";
 
   return (
-    <div className="relative min-h-full pb-24">
+    <div className="investigation-story relative min-h-full pb-24">
       <header className="report-toolbar sticky top-0 z-30 border-b backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
           <button onClick={onReset} className="btn-ghost flex min-h-9 items-center gap-1.5 px-1 text-[12.5px]">
             <ArrowLeft size={15} weight="bold" aria-hidden="true" /> New investigation
           </button>
-          <span className="mono text-[11px] text-ink-faint">/ token + project report</span>
-          <span className={`chip ${versionContext ? "" : "tint-signal"}`}>
+          <span className="mono hidden text-[11px] text-ink-faint sm:inline">/ token + project report</span>
+          <span className={`chip ml-auto sm:ml-0 ${versionContext ? "" : "tint-signal"}`}>
             {versionContext ? `saved report v${versionContext.version}` : "new scan"}
           </span>
           <div className="order-3 flex w-full items-center gap-2 sm:order-none sm:ml-auto sm:w-auto sm:justify-end">
             {onOpenBrief && (
-              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact investigation case" className="btn-primary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
+              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact investigation case" className="btn-secondary hidden min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium md:flex">
                 <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
               </button>
             )}
-            <a href="#investigation-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
+            <a href="#investigation-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary flex min-h-10 flex-1 items-center justify-center gap-2 px-3 text-[12.5px] font-medium sm:flex-none">
               <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
             </a>
+            {onReAudit && (
+              <button onClick={onReAudit} title="Run this investigation again with current evidence" className="btn-primary flex min-h-10 flex-1 items-center justify-center gap-2 px-3 text-[12.5px] font-medium sm:flex-none">
+                <ArrowClockwise size={16} weight="duotone" aria-hidden="true" />
+                Rescan
+              </button>
+            )}
             <div className="hidden items-center gap-2 sm:flex">
               {canShare && (
                 <button type="button" onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
                   <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
                   {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
-                </button>
-              )}
-              {onReAudit && readiness.status === "ready" && (
-                <button onClick={onReAudit} title="Run this investigation again with current evidence" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
-                  <ArrowClockwise size={16} weight="duotone" aria-hidden="true" />
-                  Rescan
                 </button>
               )}
               {canMutateWorkspace && (
@@ -650,7 +652,7 @@ export function InvestigationReport({
                 </button>
               )}
             </div>
-            {(canShare || (onReAudit && readiness.status === "ready")) && (
+            {canShare && (
               <details className="group relative ml-auto sm:hidden">
                 <summary
                   aria-label="More report actions"
@@ -664,12 +666,6 @@ export function InvestigationReport({
                     <button type="button" onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" className="flex min-h-10 w-full items-center gap-2 px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink disabled:cursor-wait disabled:opacity-60">
                       <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
                       {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share report"}
-                    </button>
-                  )}
-                  {onReAudit && readiness.status === "ready" && (
-                    <button onClick={onReAudit} className="flex min-h-10 w-full items-center gap-2 px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
-                      <ArrowClockwise size={16} weight="duotone" aria-hidden="true" />
-                      Rescan current evidence
                     </button>
                   )}
                 </div>
@@ -709,7 +705,7 @@ export function InvestigationReport({
         )}
         {showCurrentIntelligence && <RingAlert handle={"$" + token.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
         {/* headline */}
-        <div className="mt-6">
+        <div className="investigation-story-cover mt-6">
           <div className="flex flex-wrap items-end gap-3">
             {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-11 w-11 shrink-0 rounded-xl border border-line object-cover soft-shadow" />}
             <div>
@@ -899,18 +895,17 @@ export function InvestigationReport({
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 
-        <div className="sticky top-[65px] z-20 mt-5">
+        <div className="investigation-story-nav sticky top-[101px] z-20 mt-6 sm:top-[65px]">
           <ReportCanvasSectionNav
             sticky={false}
+            label="Report story"
             items={[
-              { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
-              ...(showProjectBasicFacts ? [{ href: "#investigation-basic-facts" as const, label: "Key facts", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              { href: "#investigation-visuals", label: "Visuals", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#investigation-evidence", label: "Sources", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
-              ...((teamPeople.length > 0 || advisors.length > 0) ? [{ href: "#investigation-team" as const, label: "Team", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              ...(invGraph && invGraph.nodes.length > 1 ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              { href: "#investigation-methodology", label: "Checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#report-summary", label: "The short answer", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#investigation-why", label: "Why", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#investigation-challenge", label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#investigation-methodology", label: "Next checks", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
             ]}
           />
         </div>
@@ -932,36 +927,34 @@ export function InvestigationReport({
           methodologyHref="#investigation-methodology"
         />
 
-        <div className="mt-4">
-          <SecondOpinion
-            id="investigation-challenge"
-            dossier={token}
-            panelCostToken={panelCostToken}
-            onRescan={onReAudit}
+        <div id="investigation-why" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
+          <ReportSectionHeading
+            index="02 · Why"
+            title="Why ARGUS reached this result"
+            description={showProjectBasicFacts
+              ? "Start with the facts we could confirm. Possible leads stay separate so they are not mistaken for proof."
+              : "Start with the saved evidence behind the score. Anything we could not confirm remains clearly marked below."}
           />
-        </div>
-
-        {showProjectBasicFacts && (
-          <div className="report-section mt-7">
-            <ReportSectionHeading
-              index="02 · Core facts"
-              title="What we confirmed about the project"
-              description="Confirmed facts are shown first. Possible leads are kept in a separate list."
-            />
+          {showProjectBasicFacts && (
             <BasicFactsPanel
               id="investigation-basic-facts"
               facts={projectBasicFacts}
               leads={projectBasicFactLeads}
               fillRequired
             />
-          </div>
-        )}
+          )}
+          {!showProjectBasicFacts && (
+            <p className="panel px-4 py-3 text-[13px] leading-relaxed text-ink-dim">
+              No separate project fact sheet was saved with this scan. The source cards below show the evidence ARGUS used.
+            </p>
+          )}
+        </div>
 
-        <div id="investigation-visuals" className="report-section scroll-mt-28 mt-7">
+        <div id="investigation-visuals" className="story-chapter report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
-            index="03 · Charts"
-            title="Market and ownership charts"
-            description="These charts use the data saved with this report. Live updates are labeled separately."
+            index="03 · Market"
+            title="What the market tells us"
+            description="Price, market value, liquidity, ownership, and usage add context to the result. Saved and live figures are labeled separately."
           />
           <div className="mt-3 space-y-3">
             <MarketPerformancePanel
@@ -982,14 +975,13 @@ export function InvestigationReport({
           </div>
         </div>
 
-        <div className="report-section mt-7">
+        <div id="investigation-people" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
-            index="04 · Sources"
-            title="Token, ownership, and team"
-            description="See the token checks and the people publicly tied to the project."
+            index="04 · People"
+            title="Who is behind it"
+            description="See the people publicly tied to the project, the project account, and the wallet that deployed the token."
           />
-        </div>
-        <div id="investigation-evidence" className="scroll-mt-28 mt-3 grid gap-3 lg:grid-cols-2">
+          <div id="investigation-evidence" className="scroll-mt-28 grid gap-3 lg:grid-cols-2">
           {/* on-chain */}
           <Card title="Blockchain data" accent={tm.color}>
             <div className="flex items-center justify-between">
@@ -1100,15 +1092,16 @@ export function InvestigationReport({
               </div>
             )}
           </Card>
+          </div>
         </div>
 
         {/* TEAM — the headline section, merged from every source, each clickable */}
         {(teamPeople.length > 0 || advisors.length > 0) && (
-          <div id="investigation-team" className="report-section scroll-mt-28 mt-7">
+          <div id="investigation-team" className="story-chapter report-section scroll-mt-28 mt-7">
             <ReportSectionHeading
-              index="05 · People"
-              title="Team and named relationships"
-              description="Each person links back to the source that tied them to this project."
+              index="04 · People continued"
+              title="The named team"
+              description="Each person links back to the public source that tied them to this project."
             />
             <Card title="Team · from X content, the site, and web/LinkedIn">
               {teamPeople.length > 0 && (
@@ -1216,10 +1209,10 @@ export function InvestigationReport({
         {/* Connection web: the subject's graph + its ties to everything else you've
             audited — the deeper map, below the team. */}
         {invGraph && invGraph.nodes.length > 1 && (
-          <div id="investigation-relationships" className="report-section scroll-mt-28 mt-7">
+          <div id="investigation-relationships" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
             <ReportSectionHeading
-              index="06 · Relationships"
-              title="How the subjects connect"
+              index="04 · Connections"
+              title="How these people and wallets connect"
               description="The graph shows recorded links. A link by itself does not mean wrongdoing."
             />
             <Card title="Connection web · click any node to open it">
@@ -1271,12 +1264,26 @@ export function InvestigationReport({
           </div>
         )}
 
-        {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
-        <div className="report-section mt-7">
+        <div className="story-chapter report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
-            index="07 · Checks"
-            title="What ARGUS checked"
-            description="See which checks finished, which found a problem, and which are still open."
+            index="05 · Challenge"
+            title="What could change the result"
+            description="Tell ARGUS what looks wrong or missing. We will compare your concern with the evidence saved in this report."
+          />
+          <SecondOpinion
+            id="investigation-challenge"
+            dossier={token}
+            panelCostToken={panelCostToken}
+            onRescan={onReAudit}
+          />
+        </div>
+
+        {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
+        <div className="story-chapter story-chapter-muted report-section mt-7">
+          <ReportSectionHeading
+            index="06 · Next"
+            title="What to verify next"
+            description="See what finished, what found a problem, and what still needs an answer before you rely on this report."
           />
           <MethodologyChecklist id="investigation-methodology" checks={diligenceChecks} />
         </div>

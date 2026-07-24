@@ -244,6 +244,40 @@
   margin-inline: -10px;
   padding: 10px;
 }
+.investigation-story-cover {
+  position: relative;
+  isolation: isolate;
+}
+.investigation-story-cover::before {
+  position: absolute;
+  z-index: -1;
+  inset: -24px -20px -20px;
+  content: "";
+  border-radius: 20px;
+  background:
+    radial-gradient(760px 280px at 8% 0%, color-mix(in oklab, var(--color-signal) 10%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in oklab, var(--color-panel) 70%, transparent), transparent);
+}
+.story-chapter {
+  margin-inline: -20px;
+  padding: 14px 20px 20px;
+  border-radius: 18px;
+}
+.story-chapter-muted {
+  background: color-mix(in oklab, var(--color-panel-2) 42%, transparent);
+}
+.story-chapter-title {
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  line-height: 1.12;
+}
+.story-chapter-description {
+  font-size: 13.5px;
+}
+.investigation-story-nav {
+  overflow: hidden;
+  border-radius: 12px;
+  filter: drop-shadow(0 12px 22px color-mix(in oklab, var(--color-void) 12%, transparent));
+}
 .clearance-boundary {
   border-color: color-mix(in oklab, var(--tint) 34%, var(--color-line));
   background:
@@ -306,6 +340,21 @@
 .report-toolbar {
   border-color: var(--color-line-2);
   background: color-mix(in oklab, var(--color-panel) 94%, transparent);
+  box-shadow: 0 12px 28px -28px color-mix(in oklab, var(--color-ink) 55%, transparent);
+}
+
+@media (max-width: 639px) {
+  .report-toolbar .btn-primary,
+  .report-toolbar .btn-secondary {
+    white-space: nowrap;
+  }
+  .story-chapter {
+    margin-inline: -8px;
+    padding-inline: 8px;
+  }
+  .investigation-story-cover::before {
+    inset-inline: -8px;
+  }
 }
 
 .sidebar-nav-active {
