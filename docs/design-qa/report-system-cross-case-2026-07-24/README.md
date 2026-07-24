@@ -18,8 +18,9 @@ This pass tested saved and rendered reports across people, protocols, tokens, an
 6. Historical snapshots: improved. Upgrade notices now describe checks relevant to the subject type.
 7. Suspended project accounts: improved. A freshly fetched first-party site can recover the project identity only when it names the project and links the exact audited X account.
 8. Canonical token identity: improved. Verified project names now feed the token lookup, while repeated press mentions remain leads until an official account, domain, counterparty, or on-chain record binds the asset.
-9. Research-lead hygiene: improved. Project reports suppress generic namesakes and category errors, and collapse repeated metrics from one article into a single source-level lead.
+9. Research-lead hygiene: improved. Project reports suppress generic namesakes, unbound social results, category errors, and market-cap text misclassified as financing, then collapse repeated metrics from one article into a single source-level lead.
 10. Project null outcomes: improved. Completed team and disclosure searches now record terminal findings instead of leaving legitimate early projects permanently provisional, while operator identity remains separate from verified brand identity.
+11. Analyst null-result semantics: improved. A completed search that found no verified operator no longer trips the named-team contradiction gate, and unverified team-search names are withheld in the live ledger.
 
 ## Before
 
@@ -32,7 +33,7 @@ This pass tested saved and rendered reports across people, protocols, tokens, an
 - `05-brian-readiness-after.png`: readiness, coverage, score, and governing-role language share one clear visual hierarchy while the sidebar retains its full width.
 - `06-world-followups-after.png`: the report keeps the highest-impact follow-ups concise and separates them from the full unresolved-question ledger.
 - Fresh production scans verified Drift Protocol as a project, bound `$DRIFT` through the official X account and Solana contract, restored market and ATH visuals, and published `CAUTION 52` with complete decision coverage.
-- The saved Pons report no longer presents a press-repeated `PONS` ticker as a confirmed official token when no canonical contract or official binding exists.
+- Fresh production scan `PA-6507556704CC469FA570` publishes Pons v8 as decision-ready `CAUTION 42`, with 7 of 7 terminal checks, three verified facts, no canonical-token or named-operator claim, and six source-linked research leads. Unbound social, namesake, audit-null, and market-cap-as-funding rows are withheld.
 
 ## Strengths retained
 
@@ -52,6 +53,6 @@ This pass tested saved and rendered reports across people, protocols, tokens, an
 - Source-of-truth contract: passed
 - Deterministic release canaries: 7 of 7
 - Calibration cases: 19 of 19
-- Test suite: 2,010 of 2,010
+- Test suite: 2,011 of 2,011
 - TypeScript checks: passed
 - Production build: passed
