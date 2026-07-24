@@ -611,7 +611,7 @@ export function InvestigationReport({
 
   return (
     <div className="relative min-h-full pb-24">
-      <header className="sticky top-0 z-30 border-b border-line bg-void/90 backdrop-blur">
+      <header className="report-toolbar sticky top-0 z-30 border-b backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
           <button onClick={onReset} className="btn-ghost flex min-h-9 items-center gap-1.5 px-1 text-[12.5px]">
             <ArrowLeft size={15} weight="bold" aria-hidden="true" /> New investigation

@@ -31,26 +31,28 @@ function contrast(foreground: string, background: string): number {
 const dark = css.slice(css.indexOf("@theme {"), css.indexOf(":root {"));
 const lightStart = css.indexOf('\n:root[data-theme="light"] {') + 1;
 const light = css.slice(lightStart, css.indexOf("@layer base", lightStart));
+const lightSidebarStart = css.indexOf('\n:root[data-theme="light"] .app-sidebar,') + 1;
+const lightSidebar = css.slice(lightSidebarStart, css.indexOf("@layer base", lightSidebarStart));
 
 const DARK_SURFACES = ["void", "panel", "panel-2", "sidebar"] as const;
 const TEXT_TOKENS = ["ink", "ink-dim", "ink-faint", "signal-lift"] as const;
 const SEMANTIC_TOKENS = ["pass", "caution", "fail", "avoid", "unverifiable"] as const;
 
 const LIGHT_PALETTE = {
-  void: "#f7f8fa",
+  void: "#f5f7fa",
   panel: "#ffffff",
-  "panel-2": "#f1f3f6",
-  sidebar: "#f3f5f8",
-  line: "#d9dee7",
-  "line-2": "#b8c2cf",
-  "control-line": "#65748a",
-  ink: "#101828",
-  "ink-dim": "#3f4d63",
-  "ink-faint": "#596a80",
-  signal: "#275ad4",
-  "signal-dim": "#1f49b8",
-  "signal-lift": "#1f49b8",
-  "accent-tint": "#e8eefc",
+  "panel-2": "#eef2f6",
+  sidebar: "#f2f5f9",
+  line: "#d6dde6",
+  "line-2": "#aeb9c8",
+  "control-line": "#66758a",
+  ink: "#0f1728",
+  "ink-dim": "#3e4b61",
+  "ink-faint": "#596980",
+  signal: "#1769e0",
+  "signal-dim": "#1157bd",
+  "signal-lift": "#1458bd",
+  "accent-tint": "#e7f0fe",
   pass: "#147a43",
   caution: "#8a5b06",
   fail: "#b92564",
@@ -110,6 +112,18 @@ describe("ARGUS theme contrast", () => {
         `control-line on ${backgroundName}`,
       ).toBeGreaterThanOrEqual(3);
     }
+  });
+
+  it("keeps the light-mode midnight navigation readable on every rail surface", () => {
+    for (const foregroundName of TEXT_TOKENS) {
+      for (const backgroundName of ["sidebar", "panel", "panel-2"] as const) {
+        expect(
+          contrast(token(lightSidebar, foregroundName), token(lightSidebar, backgroundName)),
+          `${foregroundName} on light-mode sidebar ${backgroundName}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+    expect(contrast(token(lightSidebar, "control-line"), token(lightSidebar, "panel"))).toBeGreaterThanOrEqual(3);
   });
 
   it.each([

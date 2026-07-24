@@ -5,7 +5,7 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#f7f8fa" />
+    <meta name="theme-color" content="#f5f7fa" />
     <script>
       // Apply the validated saved theme before paint. Invalid or unavailable
       // storage always falls back to ARGUS's light default.
@@ -19,7 +19,7 @@
         root.style.colorScheme = theme;
         document.querySelector('meta[name="theme-color"]')?.setAttribute(
           "content",
-          theme === "light" ? "#f7f8fa" : "#06080c",
+          theme === "light" ? "#f5f7fa" : "#06080c",
         );
       })();
     </script>

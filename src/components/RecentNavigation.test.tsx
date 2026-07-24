@@ -102,11 +102,10 @@ describe("Recent report controls", () => {
 
     const activeNav = container.querySelector<HTMLButtonElement>('aside button[aria-current="page"]');
     expect(activeNav).not.toBeNull();
-    expect(activeNav?.className.split(/\s+/)).toContain("bg-panel-2/90");
-    expect(activeNav?.className.split(/\s+/)).not.toContain("bg-signal/[0.09]");
+    expect(activeNav?.className.split(/\s+/)).toContain("sidebar-nav-active");
     const activeRail = activeNav?.querySelector<HTMLElement>('span.absolute[aria-hidden="true"]');
     expect(activeRail).not.toBeNull();
-    expect(activeRail?.className.split(/\s+/)).toEqual(expect.arrayContaining(["inset-y-0", "left-0", "w-[2px]", "bg-signal"]));
+    expect(activeRail?.className.split(/\s+/)).toEqual(expect.arrayContaining(["inset-y-1", "left-0", "w-[2px]", "bg-on-signal/80"]));
 
     const sidebarLink = [...container.querySelectorAll<HTMLAnchorElement>("aside a")]
       .find((link) => link.textContent?.includes("@gakonst") && link.textContent.includes("handle"));

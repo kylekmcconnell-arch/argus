@@ -51,22 +51,22 @@
 /* LIGHT mode — the product default. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-void: #f7f8fa;
+  --color-void: #f5f7fa;
   --color-panel: #ffffff;
-  --color-panel-2: #f1f3f6;
-  --color-sidebar: #f3f5f8;
-  --color-line: #d9dee7;
-  --color-line-2: #b8c2cf;
-  --color-control-line: #65748a;
-  --color-ink: #101828;
-  --color-ink-dim: #3f4d63;
-  --color-ink-faint: #596a80;
+  --color-panel-2: #eef2f6;
+  --color-sidebar: #f2f5f9;
+  --color-line: #d6dde6;
+  --color-line-2: #aeb9c8;
+  --color-control-line: #66758a;
+  --color-ink: #0f1728;
+  --color-ink-dim: #3e4b61;
+  --color-ink-faint: #596980;
 
-  --color-signal: #275ad4;
-  --color-signal-dim: #1f49b8;
-  --color-signal-lift: #1f49b8;
-  --color-accent-tint: #e8eefc;
-  --color-eye-pupil: #101828;
+  --color-signal: #1769e0;
+  --color-signal-dim: #1157bd;
+  --color-signal-lift: #1458bd;
+  --color-accent-tint: #e7f0fe;
+  --color-eye-pupil: #0f1728;
 
   --color-pass: #147a43;
   --color-caution: #8a5b06;
@@ -78,6 +78,35 @@
     0 1px 2px color-mix(in oklab, var(--color-ink) 5%, transparent),
     0 18px 48px -34px color-mix(in oklab, var(--color-ink) 18%, transparent);
   --select: color-mix(in oklab, var(--color-signal) 18%, transparent);
+}
+
+/* Light mode keeps the report bright while the persistent navigation becomes
+   a midnight command rail. Scoped tokens let existing component idioms retain
+   their contrast and behavior without introducing one-off sidebar colors. */
+:root[data-theme="light"] .app-sidebar,
+:root[data-theme="light"] .app-mobile-header {
+  --color-sidebar: #0d1726;
+  --color-panel: #12233a;
+  --color-panel-2: #172a43;
+  --color-line: #2a3a50;
+  --color-line-2: #5a6f8b;
+  --color-control-line: #71829b;
+  --color-ink: #f7f9fc;
+  --color-ink-dim: #c5d0df;
+  --color-ink-faint: #91a1b6;
+  --color-signal: #1769e0;
+  --color-signal-dim: #1157bd;
+  --color-signal-lift: #68b1ff;
+  --color-accent-tint: #153a66;
+  --color-eye-pupil: #0d1726;
+  --color-pass: #43d28a;
+  --color-caution: #f1b24c;
+  --color-fail: #eb78a5;
+  --color-avoid: #ff6b73;
+  --color-unverifiable: #b49cff;
+  --shadow:
+    0 1px 2px color-mix(in oklab, var(--color-eye-pupil) 64%, transparent),
+    0 18px 40px -28px color-mix(in oklab, var(--color-eye-pupil) 88%, transparent);
 }
 
 @layer base {
@@ -180,11 +209,7 @@
 }
 :root[data-theme="light"] .panel {
   border-color: color-mix(in oklab, var(--color-line-2) 38%, var(--color-line));
-  background: linear-gradient(
-    180deg,
-    var(--color-panel) 0%,
-    color-mix(in oklab, var(--color-panel-2) 18%, var(--color-panel)) 100%
-  );
+  background: var(--color-panel);
   box-shadow:
     inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
     0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent),
@@ -211,6 +236,13 @@
   background:
     radial-gradient(620px 270px at 100% 0%, color-mix(in oklab, var(--color-signal) 18%, transparent), transparent 68%),
     linear-gradient(180deg, color-mix(in oklab, var(--color-signal) 6%, var(--color-panel)) 0%, var(--color-panel) 74%);
+}
+.investigation-hero-grid {
+  border: 1px solid color-mix(in oklab, var(--color-signal) 13%, var(--color-line));
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--color-accent-tint) 46%, var(--color-void));
+  margin-inline: -10px;
+  padding: 10px;
 }
 .clearance-boundary {
   border-color: color-mix(in oklab, var(--tint) 34%, var(--color-line));
@@ -265,6 +297,30 @@
     inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
     0 1px 2px color-mix(in oklab, var(--color-ink) 7%, transparent),
     0 24px 54px -40px color-mix(in oklab, var(--color-ink) 30%, transparent);
+}
+:root[data-theme="light"] .investigation-readiness-card,
+:root[data-theme="light"] .investigation-market-card {
+  background: var(--color-panel);
+}
+
+.report-toolbar {
+  border-color: var(--color-line-2);
+  background: color-mix(in oklab, var(--color-panel) 94%, transparent);
+}
+
+.sidebar-nav-active {
+  background: var(--color-signal);
+  color: var(--color-on-signal);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-on-signal) 18%, transparent),
+    0 10px 24px -18px color-mix(in oklab, var(--color-signal) 78%, transparent);
+}
+.sidebar-nav-active:hover {
+  background: color-mix(in oklab, var(--color-signal) 80%, var(--color-signal-dim));
+}
+.app-sidebar .sidebar-case-active {
+  background: color-mix(in oklab, var(--color-signal) 20%, var(--color-panel-2));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-signal) 22%, transparent);
 }
 /* Borderless interior zone (a wash, not a box). */
 .panel-inset {

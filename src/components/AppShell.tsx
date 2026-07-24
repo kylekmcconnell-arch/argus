@@ -79,7 +79,7 @@ export function AppShell({
 
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* mobile top bar */}
-        <div className="flex min-h-14 items-center gap-3 border-b border-line bg-sidebar px-4 lg:hidden">
+        <div className="app-mobile-header flex min-h-14 items-center gap-3 border-b border-line bg-sidebar px-4 lg:hidden">
           <button
             ref={menuButtonRef}
             type="button"

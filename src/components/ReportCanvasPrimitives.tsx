@@ -56,7 +56,7 @@ export function ReportCanvasSectionNav({
   return (
     <nav
       aria-label={label}
-      className={`${sticky ? `sticky ${stickyOffsetClass} z-10` : ""} -mx-5 border-y border-line bg-void/95 px-5 backdrop-blur`}
+      className={`${sticky ? `sticky ${stickyOffsetClass} z-10` : ""} -mx-5 border-y border-line-2 bg-panel/95 px-5 backdrop-blur`}
     >
       <div className="scrollbar-none mx-auto flex max-w-5xl gap-1 overflow-x-auto py-1.5">
         {items.map((item) => (

@@ -106,11 +106,11 @@ function NavItem({
       aria-current={active ? "page" : undefined}
       title={compact ? label : undefined}
       className={`relative flex min-h-9 w-full items-center rounded-md py-2 text-[13.5px] transition ${compact ? "justify-center px-0" : `gap-2.5 pr-2.5 ${nested ? "pl-7" : "pl-2.5"}`} ${
-        active ? "bg-panel-2/90 text-ink" : "text-ink-dim hover:bg-panel/70 hover:text-ink"
+        active ? "sidebar-nav-active" : "text-ink-dim hover:bg-panel/70 hover:text-ink"
       }`}
     >
-      {active && <span className="absolute inset-y-0 left-0 w-[2px] rounded-full bg-signal" aria-hidden />}
-      <span className={active ? "text-ink-dim" : "text-ink-faint"}>
+      {active && <span className="absolute inset-y-1 left-0 w-[2px] rounded-full bg-on-signal/80" aria-hidden />}
+      <span className={active ? "text-on-signal" : "text-ink-faint"}>
         <Icon size={17} weight={active ? "bold" : "regular"} aria-hidden />
       </span>
       <span className={compact ? "sr-only" : "truncate"}>{label}</span>
@@ -301,7 +301,7 @@ export function Sidebar({
       aria-hidden={mobile && !open ? true : undefined}
       inert={mobile && !open ? true : undefined}
       data-sidebar-mode={reportLayout ? "report" : "standard"}
-      className={`fixed inset-y-0 left-0 z-40 flex h-full w-[248px] shrink-0 flex-col border-r border-line-2 bg-sidebar transition-[transform,width] duration-200 lg:static lg:translate-x-0 ${
+      className={`app-sidebar fixed inset-y-0 left-0 z-40 flex h-full w-[248px] shrink-0 flex-col border-r border-line-2 bg-sidebar transition-[transform,width] duration-200 lg:static lg:translate-x-0 ${
         "lg:w-[248px]"
       } ${
         open ? "translate-x-0" : "-translate-x-full"
@@ -329,7 +329,7 @@ export function Sidebar({
         {/* primary navigation */}
         <nav aria-label="Primary" className={`space-y-px ${compact ? "px-2" : "px-2.5"}`}>
           <NavGroup compact={compact} label="Investigate" />
-          <NavItem compact={compact} icon={FilesIcon} label="Investigation canvas" active={view === "idle"} onClick={() => nav("idle")} />
+          <NavItem compact={compact} icon={FilesIcon} label="Investigation canvas" active={view === "idle" || view === "audit"} onClick={() => nav("idle")} />
           <NavItem compact={compact} icon={CrosshairIcon} label="Radar" active={view === "radar"} onClick={() => nav("radar")} />
           <NavItem compact={compact} icon={GlobeSimpleIcon} label="Site recon" active={view === "recon"} onClick={() => nav("recon")} />
           <NavItem compact={compact} icon={WalletIcon} label="Find wallet" active={view === "find"} onClick={() => nav("find")} />
@@ -385,7 +385,7 @@ export function Sidebar({
               key={`run:${r.key}`}
               onClick={() => openRecent(r.handle, "person")}
               title="Generating. Click to watch. Keeps running if you navigate away."
-              className={`group flex w-full items-center rounded-md py-1.5 text-left transition ${compact ? "justify-center px-0" : "gap-2 px-2"} ${active ? "bg-panel soft-shadow" : "hover:bg-panel/70"}`}
+              className={`group flex w-full items-center rounded-md py-1.5 text-left transition ${compact ? "justify-center px-0" : "gap-2 px-2"} ${active ? "sidebar-case-active" : "hover:bg-panel/70"}`}
             >
               <span className="mono relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal-lift">
                 {avatar}
@@ -452,7 +452,7 @@ export function Sidebar({
                   onClose?.();
                 }}
                 className={`group relative flex w-full items-center rounded-md py-1.5 text-left transition ${compact ? "justify-center px-0" : "gap-2 px-2"} ${
-                  active ? "bg-panel soft-shadow" : "hover:bg-panel/70"
+                  active ? "sidebar-case-active" : "hover:bg-panel/70"
                 }`}
               >
                 <AuditAvatar src={auditImage(e)} letter={avatar} />
