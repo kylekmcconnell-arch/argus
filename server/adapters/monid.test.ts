@@ -145,6 +145,70 @@ describe("collectCompanyEnrichment", () => {
     expect(summary.note).toContain("Paradigm");
   });
 
+  it("fails closed when provider search returns only an unrelated near-name", async () => {
+    let enrichmentCalls = 0;
+    const fetcher = ((_input: string | URL | Request, init?: RequestInit) => {
+      const endpoint = (() => {
+        try {
+          return (JSON.parse(String(init?.body ?? "{}")) as { endpoint?: string }).endpoint ?? "";
+        } catch {
+          return "";
+        }
+      })();
+      if (endpoint === "/v1/company/search") {
+        return Promise.resolve(jsonResponse(searchCompleted([
+          { uuid: "supergut-uuid", name: "Supergut", website: "supergut.com" },
+        ])));
+      }
+      if (endpoint === "/v1/company/enrichment") enrichmentCalls += 1;
+      return Promise.resolve(jsonResponse(enrichmentCompleted({})));
+    }) as unknown as typeof fetch;
+
+    const out = await collectCompanyEnrichment("SuperGemma", { fetcher });
+
+    expect(out.available).toBe(false);
+    if (out.available) throw new Error("expected unavailable");
+    expect(out.reason).toBe("no_match");
+    expect(enrichmentCalls).toBe(0);
+  });
+
+  it("selects the exact official domain even when an unrelated result is listed first", async () => {
+    let selectedCompany = "";
+    const fetcher = ((_input: string | URL | Request, init?: RequestInit) => {
+      const body = (() => {
+        try {
+          return JSON.parse(String(init?.body ?? "{}")) as {
+            endpoint?: string;
+            input?: { queryParams?: { company?: string } };
+          };
+        } catch {
+          return {};
+        }
+      })();
+      if (body.endpoint === "/v1/company/search") {
+        return Promise.resolve(jsonResponse(searchCompleted([
+          { uuid: "supergut-uuid", name: "Supergut", website: "supergut.com" },
+          { uuid: "supergemma-uuid", name: "Supergemma Foundation", website: "supergemma.ai" },
+        ])));
+      }
+      if (body.endpoint === "/v1/company/enrichment") {
+        selectedCompany = body.input?.queryParams?.company ?? "";
+        return Promise.resolve(jsonResponse(enrichmentCompleted({
+          firmographic: { legal_name: "Supergemma Foundation" },
+        })));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }) as unknown as typeof fetch;
+
+    const out = await collectCompanyEnrichment("https://supergemma.ai", { fetcher });
+
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.uuid).toBe("supergemma-uuid");
+    expect(out.value.sourceUrl).toBe("https://supergemma.ai");
+    expect(selectedCompany).toBe("supergemma-uuid");
+  });
+
   it("reports reason:'no_match' when search returns no companies", async () => {
     const out = await collectCompanyEnrichment("Nonexistent Ventures", {
       fetcher: runFetcher({ search: searchCompleted([]) }),

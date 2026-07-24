@@ -713,7 +713,17 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     && evidence.companyEnrichment.funding.rounds.length
     ? evidence.companyEnrichment
     : undefined;
-  const fundingFact = isProject && evidence.protocolFunding && evidence.protocolFunding.rounds.length
+  const hasStrongerFundingFact = (evidence.basicFacts ?? []).some((fact) =>
+    fact.predicate === "funding"
+    && fact.providerProjection !== true
+    && (fact.status === "verified" || fact.status === "corroborated")
+    && fact.sources.some((candidate) =>
+      candidate.artifactVerified === true
+      && candidate.provider !== "defillama"
+      && candidate.provider !== "monid"
+      && candidate.relation === "supports"));
+  const fundingFact = !hasStrongerFundingFact
+    && isProject && evidence.protocolFunding && evidence.protocolFunding.rounds.length
     ? {
         rounds: evidence.protocolFunding.rounds.length,
         totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
@@ -742,22 +752,26 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       : null;
   if (fundingFact) {
     const leads = fundingFact.leadInvestors.slice(0, 4).join(", ");
-    const total = fundingFact.totalRaisedUsd > 0 ? ` · ${formatUsd(fundingFact.totalRaisedUsd)} raised` : "";
+    const total = fundingFact.totalRaisedUsd > 0 ? ` · ${formatUsd(fundingFact.totalRaisedUsd)} disclosed` : "";
     const prefix = fundingFact.ventureName ? `${fundingFact.ventureName}: ` : "";
-    projected.push(makeFact(
+    const projectedFundingFact = makeFact(
       evidence,
       "funding",
-      `${prefix}${fundingFact.rounds} public funding round${fundingFact.rounds === 1 ? "" : "s"}${total}${leads ? ` · led by ${leads}` : ""}`,
+      `${prefix}${fundingFact.rounds} funding round${fundingFact.rounds === 1 ? "" : "s"} indexed${total}${leads ? ` · named leads ${leads}` : ""}`,
       [source({
         url: fundingFact.sourceUrl,
         title: fundingFact.title,
-        excerpt: `${fundingFact.subjectLabel} raised ${formatUsd(fundingFact.totalRaisedUsd)} across ${fundingFact.rounds} public funding round(s)${leads ? `, with lead investors including ${leads}` : ""}.`,
+        excerpt: `${fundingFact.subjectLabel} has ${formatUsd(fundingFact.totalRaisedUsd)} disclosed across ${fundingFact.rounds} indexed funding round(s)${leads ? `, with named lead investors including ${leads}` : ""}. This aggregator record is a discovery index, not proof of exhaustive financing history.`,
         capturedAt: fundingFact.capturedAt,
         provider: fundingFact.provider,
         sourceClass: "other_public",
       })],
       fundingFact.ventureName ? "venture financing" : undefined,
-    ));
+    );
+    // Aggregator records help the analyst discover financing, but one indexed
+    // record cannot establish an exhaustive total or lift the P4 score floor.
+    projectedFundingFact.floorEligible = false;
+    projected.push(projectedFundingFact);
   }
 
   // On-chain TVL → traction (P5). Hack records from the same DeFiLlama

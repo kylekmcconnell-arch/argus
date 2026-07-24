@@ -112,7 +112,7 @@ describe("orchestrator provider execution truth", () => {
     ]));
   });
 
-  it("keeps model role candidates visible but publishes INCOMPLETE without provider-backed routing", async () => {
+  it("keeps sourced model leads visible but drops internal role guesses when routing is unverified", async () => {
     vi.stubEnv("GITHUB_TOKEN", "github-key");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
     const fetchMock = vi.fn().mockResolvedValue(new Response("provider unavailable", { status: 503 }));
@@ -145,7 +145,11 @@ describe("orchestrator provider execution truth", () => {
       detail: expect.stringContaining("no provider-backed methodology axes"),
     });
     expect(dossier?.report.investigative_leads).toEqual(expect.arrayContaining([
-      expect.objectContaining({ finding_type: "RoleCandidate", evidence_origin: "model_lead" }),
+      expect.objectContaining({ finding_type: "Exit", evidence_origin: "model_lead" }),
+      expect.objectContaining({ finding_type: "IPO", evidence_origin: "model_lead" }),
+    ]));
+    expect(dossier?.report.investigative_leads).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ finding_type: "RoleCandidate" }),
     ]));
   });
 

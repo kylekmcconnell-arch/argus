@@ -220,6 +220,42 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     });
   });
 
+  it("drops internal model guesses that have no traceable artifact or source", () => {
+    const audit = highScoringFounder("@scoped_subject");
+    audit.addFinding({
+      finding_type: "RoleCandidate",
+      claim: "Model intake suggests PROJECT.",
+      source_url: "",
+      source_date: "",
+      verification_status: "Rumor",
+      independent_source_count: 0,
+      polarity: 0,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    });
+
+    expect(audit.finalize().investigative_leads).toEqual([]);
+  });
+
+  it("bounds the immutable follow-up ledger to eight traceable leads", () => {
+    const audit = highScoringFounder("@scoped_subject");
+    for (let index = 0; index < 12; index += 1) {
+      audit.addFinding({
+        finding_type: "AdverseLead",
+        claim: `Candidate complaint ${index + 1}.`,
+        source_url: `https://example.com/candidate-${index + 1}`,
+        source_date: "",
+        verification_status: "Rumor",
+        independent_source_count: 1,
+        polarity: -1,
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+      });
+    }
+
+    expect(audit.finalize().investigative_leads).toHaveLength(8);
+  });
+
   it("cannot cap or publish a verified adverse finding scoped to an associate", () => {
     const audit = highScoringFounder("@primary_subject");
     audit.addFinding({

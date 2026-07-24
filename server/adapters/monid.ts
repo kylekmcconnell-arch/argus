@@ -281,21 +281,54 @@ function sectionRoot(data: unknown): Record<string, unknown> {
   return obj;
 }
 
-/** Best match: exact website host, then exact name, then first with a uuid. */
+const COMPANY_LEGAL_SUFFIX = /\b(?:incorporated|corporation|company|limited|holdings?|ventures?|inc|corp|llc|ltd|plc|co)\b/g;
+
+function normalizedCompanyName(value: unknown): string {
+  if (!isNonEmptyString(value)) return "";
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(COMPANY_LEGAL_SUFFIX, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function domainLabel(value: unknown): string {
+  const host = hostOf(value);
+  if (!host || !host.includes(".")) return "";
+  return normalizedCompanyName(host.split(".")[0]);
+}
+
+/**
+ * Resolve only an identity-bound company match.
+ *
+ * Provider search order is relevance-ranked, not identity proof. Falling back
+ * to the first UUID can attach an unrelated namesake's funding and leadership
+ * to the audited subject (for example SuperGemma -> Supergut). Accept an exact
+ * website, an exact normalized name, or a query that exactly matches the
+ * candidate's website label. Otherwise fail closed before paid enrichment.
+ */
 function pickBestMatch(companies: any[], query: string): any | null {
   const valid = companies.filter((company) => isNonEmptyString(company?.uuid));
   if (!valid.length) return null;
   const queryHost = hostOf(query);
-  const queryName = query.trim().toLowerCase();
-  if (queryHost) {
+  const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
+  const queryName = normalizedCompanyName(query);
+  if (queryLooksLikeHost) {
     const byWebsite = valid.find((company) => hostOf(company?.website) === queryHost);
     if (byWebsite) return byWebsite;
   }
   const byName = valid.find(
-    (company) => isNonEmptyString(company?.name) && company.name.trim().toLowerCase() === queryName,
+    (company) => normalizedCompanyName(company?.name) === queryName,
   );
   if (byName) return byName;
-  return valid[0];
+  if (!queryLooksLikeHost && queryName) {
+    const byWebsiteLabel = valid.find((company) => domainLabel(company?.website) === queryName);
+    if (byWebsiteLabel) return byWebsiteLabel;
+  }
+  return null;
 }
 
 /** Akta date {day,month,year} → YYYY-MM-DD / YYYY-MM / YYYY / null. */

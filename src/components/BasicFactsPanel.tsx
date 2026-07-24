@@ -48,6 +48,8 @@ export interface BasicFactView {
   attributionScope?: "direct_subject" | "related_entity" | "identity_unresolved";
   status: BasicFactStatus;
   critical?: boolean;
+  providerProjection?: boolean;
+  floorEligible?: boolean;
   sources?: BasicFactSourceView[];
 }
 

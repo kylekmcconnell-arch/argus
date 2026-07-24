@@ -34,7 +34,10 @@ const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 const fetcherReturning = (make: () => Response) =>
-  ((_input: string | URL | Request) => Promise.resolve(make())) as unknown as typeof fetch;
+  ((input: string | URL | Request) => {
+    void input;
+    return Promise.resolve(make());
+  }) as unknown as typeof fetch;
 
 describe("collectProtocolTvl", () => {
   it("returns the latest TVL and a chain breakdown, excluding pseudo-segments", async () => {
@@ -129,10 +132,45 @@ describe("collectProtocolFunding", () => {
     expect(out.value.rounds.map((r) => r.round)).toEqual(["ICO", "Strategic"]); // sorted by date ascending
     expect(out.value.rounds[1].amountUsd).toBe(25_000_000); // millions → USD
     expect(out.value.rounds[1].date).toBe("2020-10-12");
+    expect(out.value.geckoId).toBe("aave");
     expect(out.value.leadInvestors).toEqual(["Blockchain Capital", "Standard Crypto"]);
     expect(out.value.totalRaisedUsd).toBe(41_200_000);
     expect(describeFunding(out)).toMatchObject({ status: "confirmed" });
     expect(describeFunding(out).note).toContain("Blockchain Capital");
+  });
+
+  it("rejects investor-only relationship rows that are not funding rounds", async () => {
+    const out = await collectProtocolFunding("Uniswap", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({
+        name: "Uniswap",
+        gecko_id: "uniswap",
+        raises: [
+          {
+            date: 1770768000,
+            round: null,
+            amount: null,
+            valuation: null,
+            leadInvestors: ["BlackRock"],
+            otherInvestors: [],
+          },
+          {
+            date: 1596758400,
+            round: "Series A",
+            amount: 11,
+            valuation: null,
+            leadInvestors: [],
+            otherInvestors: ["a16z"],
+          },
+        ],
+      }))),
+    });
+
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.rounds).toHaveLength(1);
+    expect(out.value.rounds[0]).toMatchObject({ round: "Series A", amountUsd: 11_000_000 });
+    expect(out.value.leadInvestors).toEqual([]);
+    expect(out.value.totalRaisedUsd).toBe(11_000_000);
   });
 
   it("reports no_data (not an outage) when the protocol has no raises", async () => {

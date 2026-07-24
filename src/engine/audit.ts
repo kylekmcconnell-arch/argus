@@ -701,9 +701,27 @@ export class Audit {
   }
 
   private investigativeLeads(): Finding[] {
-    return this.findings.filter(
-      (f) => f.evidence_origin === "model_lead" || !this.findingTargetsSubject(f),
-    );
+    return this.findings
+      .filter((f) => f.evidence_origin === "model_lead" || !this.findingTargetsSubject(f))
+      // A model role guess with no artifact or candidate URL is internal
+      // routing state, not a customer-facing lead. Persist only something an
+      // investigator can actually open or trace.
+      .filter((f) => {
+        if (f.content_hash?.trim()) return true;
+        try {
+          const source = new URL(f.source_url);
+          return (source.protocol === "https:" || source.protocol === "http:")
+            && Boolean(source.hostname);
+        } catch {
+          return false;
+        }
+      })
+      // Keep the raw immutable report useful to exports and Ask ARGUS, not just
+      // the React view that collapses this section. Direct-subject leads rank
+      // ahead of related-entity leads and the dossier stays bounded.
+      .sort((left, right) =>
+        Number(this.findingTargetsSubject(right)) - Number(this.findingTargetsSubject(left)))
+      .slice(0, 8);
   }
 
   toPanoptes(): { nodes: PanoptesNode[]; edges: PanoptesEdge[] } {

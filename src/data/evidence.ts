@@ -215,6 +215,8 @@ export interface VentureTokenSnapshot extends ProjectTokenSnapshot {
 export interface ProtocolFundingSnapshot {
   slug: string;
   name: string;
+  /** CoinGecko identity from the protocol record, used to bind it to the canonical token. */
+  geckoId?: string | null;
   rounds: Array<{
     date: string | null;
     round: string;

@@ -913,9 +913,15 @@ var Audit = class {
     );
   }
   investigativeLeads() {
-    return this.findings.filter(
-      (f) => f.evidence_origin === "model_lead" || !this.findingTargetsSubject(f)
-    );
+    return this.findings.filter((f) => f.evidence_origin === "model_lead" || !this.findingTargetsSubject(f)).filter((f) => {
+      if (f.content_hash?.trim()) return true;
+      try {
+        const source2 = new URL(f.source_url);
+        return (source2.protocol === "https:" || source2.protocol === "http:") && Boolean(source2.hostname);
+      } catch {
+        return false;
+      }
+    }).sort((left, right) => Number(this.findingTargetsSubject(right)) - Number(this.findingTargetsSubject(left))).slice(0, 8);
   }
   toPanoptes() {
     const projectSubject = this.roles.length === 1 && this.roles[0] === "PROJECT" /* PROJECT */;
@@ -8050,6 +8056,21 @@ async function collectProtocolFees(projectName2, options = {}) {
   };
 }
 var millionsToUsd = (value) => typeof value === "number" && value > 0 ? Math.round(value * 1e6) : null;
+var fundingRoundFromRaise = (entry) => {
+  const amountUsd = millionsToUsd(entry.amount);
+  const valuationUsd = millionsToUsd(entry.valuation);
+  const namedRound = typeof entry.round === "string" && entry.round.trim() ? entry.round.trim() : null;
+  if (!amountUsd && !valuationUsd && !namedRound) return null;
+  const dateSec = typeof entry.date === "number" ? entry.date : null;
+  return {
+    date: dateSec ? new Date(dateSec * 1e3).toISOString().slice(0, 10) : null,
+    round: namedRound ?? "Undisclosed round",
+    amountUsd,
+    leadInvestors: strArray(entry.leadInvestors),
+    otherInvestors: strArray(entry.otherInvestors),
+    valuationUsd
+  };
+};
 async function collectProtocolFunding(projectName2, options = {}) {
   const fetcher = options.fetcher ?? fetch;
   const slug = options.slug ?? defiLlamaSlug(projectName2);
@@ -8064,18 +8085,7 @@ async function collectProtocolFunding(projectName2, options = {}) {
     };
   }
   const raw = Array.isArray(result.data.raises) ? result.data.raises : [];
-  const rounds = raw.map((entry) => {
-    const dateSec = typeof entry.date === "number" ? entry.date : null;
-    const round = typeof entry.round === "string" && entry.round.trim() ? entry.round.trim() : "Undisclosed round";
-    return {
-      date: dateSec ? new Date(dateSec * 1e3).toISOString().slice(0, 10) : null,
-      round,
-      amountUsd: millionsToUsd(entry.amount),
-      leadInvestors: strArray(entry.leadInvestors),
-      otherInvestors: strArray(entry.otherInvestors),
-      valuationUsd: millionsToUsd(entry.valuation)
-    };
-  }).sort((a, b) => a.date && b.date ? a.date.localeCompare(b.date) : 0);
+  const rounds = raw.map(fundingRoundFromRaise).filter((entry) => entry !== null).sort((a, b) => a.date && b.date ? a.date.localeCompare(b.date) : 0);
   if (!rounds.length) {
     recordCall("defillama", "funding", 0, `${slug} \xB7 no_raises`, "succeeded");
     return { available: false, reason: "no_data", note: `No public funding rounds recorded for "${slug}" on DeFiLlama.` };
@@ -8088,6 +8098,7 @@ async function collectProtocolFunding(projectName2, options = {}) {
     value: {
       slug,
       name: typeof result.data.name === "string" ? result.data.name : projectName2,
+      geckoId: typeof result.data.gecko_id === "string" ? result.data.gecko_id : null,
       rounds,
       totalRaisedUsd,
       leadInvestors,
@@ -8237,20 +8248,35 @@ function sectionRoot(data) {
   }
   return obj;
 }
+var COMPANY_LEGAL_SUFFIX = /\b(?:incorporated|corporation|company|limited|holdings?|ventures?|inc|corp|llc|ltd|plc|co)\b/g;
+function normalizedCompanyName(value) {
+  if (!isNonEmptyString(value)) return "";
+  return value.trim().toLowerCase().replace(/&/g, " and ").replace(COMPANY_LEGAL_SUFFIX, " ").replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+function domainLabel(value) {
+  const host = hostOf(value);
+  if (!host || !host.includes(".")) return "";
+  return normalizedCompanyName(host.split(".")[0]);
+}
 function pickBestMatch(companies, query) {
   const valid = companies.filter((company) => isNonEmptyString(company?.uuid));
   if (!valid.length) return null;
   const queryHost = hostOf(query);
-  const queryName = query.trim().toLowerCase();
-  if (queryHost) {
+  const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
+  const queryName = normalizedCompanyName(query);
+  if (queryLooksLikeHost) {
     const byWebsite = valid.find((company) => hostOf(company?.website) === queryHost);
     if (byWebsite) return byWebsite;
   }
   const byName = valid.find(
-    (company) => isNonEmptyString(company?.name) && company.name.trim().toLowerCase() === queryName
+    (company) => normalizedCompanyName(company?.name) === queryName
   );
   if (byName) return byName;
-  return valid[0];
+  if (!queryLooksLikeHost && queryName) {
+    const byWebsiteLabel = valid.find((company) => domainLabel(company?.website) === queryName);
+    if (byWebsiteLabel) return byWebsiteLabel;
+  }
+  return null;
 }
 function formatAktaDate(value) {
   if (!value || typeof value !== "object") return null;
@@ -17309,7 +17335,8 @@ function projectProviderBackedBasicFacts(evidence) {
   const isProject = evidence.roles.includes("PROJECT" /* PROJECT */);
   const isFounderSubject = evidence.roles.includes("FOUNDER" /* FOUNDER */);
   const enrichmentRecord = evidence.companyEnrichment?.funding && evidence.companyEnrichment.funding.rounds.length ? evidence.companyEnrichment : void 0;
-  const fundingFact = isProject && evidence.protocolFunding && evidence.protocolFunding.rounds.length ? {
+  const hasStrongerFundingFact = (evidence.basicFacts ?? []).some((fact) => fact.predicate === "funding" && fact.providerProjection !== true && (fact.status === "verified" || fact.status === "corroborated") && fact.sources.some((candidate) => candidate.artifactVerified === true && candidate.provider !== "defillama" && candidate.provider !== "monid" && candidate.relation === "supports"));
+  const fundingFact = !hasStrongerFundingFact && isProject && evidence.protocolFunding && evidence.protocolFunding.rounds.length ? {
     rounds: evidence.protocolFunding.rounds.length,
     totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
     leadInvestors: evidence.protocolFunding.leadInvestors,
@@ -17332,22 +17359,24 @@ function projectProviderBackedBasicFacts(evidence) {
   } : null;
   if (fundingFact) {
     const leads = fundingFact.leadInvestors.slice(0, 4).join(", ");
-    const total = fundingFact.totalRaisedUsd > 0 ? ` \xB7 ${formatUsd2(fundingFact.totalRaisedUsd)} raised` : "";
+    const total = fundingFact.totalRaisedUsd > 0 ? ` \xB7 ${formatUsd2(fundingFact.totalRaisedUsd)} disclosed` : "";
     const prefix = fundingFact.ventureName ? `${fundingFact.ventureName}: ` : "";
-    projected.push(makeFact(
+    const projectedFundingFact = makeFact(
       evidence,
       "funding",
-      `${prefix}${fundingFact.rounds} public funding round${fundingFact.rounds === 1 ? "" : "s"}${total}${leads ? ` \xB7 led by ${leads}` : ""}`,
+      `${prefix}${fundingFact.rounds} funding round${fundingFact.rounds === 1 ? "" : "s"} indexed${total}${leads ? ` \xB7 named leads ${leads}` : ""}`,
       [source({
         url: fundingFact.sourceUrl,
         title: fundingFact.title,
-        excerpt: `${fundingFact.subjectLabel} raised ${formatUsd2(fundingFact.totalRaisedUsd)} across ${fundingFact.rounds} public funding round(s)${leads ? `, with lead investors including ${leads}` : ""}.`,
+        excerpt: `${fundingFact.subjectLabel} has ${formatUsd2(fundingFact.totalRaisedUsd)} disclosed across ${fundingFact.rounds} indexed funding round(s)${leads ? `, with named lead investors including ${leads}` : ""}. This aggregator record is a discovery index, not proof of exhaustive financing history.`,
         capturedAt: fundingFact.capturedAt,
         provider: fundingFact.provider,
         sourceClass: "other_public"
       })],
       fundingFact.ventureName ? "venture financing" : void 0
-    ));
+    );
+    projectedFundingFact.floorEligible = false;
+    projected.push(projectedFundingFact);
   }
   const tvlSnapshot = isProject ? evidence.protocolTvl : void 0;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
@@ -18188,6 +18217,9 @@ var withWallClockBox = (work, budgetMs) => Promise.race([
     if (typeof timer === "object" && "unref" in timer) timer.unref();
   })
 ]);
+function protocolRecordMatchesCanonicalToken(recordGeckoId, canonicalGeckoId) {
+  return Boolean(recordGeckoId) && recordGeckoId === canonicalGeckoId;
+}
 var ADAPTERS = [
   xAdapter,
   githubAdapter,
@@ -19820,14 +19852,35 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         ]);
         if (holdersOutcome.available) evidence.holderProfile = { ...holdersOutcome.value, capturedAt };
         if (unlocksOutcome.available) evidence.tokenUnlocks = { ...unlocksOutcome.value, capturedAt };
-        if (feesOutcome.available) evidence.protocolFees = { ...feesOutcome.value, capturedAt };
-        if (tvlOutcome.available) {
+        const canonicalGeckoId = evidence.projectToken.coingeckoId;
+        const tvlIdentityMatched = tvlOutcome.available && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId);
+        const fundingIdentityMatched = fundingOutcome.available && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId);
+        if (feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
+          evidence.protocolFees = { ...feesOutcome.value, capturedAt };
+        }
+        if (tvlIdentityMatched) {
           evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
-          if (tvlOutcome.value.chains.length && tvlOutcome.value.geckoId && tvlOutcome.value.geckoId === evidence.projectToken.coingeckoId) {
+          if (tvlOutcome.value.chains.length) {
             evidence.projectToken = { ...evidence.projectToken, deployedChains: tvlOutcome.value.chains };
           }
         }
-        if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
+        if (fundingIdentityMatched) {
+          evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
+        }
+        const mismatchedProtocolSources = [
+          ...tvlOutcome.available && !tvlIdentityMatched ? [`TVL (${tvlOutcome.value.geckoId ?? "no CoinGecko id"})`] : [],
+          ...fundingOutcome.available && !fundingIdentityMatched ? [`funding (${fundingOutcome.value.geckoId ?? "no CoinGecko id"})`] : [],
+          ...feesOutcome.available && !tvlIdentityMatched && !fundingIdentityMatched ? ["fees"] : []
+        ];
+        if (mismatchedProtocolSources.length) {
+          emit({
+            phase: "Token",
+            label: "Protocol enrichment identity mismatch",
+            detail: `${mismatchedProtocolSources.join(", ")} did not join canonical CoinGecko id ${canonicalGeckoId}; those records were excluded.`,
+            source: "defillama",
+            tone: "warn"
+          });
+        }
         {
           const auditLinks = await collectProtocolAuditLinks(projectName2);
           const auditsResult = await withWallClockBox(
@@ -19854,9 +19907,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
             });
           }
         }
-        if (!fundingOutcome.available) {
+        if (!fundingIdentityMatched) {
+          const companyLookup = evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? projectName2;
           const enrichment = await withWallClockBox(
-            collectCompanyEnrichment(projectName2, {
+            collectCompanyEnrichment(companyLookup, {
               sections: ["funding_detail", "management_profile", "firmographic"]
             }),
             MONID_ENRICHMENT_BUDGET_MS
@@ -19975,7 +20029,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     if (primaryVenture) {
       try {
         const enrichment = await withWallClockBox(
-          collectCompanyEnrichment(primaryVenture.project_name.trim(), {
+          collectCompanyEnrichment(primaryVenture.domain ?? primaryVenture.project_name.trim(), {
             sections: ["funding_detail", "firmographic"]
           }),
           MONID_ENRICHMENT_BUDGET_MS

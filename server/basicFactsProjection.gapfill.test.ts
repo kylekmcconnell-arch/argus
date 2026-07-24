@@ -30,9 +30,10 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     projectProviderBackedBasicFacts(evidence);
     const funding = evidence.basicFacts?.find((fact) => fact.predicate === "funding");
     expect(funding).toBeTruthy();
-    expect(funding?.value).toContain("2 public funding rounds");
+    expect(funding?.value).toContain("2 funding rounds indexed");
     expect(funding?.value).toContain("Blockchain Capital");
     expect(funding?.sources[0]?.url).toContain("defillama.com/protocol/aave");
+    expect(funding?.floorEligible).toBe(false);
   });
 
   it("mints a traction fact (→P5) from on-chain TVL", () => {
@@ -98,7 +99,49 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     // presented as having raised the money themselves.
     expect(funding?.value.startsWith("Aave: ")).toBe(true);
     expect(funding?.qualifier).toBe("venture financing");
-    expect(funding?.value).toContain("$49.0M raised");
+    expect(funding?.value).toContain("$49.0M disclosed");
+    expect(funding?.floorEligible).toBe(false);
+  });
+
+  it("does not add an aggregator summary beside stronger funding evidence", () => {
+    const evidence = projectEvidence();
+    evidence.basicFacts = [{
+      factId: "funding-series-b",
+      subjectKey: "@aavetest",
+      predicate: "funding",
+      value: "Series B",
+      normalizedValue: "series b",
+      status: "corroborated",
+      critical: false,
+      provider: "public-web",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      sources: [{
+        url: "https://news.example/aave-series-b",
+        title: "Aave Series B",
+        excerpt: "Aave raised $25M in a Series B.",
+        provider: "public-web",
+        relation: "supports",
+        capturedAt: "2026-07-14T00:00:00.000Z",
+        contentHash: "funding-series-b-source",
+        sourceClass: "independent_press",
+        artifactVerified: true,
+      }],
+    }];
+    evidence.protocolFunding = {
+      slug: "aave",
+      name: "Aave",
+      rounds: [{ date: null, round: "Seed", amountUsd: 1_000_000, leadInvestors: [], otherInvestors: [], valuationUsd: null }],
+      totalRaisedUsd: 1_000_000,
+      leadInvestors: [],
+      sourceUrl: "https://defillama.com/protocol/aave",
+      capturedAt: "2026-07-14T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts?.filter((fact) => fact.predicate === "funding")).toHaveLength(1);
+    expect(evidence.basicFacts?.[0].value).toBe("Series B");
   });
 
   it("mints nothing for a non-project subject", () => {

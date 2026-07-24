@@ -401,6 +401,8 @@ export interface FundingRound {
 export interface ProtocolFunding {
   slug: string;
   name: string;
+  /** CoinGecko identity carried by the same protocol document. */
+  geckoId: string | null;
   rounds: FundingRound[];
   /** sum of known round amounts */
   totalRaisedUsd: number;
@@ -424,6 +426,28 @@ type RaiseItem = {
 
 const millionsToUsd = (value: unknown): number | null =>
   typeof value === "number" && value > 0 ? Math.round(value * 1_000_000) : null;
+
+const fundingRoundFromRaise = (entry: RaiseItem): FundingRound | null => {
+  const amountUsd = millionsToUsd(entry.amount);
+  const valuationUsd = millionsToUsd(entry.valuation);
+  const namedRound = typeof entry.round === "string" && entry.round.trim()
+    ? entry.round.trim()
+    : null;
+  // DeFiLlama occasionally carries investor-only relationship rows inside the
+  // raises array. Those are not financing events. Counting them produced the
+  // false "2 rounds, led by BlackRock" Uniswap summary even though the row had
+  // no amount, valuation, or round type.
+  if (!amountUsd && !valuationUsd && !namedRound) return null;
+  const dateSec = typeof entry.date === "number" ? entry.date : null;
+  return {
+    date: dateSec ? new Date(dateSec * 1000).toISOString().slice(0, 10) : null,
+    round: namedRound ?? "Undisclosed round",
+    amountUsd,
+    leadInvestors: strArray(entry.leadInvestors),
+    otherInvestors: strArray(entry.otherInvestors),
+    valuationUsd,
+  };
+};
 
 /**
  * Collect a protocol's public funding rounds + lead investors from DeFiLlama's
@@ -450,18 +474,8 @@ export async function collectProtocolFunding(
 
   const raw = Array.isArray(result.data.raises) ? (result.data.raises as RaiseItem[]) : [];
   const rounds: FundingRound[] = raw
-    .map((entry) => {
-      const dateSec = typeof entry.date === "number" ? entry.date : null;
-      const round = typeof entry.round === "string" && entry.round.trim() ? entry.round.trim() : "Undisclosed round";
-      return {
-        date: dateSec ? new Date(dateSec * 1000).toISOString().slice(0, 10) : null,
-        round,
-        amountUsd: millionsToUsd(entry.amount),
-        leadInvestors: strArray(entry.leadInvestors),
-        otherInvestors: strArray(entry.otherInvestors),
-        valuationUsd: millionsToUsd(entry.valuation),
-      };
-    })
+    .map(fundingRoundFromRaise)
+    .filter((entry): entry is FundingRound => entry !== null)
     .sort((a, b) => (a.date && b.date ? a.date.localeCompare(b.date) : 0));
 
   if (!rounds.length) {
@@ -477,6 +491,7 @@ export async function collectProtocolFunding(
     value: {
       slug,
       name: typeof result.data.name === "string" ? result.data.name : projectName,
+      geckoId: typeof result.data.gecko_id === "string" ? result.data.gecko_id : null,
       rounds,
       totalRaisedUsd,
       leadInvestors,

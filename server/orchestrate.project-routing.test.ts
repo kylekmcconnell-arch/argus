@@ -7,6 +7,7 @@ import {
   coalesceTeamMembersByHandle,
   collectProjectCoreEvidenceOutcomes,
   mergeDiscoveredAffiliations,
+  protocolRecordMatchesCanonicalToken,
   projectVerifiedBasicFacts,
   providerBackedRoles,
 } from "./orchestrate";
@@ -47,6 +48,12 @@ function resolvedProjectProfile(bio: string, website: string | null | undefined 
 }
 
 describe("provider-backed project routing", () => {
+  it("requires an exact CoinGecko identity join for protocol fundamentals", () => {
+    expect(protocolRecordMatchesCanonicalToken("uniswap", "uniswap")).toBe(true);
+    expect(protocolRecordMatchesCanonicalToken("uniswap-v3", "uniswap")).toBe(false);
+    expect(protocolRecordMatchesCanonicalToken(null, "uniswap")).toBe(false);
+  });
+
   it("coalesces different roster names that enrichment resolves to the same X handle", () => {
     expect(coalesceTeamMembersByHandle([
       {

@@ -177,6 +177,13 @@ const withWallClockBox = <T>(work: Promise<T>, budgetMs: number): Promise<T | nu
     }),
   ]);
 
+export function protocolRecordMatchesCanonicalToken(
+  recordGeckoId: string | null | undefined,
+  canonicalGeckoId: string,
+): boolean {
+  return Boolean(recordGeckoId) && recordGeckoId === canonicalGeckoId;
+}
+
 const ADAPTERS: Adapter[] = [
   xAdapter,
   githubAdapter,
@@ -2416,21 +2423,40 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         ]);
         if (holdersOutcome.available) evidence.holderProfile = { ...holdersOutcome.value, capturedAt };
         if (unlocksOutcome.available) evidence.tokenUnlocks = { ...unlocksOutcome.value, capturedAt };
-        if (feesOutcome.available) evidence.protocolFees = { ...feesOutcome.value, capturedAt };
-        if (tvlOutcome.available) {
+        const canonicalGeckoId = evidence.projectToken.coingeckoId;
+        const tvlIdentityMatched = tvlOutcome.available
+          && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId);
+        const fundingIdentityMatched = fundingOutcome.available
+          && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId);
+        // Slug similarity is discovery, not identity. A protocol document can
+        // only lend TVL, fees, or funding to the audited project when its own
+        // CoinGecko id joins the already verified canonical token.
+        if (feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
+          evidence.protocolFees = { ...feesOutcome.value, capturedAt };
+        }
+        if (tvlIdentityMatched) {
           evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
-          // Attach the protocol chain footprint to the verified token ONLY on
-          // a CoinGecko-id join: a name-alike DeFiLlama entry can never lend
-          // its chains to an impostor token.
-          if (
-            tvlOutcome.value.chains.length
-            && tvlOutcome.value.geckoId
-            && tvlOutcome.value.geckoId === evidence.projectToken.coingeckoId
-          ) {
+          if (tvlOutcome.value.chains.length) {
             evidence.projectToken = { ...evidence.projectToken, deployedChains: tvlOutcome.value.chains };
           }
         }
-        if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
+        if (fundingIdentityMatched) {
+          evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
+        }
+        const mismatchedProtocolSources = [
+          ...(tvlOutcome.available && !tvlIdentityMatched ? [`TVL (${tvlOutcome.value.geckoId ?? "no CoinGecko id"})`] : []),
+          ...(fundingOutcome.available && !fundingIdentityMatched ? [`funding (${fundingOutcome.value.geckoId ?? "no CoinGecko id"})`] : []),
+          ...(feesOutcome.available && !tvlIdentityMatched && !fundingIdentityMatched ? ["fees"] : []),
+        ];
+        if (mismatchedProtocolSources.length) {
+          emit({
+            phase: "Token",
+            label: "Protocol enrichment identity mismatch",
+            detail: `${mismatchedProtocolSources.join(", ")} did not join canonical CoinGecko id ${canonicalGeckoId}; those records were excluded.`,
+            source: "defillama",
+            tone: "warn",
+          });
+        }
         // Independent audits: first-party security page plus the
         // auditor-domain corroboration hop. Wall-clock boxed: up to ~6
         // bounded fetches must degrade to a skipped enrichment, never a
@@ -2465,13 +2491,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
             });
           }
         }
-        if (!fundingOutcome.available) {
+        if (!fundingIdentityMatched) {
           // Hard wall-clock box: Monid runs poll asynchronously (1-120s) and an
           // audit already runs minutes; an over-budget enrichment must degrade
           // to a skipped path, never push the whole run past the platform
           // function budget.
+          const companyLookup = evidence.projectToken.homepage
+            ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl
+            ?? projectName;
           const enrichment = await withWallClockBox(
-            collectCompanyEnrichment(projectName, {
+            collectCompanyEnrichment(companyLookup, {
               sections: ["funding_detail", "management_profile", "firmographic"],
             }),
             MONID_ENRICHMENT_BUDGET_MS,
@@ -2640,7 +2669,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     if (primaryVenture) {
       try {
         const enrichment = await withWallClockBox(
-          collectCompanyEnrichment(primaryVenture.project_name.trim(), {
+          collectCompanyEnrichment(primaryVenture.domain ?? primaryVenture.project_name.trim(), {
             sections: ["funding_detail", "firmographic"],
           }),
           MONID_ENRICHMENT_BUDGET_MS,

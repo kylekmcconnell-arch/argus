@@ -57,5 +57,85 @@
       "terra|luna|fraud|charg|collapse|indict"
     ],
     "_note": "adverse ground truth (do not miss the fraud); confirm handle status before recording (suspended resolves INCOMPLETE for the wrong reason)"
+  },
+  "aeyakovenko": {
+    "verdictIn": [
+      "PASS"
+    ],
+    "scoreMin": 70,
+    "neverIncomplete": true,
+    "expectedRole": "FOUNDER",
+    "mustSurface": [
+      "solana"
+    ]
+  },
+  "brian_armstrong": {
+    "verdictIn": [
+      "PASS"
+    ],
+    "scoreMin": 75,
+    "neverIncomplete": true,
+    "expectedRole": "FOUNDER",
+    "mustSurface": [
+      "coinbase"
+    ]
+  },
+  "driftprotocol": {
+    "verdictIn": [
+      "PASS"
+    ],
+    "scoreMin": 70,
+    "neverIncomplete": true,
+    "expectedRole": "PROJECT",
+    "mustSurface": [
+      "drift"
+    ]
+  },
+  "gakonst": {
+    "verdictIn": [
+      "PASS"
+    ],
+    "scoreMin": 75,
+    "neverIncomplete": true,
+    "expectedRole": "FOUNDER",
+    "mustSurface": [
+      "paradigm|alloy|reth|ethereum"
+    ]
+  },
+  "jupiterexchange": {
+    "verdictIn": [
+      "PASS"
+    ],
+    "scoreMin": 70,
+    "scoreMax": 90,
+    "neverIncomplete": true,
+    "expectedRole": "PROJECT",
+    "mustSurface": [
+      "jupiter|solana"
+    ]
+  },
+  "stanikulechov": {
+    "verdictIn": [
+      "PASS"
+    ],
+    "scoreMin": 75,
+    "neverIncomplete": true,
+    "expectedRole": "FOUNDER",
+    "mustSurface": [
+      "aave"
+    ]
+  },
+  "0xsupergemma": {
+    "verdictIn": [
+      "CAUTION",
+      "FAIL",
+      "AVOID"
+    ],
+    "scoreMax": 60,
+    "neverIncomplete": true,
+    "expectedRole": "PROJECT",
+    "mustNotAppear": [
+      "supergut|marc washington|30\\.2m"
+    ]
   }
 }

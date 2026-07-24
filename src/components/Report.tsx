@@ -81,6 +81,7 @@ import {
   canonicalBasicFactPredicate,
   supportsExplicitEmptyBasicFact,
 } from "../lib/basicFactQuestions";
+import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -758,6 +759,7 @@ function frozenSourceDate(value?: string): string | null {
   if (!value) return null;
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return null;
+  if (date.getTime() < Date.UTC(2020, 0, 1) || date.getTime() > Date.now() + 86_400_000) return null;
   return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
@@ -1324,7 +1326,7 @@ function isExactOfficialXProfile(url: string | undefined, handle: string): boole
  * answer already present in the stored provider-resolved X profile.
  */
 function reportBasicFacts(dossier: Dossier, audience: "project" | "investor" | "founder" | "person"): BasicFactView[] {
-  const facts = (dossier.basicFacts ?? []).map((fact): BasicFactView => {
+  const projected = (dossier.basicFacts ?? []).map((fact): BasicFactView => {
     if (fact.predicate !== "official_identity") return fact;
     const sources = fact.sources ?? [];
     const hasOfficialProfile = sources.some((source) => isExactOfficialXProfile(source.url, dossier.handle));
@@ -1338,6 +1340,21 @@ function reportBasicFacts(dossier: Dossier, audience: "project" | "investor" | "
         || source.sourceClass === "regulatory_or_onchain"),
     };
   });
+  const hasStrongerFundingFact = projected.some((fact) =>
+    canonicalBasicFactPredicate(fact.predicate) === "funding"
+    && fact.providerProjection !== true
+    && (fact.status === "verified" || fact.status === "corroborated")
+    && (fact.sources ?? []).some((source) =>
+      source.provider !== "defillama"
+      && source.provider !== "monid"
+      && ["independent_press", "official_subject", "official_counterparty", "regulatory_or_onchain"].includes(source.sourceClass ?? "")));
+  // Saved reports remain immutable, but their publication view must not put a
+  // weaker aggregator summary beside stronger source-backed financing evidence.
+  const facts = hasStrongerFundingFact
+    ? projected.filter((fact) =>
+      canonicalBasicFactPredicate(fact.predicate) !== "funding"
+      || fact.providerProjection !== true)
+    : projected;
   if (
     audience !== "project"
     || facts.some((fact) =>
@@ -1517,7 +1534,37 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           : roles.includes(SubjectClass.FOUNDER)
               ? "founder" as const
               : "person" as const;
-  const basicFacts = reportBasicFacts(f, basicFactsAudience);
+  const publicationBasicFacts = reportBasicFacts(f, basicFactsAudience);
+  const fundingEvidence = summarizeFundingEvidence(
+    publicationBasicFacts,
+    f.protocolFunding?.rounds ?? [],
+  );
+  const acceptedFundingFacts = publicationBasicFacts.filter((fact) =>
+    canonicalBasicFactPredicate(fact.predicate) === "funding"
+    && (fact.status === "verified" || fact.status === "corroborated"));
+  const firstFundingFact = acceptedFundingFacts[0];
+  const consolidatedFundingFact: BasicFactView | null = firstFundingFact
+    && fundingEvidence.independentRoundCount > 0
+    && fundingEvidence.totalKnownUsd > 0
+    ? {
+        ...firstFundingFact,
+        value: `At least ${usdCompact(fundingEvidence.totalKnownUsd)} documented across ${fundingEvidence.rounds.length} evidenced funding round${fundingEvidence.rounds.length === 1 ? "" : "s"}`,
+        normalizedValue: `at least ${fundingEvidence.totalKnownUsd} documented funding`,
+        qualifier: "documented lower bound from frozen sources",
+        status: fundingEvidence.independentSourceCount >= 2 ? "corroborated" : firstFundingFact.status,
+        providerProjection: false,
+        sources: [...new Map(acceptedFundingFacts
+          .flatMap((fact) => fact.sources ?? [])
+          .filter((source) => source.provider !== "defillama" && source.provider !== "monid")
+          .map((source) => [source.url ?? `${source.provider}:${source.title}`, source])).values()],
+      }
+    : null;
+  const basicFacts = consolidatedFundingFact
+    ? publicationBasicFacts.filter((fact) =>
+      canonicalBasicFactPredicate(fact.predicate) !== "funding"
+      || fact === firstFundingFact)
+      .map((fact) => fact === firstFundingFact ? consolidatedFundingFact : fact)
+    : publicationBasicFacts;
   const basicFactResearchAttempted = basicFacts.length > 0
     || basicFactLeads.length > 0
     || (f.basicFactQuestionLedger?.length ?? 0) > 0;
@@ -2268,11 +2315,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       value: `since ${f.protocolTvl.firstRecordedAt.slice(0, 4)}`,
       sub: "series start, bounds age",
     }] : []),
-    ...(f.protocolFunding && f.protocolFunding.totalRaisedUsd > 0 ? [{
+    ...(fundingEvidence.totalKnownUsd > 0 ? [{
       key: "raised",
-      label: "Raised",
-      value: usdCompact(f.protocolFunding.totalRaisedUsd),
-      sub: `${f.protocolFunding.rounds.length} public round${f.protocolFunding.rounds.length === 1 ? "" : "s"}`,
+      label: fundingEvidence.independentRoundCount > 0 ? "Documented funding" : "Indexed funding",
+      value: `${fundingEvidence.independentRoundCount > 0 ? "≥" : ""}${usdCompact(fundingEvidence.totalKnownUsd)}`,
+      sub: fundingEvidence.independentRoundCount > 0
+        ? `${fundingEvidence.rounds.length} evidenced round${fundingEvidence.rounds.length === 1 ? "" : "s"} · lower bound`
+        : `${fundingEvidence.rounds.length} disclosed round${fundingEvidence.rounds.length === 1 ? "" : "s"} · aggregator index`,
     }] : []),
     ...(f.projectToken?.deployedChains?.length ? [{
       key: "chains",
@@ -2686,7 +2735,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               fillRequired={fillDecisionFacts}
               audience={basicFactsAudience}
               questionLedger={f.basicFactQuestionLedger}
-              fundingRounds={f.protocolFunding?.rounds}
+              fundingRounds={fundingEvidence.rounds}
             />
           </div>
         )}

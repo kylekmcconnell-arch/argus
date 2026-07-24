@@ -231,6 +231,105 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelector('a[href="https://x.com/ponsdotfamily"]')).not.toBeNull();
   });
 
+  it("lets corroborated funding govern a conflicting aggregator projection", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      display_name: "Uniswap",
+      report: { ...base.report, roles: ["PROJECT"], governing_role: "PROJECT" },
+      protocolFunding: {
+        slug: "uniswap",
+        name: "Uniswap",
+        geckoId: "uniswap",
+        rounds: [{
+          date: "2020-08-07",
+          round: "Series A",
+          amountUsd: 11_000_000,
+          leadInvestors: [],
+          otherInvestors: ["a16z"],
+          valuationUsd: null,
+        }, {
+          date: "2026-02-11",
+          round: "Undisclosed round",
+          amountUsd: null,
+          leadInvestors: ["BlackRock"],
+          otherInvestors: [],
+          valuationUsd: null,
+        }],
+        totalRaisedUsd: 11_000_000,
+        leadInvestors: ["BlackRock"],
+        sourceUrl: "https://defillama.com/protocol/uniswap",
+        capturedAt: "2026-07-23T19:43:00.102Z",
+      },
+      basicFacts: [{
+        factId: "series-b",
+        subjectKey: "@uniswap",
+        predicate: "funding",
+        value: "Series B",
+        normalizedValue: "series b",
+        status: "corroborated" as const,
+        critical: false,
+        sources: [{
+          url: "https://news.example/2022/10/13/uniswap-series-b",
+          title: "Uniswap Labs Raises $165M in Polychain Capital-Led Round",
+          excerpt: "Uniswap Labs raised $165 million in a Series B led by Polychain Capital.",
+          provider: "public-web",
+          relation: "supports" as const,
+          capturedAt: "2026-07-23T19:43:00.102Z",
+          contentHash: "d".repeat(64),
+          sourceClass: "independent_press" as const,
+          artifactVerified: true,
+        }, {
+          url: "https://second.example/2022/10/13/uniswap-series-b",
+          title: "Uniswap Series B",
+          excerpt: "Uniswap Labs secured $165 million in a Series B led by Polychain Capital.",
+          provider: "public-web",
+          relation: "supports" as const,
+          capturedAt: "2026-07-23T19:43:00.102Z",
+          contentHash: "e".repeat(64),
+          sourceClass: "independent_press" as const,
+          artifactVerified: true,
+        }],
+        evidence_origin: "deterministic" as const,
+        artifact_verified: true,
+        provider: "public-web",
+      }, {
+        factId: "defillama-summary",
+        subjectKey: "@uniswap",
+        predicate: "funding",
+        value: "2 public funding rounds · $11.0M raised · led by BlackRock",
+        normalizedValue: "2 public funding rounds 11m raised led by blackrock",
+        status: "verified" as const,
+        critical: false,
+        sources: [{
+          url: "https://defillama.com/protocol/uniswap",
+          title: "DeFiLlama funding record",
+          excerpt: "Uniswap raised $11.0M across 2 public funding rounds, led by BlackRock.",
+          provider: "defillama",
+          relation: "supports" as const,
+          capturedAt: "2026-07-23T19:43:00.102Z",
+          contentHash: "f".repeat(64),
+          sourceClass: "other_public" as const,
+          artifactVerified: true,
+        }],
+        evidence_origin: "deterministic" as const,
+        artifact_verified: true,
+        provider: "public-web",
+        providerProjection: true,
+      }],
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("At least $176M documented across 2 evidenced funding rounds");
+    expect(container.textContent).toContain("Series B");
+    expect(container.textContent).toContain("Polychain Capital");
+    expect(container.textContent).not.toContain("BlackRock");
+    expect(container.textContent).not.toContain("2 public funding rounds");
+  });
+
   it("renders never-collected follow and acknowledgment checks as unchecked instead of affirmative negatives", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
@@ -1784,5 +1883,33 @@ describe("legacy person report coverage truth", () => {
     expect(container.textContent).toContain("Checks1/1");
     expect(container.querySelector('a[href="#scan-methodology"]')).not.toBeNull();
     expect(container.querySelector("#scan-methodology")).not.toBeNull();
+  });
+
+  it("hides impossible legacy scoring dates while preserving the immutable save time", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: {
+        ...base.report,
+        finalized_at: "1970-01-01T00:00:00.000Z",
+      },
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000101",
+        reportVersionId: "00000000-0000-4000-8000-000000000203",
+        version: 3,
+        completenessState: "complete" as const,
+        attestationState: "server_collected" as const,
+        methodologyVersion: "argus-person-v1",
+        createdAt: "2026-07-23T12:05:00.000Z",
+        checks: [],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Report saved");
+    expect(container.textContent).not.toContain("1970");
   });
 });
