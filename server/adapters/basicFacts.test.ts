@@ -954,26 +954,15 @@ describe("basic-facts source verification", () => {
     });
 
     const result = await collectBasicFacts(ctx, {
-      discover: async () => [
-        lead({
-          subject: "driftprotocol",
-          predicate: "official_identity",
-          value: "Drift Protocol",
-          questionId: "person.official_identity",
-          excerpt: "Drift Protocol",
-          sourceUrl: officialUrl,
-          sourceTitle: "Introducing DRIFT",
-        }),
-        lead({
-          subject: "driftprotocol",
-          predicate: "official_token",
-          value: "DRIFT",
-          questionId: "person.official_token",
-          excerpt: "The Drift Protocol governance token empowers the Drift community.",
-          sourceUrl: officialUrl,
-          sourceTitle: "Introducing DRIFT",
-        }),
-      ],
+      discover: async () => [lead({
+        subject: "driftprotocol",
+        predicate: "official_token",
+        value: "DRIFT",
+        questionId: "person.official_token",
+        excerpt: "The Drift Protocol governance token empowers the Drift community.",
+        sourceUrl: officialUrl,
+        sourceTitle: "Introducing DRIFT",
+      })],
       fetchSource: fetchDocuments({
         [officialUrl]: source,
         "https://www.drift.trade/": source,
@@ -987,6 +976,51 @@ describe("basic-facts source verification", () => {
       value: "Drift Protocol",
       status: "verified",
       questionId: "project.official_identity",
+    }));
+  });
+
+  it("does not invent a project identity from a matching handle and domain", async () => {
+    const evidence = emptyEvidence("@driftprotocol");
+    evidence.profile.display_name = "driftprotocol";
+    evidence.profile.profile_collection_state = "unavailable";
+    const ctx: CollectContext = {
+      handle: "@driftprotocol",
+      evidence,
+      emit: vi.fn(),
+    };
+    const officialUrl = "https://www.drift.trade/token";
+    const source = document({
+      url: officialUrl,
+      host: "www.drift.trade",
+      text: [
+        "<html><body>",
+        "<h1>Introducing DRIFT</h1>",
+        "<p>The governance token empowers the community.</p>",
+        '<a href="https://twitter.com/driftprotocol">X</a>',
+        "</body></html>",
+      ].join(""),
+      contentHash: "f".repeat(64),
+    });
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [lead({
+        subject: "driftprotocol",
+        predicate: "official_token",
+        value: "DRIFT",
+        questionId: "person.official_token",
+        excerpt: "The governance token empowers the community.",
+        sourceUrl: officialUrl,
+      })],
+      fetchSource: fetchDocuments({
+        [officialUrl]: source,
+        "https://www.drift.trade/": source,
+      }),
+    });
+
+    expect(evidence.profile.website).toBeUndefined();
+    expect(evidence.basicFacts).not.toContainEqual(expect.objectContaining({
+      predicate: "official_identity",
+      status: "verified",
     }));
   });
 

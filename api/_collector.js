@@ -9962,6 +9962,8 @@ function subjectAliases(ctx) {
 }
 var OFFICIAL_SITE_HANDLE_SUFFIXES = /* @__PURE__ */ new Set([
   "app",
+  "chain",
+  "coin",
   "dao",
   "defi",
   "dex",
@@ -9969,13 +9971,14 @@ var OFFICIAL_SITE_HANDLE_SUFFIXES = /* @__PURE__ */ new Set([
   "finance",
   "foundation",
   "labs",
+  "markets",
   "network",
   "official",
   "protocol",
   "sol",
   "xyz"
 ]);
-function officialSiteBindingCandidate(handle, sourceUrl, identity) {
+function officialSiteBindingCandidate(handle, sourceUrl, identityEvidence) {
   let url;
   try {
     url = new URL(sourceUrl);
@@ -9992,7 +9995,12 @@ function officialSiteBindingCandidate(handle, sourceUrl, identity) {
   if (!brandKey || brandKey.length < 3 || !handleKey.startsWith(brandKey)) return null;
   const suffix = handleKey.slice(brandKey.length);
   if (suffix && !OFFICIAL_SITE_HANDLE_SUFFIXES.has(suffix)) return null;
-  const discoveredIdentity = identity.trim();
+  const identityTails = suffix ? [suffix] : [...OFFICIAL_SITE_HANDLE_SUFFIXES].filter((candidate) => candidate !== "official");
+  const identityMatch = identityEvidence.match(new RegExp(
+    `\\b${escapedPattern(brandLabel)}(?:[\\s_-]+)(${identityTails.map(escapedPattern).join("|")})\\b`,
+    "i"
+  ));
+  const discoveredIdentity = identityMatch?.[0]?.replace(/[_-]+/g, " ").trim() ?? "";
   return discoveredIdentity ? { identity: discoveredIdentity, origin: url.origin, sourceUrl: url.toString() } : null;
 }
 function documentLinksExactHandle(document, handle) {
@@ -12572,8 +12580,12 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     if (canonicalOfficialWebsite(ctx.evidence.profile.website)) return [];
     const candidates = /* @__PURE__ */ new Map();
     for (const lead of leads) {
-      if (lead.predicate !== "official_identity") continue;
-      const candidate = officialSiteBindingCandidate(ctx.handle, lead.sourceUrl, lead.value);
+      const candidate = officialSiteBindingCandidate(
+        ctx.handle,
+        lead.sourceUrl,
+        `${lead.value}
+${lead.excerpt}`
+      );
       const key = candidate ? `${candidate.origin}
 ${searchable(candidate.identity)}` : "";
       if (candidate && !candidates.has(key)) candidates.set(key, candidate);

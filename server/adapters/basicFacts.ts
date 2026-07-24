@@ -994,8 +994,8 @@ function subjectAliases(ctx: CollectContext): string[] {
 }
 
 const OFFICIAL_SITE_HANDLE_SUFFIXES = new Set([
-  "app", "dao", "defi", "dex", "exchange", "finance", "foundation", "labs",
-  "network", "official", "protocol", "sol", "xyz",
+  "app", "chain", "coin", "dao", "defi", "dex", "exchange", "finance",
+  "foundation", "labs", "markets", "network", "official", "protocol", "sol", "xyz",
 ]);
 
 interface OfficialSiteBindingCandidate {
@@ -1015,7 +1015,7 @@ interface OfficialSiteBindingCandidate {
 function officialSiteBindingCandidate(
   handle: string,
   sourceUrl: string,
-  identity: string,
+  identityEvidence: string,
 ): OfficialSiteBindingCandidate | null {
   let url: URL;
   try { url = new URL(sourceUrl); } catch { return null; }
@@ -1029,7 +1029,17 @@ function officialSiteBindingCandidate(
   if (!brandKey || brandKey.length < 3 || !handleKey.startsWith(brandKey)) return null;
   const suffix = handleKey.slice(brandKey.length);
   if (suffix && !OFFICIAL_SITE_HANDLE_SUFFIXES.has(suffix)) return null;
-  const discoveredIdentity = identity.trim();
+  // The identity must be literal source text. For drift.trade +
+  // @driftprotocol this extracts "Drift Protocol" from the cited passage; it
+  // never manufactures that display name from the handle or domain alone.
+  const identityTails = suffix
+    ? [suffix]
+    : [...OFFICIAL_SITE_HANDLE_SUFFIXES].filter((candidate) => candidate !== "official");
+  const identityMatch = identityEvidence.match(new RegExp(
+    `\\b${escapedPattern(brandLabel)}(?:[\\s_-]+)(${identityTails.map(escapedPattern).join("|")})\\b`,
+    "i",
+  ));
+  const discoveredIdentity = identityMatch?.[0]?.replace(/[_-]+/g, " ").trim() ?? "";
   return discoveredIdentity
     ? { identity: discoveredIdentity, origin: url.origin, sourceUrl: url.toString() }
     : null;
@@ -4447,10 +4457,15 @@ export async function collectBasicFacts(
     const candidates = new Map<string, OfficialSiteBindingCandidate>();
     for (const lead of leads) {
       // Never invent the brand name from the handle or domain. Recovery needs
-      // an explicit identity lead whose value is then checked on the fetched
-      // first-party page and bound to the exact X handle.
-      if (lead.predicate !== "official_identity") continue;
-      const candidate = officialSiteBindingCandidate(ctx.handle, lead.sourceUrl, lead.value);
+      // a literal project identity in a cited passage, which is then checked on
+      // the fetched first-party page and bound to the exact X handle. This also
+      // covers an official-token lead whose passage explicitly says
+      // "Drift Protocol" even when search returned no site-hosted identity row.
+      const candidate = officialSiteBindingCandidate(
+        ctx.handle,
+        lead.sourceUrl,
+        `${lead.value}\n${lead.excerpt}`,
+      );
       const key = candidate ? `${candidate.origin}\n${searchable(candidate.identity)}` : "";
       if (candidate && !candidates.has(key)) candidates.set(key, candidate);
     }
