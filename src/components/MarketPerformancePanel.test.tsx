@@ -138,14 +138,14 @@ describe("MarketPerformancePanel", () => {
       />,
     ));
 
-    expect(container.textContent).toContain("$VVV market scale and performance");
+    expect(container.textContent).toContain("$VVV market and price");
     expect(container.textContent).toContain("$610.00M");
     expect(container.textContent).toContain("From all-time high");
     expect(container.textContent).toContain("-91.9%");
     expect(container.textContent).toContain("ATH $31");
-    expect(container.textContent).toContain("CANONICAL TOKEN");
-    expect(container.textContent).toContain("Captured market scale");
-    expect(container.textContent).toContain("These bars compare captured values");
+    expect(container.textContent).toContain("OFFICIAL TOKEN");
+    expect(container.textContent).toContain("Market size");
+    expect(container.textContent).toContain("Values shown are from the time of this scan");
     expect(container.textContent).toContain("CoinGecko global rank");
     expect(harness.sparkline).toHaveBeenCalledWith(expect.objectContaining({
       address,
@@ -173,7 +173,7 @@ describe("MarketPerformancePanel", () => {
 
     expect(container.textContent).toContain("Market rank");
     expect(container.textContent).toContain("Not captured");
-    expect(container.textContent).toContain("No global registry rank captured");
+    expect(container.textContent).toContain("Rank was not available");
     expect(container.textContent).not.toContain("CoinGecko global rank");
   });
 
@@ -188,7 +188,7 @@ describe("MarketPerformancePanel", () => {
 
     expect(container.textContent).toContain("$300.00M");
     expect(container.textContent).not.toContain("$4.00B");
-    expect(container.textContent).not.toContain("CANONICAL TOKEN");
+    expect(container.textContent).not.toContain("OFFICIAL TOKEN");
   });
 
   it("labels the captured-window peak honestly when a legacy snapshot has no lifetime ATH", () => {
@@ -203,9 +203,9 @@ describe("MarketPerformancePanel", () => {
 
     expect(container.textContent).toContain("From captured peak");
     expect(container.textContent).toContain("-16.7%");
-    expect(container.textContent).toContain("Refresh true ATH");
+    expect(container.textContent).toContain("Check all-time high");
     const button = [...container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent?.includes("Refresh true ATH"));
+      .find((candidate) => candidate.textContent?.includes("Check all-time high"));
     act(() => button?.click());
     expect(refresh).toHaveBeenCalledTimes(1);
   });
@@ -236,6 +236,6 @@ describe("MarketPerformancePanel", () => {
 
     expect(container.textContent).toContain("From all-time high");
     expect(container.textContent).toContain("-92.2%");
-    expect(container.textContent).toContain("LIVE SUPPLEMENT");
+    expect(container.textContent).toContain("CURRENT DATA");
   });
 });

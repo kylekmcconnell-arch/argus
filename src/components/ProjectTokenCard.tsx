@@ -52,7 +52,7 @@ export function ProjectTokenCard({
             {token.rank != null && <span className="chip">CoinGecko #{token.rank}</span>}
           </div>
           <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
-            <span className="mono font-medium text-ink">${token.symbol}</span> is the canonical token linked to {token.name}. Matched through the project's {verifiedBy} and canonical {token.chain} contract, never a name or ticker match. The identity binding is frozen into this report even when the overall verdict is withheld.
+            <span className="mono font-medium text-ink">${token.symbol}</span> is the official token linked to {token.name}. ARGUS matched it through the project’s {verifiedBy} and official {token.chain} contract, not just the name or ticker.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">

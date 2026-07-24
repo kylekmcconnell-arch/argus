@@ -228,22 +228,22 @@ export function MarketPerformancePanel({
           <ChartLineUp size={22} weight="duotone" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="eyebrow text-signal-lift">Market record</p>
+          <p className="eyebrow text-signal-lift">Market</p>
           <h3 id={headingId} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
-            ${symbol} market scale and performance
+            ${symbol} market and price
           </h3>
           <p className="mt-1 max-w-2xl text-[11.5px] leading-relaxed text-ink-faint">
-            Point-in-time valuation and the captured price path are separated from lifetime ATH performance so the report never substitutes a recent peak for the real high.
+            Market size, price change, and distance from the all-time high when this report was saved.
           </p>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {projectToken && (
             <span className="chip tint-pass gap-1">
-              <ShieldCheck size={12} weight="fill" aria-hidden="true" /> CANONICAL TOKEN
+              <ShieldCheck size={12} weight="fill" aria-hidden="true" /> OFFICIAL TOKEN
             </span>
           )}
-          <span className="chip tint-pass">{captureDate ? `CAPTURED ${captureDate.toUpperCase()}` : "FROZEN RECORD"}</span>
-          {(liveAth || liveMarketCap) && <span className="chip tint-caution">LIVE SUPPLEMENT</span>}
+          <span className="chip tint-pass">{captureDate ? `SAVED ${captureDate.toUpperCase()}` : "SAVED DATA"}</span>
+          {(liveAth || liveMarketCap) && <span className="chip tint-caution">CURRENT DATA</span>}
         </div>
       </header>
 
@@ -253,10 +253,10 @@ export function MarketPerformancePanel({
           <dd className="mono mt-1 text-[22px] font-semibold leading-none text-ink tabular-nums">{money(marketCap)}</dd>
           <dd className="mt-1 text-[10.5px] text-ink-faint">
             {liveMarketCap
-              ? "current CoinGecko supplement"
+              ? "current CoinGecko data"
               : finite(marketCap)
-                ? "stored with the report"
-                : "legacy record; refresh for current value"}
+                ? "at time of report"
+                : "not saved · check current data"}
           </dd>
         </div>
         <div className="bg-panel px-4 py-3.5">
@@ -278,10 +278,10 @@ export function MarketPerformancePanel({
           <dd className="mt-1 text-[10.5px] text-ink-faint">{performanceDetail}</dd>
         </div>
         <div className="bg-panel px-4 py-3.5">
-          <dt className="stat-label">Price at capture</dt>
+          <dt className="stat-label">Price when scanned</dt>
           <dd className="mono mt-1 text-[22px] font-semibold leading-none text-ink tabular-nums">{price(currentPrice)}</dd>
           <dd className="mt-1 text-[10.5px] text-ink-faint">
-            {history ? `${history.timeframe} series preserved` : "point-in-time quote"}
+            {history ? "saved price history" : "price when scanned"}
           </dd>
         </div>
         <div className="bg-panel px-4 py-3.5">
@@ -294,7 +294,7 @@ export function MarketPerformancePanel({
                 : "Not captured"}
           </dd>
           <dd className="mt-1 text-[10.5px] text-ink-faint">
-            {hasCoinGeckoRankContext ? "CoinGecko global rank" : "No global registry rank captured"}
+            {hasCoinGeckoRankContext ? "CoinGecko global rank" : "Rank was not available"}
           </dd>
         </div>
       </dl>
@@ -302,8 +302,8 @@ export function MarketPerformancePanel({
       <div className="grid gap-0 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.35fr)]">
         <figure className="border-b border-line/70 px-4 py-4 sm:px-5 lg:border-b-0 lg:border-r">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <figcaption className="eyebrow">Captured market scale</figcaption>
-            <span className="text-[10px] uppercase tracking-wider text-ink-faint">point in time</span>
+            <figcaption className="eyebrow">Market size</figcaption>
+            <span className="text-[10px] uppercase tracking-wider text-ink-faint">when scanned</span>
           </div>
           {scaleMetrics.length ? (
             <div className="mt-3 space-y-3">
@@ -328,19 +328,19 @@ export function MarketPerformancePanel({
             </div>
           ) : (
             <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
-              No valuation fields were stored in this legacy record.
+              Market size was not saved with this report.
             </p>
           )}
           <p className="mt-4 border-t border-line/60 pt-3 text-[10.5px] leading-relaxed text-ink-faint">
-            These bars compare captured values. They are not presented as a historical market-cap series.
+            Values shown are from the time of this scan.
           </p>
         </figure>
 
         <figure className="px-4 py-4 sm:px-5">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <figcaption className="eyebrow">Price path</figcaption>
+            <figcaption className="eyebrow">Price history</figcaption>
             <span className="text-[10px] uppercase tracking-wider text-ink-faint">
-              {history ? `${history.points.length} ${history.timeframe === "day" ? "days" : "hours"} frozen` : showCurrentIntelligence ? "live supplement" : "refresh paused"}
+              {history ? `${history.points.length} ${history.timeframe === "day" ? "days" : "hours"} saved` : showCurrentIntelligence ? "current" : "not loaded"}
             </span>
           </div>
           <div className="mt-3">
@@ -354,7 +354,7 @@ export function MarketPerformancePanel({
             ) : (
               <div className="panel-inset flex flex-col gap-3 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="max-w-xl text-[11.5px] leading-relaxed text-ink-dim">
-                  Refresh the current market overlay to recover price history and the lifetime ATH for this legacy snapshot. The supplement remains outside the stored verdict.
+                  Check current market data to load price history and the all-time high. This will not change the saved score.
                 </p>
                 {onLoadCurrentIntelligence && (
                   <button
@@ -362,7 +362,7 @@ export function MarketPerformancePanel({
                     onClick={onLoadCurrentIntelligence}
                     className="btn-chip tint-signal min-h-10 shrink-0 gap-1.5"
                   >
-                    <ArrowClockwise size={13} aria-hidden="true" /> Refresh market data
+                    <ArrowClockwise size={13} aria-hidden="true" /> Check current data
                   </button>
                 )}
               </div>
@@ -371,11 +371,11 @@ export function MarketPerformancePanel({
           {history && !hasTrueAth && !showCurrentIntelligence && (
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line/60 pt-3">
               <p className="min-w-0 flex-1 text-[10.5px] leading-relaxed text-ink-faint">
-                The chart reports loss from the captured window peak. Refresh once to compare it with the token's true lifetime ATH.
+                This chart uses the highest price in the saved period. Check current data to compare it with the true all-time high.
               </p>
               {onLoadCurrentIntelligence && (
                 <button type="button" onClick={onLoadCurrentIntelligence} className="btn-chip min-h-9 shrink-0 gap-1.5">
-                  <ArrowClockwise size={13} aria-hidden="true" /> Refresh true ATH
+                  <ArrowClockwise size={13} aria-hidden="true" /> Check all-time high
                 </button>
               )}
             </div>
@@ -402,11 +402,11 @@ export function MarketPerformancePanel({
             </div>
           )}
           {liveLoading && (
-            <p className="mt-2 text-[10.5px] text-ink-faint" role="status">Refreshing the CoinGecko lifetime record...</p>
+            <p className="mt-2 text-[10.5px] text-ink-faint" role="status">Checking CoinGecko...</p>
           )}
           {currentLive?.state === "none" && !hasTrueAth && (
             <p className="mt-2 text-[10.5px] leading-relaxed text-caution" role="status">
-              CoinGecko did not return a lifetime ATH for this contract. ARGUS is keeping the captured-window peak label instead of overstating the data.
+              CoinGecko did not return an all-time high for this contract. ARGUS is showing the highest price from the saved period instead.
             </p>
           )}
         </figure>

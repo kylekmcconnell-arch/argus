@@ -72,11 +72,11 @@ describe("BasicFactsPanel", () => {
     expect(container.querySelector("#basic-facts")).not.toBeNull();
     expect(container.querySelectorAll('ul[aria-label="Key verified answers"] > li, ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(2);
     expect(container.querySelectorAll('ul[aria-label="Unresolved basic facts"] > li')).toHaveLength(14);
-    expect(container.textContent).toContain("2 verified");
+    expect(container.textContent).toContain("2 confirmed");
     expect(container.textContent).toContain("14 questions");
     expect(container.textContent).toContain("What does the project actually do?");
     expect(container.textContent).toContain("Still to confirm");
-    expect(container.textContent).toContain("Corroborated");
+    expect(container.textContent).toContain("Confirmed twice");
     expect(container.textContent).toContain("Sources disagree");
 
     const sourceLinks = [...container.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')];
@@ -118,7 +118,7 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).toContain("excluded from the verdict");
     expect(container.textContent).toContain("Candidate founder from model search");
     expect(container.textContent).toContain("$25 million");
-    expect(container.textContent).toContain("0 verified");
+    expect(container.textContent).toContain("0 confirmed");
     expect(container.textContent).toContain("Foundational answers are still being verified");
     expect(container.textContent).toContain("ARGUS found 2 possible answers");
     expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
@@ -176,7 +176,7 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).toContain("Who is this person?");
     expect(container.textContent).toContain("What do they lead or control today?");
     expect(container.textContent).toContain("What legal or regulatory events actually name them?");
-    expect(container.textContent).toContain("2 verified");
+    expect(container.textContent).toContain("2 confirmed");
     expect(container.textContent).toContain("10 questions");
     expect(container.textContent).not.toContain("Which networks does it run on?");
     expect(container.textContent).not.toContain("When did the product launch?");
@@ -265,7 +265,7 @@ describe("BasicFactsPanel", () => {
     expect(container.querySelector('[aria-label="Identity review required"]')?.textContent)
       .toContain("Same name, identity not confirmed");
     expect(container.querySelector('[aria-label="Basic facts coverage"]')?.textContent)
-      .toContain("0 verified");
+      .toContain("0 confirmed");
   });
 
   it("keeps conflicting legal statuses in separate visible cards", () => {
@@ -330,7 +330,7 @@ describe("BasicFactsPanel", () => {
 
     expect(container.textContent).toContain("NASDAQ: COIN");
     expect(container.textContent).toContain("No verified official crypto token was found in this snapshot.");
-    expect(container.textContent).toContain("1 checked, none found");
+    expect(container.textContent).toContain("1 with no result");
     expect(container.textContent).toContain("10 questions");
     expect(container.querySelector('[aria-label="Completed empty basic-fact searches"]')?.textContent)
       .toContain("Is an official crypto token tied to a venture they control?");
@@ -355,7 +355,7 @@ describe("BasicFactsPanel", () => {
     const emptySearches = container.querySelector('[aria-label="Completed empty basic-fact searches"]');
     expect(emptySearches?.textContent).toContain("No verified public security was found in this snapshot.");
     expect(emptySearches?.textContent).toContain("No verified official crypto token was found in this snapshot.");
-    expect(container.textContent).toContain("2 checked, none found");
+    expect(container.textContent).toContain("2 with no result");
     expect(container.textContent).not.toContain("Foundational answers are still being verified");
   });
 
@@ -501,7 +501,7 @@ describe("BasicFactsPanel", () => {
     });
 
     expect(container.querySelectorAll('ul[aria-label="Key verified answers"] > li, ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(15);
-    expect(container.textContent).toContain("15 verified");
+    expect(container.textContent).toContain("15 confirmed");
     expect(container.textContent).toContain("Who founded it?");
     expect(container.textContent).toContain("Who operates it today?");
     expect(container.textContent).toContain("When was it founded?");
@@ -688,6 +688,9 @@ describe("BasicFactsPanel", () => {
         />,
       );
     });
+    const detailsButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Show details");
+    act(() => detailsButton?.click());
     const text = container.textContent ?? "";
     expect(text).toContain("Uniswap Web App");
     expect(text).toContain("$2.36B");

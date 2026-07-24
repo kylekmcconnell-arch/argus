@@ -7,6 +7,7 @@ import {
   MagnifyingGlass,
   Warning,
 } from "@phosphor-icons/react";
+import { ExpandableText } from "./ExpandableText";
 
 export type ReportCanvasTone = "pass" | "caution" | "signal" | "avoid" | "neutral";
 
@@ -130,7 +131,13 @@ export function ReportCanvasNarrativeSection({
                     </span>
                   )}
                 </div>
-                {item.detail && <p className="mt-1 text-[11.5px] leading-snug text-ink-dim">{item.detail}</p>}
+                {item.detail && (
+                  <ExpandableText
+                    text={item.detail}
+                    collapsedLength={170}
+                    className="mt-1 text-[11.5px] font-normal leading-snug text-ink-dim"
+                  />
+                )}
                 {item.provenance && <p className="mt-1 text-[10.5px] text-ink-faint">{item.provenance}</p>}
               </>
             );

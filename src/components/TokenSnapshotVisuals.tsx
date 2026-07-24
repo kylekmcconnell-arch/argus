@@ -175,8 +175,8 @@ function ForensicAxes({ token }: { token: TokenDossier }) {
   return (
     <figure className="panel-inset px-3.5 py-3" aria-labelledby="snapshot-forensic-axes">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <figcaption id="snapshot-forensic-axes" className="eyebrow">Forensic score profile</figcaption>
-        <span className="mono text-[10.5px] text-ink-faint">{token.score ?? "N/A"}/100 stored result</span>
+        <figcaption id="snapshot-forensic-axes" className="eyebrow">Score breakdown</figcaption>
+        <span className="mono text-[10.5px] text-ink-faint">{token.score ?? "N/A"}/100 saved score</span>
       </div>
       <div className="mt-2.5 grid gap-x-6 gap-y-2 lg:grid-cols-2">
         {token.axes.map((axis) => {
@@ -216,15 +216,15 @@ export function TokenSnapshotVisuals({
     <section className="panel px-4 py-4 sm:px-5" aria-labelledby="token-snapshot-visuals-title">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="eyebrow text-signal-lift">Frozen token record</p>
+          <p className="eyebrow text-signal-lift">Saved token data</p>
           <h3 id="token-snapshot-visuals-title" className="mt-1 text-[16px] font-semibold tracking-tight text-ink">
             Market and ownership structure
           </h3>
           <p className="mt-1 max-w-2xl text-[11.5px] leading-relaxed text-ink-faint">
-            Every chart in this panel is reconstructed from values saved inside this report.
+            Ownership and liquidity at the time of the scan.
           </p>
         </div>
-        <span className="chip tint-pass">CAPTURED WITH SCAN</span>
+        <span className="chip tint-pass">SAVED WITH REPORT</span>
       </header>
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         {showPriceMomentum && hasPriceMomentum && token.priceChange && <PriceMomentum priceChange={token.priceChange} />}

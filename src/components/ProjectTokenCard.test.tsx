@@ -92,7 +92,7 @@ describe("ProjectTokenCard", () => {
     const withoutHistory = { ...token, history: undefined };
     act(() => root.render(<ProjectTokenCard token={withoutHistory} showCurrentIntelligence={false} />));
 
-    expect(container.textContent).toContain("Refresh the current market overlay");
+    expect(container.textContent).toContain("Check current market data");
     expect(harness.sparkline).not.toHaveBeenCalled();
   });
 

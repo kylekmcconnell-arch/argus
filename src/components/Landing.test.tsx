@@ -42,8 +42,8 @@ describe("Landing fresh audit launch", () => {
     expect(trace).not.toBeNull();
     expect(trace?.getAttribute("aria-hidden")).toBe("true");
     expect(trace?.querySelector("svg")).not.toBeNull();
-    expect(container.textContent).toContain("Starts a fresh provider run and may use paid API quota");
-    expect(container.textContent).toContain("Open previous snapshots from Recent cases");
+    expect(container.textContent).toContain("A new scan checks current sources and may use paid data");
+    expect(container.textContent).toContain("Open a recent case to reuse saved results");
     expect(container.textContent).not.toContain("Try a live token");
     expect(container.textContent).not.toMatch(/\$(PEPE|SHIB|UNI)\b/);
 

@@ -16,16 +16,16 @@ export interface DecisionBasisProps {
 // support (decisionBasis.ts) — "No support", not a softer euphemism — and
 // `contested` means verified evidence conflicts.
 const STATUS_META: Record<DecisionBasisStatus, { label: string; color: string }> = {
-  grounded: { label: "Strong evidence", color: "var(--color-pass)" },
-  partial: { label: "Moderate evidence", color: "var(--color-caution)" },
-  contested: { label: "Contested evidence", color: "var(--color-avoid)" },
-  gap: { label: "No evidence found yet", color: "var(--color-caution)" },
+  grounded: { label: "Strong support", color: "var(--color-pass)" },
+  partial: { label: "Some support", color: "var(--color-caution)" },
+  contested: { label: "Sources disagree", color: "var(--color-avoid)" },
+  gap: { label: "No support found", color: "var(--color-caution)" },
 };
 
 const RELATION_LABEL = {
-  support: "Supports this view",
-  counter: "Needs reconciliation",
-  gap: "Open question",
+  support: "Supports result",
+  counter: "Conflicts with result",
+  gap: "Still open",
 } as const;
 
 function safeExternalSource(value?: string): string | null {
@@ -121,7 +121,7 @@ function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; rela
     <li className="panel-inset px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="chip">{RELATION_LABEL[relation]}</span>
-        <span className="ml-auto text-[11px] text-ink-faint">{captured ? `Captured ${captured}` : "Source captured by ARGUS"}</span>
+        <span className="ml-auto text-[11px] text-ink-faint">{captured ? `Saved ${captured}` : "Saved by ARGUS"}</span>
       </div>
       <div className="mt-1.5 text-[12.5px] font-medium leading-snug text-ink">{title}</div>
       {record.excerpt && <p className="mt-1 text-[11px] leading-relaxed text-ink-dim">{record.excerpt}</p>}
@@ -139,7 +139,7 @@ function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; rela
         )}
       </div>
       <details className="mt-2 text-[11px] text-ink-faint">
-        <summary className="cursor-pointer select-none">Verification details</summary>
+        <summary className="cursor-pointer select-none">Source details</summary>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
           <span>{record.provider}</span>
           <span>{record.verification.replace(/_/g, " ")}</span>
@@ -173,15 +173,15 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
 
   if (!model.available || unavailableReason) {
     const statusLabel = unavailableReason === "routing"
-      ? "Methodology unavailable"
+      ? "Report type unclear"
       : unavailableReason === "scoring"
-        ? "Scoring output incomplete"
-        : "Lineage unavailable";
+        ? "Score did not finish"
+        : "Source links unavailable";
     const explanation = unavailableReason === "routing"
-      ? "No evidence-backed role selected a scoring methodology, so this report contains no evidence-to-axis lineage. Collected intelligence remains visible without being converted into a score."
+      ? "ARGUS could not confirm what kind of subject this is, so it did not produce a score. The facts and sources it found are still shown below."
       : unavailableReason === "scoring"
-        ? "ARGUS resolved an evidence-backed role, but the analyst did not return a complete, valid governing-axis score. Collected intelligence remains visible without being presented as decision-ready."
-        : "This snapshot does not contain strict evidence-to-axis citations. ARGUS will not infer them from analyst prose or nearby sources.";
+        ? "ARGUS identified the subject, but the scoring step did not finish. You can still review the facts and sources below."
+        : "This saved report does not link each part of the score to its sources. ARGUS will not guess which source was used.";
     const rescanLabel = unavailableReason === "routing"
       ? "Run corrected investigation"
       : unavailableReason === "scoring"
@@ -190,7 +190,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
     return (
       <section aria-label="Decision basis" className="panel px-4 py-3.5">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">How ARGUS reached this view</h3>
+          <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Evidence behind the score</h3>
           <span className="chip">{statusLabel}</span>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -240,14 +240,14 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
   return (
     <section aria-label="Decision basis" className="panel px-4 py-3.5">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">How ARGUS reached this view</h3>
+        <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Evidence behind the score</h3>
         <span className="text-[12.5px] text-ink-faint">{roleLabel(model.role ?? undefined)}</span>
         <span className="ml-auto text-[11.5px] text-ink-faint">
-          {model.evidenceBacked} of {model.rows.length} diligence areas have cited support
+          {model.evidenceBacked} of {model.rows.length} areas have sources
         </span>
       </div>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-        Select an area to see what supports the view, what conflicts, and what still needs to be verified.
+        Choose an area to see the evidence and remaining questions.
       </p>
 
       {model.rows.length ? (
@@ -280,9 +280,9 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                       <span className="chip tint-var shrink-0" style={{ ["--tint" as string]: meta.color }}>{meta.label}</span>
                     </span>
                     <span className="mt-1 block text-[11px] text-ink-faint">
-                      {row.support.length} cited source{row.support.length === 1 ? "" : "s"}
-                      {row.counter.length ? ` · ${row.counter.length} need${row.counter.length === 1 ? "s" : ""} reconciliation` : ""}
-                      {questions.length ? ` · ${questions.length} question${questions.length === 1 ? "" : "s"} to verify` : ""}
+                      {row.support.length} source{row.support.length === 1 ? "" : "s"}
+                      {row.counter.length ? ` · ${row.counter.length} disagree` : ""}
+                      {questions.length ? ` · ${questions.length} still open` : ""}
                     </span>
                   </button>
                 </div>
@@ -296,11 +296,11 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                 <h4 className="text-[12.5px] font-medium text-ink">{axisLabel(selected.axis)}</h4>
                 <span className="chip tint-var" style={{ ["--tint" as string]: STATUS_META[selected.status].color }}>{STATUS_META[selected.status].label}</span>
               </div>
-              <p className="mt-1 text-[11px] text-ink-faint">These are the exact sources ARGUS used for this part of the assessment.</p>
+              <p className="mt-1 text-[11px] text-ink-faint">Sources used for this part of the score.</p>
 
               <div className="mt-3 grid gap-3 lg:grid-cols-2">
                 <div>
-                  <h5 className="eyebrow">Why this looks credible</h5>
+                  <h5 className="eyebrow">Supporting evidence</h5>
                   {selected.support.length ? (
                     <ul className="mt-1.5 space-y-2" aria-label={`Supporting evidence for ${axisLabel(selected.axis)}`}>
                       {selected.support.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="support" />)}
@@ -308,7 +308,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                   ) : <p className="mt-1.5 text-[11px] text-ink-faint">No verified supporting source was captured.</p>}
                 </div>
                 <div>
-                  <h5 className="eyebrow">Where sources disagree</h5>
+                  <h5 className="eyebrow">Conflicting evidence</h5>
                   {selected.counter.length ? (
                     <ul className="mt-1.5 space-y-2" aria-label={`Counter-evidence for ${axisLabel(selected.axis)}`}>
                       {selected.counter.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="counter" />)}
@@ -319,7 +319,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
 
               {(selectedQuestions.length > 0 || selectedCoverageGaps > 0) && (
                 <div className="mt-3 border-t border-line/60 pt-2.5">
-                  <h5 className="eyebrow">Questions to verify</h5>
+                  <h5 className="eyebrow">Open questions</h5>
                   {selectedQuestions.length > 0 && (
                     <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-caution">
                       {selectedQuestions.map((question) => <li key={question}>{question}</li>)}
@@ -327,7 +327,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                   )}
                   {selectedCoverageGaps > 0 && (
                     <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
-                      {plural(selectedCoverageGaps, "additional coverage gap")} recorded on this axis (provider or collection gaps, not an investor question).
+                      {plural(selectedCoverageGaps, "data source check")} did not finish.
                     </p>
                   )}
                 </div>

@@ -89,8 +89,8 @@ describe("DecisionBasis", () => {
       root.render(<DecisionBasis roleReport={roleReport()} catalog={[]} onRescan={onRescan} />);
     });
 
-    expect(container.textContent).toContain("Lineage unavailable");
-    expect(container.textContent).toContain("will not infer them from analyst prose");
+    expect(container.textContent).toContain("Source links unavailable");
+    expect(container.textContent).toContain("ARGUS will not guess which source was used");
     const rescan = [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent?.trim() === "Rescan to capture lineage");
     expect(rescan).toBeDefined();
@@ -115,9 +115,9 @@ describe("DecisionBasis", () => {
       );
     });
 
-    expect(container.textContent).toContain("Scoring output incomplete");
-    expect(container.textContent).toContain("resolved an evidence-backed role");
-    expect(container.textContent).toContain("analyst did not return a complete, valid governing-axis score");
+    expect(container.textContent).toContain("Score did not finish");
+    expect(container.textContent).toContain("ARGUS identified the subject");
+    expect(container.textContent).toContain("scoring step did not finish");
     expect(container.textContent).not.toContain("No evidence-backed role selected");
     const retry = [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent?.trim() === "Retry scoring investigation");
@@ -138,14 +138,12 @@ describe("DecisionBasis", () => {
       root.render(<DecisionBasis roleReport={roleReport()} catalog={[support, counter]} lineageVersion={1} />);
     });
 
-    expect(container.textContent).toContain("How ARGUS reached this view");
+    expect(container.textContent).toContain("Evidence behind the score");
     expect(container.textContent).toContain("Founder");
-    expect(container.textContent).toContain("1 of 2 diligence areas have cited support");
-    // Status labels state the evidence reality plainly (no euphemism): a
-    // conflict is "Contested", zero support is "No evidence found yet".
-    expect(container.textContent).toContain("Contested evidence");
-    expect(container.textContent).toContain("No evidence found yet");
-    expect(container.textContent).toContain("what still needs to be verified");
+    expect(container.textContent).toContain("1 of 2 areas have sources");
+    expect(container.textContent).toContain("Sources disagree");
+    expect(container.textContent).toContain("No support found");
+    expect(container.textContent).toContain("remaining questions");
 
     const axisButtons = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')];
     expect(axisButtons).toHaveLength(2);
@@ -249,7 +247,7 @@ describe("DecisionBasis", () => {
 
     expect(container.textContent).toContain("Confirm the legal identity and current role of each founder.");
     expect(container.textContent).toContain("Confirm whether the project or its founders previously used other public identities.");
-    expect(container.textContent).toContain("1 additional coverage gap recorded on this axis");
+    expect(container.textContent).toContain("1 data source check did not finish");
     expect(container.textContent).not.toContain("People Data Labs collection failed");
     expect(container.textContent).not.toContain("Licensed identity-provider");
     expect(container.textContent).not.toContain("Handle-history provider coverage");

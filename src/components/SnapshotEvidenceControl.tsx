@@ -21,10 +21,10 @@ export function LiveSupplementalNotice({
       className="tint-caution rounded-lg border px-3 py-2 text-[12.5px] leading-relaxed"
     >
       {privateSession
-        ? "Private result · supplemental panels are paused to avoid shared cache traces · not saved to a case, graph, watchlist, or activity feed"
+        ? "Private report. Extra live checks are off, and nothing is added to shared cases, watchlists, or activity."
         : persisted
-          ? "Live supplemental intelligence · fetched after the core scan · not included in the immutable Share payload or scored verdict"
-          : "Live supplemental intelligence · outside the core scan · not included in a saved Share payload or scored verdict"}
+          ? "New information checked after this scan. It is not part of the saved score or shared report."
+          : "New information checked after this scan. It is not part of the saved score."}
     </p>
   );
 }
@@ -51,7 +51,6 @@ function predatesEngineUpgrades(capturedAt: string): boolean {
 export function SnapshotEvidenceControl({
   snapshotVersion,
   capturedAt,
-  subjectKind,
   currentIntelligenceEnabled,
   onLoadCurrentIntelligence,
 }: SnapshotEvidenceControlProps) {
@@ -64,31 +63,31 @@ export function SnapshotEvidenceControl({
 
   return (
     <section
-      aria-label={`Snapshot v${snapshotVersion} evidence mode`}
+      aria-label={`Saved report v${snapshotVersion}`}
       className="panel px-3.5 py-2.5"
     >
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2">
         <span className="chip tint-signal">
-          SNAPSHOT v{snapshotVersion}
+          SAVED REPORT v{snapshotVersion}
         </span>
         <time dateTime={capturedAt} className="mono text-[11px] text-ink-faint">
-          captured {capturedTime(capturedAt)}
+          saved {capturedTime(capturedAt)}
         </time>
         {enabled ? (
           <p role="status" className="w-full text-[11.5px] leading-relaxed text-caution sm:ml-auto sm:w-auto">
-            Current intelligence · fetched now · not part of snapshot v{snapshotVersion} · does not change stored verdict
+            Current data is shown separately and does not change the saved score.
           </p>
         ) : (
           <>
             <p className="w-full text-[11.5px] leading-relaxed text-ink-faint sm:ml-1 sm:min-w-52 sm:flex-1">
-              Captured charts are shown below. Live refreshes are paused and remain outside the stored verdict.
+              This report uses data saved on {capturedTime(capturedAt)}.
             </p>
             <button
               type="button"
               onClick={loadCurrentIntelligence}
               className="btn-chip tint-signal shrink-0"
             >
-              Refresh live intelligence
+              Check current data
             </button>
           </>
         )}
@@ -99,14 +98,8 @@ export function SnapshotEvidenceControl({
           role="note"
           className="mt-2 border-t border-line/60 pt-2 text-[11.5px] leading-relaxed text-caution"
         >
-          {subjectKind === "person"
-            ? "This snapshot predates upgrades to identity recall, role corroboration, and structured outcome checks."
-            : subjectKind === "token" || subjectKind === "investigation"
-              ? "This snapshot predates upgrades to canonical token binding, market history, and float-control checks."
-              : subjectKind === "site"
-                ? "This snapshot predates upgrades to site recovery, identity extraction, and source reconciliation."
-                : "This snapshot predates upgrades to identity recall, source reconciliation, and evidence coverage."}
-          {" "}The frozen verdict is unchanged; a re-scan will answer more.
+          ARGUS now checks more sources than when this report was saved.
+          {" "}Run a new scan for a fuller report. The saved result will not change.
         </p>
       ) : null}
     </section>

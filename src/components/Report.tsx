@@ -83,6 +83,7 @@ import {
   supportsExplicitEmptyBasicFact,
 } from "../lib/basicFactQuestions";
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
+import { ExpandableText } from "./ExpandableText";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -398,11 +399,11 @@ function evidenceStrength({
   supportCount: number;
   counterCount?: number;
   questionCount?: number;
-}): "Strong evidence" | "Moderate evidence" | "Limited evidence" {
+}): "Strong support" | "Some support" | "Limited support" {
   const ratio = weight > 0 ? score / weight : 0;
-  if (supportCount >= 3 && ratio >= 0.72 && counterCount === 0 && questionCount === 0) return "Strong evidence";
-  if (supportCount >= 2 && ratio >= 0.48 && counterCount <= 1) return "Moderate evidence";
-  return "Limited evidence";
+  if (supportCount >= 3 && ratio >= 0.72 && counterCount === 0 && questionCount === 0) return "Strong support";
+  if (supportCount >= 2 && ratio >= 0.48 && counterCount <= 1) return "Some support";
+  return "Limited support";
 }
 
 function questionMeta(count: number): string {
@@ -462,14 +463,20 @@ function AxisBar({
           style={{ background: weak ? "var(--color-caution)" : color, width: `${ratio * 100}%`, transition: "width 0.7s ease-out" }}
         />
       </div>
-      {rationale && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-faint">{rationale}</p>}
+      {rationale && (
+        <ExpandableText
+          text={rationale}
+          collapsedLength={180}
+          className="mt-1.5 text-[12.5px] leading-snug text-ink-faint"
+        />
+      )}
       {evidenceRefs && (
         <a
           href={`#decision-basis-${axis}`}
           className="mt-1.5 inline-flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 rounded-md text-[12.5px] text-signal-lift underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
         >
           <span>{supportCount} {supportCount === 1 ? "source" : "sources"} reviewed</span>
-          {counterCount > 0 && <span className="text-caution">{counterCount} {counterCount === 1 ? "source needs" : "sources need"} reconciliation</span>}
+          {counterCount > 0 && <span className="text-caution">{counterCount} {counterCount === 1 ? "source disagrees" : "sources disagree"}</span>}
           {questionCount > 0 && <span className="text-caution">{questionCount} {questionCount === 1 ? "question" : "questions"} to verify</span>}
           <span aria-hidden="true">↑</span>
         </a>
@@ -505,7 +512,7 @@ function RoleCard({ rr, governing, scoreState }: { rr: RoleReport; governing: bo
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-[13.5px] font-medium text-ink">{role.label}</span>
-            {governing && <span className="chip">governs</span>}
+            {governing && <span className="chip">score used</span>}
           </div>
           <div className="mt-1 flex items-center gap-2">
             <VerdictPill verdict={rr.verdict} />
@@ -582,10 +589,10 @@ const TV_TONE: Record<string, string> = {
   Contradicted: "var(--color-avoid)",
 };
 const TV_SHORT: Record<string, string> = {
-  Corroborated: "Corroborated",
-  PartiallyCorroborated: "Partial",
-  Unconfirmed: "Unconfirmed",
-  Contradicted: "Contradicted",
+  Corroborated: "Confirmed",
+  PartiallyCorroborated: "Mixed",
+  Unconfirmed: "Not confirmed",
+  Contradicted: "Sources disagree",
 };
 
 function CorroborationTable({
@@ -598,7 +605,7 @@ function CorroborationTable({
       <div className="grid grid-cols-[1.4fr_1fr_auto] gap-2 border-b border-line px-4 py-2 eyebrow">
         <span>Claimed endorser</span>
         <span>Public signal</span>
-        <span className="text-right">Verdict</span>
+        <span className="text-right">Result</span>
       </div>
       <div className="divide-y divide-line/60">
         {rows.map((r, i) => (
@@ -1084,10 +1091,10 @@ function FrozenProfileAuthenticityPanel({
     ? "REVIEW LEAD"
     : inconclusive
       ? "INCONCLUSIVE"
-      : "VISUAL SCREEN RECORDED";
+      : "PHOTO CHECKED";
 
   return (
-    <Section title="Profile-photo check" kicker="a quick photo check, not identity proof">
+    <Section title="Profile photo" kicker="A quick image check. This cannot prove identity.">
       <Card className="p-4">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
           {imagePreview && result.classification !== "no_photo" && (
@@ -1104,11 +1111,11 @@ function FrozenProfileAuthenticityPanel({
               <span className="chip tint-var" style={{ "--tint": tone } as React.CSSProperties}>
                 {stateLabel}
               </span>
-              {confidence != null && <span className="mono text-[11px] text-ink-faint">{confidence}% model confidence</span>}
+              {confidence != null && <span className="mono text-[11px] text-ink-faint">{confidence}% confidence</span>}
             </div>
             <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{result.note}</p>
             <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-              This screen can surface synthetic, stock-like, or public-figure image leads. It cannot prove image ownership, identity, or web-wide reuse.
+              This checks whether the image looks like a real person, logo, stock image, public figure, or AI image. It cannot prove who owns the account.
             </p>
             {result.tells.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Visible profile-image indicators">
@@ -1119,24 +1126,27 @@ function FrozenProfileAuthenticityPanel({
             )}
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 pt-3 text-[11px] text-ink-faint">
-          {capturedAt && <span>Captured <time dateTime={result.capturedAt}>{capturedAt}</time></span>}
-          <span className="mono" title={imageHash ?? undefined}>Source image SHA-256 {imageHash ? `${imageHash.slice(0, 12)}…` : "unavailable"}</span>
-          {artifactHash && <span className="mono" title={artifactHash}>Artifact {artifactHash.slice(0, 12)}…</span>}
-          {source && (
-            <a href={source.href} target="_blank" rel="noopener noreferrer" className="link-ext mono">
-              Open image source
-            </a>
-          )}
-          <ExactVersionLink reportVersionId={reportVersionId} version={version} />
-        </div>
+        <details className="mt-3 border-t border-line/60 pt-3 text-[11px] text-ink-faint">
+          <summary className="cursor-pointer select-none">Technical details</summary>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {capturedAt && <span>Saved <time dateTime={result.capturedAt}>{capturedAt}</time></span>}
+            <span className="mono" title={imageHash ?? undefined}>Source image SHA-256 {imageHash ? `${imageHash.slice(0, 12)}…` : "unavailable"}</span>
+            {artifactHash && <span className="mono" title={artifactHash}>Artifact {artifactHash.slice(0, 12)}…</span>}
+            {source && (
+              <a href={source.href} target="_blank" rel="noopener noreferrer" className="link-ext mono">
+                Open image source
+              </a>
+            )}
+            <ExactVersionLink reportVersionId={reportVersionId} version={version} />
+          </div>
+        </details>
         {imageHash && (
           <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
             {frozenImageData
-              ? "The preview uses the exact image bytes retained with this report; the source-image hash verifies them."
+              ? "The saved image is shown here."
               : source
-                ? "The preview is loaded from the source URL and may change. The source-image hash identifies the exact bytes inspected in this report."
-                : "No image preview is embedded in this snapshot. The source-image hash still identifies the exact bytes inspected."}
+                ? "This image is loaded from the source and may change."
+                : "The image is not stored in this report."}
           </p>
         )}
       </Card>
@@ -1164,7 +1174,7 @@ function FrozenTrustGraphPanel({
     ? "RISK SIGNAL"
     : incomplete
       ? "INCOMPLETE"
-      : "SCREENED · NO QUALIFIED FLAGGED LINK";
+      : "NO CONCERNING CONNECTION FOUND";
 
   return (
     <Section title="Known connections" kicker="checked against every case your team has audited">
@@ -1174,25 +1184,25 @@ function FrozenTrustGraphPanel({
             <span className="chip tint-var" style={{ "--tint": tone } as React.CSSProperties}>
               {stateLabel}
             </span>
-            {screen.severity && risk && <span className="mono text-[11px] uppercase text-ink-faint">{screen.severity} policy tier</span>}
+            {screen.severity && risk && <span className="mono text-[11px] uppercase text-ink-faint">{screen.severity} concern</span>}
           </div>
           <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{screen.line}</p>
           <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-            This is the graph state available at capture time. A shared person, wallet, funder, or project is an investigative lead; it is not proof of common control by itself.
+            These are the connections known when the report was saved. Sharing a person, wallet, funder, or project does not prove common control.
           </p>
 
           <dl className="mt-3 grid gap-2 sm:grid-cols-3">
             <div className="stat-tile">
-              <dt className="stat-label">Qualified reports</dt>
+              <dt className="stat-label">Reports checked</dt>
               <dd className="stat-value mt-0.5 font-semibold">{screen.qualifiedContributionCount} / {screen.contributionCount}</dd>
             </div>
             <div className="stat-tile">
-              <dt className="stat-label">Connections surfaced</dt>
+              <dt className="stat-label">Connections found</dt>
               <dd className="stat-value mt-0.5 font-semibold">{screen.connections.length}</dd>
             </div>
             <div className="stat-tile">
-              <dt className="stat-label">Graph snapshot</dt>
-              <dd className="mono mt-0.5 truncate text-[11px] text-ink-dim" title={graphHash ?? undefined}>{graphHash ? `${graphHash.slice(0, 16)}…` : "hash unavailable"}</dd>
+              <dt className="stat-label">Status</dt>
+              <dd className="stat-value mt-0.5 font-semibold">{incomplete ? "Not finished" : "Finished"}</dd>
             </div>
           </dl>
         </div>
@@ -1206,7 +1216,7 @@ function FrozenTrustGraphPanel({
                     <span className="mono text-[12.5px] font-medium text-ink">{connection.other}</span>
                     {connection.otherVerdict && <VerdictPill verdict={connection.otherVerdict} />}
                     <span className={`chip ${connection.qualified ? "tint-pass" : ""}`}>
-                      {connection.qualified ? "decision-qualified snapshot" : "context only"}
+                      {connection.qualified ? "used in report" : "context only"}
                     </span>
                     {connection.direct && <span className="text-[11px] text-ink-faint">directly surfaced</span>}
                     <span className="ml-auto">
@@ -1234,11 +1244,14 @@ function FrozenTrustGraphPanel({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 px-4 py-3 text-[11px] text-ink-faint">
-          {capturedAt && <span>Captured <time dateTime={screen.capturedAt}>{capturedAt}</time></span>}
-          <span className="mono" title={graphHash ?? undefined}>Graph snapshot SHA-256 {graphHash ? `${graphHash.slice(0, 12)}…` : "unavailable"}</span>
-          <ExactVersionLink reportVersionId={reportVersionId} version={version} />
-        </div>
+        <details className="border-t border-line/60 px-4 py-3 text-[11px] text-ink-faint">
+          <summary className="cursor-pointer select-none">Technical details</summary>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {capturedAt && <span>Saved <time dateTime={screen.capturedAt}>{capturedAt}</time></span>}
+            <span className="mono" title={graphHash ?? undefined}>Graph snapshot SHA-256 {graphHash ? `${graphHash.slice(0, 12)}…` : "unavailable"}</span>
+            <ExactVersionLink reportVersionId={reportVersionId} version={version} />
+          </div>
+        </details>
       </Card>
     </Section>
   );
@@ -1258,8 +1271,8 @@ function FrozenSourceLedger({
   return (
     <div id="frozen-source-ledger" className="scroll-mt-24">
       <Section
-        title="Sources we saved"
-        kicker="every article and page used, saved exactly as read"
+        title="Saved sources"
+        kicker="Articles and pages used in this report"
       >
         <Card className="divide-y divide-line/60 overflow-hidden">
         {artifacts.map((artifact, index) => {
@@ -1304,17 +1317,22 @@ function FrozenSourceLedger({
               {artifact.excerpt && <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{artifact.excerpt}</p>}
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-faint">
                 {publishedAt && <span>Published <time dateTime={artifact.publishedAt}>{publishedAt}</time></span>}
-                {capturedAt && <span>Captured <time dateTime={artifact.capturedAt}>{capturedAt}</time></span>}
-                <span className="mono" title={hash ?? undefined}>SHA-256 {hash ? `${hash.slice(0, 12)}…` : "unavailable"}</span>
-                {sourceHash && <span className="mono" title={sourceHash}>{sourceHashLabel} {sourceHash.slice(0, 12)}…</span>}
+                {capturedAt && <span>Saved <time dateTime={artifact.capturedAt}>{capturedAt}</time></span>}
               </div>
+              <details className="mt-2 text-[11px] text-ink-faint">
+                <summary className="cursor-pointer select-none">Technical details</summary>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                  <span className="mono" title={hash ?? undefined}>SHA-256 {hash ? `${hash.slice(0, 12)}…` : "unavailable"}</span>
+                  {sourceHash && <span className="mono" title={sourceHash}>{sourceHashLabel} {sourceHash.slice(0, 12)}…</span>}
+                </div>
+              </details>
               {source ? (
                 <a
                   href={source.href}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="link-ext mono mt-2 inline-flex max-w-full items-center gap-1.5 text-[11px]"
-                  aria-label={`Open frozen ${SOURCE_KIND_LABEL[artifact.kind].toLowerCase()} source in a new tab: ${artifact.title}`}
+                  aria-label={`Open ${SOURCE_KIND_LABEL[artifact.kind].toLowerCase()} source in a new tab: ${artifact.title}`}
                 >
                   <span className="shrink-0 text-ink-faint">Open source</span>
                   <span className="truncate">{source.label}</span>
@@ -2183,7 +2201,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         id: `support-${axis.axis}`,
         title: diligenceAreaLabel(axis.axis),
         detail: summary,
-        meta: `${strength.replace(" evidence", "")} · ${axis.support.length} src`,
+        meta: `${strength} · ${axis.support.length} ${axis.support.length === 1 ? "source" : "sources"}`,
         href: axisHref(axis.axis),
       };
     });
@@ -2196,9 +2214,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const confidenceLimitsBase: ReportCanvasNarrativeItem[] = [
     ...(report.cap_applied ? [{
       id: "hard-cap",
-      title: `A hard cap governs the result: ${capLabel(report.cap_applied)}.`,
-      detail: "A disqualifying finding overrides the weighted role total.",
-      provenance: "Frozen scoring policy",
+      title: `The score is limited because of: ${capLabel(report.cap_applied)}.`,
+      detail: "A serious finding can limit the score even when other areas look strong.",
+      provenance: "Scoring rule",
       href: "#role-breakdown" as `#${string}`,
     }] : []),
     // Coverage bookkeeping ("N of M checks recorded, treat as provisional")
@@ -2468,12 +2486,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const relationshipRecordCount = connections.length + webTeam.length + (evidence.associates?.length ?? 0);
   const argusEdgeMetrics = [
     ...(basicFactResearchAttempted
-      ? [{ label: "Verified facts", value: verifiedDecisionFactCount, detail: "source-backed answers" }]
+      ? [{ label: "Confirmed facts", value: verifiedDecisionFactCount, detail: "answers with sources" }]
       : []),
-    { label: "Decision sources", value: citedDecisionSourceKeys.size, detail: "bound to the verdict" },
-    { label: "Conflicts captured", value: conflictSignalCount, detail: "stored in this snapshot" },
-    { label: "Relationship records", value: relationshipRecordCount, detail: "people and graph links" },
-    { label: "Open questions", value: decisionQuestionCount, detail: "worth verifying" },
+    { label: "Sources used", value: citedDecisionSourceKeys.size, detail: "used in the score" },
+    { label: "Sources that disagree", value: conflictSignalCount, detail: "shown in this report" },
+    { label: "Known links", value: relationshipRecordCount, detail: "people and project links" },
+    { label: "Still to check", value: decisionQuestionCount, detail: "important open questions" },
   ] as const;
 
   // Hero proof chips: every chip is a projection of recorded check outcomes,
@@ -2814,7 +2832,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               </div>
             </div>
 
-            <dl className="order-4 mx-5 mb-5 grid content-start gap-3 border-t border-line/60 pt-4 text-[11px] lg:order-none lg:m-0 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0" aria-label="Immutable report identity">
+            <details className="order-4 mx-5 mb-5 border-t border-line/60 pt-4 text-[11px] lg:order-none lg:m-0 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+              <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-dim">Report details</summary>
+              <dl className="mt-3 grid content-start gap-3" aria-label="Saved report details">
               <div>
                 <dt className="stat-label">Report ID</dt>
                 <dd className="mono mt-1 break-all text-ink-dim">{report.audit_id}</dd>
@@ -2823,21 +2843,22 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <dt className="stat-label">Report state</dt>
                 <dd className="mono mt-1 text-signal-lift">
                   {versionContext
-                    ? `v${versionContext.version} · frozen`
+                    ? `saved report v${versionContext.version}`
                     : liveCoreSnapshotSaved
-                      ? "core snapshot saved"
+                      ? "report saved"
                       : f.live
-                        ? "live collection"
-                        : "curated dossier"}
+                        ? "new scan"
+                        : "saved report"}
                 </dd>
               </div>
               {(capturedLabel || finalizedLabel) && (
                 <div>
-                  <dt className="stat-label">Captured</dt>
-                  <dd className="mt-1 text-ink-dim">{capturedLabel ?? finalizedLabel}</dd>
+                <dt className="stat-label">Saved</dt>
+                <dd className="mt-1 text-ink-dim">{capturedLabel ?? finalizedLabel}</dd>
                 </div>
               )}
-            </dl>
+              </dl>
+            </details>
           </div>
 
           <CriticalSubjectAlerts dossier={f} />
@@ -2885,26 +2906,28 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       ? "Every required safety check finished. Read the sources before relying on this result."
                       : "Some checks are still open. The report lists what is missing."}
                   >
-                    {readiness.status === "ready" ? "decision-ready" : readiness.status}
+                    {readiness.status === "ready" ? "ready to review" : readiness.status}
                   </span>
                 )}
                 {report.governing_role && (
                   <span
                     className="mono text-[11px] text-ink-dim"
-                    title="Subjects can hold several roles (project, founder, investor). Each role is scored separately and the LOWER-scoring role sets the final number, so a strong role can never mask a weak one."
+                    title="ARGUS scores each role separately. The lowest role score becomes the overall result."
                   >
-                    governed by {ROLE_META[report.governing_role as SubjectClass].label.toLowerCase()}
+                    {ROLE_META[report.governing_role as SubjectClass].label.toLowerCase()} score used
                   </span>
                 )}
               </div>
-              <p className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-                {presentation.final ? f.headline : legacyCoverageNotCaptured ? readinessGuidance : presentation.note}
-              </p>
+              <ExpandableText
+                text={presentation.final ? f.headline : legacyCoverageNotCaptured ? readinessGuidance : presentation.note}
+                collapsedLength={240}
+                className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim"
+              />
               {presentation.final && !legacyCoverageNotCaptured && (
                 <p className="mono mt-2 text-[11px] text-ink-faint" aria-label="Verdict support summary">
                   {verifiedDecisionFactCount > 0 && (
                     <>
-                      <span className="tabular">{verifiedDecisionFactCount}</span> facts verified
+                      <span className="tabular">{verifiedDecisionFactCount}</span> facts confirmed
                       <span aria-hidden="true"> · </span>
                     </>
                   )}
@@ -2935,7 +2958,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               )}
               {report.cap_applied && (
                 <div className="chip tint-avoid mt-3 font-medium">
-                  Hard cap · {capLabel(report.cap_applied)}
+                  Score limited · {capLabel(report.cap_applied)}
                 </div>
               )}
             </div>
@@ -2964,7 +2987,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">{readinessTitle}</span>
               <span className="text-[11px] text-ink-faint">
-                {legacyCoverageNotCaptured ? "this snapshot contains no frozen check-level outcomes" : "observable outcomes stored in this report"}
+                {legacyCoverageNotCaptured ? "this older report does not show every check" : "required checks are shown below"}
               </span>
               {!legacyCoverageNotCaptured && diligenceChecks.length > 0 && (
                 <a
@@ -2973,22 +2996,25 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 >
                   {decisionQuestionCount > 0
                     ? `${decisionQuestionCount} open ${decisionQuestionCount === 1 ? "question" : "questions"}`
-                    : "Review methodology"}
+                    : "Review checks"}
                 </a>
               )}
             </div>
             {versionContext && (
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink-faint" aria-label="Immutable report version metadata">
-                <span className="mono uppercase tracking-wide">{versionContext.completenessState} version</span>
-                {attestationLabel && <span>{attestationLabel}</span>}
-                {capturedLabel && <span>captured {capturedLabel}</span>}
-                {versionContext.methodologyVersion && <span className="mono">methodology {versionContext.methodologyVersion}</span>}
-              </div>
+              <details className="mt-2 text-[11px] text-ink-faint">
+                <summary className="cursor-pointer select-none">Saved report details</summary>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
+                  <span className="mono uppercase tracking-wide">{versionContext.completenessState} report</span>
+                  {attestationLabel && <span>{attestationLabel}</span>}
+                  {capturedLabel && <span>saved {capturedLabel}</span>}
+                  {versionContext.methodologyVersion && <span className="mono">checks version {versionContext.methodologyVersion}</span>}
+                </div>
+              </details>
             )}
             {legacyCoverageNotCaptured ? (
               <div className="panel-inset mt-3 flex flex-wrap items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12.5px] font-medium text-ink">Frozen coverage unavailable</div>
+                  <div className="text-[12.5px] font-medium text-ink">Check details unavailable</div>
                   <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
                 </div>
                 {onRescan && (
@@ -3028,11 +3054,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   .map((fact) => fact.predicate)).size,
               }] : []),
               ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
-              { href: "#decision-basis", label: "Diligence", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
+              { href: "#decision-basis", label: "Why this score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
               { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
               ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
               { href: "#relationships", label: "Relationships", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
-              ...(diligenceChecks.length > 0 ? [{ href: "#scan-methodology" as const, label: "Methodology", icon: <UserFocus aria-hidden="true" size={15} weight="bold" />, count: diligenceChecks.length }] : []),
+              ...(diligenceChecks.length > 0 ? [{ href: "#scan-methodology" as const, label: "Checks", icon: <UserFocus aria-hidden="true" size={15} weight="bold" />, count: diligenceChecks.length }] : []),
             ]}
           />
         </div>
@@ -3111,11 +3137,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="panel px-5">
             <ReportCanvasNarrativeSection
               id="verdict-rationale"
-              title={decisionFrameworkUnavailable ? "What ARGUS found before the decision failed" : favorableVerdict ? "The investment case" : "Why this is risky"}
+              title={decisionFrameworkUnavailable ? "What ARGUS found before the score failed" : favorableVerdict ? "Why it scored well" : "Main concerns"}
               description={decisionFrameworkUnavailable
                 ? routingUnresolved
-                  ? "Verified artifacts and investigative leads stay visible while subject routing is unresolved. Leads remain explicitly unscored."
-                  : "Verified artifacts and investigative leads stay visible even though the scoring pass was incomplete. Leads remain explicitly unscored."
+                  ? "Confirmed facts and possible leads are still shown while ARGUS works out what kind of subject this is."
+                  : "Confirmed facts and possible leads are still shown even though the score did not finish."
                 : favorableVerdict
                   ? "The strongest source-backed reasons this result holds up."
                   : "The findings, conflicts, and weak areas driving the result."}
@@ -3131,10 +3157,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             />
             <ReportCanvasNarrativeSection
               id="confidence-limits"
-              title={decisionFrameworkUnavailable ? "Why ARGUS withheld a verdict" : favorableVerdict ? "What could break the thesis" : "What argues against the risk case"}
+              title={decisionFrameworkUnavailable ? "Why there is no score" : favorableVerdict ? "Main concerns" : "What looks credible"}
               description={decisionFrameworkUnavailable
                 ? routingUnresolved
-                  ? "ARGUS needs to confirm what this subject is before it can apply the right review standard."
+                  ? "ARGUS needs to confirm what this subject is before it can score it."
                   : "ARGUS identified the subject, but the decision review did not finish."
                 : favorableVerdict
                   ? "Verified risks, conflicts, and adverse findings. Things we have not checked yet are listed separately under open questions."
@@ -3153,7 +3179,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             />
             {!decisionFrameworkUnavailable && decisionQuestionCount > 0 && (
               <p className="border-t border-line/60 py-3 text-[11.5px] text-ink-faint">
-                Also open: <a href="#verification-next" className="text-caution underline-offset-2 hover:underline">{decisionQuestionCount} decision {decisionQuestionCount === 1 ? "question" : "questions"}</a>. The score reflects the evidence collected; read them before relying on it.
+                Still to check: <a href="#verification-next" className="text-caution underline-offset-2 hover:underline">{decisionQuestionCount} important {decisionQuestionCount === 1 ? "question" : "questions"}</a>.
               </p>
             )}
           </div>
@@ -3172,8 +3198,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         <div className="panel mt-5 px-5">
           <ReportCanvasNarrativeSection
             id="verification-next"
-            title="What the investor should verify next"
-            description="The three unanswered questions with the most decision impact. Everything else we have not checked yet is in the list below."
+            title="What to check next"
+            description="The three unanswered questions most likely to change the result."
             tone="signal"
             items={verificationNext}
             emptyCopy={legacyCoverageNotCaptured
@@ -3183,7 +3209,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           {remainingVerificationQuestions.length > 0 && (
             <details className="border-t border-line/60 py-4" open={printExpanded || undefined}>
               <summary className="cursor-pointer text-[13px] font-medium text-ink-dim hover:text-ink">
-                Not yet checked · {remainingVerificationQuestions.length} more {remainingVerificationQuestions.length === 1 ? "item" : "items"}
+                More open questions · {remainingVerificationQuestions.length}
               </summary>
               <ul className="mt-3 space-y-2">
                 {remainingVerificationQuestions.map((item) => (
@@ -3201,8 +3227,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="panel mt-5 px-5">
             <ReportCanvasNarrativeSection
               id="remaining-points"
-              title="Where the remaining points are"
-              description={`This score is ${report.governing_score} of 100. The open points sit in the areas below; each one links to the evidence and the exact questions that would earn them.`}
+              title="What would improve the score"
+              description={`This score is ${report.governing_score} of 100. These are the areas where stronger evidence could change it.`}
               tone="signal"
               items={remainingPointsItems}
               emptyCopy=""
@@ -3353,11 +3379,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         <section className="panel mt-5 px-5 py-5" aria-label="Where this evidence came from">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div>
-              <p className="eyebrow text-signal-lift">Provenance</p>
-              <h2 className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Where this evidence came from</h2>
+              <p className="eyebrow text-signal-lift">Sources</p>
+              <h2 className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Evidence saved with this report</h2>
             </div>
             <span className="mono text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">
-              saved · repeatable · sourced
+              SAVED WITH REPORT
             </span>
           </div>
           <dl className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
@@ -3371,13 +3397,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </dl>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
             <ReportCanvasRailCard
-              title="Sources we saved"
+              title="Saved sources"
               tone="signal"
               count={`${visibleIntelligenceCount} sources and leads`}
               items={provenanceRail}
               footer={(f.sourceArtifacts?.length ?? 0) > 0 ? <a href="#frozen-source-ledger" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">View source details</a> : undefined}
             />
-            <ReportCanvasRailCard title="Report freshness" tone="neutral" items={freshnessRail} />
+            <ReportCanvasRailCard title="Report date" tone="neutral" items={freshnessRail} />
           </div>
         </section>
         {f.profileAuthenticity && (
@@ -3442,7 +3468,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
         {/* role breakdown — governing role full-width and expanded, the rest below */}
         <div id="role-breakdown" className="scroll-mt-28">
-          <Section title="Role breakdown" kicker="each role scored on its own track · never averaged">
+          <Section title="Score breakdown" kicker="Each role is checked separately. The lowest role score is used.">
             {(() => {
               const gov = report.role_reports.find((rr) => rr.role === report.governing_role);
               const others = report.role_reports.filter((rr) => rr.role !== report.governing_role);
@@ -3930,11 +3956,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <ArgusMark size={16} /> How this verdict was reached
           </div>
           <p className="text-[12.5px] leading-relaxed text-ink-faint">
-            Each role is scored to 100 on its own axes. Disqualifying findings act as hard caps that
-            override the weighted total rather than averaging into it, so a single rug or contradicted
-            endorsement cannot be diluted. The composite is the most severe role band, never a mean.
-            Identity is rewarded, not gated: pseudonymity is neutral, disclosure earns a bonus, and only
-            impersonation blocks a verdict. API-only acquisition, evidence-disciplined, reproducible.
+            ARGUS checks each role separately and uses the lowest result. Serious findings can limit
+            the score. A missing public identity does not count as wrongdoing. This report is research,
+            not financial advice.
           </p>
           <RunCostLine cost={dossier.cost} />
         </div>

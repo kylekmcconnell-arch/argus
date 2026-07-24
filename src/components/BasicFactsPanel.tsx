@@ -16,6 +16,7 @@ import {
   type BasicFactQuestionOutcomeInput,
   type BasicFactsAudience,
 } from "../lib/basicFactQuestions";
+import { ExpandableText } from "./ExpandableText";
 
 export type { BasicFactsAudience } from "../lib/basicFactQuestions";
 
@@ -76,7 +77,7 @@ const SINGLE_VALUE_PREDICATES = new Set([
 
 const STATUS_META: Record<Exclude<BasicFactStatus, "lead">, { label: string; className: string }> = {
   verified: { label: "Verified", className: "tint-pass text-pass" },
-  corroborated: { label: "Corroborated", className: "tint-pass text-pass" },
+  corroborated: { label: "Confirmed twice", className: "tint-pass text-pass" },
   conflicted: { label: "Conflicted", className: "tint-avoid text-avoid" },
   unresolved: { label: "Unresolved", className: "tint-caution text-caution" },
   checked_empty: { label: "Checked, none found", className: "tint-neutral text-ink-dim" },
@@ -594,9 +595,11 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
           {statGrid ? (
             <FactStatGrid parsed={statGrid} />
           ) : (
-            <p className={`font-semibold leading-snug tracking-tight text-ink tabular-nums ${prominent ? "text-[16.5px]" : "text-[13.5px]"}`}>
-              {answerFor(displayFact)}
-            </p>
+            <ExpandableText
+              text={answerFor(displayFact)}
+              collapsedLength={prominent ? 190 : 150}
+              className={`font-semibold leading-snug tracking-tight text-ink tabular-nums ${prominent ? "text-[16.5px]" : "text-[13.5px]"}`}
+            />
           )}
           <p className="mt-1 text-[10px] uppercase tracking-[0.09em] text-ink-faint">
             {basicFactQuestionFor(fact.predicate, audience)}
@@ -688,19 +691,19 @@ export function BasicFactsPanel({
       <header className="border-b border-line px-4 py-4 sm:px-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="eyebrow text-signal-lift">Core diligence</p>
+            <p className="eyebrow text-signal-lift">Key facts</p>
             <h2 id={`${id}-title`} className="mt-1 text-[19px] font-semibold tracking-tight text-ink">What you need to know</h2>
             <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-              Positive answers link to fetched sources. Completed searches also preserve an explicit no-verified-result outcome.
+              Confirmed facts are shown first. Open a source to check any answer.
             </p>
           </div>
           <div className="panel-inset flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-[11px]" aria-label="Basic facts coverage">
             <span className="inline-flex items-center gap-1.5 font-medium text-pass">
               <CheckCircle aria-hidden="true" size={14} weight="fill" />
-              {answered} verified
+              {answered} confirmed
             </span>
-            {checkedEmpty > 0 && <span className="text-ink-dim">{checkedEmpty} checked, none found</span>}
-            {conflicted > 0 && <span className="text-avoid">{conflicted} conflicted</span>}
+            {checkedEmpty > 0 && <span className="text-ink-dim">{checkedEmpty} with no result</span>}
+            {conflicted > 0 && <span className="text-avoid">{conflicted} where sources disagree</span>}
             {unresolved > 0 && <span className="text-ink-faint">{unresolved} still to verify</span>}
           </div>
         </div>
@@ -753,9 +756,9 @@ export function BasicFactsPanel({
           <div className="flex items-start gap-2.5">
             <CheckCircle aria-hidden="true" size={18} weight="fill" className="mt-0.5 shrink-0 text-ink-dim" />
             <div>
-              <h3 className="text-[13px] font-semibold text-ink">Asset questions checked separately</h3>
+              <h3 className="text-[13px] font-semibold text-ink">Checks with no result</h3>
               <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
-                These are completed no-result searches, not inferred assets or blanket clearance.
+                We checked these questions but did not find a verified answer.
               </p>
             </div>
           </div>

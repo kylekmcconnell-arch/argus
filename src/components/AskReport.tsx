@@ -80,8 +80,7 @@ export function AskReport({
     <div className="panel">
       <button type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
         <ChatCircleText aria-hidden="true" size={16} weight="duotone" className="text-signal-lift" />
-        <span className="eyebrow">Ask frozen evidence</span>
-        {reportVersionId && <span className="mono text-[10px] text-ink-faint">frozen version {reportVersionId.slice(0, 8)}…</span>}
+        <span className="eyebrow">Ask about this report</span>
         <CaretDown aria-hidden="true" size={14} weight="bold" className={`ml-auto text-ink-faint transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
@@ -92,17 +91,17 @@ export function AskReport({
               onChange={(event) => setQ(event.target.value)}
               onKeyDown={(event) => { if (event.key === "Enter") void ask(); }}
               disabled={!frozenReady}
-              aria-label="Question about this frozen report"
-              placeholder={frozenReady ? "What evidence supports this score?" : "Open or save an immutable snapshot first"}
+              aria-label="Question about this report"
+              placeholder={frozenReady ? "What supports this score?" : "Open or save a report first"}
               className="field min-w-0 flex-1 px-2.5 py-1.5 text-[12.5px] disabled:cursor-not-allowed disabled:opacity-60"
             />
-            <button type="button" onClick={() => void ask()} disabled={loading || !q.trim() || !frozenReady} className="btn-primary shrink-0 px-3 py-1.5 text-[12.5px] font-medium disabled:cursor-not-allowed disabled:opacity-60">{loading ? "thinking…" : "Ask"}</button>
+            <button type="button" onClick={() => void ask()} disabled={loading || !q.trim() || !frozenReady} className="btn-primary shrink-0 px-3 py-1.5 text-[12.5px] font-medium disabled:cursor-not-allowed disabled:opacity-60">{loading ? "Checking…" : "Ask"}</button>
           </div>
           {(loading || answer) && (
             <div className="mt-2.5" aria-live="polite">
               {asked && <p className="text-[11px] text-ink-faint">Q: {asked}</p>}
               {loading ? (
-                <p className="mt-1 text-[12.5px] text-ink-faint">reading frozen report evidence…</p>
+                <p className="mt-1 text-[12.5px] text-ink-faint">Checking the report…</p>
               ) : (
                 <>
                   <p className="mt-1 whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-dim">{answer}</p>
@@ -124,8 +123,8 @@ export function AskReport({
           {!answer && !loading && (
             <p className="mt-2 text-[11px] leading-snug text-ink-faint">
               {frozenReady
-                ? "Answers are limited to this exact immutable version, its cited sources, and its recorded coverage gaps. If the report does not establish something, ARGUS will say so."
-                : "Ask is unavailable until this view is bound to an immutable report version."}
+                ? "Answers use only the sources saved with this report. If the report does not know, ARGUS will say so."
+                : "Save or open a report before asking a question."}
             </p>
           )}
         </div>

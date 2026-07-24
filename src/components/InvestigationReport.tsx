@@ -201,10 +201,10 @@ function ProjectAccountStatusPill({
   if (reviewOpen || !verdict) {
     return (
       <StatusPill
-        label="Review open"
+        label="Checks still open"
         color="var(--color-caution)"
         score={null}
-        title="This project account is missing one or more required checks. Open it and read the gaps before relying on its score."
+        title="One or more required checks did not finish. Open the report to see what is missing."
       />
     );
   }
@@ -717,7 +717,7 @@ export function InvestigationReport({
             </div>
             {establishedAsset && (
               <span className="chip tint-signal mb-0.5">
-                Established market
+                Large market
               </span>
             )}
             {canShare && <CopyTldrButton base={tldrBase} mint={mintShareUrl} className="mb-0.5 ml-auto" />}
@@ -782,16 +782,16 @@ export function InvestigationReport({
               </div>
             </section>
 
-            <section className="panel investigation-hero-card investigation-market-card p-5 lg:col-span-2 xl:col-span-1" aria-label="Market scale">
+            <section className="panel investigation-hero-card investigation-market-card p-5 lg:col-span-2 xl:col-span-1" aria-label="Market size">
               <div className="flex items-center justify-between gap-3">
-                <span className="eyebrow">Market scale</span>
-                {establishedAsset && <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-signal-lift">Established asset</span>}
+                <span className="eyebrow">Market size</span>
+                {establishedAsset && <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-signal-lift">Large market</span>}
               </div>
               <div className="mt-4">
                 <p className="display-sm text-[27px] leading-none text-ink">{money(marketCap)}</p>
                 <p className="mono mt-1.5 text-[10px] uppercase tracking-[0.1em] text-ink-faint">Market capitalization</p>
               </div>
-              <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 xl:grid-cols-2" aria-label="Market scale details">
+              <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 xl:grid-cols-2" aria-label="Market size details">
                 <div>
                   <dt className="stat-label">CoinGecko rank</dt>
                   <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg.rank}` : "N/A"}</dd>
@@ -815,13 +815,13 @@ export function InvestigationReport({
             </section>
           </div>
 
-          <section
+          {(requiredGapChecks.length > 0 || readiness.status !== "ready") && <section
             className="panel clearance-boundary mt-3 flex flex-col gap-4 p-4 tint-var sm:flex-row sm:items-center sm:justify-between"
             style={{ "--tint": readinessColor } as React.CSSProperties}
-            aria-label="What this report means"
+            aria-label="Report warning"
           >
             <div>
-              <p className="eyebrow">What this report means</p>
+              <p className="eyebrow">Before you use this report</p>
               <h2 className="mt-1 text-[14px] font-semibold text-ink">
                 {requiredGapChecks.length
                   ? `${requiredGapChecks.map((check) => check.label).join(", ")} must finish before this report is ready.`
@@ -848,7 +848,7 @@ export function InvestigationReport({
                 </button>
               )}
             </div>
-          </section>
+          </section>}
 
           {projectAccount && (
             <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-ink-dim">
@@ -1240,26 +1240,25 @@ export function InvestigationReport({
               {/* why the score landed where it did */}
               <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
                 {projectAccount.report.governing_role
-                  ? <span>governed by <span className="text-ink-dim">{String(projectAccount.report.governing_role).toLowerCase()}</span></span>
-                  : <span>governing role withheld</span>}
-                {projectAccount.report.cap_applied && <span className="chip tint-avoid">cap · {String(projectAccount.report.cap_applied).replace(/_/g, " ")}</span>}
-                <button onClick={onOpenProjectAccount} className="btn-chip tint-signal ml-auto">why this score · full report →</button>
+                  ? <span><span className="text-ink-dim">{String(projectAccount.report.governing_role).toLowerCase()}</span> score used</span>
+                  : <span>Score not ready</span>}
+                {projectAccount.report.cap_applied && <span className="chip tint-avoid">score limited · {String(projectAccount.report.cap_applied).replace(/_/g, " ")}</span>}
+                <button onClick={onOpenProjectAccount} className="btn-chip tint-signal ml-auto">Open full report →</button>
               </div>
               {projectAccount.bio && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{projectAccount.bio}</p>}
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink">{projectAccountHeadline}</p>
               {projectAccount.evidence.ventures.length > 0 && (
                 <div className="mt-2 border-t border-line/60 pt-2">
-                  <div className="eyebrow">Source-backed ventures & affiliations</div>
+                  <div className="eyebrow">Verified links</div>
                   {projectSourceBackedVentures.length > 0 && <div className="mt-1 flex flex-wrap gap-1.5">
                     {projectSourceBackedVentures.slice(0, 6).map((v, i) => (
                       <span key={i} className="chip normal-case tracking-normal">{v.project_name}</span>
                     ))}
                   </div>}
                   <div className="mt-1 text-[10.5px] text-ink-faint">
-                    {projectSourceBackedVentures.length} source-backed
-                    {projectLegacyVentureCount > 0 ? ` · ${projectLegacyVentureCount} legacy curated` : ""}
-                    {projectUnverifiedVentureCount > 0 ? ` · ${projectUnverifiedVentureCount} unverified lead${projectUnverifiedVentureCount === 1 ? "" : "s"} hidden here` : ""}
-                    {projectUnverifiedVentureCount > 0 ? " · open the full report to inspect" : ""}
+                    {projectSourceBackedVentures.length} verified
+                    {projectLegacyVentureCount > 0 ? ` · ${projectLegacyVentureCount} saved` : ""}
+                    {projectUnverifiedVentureCount > 0 ? ` · ${projectUnverifiedVentureCount} possible lead${projectUnverifiedVentureCount === 1 ? "" : "s"}` : ""}
                   </div>
                 </div>
               )}
@@ -1320,7 +1319,7 @@ export function InvestigationReport({
         )}
 
         <div className="mt-4 panel p-4 text-[12.5px] leading-relaxed text-ink-faint">
-          <span className="text-ink-dim">How to read this:</span> the token and site recon run keyless and free; the project account is backgrounded automatically (one live people-audit). Per-founder deep-dives are one-click and capped at {MAX_FOUNDER_AUDITS} per investigation to bound cost. ARGUS never invents a founder: names without a verified handle are shown but not audited, and a project account is never treated as a person behind the project.
+          ARGUS checked the token, website, project account, and public team. Open a person to run a deeper review. Names without a verified profile stay unconfirmed.
         </div>
       </div>
     </div>

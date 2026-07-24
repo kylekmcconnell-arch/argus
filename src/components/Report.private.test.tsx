@@ -666,8 +666,8 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(container.textContent).toContain("supplemental panels are paused");
-    expect(container.textContent).toContain("avoid shared cache traces");
+    expect(container.textContent).toContain("Extra live checks are off");
+    expect(container.textContent).toContain("nothing is added to shared cases");
     expect(harness.livePanel).not.toHaveBeenCalled();
   });
 
@@ -726,10 +726,10 @@ describe("private person report evidence boundary", () => {
     expect(snapshotLink?.textContent?.trim()).toBe("SAVED REPORT");
     expect(snapshotLink?.title).toContain("exact immutable snapshot");
     expect(snapshotLink?.target).toBe("_blank");
-    expect(container.textContent).toContain("core snapshot saved");
+    expect(container.textContent).toContain("report saved");
     expect(container.textContent).not.toContain("live collection");
-    expect(container.textContent).toContain("Live supplemental intelligence");
-    expect(container.textContent).toContain("not included in the immutable Share payload or scored verdict");
+    expect(container.textContent).toContain("New information checked after this scan");
+    expect(container.textContent).toContain("not part of the saved score or shared report");
   });
 
   it("does not repeat frozen news, legal, and sanctions calls after a fresh saved audit", () => {
@@ -790,7 +790,7 @@ describe("private person report evidence boundary", () => {
     const mountedPanels = harness.livePanel.mock.calls.map(([panel]) => panel);
     expect(mountedPanels).not.toContain("pfp");
     expect(mountedPanels).not.toContain("ring-alert");
-    expect(container.textContent).toContain("2 unresolved");
+    expect(container.textContent).toContain("2 still open");
   });
 
   it("keeps legacy snapshot graph intelligence behind an explicitly labeled current overlay", () => {
@@ -814,11 +814,11 @@ describe("private person report evidence boundary", () => {
 
     expect(harness.livePanel.mock.calls.map(([panel]) => panel)).not.toContain("ring-alert");
     const loadOverlay = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Refresh live intelligence");
+      .find((button) => button.textContent?.trim() === "Check current data");
     expect(loadOverlay).toBeDefined();
     act(() => loadOverlay?.click());
 
-    expect(container.textContent).toContain("Current intelligence · fetched now · not part of snapshot v6 · does not change stored verdict");
+    expect(container.textContent).toContain("Current data is shown separately and does not change the saved score.");
     expect(harness.livePanel.mock.calls.find(([panel]) => panel === "ring-alert")?.[1]).toEqual(
       expect.objectContaining({ snapshotVersion: 6 }),
     );
@@ -967,7 +967,7 @@ describe("decision-safe person report presentation", () => {
       nodes: expect.not.arrayContaining([expect.objectContaining({ key: "<unknown>" })]),
       edges: expect.not.arrayContaining([expect.objectContaining({ dst: "<unknown>" })]),
     }));
-    expect(decisionBasisText()).toContain("No evidence-backed role selected a scoring methodology");
+    expect(decisionBasisText()).toContain("could not confirm what kind of subject this is");
     expect(decisionBasisText()).not.toContain("predates strict evidence-to-axis citations");
   });
 
@@ -1004,15 +1004,15 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onRescan={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Scoring output incomplete");
+    expect(container.textContent).toContain("Score did not finish");
     expect(container.textContent).toContain("ARGUS resolved this subject to Project, but the scoring pass did not complete");
     expect(container.textContent).toContain("Coverage 0%");
-    expect(container.textContent).toContain("What ARGUS found before the decision failed");
+    expect(container.textContent).toContain("What ARGUS found before the score failed");
     expect(container.textContent).toContain("Complete the Project scoring pass");
     expect(container.textContent).not.toContain("Project routing unresolved");
     expect(container.textContent).not.toContain("Resolve whether this account represents a project");
     expect([...container.querySelectorAll("span")].some((node) => node.textContent?.trim() === "decision-ready")).toBe(false);
-    expect(decisionBasisText()).toContain("resolved an evidence-backed role");
+    expect(decisionBasisText()).toContain("ARGUS identified the subject");
     expect(decisionBasisText()).not.toContain("No evidence-backed role selected a scoring methodology");
   });
 
@@ -1026,11 +1026,11 @@ describe("decision-safe person report presentation", () => {
     expect(dossier.report.composite_verdict).not.toBe("PASS");
     const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
     const counterweight = container.querySelector('section[aria-labelledby="confidence-limits-title"]')?.textContent ?? "";
-    expect(verdictDrivers).toMatch(/hard cap governs|is thin|assessed with no positive record|No token could be tied|No outside backers/i);
+    expect(verdictDrivers).toMatch(/score is limited|is thin|assessed with no positive record|No token could be tied|No outside backers/i);
     // The risk section leads with findings, never with our own process status.
     expect(verdictDrivers).not.toContain("needs more verification");
     expect(verdictDrivers).not.toContain("Treat the score and verdict as provisional");
-    expect(counterweight).toContain("What argues against the risk case");
+    expect(counterweight).toContain("What looks credible");
   });
 
   it("titles assessed-null axes with their deterministic finding and keeps coverage out of the risk section", () => {
@@ -1151,7 +1151,7 @@ describe("decision-safe person report presentation", () => {
     expect(decisionBasis).not.toContain(originalAxisName);
     expect(decisionBasis).not.toMatch(/[A-Z]\d+_/);
     expect(verificationSection).not.toMatch(/[A-Z]\d+_/);
-    expect(container.textContent).toMatch(/Strong evidence|Moderate evidence|Limited evidence/);
+    expect(container.textContent).toMatch(/Strong support|Some support|Limited support/);
     // Provider diagnostics stay in the methodology ledger; they never leak
     // into the decision summary or the verification list.
     const summarySurfaces = `${container.querySelector("#decision-summary")?.textContent ?? ""}${verificationSection}`;
@@ -1259,9 +1259,9 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Coverage 76%");
     expect(container.textContent).toContain("Coverage 76%");
     expect(container.textContent).toContain("10/13");
-    expect(container.textContent).toContain("6 of 6 diligence areas have cited support");
+    expect(container.textContent).toContain("6 of 6 areas have sources");
     expect(container.textContent).toContain("3 open questions");
-    expect(container.textContent).toContain("Also open: 3 decision questions");
+    expect(container.textContent).toContain("Still to check: 3 important questions");
     expect(container.textContent).toContain("Do not rely on this result");
     expect(container.textContent).toContain("This score uses the facts collected so far");
     expect(container.textContent).toContain("= provisional 71");
@@ -1345,7 +1345,7 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Sources we saved");
+    expect(container.textContent).toContain("Saved sources");
     expect(container.textContent).toContain("Mara Voss raises a new fund");
     expect(container.textContent).toContain(`SHA-256 ${hash.slice(0, 12)}…`);
     expect(container.textContent).toContain("SHA-256 unavailable");
@@ -1784,16 +1784,16 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Profile-photo check");
-    expect(container.textContent).toContain("a quick photo check, not identity proof");
+    expect(container.textContent).toContain("Profile photo");
+    expect(container.textContent).toContain("A quick image check. This cannot prove identity.");
     expect(container.textContent).toContain("AI-generated image lead");
-    expect(container.textContent).toContain("cannot prove image ownership, identity, or web-wide reuse");
+    expect(container.textContent).toContain("It cannot prove who owns the account");
     expect(container.textContent).toContain(`Source image SHA-256 ${imageHash.slice(0, 12)}…`);
     expect(container.querySelector('img[src="data:image/jpeg;base64,YWJj"]')).not.toBeNull();
-    expect(container.textContent).toContain("exact image bytes retained with this report");
+    expect(container.textContent).toContain("The saved image is shown here");
 
     expect(container.textContent).toContain("Known connections");
-    expect(container.textContent).toContain("A shared person, wallet, funder, or project is an investigative lead");
+    expect(container.textContent).toContain("Sharing a person, wallet, funder, or project does not prove common control");
     expect(container.textContent).toContain("9 / 12");
     expect(container.textContent).toContain("Shared founder");
     expect(container.textContent).toContain(`Graph snapshot SHA-256 ${graphHash.slice(0, 12)}…`);
@@ -1845,7 +1845,7 @@ describe("decision-safe person report presentation", () => {
         },
         {
           checkId: "profile-photo-authenticity",
-          label: "Profile-photo check",
+          label: "Profile photo",
           status: "checked-empty" as const,
           note: "real candid observed; visual-only screen cannot prove image ownership or identity",
           provider: "claude-vision",
@@ -1877,8 +1877,8 @@ describe("decision-safe person report presentation", () => {
     });
 
     const basis = decisionBasisText();
-    expect(basis).toContain("Lineage unavailable");
-    expect(basis).toContain("will not infer");
+    expect(basis).toContain("Source links unavailable");
+    expect(basis).toContain("will not guess which source was used");
     expect(basis).not.toContain("Identity resolution");
     expect(basis).not.toContain("GitHub account kylemcconnell links back to @kyle");
     expect(basis).not.toContain("MODEL-GENERATED POSITIVE NARRATIVE");
@@ -1915,7 +1915,7 @@ describe("decision-safe person report presentation", () => {
 
     expect(container.textContent).toContain("Independent profile of the founder");
     const basis = decisionBasisText();
-    expect(basis).toContain("Lineage unavailable");
+    expect(basis).toContain("Source links unavailable");
     expect(basis).not.toContain("Independent profile of the founder");
   });
 
@@ -1975,7 +1975,7 @@ describe("decision-safe person report presentation", () => {
         provider: "google-news",
       }, {
         checkId: "profile-photo-authenticity",
-        label: "Profile-photo check",
+        label: "Profile photo",
         status: "checked-empty" as const,
         note: "real candid observed; visual-only screen cannot prove image ownership or identity",
         provider: "claude-vision",
@@ -2005,7 +2005,7 @@ describe("decision-safe person report presentation", () => {
     });
 
     const basis = decisionBasisText();
-    expect(basis).toContain("Lineage unavailable");
+    expect(basis).toContain("Source links unavailable");
     expect(basis).not.toContain("MODEL POSITIVE");
     expect(basis).not.toContain("Artifact without a confirmed press outcome");
   });
@@ -2088,7 +2088,7 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("About a related company");
     expect(container.textContent).toContain("@legacy_associate");
     expect(decisionBasisText()).not.toContain("legacy_associate");
-    expect(decisionBasisText()).toContain("Lineage unavailable");
+    expect(decisionBasisText()).toContain("Source links unavailable");
     expect(container.textContent).not.toContain("A model-discovered complaint names @legacy_associate");
   });
 
@@ -2160,7 +2160,7 @@ describe("legacy person report coverage truth", () => {
     });
 
     expect(container.textContent).toContain("Coverage not captured");
-    expect(container.textContent).toContain("Frozen coverage unavailable");
+    expect(container.textContent).toContain("Check details unavailable");
     expect(container.textContent).toContain("report was saved before per-check results were recorded");
     expect(container.textContent).not.toContain("Evidence coverage0%");
     expect(container.textContent).not.toContain("0 / 0");

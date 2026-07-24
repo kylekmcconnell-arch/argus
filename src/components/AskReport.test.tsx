@@ -48,7 +48,7 @@ describe("AskReport", () => {
     });
     const toggle = container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
     act(() => toggle?.click());
-    const input = container.querySelector<HTMLInputElement>('input[aria-label="Question about this frozen report"]');
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Question about this report"]');
     expect(input?.disabled).toBe(false);
     act(() => setInputValue(input!, "What supports the claim?"));
     const askButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
@@ -75,7 +75,7 @@ describe("AskReport", () => {
     act(() => toggle?.click());
 
     expect(container.querySelector<HTMLInputElement>("input")?.disabled).toBe(true);
-    expect(container.textContent).toContain("Ask is unavailable until this view is bound to an immutable report version.");
+    expect(container.textContent).toContain("Save or open a report before asking a question.");
     expect(providerFetch).not.toHaveBeenCalled();
   });
 });

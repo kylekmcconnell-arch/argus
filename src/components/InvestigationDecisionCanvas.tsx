@@ -68,7 +68,6 @@ function DecisionLedgerList({
 }
 
 export function InvestigationDecisionCanvas({
-  verdictLabel,
   favorable,
   verdictTone,
   supports,
@@ -106,9 +105,9 @@ export function InvestigationDecisionCanvas({
       <header className="report-section-heading">
         <div>
           <p className="eyebrow text-signal-lift">01 · Result</p>
-          <h2 className="mt-1 text-[20px] font-semibold tracking-tight text-ink">How ARGUS got this result</h2>
+          <h2 className="mt-1 text-[20px] font-semibold tracking-tight text-ink">Why this result</h2>
           <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-            See what supports the result, what works against it, and what is still unanswered.
+            The strongest evidence, the main concerns, and what still needs checking.
           </p>
         </div>
         <div className="shrink-0 text-left sm:text-right">
@@ -121,10 +120,10 @@ export function InvestigationDecisionCanvas({
         <div className="grid lg:grid-cols-[minmax(0,1fr)_19rem]">
           <div className="px-5">
             <ReportCanvasNarrativeSection
-              title={`Why ARGUS reaches ${verdictLabel}`}
+              title={favorable ? "What supports this result" : "Main concerns"}
               description={favorable
-                ? "This list shows the finished checks and sourced facts that support the result."
-                : "This list shows the failed checks and sourced risks that drive the result."}
+                ? "The strongest facts and checks behind the result."
+                : "The risks and failed checks behind the result."}
               tone={verdictTone}
               items={narrativeItems("verdict", verdictItems, evidenceHref)}
               emptyCopy={favorable
@@ -133,10 +132,10 @@ export function InvestigationDecisionCanvas({
             />
             <ReportCanvasNarrativeSection
               id="report-risks"
-              title={favorable ? "What limits confidence" : "What evidence pulls the other way"}
+              title={favorable ? "Main concerns" : "What looks credible"}
               description={favorable
-                ? "Risks and unanswered questions stay visible even when the score is high."
-                : "Positive evidence stays visible even when the score is low."}
+                ? "Risks and open questions that could change the result."
+                : "Positive evidence that gives the result context."}
               tone={favorable ? "caution" : "pass"}
               items={narrativeItems("counterweight", countervailingItems, evidenceHref)}
               emptyCopy={favorable
@@ -145,11 +144,11 @@ export function InvestigationDecisionCanvas({
             />
           </div>
 
-          <aside className="border-t border-line/60 bg-panel-2/20 px-4 py-5 lg:border-l lg:border-t-0" aria-label="Investigation evidence summary">
+          <aside className="border-t border-line/60 bg-panel-2/20 px-4 py-5 lg:border-l lg:border-t-0" aria-label="Scan progress">
             <section aria-label="Evidence coverage and freshness">
               <div className="flex items-center gap-2">
                 <Database size={17} weight="duotone" aria-hidden="true" className="text-signal-lift" />
-                <h3 className="eyebrow text-ink-dim">Checks finished</h3>
+                <h3 className="eyebrow text-ink-dim">Scan progress</h3>
                 <span className="mono ml-auto text-[13.5px] font-semibold text-ink">{coveragePercent}%</span>
               </div>
               <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line" role="progressbar" aria-label="Evidence coverage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={coveragePercent}>
@@ -180,7 +179,7 @@ export function InvestigationDecisionCanvas({
             {capturedAt && (
               <div className="flex items-start gap-2 border-t border-line/60 pt-4 text-[11px] leading-snug text-ink-faint">
                 <ClockCounterClockwise size={15} weight="duotone" aria-hidden="true" className="mt-0.5 shrink-0" />
-                <span>Evidence snapshot captured {capturedAt}.</span>
+                <span>Saved {capturedAt}.</span>
               </div>
             )}
           </aside>

@@ -26,7 +26,7 @@ export function ExpandableText({
           aria-expanded={expanded}
           className="mt-1.5 text-[12px] font-medium text-signal-lift underline-offset-2 hover:underline"
         >
-          {expanded ? "Show less" : "Read more"}
+          {expanded ? "Hide details" : "Show details"}
         </button>
       )}
     </div>

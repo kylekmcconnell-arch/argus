@@ -463,8 +463,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">
                 {readiness.status === "ready" ? "Evidence complete" : `${readiness.status} coverage`}
               </span>
-              <span className="text-[11px] text-ink-faint">observable outcomes stored in this report</span>
-              <a href="#token-methodology" className="ml-auto text-[11px] text-signal-lift underline-offset-2 hover:underline">Review check-by-check methodology</a>
+              <span className="text-[11px] text-ink-faint">required checks are shown below</span>
+              <a href="#token-methodology" className="ml-auto text-[11px] text-signal-lift underline-offset-2 hover:underline">Review checks</a>
             </div>
             <dl className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="Evidence readiness summary">
               <div className="stat-tile">
@@ -472,11 +472,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 <dd className="stat-value mt-0.5 font-semibold">{readiness.coveragePercent}%</dd>
               </div>
               <div className="stat-tile">
-                <dt className="stat-label">Outcomes</dt>
+                <dt className="stat-label">Finished</dt>
                 <dd className="stat-value mt-0.5 font-semibold">{readiness.successful}<span className="text-[11px] text-ink-faint">/{readiness.applicable}</span></dd>
               </div>
               <div className="stat-tile">
-                <dt className="stat-label">Unresolved</dt>
+                <dt className="stat-label">Still open</dt>
                 <dd className="stat-value mt-0.5 font-semibold" style={{ color: readiness.unresolved ? readinessColor : "var(--color-ink)" }}>{readiness.unresolved}</dd>
               </div>
             </dl>
@@ -491,7 +491,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               { href: "#report-risks", label: "Risks", icon: <ChartDonut size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#token-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#token-relationships", label: "Relationships", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#token-methodology", label: "Sources & checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#token-methodology", label: "Checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
             ]}
           />
         </div>
@@ -557,12 +557,12 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         {/* axes */}
         <section className="mt-5">
-          <div className="mb-2.5 text-[13.5px] font-semibold tracking-tight text-ink">Forensic breakdown</div>
+          <div className="mb-2.5 text-[13.5px] font-semibold tracking-tight text-ink">Score breakdown</div>
           <div className="panel px-4 py-1 divide-y divide-line/60">
             {d.axes.map((a) => <Bar key={a.key} a={a} color={presentationColor} />)}
             <div className="flex items-center justify-between py-2.5 text-[11px] text-ink-faint">
-              <span>weighted total</span>
-              <span className="mono">= {d.score}{d.capApplied ? " (capped)" : ""}</span>
+              <span>Total score</span>
+              <span className="mono">= {d.score}{d.capApplied ? " (limited)" : ""}</span>
             </div>
           </div>
         </section>
@@ -613,7 +613,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               <Check label="Bundle / snipe concentration" ok={d.bundleRisk === "low"} value={gp ? `${d.insiderPct}% · ${d.bundleCount} wallets` : undefined} na={!gp} />
               <Check label="Pair age" ok={(d.ageDays ?? 0) >= 30} value={d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : undefined} />
               <Check
-                label="CoinGecko corroboration"
+                label="CoinGecko listing"
                 ok={!!d.cg?.listed && (d.cg?.cexCount ?? 0) > 0}
                 value={d.cg ? (d.cg.listed ? `${d.cg.rank ? "#" + d.cg.rank + " · " : ""}${d.cg.cexCount} CEX` : "unlisted") : undefined}
                 na={!d.cg}
@@ -633,7 +633,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         {/* team & provenance + unified graph */}
         <div id="token-relationships" className="scroll-mt-28 mt-3 grid gap-3 lg:grid-cols-2">
-          <Card title="Team & provenance">
+          <Card title="Team and sources">
             <div className="mb-1 text-[11px] leading-snug text-ink-faint">Vet the people behind it. These run a full audit of the project's account and site.</div>
             {d.projectX ? (
               <div className="flex items-center justify-between gap-2 py-1.5">
@@ -691,7 +691,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               </div>
             )}
           </Card>
-          <Card title="Panoptes graph">
+          <Card title="Known connections">
             <TrustGraph nodes={d.graph.nodes} edges={d.graph.edges} />
           </Card>
         </div>
@@ -752,11 +752,10 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
 
         <div className="mt-8 panel p-5">
-          <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> How this verdict was reached</div>
+          <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> How this result was reached</div>
           <p className="text-[12.5px] leading-relaxed text-ink-faint">
-            Scored live from DexScreener (market, liquidity, trading) and GoPlus (contract safety, holders), with no keys.
-            Disqualifying findings, a honeypot, mintable supply, or reclaimable ownership, act as hard caps that override the
-            weighted total. A clean market never papers over an unsafe contract. Real-time, reproducible.
+            ARGUS checks market data, the contract, liquidity, and large holders. Serious contract risks can limit
+            the score even when the market looks healthy. This report is research, not financial advice.
           </p>
         </div>
       </div>

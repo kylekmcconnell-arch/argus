@@ -15,16 +15,16 @@ import { HeroBackdrop } from "./ArgusMark";
 import { PrivateToggle } from "./PrivateToggle";
 
 const INVESTIGATION_OUTPUTS = [
-  { icon: CheckCircleIcon, label: "Verified facts", detail: "Claims tied directly to supporting sources." },
-  { icon: QuestionIcon, label: "Open questions", detail: "Unknowns ranked by their impact on the decision." },
-  { icon: DatabaseIcon, label: "Source quality", detail: "Coverage, provenance, and contradictions made visible." },
-  { icon: ClockCounterClockwiseIcon, label: "Decision freshness", detail: "A frozen case you can rescan and compare over time." },
+  { icon: CheckCircleIcon, label: "What checks out", detail: "Facts we could confirm, with links to the sources." },
+  { icon: QuestionIcon, label: "What needs attention", detail: "Risks, conflicts, and important facts we could not confirm." },
+  { icon: DatabaseIcon, label: "What to check next", detail: "The questions that matter most before you make a decision." },
+  { icon: ClockCounterClockwiseIcon, label: "A saved report", detail: "Come back later, rescan it, and see what changed." },
 ] as const;
 
 const INVESTIGATION_LENSES = [
-  { icon: FingerprintSimpleIcon, title: "Identity & authority", detail: "Who is involved, what they control, and what can actually be corroborated." },
-  { icon: CurrencyEthIcon, title: "Capital & contract risk", detail: "Wallet exposure, token powers, concentration, sanctions, and linked entities." },
-  { icon: ShieldCheckIcon, title: "Decision gaps", detail: "What keeps confidence below exceptional and what you should verify next." },
+  { icon: FingerprintSimpleIcon, title: "Who is behind it", detail: "The people involved, their roles, and what they control." },
+  { icon: CurrencyEthIcon, title: "Token and money risks", detail: "Contract powers, large holders, liquidity, sanctions, and connected wallets." },
+  { icon: ShieldCheckIcon, title: "What is still unknown", detail: "Missing facts and the most important questions to answer next." },
 ] as const;
 
 // The front door is a decision-oriented investigation canvas. Previous cases
@@ -64,8 +64,8 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
             </h1>
 
             <p className="mt-4 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-              Enter an X handle, token contract, or project website. ARGUS resolves identity and control,
-              tests the on-chain story, and separates verified facts from the gaps you still need to close.
+              Enter an X account, token address, or project website. ARGUS shows what looks credible,
+              what looks risky, and what still needs checking.
             </p>
 
             {/* primary investigation input */}
@@ -99,7 +99,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
                 </span>
               </div>
               <p id="subject-help" className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-                ARGUS detects the subject type and builds the appropriate person, token, site, or combined project case.
+                We’ll work out whether it is a person, token, website, or project.
               </p>
 
               <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line/70 pt-4">
@@ -116,15 +116,15 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
               </div>
             </form>
             <p id="fresh-audit-note" className="mt-2.5 text-[11px] leading-relaxed text-ink-faint">
-              Starts a fresh provider run and may use paid API quota. Open previous snapshots from Recent cases.
+              A new scan checks current sources and may use paid data. Open a recent case to reuse saved results.
             </p>
 
           </section>
 
           <aside aria-labelledby="investigation-output-title" className="panel rise-in overflow-hidden">
             <div className="border-b border-line px-4 py-3.5">
-              <div id="investigation-output-title" className="eyebrow">Every investigation returns</div>
-              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A decision canvas, not just a score.</p>
+              <div id="investigation-output-title" className="eyebrow">What you’ll get</div>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A clear result with the evidence behind it.</p>
             </div>
             <div className="divide-y divide-line/70">
               {INVESTIGATION_OUTPUTS.map(({ icon: Icon, label, detail }) => (
@@ -137,17 +137,14 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
                 </div>
               ))}
             </div>
-            <div className="panel-inset mx-4 mb-4 px-3 py-2.5 text-[11px] leading-relaxed text-ink-dim">
-              Verified, inferred, and unresolved evidence stays visibly distinct.
-            </div>
           </aside>
         </div>
 
         <section aria-labelledby="investigation-lenses-title" className="mt-12 border-t border-line/70 pt-7">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <div className="eyebrow">Decision coverage</div>
-              <h2 id="investigation-lenses-title" className="display-sm mt-2 text-[18px] text-ink">One subject. Three diligence lenses.</h2>
+              <div className="eyebrow">What ARGUS checks</div>
+              <h2 id="investigation-lenses-title" className="display-sm mt-2 text-[18px] text-ink">Three questions, one report.</h2>
             </div>
             <button type="button" onClick={onAbout} className="btn-ghost flex min-h-9 items-center gap-1.5 text-[12.5px] text-signal-lift">
               See how ARGUS works <ArrowRightIcon size={14} aria-hidden />
@@ -165,7 +162,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
         </section>
 
         <div className="pt-10 text-[11px] text-ink-faint">
-          Hard caps over scores · pseudonymity is neutral · evidence-disciplined
+          Research only · not financial advice
         </div>
       </div>
     </div>

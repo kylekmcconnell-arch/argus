@@ -190,7 +190,7 @@ describe("token report supplemental evidence boundary", () => {
       expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
     }
 
-    expect(container.textContent).toContain("Why ARGUS reaches PASS");
+    expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).toContain("Finished checks");
     expect(container.textContent).toContain("Check next");
     expect(container.querySelector('[role="progressbar"][aria-label="Evidence coverage"]')).not.toBeNull();
@@ -207,8 +207,8 @@ describe("token report supplemental evidence boundary", () => {
       ],
     }));
 
-    const verdictDrivers = container.querySelector('ul[aria-label="Why ARGUS reaches FAIL"]')?.textContent ?? "";
-    const counterweight = container.querySelector('ul[aria-label="What evidence pulls the other way"]')?.textContent ?? "";
+    const verdictDrivers = container.querySelector('ul[aria-label="Main concerns"]')?.textContent ?? "";
+    const counterweight = container.querySelector('ul[aria-label="What looks credible"]')?.textContent ?? "";
     expect(verdictDrivers).toContain("Liquidity is unlocked and removable.");
     expect(verdictDrivers).not.toContain("Contract source is verified.");
     expect(counterweight).toContain("Contract source is verified.");
@@ -231,7 +231,7 @@ describe("token report supplemental evidence boundary", () => {
       ],
     }));
 
-    const counterweight = container.querySelector('ul[aria-label="What evidence pulls the other way"]')?.textContent ?? "";
+    const counterweight = container.querySelector('ul[aria-label="What looks credible"]')?.textContent ?? "";
     expect(counterweight).toContain("Contract safety");
     expect(counterweight).not.toContain("Market intelligence");
     expect(counterweight).not.toContain("CoinGecko returned no matching asset");
@@ -243,8 +243,8 @@ describe("token report supplemental evidence boundary", () => {
   it("keeps every current-data panel paused on an immutable snapshot until explicit opt-in", () => {
     render(dossier({ versionContext }));
 
-    expect(container.textContent).toContain("SNAPSHOT v2");
-    expect(container.textContent).toContain("Captured charts are shown below");
+    expect(container.textContent).toContain("SAVED REPORT v2");
+    expect(container.textContent).toContain("This report uses data saved on");
     expect(harness.livePanel).not.toHaveBeenCalled();
     expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
     expect(harness.serviceAlert).not.toHaveBeenCalled();
@@ -259,11 +259,11 @@ describe("token report supplemental evidence boundary", () => {
     expect(copiedReport).not.toContain("audited live");
 
     const load = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("Refresh live intelligence"));
+      .find((button) => button.textContent?.includes("Check current data"));
     expect(load).toBeDefined();
     act(() => load?.click());
 
-    expect(container.textContent).toContain("not part of snapshot v2");
+    expect(container.textContent).toContain("Current data is shown separately and does not change the saved score");
     expect(harness.livePanel).toHaveBeenCalled();
     expect(harness.secondOpinion).toHaveBeenLastCalledWith(expect.objectContaining({ panelCostToken: undefined }));
     expect(harness.livePanel.mock.calls.some(([name]) => name === "on-chain" || name === "counterparties")).toBe(false);
@@ -292,7 +292,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({
       panelCostToken: "signed-panel-capability",
     }));
-    expect(container.textContent).toContain("not included in the immutable Share payload or scored verdict");
+    expect(container.textContent).toContain("not part of the saved score or shared report");
     expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Share")).toBe(true);
     const onChainProps = harness.livePanel.mock.calls
       .find(([name]) => name === "on-chain")?.[1] as Record<string, unknown> | undefined;
@@ -326,9 +326,9 @@ describe("token report supplemental evidence boundary", () => {
   it("keeps private supplemental panels paused and copies no mutable subject link", () => {
     render(dossier({ persistence: { state: "private" } }));
 
-    expect(container.textContent).toContain("supplemental panels are paused");
-    expect(container.textContent).toContain("avoid shared cache traces");
-    expect(container.textContent).toContain("not saved to a case");
+    expect(container.textContent).toContain("Extra live checks are off");
+    expect(container.textContent).toContain("nothing is added to shared cases");
+    expect(container.textContent).toContain("watchlists, or activity");
     expect(harness.livePanel).not.toHaveBeenCalled();
     expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
     expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Share")).toBe(false);

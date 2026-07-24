@@ -186,12 +186,12 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("PASS 84");
     expect(container.textContent).toContain("NOT READY");
     expect(container.textContent).toContain("Score only · not financial advice");
-    expect(container.textContent).toContain("What this report means");
-    expect(container.textContent).toContain("Market scale");
+    expect(container.textContent).toContain("Before you use this report");
+    expect(container.textContent).toContain("Market size");
     expect(container.textContent).toContain("1 required safety check is not finished");
     expect(container.querySelector<HTMLProgressElement>('progress[aria-label="Evidence outcomes recorded: 53%"]')?.value).toBe(53);
-    expect(container.textContent).toContain("Why ARGUS reaches PASS");
-    expect(container.textContent).not.toContain("Why ARGUS reaches INCOMPLETE");
+    expect(container.textContent).toContain("What supports this result");
+    expect(container.textContent).not.toContain("INCOMPLETE");
     expect(container.textContent).not.toContain("Investigation incomplete");
   });
 
@@ -360,7 +360,7 @@ describe("investigation exact sharing", () => {
       expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
     }
 
-    expect(container.textContent).toContain("Why ARGUS reaches PASS");
+    expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).toContain("Finished checks");
     expect(container.textContent).toContain("Check next");
     expect(container.querySelector('[role="progressbar"][aria-label="Evidence coverage"]')).not.toBeNull();
@@ -397,7 +397,7 @@ describe("investigation exact sharing", () => {
 
     expect(container.textContent).toContain("Market and ownership charts");
     expect(container.textContent).toContain("Market and ownership structure");
-    expect(container.textContent).toContain("CAPTURED JUL 23, 2026");
+    expect(container.textContent).toContain("SAVED JUL 23, 2026");
     expect(container.textContent).toContain("From captured peak");
     expect(harness.livePanel.mock.calls.filter(([name]) => name === "sparkline")).toHaveLength(1);
     expect(harness.livePanel.mock.calls.some(([name]) => name === "project-research")).toBe(false);
@@ -421,7 +421,7 @@ describe("investigation exact sharing", () => {
 
     expect(harness.livePanel.mock.calls.some(([name]) => name === "sparkline")).toBe(false);
     const refresh = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.includes("Refresh market data"));
+      .find((button) => button.textContent?.includes("Check current data"));
     expect(refresh).toBeDefined();
     await act(async () => refresh?.click());
 

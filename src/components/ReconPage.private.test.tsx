@@ -66,8 +66,8 @@ describe("private site recon evidence boundary", () => {
       root.render(<ReconPage initialRecon={recon} initialPrivate />);
     });
 
-    expect(container.textContent).toContain("supplemental panels are paused");
-    expect(container.textContent).toContain("avoid shared cache traces");
+    expect(container.textContent).toContain("Extra live checks are off");
+    expect(container.textContent).toContain("nothing is added to shared cases");
     expect(harness.livePanel).not.toHaveBeenCalled();
   });
 });
