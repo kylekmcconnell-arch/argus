@@ -797,7 +797,7 @@ export function InvestigationReport({
                   <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg.rank}` : "N/A"}</dd>
                 </div>
                 <div>
-                  <dt className="stat-label" title="Estimated value if every token were circulating.">Value if every token circulated</dt>
+                  <dt className="stat-label" title="Estimated value if every token were circulating.">All-token value</dt>
                   <dd className="stat-value mt-1">{money(fullyDilutedValue)}</dd>
                 </div>
                 <div>
