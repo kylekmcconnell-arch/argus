@@ -112,4 +112,47 @@ describe("summarizeFundingEvidence", () => {
       leadInvestors: ["Dragonfly"],
     })]);
   });
+
+  it("does not count the subject's own pages as independent corroboration", () => {
+    const summary = summarizeFundingEvidence([{
+      predicate: "funding",
+      value: "raised $65 million Series A",
+      status: "verified",
+      sources: [{
+        url: "https://venice.ai/blog/series-a",
+        excerpt: "Venice raised $65 million in a Series A.",
+        provider: "public-web",
+        sourceClass: "official_subject",
+      }, {
+        url: "https://venice.ai/press/funding",
+        excerpt: "Venice announces its $65 million Series A round.",
+        provider: "public-web",
+        sourceClass: "official_subject",
+      }],
+    }]);
+
+    expect(summary.independentRoundCount).toBe(1);
+    expect(summary.independentSourceCount).toBe(0);
+  });
+
+  it("counts syndicated subdomains of one outlet as a single witness", () => {
+    const summary = summarizeFundingEvidence([{
+      predicate: "funding",
+      value: "raised $165 million Series B",
+      status: "corroborated",
+      sources: [{
+        url: "https://markets.businessinsider.example/uniswap-series-b",
+        excerpt: "Uniswap Labs raised $165 million in a Series B round.",
+        provider: "public-web",
+        sourceClass: "independent_press",
+      }, {
+        url: "https://www.businessinsider.example/uniswap-series-b",
+        excerpt: "Uniswap Labs raised $165 million in a Series B round.",
+        provider: "public-web",
+        sourceClass: "independent_press",
+      }],
+    }]);
+
+    expect(summary.independentSourceCount).toBe(1);
+  });
 });

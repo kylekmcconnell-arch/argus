@@ -38,6 +38,31 @@ const STRONG_SOURCE_CLASSES = new Set([
   "regulatory_or_onchain",
 ]);
 
+// Self-published pages document a round but can never corroborate it; two
+// URLs on the subject's own site are one voice, not two witnesses.
+const INDEPENDENT_SOURCE_CLASSES = new Set([
+  "independent_press",
+  "official_counterparty",
+  "regulatory_or_onchain",
+]);
+
+const SECOND_LEVEL_TLDS = new Set([
+  "co.uk", "com.au", "co.jp", "com.br", "co.in", "co.nz", "com.sg", "com.hk",
+]);
+
+/** Collapse a URL to its registrable domain so syndicated subdomains count once. */
+function registrableDomain(url: string): string | null {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    const labels = host.split(".").filter(Boolean);
+    if (labels.length <= 2) return host;
+    const lastTwo = labels.slice(-2).join(".");
+    return SECOND_LEVEL_TLDS.has(lastTwo) ? labels.slice(-3).join(".") : lastTwo;
+  } catch {
+    return null;
+  }
+}
+
 const compact = (value: unknown): string =>
   typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
 
@@ -227,12 +252,15 @@ export function summarizeFundingEvidence(
   }
   merged.sort((left, right) => String(left.date ?? "").localeCompare(String(right.date ?? "")));
 
-  const independentUrls = new Set(independentRows.flatMap((entry) =>
-    entry.sources.map((source) => source.url).filter((url): url is string => Boolean(url))));
+  const independentDomains = new Set(independentRows.flatMap((entry) =>
+    entry.sources
+      .filter((source) => INDEPENDENT_SOURCE_CLASSES.has(source.sourceClass ?? ""))
+      .map((source) => registrableDomain(source.url ?? ""))
+      .filter((domain): domain is string => Boolean(domain))));
   return {
     rounds: merged,
     totalKnownUsd: merged.reduce((sum, round) => sum + (round.amountUsd ?? 0), 0),
     independentRoundCount: independentByRound.size,
-    independentSourceCount: independentUrls.size,
+    independentSourceCount: independentDomains.size,
   };
 }
