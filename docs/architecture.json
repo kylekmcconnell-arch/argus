@@ -208,7 +208,8 @@
  },
  "qualityGates": {
   "npm run typecheck": "tsc -b + server + api tsconfigs (NEVER bare npx tsc --noEmit; it skips 2 projects)",
-  "npm test": "full vitest suite (~1880+ tests): engine fidelity, adapters, invariants",
+  "npm test": "full vitest suite (~2080+ tests): engine fidelity, adapters, invariants",
+  "npm run audit:reports": "stored-report corpus auditor over raw report_versions payloads (needs Supabase creds; manual only, NOT wired into CI)",
   "npm run truth:check": "source-of-truth doc contract",
   "npm run canary:offline": "7 deterministic release cases, all providers intercepted, 0 unexpected URLs",
   "npm run calibrate": "19-case golden verdict set; the safety net proving scoring changes don't inflate bad actors",
@@ -218,11 +219,16 @@
  },
  "clientSurface": {
   "src/App.tsx": "phase router (~19 phases) + report/token/investigation state",
-  "src/components/Report.tsx": "flagship person/project report renderer (176KB; edit with care, fresh context)",
+  "src/components/Report.tsx": "flagship person/project report renderer (206KB; edit with care, fresh context); render-time lead pruning, funding consolidation, and frozen-snapshot repairs live here",
   "src/components/TokenReport.tsx + src/token/audit.ts": "token dossier + token audit engine",
   "src/components/InvestigationRun.tsx / LiveRun.tsx": "SSE audit runners",
-  "src/components/InvestigationDecisionCanvas.tsx / InvestigationReport.tsx": "decision canvas",
-  "src/components/SnapshotEvidenceControl.tsx": "frozen-snapshot control + pre-upgrade re-scan nudge"
+  "src/components/InvestigationDecisionCanvas.tsx / InvestigationReport.tsx": "decision canvas + numbered story chapters (2026-07-24 restructure)",
+  "src/components/SnapshotEvidenceControl.tsx": "frozen-snapshot control + pre-upgrade re-scan nudge",
+  "frozenVisuals": "MarketPerformancePanel / TokenSnapshotVisuals / UsageVisuals render frozen chart series with explicit captured-with-scan vs live-refresh chips",
+  "arkhamPanels": "MoneyFlowStory + EntityConcentration call api/arkham-money-flow + api/arkham-token-holders (analyst role, HMAC panel-cost token, daily unit quota, cached)",
+  "src/lib/plainLanguage.ts": "render-time jargon rewriter for model prose + status labels (display-only; stored payloads and presentation tier types unchanged)",
+  "src/lib/fundingEvidence.ts": "raise-vs-valuation separation for the funding card; corroboration counted by independent non-self registrable domains",
+  "theme": "light-first since 2026-07-24 via versioned storage key argus-theme-v2 (prior dark preference deliberately reset once); midnight nav rail is a scoped token override in index.css"
  },
  "invariants": [
   "H2: no score floor from soft evidence - floors only from strict verified facts (floorEligible!==false); recall facts, press, and audit self-attestation are ceiling-only",
