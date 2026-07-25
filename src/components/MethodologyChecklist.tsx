@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import {
+  decisionCriticalChecks,
   isAdverseFinding,
   NEVER_WAIVE_CHECK_IDS,
   summarizeChecks,
@@ -79,7 +80,12 @@ export function MethodologyChecklist({
   const panelId = `${baseId}-panel`;
   if (!checks.length) return null;
 
-  const coverage = summarizeChecks(checks);
+  const governingChecks = decisionCriticalChecks(checks);
+  const coverage = summarizeChecks(governingChecks);
+  const governingSet = new Set(governingChecks);
+  const extraOpen = checks.filter((check) =>
+    !governingSet.has(check)
+    && ["unknown", "unavailable", "stale"].includes(check.status)).length;
   const grouped = [
     {
       label: "Required safety checks",
@@ -117,11 +123,12 @@ export function MethodologyChecklist({
         <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
           <span className="eyebrow shrink-0">{summaryLabel}</span>
           <span className="text-[12.5px] leading-snug text-ink-dim">
-            {coverage.successful} of {coverage.inScope} {coverage.notApplicable ? "relevant checks" : "checks"} finished
+            {coverage.successful} of {coverage.inScope} main checks finished
             {coverage.findings ? ` · ${coverage.findings} ${coverage.findings === 1 ? "needs" : "need"} attention` : ""}
             {coverage.unknownOrFailed ? ` · ${coverage.unknownOrFailed} still open` : ""}
             {openRequired ? ` · ${openRequired} required` : ""}
             {coverage.notApplicable ? ` · ${coverage.notApplicable} did not apply` : ""}
+            {extraOpen ? ` · ${extraOpen} extra ${extraOpen === 1 ? "follow-up" : "follow-ups"} open` : ""}
           </span>
         </span>
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-faint)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-auto shrink-0 transition-transform" style={{ transform: open ? "rotate(180deg)" : "none" }}><path d="M6 9l6 6 6-6" /></svg>

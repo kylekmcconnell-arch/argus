@@ -39,7 +39,25 @@ describe("MethodologyChecklist", () => {
 
     expect(container.textContent).toContain("Token checks");
     expect(container.textContent).toContain(
-      "2 of 3 relevant checks finished · 1 needs attention · 1 still open · 1 did not apply",
+      "2 of 3 main checks finished · 1 needs attention · 1 still open · 1 did not apply",
     );
+  });
+
+  it("separates post-scan follow-ups from the main completion count", () => {
+    act(() => {
+      root.render(
+        <MethodologyChecklist
+          checks={[
+            { checkId: "contract-safety", label: "Contract safety", status: "confirmed", decisionCritical: true },
+            { checkId: "holder-distribution", label: "Holder distribution", status: "confirmed", decisionCritical: true },
+            { checkId: "deployer-trail-evm", label: "Creator wallet details", status: "unknown", decisionCritical: true },
+            { checkId: "bytecode-fingerprint-evm", label: "Known scam code comparison", status: "unknown", decisionCritical: true },
+          ]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("2 of 2 main checks finished · 2 extra follow-ups open");
+    expect(container.textContent).not.toContain("2 of 4 main checks");
   });
 });

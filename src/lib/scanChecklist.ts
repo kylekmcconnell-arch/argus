@@ -35,6 +35,15 @@ export interface ScanCheck {
   completedAt?: string;
 }
 
+// These panels intentionally run after persistence with a short-lived signed
+// capability. They remain visible follow-up research, but they are not part of
+// the immutable scan completion denominator, including on older saved reports
+// that originally marked every row decision-critical.
+export const POST_SCAN_ENRICHMENT_CHECK_IDS: ReadonlySet<string> = new Set([
+  "deployer-trail-evm",
+  "bytecode-fingerprint-evm",
+]);
+
 /**
  * Select the checks that govern the public decision-readiness label.
  *
@@ -44,7 +53,9 @@ export interface ScanCheck {
 export function decisionCriticalChecks(checks: readonly ScanCheck[]): readonly ScanCheck[] {
   const hasExplicitCriticality = checks.some((check) => check.decisionCritical !== undefined);
   return hasExplicitCriticality
-    ? checks.filter((check) => check.decisionCritical === true)
+    ? checks.filter((check) =>
+      check.decisionCritical === true
+      && (!check.checkId || !POST_SCAN_ENRICHMENT_CHECK_IDS.has(check.checkId)))
     : checks;
 }
 
@@ -327,14 +338,16 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
         },
   );
 
-  // These checks execute in report-page panels today. Their outcomes are not
-  // represented in TokenDossier, so mounting the panel must not become "ran".
+  // These checks execute in report-page panels after the saved score. Their
+  // outcomes are not represented in TokenDossier, so mounting the panel must
+  // not become "ran". Keep them visible as follow-up research, but do not let
+  // their separate lifecycle lower the saved scan's completion percentage.
   checks.push(evm
-    ? { checkId: "deployer-trail-evm", decisionCritical: true, label: "Deployer trail (EVM)", status: "unknown", note: outcomeNotRecorded }
-    : { checkId: "deployer-trail-evm", decisionCritical: true, label: "Deployer trail (EVM)", status: "not-applicable", note: "Solana" });
+    ? { checkId: "deployer-trail-evm", decisionCritical: false, label: "Creator wallet details", status: "unknown", note: "Checked after the saved score; the latest wallet result is shown below" }
+    : { checkId: "deployer-trail-evm", decisionCritical: false, label: "Creator wallet details", status: "not-applicable", note: "Solana" });
   checks.push(evm
-    ? { checkId: "bytecode-fingerprint-evm", decisionCritical: true, label: "Bytecode fingerprint (EVM)", status: "unknown", note: `known scam code check; ${outcomeNotRecorded}` }
-    : { checkId: "bytecode-fingerprint-evm", decisionCritical: true, label: "Bytecode fingerprint", status: "not-applicable", note: "Solana" });
+    ? { checkId: "bytecode-fingerprint-evm", decisionCritical: false, label: "Known scam code comparison", status: "unknown", note: "Checked after the saved score; the latest contract-code result is shown below" }
+    : { checkId: "bytecode-fingerprint-evm", decisionCritical: false, label: "Known scam code comparison", status: "not-applicable", note: "Solana" });
 
   checks.push(
     dossier.cg?.listed

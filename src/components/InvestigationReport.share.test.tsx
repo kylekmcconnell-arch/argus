@@ -193,7 +193,7 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("Before you use this report");
     expect(container.textContent).toContain("Market size");
     expect(container.textContent).toContain("1 required safety check is not finished");
-    expect(container.querySelector<HTMLProgressElement>('progress[aria-label="Checks finished: 53%"]')?.value).toBe(53);
+    expect(container.querySelector<HTMLProgressElement>('progress[aria-label="Checks finished: 63%"]')?.value).toBe(63);
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).not.toContain("INCOMPLETE");
     expect(container.textContent).not.toContain("Investigation incomplete");

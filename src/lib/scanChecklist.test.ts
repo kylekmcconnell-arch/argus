@@ -150,8 +150,8 @@ describe("tokenChecks", () => {
 
     expect(byLabel(checks, "Operator / funding trace")).toMatchObject({ status: "unknown" });
     expect(byLabel(checks, "Operator / funding trace").note).toContain("deployer 0x123…cdef resolved");
-    expect(byLabel(checks, "Deployer trail (EVM)")).toMatchObject({ status: "unknown" });
-    expect(byLabel(checks, "Bytecode fingerprint (EVM)")).toMatchObject({ status: "unknown" });
+    expect(byLabel(checks, "Creator wallet details")).toMatchObject({ status: "unknown", decisionCritical: false });
+    expect(byLabel(checks, "Known scam code comparison")).toMatchObject({ status: "unknown", decisionCritical: false });
     expect(byLabel(checks, "OFAC sanctions screen")).toMatchObject({ status: "unknown" });
   });
 
@@ -386,7 +386,7 @@ describe("reconcileInvestigationChecks", () => {
     expect(byLabel(rows, "Trust-graph reconciliation").status).toBe("checked-empty");
     // never credited: no recorded source exists for these
     expect(byLabel(rows, "Operator / funding trace").status).toBe("unknown");
-    expect(byLabel(rows, "Deployer trail (EVM)").status).toBe("unknown");
+    expect(byLabel(rows, "Creator wallet details").status).toBe("unknown");
   });
 
   it("credits nothing without a confirmed canonical binding", () => {

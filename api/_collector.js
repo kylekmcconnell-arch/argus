@@ -4921,9 +4921,13 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
 }
 
 // src/lib/scanChecklist.ts
+var POST_SCAN_ENRICHMENT_CHECK_IDS = /* @__PURE__ */ new Set([
+  "deployer-trail-evm",
+  "bytecode-fingerprint-evm"
+]);
 function decisionCriticalChecks(checks) {
   const hasExplicitCriticality = checks.some((check) => check.decisionCritical !== void 0);
-  return hasExplicitCriticality ? checks.filter((check) => check.decisionCritical === true) : checks;
+  return hasExplicitCriticality ? checks.filter((check) => check.decisionCritical === true && (!check.checkId || !POST_SCAN_ENRICHMENT_CHECK_IDS.has(check.checkId))) : checks;
 }
 var SUCCESSFUL = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty"]);
 var NEVER_WAIVE_CHECK_IDS = /* @__PURE__ */ new Set([

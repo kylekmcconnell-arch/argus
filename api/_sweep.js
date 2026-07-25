@@ -1132,8 +1132,8 @@ function tokenChecks(dossier) {
       note: dossier.deployer ? `deployer ${shortAddr(dossier.deployer)} resolved; trace ${outcomeNotRecorded}` : `deployer unresolved; trace ${outcomeNotRecorded}`
     }
   );
-  checks.push(evm ? { checkId: "deployer-trail-evm", decisionCritical: true, label: "Deployer trail (EVM)", status: "unknown", note: outcomeNotRecorded } : { checkId: "deployer-trail-evm", decisionCritical: true, label: "Deployer trail (EVM)", status: "not-applicable", note: "Solana" });
-  checks.push(evm ? { checkId: "bytecode-fingerprint-evm", decisionCritical: true, label: "Bytecode fingerprint (EVM)", status: "unknown", note: `known scam code check; ${outcomeNotRecorded}` } : { checkId: "bytecode-fingerprint-evm", decisionCritical: true, label: "Bytecode fingerprint", status: "not-applicable", note: "Solana" });
+  checks.push(evm ? { checkId: "deployer-trail-evm", decisionCritical: false, label: "Creator wallet details", status: "unknown", note: "Checked after the saved score; the latest wallet result is shown below" } : { checkId: "deployer-trail-evm", decisionCritical: false, label: "Creator wallet details", status: "not-applicable", note: "Solana" });
+  checks.push(evm ? { checkId: "bytecode-fingerprint-evm", decisionCritical: false, label: "Known scam code comparison", status: "unknown", note: "Checked after the saved score; the latest contract-code result is shown below" } : { checkId: "bytecode-fingerprint-evm", decisionCritical: false, label: "Known scam code comparison", status: "not-applicable", note: "Solana" });
   checks.push(
     dossier.cg?.listed ? {
       checkId: "market-intelligence",
