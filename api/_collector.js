@@ -2752,9 +2752,12 @@ function normalizeAnalystSupportCounterOverlap(value, evidenceCatalog, projectSc
   }
   return value;
 }
-function normalizeAnalystCitationEligibility(value, evidenceCatalog) {
+function normalizeAnalystCitationEligibility(value, evidenceCatalog, axisCatalog2 = []) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const root = value;
+  const projectAxes = new Set(
+    axisCatalog2.filter((axis) => axis.role === "PROJECT").map((axis) => axis.axis)
+  );
   const aliasToArtifact = /* @__PURE__ */ new Map();
   evidenceCatalog.forEach((artifact, index) => {
     aliasToArtifact.set(artifact.artifactId, artifact);
@@ -2780,7 +2783,11 @@ function normalizeAnalystCitationEligibility(value, evidenceCatalog) {
     if (!axis || typeof row.primaryEvidenceRef !== "string" || !Array.isArray(row.additionalEvidenceRefs) || !Array.isArray(row.counterEvidenceRefs) || !Array.isArray(row.coverageRefs)) return candidate;
     const support = eligibleValues([row.primaryEvidenceRef, ...row.additionalEvidenceRefs], axis, true);
     if (!support.length) return candidate;
-    const counter = eligibleValues(row.counterEvidenceRefs, axis, true);
+    const counter = eligibleValues(row.counterEvidenceRefs, axis, true).filter((ref) => {
+      if (!projectAxes.has(axis)) return true;
+      const artifact = artifactFor(ref);
+      return isVerifiedCounterArtifact(artifact, axis);
+    });
     const coverage = eligibleValues(row.coverageRefs, axis, false);
     const changed = support[0] !== row.primaryEvidenceRef || support.length - 1 !== row.additionalEvidenceRefs.length || counter.length !== row.counterEvidenceRefs.length || coverage.length !== row.coverageRefs.length;
     return changed ? {
@@ -2807,6 +2814,54 @@ function normalizeAnalystCitationEligibility(value, evidenceCatalog) {
     return changed ? { ...root, axes } : value;
   }
   return value;
+}
+function normalizeGroundedTeamNarrative(value, evidenceCatalog, axisCatalog2) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const hasGroundedProjectTeam = axisCatalog2.some((axis) => axis.axis === "P1_team_and_identity" && axis.role === "PROJECT") && evidenceCatalog.some((artifact) => artifact.eligibleAxes.includes("P1_team_and_identity") && isSubstantiveArtifact(artifact) && artifact.section === "team");
+  if (!hasGroundedProjectTeam) return value;
+  const root = value;
+  let changed = false;
+  const normalizeText = (candidate, replacement) => {
+    if (typeof candidate !== "string" || !describesGroundedTeamAsUnresolved(candidate)) return candidate;
+    changed = true;
+    return replacement;
+  };
+  const normalizeTeamRow = (candidate, axisHint) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
+    const row = candidate;
+    const axis = typeof row.axis === "string" ? row.axis : axisHint;
+    if (axis !== "P1_team_and_identity") return candidate;
+    const rationale = normalizeText(
+      row.rationale,
+      "The collected evidence documents a named public project team."
+    );
+    let gaps = row.gaps;
+    if (Array.isArray(row.gaps)) {
+      const nextGaps = row.gaps.filter((gap) => typeof gap !== "string" || !describesGroundedTeamAsUnresolved(gap));
+      if (nextGaps.length !== row.gaps.length) changed = true;
+      gaps = nextGaps;
+    }
+    return rationale !== row.rationale || gaps !== row.gaps ? { ...row, rationale, gaps } : candidate;
+  };
+  const headline = normalizeText(
+    root.headline,
+    "The project has a named public team; the result follows the evidence collected for each score area."
+  );
+  const identityNote = normalizeText(
+    root.identity_note,
+    "The project's named public team is documented in the collected evidence."
+  );
+  let axes = root.axes;
+  if (Array.isArray(root.axes)) {
+    const rawAxes = root.axes;
+    const nextAxes = rawAxes.map((row) => normalizeTeamRow(row));
+    if (nextAxes.some((axis, index) => axis !== rawAxes[index])) axes = nextAxes;
+  } else if (root.axes && typeof root.axes === "object") {
+    const entries = Object.entries(root.axes);
+    const nextAxes = Object.fromEntries(entries.map(([axis, row]) => [axis, normalizeTeamRow(row, axis)]));
+    if (entries.some(([axis, row]) => nextAxes[axis] !== row)) axes = nextAxes;
+  }
+  return changed ? { ...root, headline, identity_note: identityNote, axes } : value;
 }
 var stripBannedDashes = (value) => value.replace(/(\d)\s*[\u2013\u2014]\s*(?=\d)/g, "$1-").replace(/\s*[\u2013\u2014]+\s*/g, ", ").replace(/^,\s*/, "").replace(/,\s*$/, "").trim();
 function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onReject, options = {}) {
@@ -4770,9 +4825,10 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
   }
   let rejectionReason = "unknown";
   let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
-  normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
+  normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog, axisCatalog2);
+  normalizedRaw = normalizeGroundedTeamNarrative(normalizedRaw, evidenceCatalog, axisCatalog2);
   if (normalizedRaw !== raw) {
-    console.info("[agent] normalized analyst citation placement before strict validation");
+    console.info("[agent] normalized analyst verdict before strict validation");
   }
   let validated = validateAnalystVerdict(
     normalizedRaw,
@@ -4843,9 +4899,10 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
     );
     rejectionReason = "unknown";
     normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
-    normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
+    normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog, axisCatalog2);
+    normalizedRaw = normalizeGroundedTeamNarrative(normalizedRaw, evidenceCatalog, axisCatalog2);
     if (normalizedRaw !== raw) {
-      console.info("[agent] normalized repaired citation placement before strict validation");
+      console.info("[agent] normalized repaired analyst verdict before strict validation");
     }
     validated = validateAnalystVerdict(
       normalizedRaw,

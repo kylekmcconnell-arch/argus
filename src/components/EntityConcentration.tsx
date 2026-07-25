@@ -80,11 +80,13 @@ export function EntityConcentration({ address, chain, symbol, panelCostToken }: 
   const tone = lead.isService ? "var(--color-signal)" : toneFor(lead.percent);
   const visibleWallets = lead.observedWallets;
   const groupedSentence = visibleWallets > 1
-    ? `Arkham links at least ${visibleWallets} visible holder wallets to ${lead.name}. Together, the entity holds ${lead.percent.toFixed(1)}% of $${symbol}.`
+    ? `Arkham groups at least ${visibleWallets} visible holder wallets under the label ${lead.name}. Combined, they account for ${lead.percent.toFixed(1)}% of $${symbol}.`
     : `${lead.name} is the largest identified holder at ${lead.percent.toFixed(1)}% of $${symbol}.`;
   const custodySentence = lead.isService
-    ? " It is marked as a service or custody entity, so this does not mean one person owns all of those tokens."
-    : "";
+    ? " It is marked as a service or custody entity, so the balance may represent many customers."
+    : visibleWallets > 1
+      ? " The group can include treasury, staking, vesting, burn, or custody contracts. It does not prove one person can freely sell the full amount."
+      : "";
 
   return (
     <section className="panel tint-var p-4" style={{ "--tint": tone } as React.CSSProperties} aria-labelledby={titleId}>
@@ -112,7 +114,7 @@ export function EntityConcentration({ address, chain, symbol, panelCostToken }: 
 
       <p className="mt-2 text-[11px] leading-snug text-ink-faint">
         Arkham identified entities covering at least {data.knownEntityPercent.toFixed(1)}% of the token supply.
-        Unidentified wallets remain separate. Entity attribution is useful evidence, not proof of beneficial ownership.
+        Unidentified wallets remain separate. A shared label is useful evidence, not proof of common ownership or control.
       </p>
     </section>
   );

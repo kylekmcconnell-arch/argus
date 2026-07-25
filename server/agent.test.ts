@@ -12,6 +12,7 @@ import {
   extractScoringEvidenceCatalog,
   inspectAnalystScoringPreflight,
   normalizeAnalystCitationEligibility,
+  normalizeGroundedTeamNarrative,
   normalizeAnalystSupportCounterOverlap,
   projectScoreFloorsForPacket,
   scanContradictions,
@@ -1689,6 +1690,67 @@ describe("analyst verdict integrity", () => {
     const result = validateAnalystVerdict(normalized, catalog, evidenceCatalog);
 
     expect(result?.axes[0]).toMatchObject({ evidenceRefs: [alternateF1Ref] });
+  });
+
+  it("drops positive project context misfiled as counter-evidence without another model call", () => {
+    const projectAxis: AnalystAxis[] = [
+      { axis: "P5_traction_and_liveness", weight: 12, role: "PROJECT" },
+    ];
+    const supportRef = `art_v1_${"7".repeat(64)}`;
+    const positiveContextRef = `art_v1_${"8".repeat(64)}`;
+    const evidenceCatalog = [
+      axisArtifact(supportRef, ["P5_traction_and_liveness"], "verified"),
+      axisArtifact(positiveContextRef, ["P5_traction_and_liveness"], "verified"),
+    ];
+    const raw = {
+      axes: [{
+        ...validAxis("P5_traction_and_liveness", 9, supportRef),
+        counterEvidenceRefs: [positiveContextRef],
+      }],
+      headline: "The product has observable traction.",
+      identity_note: "The project team is documented.",
+    };
+
+    const normalized = normalizeAnalystCitationEligibility(raw, evidenceCatalog, projectAxis);
+
+    expect(normalized).not.toBe(raw);
+    expect(validateAnalystVerdict(normalized, projectAxis, evidenceCatalog)).not.toBeNull();
+  });
+
+  it("normalizes a stale unresolved-team sentence when the frozen packet has a named team", () => {
+    const projectAxis: AnalystAxis[] = [
+      { axis: "P1_team_and_identity", weight: 16, role: "PROJECT" },
+    ];
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      team: [{
+        name: "Named Co-Founder",
+        handle: "@namedfounder",
+        role: "co-founder",
+        source: "official project documentation",
+        sourceUrl: "https://docs.example.com/team/founders",
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+    }, projectAxis));
+    const teamArtifact = frozen.find((artifact) => artifact.section === "team")!;
+    const raw = {
+      axes: [{
+        ...validAxis("P1_team_and_identity", 13, teamArtifact.artifactId),
+        rationale: "No named leadership was surfaced.",
+        gaps: ["The project team remains unresolved.", "Employment dates still need review."],
+      }],
+      headline: "Execution is held back by an absent named team.",
+      identity_note: "The team is unresolved.",
+    };
+
+    const normalized = normalizeGroundedTeamNarrative(raw, frozen, projectAxis);
+    const result = validateAnalystVerdict(normalized, projectAxis, frozen);
+
+    expect(normalized).not.toBe(raw);
+    expect(result).not.toBeNull();
+    expect(result?.headline).toContain("named public team");
+    expect(result?.axes[0].gaps).toEqual(["Employment dates still need review."]);
   });
 
   it.each([F2_UNAVAILABLE_REF, F2_CHECKED_EMPTY_REF])(

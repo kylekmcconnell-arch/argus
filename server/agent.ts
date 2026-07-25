@@ -873,9 +873,13 @@ export function normalizeAnalystSupportCounterOverlap(
 export function normalizeAnalystCitationEligibility(
   value: unknown,
   evidenceCatalog: AxisEvidenceRecord[],
+  axisCatalog: AnalystAxis[] = [],
 ): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const root = value as Record<string, unknown>;
+  const projectAxes = new Set(
+    axisCatalog.filter((axis) => axis.role === "PROJECT").map((axis) => axis.axis),
+  );
   const aliasToArtifact = new Map<string, AxisEvidenceRecord>();
   evidenceCatalog.forEach((artifact, index) => {
     aliasToArtifact.set(artifact.artifactId, artifact);
@@ -919,7 +923,11 @@ export function normalizeAnalystCitationEligibility(
     // runs first. Deduplicating counter against support here would resolve the
     // sole-support overlap case in favor of support, silently erasing the
     // counter-evidence marker the strict validator must reject for repair.
-    const counter = eligibleValues(row.counterEvidenceRefs, axis, true);
+    const counter = eligibleValues(row.counterEvidenceRefs, axis, true).filter((ref) => {
+      if (!projectAxes.has(axis)) return true;
+      const artifact = artifactFor(ref);
+      return isVerifiedCounterArtifact(artifact, axis);
+    });
     const coverage = eligibleValues(row.coverageRefs, axis, false);
     const changed = support[0] !== row.primaryEvidenceRef
       || support.length - 1 !== row.additionalEvidenceRefs.length
@@ -950,6 +958,74 @@ export function normalizeAnalystCitationEligibility(
     return changed ? { ...root, axes } : value;
   }
   return value;
+}
+
+// A verified project-team artifact makes "the team is unresolved" wording
+// internally false. Re-asking the model to rewrite an otherwise valid verdict
+// is expensive and can introduce a new citation error, so normalize only that
+// contradicted prose locally. No evidence or score is added or changed.
+export function normalizeGroundedTeamNarrative(
+  value: unknown,
+  evidenceCatalog: AxisEvidenceRecord[],
+  axisCatalog: AnalystAxis[],
+): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const hasGroundedProjectTeam = axisCatalog.some((axis) =>
+    axis.axis === "P1_team_and_identity" && axis.role === "PROJECT")
+    && evidenceCatalog.some((artifact) =>
+      artifact.eligibleAxes.includes("P1_team_and_identity")
+      && isSubstantiveArtifact(artifact)
+      && artifact.section === "team");
+  if (!hasGroundedProjectTeam) return value;
+
+  const root = value as Record<string, unknown>;
+  let changed = false;
+  const normalizeText = (candidate: unknown, replacement: string): unknown => {
+    if (typeof candidate !== "string" || !describesGroundedTeamAsUnresolved(candidate)) return candidate;
+    changed = true;
+    return replacement;
+  };
+  const normalizeTeamRow = (candidate: unknown, axisHint?: string): unknown => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
+    const row = candidate as Record<string, unknown>;
+    const axis = typeof row.axis === "string" ? row.axis : axisHint;
+    if (axis !== "P1_team_and_identity") return candidate;
+    const rationale = normalizeText(
+      row.rationale,
+      "The collected evidence documents a named public project team.",
+    );
+    let gaps = row.gaps;
+    if (Array.isArray(row.gaps)) {
+      const nextGaps = row.gaps.filter((gap) =>
+        typeof gap !== "string" || !describesGroundedTeamAsUnresolved(gap));
+      if (nextGaps.length !== row.gaps.length) changed = true;
+      gaps = nextGaps;
+    }
+    return rationale !== row.rationale || gaps !== row.gaps
+      ? { ...row, rationale, gaps }
+      : candidate;
+  };
+
+  const headline = normalizeText(
+    root.headline,
+    "The project has a named public team; the result follows the evidence collected for each score area.",
+  );
+  const identityNote = normalizeText(
+    root.identity_note,
+    "The project's named public team is documented in the collected evidence.",
+  );
+  let axes = root.axes;
+  if (Array.isArray(root.axes)) {
+    const rawAxes = root.axes;
+    const nextAxes = rawAxes.map((row) => normalizeTeamRow(row));
+    if (nextAxes.some((axis, index) => axis !== rawAxes[index])) axes = nextAxes;
+  } else if (root.axes && typeof root.axes === "object") {
+    const entries = Object.entries(root.axes as Record<string, unknown>);
+    const nextAxes = Object.fromEntries(entries.map(([axis, row]) => [axis, normalizeTeamRow(row, axis)]));
+    if (entries.some(([axis, row]) => nextAxes[axis] !== row)) axes = nextAxes;
+  }
+
+  return changed ? { ...root, headline, identity_note: identityNote, axes } : value;
 }
 
 // The uiCopyPolicy CI gate bans em and en dashes but can only see authored
@@ -3726,9 +3802,10 @@ export async function analyzeSubject(
   }
   let rejectionReason = "unknown";
   let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
-  normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
+  normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog, axisCatalog);
+  normalizedRaw = normalizeGroundedTeamNarrative(normalizedRaw, evidenceCatalog, axisCatalog);
   if (normalizedRaw !== raw) {
-    console.info("[agent] normalized analyst citation placement before strict validation");
+    console.info("[agent] normalized analyst verdict before strict validation");
   }
   let validated = validateAnalystVerdict(
     normalizedRaw,
@@ -3826,9 +3903,10 @@ export async function analyzeSubject(
     );
     rejectionReason = "unknown";
     normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
-    normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
+    normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog, axisCatalog);
+    normalizedRaw = normalizeGroundedTeamNarrative(normalizedRaw, evidenceCatalog, axisCatalog);
     if (normalizedRaw !== raw) {
-      console.info("[agent] normalized repaired citation placement before strict validation");
+      console.info("[agent] normalized repaired analyst verdict before strict validation");
     }
     validated = validateAnalystVerdict(
       normalizedRaw,

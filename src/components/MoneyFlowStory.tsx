@@ -128,6 +128,9 @@ export function MoneyFlowStory({ address, chain, panelCostToken }: {
       )}
 
       <p className="mt-2 text-[13px] leading-relaxed text-ink">{flowSummary(data)}</p>
+      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+        This covers only the contract-creator wallet and transfers Arkham could price. It is not company funding, token trading volume, or the project's full treasury.
+      </p>
 
       <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="stat-tile">
