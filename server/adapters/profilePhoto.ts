@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { ANALYST_MODEL, env } from "../config";
 import { addClaudeUsage, recordCall } from "../cost";
 import type {
+  CollectedEvidence,
   ProfileAuthenticityResult,
   ProfilePhotoClassification,
   SourceArtifact,
 } from "../../src/data/evidence";
+import { SubjectClass } from "../../src/engine";
 import type { CollectContext } from "./types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -255,9 +257,50 @@ function addArtifact(ctx: CollectContext, artifact: SourceArtifact): void {
   if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
 }
 
+/**
+ * Decide whether an account image represents a human identity at all.
+ *
+ * Methodology roles are intentionally multi-select, so a company bio that says
+ * "founded by..." can temporarily carry both PROJECT and FOUNDER. That must not
+ * make the company's logo undergo a human-face integrity screen. A resolved,
+ * source-backed real-person name is the escape hatch for genuine people whose
+ * bios also describe a project.
+ */
+export function isOrganizationProfile(evidence: CollectedEvidence): boolean {
+  const resolvedPersonName = evidence.profile.resolved_name?.trim() ?? "";
+  const hasResolvedPerson = (
+    evidence.profile.identity_confidence === "Confirmed"
+    || evidence.profile.identity_confidence === "Probable"
+  ) && resolvedPersonName.split(/\s+/).filter(Boolean).length >= 2;
+  if (hasResolvedPerson) return false;
+
+  const hasProjectIdentity = evidence.projectToken?.verified === true
+    || evidence.roles.includes(SubjectClass.PROJECT);
+  const collectiveOrganizationBio = /\b(?:we|our|firm|fund|company|team|agency)\b/i
+    .test(evidence.profile.bio);
+  const hasOrganizationRole = evidence.roles.includes(SubjectClass.AGENCY)
+    || evidence.roles.includes(SubjectClass.INVESTOR);
+
+  return hasProjectIdentity
+    || (Boolean(evidence.profile.website) && hasOrganizationRole && collectiveOrganizationBio);
+}
+
 export async function collectProfilePhoto(ctx: CollectContext): Promise<ProfilePhotoAttempt> {
   const capturedAt = new Date().toISOString();
   const profileUrl = `https://x.com/${encodeURIComponent(ctx.handle.replace(/^@/, ""))}`;
+
+  if (isOrganizationProfile(ctx.evidence)) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "not-applicable",
+      note: "company or project account; a logo or brand image is expected, so no human-face integrity screen applies",
+      provider: "argus-subject-router",
+    });
+    return {
+      status: "succeeded",
+      detail: "company or project account; human profile-photo screen not applicable",
+    };
+  }
 
   if (ctx.evidence.profile.avatar_source_state === "none") {
     const result: ProfileAuthenticityResult = {

@@ -5086,12 +5086,13 @@ describe("pseudonymous mega-account name alias (Vitalik regression)", () => {
 // questions prior audits already answered, and the reused verified facts flow
 // into evidence without re-fetching their sources.
 describe("knowledge base read-through", () => {
+  const freshCapture = () => new Date().toISOString();
   const cachedFounderFact = () => ({
     factId: "kb-founder", subjectKey: "alice", predicate: "founder" as const, value: "Acme",
     normalizedValue: "acme", status: "verified" as const, critical: true,
     sources: [{
       url: "https://alice.example/about", sourceClass: "official_subject" as const, relation: "supports" as const,
-      excerpt: "Alice founded Acme.", contentHash: "z".repeat(64), capturedAt: NOW, provider: "public-web" as const, artifactVerified: true,
+      excerpt: "Alice founded Acme.", contentHash: "z".repeat(64), capturedAt: freshCapture(), provider: "public-web" as const, artifactVerified: true,
     }],
     evidence_origin: "deterministic" as const, artifact_verified: true, provider: "public-web" as const, questionId: "person.founder",
   });
@@ -5146,6 +5147,95 @@ describe("knowledge base read-through", () => {
     expect(reusedIds).not.toEqual(expect.arrayContaining(["kb-traction"]));
     expect(reusedIds).not.toEqual(expect.arrayContaining(["kb-tvl"]));
     expect(reusedIds).not.toEqual(expect.arrayContaining(["kb-product"]));
+  });
+
+  it("carries a recent funding fact forward but still searches for a newer round", async () => {
+    vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
+    const cachedFunding = {
+      ...cachedFounderFact(),
+      factId: "kb-funding",
+      predicate: "funding" as const,
+      value: "$10M Series A",
+      normalizedValue: "$10m series a",
+      questionId: "project.funding",
+    };
+    vi.mocked(readEntityFacts).mockResolvedValueOnce({
+      facts: { basicFacts: [cachedFunding] },
+      updatedAt: freshCapture(),
+      auditCount: 2,
+      entityType: "PROJECT",
+    });
+    const { ctx, evidence } = context("https://alice.example");
+    ctx.organizationId = "org1";
+    let discoveredIds: string[] = [];
+
+    await collectBasicFacts(ctx, {
+      discover: spyDiscover((ids) => { discoveredIds = ids; }),
+      fetchSource: vi.fn(),
+    });
+
+    expect(discoveredIds).toContain("project.funding");
+    expect(evidence.basicFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ predicate: "funding", value: "$10M Series A" }),
+    ]));
+  });
+
+  it("keeps a verified historical hack visible and still reruns the incident search", async () => {
+    vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
+    const cachedIncident = {
+      ...cachedFounderFact(),
+      factId: "kb-incident",
+      predicate: "security_incident" as const,
+      value: "April 2 exploit; recovery status unresolved",
+      normalizedValue: "april 2 exploit recovery status unresolved",
+      questionId: "project.security_incident",
+    };
+    vi.mocked(readEntityFacts).mockResolvedValueOnce({
+      facts: { basicFacts: [cachedIncident] },
+      updatedAt: freshCapture(),
+      auditCount: 2,
+      entityType: "PROJECT",
+    });
+    const { ctx, evidence } = context("https://alice.example");
+    ctx.organizationId = "org1";
+    let discoveredIds: string[] = [];
+
+    await collectBasicFacts(ctx, {
+      discover: spyDiscover((ids) => { discoveredIds = ids; }),
+      fetchSource: vi.fn(),
+    });
+
+    expect(discoveredIds).toContain("project.security_incident");
+    expect(evidence.basicFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        predicate: "security_incident",
+        value: "April 2 exploit; recovery status unresolved",
+      }),
+    ]));
+  });
+
+  it("does not reuse a fact whose source capture is outside its cooldown", async () => {
+    vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
+    const staleFounder = cachedFounderFact();
+    staleFounder.sources[0].capturedAt = "2025-01-01T00:00:00.000Z";
+    vi.mocked(readEntityFacts).mockResolvedValueOnce({
+      facts: { basicFacts: [staleFounder] },
+      updatedAt: freshCapture(),
+      auditCount: 12,
+      entityType: "FOUNDER",
+    });
+    const { ctx, evidence } = founderCtx();
+    let discoveredIds: string[] = [];
+
+    await collectBasicFacts(ctx, {
+      discover: spyDiscover((ids) => { discoveredIds = ids; }),
+      fetchSource: vi.fn(),
+    });
+
+    expect(discoveredIds).toContain("person.founder");
+    expect(evidence.basicFacts ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ factId: "kb-founder" }),
+    ]));
   });
 
   it("ignores the knowledge base entirely when the flag is off", async () => {

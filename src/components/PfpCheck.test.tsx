@@ -88,4 +88,17 @@ describe("legacy profile-photo integrity overlay", () => {
     expect(container.textContent).toContain("provider returned no usable conclusion");
     expect(container.textContent).not.toContain("No concern found");
   });
+
+  it("does not call the paid photo endpoint for a brand account", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    await act(async () => {
+      root.render(<PfpCheck handle="@acme" brand panelCostToken="signed-panel" />);
+    });
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Brand image expected");
+    expect(container.textContent).toContain("does not judge this image as if it were a person's face");
+  });
 });

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
+import { SubjectClass } from "../../src/engine";
 import type { CheckObservation, CollectContext } from "./types";
 import { collectProfilePhoto, fetchTrustedProfileImage } from "./profilePhoto";
 
@@ -172,6 +173,53 @@ describe("frozen profile-photo integrity collector", () => {
       flag: false,
     });
     expect(checks).toContainEqual(expect.objectContaining({ status: "checked-empty" }));
+  });
+
+  it("does not fetch or judge a company logo as a human face", async () => {
+    const { ctx, checks } = context();
+    ctx.evidence.roles = [SubjectClass.PROJECT, SubjectClass.FOUNDER];
+    ctx.evidence.profile.bio = "The official Acme protocol, founded by Alice.";
+    ctx.evidence.profile.website = "https://acme.example";
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+
+    const attempt = await collectProfilePhoto(ctx);
+
+    expect(attempt).toMatchObject({
+      status: "succeeded",
+      detail: expect.stringContaining("human profile-photo screen not applicable"),
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(ctx.evidence.profileAuthenticity).toBeUndefined();
+    expect(ctx.evidence.sourceArtifacts).toEqual([]);
+    expect(checks).toContainEqual(expect.objectContaining({
+      id: "profile-photo-authenticity",
+      status: "not-applicable",
+      provider: "argus-subject-router",
+    }));
+  });
+
+  it("still screens a resolved person who also has a project role", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(imageResponse())
+      .mockResolvedValueOnce(visionResponse({
+        classification: "real_candid",
+        confidence: 0.91,
+        is_real_person: true,
+        flag: false,
+        tells: ["natural background"],
+        note: "A visually plausible personal photograph.",
+      })));
+    const { ctx } = context();
+    ctx.evidence.roles = [SubjectClass.PROJECT, SubjectClass.FOUNDER];
+    ctx.evidence.profile.resolved_name = "Alice Example";
+    ctx.evidence.profile.identity_confidence = "Confirmed";
+
+    const attempt = await collectProfilePhoto(ctx);
+
+    expect(attempt.status).toBe("succeeded");
+    expect(ctx.evidence.profileAuthenticity?.classification).toBe("real_candid");
   });
 });
 

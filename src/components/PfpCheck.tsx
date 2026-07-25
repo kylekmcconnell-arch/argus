@@ -52,12 +52,13 @@ function photoScreenData(value: unknown): PhotoScreenData {
 
 export function PfpCheck({ handle, brand, panelCostToken }: { handle: string; brand?: boolean; panelCostToken?: string }) {
   const [data, setData] = useState<PhotoScreenData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!brand);
   const ran = useRef(false);
 
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
+    if (brand) return;
     (async () => {
       try {
         const params = new URLSearchParams({ handle: handle.replace(/^@/, "") });
@@ -81,7 +82,22 @@ export function PfpCheck({ handle, brand, panelCostToken }: { handle: string; br
         setLoading(false);
       }
     })();
-  }, [handle, panelCostToken]);
+  }, [brand, handle, panelCostToken]);
+
+  if (brand) {
+    return (
+      <div className="panel p-4">
+        <div className="text-[12.5px] text-ink-dim">Profile image</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-2">
+          <span className="text-[13.5px] font-medium text-ink">Brand image expected</span>
+          <span className="chip">company or project account</span>
+        </div>
+        <div className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
+          Companies commonly use a logo or mascot. Argus does not judge this image as if it were a person's face.
+        </div>
+      </div>
+    );
+  }
 
   // On a project/brand account, a logo or no-face avatar is expected and is NOT
   // a red flag — only an individual claiming to be a real founder is undercut by

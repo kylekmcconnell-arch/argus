@@ -12972,25 +12972,86 @@ function questionLedger(ctx, questions, facts, primary, repair, repairQuestionId
     };
   });
 }
-var ENTITY_REUSE_TTL_MS = 30 * 24 * 3600 * 1e3;
+var DAY_MS2 = 24 * 3600 * 1e3;
+var ENTITY_REUSE_READ_WINDOW_MS = 365 * DAY_MS2;
+var FACT_REUSE_TTL_MS = {
+  official_identity: 14 * DAY_MS2,
+  current_role: DAY_MS2,
+  prior_role: 14 * DAY_MS2,
+  education: 30 * DAY_MS2,
+  product: DAY_MS2,
+  founder: DAY_MS2,
+  executive: DAY_MS2,
+  founded: 30 * DAY_MS2,
+  launched: 30 * DAY_MS2,
+  exit: 30 * DAY_MS2,
+  track_record: 14 * DAY_MS2,
+  official_token: DAY_MS2,
+  public_security: DAY_MS2,
+  network: DAY_MS2,
+  legal_entity: DAY_MS2,
+  funding: 30 * DAY_MS2,
+  investor: 30 * DAY_MS2,
+  partnership: 14 * DAY_MS2,
+  // A verified historical incident must not disappear on a later provider
+  // outage. Carry the event forward, but ALWAYS_REFRESH_PREDICATES below still
+  // reruns today's incident search for new events and updated recovery status.
+  security_incident: 365 * DAY_MS2,
+  governance: DAY_MS2,
+  audit: DAY_MS2,
+  repository: DAY_MS2
+};
+var ALWAYS_REFRESH_PREDICATES = /* @__PURE__ */ new Set([
+  "funding",
+  "investor",
+  "partnership",
+  "traction",
+  "legal_regulatory_event",
+  "security_incident",
+  "control",
+  "conflict_of_interest",
+  "tokenomics",
+  "vesting",
+  "treasury"
+]);
+function mostRecentFactCaptureMs(fact) {
+  const captures = fact.sources.map((source2) => Date.parse(source2.capturedAt)).filter(Number.isFinite);
+  return captures.length ? Math.max(...captures) : null;
+}
+function reusableFactIsFresh(fact, now = Date.now()) {
+  const ttl = FACT_REUSE_TTL_MS[fact.predicate];
+  if (!ttl) return false;
+  const capturedAt = mostRecentFactCaptureMs(fact);
+  if (capturedAt === null) return false;
+  const age = now - capturedAt;
+  return age >= 0 && age <= ttl;
+}
+function cachedFactClosesDiscovery(ctx, question, facts) {
+  if (ALWAYS_REFRESH_PREDICATES.has(question.predicate)) return false;
+  return deterministicQuestionAnswerRefs(ctx, question, facts).length > 0;
+}
 async function loadReusableBasicFacts(ctx) {
   if (env("ARGUS_ENTITY_REUSE") !== "on") return [];
-  const rec = await readEntityFacts(ctx.organizationId, canonicalEntityKey({ handle: ctx.handle }), ENTITY_REUSE_TTL_MS);
+  const rec = await readEntityFacts(
+    ctx.organizationId,
+    canonicalEntityKey({ handle: ctx.handle }),
+    ENTITY_REUSE_READ_WINDOW_MS
+  );
   const cached = rec?.facts && typeof rec.facts === "object" ? rec.facts.basicFacts : void 0;
   if (!Array.isArray(cached)) return [];
   const projectionLike = (fact) => fact.providerProjection === true || /^captured \d{4}-\d{2}-\d{2}$/.test(String(fact.qualifier ?? "")) || /operates a live on-chain protocol/.test(String(fact.value ?? ""));
-  return cached.filter((fact) => Boolean(fact) && typeof fact === "object" && typeof fact.predicate === "string" && typeof fact.value === "string" && fact.artifact_verified === true && fact.predicate !== "legal_regulatory_event" && !projectionLike(fact));
+  return cached.filter((fact) => Boolean(fact) && typeof fact === "object" && typeof fact.predicate === "string" && typeof fact.value === "string" && fact.artifact_verified === true && fact.predicate !== "legal_regulatory_event" && !projectionLike(fact) && reusableFactIsFresh(fact));
 }
 async function collectBasicFacts(ctx, dependencies = {}) {
   const reusedFacts = await loadReusableBasicFacts(ctx);
   hydrateOfficialProjectIdentityFromFacts(ctx.evidence, reusedFacts);
   const questions = basicFactsResearchQuestions(ctx);
-  const questionsToDiscover = reusedFacts.length ? questions.filter((question) => deterministicQuestionAnswerRefs(ctx, question, reusedFacts).length === 0) : questions;
+  const questionsToDiscover = reusedFacts.length ? questions.filter((question) => !cachedFactClosesDiscovery(ctx, question, reusedFacts)) : questions;
   if (reusedFacts.length) {
     ctx.emit({
       phase: "P0 \xB7 Intake",
-      label: "Knowledge base reuse",
-      detail: `Reused ${reusedFacts.length} verified fact${reusedFacts.length === 1 ? "" : "s"} from a prior audit; discovery searches only the ${questionsToDiscover.length} remaining question${questionsToDiscover.length === 1 ? "" : "s"}.`,
+      label: "Recent verified facts reused",
+      detail: `Kept ${reusedFacts.length} fact${reusedFacts.length === 1 ? "" : "s"} that Argus verified recently. This scan is rechecking ${questionsToDiscover.length} question${questionsToDiscover.length === 1 ? "" : "s"} that may still need an answer or could have changed.`,
       source: "knowledge-base",
       tone: "good"
     });
@@ -14004,9 +14065,30 @@ function addArtifact(ctx, artifact) {
   );
   if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
 }
+function isOrganizationProfile(evidence) {
+  const resolvedPersonName = evidence.profile.resolved_name?.trim() ?? "";
+  const hasResolvedPerson = (evidence.profile.identity_confidence === "Confirmed" || evidence.profile.identity_confidence === "Probable") && resolvedPersonName.split(/\s+/).filter(Boolean).length >= 2;
+  if (hasResolvedPerson) return false;
+  const hasProjectIdentity = evidence.projectToken?.verified === true || evidence.roles.includes("PROJECT" /* PROJECT */);
+  const collectiveOrganizationBio = /\b(?:we|our|firm|fund|company|team|agency)\b/i.test(evidence.profile.bio);
+  const hasOrganizationRole = evidence.roles.includes("AGENCY" /* AGENCY */) || evidence.roles.includes("INVESTOR" /* INVESTOR */);
+  return hasProjectIdentity || Boolean(evidence.profile.website) && hasOrganizationRole && collectiveOrganizationBio;
+}
 async function collectProfilePhoto(ctx) {
   const capturedAt = (/* @__PURE__ */ new Date()).toISOString();
   const profileUrl = `https://x.com/${encodeURIComponent(ctx.handle.replace(/^@/, ""))}`;
+  if (isOrganizationProfile(ctx.evidence)) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "not-applicable",
+      note: "company or project account; a logo or brand image is expected, so no human-face integrity screen applies",
+      provider: "argus-subject-router"
+    });
+    return {
+      status: "succeeded",
+      detail: "company or project account; human profile-photo screen not applicable"
+    };
+  }
   if (ctx.evidence.profile.avatar_source_state === "none") {
     const result2 = {
       provider: "twitterapi",

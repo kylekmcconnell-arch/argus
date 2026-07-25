@@ -4384,14 +4384,89 @@ function questionLedger(
 }
 
 /** Discover role-aware basic facts, verify sources, then repair only critical gaps. */
-// Read-through: reuse the VERIFIED basic facts a prior audit already resolved
-// for this subject, so discovery only searches for what is still missing.
-// Flag-gated (ARGUS_ENTITY_REUSE=on) and freshness-bounded; returns [] when off,
-// unset, or stale, keeping the normal full-discovery path byte-identical.
-const ENTITY_REUSE_TTL_MS = 30 * 24 * 3600 * 1000;
+// Read-through: reuse VERIFIED facts a prior audit already resolved. Freshness
+// is fact-level, not row-level: entity_facts.updated_at changes on every scan,
+// while the source capture on an older fact does not. This prevents a frequently
+// rescanned account from keeping old facts "fresh" forever.
+const DAY_MS = 24 * 3600 * 1000;
+const ENTITY_REUSE_READ_WINDOW_MS = 365 * DAY_MS;
+const FACT_REUSE_TTL_MS: Partial<Record<BasicFactPredicate, number>> = {
+  official_identity: 14 * DAY_MS,
+  current_role: DAY_MS,
+  prior_role: 14 * DAY_MS,
+  education: 30 * DAY_MS,
+  product: DAY_MS,
+  founder: DAY_MS,
+  executive: DAY_MS,
+  founded: 30 * DAY_MS,
+  launched: 30 * DAY_MS,
+  exit: 30 * DAY_MS,
+  track_record: 14 * DAY_MS,
+  official_token: DAY_MS,
+  public_security: DAY_MS,
+  network: DAY_MS,
+  legal_entity: DAY_MS,
+  funding: 30 * DAY_MS,
+  investor: 30 * DAY_MS,
+  partnership: 14 * DAY_MS,
+  // A verified historical incident must not disappear on a later provider
+  // outage. Carry the event forward, but ALWAYS_REFRESH_PREDICATES below still
+  // reruns today's incident search for new events and updated recovery status.
+  security_incident: 365 * DAY_MS,
+  governance: DAY_MS,
+  audit: DAY_MS,
+  repository: DAY_MS,
+};
+
+// A cached fact may still be useful history without closing today's search.
+// These predicates can gain a new material event at any moment, so every rescan
+// must look for updates even when older verified rows are carried forward.
+const ALWAYS_REFRESH_PREDICATES = new Set<BasicFactPredicate>([
+  "funding",
+  "investor",
+  "partnership",
+  "traction",
+  "legal_regulatory_event",
+  "security_incident",
+  "control",
+  "conflict_of_interest",
+  "tokenomics",
+  "vesting",
+  "treasury",
+]);
+
+function mostRecentFactCaptureMs(fact: BasicFact): number | null {
+  const captures = fact.sources
+    .map((source) => Date.parse(source.capturedAt))
+    .filter(Number.isFinite);
+  return captures.length ? Math.max(...captures) : null;
+}
+
+function reusableFactIsFresh(fact: BasicFact, now = Date.now()): boolean {
+  const ttl = FACT_REUSE_TTL_MS[fact.predicate];
+  if (!ttl) return false;
+  const capturedAt = mostRecentFactCaptureMs(fact);
+  if (capturedAt === null) return false;
+  const age = now - capturedAt;
+  return age >= 0 && age <= ttl;
+}
+
+function cachedFactClosesDiscovery(
+  ctx: CollectContext,
+  question: BasicFactsResearchQuestion,
+  facts: readonly BasicFact[],
+): boolean {
+  if (ALWAYS_REFRESH_PREDICATES.has(question.predicate)) return false;
+  return deterministicQuestionAnswerRefs(ctx, question, facts).length > 0;
+}
+
 async function loadReusableBasicFacts(ctx: CollectContext): Promise<BasicFact[]> {
   if (env("ARGUS_ENTITY_REUSE") !== "on") return [];
-  const rec = await readEntityFacts(ctx.organizationId, canonicalEntityKey({ handle: ctx.handle }), ENTITY_REUSE_TTL_MS);
+  const rec = await readEntityFacts(
+    ctx.organizationId,
+    canonicalEntityKey({ handle: ctx.handle }),
+    ENTITY_REUSE_READ_WINDOW_MS,
+  );
   const cached = rec?.facts && typeof rec.facts === "object" ? (rec.facts as { basicFacts?: unknown }).basicFacts : undefined;
   if (!Array.isArray(cached)) return [];
   // Never reuse provider-projection facts (market captures, TVL, fee
@@ -4409,7 +4484,8 @@ async function loadReusableBasicFacts(ctx: CollectContext): Promise<BasicFact[]>
     && typeof (fact as { value?: unknown }).value === "string"
     && (fact as { artifact_verified?: unknown }).artifact_verified === true
     && (fact as { predicate?: unknown }).predicate !== "legal_regulatory_event"
-    && !projectionLike(fact as { providerProjection?: unknown; qualifier?: unknown; value?: unknown }));
+    && !projectionLike(fact as { providerProjection?: unknown; qualifier?: unknown; value?: unknown })
+    && reusableFactIsFresh(fact as BasicFact));
 }
 
 export async function collectBasicFacts(
@@ -4427,13 +4503,13 @@ export async function collectBasicFacts(
   hydrateOfficialProjectIdentityFromFacts(ctx.evidence, reusedFacts);
   const questions = basicFactsResearchQuestions(ctx);
   const questionsToDiscover = reusedFacts.length
-    ? questions.filter((question) => deterministicQuestionAnswerRefs(ctx, question, reusedFacts).length === 0)
+    ? questions.filter((question) => !cachedFactClosesDiscovery(ctx, question, reusedFacts))
     : questions;
   if (reusedFacts.length) {
     ctx.emit({
       phase: "P0 · Intake",
-      label: "Knowledge base reuse",
-      detail: `Reused ${reusedFacts.length} verified fact${reusedFacts.length === 1 ? "" : "s"} from a prior audit; discovery searches only the ${questionsToDiscover.length} remaining question${questionsToDiscover.length === 1 ? "" : "s"}.`,
+      label: "Recent verified facts reused",
+      detail: `Kept ${reusedFacts.length} fact${reusedFacts.length === 1 ? "" : "s"} that Argus verified recently. This scan is rechecking ${questionsToDiscover.length} question${questionsToDiscover.length === 1 ? "" : "s"} that may still need an answer or could have changed.`,
       source: "knowledge-base",
       tone: "good",
     });
