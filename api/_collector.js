@@ -12297,12 +12297,12 @@ function resolveBasicFactCandidates(candidates) {
     const independentHosts = new Set(sources.filter((source2) => source2.sourceClass === "independent_press").map((source2) => new URL(source2.url).hostname.replace(/^www\./, "")));
     if (rows[0]?.predicate === "partnership") {
       const counterpartyConfirmed = sources.some((source2) => source2.sourceClass === "official_counterparty");
-      if (!counterpartyConfirmed && independentHosts.size < 2) return [];
-      return [{
-        ...rows[0],
-        status: counterpartyConfirmed ? "verified" : "corroborated",
-        sources
-      }];
+      if (!counterpartyConfirmed && independentHosts.size < 2) {
+        strictFailures.push(rows);
+        continue;
+      }
+      resolved.push(counterpartyConfirmed ? { ...rows[0], status: "verified", sources } : { ...rows[0], status: "corroborated", floorEligible: false, sources });
+      continue;
     }
     if (rows[0]?.predicate === "public_security" && !official) continue;
     if (rows[0]?.predicate === "official_token" && !official) continue;
@@ -14782,6 +14782,10 @@ function checkIsStale(check, nowMs) {
   const deadlineMs = Date.parse(deadline);
   return Number.isFinite(deadlineMs) && deadlineMs <= nowMs;
 }
+function checkStableId(value) {
+  const check = checkRecord(value);
+  return typeof check.checkId === "string" ? check.checkId : typeof check.check_id === "string" ? check.check_id : "";
+}
 function checkDecisionCriticality(value) {
   const check = checkRecord(value);
   const metadata = checkRecord(check.metadata);
@@ -14796,7 +14800,7 @@ function coverageQualifiedCompleteness(input) {
   }
   if (input.checks === void 0) return completeness;
   const hasExplicitCriticality = input.checks.some((value) => checkDecisionCriticality(value) !== void 0);
-  const governingChecks = hasExplicitCriticality ? input.checks.filter((value) => checkDecisionCriticality(value) === true) : input.checks;
+  const governingChecks = hasExplicitCriticality ? input.checks.filter((value) => checkDecisionCriticality(value) === true && !POST_SCAN_ENRICHMENT_CHECK_IDS.has(checkStableId(value))) : input.checks;
   const applicable = governingChecks.filter((value) => {
     const check = checkRecord(value);
     const metadata = checkRecord(check.metadata);

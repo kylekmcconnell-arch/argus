@@ -4540,6 +4540,105 @@ WBTC is an ERC-20 wrapped token issued by BitGo. Coinbase customers can trade WB
     ]);
   });
 
+  it("keeps sibling verified facts when a partnership group is present", () => {
+    const partnershipPassage = "Jupiter partnered with Pyth Network.";
+    const productPassage = "Jupiter is a swap aggregator on Solana.";
+    const productClaim = verifyBasicFactLead(
+      lead({
+        predicate: "product",
+        value: "swap aggregator on Solana",
+        questionId: "project.product",
+        excerpt: productPassage,
+        sourceUrl: "https://jup.ag/about",
+      }),
+      document({
+        url: "https://jup.ag/about",
+        host: "jup.ag",
+        text: `<p>${productPassage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    );
+    const uncorroborated = verifyBasicFactLead(
+      lead({
+        predicate: "partnership",
+        value: "Pyth Network",
+        questionId: "project.partnership",
+        excerpt: partnershipPassage,
+        sourceUrl: "https://jup.ag/integrations/pyth",
+      }),
+      document({
+        url: "https://jup.ag/integrations/pyth",
+        host: "jup.ag",
+        text: `<p>${partnershipPassage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    );
+    const counterpartyClaim = verifyBasicFactLead(
+      lead({
+        predicate: "partnership",
+        value: "Pyth Network",
+        questionId: "project.partnership",
+        excerpt: partnershipPassage,
+        sourceUrl: "https://pyth.network/integrations/jupiter",
+      }),
+      document({
+        url: "https://pyth.network/integrations/jupiter",
+        host: "pyth.network",
+        text: `<p>${partnershipPassage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    );
+
+    expect(productClaim).toEqual(expect.objectContaining({ predicate: "product", status: "verified" }));
+
+    expect(resolveBasicFactCandidates([productClaim!, uncorroborated!])).toEqual([
+      expect.objectContaining({ predicate: "product", status: "verified" }),
+    ]);
+
+    expect(resolveBasicFactCandidates([productClaim!, uncorroborated!, counterpartyClaim!])).toEqual([
+      expect.objectContaining({ predicate: "product", status: "verified" }),
+      expect.objectContaining({ predicate: "partnership", status: "verified" }),
+    ]);
+  });
+
+  it("completes coverage from press-corroborated partnerships without making them floor-grade", () => {
+    const passage = "Jupiter partnered with Pyth Network.";
+    const pressClaim = (host: string) => verifyBasicFactLead(
+      lead({
+        predicate: "partnership",
+        value: "Pyth Network",
+        questionId: "project.partnership",
+        excerpt: passage,
+        sourceUrl: `https://${host}/jupiter-pyth`,
+      }),
+      document({
+        url: `https://${host}/jupiter-pyth`,
+        host,
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    );
+    const first = pressClaim("cryptowire.example");
+    const second = pressClaim("defidaily.example");
+
+    expect(first?.sources[0]?.sourceClass).toBe("independent_press");
+    expect(resolveBasicFactCandidates([first!, second!])).toEqual([
+      expect.objectContaining({
+        predicate: "partnership",
+        status: "corroborated",
+        floorEligible: false,
+      }),
+    ]);
+  });
+
   it("does not grant counterparty authority to a lookalike subdomain", () => {
     const passage = "Jupiter partnered with Pyth Network.";
     const lookalikeClaim = verifyBasicFactLead(

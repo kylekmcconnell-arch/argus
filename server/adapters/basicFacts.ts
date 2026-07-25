@@ -3441,12 +3441,16 @@ export function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[]
     // fetched hosts corroborate the same atomic relationship.
     if (rows[0]?.predicate === "partnership") {
       const counterpartyConfirmed = sources.some((source) => source.sourceClass === "official_counterparty");
-      if (!counterpartyConfirmed && independentHosts.size < 2) return [];
-      return [{
-        ...rows[0],
-        status: counterpartyConfirmed ? "verified" as const : "corroborated" as const,
-        sources,
-      }];
+      if (!counterpartyConfirmed && independentHosts.size < 2) {
+        strictFailures.push(rows);
+        continue;
+      }
+      resolved.push(counterpartyConfirmed
+        ? { ...rows[0], status: "verified" as const, sources }
+        // Press corroboration completes coverage but never enforces a score
+        // floor (H2); only the named counterparty's own domain is floor-grade.
+        : { ...rows[0], status: "corroborated" as const, floorEligible: false, sources });
+      continue;
     }
     // A stock or debt-security classification must come from the issuer or a
     // regulator. Two news articles may corroborate a reported claim, but they
