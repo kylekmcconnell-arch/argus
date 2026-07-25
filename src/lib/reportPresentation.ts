@@ -1,6 +1,6 @@
 // NOTE: this module is loaded as native ESM by the api/ functions — every
 // runtime import here MUST carry an explicit .js extension.
-import { CLEARANCE_COVERAGE_FLOOR_PERCENT, NEVER_WAIVE_CHECK_IDS } from "./scanChecklist.js";
+import { CLEARANCE_COVERAGE_FLOOR_PERCENT, NEVER_WAIVE_CHECK_IDS, POST_SCAN_ENRICHMENT_CHECK_IDS } from "./scanChecklist.js";
 
 export type PublicCompleteness = "complete" | "partial" | "failed";
 
@@ -76,6 +76,15 @@ function checkIsStale(check: Record<string, unknown>, nowMs: number): boolean {
   return Number.isFinite(deadlineMs) && deadlineMs <= nowMs;
 }
 
+function checkStableId(value: unknown): string {
+  const check = checkRecord(value);
+  return typeof check.checkId === "string"
+    ? check.checkId
+    : typeof check.check_id === "string"
+      ? check.check_id
+      : "";
+}
+
 function checkDecisionCriticality(value: unknown): boolean | undefined {
   const check = checkRecord(value);
   const metadata = checkRecord(check.metadata);
@@ -99,8 +108,11 @@ export function coverageQualifiedCompleteness(input: {
   if (input.checks === undefined) return completeness;
 
   const hasExplicitCriticality = input.checks.some((value) => checkDecisionCriticality(value) !== undefined);
+  // Post-scan enrichment rows never gate public completeness, even on legacy
+  // snapshots that froze them as decision-critical (mirrors decisionCriticalChecks).
   const governingChecks = hasExplicitCriticality
-    ? input.checks.filter((value) => checkDecisionCriticality(value) === true)
+    ? input.checks.filter((value) => checkDecisionCriticality(value) === true
+        && !POST_SCAN_ENRICHMENT_CHECK_IDS.has(checkStableId(value)))
     : input.checks;
   const applicable = governingChecks.filter((value) => {
     const check = checkRecord(value);

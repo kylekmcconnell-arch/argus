@@ -200,6 +200,18 @@ describe("public report presentation policy", () => {
     })).toBe("partial");
   });
 
+  it("excludes post-scan enrichment rows from public completeness even when frozen critical", () => {
+    expect(coverageQualifiedCompleteness({
+      completeness: "complete",
+      attestation: "server_collected",
+      checks: [
+        { status: "confirmed", decisionCritical: true, checkId: "ofac-sanctions-name" },
+        { status: "unknown", decisionCritical: true, checkId: "deployer-trail-evm" },
+        { status: "unknown", decisionCritical: true, check_id: "bytecode-fingerprint-evm" },
+      ],
+    })).toBe("complete");
+  });
+
   it("reads decision criticality from stored check metadata and preserves legacy semantics", () => {
     expect(coverageQualifiedCompleteness({
       completeness: "complete",
