@@ -1,9 +1,9 @@
 {
   "subject": "@orbitgroup_ai",
-  "recordedAt": "2026-07-26T14:44:23.163Z",
+  "recordedAt": "2026-07-26T14:52:53.096Z",
   "score": null,
   "verdict": "INCOMPLETE",
   "completeness": "partial",
-  "verifiedFactCount": 1,
-  "costUsd": 1.17
+  "verifiedFactCount": 10,
+  "costUsd": 1.07
 }

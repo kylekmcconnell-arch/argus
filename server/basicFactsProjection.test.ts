@@ -52,6 +52,61 @@ const acceptedFact = (predicate: BasicFactPredicate, value: string, excerpt: str
 });
 
 describe("projectProviderBackedBasicFacts", () => {
+  it("mints a ceiling-only product fact from a live official site when nothing else can", () => {
+    // The @orbitgroup_ai case: bio parses to no product name, token unbound,
+    // discovery verification starved, yet ARGUS itself fetched a live site
+    // bound to the account. That fetch completes product substance.
+    const evidence = emptyEvidence("@orbitgroup_ai");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile = {
+      ...evidence.profile,
+      display_name: "Orbit",
+      website: "https://orbitgroup.ai/",
+      site_substance_status: "live",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-26T10:00:00.000Z",
+    };
+    projectProviderBackedBasicFacts(evidence);
+    const product = (evidence.basicFacts ?? []).find((fact) =>
+      fact.predicate === "product" && fact.value === "orbitgroup.ai");
+    expect(product).toBeDefined();
+    expect(product?.floorEligible).toBe(false);
+    expect(product?.sources[0]).toEqual(expect.objectContaining({
+      url: "https://orbitgroup.ai/",
+      sourceClass: "official_subject",
+      provider: "sitecheck",
+    }));
+  });
+
+  it("does not mint the site product fact without a live fetch or a project route", () => {
+    const notLive = emptyEvidence("@orbitgroup_ai");
+    notLive.roles = [SubjectClass.PROJECT];
+    notLive.profile = {
+      ...notLive.profile,
+      website: "https://orbitgroup.ai/",
+      site_substance_status: "coming_soon",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-26T10:00:00.000Z",
+    };
+    projectProviderBackedBasicFacts(notLive);
+    expect((notLive.basicFacts ?? []).some((fact) => fact.predicate === "product")).toBe(false);
+
+    const person = emptyEvidence("@someone");
+    person.roles = [SubjectClass.FOUNDER];
+    person.profile = {
+      ...person.profile,
+      website: "https://someone.com/",
+      site_substance_status: "live",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-26T10:00:00.000Z",
+    };
+    projectProviderBackedBasicFacts(person);
+    expect((person.basicFacts ?? []).some((fact) => fact.predicate === "product" && fact.provider === "public-web")).toBe(false);
+  });
+
   it("reuses frozen profile, token, market, and GitHub records without promoting model leads", () => {
     const evidence = emptyEvidence("@jupiterexchange");
     evidence.roles = [SubjectClass.PROJECT];

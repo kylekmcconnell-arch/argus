@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { SubjectClass } from "../src/engine";
+import { canonicalOfficialWebsite } from "../src/lib/fundScaleEvidence";
 import {
   canonicalBasicFactComparisonValue,
   type BasicFact,
@@ -488,6 +489,35 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       productFact.floorEligible = false;
       projected.push(productFact);
     }
+  }
+
+  // A live official site, fetched by ARGUS itself for a PROJECT-routed
+  // subject, is deterministic product-surface evidence that cannot be
+  // hallucinated. Without it, a project whose bio parses to no product name
+  // and whose token is unlaunched abstains on product substance forever even
+  // though the strongest first-party artifact (the served site) is in hand.
+  // Ceiling-only, like every self-description.
+  const liveOfficialSite = evidence.roles.includes(SubjectClass.PROJECT)
+    && evidence.profile.site_substance_status === "live"
+    ? canonicalOfficialWebsite(evidence.profile.website)
+    : null;
+  if (liveOfficialSite) {
+    const siteProductFact = makeFact(
+      evidence,
+      "product",
+      liveOfficialSite.domain,
+      [source({
+        url: liveOfficialSite.canonicalUrl,
+        title: `Official website (${liveOfficialSite.domain})`,
+        excerpt: `${liveOfficialSite.domain} served a live product surface when ARGUS fetched it during this scan of ${evidence.profile.handle}.`,
+        capturedAt,
+        provider: "sitecheck",
+        sourceClass: "official_subject",
+      })],
+      "live site fetch",
+    );
+    siteProductFact.floorEligible = false;
+    projected.push(siteProductFact);
   }
 
   if (

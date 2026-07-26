@@ -18251,6 +18251,25 @@ function projectProviderBackedBasicFacts(evidence) {
       projected.push(productFact);
     }
   }
+  const liveOfficialSite = evidence.roles.includes("PROJECT" /* PROJECT */) && evidence.profile.site_substance_status === "live" ? canonicalOfficialWebsite(evidence.profile.website) : null;
+  if (liveOfficialSite) {
+    const siteProductFact = makeFact(
+      evidence,
+      "product",
+      liveOfficialSite.domain,
+      [source({
+        url: liveOfficialSite.canonicalUrl,
+        title: `Official website (${liveOfficialSite.domain})`,
+        excerpt: `${liveOfficialSite.domain} served a live product surface when ARGUS fetched it during this scan of ${evidence.profile.handle}.`,
+        capturedAt,
+        provider: "sitecheck",
+        sourceClass: "official_subject"
+      })],
+      "live site fetch"
+    );
+    siteProductFact.floorEligible = false;
+    projected.push(siteProductFact);
+  }
   if (officialProfileSource && evidence.roles.includes("FOUNDER" /* FOUNDER */) && evidence.profile.identity_confidence !== "SuspectedImpersonation") {
     const existingVerifiedSources = (evidence.basicFacts ?? []).filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")).flatMap((fact) => fact.sources).filter((candidate) => candidate.relation === "supports" && candidate.provider !== "twitterapi" && candidate.url !== officialProfileSource.url);
     const aliases = [...new Set([
