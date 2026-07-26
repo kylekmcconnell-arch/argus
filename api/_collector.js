@@ -20170,11 +20170,15 @@ function axisCatalog(roles) {
 }
 function providerBackedRoles(evidence) {
   const roles = /* @__PURE__ */ new Set();
+  let bioPrimaryProjectVerified = false;
+  let investorBeyondBio = false;
   if (evidence.profile.profile_collection_state === "resolved" && evidence.profile.bio.trim()) {
-    const profileRoles = classifySubject(evidence.profile.bio).applicable_classes;
+    const classification = classifySubject(evidence.profile.bio);
+    const profileRoles = classification.applicable_classes;
     const providerCapturedAt = Date.parse(evidence.profile.profile_captured_at ?? "");
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);
     const projectProfileVerified = evidence.profile.profile_provider === "twitterapi" && Number.isFinite(providerCapturedAt) && officialSite !== null;
+    bioPrimaryProjectVerified = projectProfileVerified && classification.subject_class === "PROJECT" /* PROJECT */ && classification.scores["PROJECT" /* PROJECT */] > classification.scores["INVESTOR" /* INVESTOR */];
     profileRoles.forEach((role) => {
       if (role !== "PROJECT" /* PROJECT */ || projectProfileVerified) roles.add(role);
     });
@@ -20185,7 +20189,10 @@ function providerBackedRoles(evidence) {
     if (/founder|co-?founder|\bceo\b|\bcto\b|creator|owner/.test(role)) roles.add("FOUNDER" /* FOUNDER */);
     else if (/advisor|adviser|board/.test(role)) roles.add("ADVISOR" /* ADVISOR */);
     else if (/contributor|engineer|developer|employee|manager|director|lead|role on record/.test(role)) roles.add("MEMBER" /* MEMBER */);
-    else if (/\binvestor\b|\bpartner\b|\bprincipal\b|\bventure capital(?:ist)?\b|\bvc\b|\bgp\b/.test(role)) roles.add("INVESTOR" /* INVESTOR */);
+    else if (/\binvestor\b|\bpartner\b|\bprincipal\b|\bventure capital(?:ist)?\b|\bvc\b|\bgp\b/.test(role)) {
+      roles.add("INVESTOR" /* INVESTOR */);
+      investorBeyondBio = true;
+    }
   }
   for (const fact of evidence.basicFacts ?? []) {
     if (fact.artifact_verified !== true) continue;
@@ -20204,7 +20211,11 @@ function providerBackedRoles(evidence) {
     roles.add("PROJECT" /* PROJECT */);
   }
   if (roles.has("INVESTOR" /* INVESTOR */) && !evidence.projectToken?.verified) {
-    roles.delete("PROJECT" /* PROJECT */);
+    if (bioPrimaryProjectVerified && !investorBeyondBio) {
+      roles.delete("INVESTOR" /* INVESTOR */);
+    } else {
+      roles.delete("PROJECT" /* PROJECT */);
+    }
   }
   if (roles.size === 0 && evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && canonicalOfficialWebsite(evidence.profile.website) !== null && evidence.profile.site_substance_status === "live") {
     roles.add("PROJECT" /* PROJECT */);

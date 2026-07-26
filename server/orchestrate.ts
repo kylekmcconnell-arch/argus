@@ -1299,13 +1299,21 @@ export function axisCatalog(roles: SubjectClass[]) {
  */
 export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[] {
   const roles = new Set<SubjectClass>();
+  let bioPrimaryProjectVerified = false;
+  let investorBeyondBio = false;
   if (evidence.profile.profile_collection_state === "resolved" && evidence.profile.bio.trim()) {
-    const profileRoles = classifySubject(evidence.profile.bio).applicable_classes;
+    const classification = classifySubject(evidence.profile.bio);
+    const profileRoles = classification.applicable_classes;
     const providerCapturedAt = Date.parse(evidence.profile.profile_captured_at ?? "");
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);
     const projectProfileVerified = evidence.profile.profile_provider === "twitterapi"
       && Number.isFinite(providerCapturedAt)
       && officialSite !== null;
+    // Strict margin required: on a PROJECT/INVESTOR tie the fund lens keeps
+    // governing, so a real fund with product-ish vocabulary never flips.
+    bioPrimaryProjectVerified = projectProfileVerified
+      && classification.subject_class === SubjectClass.PROJECT
+      && classification.scores[SubjectClass.PROJECT] > classification.scores[SubjectClass.INVESTOR];
     profileRoles.forEach((role) => {
       if (role !== SubjectClass.PROJECT || projectProfileVerified) roles.add(role);
     });
@@ -1321,7 +1329,10 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     // INVESTOR must mean. The investor terms are whole words for the same
     // reason ("Partnerships" is not "Partner"; "Capital Markets" is not a fund).
     else if (/contributor|engineer|developer|employee|manager|director|lead|role on record/.test(role)) roles.add(SubjectClass.MEMBER);
-    else if (/\binvestor\b|\bpartner\b|\bprincipal\b|\bventure capital(?:ist)?\b|\bvc\b|\bgp\b/.test(role)) roles.add(SubjectClass.INVESTOR);
+    else if (/\binvestor\b|\bpartner\b|\bprincipal\b|\bventure capital(?:ist)?\b|\bvc\b|\bgp\b/.test(role)) {
+      roles.add(SubjectClass.INVESTOR);
+      investorBeyondBio = true;
+    }
   }
   // A verified founder or executive fact is provider-backed role evidence just
   // as much as a verified venture row is: a subject whose bio carries no role
@@ -1355,9 +1366,18 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   }
   // A fund's brand account can use project-like language, but its governing
   // methodology remains INVESTOR unless it also ships a separately verified
-  // product/token under the exact audited identity.
+  // product/token under the exact audited identity. Symmetric exception: a
+  // brand account whose bio LEADS with its own product/token ("powered by
+  // $X") and whose verified official site links the handle back is a project
+  // that merely talks about capital; when no venture record verified the
+  // investing (vocabulary was the only investor evidence), the fund
+  // methodology is the wrong lens and would starve the scan into INCOMPLETE.
   if (roles.has(SubjectClass.INVESTOR) && !evidence.projectToken?.verified) {
-    roles.delete(SubjectClass.PROJECT);
+    if (bioPrimaryProjectVerified && !investorBeyondBio) {
+      roles.delete(SubjectClass.INVESTOR);
+    } else {
+      roles.delete(SubjectClass.PROJECT);
+    }
   }
   // Last-resort structural routing: a brand account whose bio carries no
   // classifying keyword ("Launch coins on Robinhood via <link>") still routes

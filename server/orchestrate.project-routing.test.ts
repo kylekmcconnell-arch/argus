@@ -53,6 +53,43 @@ function resolvedProjectProfile(bio: string, website: string | null | undefined 
 }
 
 describe("provider-backed project routing", () => {
+  it("routes a powered-by-token brand account as PROJECT, not INVESTOR", () => {
+    // The @orbitgroup_ai case: a token platform whose bio also says
+    // "capital" and "investors". The fund methodology starves such a scan
+    // into INCOMPLETE; the project methodology can actually assess it.
+    const evidence = resolvedProjectProfile(
+      "Burn-rate-based fundraising for serious founders. Connecting capital with execution, transparently. Built for builders. Trusted by investors. Powered by $ORBIT",
+      "https://orbitgroup.ai/",
+    );
+    const roles = providerBackedRoles(evidence);
+    expect(roles).toContain(SubjectClass.PROJECT);
+    expect(roles).not.toContain(SubjectClass.INVESTOR);
+  });
+
+  it("keeps the fund methodology when the investor signal leads or is verified", () => {
+    const fund = resolvedProjectProfile(
+      "We back bold entrepreneurs building the next internet. Our platform for founders.",
+      "https://fund.example/",
+    );
+    const fundRoles = providerBackedRoles(fund);
+    expect(fundRoles).toContain(SubjectClass.INVESTOR);
+    expect(fundRoles).not.toContain(SubjectClass.PROJECT);
+
+    const verifiedGp = resolvedProjectProfile(
+      "Burn-rate-based fundraising for serious founders. Powered by $ORBIT",
+      "https://orbitgroup.ai/",
+    );
+    verifiedGp.ventures.push({
+      name: "Orbit Capital",
+      role: "General Partner",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    } as unknown as Venture);
+    const gpRoles = providerBackedRoles(verifiedGp);
+    expect(gpRoles).toContain(SubjectClass.INVESTOR);
+    expect(gpRoles).not.toContain(SubjectClass.PROJECT);
+  });
+
   it("requires an exact CoinGecko identity join for protocol fundamentals", () => {
     expect(protocolRecordMatchesCanonicalToken("uniswap", "uniswap")).toBe(true);
     expect(protocolRecordMatchesCanonicalToken("uniswap-v3", "uniswap")).toBe(false);
