@@ -6,7 +6,7 @@
  * URLs, legal text, or raw evidence records.
  */
 export function plainLanguageSummary(value: string): string {
-  return value
+  return humanizeAxisIds(value)
     .replace(/\bcanonical project token\b/gi, "official token")
     .replace(/\bcanonical token\b/gi, "official token")
     .replace(/\bcanonical\b/gi, "official")
@@ -41,6 +41,16 @@ export function plainLanguageSummary(value: string): string {
     .replace(/\bFDV\b/g, "all-token value")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+import { axisLabel } from "./verdict";
+
+/** "substantive evidence is missing for I2_portfolio_quality" reads as jargon; swap axis ids for their labels. */
+function humanizeAxisIds(value: string): string {
+  return value.replace(/\b[A-Z]{1,3}\d+_[a-z0-9_]+\b/g, (token) => {
+    const label = axisLabel(token);
+    return label === token ? token : label.toLowerCase();
+  });
 }
 
 const ROLE_ACRONYMS = new Set(["ceo", "cto", "coo", "cfo", "cmo", "cio", "ciso", "vp"]);

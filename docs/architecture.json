@@ -123,6 +123,10 @@
    "projectToken.ts": {
     "collects": "canonical token binding via official-X/official-domain (never a name match)"
    },
+   "linkHub.ts": {
+    "collects": "official-site dereference when the profile website is a link aggregator (linktr.ee etc); hub page must link the exact audited handle AND the extracted site must link back; ambiguity fails closed",
+    "note": "runs inside resolveProfile; without it a linktree-only profile silently loses PROJECT routing and token binding (the @orbitgroup_ai INCOMPLETE case)"
+   },
    "portfolio.ts + fundScale.ts + investorDiscovery.ts": {
     "collects": "investor I2 portfolio + I3 fund scale"
    },

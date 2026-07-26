@@ -194,6 +194,24 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
   return signals.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
 }
 
+const TICKER_STOPWORDS = new Set([
+  "USD", "USDT", "USDC", "BTC", "ETH", "SOL", "BNB", "AI", "APY", "APR",
+  "CEO", "CTO", "COO", "IPO", "LLC", "INC", "DAO", "NFT", "TVL", "FDV",
+]);
+
+/**
+ * The first plausible self-claimed ticker in a profile bio ("Powered by
+ * $ORBIT"). Used to direct the reader to the token scan when a scan could
+ * not bind the claimed token; never used as evidence of anything.
+ */
+export function claimedTicker(bio: string | null | undefined): string | null {
+  for (const match of (bio ?? "").matchAll(/\$([A-Za-z][A-Za-z0-9]{1,9})\b/g)) {
+    const ticker = match[1].toUpperCase();
+    if (!TICKER_STOPWORDS.has(ticker)) return ticker;
+  }
+  return null;
+}
+
 export interface VerdictArgumentInputs {
   verdict?: string | null;
   supports?: readonly (string | null | undefined)[];

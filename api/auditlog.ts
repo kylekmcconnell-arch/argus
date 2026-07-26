@@ -109,6 +109,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         contributor: auth.displayName.slice(0, 80),
         contributor_user_id: auth.userId,
       };
+      // An owner reconciling another analyst's entry (opening a shared case
+      // folds the stored outcome back into the rail) must not become its
+      // author: merge-duplicates leaves omitted columns untouched, so the
+      // original contributor survives the update.
+      const editingForeignRow = mode === "update" && !clientId.startsWith(`${auth.userId}:`);
+      if (editingForeignRow) {
+        delete (row as Partial<typeof row>).contributor;
+        delete (row as Partial<typeof row>).contributor_user_id;
+      }
       const resolution = mode === "update" ? "merge-duplicates" : "ignore-duplicates";
       const response = await fetch(
         `${credentials.url}/rest/v1/${TABLE}?on_conflict=organization_id,client_id`,

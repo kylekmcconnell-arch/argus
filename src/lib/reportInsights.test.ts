@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveNoticedSignals, deriveVerdictArgument } from "./reportInsights";
+import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument } from "./reportInsights";
 
 describe("deriveNoticedSignals", () => {
   it("lifts unlocked liquidity and holder concentration out of the stat grid", () => {
@@ -87,6 +87,15 @@ describe("deriveNoticedSignals", () => {
       verifiedTeamCount: 0,
       marketCapUsd: 2_000_000,
     })).toEqual([]);
+  });
+});
+
+describe("claimedTicker", () => {
+  it("finds a self-claimed ticker and skips currency and acronym noise", () => {
+    expect(claimedTicker("Burn-rate-based fundraising. Powered by $ORBIT")).toBe("ORBIT");
+    expect(claimedTicker("We raised $100M in USDC")).toBeNull();
+    expect(claimedTicker("$BTC and $ETH maxi")).toBeNull();
+    expect(claimedTicker(null)).toBeNull();
   });
 });
 

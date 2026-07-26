@@ -23,7 +23,7 @@ import {
   UserFocus,
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
-import { deriveNoticedSignals } from "../lib/reportInsights";
+import { claimedTicker, deriveNoticedSignals } from "../lib/reportInsights";
 import { NoticedRail } from "./InvestigatorBrief";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
@@ -2346,6 +2346,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     provenance: "Not fully checked",
     href: "#scan-methodology" as `#${string}`,
   }));
+  // A bio that claims its own token ("Powered by $X") on a scan that could
+  // not score or bind it deserves a directed next step in the subject's own
+  // language, not an axis id.
+  const claimedUnboundTicker = !f.projectToken
+    && (routingUnresolved || scoringOutputIncomplete || report.composite_verdict === "INCOMPLETE")
+    ? claimedTicker(f.bio)
+    : null;
   // Ranked by decision impact: gating problems, then facts where sources
   // disagree, then unresolved decision checks, then unanswered facts, then
   // source gaps, then generic collection gaps. Dedupe keeps the first
@@ -2364,6 +2371,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       detail: `ARGUS identified this as a ${resolvedRoleLabel.toLowerCase()}, but the decision review did not finish. Rerun it without discarding the evidence already collected.`,
       provenance: "Decision review incomplete",
       href: "#decision-basis" as `#${string}`,
+    }] : []),
+    ...(claimedUnboundTicker ? [{
+      id: "verify-claimed-token",
+      title: `Run the token scan for $${claimedUnboundTicker}`,
+      detail: `The profile claims a token ($${claimedUnboundTicker}) this scan could not bind to an official site. The token scan checks the contract, market, holders, and liquidity directly.`,
+      provenance: "Claimed token unbound",
+      href: "#report-overview" as `#${string}`,
     }] : []),
     ...conflictedBasicFactQuestions,
     ...checkVerificationQuestions,

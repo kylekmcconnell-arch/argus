@@ -607,6 +607,17 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(res2.subject_class).toBe(SubjectClass.KOL);
   });
 
+  it("routes a token brand account ahead of its investor vocabulary", () => {
+    // The real @orbitgroup_ai bio: fundraising-platform language plus its own
+    // token. "Powered by $ORBIT" must outrank the stray "capital" so the
+    // PROJECT lane (site binding, token binding, product checks) runs.
+    const res = classifySubject(
+      "Burn-rate-based fundraising for serious founders.\nConnecting capital with execution, transparently.\nBuilt for builders. Trusted by investors.\nPowered by $ORBIT",
+    );
+    expect(res.subject_class).toBe(SubjectClass.PROJECT);
+    expect(res.applicable_classes).toContain(SubjectClass.INVESTOR);
+  });
+
   it("classifies a fund whose bio backs builders without VC keywords as INVESTOR", () => {
     // The real @a16zcrypto bio: no "venture/capital/fund" keyword, and the
     // entrepreneurs it backs are "building" (that must not misfire as FOUNDER).

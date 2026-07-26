@@ -41,6 +41,9 @@ const PATTERNS: Record<SubjectClass, RegExp[]> = {
     /\bproduct\b(?!\s+(?:manager|management|lead|leader|designer|design|engineer|engineering|marketing|marketer|growth|strategy|strategist|ops|operations|at)\b)/i,
     /\bplatform\b/i, /\bthe official\b/i, /\bofficial account\b/i, /\bwe'?re building\b/i,
     /\bour (?:token|protocol|platform|app|mission|community)\b/i, /\b\$[A-Z]{2,6} token\b/i,
+    // "Powered by $X" is a brand account naming its own token; it must outrank
+    // stray investor vocabulary ("connecting capital") in the same bio.
+    /\bpowered by \$[A-Za-z][A-Za-z0-9]{1,9}\b/i,
     /\bpowered by\b/i, /\bmainnet\b/i, /\btestnet\b/i,
     // Verb-phrase product bios: the account states what its product DOES
     // ("Launch coins on Robinhood", "Trade perps on-chain") without naming a

@@ -18,6 +18,14 @@ describe("plainLanguageSummary", () => {
     );
   });
 
+  it("replaces internal axis ids with their labels", () => {
+    expect(plainLanguageSummary(
+      "Investigation incomplete: substantive evidence is missing for I2_portfolio_quality.",
+    )).toBe(
+      "Investigation incomplete: meaningful evidence is missing for portfolio quality.",
+    );
+  });
+
   it("keeps URLs, amounts, tickers, and names unchanged", () => {
     const text = "$VVV has $567M market cap. Source: https://venice.ai.";
     expect(plainLanguageSummary(text)).toBe(text);

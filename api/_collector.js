@@ -435,6 +435,9 @@ var PATTERNS = {
     /\bwe'?re building\b/i,
     /\bour (?:token|protocol|platform|app|mission|community)\b/i,
     /\b\$[A-Z]{2,6} token\b/i,
+    // "Powered by $X" is a brand account naming its own token; it must outrank
+    // stray investor vocabulary ("connecting capital") in the same bio.
+    /\bpowered by \$[A-Za-z][A-Za-z0-9]{1,9}\b/i,
     /\bpowered by\b/i,
     /\bmainnet\b/i,
     /\btestnet\b/i,
@@ -7797,6 +7800,120 @@ async function checkSiteSubstance(domain) {
   return { url: page.url, status: "live", detail: `site is up${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
 }
 
+// server/adapters/linkHub.ts
+var LINK_HUB_HOSTS = /* @__PURE__ */ new Set([
+  "linktr.ee",
+  "linkin.bio",
+  "lnk.bio",
+  "beacons.ai",
+  "bio.link",
+  "taplink.cc",
+  "solo.to",
+  "hoo.be",
+  "komi.io",
+  "linkfly.to",
+  "lynk.id",
+  "campsite.bio"
+]);
+var NON_WEBSITE_HOSTS = [
+  "x.com",
+  "twitter.com",
+  "instagram.com",
+  "tiktok.com",
+  "youtube.com",
+  "youtu.be",
+  "facebook.com",
+  "linkedin.com",
+  "discord.gg",
+  "discord.com",
+  "t.me",
+  "telegram.me",
+  "medium.com",
+  "substack.com",
+  "mirror.xyz",
+  "github.com",
+  "opensea.io",
+  "dexscreener.com",
+  "dextools.io",
+  "coingecko.com",
+  "coinmarketcap.com",
+  "etherscan.io",
+  "basescan.org",
+  "bscscan.com",
+  "solscan.io",
+  "birdeye.so",
+  "pump.fun",
+  "raydium.io",
+  "uniswap.org",
+  "jup.ag",
+  "apps.apple.com",
+  "play.google.com",
+  "docs.google.com",
+  "forms.gle",
+  "mailto"
+];
+var hostOf = (raw) => {
+  try {
+    return new URL(raw).hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return null;
+  }
+};
+var escapeRe = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var handleBacklinkPattern = (account) => new RegExp(`(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${escapeRe(account)}(?:[/?#"'\\s<]|$)`, "i");
+function isLinkHubUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return false;
+  const host = hostOf(value);
+  return Boolean(host && LINK_HUB_HOSTS.has(host));
+}
+async function resolveLinkHubWebsite(rawHubUrl, handle, fetchDoc = fetchPublicText) {
+  const account = handle.replace(/^@/, "");
+  let hub;
+  try {
+    hub = new URL(rawHubUrl);
+  } catch {
+    return null;
+  }
+  const hubHost = hostOf(hub.toString());
+  if (!hubHost || !LINK_HUB_HOSTS.has(hubHost)) return null;
+  const hubPages = hub.pathname && hub.pathname !== "/" ? [hub.toString()] : [.../* @__PURE__ */ new Set([`${hub.origin}/${account}`, `${hub.origin}/${account.toLowerCase()}`])];
+  const backlink = handleBacklinkPattern(account);
+  for (const hubUrl of hubPages) {
+    const page = await fetchDoc(hubUrl);
+    if (page.status !== "ok" || !page.text) continue;
+    const text2 = page.text.replace(/\\\//g, "/");
+    if (!backlink.test(text2)) continue;
+    const external = /* @__PURE__ */ new Map();
+    for (const raw of text2.match(/https?:\/\/[^\s"'<>()]+/gi) ?? []) {
+      const cleaned = raw.replace(/[.,;:!?]+$/, "");
+      const host = hostOf(cleaned);
+      if (!host || LINK_HUB_HOSTS.has(host)) continue;
+      if (NON_WEBSITE_HOSTS.some((listed) => host === listed || host.endsWith(`.${listed}`))) continue;
+      const registrable = host.split(".").slice(-2).join(".");
+      if (!external.has(registrable)) external.set(registrable, cleaned);
+    }
+    const handleKey = account.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const stemMatches = [...external.entries()].filter(([registrable]) => {
+      const brand = registrable.split(".")[0].replace(/[^a-z0-9]/g, "");
+      return brand.length >= 3 && handleKey.startsWith(brand);
+    });
+    const chosen = stemMatches.length === 1 ? stemMatches[0][1] : stemMatches.length === 0 && external.size === 1 ? [...external.values()][0] : null;
+    if (!chosen) continue;
+    let site;
+    try {
+      site = new URL(chosen);
+    } catch {
+      continue;
+    }
+    const homepage = `${site.origin}/`;
+    const siteDoc = await fetchDoc(homepage);
+    if (siteDoc.status !== "ok" || !siteDoc.text) continue;
+    if (!backlink.test(siteDoc.text.replace(/\\\//g, "/"))) continue;
+    return { website: homepage, hubUrl };
+  }
+  return null;
+}
+
 // server/adapters/dexscreener.ts
 var BASE = "https://api.dexscreener.com";
 var MAX_PROMO_LOOKUPS = 8;
@@ -8379,7 +8496,7 @@ function toStringList(value) {
   ).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
   return [...new Set(out)];
 }
-function hostOf(value) {
+function hostOf2(value) {
   if (!isNonEmptyString(value)) return null;
   const raw = value.trim().toLowerCase();
   try {
@@ -8389,7 +8506,7 @@ function hostOf(value) {
   }
 }
 function websiteUrl(value) {
-  const host = hostOf(value);
+  const host = hostOf2(value);
   return host ? `https://${host}` : null;
 }
 function normalizeSections(input) {
@@ -8501,7 +8618,7 @@ function normalizedCompanyName(value) {
   return value.trim().toLowerCase().replace(/&/g, " and ").replace(COMPANY_LEGAL_SUFFIX, " ").replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
 }
 function domainLabel(value) {
-  const host = hostOf(value);
+  const host = hostOf2(value);
   if (!host || !host.includes(".")) return "";
   return normalizedCompanyName(host.split(".")[0]);
 }
@@ -8524,7 +8641,7 @@ function logCompanyResolution(event, details) {
 }
 function pickBestMatch(companies, query, options) {
   const valid = companies.filter((company) => isNonEmptyString(company?.uuid));
-  const queryHost = hostOf(query);
+  const queryHost = hostOf2(query);
   const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
   const queryName = normalizedCompanyName(query);
   const officialName = normalizedCompanyName(options.officialName);
@@ -8547,7 +8664,7 @@ function pickBestMatch(companies, query, options) {
   }
   if (queryLooksLikeHost) {
     const ranked = valid.flatMap((company) => {
-      const matchedDomain = hostOf(company?.website);
+      const matchedDomain = hostOf2(company?.website);
       const method = matchedDomain ? relatedOfficialHosts(queryHost, matchedDomain) : null;
       if (!method) return [];
       const exactName = officialName && normalizedCompanyName(company?.name) === officialName;
@@ -8591,7 +8708,7 @@ function pickBestMatch(companies, query, options) {
       company,
       method: "exact_name",
       requestedDomain: null,
-      matchedDomain: hostOf(company?.website),
+      matchedDomain: hostOf2(company?.website),
       candidateCount: valid.length
     };
   }
@@ -8611,7 +8728,7 @@ function pickBestMatch(companies, query, options) {
         company,
         method: "domain_label",
         requestedDomain: null,
-        matchedDomain: hostOf(company?.website),
+        matchedDomain: hostOf2(company?.website),
         candidateCount: valid.length
       };
     }
@@ -8633,8 +8750,8 @@ function pickBestMatch(companies, query, options) {
 }
 function companyEnrichmentMatchesOfficialDomain(enrichment, officialWebsite) {
   if (enrichment.identityMatch !== "official_domain") return false;
-  const expected = hostOf(officialWebsite) ?? hostOf(enrichment.requestedDomain);
-  const matched = hostOf(enrichment.matchedDomain) ?? hostOf(enrichment.sourceUrl);
+  const expected = hostOf2(officialWebsite) ?? hostOf2(enrichment.requestedDomain);
+  const matched = hostOf2(enrichment.matchedDomain) ?? hostOf2(enrichment.sourceUrl);
   return Boolean(expected && matched && relatedOfficialHosts(expected, matched));
 }
 function formatAktaDate(value) {
@@ -8724,7 +8841,7 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
     return { available: false, reason: "no_match", note: "No company name or website supplied." };
   }
   if (options.identityPolicy === "official_domain_only") {
-    const requestedDomain = hostOf(query);
+    const requestedDomain = hostOf2(query);
     if (!requestedDomain?.includes(".") || requestedDomain.includes(" ")) {
       logCompanyResolution("rejected", {
         reason: "official_domain_required",
@@ -8739,7 +8856,7 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
   }
   const fetcher = options.fetcher ?? fetch;
   const sections = normalizeSections(options.sections);
-  const queryDomain = hostOf(query);
+  const queryDomain = hostOf2(query);
   const rootDomain = queryDomain ? registrableProjectDomain(queryDomain) : null;
   const searchQueries = [
     query,
@@ -8760,7 +8877,7 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
       logCompanyResolution("provider_error", {
         stage: "search",
         queryDomain,
-        providerQuery: hostOf(providerQuery) ?? providerQuery,
+        providerQuery: hostOf2(providerQuery) ?? providerQuery,
         note: search.note
       });
       return { available: false, reason: "unavailable", note: search.note };
@@ -8773,7 +8890,7 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
         "monid",
         "company/search",
         0,
-        `search \xB7 no_match \xB7 retry ${hostOf(searchQueries[index + 1]) ?? searchQueries[index + 1]}`,
+        `search \xB7 no_match \xB7 retry ${hostOf2(searchQueries[index + 1]) ?? searchQueries[index + 1]}`,
         "succeeded"
       );
     }
@@ -8791,8 +8908,8 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
       reason: decision.reason,
       queryDomain: decision.requestedDomain,
       candidateCount: decision.candidateCount,
-      searchDomains: searchQueries.map((providerQuery) => hostOf(providerQuery) ?? providerQuery),
-      candidateDomains: companies.map((company) => hostOf(company?.website)).filter((domain) => Boolean(domain)).slice(0, 10)
+      searchDomains: searchQueries.map((providerQuery) => hostOf2(providerQuery) ?? providerQuery),
+      candidateDomains: companies.map((company) => hostOf2(company?.website)).filter((domain) => Boolean(domain)).slice(0, 10)
     });
     return {
       available: false,
@@ -19442,6 +19559,15 @@ async function resolveProfile(ctx) {
     ctx.evidence.profile.bio = prof.bio ?? "";
     const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? void 0;
     ctx.evidence.profile.website = profileWebsite;
+    if (isLinkHubUrl(profileWebsite)) {
+      const hubResolved = await resolveLinkHubWebsite(profileWebsite, ctx.handle);
+      if (hubResolved) {
+        ctx.evidence.profile.website = hubResolved.website;
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Official site resolved through the profile link hub", detail: `${hubResolved.hubUrl} lists ${hubResolved.website}, and that site links back to ${ctx.handle}. Using it as the official website.`, source: "site fetch", tone: "neutral" });
+      } else {
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Profile links a link hub, not a website", detail: `${profileWebsite} did not resolve to a single site that links back to ${ctx.handle}. Site-based checks treat the official website as unknown.`, source: "site fetch", tone: "warn" });
+      }
+    }
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);

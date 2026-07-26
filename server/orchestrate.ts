@@ -33,6 +33,7 @@ import { PersonCheckTracker, type ProviderRunState } from "./checks";
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
+import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
@@ -483,6 +484,20 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
     ctx.evidence.profile.bio = prof.bio ?? "";
     const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? undefined;
     ctx.evidence.profile.website = profileWebsite;
+    // A link aggregator is a pointer, not a website: left as-is it kills
+    // PROJECT routing, official-site verification, and token binding for the
+    // whole run. Dereference it deterministically (hub must link this exact
+    // handle; the extracted site must link the handle back) or disclose why
+    // site-based checks will run without an official website.
+    if (isLinkHubUrl(profileWebsite)) {
+      const hubResolved = await resolveLinkHubWebsite(profileWebsite!, ctx.handle);
+      if (hubResolved) {
+        ctx.evidence.profile.website = hubResolved.website;
+        ctx.emit({ phase: "P0 · Intake", label: "Official site resolved through the profile link hub", detail: `${hubResolved.hubUrl} lists ${hubResolved.website}, and that site links back to ${ctx.handle}. Using it as the official website.`, source: "site fetch", tone: "neutral" });
+      } else {
+        ctx.emit({ phase: "P0 · Intake", label: "Profile links a link hub, not a website", detail: `${profileWebsite} did not resolve to a single site that links back to ${ctx.handle}. Site-based checks treat the official website as unknown.`, source: "site fetch", tone: "warn" });
+      }
+    }
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
