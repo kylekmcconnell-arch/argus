@@ -43,6 +43,25 @@ export function plainLanguageSummary(value: string): string {
     .trim();
 }
 
+const ROLE_ACRONYMS = new Set(["ceo", "cto", "coo", "cfo", "cmo", "cio", "ciso", "vp"]);
+
+/** One casing for role chips everywhere: "ceo" and "CEO" both render "CEO", "co-founder" renders "Co-Founder". */
+export function formatRoleLabel(value: string | undefined): string {
+  const raw = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  return raw
+    .split(" ")
+    .map((word) => word
+      .split("-")
+      .map((part) => {
+        if (ROLE_ACRONYMS.has(part.toLowerCase())) return part.toUpperCase();
+        if (/^(?:of|and|the|for|at|&)$/i.test(part)) return part.toLowerCase();
+        return part.charAt(0).toUpperCase() + part.slice(1);
+      })
+      .join("-"))
+    .join(" ");
+}
+
 /** Plain labels for the report's result and check-status banners. */
 export function plainReportStatusLabel(value: string): string {
   const labels: Record<string, string> = {

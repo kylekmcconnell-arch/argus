@@ -519,7 +519,10 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("Built by Erik Voorhees, Teana Baker-Taylor");
     expect(container.textContent).toContain("Named team and founders");
     expect(container.textContent).toContain("Founders (2)");
-    expect(container.textContent).toContain("Other named team (1)");
+    // The handle-only "@twistartups · CEO" row (a media account bound to a
+    // project-owned role by the post scan) must not render as team at all.
+    expect(container.textContent).not.toContain("Other named team");
+    expect(container.textContent).not.toContain("@twistartups");
     expect(container.textContent).not.toContain("Who is behind it");
     expect(container.textContent).not.toContain("The people behind it");
     expect(container.textContent).not.toContain("Full roster with roles");
@@ -527,7 +530,6 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("Token checks");
     expect(container.textContent).toContain("Project account checks");
     const teamSectionText = container.querySelector("#investigation-team")?.textContent ?? "";
-    expect(teamSectionText.match(/@twistartups/g)).toHaveLength(1);
     expect(teamSectionText.match(/@erikvoorhees/g)).toHaveLength(1);
   });
 

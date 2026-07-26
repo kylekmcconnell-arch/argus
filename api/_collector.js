@@ -1029,7 +1029,14 @@ function assembleDossier(ev, live) {
   graphAudit.setIdentity(ev.profile.identity_confidence);
   const governingEligible = (row) => row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
   const meaningfulTeamValue = (value) => Boolean(value.trim()) && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(value.trim());
-  const identityGrounded = (row) => meaningfulTeamValue(row.name) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true;
+  const teamNameIsOwnHandle = (row) => {
+    const name = row.name.trim();
+    if (name.startsWith("@")) return true;
+    if (/[\s._-]/.test(name)) return false;
+    const compact3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return Boolean(row.handle) && compact3(name) === compact3((row.handle ?? "").replace(/^@/, ""));
+  };
+  const identityGrounded = (row) => meaningfulTeamValue(row.name) && meaningfulTeamValue(row.role) && !teamNameIsOwnHandle(row) && row.evidence_origin !== "model_lead" && row.artifact_verified === true;
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
     ...member,
     ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0 } : {},
@@ -7020,6 +7027,9 @@ async function enrichTeamIdentities(project, people) {
 }
 var ROLE_SOURCE = "co-?founders?|founders?|ceo|cto|coo|cfo|cmo|chief\\s+\\w+\\s+officer|lead\\s+(?:dev|developer|engineer)|core\\s+(?:dev|team)|head\\s+of\\s+\\w+|advisors?|team\\s+members?|our\\s+(?:founder|ceo|cto|coo|team|dev|lead)";
 var regexEscape2 = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var BEFORE_ROLE_CONNECTORS = /* @__PURE__ */ new Set(["is", "was", "as", "the", "a", "an", "our", "own", "core", "now", "currently", "serves", "joins", "named", "appointed"]);
+var AFTER_ROLE_CONNECTORS = /* @__PURE__ */ new Set(["is", "was", "the", "a", "an", "our", "own", "core", "aka"]);
+var connectorAllowed = (gap, allowed) => (gap.toLowerCase().match(/[a-z']+/g) ?? []).every((word) => allowed.has(word));
 function scanPostsForRoles(posts, projectName2) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
@@ -7041,6 +7051,8 @@ function scanPostsForRoles(posts, projectName2) {
     const before = new RegExp(`@([A-Za-z0-9_]{2,30})[^@\\n.!?]{0,32}\\b(${ROLE_SOURCE})\\b`, "gi");
     for (const match of p.matchAll(before)) {
       const role = match[2].toLowerCase().replace(/^our\s+/, "");
+      const gap = match[0].slice(1 + match[1].length, match[0].length - match[2].length);
+      if (!connectorAllowed(gap, BEFORE_ROLE_CONNECTORS)) continue;
       if (!roleIsProjectOwned(p, match.index, match[0].length, role)) continue;
       const kind = /advisor/i.test(role) ? "advisor" : "team";
       add({ name: `@${match[1]}`, handle: `@${match[1]}`, role, kind, evidence: `the official account placed @${match[1]} next to the role "${role}"`, source: "post role-scan" });
@@ -7048,6 +7060,8 @@ function scanPostsForRoles(posts, projectName2) {
     const after = new RegExp(`\\b(${ROLE_SOURCE})\\b(?!\\s+of\\b)[^@\\n.!?]{0,24}@([A-Za-z0-9_]{2,30})`, "gi");
     for (const match of p.matchAll(after)) {
       const role = match[1].toLowerCase().replace(/^our\s+/, "");
+      const gap = match[0].slice(match[1].length, match[0].length - match[2].length - 1);
+      if (!connectorAllowed(gap, AFTER_ROLE_CONNECTORS)) continue;
       if (!roleIsProjectOwned(p, match.index, match[0].length, role)) continue;
       const kind = /advisor/i.test(role) ? "advisor" : "team";
       add({ name: `@${match[2]}`, handle: `@${match[2]}`, role, kind, evidence: `the official account placed the role "${role}" next to @${match[2]}`, source: "post role-scan" });

@@ -1115,6 +1115,14 @@ export async function enrichTeamIdentities(
 // Catches team the LLM search misses, straight from the project's own language.
 const ROLE_SOURCE = "co-?founders?|founders?|ceo|cto|coo|cfo|cmo|chief\\s+\\w+\\s+officer|lead\\s+(?:dev|developer|engineer)|core\\s+(?:dev|team)|head\\s+of\\s+\\w+|advisors?|team\\s+members?|our\\s+(?:founder|ceo|cto|coo|team|dev|lead)";
 const regexEscape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// A handle binds to a role only across an appositive connector ("@x, our CEO";
+// "our CTO @x"). Any other word between them ("thanks @x for having our CEO
+// on the show") means the handle is a bystander: the role is project-owned
+// but the handle is not its holder, so the bind is rejected.
+const BEFORE_ROLE_CONNECTORS = new Set(["is", "was", "as", "the", "a", "an", "our", "own", "core", "now", "currently", "serves", "joins", "named", "appointed"]);
+const AFTER_ROLE_CONNECTORS = new Set(["is", "was", "the", "a", "an", "our", "own", "core", "aka"]);
+const connectorAllowed = (gap: string, allowed: Set<string>): boolean =>
+  (gap.toLowerCase().match(/[a-z']+/g) ?? []).every((word) => allowed.has(word));
 export function scanPostsForRoles(posts: string[], projectName?: string): TeamMember[] {
   const out: TeamMember[] = [];
   const seen = new Set<string>();
@@ -1136,6 +1144,8 @@ export function scanPostsForRoles(posts: string[], projectName?: string): TeamMe
     const before = new RegExp(`@([A-Za-z0-9_]{2,30})[^@\\n.!?]{0,32}\\b(${ROLE_SOURCE})\\b`, "gi");
     for (const match of p.matchAll(before)) {
       const role = match[2].toLowerCase().replace(/^our\s+/, "");
+      const gap = match[0].slice(1 + match[1].length, match[0].length - match[2].length);
+      if (!connectorAllowed(gap, BEFORE_ROLE_CONNECTORS)) continue;
       if (!roleIsProjectOwned(p, match.index, match[0].length, role)) continue;
       const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
       add({ name: `@${match[1]}`, handle: `@${match[1]}`, role, kind, evidence: `the official account placed @${match[1]} next to the role "${role}"`, source: "post role-scan" });
@@ -1143,6 +1153,8 @@ export function scanPostsForRoles(posts: string[], projectName?: string): TeamMe
     const after = new RegExp(`\\b(${ROLE_SOURCE})\\b(?!\\s+of\\b)[^@\\n.!?]{0,24}@([A-Za-z0-9_]{2,30})`, "gi");
     for (const match of p.matchAll(after)) {
       const role = match[1].toLowerCase().replace(/^our\s+/, "");
+      const gap = match[0].slice(match[1].length, match[0].length - match[2].length - 1);
+      if (!connectorAllowed(gap, AFTER_ROLE_CONNECTORS)) continue;
       if (!roleIsProjectOwned(p, match.index, match[0].length, role)) continue;
       const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
       add({ name: `@${match[2]}`, handle: `@${match[2]}`, role, kind, evidence: `the official account placed the role "${role}" next to @${match[2]}`, source: "post role-scan" });

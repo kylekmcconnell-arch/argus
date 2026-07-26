@@ -161,9 +161,20 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
   const meaningfulTeamValue = (value: string) => Boolean(value.trim())
     && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(value.trim());
+  // A display name that is just the row's own handle is not a resolved
+  // identity: a post-scan can bind a bystander account to a project-owned
+  // role ("thanks @mediashow for having our CEO on"). Such rows stay leads.
+  const teamNameIsOwnHandle = (row: WebTeamMember) => {
+    const name = row.name.trim();
+    if (name.startsWith("@")) return true;
+    if (/[\s._-]/.test(name)) return false;
+    const compact = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return Boolean(row.handle) && compact(name) === compact((row.handle ?? "").replace(/^@/, ""));
+  };
   const identityGrounded = (row: WebTeamMember) =>
     meaningfulTeamValue(row.name)
     && meaningfulTeamValue(row.role)
+    && !teamNameIsOwnHandle(row)
     && row.evidence_origin !== "model_lead"
     && row.artifact_verified === true;
   const groundedWebTeam = (ev.webTeam ?? [])

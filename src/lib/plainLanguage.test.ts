@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { plainLanguageSummary } from "./plainLanguage";
+import { formatRoleLabel, plainLanguageSummary } from "./plainLanguage";
 
 describe("plainLanguageSummary", () => {
   it("translates internal research shorthand without changing facts", () => {
@@ -21,5 +21,15 @@ describe("plainLanguageSummary", () => {
   it("keeps URLs, amounts, tickers, and names unchanged", () => {
     const text = "$VVV has $567M market cap. Source: https://venice.ai.";
     expect(plainLanguageSummary(text)).toBe(text);
+  });
+});
+
+describe("formatRoleLabel", () => {
+  it("renders one casing for role chips regardless of source casing", () => {
+    expect(formatRoleLabel("ceo")).toBe("CEO");
+    expect(formatRoleLabel("Founder & CEO")).toBe("Founder & CEO");
+    expect(formatRoleLabel("co-founder and coo")).toBe("Co-Founder and COO");
+    expect(formatRoleLabel("head of engineering")).toBe("Head of Engineering");
+    expect(formatRoleLabel(undefined)).toBe("");
   });
 });

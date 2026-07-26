@@ -27,6 +27,28 @@ describe("deterministic project-team post scan", () => {
     expect(people).toEqual([]);
   });
 
+  it("does not bind a media account to the project's own role", () => {
+    expect(scanPostsForRoles([
+      "Thanks @twistartups for having our CEO on the show today!",
+    ], "Venice")).toEqual([]);
+    expect(scanPostsForRoles([
+      "Our founder joined @twistartups to talk private AI.",
+    ], "Venice")).toEqual([]);
+  });
+
+  it("still binds an appositive role to the adjacent handle", () => {
+    expect(scanPostsForRoles([
+      "@erikvoorhees, our CEO, shipped private inference this week.",
+    ], "Venice")).toEqual([
+      expect.objectContaining({ handle: "@erikvoorhees", role: "ceo", kind: "team" }),
+    ]);
+    expect(scanPostsForRoles([
+      "Meet our CTO @teanabt.",
+    ], "Venice")).toEqual([
+      expect.objectContaining({ handle: "@teanabt", role: "cto", kind: "team" }),
+    ]);
+  });
+
   it("captures a bounded list explicitly named as members of the project team", () => {
     const people = scanPostsForRoles([
       "@weremeow @sssionggg and other members of the Jupiter team are joining us.",

@@ -61,7 +61,7 @@ import {
   type BasicFactLeadView,
   type BasicFactView,
 } from "./BasicFactsPanel";
-import { plainLanguageSummary } from "../lib/plainLanguage";
+import { formatRoleLabel, plainLanguageSummary } from "../lib/plainLanguage";
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
@@ -232,6 +232,15 @@ function teamNameLooksLikeHandle(person: TeamIdentity): boolean {
   return name.startsWith("@")
     || (!/[\s._-]/.test(name)
       && normalizedTeamIdentity(name) === normalizedTeamIdentity(person.handle));
+}
+
+// A leadership title only renders against a resolved human identity. A row
+// whose display name is just its own handle (the @twistartups class: a media
+// account bound to "our CEO" inside a post) is a mention, not a team member.
+const LEADERSHIP_ROLE_CLAIM = /\b(?:founder|co[- ]?founder|creator|ceo|cto|coo|cfo|cmo|chief|president|owner|head|director|officer|lead)\b/i;
+
+function credibleTeamRow(person: TeamIdentity & { role?: string }): boolean {
+  return !LEADERSHIP_ROLE_CLAIM.test(person.role ?? "") || !teamNameLooksLikeHandle(person);
 }
 
 function humanTeamName(current: TeamIdentity, incoming: TeamIdentity): string {
@@ -714,7 +723,7 @@ export function InvestigationReport({
         source: p.linkedin ? "web/LinkedIn" : "X content",
       });
     }
-    return [...map.values()];
+    return [...map.values()].filter(credibleTeamRow);
   })();
   // The full team, from EVERY source: site names, site-linked handles, project
   // bio handles, X-content team, and the web/LinkedIn dig — merged into one list.
@@ -1388,7 +1397,7 @@ export function InvestigationReport({
                                 <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                                 <span className="text-[12.5px] text-ink">{m.name}</span>
                                 {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
-                                {m.role && <span className="text-[11px] text-ink-faint">{m.role}</span>}
+                                {m.role && <span className="text-[11px] text-ink-faint">{formatRoleLabel(m.role)}</span>}
                                 {m.linkedin && (
                                   <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                                 )}
