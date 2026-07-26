@@ -5,6 +5,8 @@ import {
   type ReportCanvasNarrativeItem,
 } from "./ReportCanvasPrimitives";
 import { plainLanguageSummary } from "../lib/plainLanguage";
+import type { VerdictArgument } from "../lib/reportInsights";
+import { VerdictArgumentBlock } from "./InvestigatorBrief";
 
 export interface DecisionCanvasItem {
   label: string;
@@ -111,12 +113,14 @@ export function InvestigationDecisionCanvas({
   successful,
   applicable,
   capturedAt,
+  argument,
   evidenceHref = "#token-evidence",
   methodologyHref = "#token-methodology",
 }: {
   verdictLabel: string;
   favorable: boolean;
   verdictTone: ReportCanvasTone;
+  argument?: VerdictArgument | undefined;
   supports: DecisionCanvasItem[];
   concerns: DecisionCanvasItem[];
   nextSteps: DecisionCanvasItem[];
@@ -149,6 +153,11 @@ export function InvestigationDecisionCanvas({
       </header>
 
       <div className="panel mt-3 overflow-hidden">
+        {argument && (
+          <div className="border-b border-line/70 px-5 py-4">
+            <VerdictArgumentBlock argument={argument} />
+          </div>
+        )}
         <div className="grid lg:grid-cols-[minmax(0,1fr)_19rem]">
           <div className="px-5">
             <ReportCanvasNarrativeSection

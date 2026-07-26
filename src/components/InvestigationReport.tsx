@@ -62,6 +62,8 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { formatRoleLabel, plainLanguageSummary } from "../lib/plainLanguage";
+import { deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
+import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
@@ -751,6 +753,42 @@ export function InvestigationReport({
     }
     return people;
   })();
+  // Investigator rail: deterministic anomalies computed from the frozen stats
+  // so the few numbers that change a decision stop hiding inside stat grids.
+  const lpLockedOrBurnedPct = token.safetyChecked && token.safety.available
+    ? token.safety.lpLockedPct + token.safety.lpBurnedPct
+    : projectAccount?.holderProfile?.lpLockedOrBurnedPct ?? null;
+  const top10FromRows = token.topHolders?.length === 10
+    ? token.topHolders.reduce((sum, holder) => sum + (holder.percent ?? 0), 0)
+    : null;
+  const circulatingSupplyPct = (() => {
+    const circulating = projectAccount?.projectToken?.circulatingSupply;
+    const denominator = projectAccount?.projectToken?.maxSupply ?? projectAccount?.projectToken?.totalSupply;
+    return circulating != null && denominator != null && denominator > 0
+      ? (circulating / denominator) * 100
+      : null;
+  })();
+  const upcomingUnlocks = projectAccount?.tokenUnlocks;
+  const noticedSignals = deriveNoticedSignals({
+    lpLockedPct: lpLockedOrBurnedPct,
+    largestHolderPct: token.safety.topHolderPct ?? projectAccount?.holderProfile?.topHolderPct,
+    top10HolderPct: projectAccount?.holderProfile?.top10Pct ?? top10FromRows,
+    circulatingPct: circulatingSupplyPct,
+    fdvUsd: fullyDilutedValue ?? null,
+    marketCapUsd: marketCap ?? null,
+    volume24hUsd: token.vol24 ?? null,
+    nextUnlock: upcomingUnlocks
+      ? { date: upcomingUnlocks.nextUnlockDate, amountUsd: upcomingUnlocks.unlockValueUsd, pctSupply: upcomingUnlocks.percentOfSupply }
+      : null,
+    tvlChange30dPct: projectAccount?.protocolTvl?.change30dPct ?? null,
+    feesChange30dPct: projectAccount?.protocolFees?.change30dOver30dPct ?? null,
+    athDrawdownPct: token.cg?.ath?.drawdownPct ?? projectAccount?.projectToken?.ath?.drawdownPct ?? null,
+    accountSuspended: projectAccount?.x_account_status === "suspended",
+    daysSinceLastPost: projectAccount?.days_since_post ?? null,
+    verifiedTeamCount: projectAccount ? projectAccount.webTeam?.length ?? 0 : null,
+    namedTeamCount: teamPeople.length,
+    anchors: { market: "#investigation-visuals", team: "#investigation-team", account: "#investigation-people" },
+  });
   const advisors = (projectAccount?.evidence.testimonials ?? []).filter((t) => t.claimed_relationship === "advisor");
   const founderTeam = teamPeople.filter((person) => /\b(?:co[- ]?founder|founder|creator)\b/i.test(person.role ?? ""));
   const otherNamedTeam = teamPeople.filter((person) => !founderTeam.includes(person));
@@ -878,6 +916,15 @@ export function InvestigationReport({
       label: `${requiredGapChecks.includes(check) ? "Required: " : ""}Check ${check.label.toLowerCase()}`,
       detail: check.note,
     }));
+  // The three-line argument at the top of the case: strongest support,
+  // sharpest concern (a cap always wins that slot), and what to check next.
+  const verdictArgument = deriveVerdictArgument({
+    verdict: token.verdict,
+    supports: supportItems.map((item) => item.label),
+    concerns: concernItems.map((item) => item.label),
+    capReason: token.capApplied ? `The score is capped: ${token.capApplied.replace(/_/g, " ")}` : null,
+    nextChecks: nextStepItems.map((item) => item.label),
+  });
   // One paste, whole verdict: composed for group chats. The link is appended
   // at copy time (share link when mintable, app URL else).
   const tldrBase = [
@@ -1103,6 +1150,12 @@ export function InvestigationReport({
             </section>
           </div>
 
+          {noticedSignals.length > 0 && (
+            <section className="panel mt-3 p-4" aria-label="What Argus noticed">
+              <NoticedRail signals={noticedSignals} />
+            </section>
+          )}
+
           {(requiredGapChecks.length > 0 || readiness.status !== "ready") && <section
             className="panel clearance-boundary mt-3 flex flex-col gap-4 p-4 tint-var sm:flex-row sm:items-center sm:justify-between"
             style={{ "--tint": readinessColor } as React.CSSProperties}
@@ -1205,6 +1258,7 @@ export function InvestigationReport({
           verdictLabel={observedTokenMeta.label}
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
+          argument={verdictArgument}
           supports={supportItems}
           concerns={concernItems}
           nextSteps={nextStepItems}

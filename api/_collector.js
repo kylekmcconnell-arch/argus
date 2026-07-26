@@ -1216,6 +1216,7 @@ function assembleDossier(ev, live) {
     ...ev.protocolFunding ? { protocolFunding: { ...ev.protocolFunding, rounds: ev.protocolFunding.rounds.map((round) => ({ ...round })), leadInvestors: [...ev.protocolFunding.leadInvestors] } } : {},
     ...ev.protocolFees ? { protocolFees: { ...ev.protocolFees } } : {},
     ...ev.holderProfile ? { holderProfile: { ...ev.holderProfile } } : {},
+    ...ev.tokenUnlocks ? { tokenUnlocks: { ...ev.tokenUnlocks } } : {},
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {},

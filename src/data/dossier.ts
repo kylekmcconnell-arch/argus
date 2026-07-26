@@ -127,6 +127,8 @@ export interface Dossier {
   protocolFees?: CollectedEvidence["protocolFees"];
   /** Frozen float-control profile (GoPlus holder register) for the concentration bar. */
   holderProfile?: CollectedEvidence["holderProfile"];
+  /** Frozen upcoming-unlock schedule (CryptoRank), for the noticed rail and unlock pressure math. */
+  tokenUnlocks?: CollectedEvidence["tokenUnlocks"];
   /** Plain-language answers to the project's core diligence questions. */
   basicFacts?: DossierBasicFact[];
   /** Model-discovered candidates that remain unverified and unscored. */
@@ -367,6 +369,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.protocolFunding ? { protocolFunding: { ...ev.protocolFunding, rounds: ev.protocolFunding.rounds.map((round) => ({ ...round })), leadInvestors: [...ev.protocolFunding.leadInvestors] } } : {}),
     ...(ev.protocolFees ? { protocolFees: { ...ev.protocolFees } } : {}),
     ...(ev.holderProfile ? { holderProfile: { ...ev.holderProfile } } : {}),
+    ...(ev.tokenUnlocks ? { tokenUnlocks: { ...ev.tokenUnlocks } } : {}),
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...(ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {}),

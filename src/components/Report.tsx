@@ -23,6 +23,8 @@ import {
   UserFocus,
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
+import { deriveNoticedSignals } from "../lib/reportInsights";
+import { NoticedRail } from "./InvestigatorBrief";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
 import type { Dossier } from "../data/dossier";
@@ -2407,6 +2409,34 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         href: axisHref(axis.axis),
       };
     });
+  // Investigator rail: deterministic anomalies from the frozen stats, so the
+  // few numbers that change a decision stop hiding inside stat grids.
+  const noticedSignals = deriveNoticedSignals({
+    lpLockedPct: f.holderProfile?.lpLockedOrBurnedPct,
+    largestHolderPct: f.holderProfile?.topHolderPct,
+    top10HolderPct: f.holderProfile?.top10Pct,
+    circulatingPct: (() => {
+      const circulating = f.projectToken?.circulatingSupply;
+      const denominator = f.projectToken?.maxSupply ?? f.projectToken?.totalSupply;
+      return circulating != null && denominator != null && denominator > 0
+        ? (circulating / denominator) * 100
+        : null;
+    })(),
+    fdvUsd: f.projectToken?.fdvUsd,
+    marketCapUsd: f.projectToken?.marketCapUsd,
+    volume24hUsd: f.projectToken?.volume24hUsd,
+    nextUnlock: f.tokenUnlocks
+      ? { date: f.tokenUnlocks.nextUnlockDate, amountUsd: f.tokenUnlocks.unlockValueUsd, pctSupply: f.tokenUnlocks.percentOfSupply }
+      : null,
+    tvlChange30dPct: f.protocolTvl?.change30dPct,
+    feesChange30dPct: f.protocolFees?.change30dOver30dPct,
+    athDrawdownPct: f.projectToken?.ath?.drawdownPct,
+    accountSuspended: f.x_account_status === "suspended",
+    daysSinceLastPost: f.days_since_post,
+    verifiedTeamCount: f.projectToken ? webTeam.length : null,
+    namedTeamCount: webTeam.length + webTeamLeads.length,
+    anchors: { market: "#project-token", team: "#identity-evidence", account: "#report-overview" },
+  });
   // One paste, whole verdict: composed for group chats and IC memos alike.
   // The link is appended at copy time (share link when mintable, app URL else).
   const tldrBase = [
@@ -3042,6 +3072,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 verdict={report.composite_verdict ?? null}
                 coverage={f.completeness_state}
               />
+            )}
+            {noticedSignals.length > 0 && (
+              <div className="mt-4 border-t border-line/70 pt-4">
+                <NoticedRail signals={noticedSignals} />
+              </div>
             )}
           </div>
         </section>
