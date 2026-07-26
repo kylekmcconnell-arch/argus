@@ -2176,7 +2176,7 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs, onFail
     model: ANALYST_MODEL,
     max_tokens: maxTokens,
     system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: [{ type: "text", text: user, cache_control: { type: "ephemeral" } }] }],
+    messages: [{ role: "user", content: [{ type: "text", text: user }] }],
     tools: [tool],
     tool_choice: { type: "tool", name: tool.name, disable_parallel_tool_use: true }
   });

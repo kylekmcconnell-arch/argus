@@ -1181,10 +1181,12 @@ function claudeRequestBody(
   assistantContent?: ClaudeContentBlock[],
   maxSearchUses = PRIMARY_SEARCH_USES_PER_BATCH,
 ): Record<string, unknown> {
-  // Prompt caching: the breakpoint on the user prompt makes the pause_turn
-  // continuation and the transient-failure retry re-read system + tools +
-  // prompt at 10% of input price; the trailing marker on the resent search
-  // round caches the fat first-round content on continuation calls.
+  // Prompt caching, honestly: on Haiku the prompt-only prefix usually sits
+  // under the model's 2,048-token cache minimum, so the breakpoint on the
+  // user prompt is inert there (it arms if the discovery model returns to a
+  // Sonnet-class 1,024 minimum). The trailing marker on the resent search
+  // round is what pays: it caches the fat first-round content so a second
+  // pause_turn continuation re-reads it at 10% of input price.
   const userContent = [{ type: "text", text: prompt, cache_control: { type: "ephemeral" } }];
   return {
     model: DISCOVERY_MODEL,
