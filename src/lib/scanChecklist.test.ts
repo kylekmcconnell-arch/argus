@@ -340,6 +340,48 @@ describe("token OFAC address screen recording", () => {
     expect(row.completedAt).toBe("2026-07-15T16:00:00.000Z");
   });
 
+  it("says a chain exposed no addresses to screen, and marks the gap unretryable", () => {
+    // The $MUMU case on Robinhood Chain: no deployer, no holder list, so the
+    // screen had no input. It must stay open (never-waive) without reading as
+    // a clean screen or promising that a rescan would help.
+    const checks = tokenChecks(dossier({
+      chain: "robinhood",
+      sanctionsScreen: {
+        available: false,
+        checked: 0,
+        sanctioned: [],
+        completedAt: "2026-07-27T17:12:00.000Z",
+        reason: "no_screenable_addresses",
+      },
+    }));
+    const row = byLabel(checks, "OFAC sanctions screen");
+
+    expect(row.status).toBe("unavailable");
+    expect(row.retryable).toBe(false);
+    expect(row.note).toContain("Robinhood Chain");
+    expect(row.note).toContain("nothing to screen");
+    expect(row.note).toContain("not a clean result");
+    // Still never-waive: an unscreenable chain can never reach clearance.
+    expect(clearanceCoverage(checks).openNeverWaive).toContain("ofac-sanctions-address");
+  });
+
+  it("keeps an unreachable sanctions list retryable and distinct from an unscreenable chain", () => {
+    const checks = tokenChecks(dossier({
+      sanctionsScreen: {
+        available: false,
+        checked: 9,
+        sanctioned: [],
+        completedAt: "2026-07-27T17:12:00.000Z",
+        reason: "list_unavailable",
+      },
+    }));
+    const row = byLabel(checks, "OFAC sanctions screen");
+
+    expect(row.status).toBe("unavailable");
+    expect(row.retryable).toBeUndefined();
+    expect(row.note).toContain("sanctions list was unavailable");
+  });
+
   it("records an SDN hit as a finding, never a pass", () => {
     const checks = tokenChecks(dossier({
       sanctionsScreen: { available: true, checked: 11, sanctioned: ["0xdeadbeef00000000"], completedAt: "2026-07-15T16:00:00.000Z" },

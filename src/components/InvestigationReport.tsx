@@ -579,6 +579,11 @@ export function InvestigationReport({
   const requiredGapChecks = gapChecks.filter((check) =>
     check.checkId ? clearance.openNeverWaive.includes(check.checkId) : false);
   const enrichmentGapChecks = gapChecks.filter((check) => !requiredGapChecks.includes(check));
+  // A gap the providers cannot close on this chain stays open and still blocks
+  // clearance, but offering a rescan for it would be a false remedy.
+  const unretryableGapChecks = requiredGapChecks.filter((check) => check.retryable === false);
+  const retryCanCloseAGap = requiredGapChecks.length === 0
+    || unretryableGapChecks.length < requiredGapChecks.length;
   const projectChecks = projectAccount
     ? projectAccount.versionContext
       ? projectAccount.versionContext.checks
@@ -1165,14 +1170,18 @@ export function InvestigationReport({
               <p className="eyebrow">Before you use this report</p>
               <h2 className="mt-1 text-[14px] font-semibold text-ink">
                 {requiredGapChecks.length
-                  ? `${requiredGapChecks.map((check) => check.label).join(", ")} must finish before this report is ready.`
+                  ? unretryableGapChecks.length === requiredGapChecks.length
+                    ? `${requiredGapChecks.map((check) => check.label).join(", ")} could not run for this token.`
+                    : `${requiredGapChecks.map((check) => check.label).join(", ")} must finish before this report is ready.`
                   : readiness.status === "ready"
                     ? "Required safety checks are finished."
                     : "This report is not ready to rely on yet."}
               </h2>
               <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
                 {requiredGapChecks.length
-                  ? `${enrichmentGapChecks.length} extra ${enrichmentGapChecks.length === 1 ? "check is" : "checks are"} also open and listed below.`
+                  ? unretryableGapChecks.length === requiredGapChecks.length
+                    ? `${unretryableGapChecks[0]?.note ?? "A required screen could not run."} A new scan would reach the same limit.`
+                    : `${enrichmentGapChecks.length} extra ${enrichmentGapChecks.length === 1 ? "check is" : "checks are"} also open and listed below.`
                   : readiness.status === "ready"
                     ? `${enrichmentGapChecks.length} extra ${enrichmentGapChecks.length === 1 ? "check is" : "checks are"} still open. ${enrichmentGapChecks.length === 1 ? "It does" : "They do"} not block review.`
                     : "Open the check list to see what is missing."}
@@ -1182,7 +1191,7 @@ export function InvestigationReport({
               <a href="#investigation-methodology" className="text-[12px] font-medium text-signal-lift underline-offset-2 hover:underline">
                 See every check
               </a>
-              {onReAudit && readiness.status !== "ready" && (
+              {onReAudit && readiness.status !== "ready" && retryCanCloseAGap && (
                 <button type="button" onClick={onReAudit} className="btn-primary min-h-10 px-3 text-[12px] font-medium">
                   <ArrowClockwise size={15} weight="duotone" aria-hidden="true" />
                   Retry required scan

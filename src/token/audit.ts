@@ -100,6 +100,13 @@ export interface SanctionsScreenOutcome {
   listSize?: number;
   sanctioned: string[];
   completedAt: string;
+  /**
+   * Why an unavailable screen did not produce a result. "no_screenable_addresses"
+   * means the chain yielded no deployer and no holder list, so there was nothing
+   * to compare against the SDN list. That is a chain-coverage limit a rescan
+   * cannot change, and it must never read as a clean screen.
+   */
+  reason?: "no_screenable_addresses" | "list_unavailable";
 }
 
 // A screener the audit calls to record its OFAC outcome. The browser default
@@ -193,7 +200,18 @@ export async function screenAddressSanctions(
   fetchImpl: typeof fetch = fetch,
 ): Promise<SanctionsScreenOutcome | undefined> {
   const unique = [...new Set(addresses.filter((a): a is string => typeof a === "string" && a.length > 8))].slice(0, 40);
-  if (!unique.length) return undefined;
+  // No deployer and no holder list came back for this chain. Record that as an
+  // explicit unscreenable outcome rather than silence: a screen that never ran
+  // must be visible as a coverage limit, not hidden as a missing field.
+  if (!unique.length) {
+    return {
+      available: false,
+      checked: 0,
+      sanctioned: [],
+      completedAt: new Date().toISOString(),
+      reason: "no_screenable_addresses",
+    };
+  }
   // Same-origin relative fetch only resolves in a browser. `globalThis` is
   // typed in both the DOM and Node libs (a bare `window` is not), so this is
   // the env-agnostic way to detect the browser without a DOM-lib dependency.
@@ -205,9 +223,9 @@ export async function screenAddressSanctions(
       `/api/sanctions?addresses=${encodeURIComponent(unique.join(","))}&chain=${encodeURIComponent(chain)}`,
       { signal: AbortSignal.timeout(9000) },
     );
-    if (!r.ok) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    if (!r.ok) return { available: false, checked: unique.length, sanctioned: [], completedAt, reason: "list_unavailable" as const };
     const d = await r.json() as { available?: boolean; checked?: number; listSize?: number; sanctioned?: string[] };
-    if (d?.available !== true) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    if (d?.available !== true) return { available: false, checked: unique.length, sanctioned: [], completedAt, reason: "list_unavailable" as const };
     return {
       available: true,
       checked: typeof d.checked === "number" ? d.checked : unique.length,
@@ -216,7 +234,7 @@ export async function screenAddressSanctions(
       completedAt,
     };
   } catch {
-    return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    return { available: false, checked: unique.length, sanctioned: [], completedAt, reason: "list_unavailable" as const };
   }
 }
 

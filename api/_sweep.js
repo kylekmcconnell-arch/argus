@@ -432,7 +432,15 @@ async function screenDeployerRisk(address, fetchImpl = fetch) {
 }
 async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
   const unique = [...new Set(addresses.filter((a) => typeof a === "string" && a.length > 8))].slice(0, 40);
-  if (!unique.length) return void 0;
+  if (!unique.length) {
+    return {
+      available: false,
+      checked: 0,
+      sanctioned: [],
+      completedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      reason: "no_screenable_addresses"
+    };
+  }
   const origin = globalThis.location?.origin;
   if (!origin) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
@@ -441,9 +449,9 @@ async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
       `/api/sanctions?addresses=${encodeURIComponent(unique.join(","))}&chain=${encodeURIComponent(chain)}`,
       { signal: AbortSignal.timeout(9e3) }
     );
-    if (!r.ok) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    if (!r.ok) return { available: false, checked: unique.length, sanctioned: [], completedAt, reason: "list_unavailable" };
     const d = await r.json();
-    if (d?.available !== true) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    if (d?.available !== true) return { available: false, checked: unique.length, sanctioned: [], completedAt, reason: "list_unavailable" };
     return {
       available: true,
       checked: typeof d.checked === "number" ? d.checked : unique.length,
@@ -452,7 +460,7 @@ async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
       completedAt
     };
   } catch {
-    return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    return { available: false, checked: unique.length, sanctioned: [], completedAt, reason: "list_unavailable" };
   }
 }
 var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -1053,6 +1061,20 @@ function contractSafetyNote(dossier) {
   return "provider response recorded; no surfaced contract-control concern";
 }
 var outcomeNotRecorded = "completion outcome not recorded";
+var CHAIN_DISPLAY_NAMES = Object.freeze({
+  robinhood: "Robinhood Chain",
+  ethereum: "Ethereum",
+  base: "Base",
+  solana: "Solana",
+  arbitrum: "Arbitrum",
+  bsc: "BNB Chain",
+  polygon: "Polygon"
+});
+function chainDisplayName(chain) {
+  const key = (chain ?? "").trim().toLowerCase();
+  if (!key) return "this chain";
+  return CHAIN_DISPLAY_NAMES[key] ?? `the ${key} chain`;
+}
 function tokenChecks(dossier) {
   const evm = dossier.chain !== "solana";
   const safety = dossier.safety;
@@ -1151,6 +1173,17 @@ function tokenChecks(dossier) {
       label: "OFAC sanctions screen",
       status: sanctionsScreen.sanctioned.length ? "finding" : "confirmed",
       note: sanctionsScreen.sanctioned.length ? `${sanctionsScreen.sanctioned.length} of ${sanctionsScreen.checked} screened addresses are on the US Treasury SDN list` : `${sanctionsScreen.checked} address${sanctionsScreen.checked === 1 ? "" : "es"} (deployer + top holders) screened against the${sanctionsScreen.listSize ? ` ${sanctionsScreen.listSize.toLocaleString()}-entry` : ""} OFAC SDN list; no matches`,
+      provider: "ofac-sdn",
+      completedAt: sanctionsScreen.completedAt
+    } : sanctionsScreen?.reason === "no_screenable_addresses" ? {
+      checkId: "ofac-sanctions-address",
+      decisionCritical: true,
+      label: "OFAC sanctions screen",
+      status: "unavailable",
+      // A rescan cannot conjure addresses this chain never exposed, so
+      // the report must not offer one as the remedy.
+      retryable: false,
+      note: `No creator or holder address could be resolved on ${chainDisplayName(dossier.chain)}, so there was nothing to screen against the sanctions list. This is a coverage limit of that chain, not a clean result.`,
       provider: "ofac-sdn",
       completedAt: sanctionsScreen.completedAt
     } : sanctionsScreen ? { checkId: "ofac-sanctions-address", decisionCritical: true, label: "OFAC sanctions screen", status: "unavailable", note: "The U.S. sanctions list was unavailable, so this check did not finish" } : { checkId: "ofac-sanctions-address", decisionCritical: true, label: "OFAC sanctions screen", status: "unknown", note: `token creator + largest holders; ${outcomeNotRecorded}` }

@@ -26,6 +26,12 @@ export interface ScanCheck {
    * compatibility.
    */
   decisionCritical?: boolean;
+  /**
+   * False when a rescan provably cannot close this gap (a chain the address
+   * providers do not cover, for example). The report still counts the check
+   * as open; it just stops offering a retry that cannot change the outcome.
+   */
+  retryable?: boolean;
   // Frozen server-collected checks carry stable provenance fields. They remain
   // optional so older fixtures and locally derived token checklists continue to
   // deserialize without a migration.
@@ -216,6 +222,23 @@ function contractSafetyNote(dossier: TokenDossier): string {
 
 const outcomeNotRecorded = "completion outcome not recorded";
 
+const CHAIN_DISPLAY_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  robinhood: "Robinhood Chain",
+  ethereum: "Ethereum",
+  base: "Base",
+  solana: "Solana",
+  arbitrum: "Arbitrum",
+  bsc: "BNB Chain",
+  polygon: "Polygon",
+});
+
+/** Chain ids reach the reader as prose, so give the known ones their real names. */
+export function chainDisplayName(chain: string | undefined): string {
+  const key = (chain ?? "").trim().toLowerCase();
+  if (!key) return "this chain";
+  return CHAIN_DISPLAY_NAMES[key] ?? `the ${key} chain`;
+}
+
 // ── Token / investigation ────────────────────────────────────────────────
 export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
   const evm = dossier.chain !== "solana";
@@ -381,9 +404,22 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
           provider: "ofac-sdn",
           completedAt: sanctionsScreen.completedAt,
         }
-      : sanctionsScreen
-        ? { checkId: "ofac-sanctions-address", decisionCritical: true, label: "OFAC sanctions screen", status: "unavailable", note: "The U.S. sanctions list was unavailable, so this check did not finish" }
-        : { checkId: "ofac-sanctions-address", decisionCritical: true, label: "OFAC sanctions screen", status: "unknown", note: `token creator + largest holders; ${outcomeNotRecorded}` },
+      : sanctionsScreen?.reason === "no_screenable_addresses"
+        ? {
+            checkId: "ofac-sanctions-address",
+            decisionCritical: true,
+            label: "OFAC sanctions screen",
+            status: "unavailable",
+            // A rescan cannot conjure addresses this chain never exposed, so
+            // the report must not offer one as the remedy.
+            retryable: false,
+            note: `No creator or holder address could be resolved on ${chainDisplayName(dossier.chain)}, so there was nothing to screen against the sanctions list. This is a coverage limit of that chain, not a clean result.`,
+            provider: "ofac-sdn",
+            completedAt: sanctionsScreen.completedAt,
+          }
+        : sanctionsScreen
+          ? { checkId: "ofac-sanctions-address", decisionCritical: true, label: "OFAC sanctions screen", status: "unavailable", note: "The U.S. sanctions list was unavailable, so this check did not finish" }
+          : { checkId: "ofac-sanctions-address", decisionCritical: true, label: "OFAC sanctions screen", status: "unknown", note: `token creator + largest holders; ${outcomeNotRecorded}` },
   );
 
   checks.push({ checkId: "documents-audits", decisionCritical: true, label: "Documents & audits", status: "unknown", note: `whitepaper, security audits, and documents; ${outcomeNotRecorded}` });
