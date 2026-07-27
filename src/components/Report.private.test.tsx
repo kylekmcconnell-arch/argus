@@ -2302,7 +2302,7 @@ describe("legacy person report coverage truth", () => {
     });
 
     expect(container.textContent).toContain("NASDAQ: COIN");
-    expect(container.textContent).not.toContain("Token identity unresolved");
+    expect(container.textContent).not.toContain("Token claim unproven");
     expect(container.textContent).not.toContain("Founder pattern");
   });
 

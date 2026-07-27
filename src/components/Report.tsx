@@ -2593,9 +2593,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     } else if (auditFacts.length > 0) {
       heroProofChips.push({ key: "audits", label: "Audits cited", value: `x${auditFacts.length}`, tone: "neutral", href: "#basic-facts", title: "Audit claims verified on project materials; auditor-site confirmation not recorded." });
     } else if (auditQuestion && basicFactQuestionOutcome(auditQuestion) !== "checked_empty") {
-      heroProofChips.push({ key: "audits", label: "Audits not verified", tone: "caution", href: "#verification-next", title: "Independent audits are not verified in this snapshot." });
+      heroProofChips.push({ key: "audits", label: "No audit on record", tone: "caution", href: "#verification-next", title: "No security audit could be verified for this project. This is a finding about the project, not a scan error; the audit search did not fully finish, so a rescan may still surface one." });
     } else if (auditQuestion) {
-      heroProofChips.push({ key: "audits", label: "No audits found", tone: "caution", href: "#basic-facts", title: "A completed search found no independent audit." });
+      heroProofChips.push({ key: "audits", label: "No audit published", tone: "caution", href: "#basic-facts", title: "A completed search found no independent security audit for this project." });
     }
   }
   {
@@ -2609,7 +2609,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     } else if (tokenQuestion && basicFactQuestionOutcome(tokenQuestion) === "checked_empty") {
       heroProofChips.push({ key: "token", label: "No official token", tone: "neutral", href: "#basic-facts", title: "A completed search found no verified official token." });
     } else if (tokenQuestion && tokenClaimObserved) {
-      heroProofChips.push({ key: "token", label: "Token identity unresolved", tone: "caution", href: "#verification-next", title: "Official-token candidacy is not resolved. This is the core scam vector; verify before capital moves." });
+      const claimedSymbol = claimedTicker(f.bio);
+      heroProofChips.push({
+        key: "token",
+        label: "Token claim unproven",
+        ...(claimedSymbol ? { value: `$${claimedSymbol}` } : {}),
+        tone: "caution",
+        href: "#verification-next",
+        title: `This account claims a token${claimedSymbol ? ` ($${claimedSymbol})` : ""} that no official site or registry record links to it. Anything sold under that name is unproven; this is the core scam vector, so verify before capital moves.`,
+      });
     }
   }
   {
