@@ -53,6 +53,33 @@ function resolvedProjectProfile(bio: string, website: string | null | undefined 
 }
 
 describe("provider-backed project routing", () => {
+  it("classifies an empty-bio account from its own posts instead of refusing to route", () => {
+    // The @stonkbrokers case: empty bio, no website, 11 followers. Routing read
+    // only the bio, found nothing, and published INCOMPLETE with zero
+    // applicable checks even though the account's own posts say what it is.
+    const evidence = emptyEvidence("@stonkbrokers");
+    evidence.profile.bio = "";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-07-27T13:00:00.000Z";
+    expect(providerBackedRoles(evidence)).toEqual([]);
+
+    evidence.profile.self_post_sample = "daily alpha calls for degen traders. entry and exit signals on the best gems.";
+    expect(providerBackedRoles(evidence)).toContain(SubjectClass.KOL);
+  });
+
+  it("keeps the bio governing when it says something", () => {
+    const evidence = emptyEvidence("@somefund");
+    evidence.profile.bio = "We back bold entrepreneurs building the next internet.";
+    evidence.profile.self_post_sample = "alpha calls degen gems";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-07-27T13:00:00.000Z";
+    const roles = providerBackedRoles(evidence);
+    expect(roles).toContain(SubjectClass.INVESTOR);
+    expect(roles).not.toContain(SubjectClass.KOL);
+  });
+
   it("routes a powered-by-token brand account as PROJECT, not INVESTOR", () => {
     // The @orbitgroup_ai case: a token platform whose bio also says
     // "capital" and "investors". The fund methodology starves such a scan

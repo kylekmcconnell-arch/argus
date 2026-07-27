@@ -781,6 +781,12 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   const posts = corpus.posts;
   if (posts.length) {
     ctx.evidence.recentActivity = corpus.newest.length ? corpus.newest : posts; // newest originals drive tone/dormancy
+    // An account with an empty bio still says what it is, in its own posts.
+    // Freeze a bounded sample so routing can classify from first-party content
+    // instead of abandoning the subject for lack of a bio string.
+    if (!ctx.evidence.profile.bio.trim()) {
+      ctx.evidence.profile.self_post_sample = posts.slice(0, 12).join(" \n ").slice(0, 2000);
+    }
     ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
   }
 
@@ -1301,8 +1307,12 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   const roles = new Set<SubjectClass>();
   let bioPrimaryProjectVerified = false;
   let investorBeyondBio = false;
-  if (evidence.profile.profile_collection_state === "resolved" && evidence.profile.bio.trim()) {
-    const classification = classifySubject(evidence.profile.bio);
+  // The bio is the first-party self-description, but an empty bio is not an
+  // absent subject: the account's own posts are the same kind of evidence from
+  // the same provider, so they classify when the bio says nothing.
+  const selfDescription = evidence.profile.bio.trim() || (evidence.profile.self_post_sample ?? "").trim();
+  if (evidence.profile.profile_collection_state === "resolved" && selfDescription) {
+    const classification = classifySubject(selfDescription);
     const profileRoles = classification.applicable_classes;
     const providerCapturedAt = Date.parse(evidence.profile.profile_captured_at ?? "");
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);

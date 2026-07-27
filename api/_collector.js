@@ -19863,6 +19863,9 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   const posts = corpus.posts;
   if (posts.length) {
     ctx.evidence.recentActivity = corpus.newest.length ? corpus.newest : posts;
+    if (!ctx.evidence.profile.bio.trim()) {
+      ctx.evidence.profile.self_post_sample = posts.slice(0, 12).join(" \n ").slice(0, 2e3);
+    }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
   }
   if (foundWallets.length) {
@@ -20264,8 +20267,9 @@ function providerBackedRoles(evidence) {
   const roles = /* @__PURE__ */ new Set();
   let bioPrimaryProjectVerified = false;
   let investorBeyondBio = false;
-  if (evidence.profile.profile_collection_state === "resolved" && evidence.profile.bio.trim()) {
-    const classification = classifySubject(evidence.profile.bio);
+  const selfDescription = evidence.profile.bio.trim() || (evidence.profile.self_post_sample ?? "").trim();
+  if (evidence.profile.profile_collection_state === "resolved" && selfDescription) {
+    const classification = classifySubject(selfDescription);
     const profileRoles = classification.applicable_classes;
     const providerCapturedAt = Date.parse(evidence.profile.profile_captured_at ?? "");
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);

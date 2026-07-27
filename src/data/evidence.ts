@@ -28,6 +28,13 @@ export interface SubjectProfile {
    * "live" means a substantial product surface was observed on the domain. */
   site_substance_status?: "live" | "coming_soon" | "unreachable" | "access_blocked" | "unavailable" | "client_rendered";
   bio: string;
+  /**
+   * Bounded sample of the account's OWN recent original posts, frozen only to
+   * classify a subject whose bio is empty. First-party content fetched from
+   * the provider, so it is routing-eligible in exactly the way the bio is;
+   * it is never treated as a verified claim about anything.
+   */
+  self_post_sample?: string;
   followers: string;
   joined: string;
   identity_confidence: IdentityConfidence;
