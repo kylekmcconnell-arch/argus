@@ -61,6 +61,40 @@ const BLOCKSCOUT_API: Record<string, string> = {
 
 export interface ExplorerHolder { address: string; percent: number; isContract?: boolean }
 
+export interface ExplorerContractSource {
+  name: string | null;
+  isVerified: boolean;
+  sourceCode: string;
+}
+
+/**
+ * Verified contract source from a public Blockscout instance (keyless).
+ * Read only to inspect what the deployer wrote about their own contract; the
+ * source is never executed, compiled, or trusted as a claim about behaviour.
+ */
+export async function blockscoutContractSource(
+  chain: string,
+  address: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ExplorerContractSource | null> {
+  const base = BLOCKSCOUT_API[chain];
+  if (!base) return null;
+  try {
+    const response = await fetchImpl(`${base}/api/v2/smart-contracts/${address}`, { signal: AbortSignal.timeout(9000) });
+    if (!response.ok) return null;
+    const body = await response.json() as { name?: unknown; is_verified?: unknown; source_code?: unknown };
+    const sourceCode = typeof body?.source_code === "string" ? body.source_code : "";
+    if (!sourceCode) return null;
+    return {
+      name: typeof body?.name === "string" ? body.name : null,
+      isVerified: body?.is_verified === true,
+      sourceCode: sourceCode.slice(0, 400_000),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Top token holders from a public Blockscout instance (keyless, CORS-open).
  * Blockscout returns holders correctly ordered by balance, so this is the

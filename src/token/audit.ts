@@ -10,10 +10,12 @@ import type { TraceStep } from "../data/evidence";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { tokenEntityKey, walletEntityKey } from "../graph/network";
 import { fetchPriceHistory, type PriceHistory } from "../lib/priceHistory";
+import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import {
   dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
-  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders,
+  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource,
   type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo, type ExplorerHolder,
+  type ExplorerContractSource,
 } from "./sources";
 
 export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string }
@@ -434,21 +436,26 @@ async function runTokenAudit(
   let gpEvm: GoPlusSecurity | null = null;
   let sol: SolanaSecurity | null = null;
   let explorerHolders: ExplorerHolder[] | null = null;
+  let contractSource: ExplorerContractSource | null = null;
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders…", tone: "neutral" });
     sol = await goplusSolana(address);
     safety = solanaSafety(sol);
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders…" : "GoPlus + honeypot.is buy/sell simulation…", tone: "neutral" });
-    const [gp, sim, explorer] = await Promise.all([
+    const [gp, sim, explorer, source] = await Promise.all([
       goplus(gpChain, address),
       opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address),
       // Where GoPlus cannot order holders, the chain's own explorer is the
       // only correct distribution source. Runs in parallel: no added latency.
       GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address) : Promise.resolve(null),
+      // What the deployer wrote about their own contract. Free, and the only
+      // place an intent to defeat safety scanners is ever stated outright.
+      blockscoutContractSource(chain, address),
     ]);
     gpEvm = gp;
     explorerHolders = explorer;
+    contractSource = source;
     safety = evmSafety(gp, sim);
     // The largest-holder figure must come from the ordered source, and must go
     // silent rather than report an unordered sample as if it were measured.
@@ -532,6 +539,14 @@ async function runTokenAudit(
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
     // The deployer's OTHER tokens include honeypots — a serial-scammer signal that a
     // clean-looking contract can't wash off. Independent of this token's own flags.
+    // A deployer who documents defeating a scanner has tuned the very checks
+    // above until they went quiet, so their clean result proves less than it
+    // appears. Capped below PASS, not to AVOID: evasion of a detector is not
+    // by itself proof the contract steals, and the quote says what it says.
+    for (const evasion of detectScannerEvasion(contractSource?.sourceCode)) {
+      findings.push({ claim: scannerEvasionClaim(evasion), tone: "bad", source: "contract source" });
+      caps.push([55, "documented_scanner_evasion"]);
+    }
     if (s.serialScammerCreator) { caps.push([25, "serial_scammer_creator"]); findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before. This is a serial-scammer signal.", tone: "bad", source: "goplus" }); }
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
     if (s.simChecked && !s.honeypot) findings.push({ claim: `Buying and selling worked in the test (${s.buyTax.toFixed(0)}% buy fee / ${s.sellTax.toFixed(0)}% sell fee).`, tone: "good", source: "honeypot.is" });
