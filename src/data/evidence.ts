@@ -37,6 +37,8 @@ export interface SubjectProfile {
   self_post_sample?: string;
   followers: string;
   joined: string;
+  /** Raw ISO account creation time; `joined` is display-only and cannot be parsed. */
+  account_created_at?: string;
   identity_confidence: IdentityConfidence;
   identity_note: string;
   prior_handles?: string[]; // past X usernames for the same account id (rebrands)
@@ -696,6 +698,25 @@ export interface VentureTeamInput {
   provider?: string;
 }
 
+/** Registry record for the project's official domain (RDAP, free and keyless). */
+export interface DomainRegistrationSnapshot {
+  domain: string;
+  registeredAt: string;
+  ageMonths: number;
+  source: string;
+  capturedAt: string;
+}
+
+/** When a project's public surfaces first existed, bracketed by two independent dates. */
+export interface LaunchWindowSnapshot {
+  earliest: string;
+  earliestSource: "domain" | "account";
+  latest: string;
+  latestSource: "domain" | "account";
+  gapMonths: number;
+  summary: string;
+}
+
 export interface CollectedEvidence {
   profile: SubjectProfile;
   roles: SubjectClass[];
@@ -758,6 +779,9 @@ export interface CollectedEvidence {
    * team page shows; the record states the end date and nothing about why.
    */
   employmentDepartures?: { company: string; summary: string; ended?: string }[];
+  /** Official-domain registration record, and the launch window it brackets with the account age. */
+  domainRegistration?: DomainRegistrationSnapshot;
+  launchWindow?: LaunchWindowSnapshot;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to

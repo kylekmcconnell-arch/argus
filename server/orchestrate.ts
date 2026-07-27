@@ -34,6 +34,7 @@ import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fm
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
+import { collectDomainRegistration, deriveLaunchWindow } from "./adapters/domainAge";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
@@ -501,7 +502,10 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
-      if (!isNaN(d.getTime())) ctx.evidence.profile.joined = d.toLocaleString("en-US", { month: "short", year: "numeric" });
+      if (!isNaN(d.getTime())) {
+        ctx.evidence.profile.joined = d.toLocaleString("en-US", { month: "short", year: "numeric" });
+        ctx.evidence.profile.account_created_at = d.toISOString();
+      }
     }
     ctx.emit({ phase: "P0 · Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} · ${ctx.evidence.profile.followers} followers · joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   } else if (prof) {
@@ -740,18 +744,31 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // the corpus posts; site liveness), so this prelude costs one slow provider,
   // not the sum. Results are applied in the original order below so every
   // evidence merge stays identical to the serial pipeline.
-  const [hist, { corpus, foundWallets }] = await Promise.all([
+  const [hist, { corpus, foundWallets }, registration] = await Promise.all([
     handleHistory(ctx.handle),
     (async () => {
       const corpus = await collectCorpus(ctx.handle);
       const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...corpus.posts].join(" \n "));
       return { corpus, foundWallets };
     })(),
+    // Free, keyless registry lookup in the same wave: it costs no extra latency
+    // and gives the second date the launch window needs.
+    collectDomainRegistration(domain),
     // Site liveness is deterministic and should not disappear when the language
     // model is unavailable. Running token identity first means slogan-only project
     // accounts can supply their verified CoinGecko homepage here.
     collectProjectSiteSubstance(ctx, domain),
   ]);
+  if (registration.available) {
+    ctx.evidence.domainRegistration = { ...registration.value };
+    const window = deriveLaunchWindow(registration.value.registeredAt, ctx.evidence.profile.account_created_at);
+    if (window) {
+      ctx.evidence.launchWindow = { ...window };
+      ctx.emit({ phase: "P0 · Intake", label: "Public footprint window", detail: window.summary, source: "rdap + twitterapi", tone: "neutral" });
+    } else {
+      ctx.emit({ phase: "P0 · Intake", label: "Domain age", detail: `${registration.value.domain} was registered ${registration.value.registeredAt.slice(0, 10)} (${registration.value.ageMonths} months ago).`, source: "rdap", tone: "neutral" });
+    }
+  }
 
   // Handle-change history: a rebrand to escape a burned reputation is a real
   // flag, and the old handles let us search the subject's history under them.

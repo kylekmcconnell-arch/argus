@@ -7326,8 +7326,8 @@ function candidateUrlTiers(domain) {
 }
 var TEAM_DOCUMENT_HINT = /(?:^|[\/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[\/_\-.]|$)/i;
 function teamDocumentUrlsFromIndex(domain, raw) {
-  const apex = normalizedApex(domain);
-  if (!apex || !raw) return [];
+  const apex2 = normalizedApex(domain);
+  if (!apex2 || !raw) return [];
   const matches = raw.match(/https?:\/\/[^\s<>"'\])}]+/gi) ?? [];
   const out = [];
   const seen = /* @__PURE__ */ new Set();
@@ -7335,7 +7335,7 @@ function teamDocumentUrlsFromIndex(domain, raw) {
     try {
       const url = new URL(value.replace(/&amp;/g, "&").replace(/[.,;:]+$/, ""));
       const host = url.hostname.toLowerCase();
-      if (host !== apex && !host.endsWith(`.${apex}`)) continue;
+      if (host !== apex2 && !host.endsWith(`.${apex2}`)) continue;
       if (!TEAM_DOCUMENT_HINT.test(`${url.hostname}${url.pathname}`)) continue;
       url.hash = "";
       url.search = "";
@@ -7590,11 +7590,11 @@ ${corpus}`,
   });
 }
 async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
-  const apex = normalizedApex(domain);
-  if (!apex || !verifiedTeam.length) return [];
+  const apex2 = normalizedApex(domain);
+  if (!apex2 || !verifiedTeam.length) return [];
   const verifiedAuthors = new Set(verifiedTeam.flatMap((person) => [person.name, person.handle?.replace(/^@/, "")]).filter((value) => Boolean(value?.trim())).map((value) => value.trim().toLowerCase()));
   const searches = ["cofounder", "co-founder"];
-  const hosts = [`discuss.${apex}`, `forum.${apex}`];
+  const hosts = [`discuss.${apex2}`, `forum.${apex2}`];
   const results = await Promise.all(hosts.flatMap((host) => searches.map(async (query) => {
     try {
       const response = await fetch(`https://${host}/search.json?q=${encodeURIComponent(query)}`, {
@@ -7618,22 +7618,22 @@ async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
   return [...new Set(results.flat())].slice(0, 8);
 }
 async function fetchTeamPage(domain, projectName2) {
-  const apex = normalizedApex(domain);
-  if (!apex) return [];
+  const apex2 = normalizedApex(domain);
+  if (!apex2) return [];
   const [primaryCandidates = [], fallbackCandidates = []] = candidateUrlTiers(domain);
   const primaryUrls = [.../* @__PURE__ */ new Set([
     ...await discoverTeamDocumentUrls(domain),
     ...primaryCandidates
   ])];
   if (!primaryUrls.length) return [];
-  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex)))).filter(Boolean);
+  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex2)))).filter(Boolean);
   if (!pages.length && fallbackCandidates.length) {
-    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex)))).filter(Boolean);
+    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex2)))).filter(Boolean);
   }
   if (!pages.length) return [];
   const directTeam = await extractTeamFromPages(pages, projectName2);
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
-  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex)))).filter(Boolean);
+  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex2)))).filter(Boolean);
   const forumTeam = await extractTeamFromPages(forumPages, projectName2, true);
   const seen = /* @__PURE__ */ new Set();
   return [...directTeam, ...forumTeam].filter((person) => {
@@ -7973,6 +7973,100 @@ async function resolveLinkHubWebsite(rawHubUrl, handle, fetchDoc = fetchPublicTe
     return { website: homepage, hubUrl };
   }
   return null;
+}
+
+// server/adapters/domainAge.ts
+var RDAP_BASE = "https://rdap.org/domain/";
+var REGISTRATION_EVENTS = /* @__PURE__ */ new Set(["registration", "last changed registration", "registrar registration"]);
+var apex = (value) => value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[/?#].*$/, "").replace(/\.$/, "");
+function monthsBetween(fromIso, now) {
+  const from = new Date(fromIso);
+  if (!Number.isFinite(from.getTime())) return 0;
+  const months = (now.getFullYear() - from.getFullYear()) * 12 + (now.getMonth() - from.getMonth());
+  return Math.max(0, from.getDate() > now.getDate() ? months - 1 : months);
+}
+function registrationEventDate(events) {
+  if (!Array.isArray(events)) return null;
+  const dates = events.map((event) => {
+    const row = event && typeof event === "object" ? event : null;
+    const action = typeof row?.eventAction === "string" ? row.eventAction.toLowerCase() : "";
+    const date = typeof row?.eventDate === "string" ? row.eventDate : "";
+    return REGISTRATION_EVENTS.has(action) && date ? date : null;
+  }).filter((value) => Boolean(value)).sort();
+  return dates[0] ?? null;
+}
+async function collectDomainRegistration(website, fetchImpl = fetch, now = /* @__PURE__ */ new Date()) {
+  const domain = website ? apex(website) : "";
+  if (!domain || !domain.includes(".")) {
+    return { available: false, reason: "no_domain", note: "no official domain to age" };
+  }
+  let response;
+  try {
+    response = await fetchImpl(`${RDAP_BASE}${encodeURIComponent(domain)}`, {
+      redirect: "follow",
+      headers: { accept: "application/rdap+json, application/json" },
+      signal: AbortSignal.timeout(9e3)
+    });
+  } catch {
+    recordCall("rdap", "domain-age", 0, "transport_error", "failed");
+    return { available: false, reason: "unavailable", note: "RDAP was unreachable" };
+  }
+  if (response.status === 404) {
+    recordCall("rdap", "domain-age", 0, "no_record_404", "succeeded");
+    return { available: false, reason: "not_found", note: `no RDAP record for ${domain}` };
+  }
+  if (!response.ok) {
+    recordCall("rdap", "domain-age", 0, `http_${response.status}`, "failed");
+    return { available: false, reason: "unavailable", note: `RDAP returned http_${response.status}` };
+  }
+  let body;
+  try {
+    body = await response.json();
+  } catch {
+    recordCall("rdap", "domain-age", 0, "response_json_error", "failed");
+    return { available: false, reason: "unavailable", note: "RDAP response was unreadable" };
+  }
+  const registeredAt = registrationEventDate(body?.events);
+  if (!registeredAt) {
+    recordCall("rdap", "domain-age", 0, "no_registration_event", "partial");
+    return { available: false, reason: "not_found", note: `RDAP record for ${domain} states no registration date` };
+  }
+  recordCall("rdap", "domain-age", 0, void 0, "succeeded");
+  return {
+    available: true,
+    value: {
+      domain,
+      registeredAt,
+      ageMonths: monthsBetween(registeredAt, now),
+      source: `${RDAP_BASE}${domain}`,
+      capturedAt: now.toISOString()
+    }
+  };
+}
+var monthYear = (iso2) => {
+  const date = new Date(iso2);
+  if (!Number.isFinite(date.getTime())) return iso2;
+  return date.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+};
+function deriveLaunchWindow(domainRegisteredAt, accountCreatedAt) {
+  const domainTime = domainRegisteredAt ? Date.parse(domainRegisteredAt) : NaN;
+  const accountTime = accountCreatedAt ? Date.parse(accountCreatedAt) : NaN;
+  if (!Number.isFinite(domainTime) || !Number.isFinite(accountTime)) return null;
+  const domainFirst = domainTime <= accountTime;
+  const earliest = domainFirst ? domainRegisteredAt : accountCreatedAt;
+  const latest = domainFirst ? accountCreatedAt : domainRegisteredAt;
+  const gapMonths = monthsBetween(earliest, new Date(latest));
+  const earliestLabel = domainFirst ? "the domain was registered" : "the X account was created";
+  const latestLabel = domainFirst ? "the X account followed" : "the domain was registered";
+  const gapNote = gapMonths >= 24 ? ` The two are ${Math.round(gapMonths / 12)} years apart, so one surface long predates the other.` : gapMonths >= 6 ? ` The two are about ${gapMonths} months apart.` : " Both surfaces appeared within months of each other.";
+  return {
+    earliest,
+    earliestSource: domainFirst ? "domain" : "account",
+    latest,
+    latestSource: domainFirst ? "account" : "domain",
+    gapMonths,
+    summary: `Public footprint starts ${monthYear(earliest)}, when ${earliestLabel}; ${latestLabel} ${monthYear(latest)}.${gapNote}`
+  };
 }
 
 // server/adapters/dexscreener.ts
@@ -9108,7 +9202,7 @@ function sameCompany(recordName, target) {
   const [shorter, longer] = aTokens.length <= bTokens.length ? [aTokens, bTokens] : [bTokens, aTokens];
   return shorter.every((token) => longer.includes(token));
 }
-var monthYear = (value) => {
+var monthYear2 = (value) => {
   const match = value.match(/^(\d{4})-(\d{2})/);
   if (!match) return value;
   const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -9131,7 +9225,7 @@ function employmentCurrency(records, company, person) {
       company: open.company ?? company,
       ...open.title ? { title: open.title } : {},
       ...open.start ? { start: open.start } : {},
-      summary: `${who} still lists ${open.title ? `${open.title} at ` : ""}${open.company ?? company} as a current role${open.start ? `, held since ${monthYear(open.start)}` : ""}.`
+      summary: `${who} still lists ${open.title ? `${open.title} at ` : ""}${open.company ?? company} as a current role${open.start ? `, held since ${monthYear2(open.start)}` : ""}.`
     };
   }
   const latest = [...matches].sort((a, b) => String(b.end ?? "").localeCompare(String(a.end ?? "")))[0];
@@ -9142,7 +9236,7 @@ function employmentCurrency(records, company, person) {
     ...latest.title ? { title: latest.title } : {},
     ...latest.start ? { start: latest.start } : {},
     ...ended ? { end: ended } : {},
-    summary: `${who} no longer lists ${latest.company ?? company} as a current role: the record ends ${ended ? monthYear(ended) : "on an unstated date"}${latest.title ? ` (${latest.title})` : ""}.`
+    summary: `${who} no longer lists ${latest.company ?? company} as a current role: the record ends ${ended ? monthYear2(ended) : "on an unstated date"}${latest.title ? ` (${latest.title})` : ""}.`
   };
 }
 
@@ -19787,7 +19881,10 @@ async function resolveProfile(ctx) {
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
-      if (!isNaN(d.getTime())) ctx.evidence.profile.joined = d.toLocaleString("en-US", { month: "short", year: "numeric" });
+      if (!isNaN(d.getTime())) {
+        ctx.evidence.profile.joined = d.toLocaleString("en-US", { month: "short", year: "numeric" });
+        ctx.evidence.profile.account_created_at = d.toISOString();
+      }
     }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} \xB7 ${ctx.evidence.profile.followers} followers \xB7 joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   } else if (prof) {
@@ -19953,18 +20050,31 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website) ?? void 0;
   const bioDomain = bioWebsiteDomain(ctx.evidence.profile.bio);
   const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  const [hist, { corpus, foundWallets }] = await Promise.all([
+  const [hist, { corpus, foundWallets }, registration] = await Promise.all([
     handleHistory(ctx.handle),
     (async () => {
       const corpus2 = await collectCorpus(ctx.handle);
       const foundWallets2 = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...corpus2.posts].join(" \n "));
       return { corpus: corpus2, foundWallets: foundWallets2 };
     })(),
+    // Free, keyless registry lookup in the same wave: it costs no extra latency
+    // and gives the second date the launch window needs.
+    collectDomainRegistration(domain),
     // Site liveness is deterministic and should not disappear when the language
     // model is unavailable. Running token identity first means slogan-only project
     // accounts can supply their verified CoinGecko homepage here.
     collectProjectSiteSubstance(ctx, domain)
   ]);
+  if (registration.available) {
+    ctx.evidence.domainRegistration = { ...registration.value };
+    const window = deriveLaunchWindow(registration.value.registeredAt, ctx.evidence.profile.account_created_at);
+    if (window) {
+      ctx.evidence.launchWindow = { ...window };
+      ctx.emit({ phase: "P0 \xB7 Intake", label: "Public footprint window", detail: window.summary, source: "rdap + twitterapi", tone: "neutral" });
+    } else {
+      ctx.emit({ phase: "P0 \xB7 Intake", label: "Domain age", detail: `${registration.value.domain} was registered ${registration.value.registeredAt.slice(0, 10)} (${registration.value.ageMonths} months ago).`, source: "rdap", tone: "neutral" });
+    }
+  }
   if (hist && hist.priorHandles.length) {
     ctx.evidence.profile.prior_handles = hist.priorHandles;
     ctx.recordCheck?.({
