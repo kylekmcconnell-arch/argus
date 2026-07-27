@@ -12,13 +12,25 @@ contract LunchTokenPlain {
 }`;
 
 describe("detectScannerEvasion", () => {
-  it("catches a comment that names a scanner and states intent to stop it flagging", () => {
+  it("reads MUMU as tuning, not concealment: the restriction was removed", () => {
+    // An anti-snipe hook IS a transfer restriction, so GMGN flagging it was
+    // correct and deleting it makes the token freer to trade. Recorded as
+    // context, never as a penalty.
     const findings = detectScannerEvasion(MUMU_SOURCE);
     expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ kind: "tuning" });
     expect(findings[0].detectors).toContain("GMGN");
-    expect(findings[0].quote).toContain("stop flagging");
-    expect(scannerEvasionClaim(findings[0])).toContain("documents defeating GMGN");
-    expect(scannerEvasionClaim(findings[0])).toContain("weaker evidence than usual");
+    expect(scannerEvasionClaim(findings[0])).toContain("removed rather than hidden");
+    expect(scannerEvasionClaim(findings[0])).toContain("not because it is misconduct");
+  });
+
+  it("separates concealment, where the behaviour stays and the detector is blinded", () => {
+    const hidden = detectScannerEvasion(`/* hides the tax so honeypot detection does not flag it */`);
+    expect(hidden[0]).toMatchObject({ kind: "concealment" });
+    expect(scannerEvasionClaim(hidden[0])).toContain("not evidence the behaviour is absent");
+
+    expect(detectScannerEvasion(`// bypasses DEXTools detection of the blacklist`)[0].kind).toBe("concealment");
+    expect(detectScannerEvasion(`// disabled so rug checkers no longer mark the pair`)[0].kind).toBe("tuning");
   });
 
   it("requires BOTH a detection surface and intent, so ordinary security talk never fires", () => {
@@ -36,6 +48,7 @@ describe("detectScannerEvasion", () => {
     expect(detectScannerEvasion(`/* hides the tax so honeypot detection does not flag it */`)).toHaveLength(1);
     expect(detectScannerEvasion(`// disabled so rug checkers no longer mark the pair`)).toHaveLength(1);
     expect(detectScannerEvasion(`// bypasses DEXTools detection of the blacklist`)).toHaveLength(1);
+    expect(detectScannerEvasion(`// masks the blacklist so TokenSniffer never detects it`)[0].kind).toBe("concealment");
   });
 
   it("ignores licence headers and returns nothing for empty or absent source", () => {

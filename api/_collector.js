@@ -15120,13 +15120,13 @@ import { createHash as createHash7 } from "node:crypto";
 
 // src/lib/reportPresentation.ts
 var VERDICT_COLORS = Object.freeze({
-  PASS: "#16a34a",
-  CAUTION: "#d97706",
-  FAIL: "#ea580c",
-  AVOID: "#dc2626",
-  UNVERIFIABLE_IDENTITY: "#7c3aed",
+  PASS: "#1a9c63",
+  CAUTION: "#a4526c",
+  FAIL: "#b32e57",
+  AVOID: "#96143a",
+  UNVERIFIABLE_IDENTITY: "#6940cc",
   INCOMPLETE: "#a1a1aa",
-  PROVISIONAL: "#d97706"
+  PROVISIONAL: "#a4526c"
 });
 var ADVERSE_VERDICTS = /* @__PURE__ */ new Set([
   "CAUTION",
@@ -22478,6 +22478,10 @@ var DETECTOR_PATTERNS = [
   [/\btrade\s*restriction\b/i, "trade-restriction detection"],
   [/\bscanner?s?\b|\bdetector\b|\bbot\s*checks?\b/i, "automated scanners"]
 ];
+var CONCEALMENT_INTENT = [
+  /\b(?:hide|hides|hidden|hiding|mask|masks|masked|disguise|disguises|obfuscate|obfuscates|conceal|conceals|spoof|spoofs|fake|fakes)\b/i,
+  /\b(?:bypass|bypasses|evade|evades|evasion|dodge|dodges|trick|tricks|fool|fools|defeat|defeats)\b/i
+];
 var EVASION_INTENT = [
   /\b(?:stop|stops|stopped|prevent|prevents|avoid|avoids|bypass|bypasses|evade|evades|dodge|defeat|suppress)\b/i,
   /\bso\s+(?:it|they|we)\s+(?:do(?:es)?n'?t|won'?t|will\s+not|no\s+longer)\b/i,
@@ -22513,14 +22517,18 @@ function detectScannerEvasion(source2) {
     const key = comment.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    findings.push({ quote: comment.slice(0, 300), detectors });
+    const kind = CONCEALMENT_INTENT.some((pattern) => pattern.test(comment)) ? "concealment" : "tuning";
+    findings.push({ quote: comment.slice(0, 300), detectors, kind });
     if (findings.length >= 3) break;
   }
   return findings;
 }
 function scannerEvasionClaim(finding) {
   const surfaces = finding.detectors.slice(0, 2).join(" and ");
-  return `The verified contract source documents defeating ${surfaces}: "${finding.quote}" A contract tuned until safety scanners go quiet passes those checks by construction, so a clean contract result here is weaker evidence than usual.`;
+  if (finding.kind === "concealment") {
+    return `The verified contract source documents concealing behaviour from ${surfaces}: "${finding.quote}" The behaviour stays and the detector is blinded to it, so a clean contract result here is not evidence the behaviour is absent.`;
+  }
+  return `The deployer writes about ${surfaces} in the contract source: "${finding.quote}" Read as stated, the flagged behaviour was removed rather than hidden, so the clean scanner result is accurate. It is recorded because a deployer iterating against scanner heuristics is worth knowing, not because it is misconduct.`;
 }
 
 // src/token/audit.ts
@@ -22856,8 +22864,9 @@ async function runTokenAudit(input, emit, opts) {
     }
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
     for (const evasion of detectScannerEvasion(contractSource?.sourceCode)) {
-      findings.push({ claim: scannerEvasionClaim(evasion), tone: "bad", source: "contract source" });
-      caps.push([55, "documented_scanner_evasion"]);
+      const concealed = evasion.kind === "concealment";
+      findings.push({ claim: scannerEvasionClaim(evasion), tone: concealed ? "bad" : "warn", source: "contract source" });
+      if (concealed) caps.push([55, "documented_scanner_concealment"]);
     }
     if (s.serialScammerCreator) {
       caps.push([25, "serial_scammer_creator"]);

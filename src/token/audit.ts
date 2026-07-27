@@ -544,8 +544,12 @@ async function runTokenAudit(
     // appears. Capped below PASS, not to AVOID: evasion of a detector is not
     // by itself proof the contract steals, and the quote says what it says.
     for (const evasion of detectScannerEvasion(contractSource?.sourceCode)) {
-      findings.push({ claim: scannerEvasionClaim(evasion), tone: "bad", source: "contract source" });
-      caps.push([55, "documented_scanner_evasion"]);
+      const concealed = evasion.kind === "concealment";
+      findings.push({ claim: scannerEvasionClaim(evasion), tone: concealed ? "bad" : "warn", source: "contract source" });
+      // Only concealment limits the score. Removing the flagged behaviour is
+      // the deployer answering a false positive, and the scanner's clean
+      // reading afterwards is correct.
+      if (concealed) caps.push([55, "documented_scanner_concealment"]);
     }
     if (s.serialScammerCreator) { caps.push([25, "serial_scammer_creator"]); findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before. This is a serial-scammer signal.", tone: "bad", source: "goplus" }); }
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });

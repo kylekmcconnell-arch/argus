@@ -53,26 +53,26 @@ const LIGHT_PALETTE = {
   "signal-dim": "#1157bd",
   "signal-lift": "#1458bd",
   "accent-tint": "#e7f0fe",
-  pass: "#147a43",
-  caution: "#8a5b06",
-  fail: "#b92564",
-  avoid: "#c72e35",
+  pass: "#1a9c63",
+  caution: "#a4526c",
+  fail: "#b32e57",
+  avoid: "#96143a",
   unverifiable: "#6940cc",
 } as const;
 
 const SEMANTIC_PALETTES = {
   dark: {
-    pass: "#35c97b",
-    caution: "#f2ad3f",
-    fail: "#e56c9d",
-    avoid: "#f05b61",
+    pass: "#2fbd7a",
+    caution: "#d98aa2",
+    fail: "#e2698e",
+    avoid: "#ef4f72",
     unverifiable: "#a98cf5",
   },
   light: {
-    pass: "#147a43",
-    caution: "#8a5b06",
-    fail: "#b92564",
-    avoid: "#c72e35",
+    pass: "#1a9c63",
+    caution: "#a4526c",
+    fail: "#b32e57",
+    avoid: "#96143a",
     unverifiable: "#6940cc",
   },
 } as const;

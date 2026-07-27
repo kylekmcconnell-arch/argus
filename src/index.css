@@ -30,10 +30,13 @@
   --color-accent-tint: #101621; /* localized active-state wash */
   --color-eye-pupil: #05070b; /* live iris center; deliberately dark in both themes */
 
-  --color-pass: #35c97b; /* jade — confirmed good */
-  --color-caution: #f2ad3f; /* amber — warn / partial */
-  --color-fail: #e56c9d; /* cool magenta-rose — failed verdict score */
-  --color-avoid: #f05b61; /* alarm red — disqualifying */
+  /* Jade and crimson. Adverse states share one rose-to-crimson family so
+     severity reads as depth rather than a hue change, and no orange sits
+     beside the jade. Chosen with Enigma 2026-07-27. */
+  --color-pass: #2fbd7a; /* jade: confirmed good */
+  --color-caution: #d98aa2; /* dusty rose: warn / partial */
+  --color-fail: #e2698e; /* rose: failed verdict score */
+  --color-avoid: #ef4f72; /* vivid crimson: disqualifying */
   --color-unverifiable: #a98cf5;
 
   --font-sans: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -68,10 +71,10 @@
   --color-accent-tint: #e7f0fe;
   --color-eye-pupil: #0f1728;
 
-  --color-pass: #147a43;
-  --color-caution: #8a5b06;
-  --color-fail: #b92564;
-  --color-avoid: #c72e35;
+  --color-pass: #1a9c63;
+  --color-caution: #a4526c;
+  --color-fail: #b32e57;
+  --color-avoid: #96143a;
   --color-unverifiable: #6940cc;
 
   --shadow:
@@ -99,10 +102,10 @@
   --color-signal-lift: #68b1ff;
   --color-accent-tint: #153a66;
   --color-eye-pupil: #0d1726;
-  --color-pass: #43d28a;
-  --color-caution: #f1b24c;
-  --color-fail: #eb78a5;
-  --color-avoid: #ff6b73;
+  --color-pass: #45d18d;
+  --color-caution: #e79cb4;
+  --color-fail: #ee7fa4;
+  --color-avoid: #f2647f;
   --color-unverifiable: #b49cff;
   --shadow:
     0 1px 2px color-mix(in oklab, var(--color-eye-pupil) 64%, transparent),

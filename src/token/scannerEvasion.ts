@@ -19,6 +19,14 @@ export interface ScannerEvasionFinding {
   quote: string;
   /** Detection surfaces the comment names. */
   detectors: string[];
+  /**
+   * "concealment": the behaviour stays and is hidden, which limits the score.
+   * "tuning": the behaviour was REMOVED so the flag stops, which is a dev
+   * answering a false positive. An anti-snipe hook genuinely is a transfer
+   * restriction, so a scanner flagging it was right and deleting it makes the
+   * token freer to trade. That is context for a reader, not a penalty.
+   */
+  kind: "concealment" | "tuning";
 }
 
 /** Named detection surfaces, plus the generic flag vocabulary they share. */
@@ -34,6 +42,15 @@ const DETECTOR_PATTERNS: Array<[RegExp, string]> = [
   [/\bhoneypot\b/i, "honeypot detection"],
   [/\btrade\s*restriction\b/i, "trade-restriction detection"],
   [/\bscanner?s?\b|\bdetector\b|\bbot\s*checks?\b/i, "automated scanners"],
+];
+
+/**
+ * Concealment: the behaviour STAYS and the deployer hides it. This is the
+ * damning class, and the only one that limits a score.
+ */
+const CONCEALMENT_INTENT = [
+  /\b(?:hide|hides|hidden|hiding|mask|masks|masked|disguise|disguises|obfuscate|obfuscates|conceal|conceals|spoof|spoofs|fake|fakes)\b/i,
+  /\b(?:bypass|bypasses|evade|evades|evasion|dodge|dodges|trick|tricks|fool|fools|defeat|defeats)\b/i,
 ];
 
 /**
@@ -93,8 +110,8 @@ export function detectScannerEvasion(source: string | null | undefined): Scanner
     const key = comment.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    // Keep the most specific named surface first for the finding text.
-    findings.push({ quote: comment.slice(0, 300), detectors });
+    const kind = CONCEALMENT_INTENT.some((pattern) => pattern.test(comment)) ? "concealment" as const : "tuning" as const;
+    findings.push({ quote: comment.slice(0, 300), detectors, kind });
     if (findings.length >= 3) break;
   }
   return findings;
@@ -103,5 +120,8 @@ export function detectScannerEvasion(source: string | null | undefined): Scanner
 /** One sentence naming what the deployer wrote, with the quote as its evidence. */
 export function scannerEvasionClaim(finding: ScannerEvasionFinding): string {
   const surfaces = finding.detectors.slice(0, 2).join(" and ");
-  return `The verified contract source documents defeating ${surfaces}: "${finding.quote}" A contract tuned until safety scanners go quiet passes those checks by construction, so a clean contract result here is weaker evidence than usual.`;
+  if (finding.kind === "concealment") {
+    return `The verified contract source documents concealing behaviour from ${surfaces}: "${finding.quote}" The behaviour stays and the detector is blinded to it, so a clean contract result here is not evidence the behaviour is absent.`;
+  }
+  return `The deployer writes about ${surfaces} in the contract source: "${finding.quote}" Read as stated, the flagged behaviour was removed rather than hidden, so the clean scanner result is accurate. It is recorded because a deployer iterating against scanner heuristics is worth knowing, not because it is misconduct.`;
 }

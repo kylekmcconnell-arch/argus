@@ -253,6 +253,10 @@ var DETECTOR_PATTERNS = [
   [/\btrade\s*restriction\b/i, "trade-restriction detection"],
   [/\bscanner?s?\b|\bdetector\b|\bbot\s*checks?\b/i, "automated scanners"]
 ];
+var CONCEALMENT_INTENT = [
+  /\b(?:hide|hides|hidden|hiding|mask|masks|masked|disguise|disguises|obfuscate|obfuscates|conceal|conceals|spoof|spoofs|fake|fakes)\b/i,
+  /\b(?:bypass|bypasses|evade|evades|evasion|dodge|dodges|trick|tricks|fool|fools|defeat|defeats)\b/i
+];
 var EVASION_INTENT = [
   /\b(?:stop|stops|stopped|prevent|prevents|avoid|avoids|bypass|bypasses|evade|evades|dodge|defeat|suppress)\b/i,
   /\bso\s+(?:it|they|we)\s+(?:do(?:es)?n'?t|won'?t|will\s+not|no\s+longer)\b/i,
@@ -288,14 +292,18 @@ function detectScannerEvasion(source) {
     const key = comment.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    findings.push({ quote: comment.slice(0, 300), detectors });
+    const kind = CONCEALMENT_INTENT.some((pattern) => pattern.test(comment)) ? "concealment" : "tuning";
+    findings.push({ quote: comment.slice(0, 300), detectors, kind });
     if (findings.length >= 3) break;
   }
   return findings;
 }
 function scannerEvasionClaim(finding) {
   const surfaces = finding.detectors.slice(0, 2).join(" and ");
-  return `The verified contract source documents defeating ${surfaces}: "${finding.quote}" A contract tuned until safety scanners go quiet passes those checks by construction, so a clean contract result here is weaker evidence than usual.`;
+  if (finding.kind === "concealment") {
+    return `The verified contract source documents concealing behaviour from ${surfaces}: "${finding.quote}" The behaviour stays and the detector is blinded to it, so a clean contract result here is not evidence the behaviour is absent.`;
+  }
+  return `The deployer writes about ${surfaces} in the contract source: "${finding.quote}" Read as stated, the flagged behaviour was removed rather than hidden, so the clean scanner result is accurate. It is recorded because a deployer iterating against scanner heuristics is worth knowing, not because it is misconduct.`;
 }
 
 // src/token/sources.ts
@@ -853,8 +861,9 @@ async function runTokenAudit(input, emit, opts) {
     }
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
     for (const evasion of detectScannerEvasion(contractSource?.sourceCode)) {
-      findings.push({ claim: scannerEvasionClaim(evasion), tone: "bad", source: "contract source" });
-      caps.push([55, "documented_scanner_evasion"]);
+      const concealed = evasion.kind === "concealment";
+      findings.push({ claim: scannerEvasionClaim(evasion), tone: concealed ? "bad" : "warn", source: "contract source" });
+      if (concealed) caps.push([55, "documented_scanner_concealment"]);
     }
     if (s.serialScammerCreator) {
       caps.push([25, "serial_scammer_creator"]);

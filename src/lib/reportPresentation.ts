@@ -27,14 +27,23 @@ export interface PublicReportReadinessSummary {
   neededEvidenceSummary: string;
 }
 
+/**
+ * Jade and crimson, matching the --color-* tokens in index.css.
+ *
+ * These are literal hex because this module is read server-side for OG share
+ * cards, where a CSS variable cannot resolve. They previously disagreed with
+ * the design tokens, which is where the orange nobody chose was coming from:
+ * the tokens said magenta-rose for FAIL and this said #ea580c. Keep the two
+ * in step; the light-theme token values are the source of truth.
+ */
 const VERDICT_COLORS: Readonly<Record<string, string>> = Object.freeze({
-  PASS: "#16a34a",
-  CAUTION: "#d97706",
-  FAIL: "#ea580c",
-  AVOID: "#dc2626",
-  UNVERIFIABLE_IDENTITY: "#7c3aed",
+  PASS: "#1a9c63",
+  CAUTION: "#a4526c",
+  FAIL: "#b32e57",
+  AVOID: "#96143a",
+  UNVERIFIABLE_IDENTITY: "#6940cc",
   INCOMPLETE: "#a1a1aa",
-  PROVISIONAL: "#d97706",
+  PROVISIONAL: "#a4526c",
 });
 
 const ADVERSE_VERDICTS = new Set([
