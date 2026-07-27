@@ -153,14 +153,20 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
       anchor: anchors.account,
     });
   } else if (
-    isNum(input.daysSinceLastPost) && input.daysSinceLastPost >= 30
-    && isNum(input.volume24hUsd) && input.volume24hUsd >= 100_000
+    isNum(input.daysSinceLastPost)
+    && (input.daysSinceLastPost >= 90
+      || (input.daysSinceLastPost >= 30 && isNum(input.volume24hUsd) && input.volume24hUsd >= 100_000))
   ) {
+    const days = Math.round(input.daysSinceLastPost);
     signals.push({
       id: "account-quiet",
-      severity: "watch",
-      headline: `The official account has been silent for ${Math.round(input.daysSinceLastPost)} days`,
-      detail: `No posts while the token still trades ${usdCompact(input.volume24hUsd)} a day.`,
+      // Half a year of silence from the official voice is a leading red flag
+      // on its own, token or not; shorter gaps stay a watch item.
+      severity: days >= 180 ? "alert" : "watch",
+      headline: `The official account has been silent for ${days} days`,
+      detail: isNum(input.volume24hUsd) && input.volume24hUsd >= 100_000
+        ? `No posts while the token still trades ${usdCompact(input.volume24hUsd)} a day.`
+        : "A live project talks. Months of silence from the official account is a warning on its own.",
       anchor: anchors.account,
     });
   }

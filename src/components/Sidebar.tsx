@@ -33,6 +33,7 @@ import { activeRuns, subscribeRuns } from "../lib/runner";
 import { activeScans, subscribeScans } from "../lib/activescans";
 import { activeScanRuns, subscribeScanRuns } from "../lib/scanrunner";
 import { getAnalyst } from "../lib/analyst";
+import { useDeployFreshness } from "../lib/useDeployFreshness";
 import { auditImage } from "../lib/avatars";
 import type { ReportKind } from "../lib/reports";
 import { normalizeSubjectRef } from "../lib/subjectRef";
@@ -196,6 +197,7 @@ export function Sidebar({
   onClose?: () => void;
 }) {
   const auth = useArgusAuth();
+  const deployStale = useDeployFreshness();
   const drawerRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   // Reports need more canvas, but collapsing the rail to icons removes too much
@@ -314,6 +316,16 @@ export function Sidebar({
           <span className={compact ? "sr-only" : "display text-[15px] tracking-[0.02em] text-ink"}>ARGUS</span>
           <span className={compact ? "sr-only" : "chip ml-auto"}>v3.0</span>
         </button>
+        {deployStale && !compact && (
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            title="A newer ARGUS is live. Reload to pick up the latest report rendering and fixes."
+            className="btn-chip tint-signal shrink-0"
+          >
+            Update
+          </button>
+        )}
         <button
           ref={closeButtonRef}
           type="button"

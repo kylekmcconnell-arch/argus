@@ -15,16 +15,26 @@ export function LiveSupplementalNotice({
   private?: boolean;
   persisted?: boolean;
 }) {
+  // Private mode is a mode disclosure and keeps the boxed treatment. The
+  // fresh-scan variant used to read "New information checked after this
+  // scan" in a caution box, which made every rescan look instantly stale;
+  // the panels already carry their own live/saved chips, so one quiet line
+  // stating the score is frozen is all this needs to say.
+  if (privateSession) {
+    return (
+      <p
+        role="status"
+        className="tint-caution rounded-lg border px-3 py-2 text-[12.5px] leading-relaxed"
+      >
+        Private report. Extra live checks are off, and nothing is added to shared cases, watchlists, or activity.
+      </p>
+    );
+  }
   return (
-    <p
-      role="status"
-      className="tint-caution rounded-lg border px-3 py-2 text-[12.5px] leading-relaxed"
-    >
-      {privateSession
-        ? "Private report. Extra live checks are off, and nothing is added to shared cases, watchlists, or activity."
-        : persisted
-          ? "New information checked after this scan. It is not part of the saved score or shared report."
-          : "New information checked after this scan. It is not part of the saved score."}
+    <p role="note" className="text-[11.5px] leading-relaxed text-ink-faint">
+      {persisted
+        ? "Extra checks below run live. They do not change the saved score or the shared report."
+        : "Extra checks below run live. They do not change the saved score."}
     </p>
   );
 }

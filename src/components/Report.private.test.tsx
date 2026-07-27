@@ -737,8 +737,8 @@ describe("private person report evidence boundary", () => {
     expect(snapshotLink?.target).toBe("_blank");
     expect(container.textContent).toContain("report saved");
     expect(container.textContent).not.toContain("live collection");
-    expect(container.textContent).toContain("New information checked after this scan");
-    expect(container.textContent).toContain("not part of the saved score or shared report");
+    expect(container.textContent).toContain("Extra checks below run live");
+    expect(container.textContent).toContain("do not change the saved score or the shared report");
   });
 
   it("does not repeat frozen news, legal, and sanctions calls after a fresh saved audit", () => {

@@ -293,7 +293,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({
       panelCostToken: "signed-panel-capability",
     }));
-    expect(container.textContent).toContain("not part of the saved score or shared report");
+    expect(container.textContent).toContain("do not change the saved score or the shared report");
     expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Share")).toBe(true);
     const onChainProps = harness.livePanel.mock.calls
       .find(([name]) => name === "on-chain")?.[1] as Record<string, unknown> | undefined;

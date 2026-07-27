@@ -17535,10 +17535,22 @@ async function collectDexProjectToken(ctx, query) {
   }
   const candidate = dexProjectCandidates(ctx, query, rows)[0];
   if (!candidate) {
+    const q = query.trim().toLowerCase();
+    const nameAlikes = [...new Map(rows.filter((row) => {
+      const name = String(row.baseToken?.name ?? "").toLowerCase();
+      const symbol = String(row.baseToken?.symbol ?? "").toLowerCase();
+      return Boolean(name && (name.includes(q) || q.includes(name) || symbol === q));
+    }).map((row) => {
+      const base = row.baseToken ?? {};
+      const label = `${String(base.name ?? "").trim()} ($${String(base.symbol ?? "").trim().toUpperCase()})`;
+      return [label.toLowerCase(), label];
+    })).values()];
     return {
       state: "empty",
       attempts: 1,
-      detail: "DexScreener returned no identity-bound project-token candidate"
+      detail: "DexScreener returned no identity-bound project-token candidate",
+      nameMatchCount: nameAlikes.length,
+      nameMatches: nameAlikes.slice(0, 3)
     };
   }
   const historyResult = await tokenHistory(candidate.chain, candidate.pairAddress);
@@ -17781,10 +17793,15 @@ async function collectProjectTokenIdentity(ctx) {
         attempts
       };
     }
+    const dexAlikes = dexFallback.state === "empty" ? dexFallback.nameMatches ?? [] : [];
+    const dexAlikeCount = dexFallback.state === "empty" ? dexFallback.nameMatchCount ?? 0 : 0;
+    const cgSamples = candidates.slice(0, 3).map((row) => `${row.name} ($${row.symbol.toUpperCase()})`);
+    const alikeSamples = [.../* @__PURE__ */ new Set([...cgSamples, ...dexAlikes])].slice(0, 3);
+    const alikeCount = Math.max(candidates.length + dexAlikeCount, alikeSamples.length);
     ctx.recordCheck?.({
       id: "project-token-identity",
       status: "finding",
-      note: `assessed token identity: CoinGecko and DexScreener searches completed; ${candidates.length} CoinGecko candidate${candidates.length === 1 ? " was" : "s were"} inspected and neither registry produced a contract bound to the official X account or website domain. A null result on this axis, not adverse conduct evidence.`,
+      note: alikeCount > 0 ? `assessed token identity: CoinGecko and DexScreener searches completed. ${alikeCount} token${alikeCount === 1 ? " trades" : "s trade"} under a matching name (${alikeSamples.join(", ")}${alikeCount > alikeSamples.length ? ", and more" : ""}), and none links back to the official X account or website domain, so no official token was recorded. A null result on this axis, not adverse conduct evidence.` : "assessed token identity: CoinGecko and DexScreener searches completed and found no token under a matching name. A null result on this axis, not adverse conduct evidence.",
       provider: "coingecko/dexscreener"
     });
     return {

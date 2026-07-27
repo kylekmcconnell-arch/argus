@@ -96,6 +96,9 @@ interface DexFallbackResult {
   attempts: number;
   detail: string;
   snapshot?: ProjectTokenSnapshot;
+  /** Name-matched DEX tokens that failed the identity gate, for the assessed-null disclosure. */
+  nameMatches?: string[];
+  nameMatchCount?: number;
 }
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -473,10 +476,28 @@ async function collectDexProjectToken(
   }
   const candidate = dexProjectCandidates(ctx, query, rows)[0];
   if (!candidate) {
+    // Disclose what the search DID see: tokens trading under a matching name
+    // that no official account or domain links back to. Naming them is what
+    // turns "unresolved" into an investigator's finding.
+    const q = query.trim().toLowerCase();
+    const nameAlikes = [...new Map(rows
+      .filter((row) => {
+        const name = String((row as { baseToken?: { name?: unknown } }).baseToken?.name ?? "").toLowerCase();
+        const symbol = String((row as { baseToken?: { symbol?: unknown } }).baseToken?.symbol ?? "").toLowerCase();
+        return Boolean(name && (name.includes(q) || q.includes(name) || symbol === q));
+      })
+      .map((row) => {
+        const base = (row as { baseToken?: { name?: unknown; symbol?: unknown } }).baseToken ?? {};
+        const label = `${String(base.name ?? "").trim()} ($${String(base.symbol ?? "").trim().toUpperCase()})`;
+        return [label.toLowerCase(), label] as const;
+      }))
+      .values()];
     return {
       state: "empty",
       attempts: 1,
       detail: "DexScreener returned no identity-bound project-token candidate",
+      nameMatchCount: nameAlikes.length,
+      nameMatches: nameAlikes.slice(0, 3),
     };
   }
   const historyResult = await tokenHistory(candidate.chain, candidate.pairAddress);
@@ -747,10 +768,17 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     // Both independent registry paths completed and neither produced an
     // account/domain-bound contract. This is an assessed null on token
     // identity, not a claim that no similarly named token exists.
+    const dexAlikes = dexFallback.state === "empty" ? dexFallback.nameMatches ?? [] : [];
+    const dexAlikeCount = dexFallback.state === "empty" ? dexFallback.nameMatchCount ?? 0 : 0;
+    const cgSamples = candidates.slice(0, 3).map((row) => `${row.name} ($${row.symbol.toUpperCase()})`);
+    const alikeSamples = [...new Set([...cgSamples, ...dexAlikes])].slice(0, 3);
+    const alikeCount = Math.max(candidates.length + dexAlikeCount, alikeSamples.length);
     ctx.recordCheck?.({
       id: "project-token-identity",
       status: "finding",
-      note: `assessed token identity: CoinGecko and DexScreener searches completed; ${candidates.length} CoinGecko candidate${candidates.length === 1 ? " was" : "s were"} inspected and neither registry produced a contract bound to the official X account or website domain. A null result on this axis, not adverse conduct evidence.`,
+      note: alikeCount > 0
+        ? `assessed token identity: CoinGecko and DexScreener searches completed. ${alikeCount} token${alikeCount === 1 ? " trades" : "s trade"} under a matching name (${alikeSamples.join(", ")}${alikeCount > alikeSamples.length ? ", and more" : ""}), and none links back to the official X account or website domain, so no official token was recorded. A null result on this axis, not adverse conduct evidence.`
+        : "assessed token identity: CoinGecko and DexScreener searches completed and found no token under a matching name. A null result on this axis, not adverse conduct evidence.",
       provider: "coingecko/dexscreener",
     });
     return {

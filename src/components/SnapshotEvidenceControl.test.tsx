@@ -88,8 +88,9 @@ describe("LiveSupplementalNotice", () => {
   it("keeps live post-scan evidence outside the immutable share and verdict", async () => {
     await act(async () => root.render(<LiveSupplementalNotice persisted />));
 
-    expect(container.querySelector("[role='status']")?.textContent).toContain("checked after this scan");
-    expect(container.textContent).toContain("not part of the saved score or shared report");
+    // A quiet note, not a caution box: a fresh scan must not read as stale.
+    expect(container.querySelector("[role='note']")?.textContent).toContain("Extra checks below run live");
+    expect(container.textContent).toContain("do not change the saved score or the shared report");
   });
 
   it("labels private supplemental panels as paused and unsaved", async () => {
@@ -103,7 +104,7 @@ describe("LiveSupplementalNotice", () => {
   it("does not imply an immutable share exists before persistence", async () => {
     await act(async () => root.render(<LiveSupplementalNotice />));
 
-    expect(container.textContent).toContain("not part of the saved score");
+    expect(container.textContent).toContain("do not change the saved score");
     expect(container.textContent).not.toContain("shared report");
   });
 });

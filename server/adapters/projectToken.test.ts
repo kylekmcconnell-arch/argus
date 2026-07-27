@@ -274,7 +274,13 @@ describe("verified project-token collection", () => {
     expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
       id: "project-token-identity",
       status: "finding",
-      note: expect.stringContaining("neither registry produced a contract bound to the official X account or website domain"),
+      note: expect.stringContaining("none links back to the official X account or website domain"),
+    }));
+    // The disclosure names what the search DID see, so "unresolved" reads as
+    // an investigator's finding instead of a shrug.
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      note: expect.stringContaining("under a matching name"),
     }));
   });
 

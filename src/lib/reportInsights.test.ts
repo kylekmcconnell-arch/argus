@@ -60,6 +60,19 @@ describe("deriveNoticedSignals", () => {
     })).toEqual([]);
   });
 
+  it("treats long official-account silence as a leading flag even with no token bound", () => {
+    const [signal] = deriveNoticedSignals({ daysSinceLastPost: 294 });
+    expect(signal).toMatchObject({ id: "account-quiet", severity: "alert" });
+    expect(signal.headline).toBe("The official account has been silent for 294 days");
+    expect(signal.detail).toContain("warning on its own");
+
+    expect(deriveNoticedSignals({ daysSinceLastPost: 45 })).toEqual([]);
+    expect(deriveNoticedSignals({ daysSinceLastPost: 45, volume24hUsd: 200_000 })[0]).toMatchObject({
+      id: "account-quiet",
+      severity: "watch",
+    });
+  });
+
   it("ranks alerts ahead of watches and notes", () => {
     const signals = deriveNoticedSignals({
       athDrawdownPct: -94,
