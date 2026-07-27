@@ -17871,6 +17871,10 @@ async function collectSiteDeclaredToken(ctx, fetchImpl = fetch) {
   const info = isRecord3(best.info) ? best.info : {};
   const priceUsd = finiteNumber(best.priceUsd);
   const liquidityUsd = isRecord3(best.liquidity) ? finiteNumber(best.liquidity.usd) : void 0;
+  const marketCapUsd = finiteNumber(best.marketCap);
+  const fdvUsd = finiteNumber(best.fdv);
+  const volume24hUsd = isRecord3(best.volume) ? finiteNumber(best.volume.h24) : void 0;
+  const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: void 0, attempts: 0 };
   return {
     sourceUrl: scope.canonicalUrl,
     snapshot: {
@@ -17884,9 +17888,13 @@ async function collectSiteDeclaredToken(ctx, fetchImpl = fetch) {
       homepage: scope.canonicalUrl,
       sourceUrl: scope.canonicalUrl,
       capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      providers: ["dexscreener"],
+      providers: ["dexscreener", ...historyResult.history ? ["geckoterminal"] : []],
       ...priceUsd !== void 0 ? { priceUsd } : {},
       ...liquidityUsd !== void 0 ? { liquidityUsd } : {},
+      ...marketCapUsd !== void 0 ? { marketCapUsd } : {},
+      ...fdvUsd !== void 0 ? { fdvUsd } : {},
+      ...volume24hUsd !== void 0 ? { volume24hUsd } : {},
+      ...historyResult.history ? { history: historyResult.history } : {},
       ...cleanText(info.imageUrl) ? { imageUrl: cleanText(info.imageUrl) } : {},
       ...pairAddress ? { pairAddress } : {}
     }

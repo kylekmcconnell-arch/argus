@@ -622,6 +622,14 @@ async function collectSiteDeclaredToken(
   const info = isRecord(best.info) ? best.info as JsonRecord : {};
   const priceUsd = finiteNumber(best.priceUsd);
   const liquidityUsd = isRecord(best.liquidity) ? finiteNumber(best.liquidity.usd) : undefined;
+  // The same DexScreener row already carries the market figures; dropping them
+  // left the report saying "Not captured" beside a token it had just bound.
+  const marketCapUsd = finiteNumber(best.marketCap);
+  const fdvUsd = finiteNumber(best.fdv);
+  const volume24hUsd = isRecord(best.volume) ? finiteNumber(best.volume.h24) : undefined;
+  // Freeze the price series so the saved report renders its own chart rather
+  // than depending on a live refresh, exactly as the other binding paths do.
+  const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: undefined, attempts: 0 };
   return {
     sourceUrl: scope.canonicalUrl,
     snapshot: {
@@ -635,9 +643,13 @@ async function collectSiteDeclaredToken(
       homepage: scope.canonicalUrl,
       sourceUrl: scope.canonicalUrl,
       capturedAt: new Date().toISOString(),
-      providers: ["dexscreener"],
+      providers: ["dexscreener", ...(historyResult.history ? ["geckoterminal" as const] : [])],
       ...(priceUsd !== undefined ? { priceUsd } : {}),
       ...(liquidityUsd !== undefined ? { liquidityUsd } : {}),
+      ...(marketCapUsd !== undefined ? { marketCapUsd } : {}),
+      ...(fdvUsd !== undefined ? { fdvUsd } : {}),
+      ...(volume24hUsd !== undefined ? { volume24hUsd } : {}),
+      ...(historyResult.history ? { history: historyResult.history } : {}),
       ...(cleanText(info.imageUrl) ? { imageUrl: cleanText(info.imageUrl) } : {}),
       ...(pairAddress ? { pairAddress } : {}),
     } as ProjectTokenSnapshot,
