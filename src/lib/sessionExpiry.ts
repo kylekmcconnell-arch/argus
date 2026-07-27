@@ -43,7 +43,9 @@ export function resetSessionExpiryForTest(): void {
   listeners.clear();
 }
 
-function isArgusApiRequest(input: RequestInfo | URL, origin: string): boolean {
+type FetchTarget = Parameters<typeof fetch>[0];
+
+function isArgusApiRequest(input: FetchTarget, origin: string): boolean {
   const raw = typeof input === "string" ? input
     : input instanceof URL ? input.toString()
       : input instanceof Request ? input.url
@@ -63,7 +65,7 @@ export function installSessionExpiryWatch(target: { fetch: typeof fetch; locatio
   installed = true;
   const origin = target.location?.origin ?? "";
   const original = target.fetch.bind(target);
-  target.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  target.fetch = async (input: FetchTarget, init?: RequestInit): Promise<Response> => {
     const response = await original(input, init);
     // Read only. The caller receives the untouched response either way.
     if (response.status === 401 && isArgusApiRequest(input, origin)) markSessionExpired();
