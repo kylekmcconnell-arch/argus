@@ -19042,6 +19042,24 @@ var GOPLUS_UNSORTED_HOLDER_CHAINS = /* @__PURE__ */ new Set(["robinhood"]);
 var BLOCKSCOUT_API = {
   robinhood: "https://robinhoodchain.blockscout.com"
 };
+async function blockscoutContractSource(chain, address, fetchImpl = fetch) {
+  const base = BLOCKSCOUT_API[chain];
+  if (!base) return null;
+  try {
+    const response = await fetchImpl(`${base}/api/v2/smart-contracts/${address}`, { signal: AbortSignal.timeout(9e3) });
+    if (!response.ok) return null;
+    const body = await response.json();
+    const sourceCode = typeof body?.source_code === "string" ? body.source_code : "";
+    if (!sourceCode) return null;
+    return {
+      name: typeof body?.name === "string" ? body.name : null,
+      isVerified: body?.is_verified === true,
+      sourceCode: sourceCode.slice(0, 4e5)
+    };
+  } catch {
+    return null;
+  }
+}
 async function blockscoutHolders(chain, address, fetchImpl = fetch) {
   const base = BLOCKSCOUT_API[chain];
   if (!base) return null;
@@ -22336,6 +22354,65 @@ async function fetchPriceHistory(address, chain, pairAddress) {
   return null;
 }
 
+// src/token/scannerEvasion.ts
+var DETECTOR_PATTERNS = [
+  [/\bgmgn\b/i, "GMGN"],
+  [/\bhoneypot\.is\b/i, "honeypot.is"],
+  [/\btoken\s*sniffer\b/i, "TokenSniffer"],
+  [/\bgo\s*plus\b/i, "GoPlus"],
+  [/\bquick\s*intel\b/i, "QuickIntel"],
+  [/\bde\.fi\b|\bdefi\s*scanner\b/i, "De.Fi scanner"],
+  [/\bdex\s*tools\b/i, "DEXTools"],
+  [/\brug\s*(?:check|checker|screen)s?\b/i, "rug checker"],
+  [/\bhoneypot\b/i, "honeypot detection"],
+  [/\btrade\s*restriction\b/i, "trade-restriction detection"],
+  [/\bscanner?s?\b|\bdetector\b|\bbot\s*checks?\b/i, "automated scanners"]
+];
+var EVASION_INTENT = [
+  /\b(?:stop|stops|stopped|prevent|prevents|avoid|avoids|bypass|bypasses|evade|evades|dodge|defeat|suppress)\b/i,
+  /\bso\s+(?:it|they|we)\s+(?:do(?:es)?n'?t|won'?t|will\s+not|no\s+longer)\b/i,
+  /\b(?:not|never|no\s+longer)\s+(?:get\s+)?(?:flag\w*|detect\w*|mark\w*|catch|caught|picked\s+up)\b/i,
+  /\b(?:hide|hides|hidden|mask|masks|disguise)\b/i
+];
+var FLAGGING_VERB = /\b(?:flag|flags|flagged|flagging|detect|detects|detected|detection|mark|marks|marked|trigger|triggers|caught|catch|report|reports|classif\w*)\b/i;
+var COMMENT = /\/\/[^\n\r]{4,400}|\/\*[\s\S]{4,1200}?\*\//g;
+function cleanComment(raw) {
+  return raw.replace(/^\s*\/\*+/, "").replace(/\*+\/\s*$/, "").replace(/^\s*\/\/+/gm, "").replace(/^\s*\*+/gm, "").replace(/\s+/g, " ").trim();
+}
+function sourceComments(source2) {
+  const out = [];
+  for (const match of source2.matchAll(COMMENT)) {
+    const text2 = cleanComment(match[0]);
+    if (text2.length < 12) continue;
+    if (/^SPDX-License-Identifier/i.test(text2)) continue;
+    out.push(text2);
+  }
+  return out;
+}
+function detectScannerEvasion(source2) {
+  if (!source2 || typeof source2 !== "string") return [];
+  const findings = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const comment of sourceComments(source2)) {
+    const detectors = [...new Set(
+      DETECTOR_PATTERNS.filter(([pattern]) => pattern.test(comment)).map(([, name]) => name)
+    )];
+    if (!detectors.length) continue;
+    if (!EVASION_INTENT.some((pattern) => pattern.test(comment))) continue;
+    if (!FLAGGING_VERB.test(comment)) continue;
+    const key = comment.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    findings.push({ quote: comment.slice(0, 300), detectors });
+    if (findings.length >= 3) break;
+  }
+  return findings;
+}
+function scannerEvasionClaim(finding) {
+  const surfaces = finding.detectors.slice(0, 2).join(" and ");
+  return `The verified contract source documents defeating ${surfaces}: "${finding.quote}" A contract tuned until safety scanners go quiet passes those checks by construction, so a clean contract result here is weaker evidence than usual.`;
+}
+
 // src/token/audit.ts
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
 async function screenDeployerRisk(address, fetchImpl = fetch) {
@@ -22594,21 +22671,26 @@ async function runTokenAudit(input, emit, opts) {
   let gpEvm = null;
   let sol = null;
   let explorerHolders = null;
+  let contractSource = null;
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders\u2026", tone: "neutral" });
     sol = await goplusSolana(address);
     safety = solanaSafety(sol);
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders\u2026" : "GoPlus + honeypot.is buy/sell simulation\u2026", tone: "neutral" });
-    const [gp, sim, explorer] = await Promise.all([
+    const [gp, sim, explorer, source2] = await Promise.all([
       goplus(gpChain, address),
       opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address),
       // Where GoPlus cannot order holders, the chain's own explorer is the
       // only correct distribution source. Runs in parallel: no added latency.
-      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address) : Promise.resolve(null)
+      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address) : Promise.resolve(null),
+      // What the deployer wrote about their own contract. Free, and the only
+      // place an intent to defeat safety scanners is ever stated outright.
+      blockscoutContractSource(chain, address)
     ]);
     gpEvm = gp;
     explorerHolders = explorer;
+    contractSource = source2;
     safety = evmSafety(gp, sim);
     if (explorerHolders?.length) {
       safety = { ...safety, topHolderPct: explorerHolders[0].percent };
@@ -22663,6 +22745,10 @@ async function runTokenAudit(input, emit, opts) {
       }
     }
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
+    for (const evasion of detectScannerEvasion(contractSource?.sourceCode)) {
+      findings.push({ claim: scannerEvasionClaim(evasion), tone: "bad", source: "contract source" });
+      caps.push([55, "documented_scanner_evasion"]);
+    }
     if (s.serialScammerCreator) {
       caps.push([25, "serial_scammer_creator"]);
       findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before. This is a serial-scammer signal.", tone: "bad", source: "goplus" });
