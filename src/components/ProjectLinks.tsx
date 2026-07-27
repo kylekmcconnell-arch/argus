@@ -1,5 +1,5 @@
-// A compact row of the project's official links — website, socials, and the
-// contract address — for the TOP of a report. Shared across the token,
+// A compact row of the project's official links (website, socials, and the
+// contract address) for the TOP of a report. Shared across the token,
 // investigation, and site reports so the same links show in the same place
 // everywhere. Classifies each URL to a clean platform label, dedupes (one X,
 // one Telegram, one per website host), and orders website-first.
@@ -84,7 +84,7 @@ export function ProjectLinks({
   if (xHandle) push(`https://x.com/${xHandle.replace(/^@/, "")}`);
   for (const l of links ?? []) push(l.url);
 
-  // Dedupe by label — one chip per platform (and one per distinct website host).
+  // Dedupe by label: one chip per platform (and one per distinct website host).
   const seen = new Set<string>();
   const items = urls
     .map((url) => ({ url, ...classify(url) }))
