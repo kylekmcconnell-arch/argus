@@ -17675,6 +17675,20 @@ function dexIdentity(ctx, row) {
     officialX: `@${exactHandle}`
   };
 }
+function siteContractCandidates(html, limit = 10) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const match of html.matchAll(/0x[a-fA-F0-9]{40}/g)) {
+    const address = match[0];
+    const key = address.toLowerCase();
+    if (/^0x0{40}$/i.test(address) || /^0x0{38}dead$/i.test(address)) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(address);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
 async function dexSearch(query) {
   let response;
   try {
@@ -17806,6 +17820,75 @@ async function collectDexProjectToken(ctx, query) {
       ...candidate.liquidityUsd !== void 0 ? { liquidityUsd: candidate.liquidityUsd } : {},
       pairAddress: candidate.pairAddress,
       ...history ? { history } : {}
+    }
+  };
+}
+async function collectSiteDeclaredToken(ctx, fetchImpl = fetch) {
+  const scope = canonicalOfficialWebsite(ctx.evidence.profile.website);
+  if (!scope) return null;
+  let html;
+  try {
+    const response = await fetchImpl(scope.canonicalUrl, {
+      headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(9e3)
+    });
+    if (!response.ok) {
+      recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
+      return null;
+    }
+    html = (await response.text()).slice(0, 4e5);
+  } catch {
+    recordCall("site-fetch", "token-declaration", 0, "transport_error", "failed");
+    return null;
+  }
+  const candidates = siteContractCandidates(html);
+  if (!candidates.length) {
+    recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
+    return null;
+  }
+  const resolved = [];
+  for (const address of candidates.slice(0, 6)) {
+    const pairs = await dexPairs(address);
+    if (pairs && pairs.length) resolved.push({ address, pairs });
+  }
+  if (resolved.length !== 1) {
+    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
+    return null;
+  }
+  const [only] = resolved;
+  const best = [...only.pairs].sort((left, right) => {
+    const l = isRecord3(left.liquidity) ? finiteNumber(left.liquidity.usd) ?? 0 : 0;
+    const r = isRecord3(right.liquidity) ? finiteNumber(right.liquidity.usd) ?? 0 : 0;
+    return r - l;
+  })[0];
+  const base = isRecord3(best.baseToken) ? best.baseToken : {};
+  const name = cleanText(base.name) || cleanText(ctx.evidence.profile.display_name);
+  const symbol = cleanText(base.symbol);
+  const chain = cleanText(best.chainId);
+  const pairAddress = cleanText(best.pairAddress);
+  if (!symbol || !chain) return null;
+  const info = isRecord3(best.info) ? best.info : {};
+  const priceUsd = finiteNumber(best.priceUsd);
+  const liquidityUsd = isRecord3(best.liquidity) ? finiteNumber(best.liquidity.usd) : void 0;
+  return {
+    sourceUrl: scope.canonicalUrl,
+    snapshot: {
+      verified: true,
+      verification: "official_domain",
+      name,
+      symbol,
+      rank: null,
+      address: only.address,
+      chain,
+      homepage: scope.canonicalUrl,
+      sourceUrl: scope.canonicalUrl,
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      providers: ["dexscreener"],
+      ...priceUsd !== void 0 ? { priceUsd } : {},
+      ...liquidityUsd !== void 0 ? { liquidityUsd } : {},
+      ...cleanText(info.imageUrl) ? { imageUrl: cleanText(info.imageUrl) } : {},
+      ...pairAddress ? { pairAddress } : {}
     }
   };
 }
@@ -18006,6 +18089,25 @@ async function collectProjectTokenIdentity(ctx) {
         tone: "good"
       });
       return { state: "executed", detail: dexFallback.detail, attempts };
+    }
+    const declared = await collectSiteDeclaredToken(ctx);
+    if (declared) {
+      ctx.evidence.projectToken = declared.snapshot;
+      ctx.recordCheck?.({
+        id: "project-token-identity",
+        status: "confirmed",
+        note: `$${declared.snapshot.symbol} is published as this project's contract on its own verified site (${declared.sourceUrl}) and resolves to a tradeable ${declared.snapshot.chain} token`,
+        provider: "site-fetch/dexscreener",
+        sourceCount: 2
+      });
+      ctx.emit({
+        phase: "P0 \xB7 Routing",
+        label: `Official token declared on the project site \xB7 $${declared.snapshot.symbol}`,
+        detail: `${declared.sourceUrl} publishes ${declared.snapshot.address} as its contract, and that address trades on ${declared.snapshot.chain}. First-party declaration outranks a registry's self-reported links.`,
+        source: "site-fetch / dexscreener",
+        tone: "good"
+      });
+      return { state: "executed", detail: `bound $${declared.snapshot.symbol} from the project's own site`, attempts: attempts + 1 };
     }
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
     if (!search || coinDetailsUnavailable || dexFallback.state === "failed") {

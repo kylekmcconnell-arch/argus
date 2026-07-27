@@ -370,6 +370,36 @@ function dexIdentity(
   };
 }
 
+/**
+ * Contract addresses a project publishes on its OWN verified site.
+ *
+ * Token binding is registry-first: it searches CoinGecko and DexScreener by
+ * name and then asks whether that registry record points back at the project.
+ * DexScreener socials are self-submitted, so a team that never filled them in
+ * can never bind, and the strongest evidence in existence stays invisible:
+ * the project stating its contract address on its own domain. @clutchmarkets
+ * printed the $STONKBROKER address on stonkbrokers.cash and ARGUS recorded no
+ * token at all.
+ *
+ * Addresses are extracted verbatim; which one is actually a token is settled
+ * on-chain afterwards, never by guessing from page position.
+ */
+export function siteContractCandidates(html: string, limit = 10): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/0x[a-fA-F0-9]{40}/g)) {
+    const address = match[0];
+    const key = address.toLowerCase();
+    // The zero address and obvious burn sinks are never a project's token.
+    if (/^0x0{40}$/i.test(address) || /^0x0{38}dead$/i.test(address)) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(address);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 async function dexSearch(query: string): Promise<JsonRecord[] | null> {
   let response: Response;
   try {
@@ -527,6 +557,90 @@ async function collectDexProjectToken(
       pairAddress: candidate.pairAddress,
       ...(history ? { history } : {}),
     },
+  };
+}
+
+/**
+ * Bind the token a project publishes on its OWN verified domain.
+ *
+ * This is first-party evidence and outranks anything a registry self-reports:
+ * the project is stating, on the domain ARGUS already verified belongs to it,
+ * which contract is theirs. Every candidate on the page is resolved on-chain
+ * and only a single tradeable token may survive, so a page listing a treasury
+ * beside its token binds the token, and a page listing several tradeable
+ * tokens binds nothing rather than guessing.
+ */
+async function collectSiteDeclaredToken(
+  ctx: CollectContext,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ snapshot: ProjectTokenSnapshot; sourceUrl: string } | null> {
+  const scope = canonicalOfficialWebsite(ctx.evidence.profile.website);
+  if (!scope) return null;
+  let html: string;
+  try {
+    const response = await fetchImpl(scope.canonicalUrl, {
+      headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(9_000),
+    });
+    if (!response.ok) {
+      recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
+      return null;
+    }
+    html = (await response.text()).slice(0, 400_000);
+  } catch {
+    recordCall("site-fetch", "token-declaration", 0, "transport_error", "failed");
+    return null;
+  }
+  const candidates = siteContractCandidates(html);
+  if (!candidates.length) {
+    recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
+    return null;
+  }
+  const resolved: Array<{ address: string; pairs: JsonRecord[] }> = [];
+  for (const address of candidates.slice(0, 6)) {
+    const pairs = await dexPairs(address);
+    if (pairs && pairs.length) resolved.push({ address, pairs });
+  }
+  if (resolved.length !== 1) {
+    recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
+    return null;
+  }
+  const [only] = resolved;
+  // Deepest pool represents the token; a dust pair must not name the chain.
+  const best = [...only.pairs].sort((left, right) => {
+    const l = isRecord(left.liquidity) ? finiteNumber(left.liquidity.usd) ?? 0 : 0;
+    const r = isRecord(right.liquidity) ? finiteNumber(right.liquidity.usd) ?? 0 : 0;
+    return r - l;
+  })[0];
+  const base = isRecord(best.baseToken) ? best.baseToken as JsonRecord : {};
+  const name = cleanText(base.name) || cleanText(ctx.evidence.profile.display_name);
+  const symbol = cleanText(base.symbol);
+  const chain = cleanText(best.chainId);
+  const pairAddress = cleanText(best.pairAddress);
+  if (!symbol || !chain) return null;
+  const info = isRecord(best.info) ? best.info as JsonRecord : {};
+  const priceUsd = finiteNumber(best.priceUsd);
+  const liquidityUsd = isRecord(best.liquidity) ? finiteNumber(best.liquidity.usd) : undefined;
+  return {
+    sourceUrl: scope.canonicalUrl,
+    snapshot: {
+      verified: true,
+      verification: "official_domain",
+      name,
+      symbol,
+      rank: null,
+      address: only.address,
+      chain,
+      homepage: scope.canonicalUrl,
+      sourceUrl: scope.canonicalUrl,
+      capturedAt: new Date().toISOString(),
+      providers: ["dexscreener"],
+      ...(priceUsd !== undefined ? { priceUsd } : {}),
+      ...(liquidityUsd !== undefined ? { liquidityUsd } : {}),
+      ...(cleanText(info.imageUrl) ? { imageUrl: cleanText(info.imageUrl) } : {}),
+      ...(pairAddress ? { pairAddress } : {}),
+    } as ProjectTokenSnapshot,
   };
 }
 
@@ -749,6 +863,29 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
         tone: "good",
       });
       return { state: "executed", detail: dexFallback.detail, attempts };
+    }
+
+    // Last tier before an assessed null: the project's own domain. A registry
+    // that never got the project's socials cannot speak for it, but the
+    // project's own site can, and it is the stronger evidence of the two.
+    const declared = await collectSiteDeclaredToken(ctx);
+    if (declared) {
+      ctx.evidence.projectToken = declared.snapshot;
+      ctx.recordCheck?.({
+        id: "project-token-identity",
+        status: "confirmed",
+        note: `$${declared.snapshot.symbol} is published as this project's contract on its own verified site (${declared.sourceUrl}) and resolves to a tradeable ${declared.snapshot.chain} token`,
+        provider: "site-fetch/dexscreener",
+        sourceCount: 2,
+      });
+      ctx.emit({
+        phase: "P0 · Routing",
+        label: `Official token declared on the project site · $${declared.snapshot.symbol}`,
+        detail: `${declared.sourceUrl} publishes ${declared.snapshot.address} as its contract, and that address trades on ${declared.snapshot.chain}. First-party declaration outranks a registry's self-reported links.`,
+        source: "site-fetch / dexscreener",
+        tone: "good",
+      });
+      return { state: "executed", detail: `bound $${declared.snapshot.symbol} from the project's own site`, attempts: attempts + 1 };
     }
 
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);

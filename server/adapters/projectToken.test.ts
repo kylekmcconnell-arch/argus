@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import { getCost, withCostLedger } from "../cost";
 import type { CollectContext } from "./types";
-import { collectProjectTokenIdentity } from "./projectToken";
+import { collectProjectTokenIdentity, siteContractCandidates } from "./projectToken";
 
 const SOLANA_TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const OTHER_TOKEN = "So11111111111111111111111111111111111111112";
@@ -419,5 +419,30 @@ describe("verified project-token collection", () => {
     });
     expect(evidence.projectToken).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("token declared on the project's own site", () => {
+  it("extracts every distinct address and drops burn sinks", () => {
+    // The live stonkbrokers.cash shape: a vault address linked to the
+    // explorer, and the token contract behind a copy button.
+    const html = `<a href="https://robinhoodchain.blockscout.com/address/0x038a7f4e4e89448ad74e044337c9ac25c11e726b">vault</a>
+      <button>0xe934e36a439c94017b64a3fece66af12099abf50</button>
+      <span>0x0000000000000000000000000000000000000000</span>
+      <span>0xE934E36A439C94017B64A3FECE66AF12099ABF50</span>`;
+    expect(siteContractCandidates(html)).toEqual([
+      "0x038a7f4e4e89448ad74e044337c9ac25c11e726b",
+      "0xe934e36a439c94017b64a3fece66af12099abf50",
+    ]);
+  });
+
+  it("returns nothing when the page states no address", () => {
+    expect(siteContractCandidates("<p>no contracts here</p>")).toEqual([]);
+  });
+
+  it("caps how many candidates it will resolve", () => {
+    const many = Array.from({ length: 20 }, (_, i) =>
+      `0x${String(i).padStart(2, "0")}${"a".repeat(38)}`).join(" ");
+    expect(siteContractCandidates(many).length).toBeLessThanOrEqual(10);
   });
 });
