@@ -182,7 +182,7 @@ function normalizeSections(input?: string[]): EnrichmentSection[] {
 const TERMINAL_OK = "COMPLETED";
 const TERMINAL_FAIL = new Set(["FAILED", "BLOCKED", "TIMED_OUT", "STOPPED"]);
 
-type RunOutcome = { ok: true; data: unknown } | { ok: false; note: string };
+type RunOutcome = { ok: true; data: unknown } | { ok: false; note: string; noRecord?: boolean };
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -219,6 +219,9 @@ async function startRun(
   } catch {
     return { ok: false, note: "Monid was unavailable." };
   }
+  // A 404 is an answer (the provider has no record for this lookup), not an
+  // outage; it must never render as a failed source check.
+  if (res.status === 404) return { ok: false, noRecord: true, note: "no record found (no_record_404)" };
   if (!res.ok) return { ok: false, note: `Monid request failed (http_${res.status}).` };
   let run: any;
   try {
@@ -674,7 +677,7 @@ export async function collectCompanyEnrichment(
       fetcher,
     );
     if (!search.ok) {
-      recordCall("monid", "company/search", 0, `search · ${search.note}`, "failed");
+      recordCall("monid", "company/search", 0, `search · ${search.note}`, search.noRecord ? "succeeded" : "failed");
       logCompanyResolution("provider_error", {
         stage: "search",
         queryDomain,
@@ -753,7 +756,7 @@ export async function collectCompanyEnrichment(
   );
   const sectionMeta = `enrichment · ${sections.length} section(s) · ${uuid}`;
   if (!enrichment.ok) {
-    recordCall("monid", "company/enrichment", 0, `${sectionMeta} · ${enrichment.note}`, "failed");
+    recordCall("monid", "company/enrichment", 0, `${sectionMeta} · ${enrichment.note}`, enrichment.noRecord ? "succeeded" : "failed");
     logCompanyResolution("provider_error", {
       stage: "enrichment",
       queryDomain: decision.requestedDomain,
@@ -882,6 +885,9 @@ async function startRunFor(
   } catch {
     return { ok: false, note: "Monid was unavailable." };
   }
+  // A 404 is an answer (the provider has no record for this lookup), not an
+  // outage; it must never render as a failed source check.
+  if (res.status === 404) return { ok: false, noRecord: true, note: "no record found (no_record_404)" };
   if (!res.ok) return { ok: false, note: `Monid request failed (http_${res.status}).` };
   let run: any;
   try {
@@ -931,7 +937,11 @@ export async function enrichPersonViaMonid(
     startRunFor("pdl", key, "/v5/person/enrich", { body }, fetcher),
     timeout,
   ]);
-  if (!outcome.ok) return { outcome: "error", note: outcome.note };
+  if (!outcome.ok) {
+    return outcome.noRecord
+      ? { outcome: "no_match" }
+      : { outcome: "error", note: outcome.note };
+  }
   // For a match, startRunFor unwrapped run.output.data (the person record). A
   // no-match unwraps to the bare {status:404,...} envelope, which has no
   // full_name — the guard below classifies it as no_match, never a person.
@@ -1045,7 +1055,7 @@ export async function collectCompanyNews(
   } else {
     const search = await startRun(key, "/v1/company/search", { queryParams: { query } }, fetcher);
     if (!search.ok) {
-      recordCall("monid", "company/search", 0, `news search · ${search.note}`, "failed");
+      recordCall("monid", "company/search", 0, `news search · ${search.note}`, search.noRecord ? "succeeded" : "failed");
       return { available: false, reason: "unavailable", note: search.note };
     }
     const decision = pickBestMatch(companyList(search.data), query, {});
@@ -1069,7 +1079,7 @@ export async function collectCompanyNews(
   const news = await startRun(key, "/v1/news", { queryParams }, fetcher);
   const meta = `news · ${companyId}`;
   if (!news.ok) {
-    recordCall("monid", "akta/news", 0, `${meta} · ${news.note}`, "failed");
+    recordCall("monid", "akta/news", 0, `${meta} · ${news.note}`, news.noRecord ? "succeeded" : "failed");
     return { available: false, reason: "unavailable", note: news.note };
   }
 
@@ -1181,7 +1191,7 @@ export async function collectTokenContractRisk(
   const run = await startRunFor("api.strale.io", key, "/x402/solutions/web3-pre-trade", { body }, fetcher);
   const meta = `web3-pre-trade · ${tokenId}`;
   if (!run.ok) {
-    recordCall("monid", "strale/web3-pre-trade", 0, `${meta} · ${run.note}`, "failed");
+    recordCall("monid", "strale/web3-pre-trade", 0, `${meta} · ${run.note}`, run.noRecord ? "succeeded" : "failed");
     return { available: false, reason: "unavailable", note: run.note };
   }
   recordCall("monid", "strale/web3-pre-trade", 0.14256, meta, "succeeded");

@@ -69,18 +69,44 @@ describe("OutcomeDeltaStrip", () => {
 });
 
 describe("ProviderFailureNotice", () => {
-  it("says plainly which provider calls ended in failure without asserting fallback state", () => {
+  it("alarms on rejected checks and names the providers plainly", () => {
     act(() => {
       root.render(<ProviderFailureNotice failures={[
         { provider: "claude", op: "record_verdict", failed: 2, meta: "http_400 credit balance too low" },
         { provider: "claude", op: "basic-facts-search", failed: 3 },
       ]} />);
     });
-    expect(container.textContent).toContain("2 source checks did not finish after 5 failed attempts.");
+    expect(container.textContent).toContain("2 source checks were rejected and need attention (claude).");
     expect(container.textContent).not.toContain("no fallback provider");
     expect(container.textContent).toContain("claude · record_verdict · http_400 credit balance too low");
     expect(container.textContent).toContain("This may leave part of the report unanswered");
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it("keeps no-record answers and outages in proportion instead of alarming", () => {
+    act(() => {
+      root.render(<ProviderFailureNotice failures={[
+        { provider: "github", op: "users/orbitgroup_ai", failed: 1, meta: "subscription/keyed · no_record_404" },
+        { provider: "peopledatalabs", op: "person-enrich:monid", failed: 3, meta: "monid_no record found (no_record_404)" },
+        { provider: "monid", op: "company/search", failed: 1, meta: "search · Monid request failed (http_502)." },
+      ]} />);
+    });
+    expect(container.textContent).toContain("1 source was temporarily unavailable (monid).");
+    expect(container.textContent).toContain("2 sources have no record of this subject (github, peopledatalabs).");
+    expect(container.textContent).not.toContain("rejected");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('[role="note"]')).not.toBeNull();
+  });
+
+  it("treats a no-record-only notice as an answer, not a gap", () => {
+    act(() => {
+      root.render(<ProviderFailureNotice failures={[
+        { provider: "github", op: "users/someone", failed: 1, meta: "subscription/keyed · no_record_404" },
+      ]} />);
+    });
+    expect(container.textContent).toContain("1 source has no record of this subject (github).");
+    expect(container.textContent).toContain("an answered check, not a gap");
+    expect(container.textContent).not.toContain("Run a new scan later");
   });
 
   it("renders nothing on a clean run", () => {

@@ -117,7 +117,7 @@ describe("keyless adapter attempt accounting", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response("not found", 404, "application/json")));
 
     const captured = await withCostLedger(async () => ({
-      result: await resolveForHandle("@missing-farcaster-user", "no wallet disclosed"),
+      result: await resolveForHandle("@missingfc", "no wallet disclosed"),
       cost: getCost(),
     }));
 
@@ -131,6 +131,24 @@ describe("keyless adapter attempt accounting", () => {
       status: "partial",
       meta: "http_404",
     }));
+  });
+
+  it("skips the Farcaster lookup entirely for a handle that cannot be an fname", async () => {
+    // Farcaster names are lowercase [0-9a-z-], max 16 chars: an underscore or
+    // an overlong handle would 400 on every scan (the @orbitgroup_ai case).
+    const fetchMock = vi.fn().mockResolvedValue(response("{}", 200, "application/json"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captured = await withCostLedger(async () => ({
+      result: await resolveForHandle("@orbitgroup_ai", "no wallet disclosed"),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toEqual([]);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).not.toContainEqual(
+      expect.stringContaining("api.warpcast.com"),
+    );
+    expect(captured.cost.calls).not.toContainEqual(expect.objectContaining({ op: "api.warpcast.com" }));
   });
 
   it("records wallet transport and JSON failures once per physical resolver call", async () => {

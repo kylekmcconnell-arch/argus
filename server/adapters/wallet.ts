@@ -78,8 +78,13 @@ export interface ResolvedWallet { address: string; chain: string; source: string
 
 // Farcaster: the handle's on-chain verified addresses (assumes the FC username
 // matches the X handle, common for crypto-natives; labeled so a human can judge).
+// Farcaster fnames are lowercase, 1-16 chars of [0-9a-z-]; an X handle that
+// cannot be an fname (underscores, length) would 400 on every scan, so the
+// lookup is skipped instead of booking a provider failure.
+const FARCASTER_NAME = /^[0-9a-z][0-9a-z-]{0,15}$/;
 async function farcasterWallets(handle: string): Promise<ResolvedWallet[]> {
-  const u = handle.replace(/^@/, "");
+  const u = handle.replace(/^@/, "").toLowerCase();
+  if (!FARCASTER_NAME.test(u)) return [];
   const ud = await getJson(`https://api.warpcast.com/v2/user-by-username?username=${encodeURIComponent(u)}`);
   const fid = ud?.result?.user?.fid;
   if (!fid) return [];

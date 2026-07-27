@@ -44,6 +44,12 @@ async function ghJson<T>(path: string, key: string): Promise<T | null> {
     return null;
   }
   if (!res.ok) {
+    // A 404 from a lookup is an answer (no such account or repo), not an
+    // outage; it must never render as a failed source check.
+    if (res.status === 404) {
+      recordCall("github", op, 0, `${tier} · no_record_404`, "succeeded");
+      return null;
+    }
     recordCall("github", op, 0, `${tier} · http_${res.status}`, "failed");
     return null;
   }

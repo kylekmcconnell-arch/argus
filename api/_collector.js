@@ -8545,6 +8545,7 @@ async function startRun(key, endpoint, input, fetcher) {
   } catch {
     return { ok: false, note: "Monid was unavailable." };
   }
+  if (res.status === 404) return { ok: false, noRecord: true, note: "no record found (no_record_404)" };
   if (!res.ok) return { ok: false, note: `Monid request failed (http_${res.status}).` };
   let run;
   try {
@@ -8875,7 +8876,7 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
       fetcher
     );
     if (!search.ok) {
-      recordCall("monid", "company/search", 0, `search \xB7 ${search.note}`, "failed");
+      recordCall("monid", "company/search", 0, `search \xB7 ${search.note}`, search.noRecord ? "succeeded" : "failed");
       logCompanyResolution("provider_error", {
         stage: "search",
         queryDomain,
@@ -8947,7 +8948,7 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
   );
   const sectionMeta = `enrichment \xB7 ${sections.length} section(s) \xB7 ${uuid}`;
   if (!enrichment.ok) {
-    recordCall("monid", "company/enrichment", 0, `${sectionMeta} \xB7 ${enrichment.note}`, "failed");
+    recordCall("monid", "company/enrichment", 0, `${sectionMeta} \xB7 ${enrichment.note}`, enrichment.noRecord ? "succeeded" : "failed");
     logCompanyResolution("provider_error", {
       stage: "enrichment",
       queryDomain: decision.requestedDomain,
@@ -8998,6 +8999,7 @@ async function startRunFor(provider, key, endpoint, input, fetcher) {
   } catch {
     return { ok: false, note: "Monid was unavailable." };
   }
+  if (res.status === 404) return { ok: false, noRecord: true, note: "no record found (no_record_404)" };
   if (!res.ok) return { ok: false, note: `Monid request failed (http_${res.status}).` };
   let run;
   try {
@@ -9024,7 +9026,9 @@ async function enrichPersonViaMonid(params, fetcher = fetch) {
     startRunFor("pdl", key, "/v5/person/enrich", { body }, fetcher),
     timeout
   ]);
-  if (!outcome.ok) return { outcome: "error", note: outcome.note };
+  if (!outcome.ok) {
+    return outcome.noRecord ? { outcome: "no_match" } : { outcome: "error", note: outcome.note };
+  }
   const data = outcome.data;
   if (!data || typeof data !== "object" || Array.isArray(data)) return { outcome: "no_match" };
   const record3 = data;
@@ -9268,6 +9272,10 @@ async function ghJson(path, key) {
     return null;
   }
   if (!res.ok) {
+    if (res.status === 404) {
+      recordCall("github", op, 0, `${tier} \xB7 no_record_404`, "succeeded");
+      return null;
+    }
     recordCall("github", op, 0, `${tier} \xB7 http_${res.status}`, "failed");
     return null;
   }
@@ -14826,8 +14834,10 @@ async function resolveName(name) {
   if (!a && /\.eth$/i.test(lower)) a = await ensideas(lower);
   return a ? { address: a, chain: a.startsWith("0x") ? "evm" : "solana" } : null;
 }
+var FARCASTER_NAME = /^[0-9a-z][0-9a-z-]{0,15}$/;
 async function farcasterWallets(handle) {
-  const u = handle.replace(/^@/, "");
+  const u = handle.replace(/^@/, "").toLowerCase();
+  if (!FARCASTER_NAME.test(u)) return [];
   const ud = await getJson(`https://api.warpcast.com/v2/user-by-username?username=${encodeURIComponent(u)}`);
   const fid = ud?.result?.user?.fid;
   if (!fid) return [];
