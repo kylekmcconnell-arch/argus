@@ -252,8 +252,43 @@ var GOPLUS_CHAIN = {
   cronos: "25",
   zksync: "324",
   linea: "59144",
-  scroll: "534352"
+  scroll: "534352",
+  // Robinhood Chain (Arbitrum stack, mainnet Jul 2026). GoPlus has covered it
+  // since launch; ARGUS simply never asked, which left every token on this
+  // chain with no safety data, no creator, and therefore no sanctions screen.
+  robinhood: "4663"
 };
+var GOPLUS_UNSORTED_HOLDER_CHAINS = /* @__PURE__ */ new Set(["robinhood"]);
+var BLOCKSCOUT_API = {
+  robinhood: "https://robinhoodchain.blockscout.com"
+};
+async function blockscoutHolders(chain, address, fetchImpl = fetch) {
+  const base = BLOCKSCOUT_API[chain];
+  if (!base) return null;
+  try {
+    const [tokenRes, holderRes] = await Promise.all([
+      fetchImpl(`${base}/api/v2/tokens/${address}`, { signal: AbortSignal.timeout(9e3) }),
+      fetchImpl(`${base}/api/v2/tokens/${address}/holders`, { signal: AbortSignal.timeout(9e3) })
+    ]);
+    if (!tokenRes.ok || !holderRes.ok) return null;
+    const meta = await tokenRes.json();
+    const supply = Number(meta?.total_supply ?? 0);
+    if (!Number.isFinite(supply) || supply <= 0) return null;
+    const body = await holderRes.json();
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const rows = [];
+    for (const item of items) {
+      const value = Number(item?.value ?? 0);
+      const hash = item?.address?.hash;
+      if (!hash || !Number.isFinite(value) || value <= 0) continue;
+      rows.push({ address: hash, percent: value / supply * 100, isContract: item.address?.is_contract === true });
+      if (rows.length >= 10) break;
+    }
+    return rows;
+  } catch {
+    return null;
+  }
+}
 async function dexByTokenResult(address) {
   try {
     const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
@@ -665,15 +700,28 @@ async function runTokenAudit(input, emit, opts) {
   let safety = emptySafety();
   let gpEvm = null;
   let sol = null;
+  let explorerHolders = null;
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders\u2026", tone: "neutral" });
     sol = await goplusSolana(address);
     safety = solanaSafety(sol);
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders\u2026" : "GoPlus + honeypot.is buy/sell simulation\u2026", tone: "neutral" });
-    const [gp, sim] = await Promise.all([goplus(gpChain, address), opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address)]);
+    const [gp, sim, explorer] = await Promise.all([
+      goplus(gpChain, address),
+      opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address),
+      // Where GoPlus cannot order holders, the chain's own explorer is the
+      // only correct distribution source. Runs in parallel: no added latency.
+      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address) : Promise.resolve(null)
+    ]);
     gpEvm = gp;
+    explorerHolders = explorer;
     safety = evmSafety(gp, sim);
+    if (explorerHolders?.length) {
+      safety = { ...safety, topHolderPct: explorerHolders[0].percent };
+    } else if (GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain)) {
+      safety = { ...safety, topHolderPct: null };
+    }
   } else {
     step({ phase: "Contract", label: "Limited", detail: `On-chain safety not available for ${chain} keyless; scored on market data only.`, tone: "warn" });
   }
@@ -776,7 +824,12 @@ async function runTokenAudit(input, emit, opts) {
       }
     }
   }
-  const rawHolders = chain === "solana" ? sol?.holders ?? [] : gpEvm?.holders ?? [];
+  const evmHolders = explorerHolders ? explorerHolders.map((holder) => ({
+    address: holder.address,
+    percent: String(holder.percent / 100),
+    is_contract: holder.isContract ? 1 : 0
+  })) : GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? [] : gpEvm?.holders ?? [];
+  const rawHolders = chain === "solana" ? sol?.holders ?? [] : evmHolders;
   const eoaHolders = rawHolders.filter(
     (h) => !(h.is_contract === 1 || h.is_contract === "1") && h.is_locked !== 1 && !/lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(h.tag || "")
   );

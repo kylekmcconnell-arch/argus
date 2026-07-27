@@ -12,7 +12,8 @@ import { tokenEntityKey, walletEntityKey } from "../graph/network";
 import { fetchPriceHistory, type PriceHistory } from "../lib/priceHistory";
 import {
   dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
-  type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo,
+  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders,
+  type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo, type ExplorerHolder,
 } from "./sources";
 
 export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string }
@@ -432,15 +433,30 @@ async function runTokenAudit(
   let safety = emptySafety();
   let gpEvm: GoPlusSecurity | null = null;
   let sol: SolanaSecurity | null = null;
+  let explorerHolders: ExplorerHolder[] | null = null;
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders…", tone: "neutral" });
     sol = await goplusSolana(address);
     safety = solanaSafety(sol);
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders…" : "GoPlus + honeypot.is buy/sell simulation…", tone: "neutral" });
-    const [gp, sim] = await Promise.all([goplus(gpChain, address), opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address)]);
+    const [gp, sim, explorer] = await Promise.all([
+      goplus(gpChain, address),
+      opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address),
+      // Where GoPlus cannot order holders, the chain's own explorer is the
+      // only correct distribution source. Runs in parallel: no added latency.
+      GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? blockscoutHolders(chain, address) : Promise.resolve(null),
+    ]);
     gpEvm = gp;
+    explorerHolders = explorer;
     safety = evmSafety(gp, sim);
+    // The largest-holder figure must come from the ordered source, and must go
+    // silent rather than report an unordered sample as if it were measured.
+    if (explorerHolders?.length) {
+      safety = { ...safety, topHolderPct: explorerHolders[0].percent };
+    } else if (GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain)) {
+      safety = { ...safety, topHolderPct: null };
+    }
   } else {
     step({ phase: "Contract", label: "Limited", detail: `On-chain safety not available for ${chain} keyless; scored on market data only.`, tone: "warn" });
   }
@@ -583,7 +599,17 @@ async function runTokenAudit(
   // ---- insider / bundle-snipe concentration ----
   // Non-contract, non-locked wallets holding a large combined share are the
   // signature of a bundled launch or a coordinated early snipe.
-  const rawHolders = (chain === "solana" ? sol?.holders ?? [] : gpEvm?.holders ?? []) as Array<{ address?: string; account?: string; percent?: string; is_contract?: number | string; is_locked?: number; tag?: string }>;
+  // On a chain whose GoPlus holder order is untrusted, an explorer list is the
+  // only acceptable input; with no explorer result the distribution stays empty
+  // rather than falling back to a sample that would understate concentration.
+  const evmHolders = explorerHolders
+    ? explorerHolders.map((holder) => ({
+        address: holder.address,
+        percent: String(holder.percent / 100),
+        is_contract: holder.isContract ? 1 : 0,
+      }))
+    : GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? [] : gpEvm?.holders ?? [];
+  const rawHolders = (chain === "solana" ? sol?.holders ?? [] : evmHolders) as Array<{ address?: string; account?: string; percent?: string; is_contract?: number | string; is_locked?: number; tag?: string }>;
   const eoaHolders = rawHolders.filter(
     (h) => !(h.is_contract === 1 || h.is_contract === "1") && h.is_locked !== 1 && !/lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(h.tag || ""),
   );

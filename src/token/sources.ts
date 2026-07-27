@@ -39,7 +39,64 @@ export const GOPLUS_CHAIN: Record<string, string> = {
   zksync: "324",
   linea: "59144",
   scroll: "534352",
+  // Robinhood Chain (Arbitrum stack, mainnet Jul 2026). GoPlus has covered it
+  // since launch; ARGUS simply never asked, which left every token on this
+  // chain with no safety data, no creator, and therefore no sanctions screen.
+  robinhood: "4663",
 };
+
+/**
+ * Chains where GoPlus returns a holder sample that is NOT ordered by balance.
+ * Observed on Robinhood Chain: its ten rows all sat near 0.36% while the real
+ * top holder held 4.17%, which would publish a 12x understatement of
+ * concentration as if it were measured. Safety flags and creator_address from
+ * these chains stay trustworthy; only the holder ordering is unusable.
+ */
+export const GOPLUS_UNSORTED_HOLDER_CHAINS: ReadonlySet<string> = new Set(["robinhood"]);
+
+/** Keyless Blockscout instances, used where they are the only correct holder source. */
+const BLOCKSCOUT_API: Record<string, string> = {
+  robinhood: "https://robinhoodchain.blockscout.com",
+};
+
+export interface ExplorerHolder { address: string; percent: number; isContract?: boolean }
+
+/**
+ * Top token holders from a public Blockscout instance (keyless, CORS-open).
+ * Blockscout returns holders correctly ordered by balance, so this is the
+ * authoritative distribution on chains GoPlus cannot order.
+ */
+export async function blockscoutHolders(
+  chain: string,
+  address: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ExplorerHolder[] | null> {
+  const base = BLOCKSCOUT_API[chain];
+  if (!base) return null;
+  try {
+    const [tokenRes, holderRes] = await Promise.all([
+      fetchImpl(`${base}/api/v2/tokens/${address}`, { signal: AbortSignal.timeout(9000) }),
+      fetchImpl(`${base}/api/v2/tokens/${address}/holders`, { signal: AbortSignal.timeout(9000) }),
+    ]);
+    if (!tokenRes.ok || !holderRes.ok) return null;
+    const meta = await tokenRes.json() as { total_supply?: string };
+    const supply = Number(meta?.total_supply ?? 0);
+    if (!Number.isFinite(supply) || supply <= 0) return null;
+    const body = await holderRes.json() as { items?: Array<{ value?: string; address?: { hash?: string; is_contract?: boolean } }> };
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const rows: ExplorerHolder[] = [];
+    for (const item of items) {
+      const value = Number(item?.value ?? 0);
+      const hash = item?.address?.hash;
+      if (!hash || !Number.isFinite(value) || value <= 0) continue;
+      rows.push({ address: hash, percent: (value / supply) * 100, isContract: item.address?.is_contract === true });
+      if (rows.length >= 10) break;
+    }
+    return rows;
+  } catch {
+    return null;
+  }
+}
 
 // Trending + freshly-listed tokens, for the live Radar. Merges DexScreener's
 // boosted (trending) and latest-profile feeds, deduped.

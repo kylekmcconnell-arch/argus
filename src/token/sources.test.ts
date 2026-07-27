@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { coingeckoToken, pickPair, type DexPair } from "./sources";
+import { blockscoutHolders, coingeckoToken, pickPair, GOPLUS_CHAIN, GOPLUS_UNSORTED_HOLDER_CHAINS, type DexPair } from "./sources";
 
 const SOLANA_A = "52hneKeDvX3QMpysYXERquicq3QXxfVChqsEtYaLpump";
 const SOLANA_B = "52hNeKeDvX3QMpysYXERquicq3QXxfVChqsEtYaLpump";
@@ -52,5 +52,46 @@ describe("pickPair", () => {
           drawdownPct: -87.4,
         },
       });
+  });
+});
+
+describe("blockscoutHolders", () => {
+  const json = (body: unknown) => ({ ok: true, json: async () => body }) as Response;
+  const holderBody = (rows: Array<[string, string]>) => ({
+    items: rows.map(([hash, value]) => ({ value, address: { hash, is_contract: false } })),
+  });
+
+  it("returns real percentages ordered by balance, from the chain's own explorer", async () => {
+    // The observed $MUMU shape: GoPlus put every row near 0.36%, the explorer
+    // shows the true leader at 4.17%.
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/holders")) {
+        return json(holderBody([
+          ["0x5d25149b5710f4df0a485F075668e1649c4bb2f9", "41674763862759845422483882"],
+          ["0x9Ba5eD49FD86EE032dE2C3e7229b4E0836767C92", "23689988172362018879509934"],
+        ]));
+      }
+      return json({ total_supply: "1000000000000000000000000000" });
+    }));
+
+    const holders = await blockscoutHolders("robinhood", "0x8eC17C059f250A5c19566C3fC56EE13A343dD283");
+    expect(holders).toHaveLength(2);
+    expect(holders?.[0].address).toBe("0x5d25149b5710f4df0a485F075668e1649c4bb2f9");
+    expect(holders?.[0].percent).toBeCloseTo(4.17, 2);
+    expect(holders?.[1].percent).toBeCloseTo(2.37, 2);
+  });
+
+  it("returns null for a chain with no configured explorer, and on a failed lookup", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ total_supply: "0" })));
+    expect(await blockscoutHolders("ethereum", "0xabc")).toBeNull();
+    expect(await blockscoutHolders("robinhood", "0xabc")).toBeNull();
+  });
+
+  it("marks Robinhood Chain holder ordering as untrusted from GoPlus", () => {
+    expect(GOPLUS_UNSORTED_HOLDER_CHAINS.has("robinhood")).toBe(true);
+    expect(GOPLUS_UNSORTED_HOLDER_CHAINS.has("ethereum")).toBe(false);
+    // The chain is configured for GoPlus safety data even so.
+    expect(GOPLUS_CHAIN.robinhood).toBe("4663");
   });
 });
