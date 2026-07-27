@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, lazy, Suspense } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppErrorBoundary, isStaleChunkError } from "./AppErrorBoundary";
@@ -77,6 +77,31 @@ describe("AppErrorBoundary", () => {
     expect(reload).not.toHaveBeenCalled();
     expect(container.textContent).toContain("older ARGUS than the server");
     expect(container.textContent).toContain("Reload ARGUS");
+  });
+
+  it("catches the real mechanism: a lazy page chunk that 404s after a deploy", async () => {
+    // Not a synthetic throw. This is how the failure actually arrives: a
+    // lazy() page import rejects and surfaces through Suspense, exactly as
+    // observed in prod (InvestigationRun-DFK9jHnX.js returning 404).
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...window.location, href: "https://argus.example/", reload },
+    });
+    const StalePage = lazy(() => Promise.reject(
+      new Error("Failed to fetch dynamically imported module: https://argus.example/assets/InvestigationRun-DFK9jHnX.js"),
+    ));
+
+    await act(async () => root.render(
+      <AppErrorBoundary>
+        <Suspense fallback={<p>loading</p>}>
+          <StalePage />
+        </Suspense>
+      </AppErrorBoundary>,
+    ));
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("ARGUS updated while this tab was open");
   });
 
   it("names a genuine render failure instead of disappearing", async () => {
