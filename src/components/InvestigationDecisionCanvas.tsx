@@ -165,7 +165,7 @@ export function InvestigationDecisionCanvas({
               description={favorable
                 ? "The strongest facts and checks behind the result."
                 : "The risks and failed checks behind the result."}
-              tone={verdictTone}
+              tone={favorable ? verdictTone : "avoid"}
               items={narrativeItems("verdict", verdictItems, evidenceHref)}
               emptyCopy={favorable
                 ? "No sourced support is recorded yet. Read the open questions before using this result."
@@ -177,7 +177,7 @@ export function InvestigationDecisionCanvas({
               description={favorable
                 ? "Risks and open questions that could change the result."
                 : "Positive evidence that gives the result context."}
-              tone={favorable ? "caution" : "pass"}
+              tone={favorable ? "avoid" : "pass"}
               items={narrativeItems("counterweight", countervailingItems, evidenceHref)}
               emptyCopy={favorable
                 ? "No risk or major unanswered question is recorded in this saved report."
