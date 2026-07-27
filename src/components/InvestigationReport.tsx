@@ -1063,6 +1063,16 @@ export function InvestigationReport({
             {canShare && <CopyTldrButton base={tldrBase} mint={mintShareUrl} className="mb-0.5 ml-auto" />}
           </div>
 
+          {/* Where the project actually lives, at the top where a reader looks
+              first: official site, socials, and the contract in one click. */}
+          <ProjectLinks
+            className="mt-3"
+            website={projectDomain}
+            xHandle={projectX ?? token.cg?.twitter}
+            contractAddress={token.address}
+            links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
+          />
+
           <div className="investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
             <section className="panel investigation-hero-card flex flex-col p-5" aria-label="Risk score">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1230,13 +1240,6 @@ export function InvestigationReport({
             ) : null;
           })()}
           <ReportDisclaimer className="mt-2 max-w-3xl" />
-          {/* official website + socials */}
-          <ProjectLinks
-            className="mt-3"
-            website={projectDomain}
-            xHandle={projectX ?? token.cg?.twitter}
-            links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
-          />
           {canMutateWorkspace && (
             <div className="mt-3 flex max-w-3xl flex-wrap items-center gap-2 rounded-lg border border-line bg-panel-2/40 px-3 py-2.5">
               <span className="text-[12.5px] text-ink-dim">Get an alert when a later scan finds a change.</span>
