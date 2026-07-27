@@ -35,6 +35,7 @@ import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
 import { collectDomainRegistration, deriveLaunchWindow } from "./adapters/domainAge";
+import { checkLeaderDepartures } from "./adapters/peopledatalabs";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
@@ -3287,6 +3288,42 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     if (evidence.roles.includes(SubjectClass.PROJECT)) {
       checkTracker.record({ id: "project-backing-partners", status: "unavailable", note: detail, provider: "project-core-evidence" });
       checkTracker.record({ id: "project-transparency", status: "unavailable", note: detail, provider: "project-disclosure-collector" });
+    }
+  }
+
+  // Does the leadership this project claims still claim the project back? A
+  // team page records who was once listed; only the employment record shows
+  // who quietly stopped listing it. Each lookup is paid, so this is bounded to
+  // founders and C-level and capped at three, and it runs only when a project
+  // has both a name to match and named leaders to check.
+  if (evidence.roles.includes(SubjectClass.PROJECT) && (evidence.webTeam?.length ?? 0) > 0) {
+    const leaderCompany = evidence.projectToken?.name?.trim() || evidence.profile.display_name.trim();
+    try {
+      const departures = await checkLeaderDepartures(evidence.webTeam ?? [], leaderCompany);
+      const left = departures.filter((row) => row.state === "departed");
+      if (departures.length) {
+        evidence.leaderDepartures = departures.map((row) => ({ ...row }));
+        checkTracker.record({
+          id: "founder-company-relationships",
+          status: left.length ? "finding" : "confirmed",
+          note: left.length
+            ? left.map((row) => row.summary).join(" ")
+            : `${departures.length} named leader${departures.length === 1 ? "" : "s"} still list ${leaderCompany} as a current role`,
+          provider: "peopledatalabs",
+          sourceCount: departures.length,
+        });
+      }
+      if (left.length) {
+        emit({
+          phase: "P1 · Team",
+          label: `${left.length} named leader${left.length === 1 ? "" : "s"} no longer list this project`,
+          detail: `${left[0].summary} The licensed record can lag a live profile, so confirm on the person's own page before relying on it.`,
+          source: "peopledatalabs",
+          tone: "warn",
+        });
+      }
+    } catch (error) {
+      emit({ phase: "P1 · Team", label: "Leadership currency check failed", detail: String(error), source: "peopledatalabs", tone: "warn" });
     }
   }
 

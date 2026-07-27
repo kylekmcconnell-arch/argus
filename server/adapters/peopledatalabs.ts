@@ -17,6 +17,66 @@ const asRecord = (value: unknown): JsonRecord | null =>
 const optionalString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value : undefined;
 
+/** Founder and C-level titles only: the people whose departure changes the case. */
+const PROJECT_LEADER_ROLE = /\b(?:co-?founder|founder|chief(?:\s+\w+){0,3}\s+officer|ceo|cto|cfo|coo|cmo|president)\b/i;
+
+/** Bounded so a large roster cannot quietly multiply the bill. */
+const MAX_LEADER_LOOKUPS = 3;
+
+export interface LeaderDepartureCheck {
+  name: string;
+  role: string;
+  linkedin?: string;
+  state: "current" | "departed" | "absent";
+  summary: string;
+  ended?: string;
+}
+
+/**
+ * Does the leadership a project claims still claim the project back?
+ *
+ * A team page is a snapshot of who was once listed. Employment records carry
+ * end dates, so a founder who quietly stopped listing the company is visible
+ * in data ARGUS can buy, and no page will ever show it. Each lookup is paid
+ * (about $0.10), so this is deliberately bounded to founders and C-level and
+ * capped at three people, cheapest-signal-first: the ones whose departure
+ * actually changes the read.
+ *
+ * PDL is a licensed derivative of LinkedIn and can lag the live profile, so
+ * every result carries the person's LinkedIn URL for a human to confirm.
+ */
+export async function checkLeaderDepartures(
+  team: ReadonlyArray<{ name?: string; role?: string; linkedin?: string }>,
+  company: string,
+  enrich: typeof enrichPerson = enrichPerson,
+): Promise<LeaderDepartureCheck[]> {
+  if (!company.trim()) return [];
+  const leaders = team
+    .filter((member) => PROJECT_LEADER_ROLE.test(member.role ?? ""))
+    .filter((member) => (member.name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2)
+    .slice(0, MAX_LEADER_LOOKUPS);
+  const out: LeaderDepartureCheck[] = [];
+  for (const leader of leaders) {
+    const name = (leader.name ?? "").trim();
+    const person = await enrich({
+      name,
+      company,
+      ...(leader.linkedin ? { profile: leader.linkedin } : {}),
+    });
+    if (!person) continue;
+    const currency = employmentCurrency(person.experience, company, name);
+    out.push({
+      name,
+      role: (leader.role ?? "").trim(),
+      ...(leader.linkedin ?? person.linkedin ? { linkedin: leader.linkedin ?? person.linkedin ?? undefined } : {}),
+      state: currency.state,
+      summary: currency.summary,
+      ...(currency.end ? { ended: currency.end } : {}),
+    });
+  }
+  return out;
+}
+
 export async function enrichPerson(params: { profile?: string; name?: string; company?: string }) {
   // Prefer Monid's full-data PDL: our own direct key is on the free tier, which
   // omits the contact fields (emails/phone) that confirm an identity. Same PDL

@@ -779,6 +779,11 @@ export interface CollectedEvidence {
    * team page shows; the record states the end date and nothing about why.
    */
   employmentDepartures?: { company: string; summary: string; ended?: string }[];
+  /**
+   * Whether each named founder/C-level leader still lists this project as a
+   * current role, and the end date when they do not. Paid, bounded lookup.
+   */
+  leaderDepartures?: { name: string; role: string; linkedin?: string; state: "current" | "departed" | "absent"; summary: string; ended?: string }[];
   /** Official-domain registration record, and the launch window it brackets with the account age. */
   domainRegistration?: DomainRegistrationSnapshot;
   launchWindow?: LaunchWindowSnapshot;

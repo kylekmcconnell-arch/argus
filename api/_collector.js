@@ -8069,317 +8069,6 @@ function deriveLaunchWindow(domainRegisteredAt, accountCreatedAt) {
   };
 }
 
-// server/adapters/dexscreener.ts
-var BASE = "https://api.dexscreener.com";
-var MAX_PROMO_LOOKUPS = 8;
-var isRecord = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-var recordDex = (op, status, detail) => {
-  recordCall("dexscreener", op, 0, ["keyless", detail].filter(Boolean).join(" \xB7 "), status);
-};
-async function lookupToken(address) {
-  let res;
-  try {
-    res = await fetch(`${BASE}/latest/dex/tokens/${address}`, {
-      signal: AbortSignal.timeout(8e3)
-    });
-  } catch {
-    recordDex("token-pairs", "failed", "transport_error");
-    return null;
-  }
-  if (!res.ok) {
-    recordDex("token-pairs", "failed", `http_${res.status}`);
-    return null;
-  }
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    recordDex("token-pairs", "failed", "response_json_error");
-    return null;
-  }
-  if (!isRecord(data) || !Array.isArray(data.pairs)) {
-    recordDex("token-pairs", "partial", "result_shape_error");
-    return null;
-  }
-  if (!data.pairs.length) {
-    recordDex("token-pairs", "succeeded", "no_pairs");
-    return { address };
-  }
-  const pairs = data.pairs.filter(isRecord);
-  if (!pairs.length) {
-    recordDex("token-pairs", "partial", "invalid_pair_rows");
-    return null;
-  }
-  const top = pairs.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
-  const incomplete = pairs.length !== data.pairs.length || !top.chainId && !top.baseToken?.symbol && top.priceUsd == null && top.liquidity?.usd == null;
-  recordDex("token-pairs", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : void 0);
-  return {
-    address,
-    chain: top.chainId,
-    symbol: top.baseToken?.symbol,
-    priceUsd: top.priceUsd ? Number(top.priceUsd) : void 0,
-    liquidityUsd: top.liquidity?.usd,
-    volume24h: top.volume?.h24,
-    fdv: top.fdv,
-    pairCreatedAt: top.pairCreatedAt
-  };
-}
-async function detectTokenLifecycle(ticker, knownAddress) {
-  const sym = ticker.replace(/^\$/, "").trim();
-  if (!sym) return null;
-  let res;
-  try {
-    res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
-      signal: AbortSignal.timeout(8e3)
-    });
-  } catch {
-    recordDex("token-search", "failed", "transport_error");
-    return null;
-  }
-  if (!res.ok) {
-    recordDex("token-search", "failed", `http_${res.status}`);
-    return null;
-  }
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    recordDex("token-search", "failed", "response_json_error");
-    return null;
-  }
-  if (!isRecord(data) || !Array.isArray(data.pairs)) {
-    recordDex("token-search", "partial", "result_shape_error");
-    return null;
-  }
-  try {
-    const validRows = data.pairs.filter(isRecord);
-    const pairs = validRows.filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
-    if (!pairs.length) {
-      recordDex("token-search", validRows.length === data.pairs.length ? "succeeded" : "partial", validRows.length === data.pairs.length ? "no_match" : "invalid_pair_rows");
-      return null;
-    }
-    const byAddr = /* @__PURE__ */ new Map();
-    let missingAddress = 0;
-    for (const p of pairs) {
-      const a = p.baseToken?.address;
-      if (!a) {
-        missingAddress += 1;
-        continue;
-      }
-      let arr = byAddr.get(a);
-      if (!arr) {
-        arr = [];
-        byAddr.set(a, arr);
-      }
-      arr.push(p);
-    }
-    const generations = [...byAddr.entries()].map(([address, ps]) => {
-      const created = ps.map((p) => p.pairCreatedAt).filter((x) => typeof x === "number");
-      const top = ps.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
-      return {
-        address,
-        chain: top.chainId,
-        firstLaunch: created.length ? Math.min(...created) : void 0,
-        liquidityUsd: ps.reduce((s, p) => s + (p.liquidity?.usd ?? 0), 0),
-        priceUsd: top.priceUsd ? Number(top.priceUsd) : void 0,
-        h24: top.priceChange?.h24
-      };
-    }).sort((a, b) => (a.firstLaunch ?? 0) - (b.firstLaunch ?? 0));
-    const migrated = generations.length >= 2;
-    const canon = knownAddress ? generations.find((g) => g.address.toLowerCase() === knownAddress.toLowerCase()) : null;
-    let dive = null;
-    if (canon) {
-      const nearZeroLiq = canon.liquidityUsd < 5e3;
-      const crashed = (canon.h24 ?? 0) < -60;
-      if (nearZeroLiq || crashed) {
-        dive = {
-          address: canon.address,
-          detail: `liquidity $${Math.round(canon.liquidityUsd).toLocaleString()}${canon.h24 != null ? `, ${Math.round(canon.h24)}% 24h` : ""}${nearZeroLiq ? " (effectively dead)" : ""}`
-        };
-      }
-    }
-    const incomplete = validRows.length !== data.pairs.length || missingAddress > 0;
-    recordDex("token-search", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : void 0);
-    return { ticker: sym, generations, migrated, dive };
-  } catch {
-    recordDex("token-search", "partial", "result_processing_error");
-    return null;
-  }
-}
-var dexscreenerAdapter = {
-  id: "dexscreener",
-  label: "DexScreener",
-  available: () => true,
-  // keyless
-  async run(ctx) {
-    if (ctx.evidence.roles.includes("PROJECT" /* PROJECT */) && !ctx.evidence.roles.includes("KOL" /* KOL */)) {
-      return { state: "skipped", attempts: 0, detail: "project-account token mentions are not KOL promotions" };
-    }
-    const withContract = ctx.evidence.promotions.filter((p) => p.contract_address);
-    if (!withContract.length) return;
-    const promos = withContract.slice(0, MAX_PROMO_LOOKUPS);
-    ctx.emit({ phase: "On-chain", label: "DEX liquidity scan", detail: `Resolving ${promos.length}${withContract.length > promos.length ? ` of ${withContract.length}` : ""} promoted token(s) on DexScreener\u2026`, tone: "neutral" });
-    await Promise.all(promos.map(async (p) => {
-      const snap = await lookupToken(p.contract_address);
-      if (!snap) return;
-      const thin = (snap.liquidityUsd ?? 0) < 1e4;
-      p.perf_current = snap.priceUsd;
-      ctx.recordCheck?.({
-        id: "promoted-token-performance",
-        status: thin ? "finding" : "confirmed",
-        note: `$${snap.symbol ?? p.ticker} liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}${thin ? " (thin liquidity)" : ""}`,
-        provider: "dexscreener",
-        sourceCount: 1
-      });
-      ctx.emit({
-        phase: "On-chain",
-        label: `$${snap.symbol ?? p.ticker}`,
-        detail: `liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}, 24h vol $${Math.round(snap.volume24h ?? 0).toLocaleString()}${thin ? " (thin liquidity, rug-risk flag)" : ""}`,
-        source: "dexscreener",
-        tone: thin ? "warn" : "neutral"
-      });
-    }));
-  }
-};
-
-// src/lib/cadence.ts
-var DAY = 864e5;
-var median = (xs) => {
-  if (!xs.length) return 0;
-  const s = [...xs].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-};
-function analyzeCadence(posts, now) {
-  const times = posts.map((p) => p.createdAt).filter((t) => Number.isFinite(t)).sort((a, b) => b - a);
-  if (times.length < 4) return null;
-  const gaps = [];
-  for (let i = 0; i < times.length - 1; i++) gaps.push((times[i] - times[i + 1]) / DAY);
-  const medianGapDays = median(gaps);
-  const recentGapDays = gaps[0];
-  const daysSinceLast = (now - times[0]) / DAY;
-  const half = Math.floor(gaps.length / 2);
-  const recentMedian = median(gaps.slice(0, half || 1));
-  const olderMedian = median(gaps.slice(half)) || medianGapDays;
-  const decaying = olderMedian > 0 && recentMedian >= olderMedian * 3 && recentMedian - olderMedian >= 3;
-  const silent = daysSinceLast >= Math.max(21, medianGapDays * 4);
-  const summary = silent ? `Silent ${Math.round(daysSinceLast)}d (typical gap ~${medianGapDays.toFixed(1)}d): went quiet.` : decaying ? `Cadence thinning: recent gaps ~${recentMedian.toFixed(1)}d vs ~${olderMedian.toFixed(1)}d earlier.` : `Posting steady (~${medianGapDays.toFixed(1)}d gap, last post ${Math.round(daysSinceLast)}d ago).`;
-  return { postsAnalyzed: times.length, daysSinceLast, medianGapDays, recentGapDays, decaying, silent, summary };
-}
-
-// src/lib/basicFactQuestions.ts
-var EXPLICIT_EMPTY_PREDICATES = /* @__PURE__ */ new Set(["official_token", "public_security", "security_incident"]);
-function basicFactQuestionOutcome(entry) {
-  if (!entry) return "unresolved";
-  if (entry.status === "answered") return "answered";
-  return entry.providerRuns.at(-1)?.state === "completed_empty" ? "checked_empty" : "unresolved";
-}
-function supportsExplicitEmptyBasicFact(predicate) {
-  return EXPLICIT_EMPTY_PREDICATES.has(canonicalBasicFactPredicate(predicate));
-}
-var PROJECT_QUESTIONS = [
-  ["official_identity", "What is the project's official name and website?"],
-  ["product", "What does the project actually do?"],
-  ["founder", "Who founded it?"],
-  ["executive", "Who operates it today?"],
-  ["founded", "When was it founded?"],
-  ["launched", "When did the product launch?"],
-  ["official_token", "Does it have an official token?"],
-  ["network", "Which networks does it run on?"],
-  ["legal_entity", "Which legal entity is responsible?"],
-  ["security_incident", "Has the project been hacked or lost funds? What happened afterward?"],
-  ["funding", "How much funding has it raised?"],
-  ["investor", "Who funded it?"],
-  ["partnership", "Which material partners or integrations are verified?"],
-  ["governance", "Who controls governance and the treasury?"],
-  ["audit", "Has the code been independently audited?"],
-  ["repository", "Where is the source code maintained?"],
-  ["traction", "Is there evidence of real usage?"]
-];
-var FOUNDER_QUESTIONS = [
-  ["official_identity", "Who is this person?"],
-  ["current_role", "What do they lead or control today?"],
-  ["founder", "Which companies or projects did they found?"],
-  ["prior_role", "What did they do before?"],
-  ["track_record", "What outcomes prove their track record?"],
-  ["exit", "What exits or failures are verified?"],
-  ["control", "What ownership, voting, or treasury control do they hold?"],
-  ["conflict_of_interest", "What material conflicts are disclosed?"],
-  ["legal_regulatory_event", "What legal or regulatory events actually name them?"],
-  ["public_security", "Is a related asset a public security?"],
-  ["official_token", "Is an official crypto token tied to a venture they control?"],
-  ["education", "What education or credentials are verified?"]
-];
-var INVESTOR_QUESTIONS = [
-  ["official_identity", "Who is this investor?"],
-  ["current_role", "Which firm and fund do they represent today?"],
-  ["investor", "Which investments are directly attributed to them?"],
-  ["track_record", "What realized outcomes prove their track record?"],
-  ["exit", "Which portfolio exits are verified?"],
-  ["legal_entity", "Which legal entity manages the fund?"],
-  ["control", "What board, voting, or investment control do they hold?"],
-  ["conflict_of_interest", "What material conflicts are disclosed?"],
-  ["legal_regulatory_event", "What legal or regulatory events name them or their firm?"],
-  ["public_security", "Is a related asset a public security?"],
-  ["official_token", "Is a crypto token directly tied to a venture they control?"]
-];
-var PERSON_QUESTIONS = [
-  ["official_identity", "Who is this person?"],
-  ["current_role", "What do they do today?"],
-  ["prior_role", "What did they do before?"],
-  ["founder", "What have they founded?"],
-  ["track_record", "What outcomes are verified?"],
-  ["legal_regulatory_event", "What material legal or regulatory events name them?"],
-  ["official_token", "Is an official token tied to them?"]
-];
-var QUESTION_MAPS = {
-  project: new Map(PROJECT_QUESTIONS),
-  founder: new Map(FOUNDER_QUESTIONS),
-  investor: new Map(INVESTOR_QUESTIONS),
-  person: new Map(PERSON_QUESTIONS)
-};
-var PREDICATE_ALIASES = {
-  identity: "official_identity",
-  founders: "founder",
-  cofounders: "founder",
-  co_founders: "founder",
-  team: "executive",
-  leadership: "executive",
-  core_team: "executive",
-  token: "official_token",
-  // A supply or allocation disclosure answers its own question. It must never
-  // reconcile against the token symbol, where the singleton rule would present
-  // it as a fake conflict with the verified official token.
-  tokeneconomics: "tokenomics",
-  launch_date: "launched",
-  launch: "launched",
-  founding_date: "founded",
-  incorporation: "legal_entity",
-  company: "legal_entity",
-  investors: "investor",
-  partners: "partnership",
-  partnerships: "partnership",
-  integration: "partnership",
-  integrations: "partnership",
-  fundraising: "funding",
-  security_audits: "audit",
-  audits: "audit",
-  hack: "security_incident",
-  hacks: "security_incident",
-  exploit: "security_incident",
-  exploits: "security_incident",
-  security_event: "security_incident",
-  security_events: "security_incident",
-  github: "repository",
-  repositories: "repository",
-  usage: "traction",
-  adoption: "traction"
-};
-function canonicalBasicFactPredicate(value) {
-  const normalized4 = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-  return PREDICATE_ALIASES[normalized4] ?? normalized4;
-}
-
 // server/adapters/defiLlama.ts
 var API_BASE = "https://api.llama.fi";
 function defiLlamaSlug(name) {
@@ -9241,9 +8930,35 @@ function employmentCurrency(records, company, person) {
 }
 
 // server/adapters/peopledatalabs.ts
-var BASE2 = "https://api.peopledatalabs.com/v5";
+var BASE = "https://api.peopledatalabs.com/v5";
 var asRecord3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
 var optionalString = (value) => typeof value === "string" && value.trim() ? value : void 0;
+var PROJECT_LEADER_ROLE = /\b(?:co-?founder|founder|chief(?:\s+\w+){0,3}\s+officer|ceo|cto|cfo|coo|cmo|president)\b/i;
+var MAX_LEADER_LOOKUPS = 3;
+async function checkLeaderDepartures(team, company, enrich = enrichPerson) {
+  if (!company.trim()) return [];
+  const leaders = team.filter((member) => PROJECT_LEADER_ROLE.test(member.role ?? "")).filter((member) => (member.name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2).slice(0, MAX_LEADER_LOOKUPS);
+  const out = [];
+  for (const leader of leaders) {
+    const name = (leader.name ?? "").trim();
+    const person = await enrich({
+      name,
+      company,
+      ...leader.linkedin ? { profile: leader.linkedin } : {}
+    });
+    if (!person) continue;
+    const currency = employmentCurrency(person.experience, company, name);
+    out.push({
+      name,
+      role: (leader.role ?? "").trim(),
+      ...leader.linkedin ?? person.linkedin ? { linkedin: leader.linkedin ?? person.linkedin ?? void 0 } : {},
+      state: currency.state,
+      summary: currency.summary,
+      ...currency.end ? { ended: currency.end } : {}
+    });
+  }
+  return out;
+}
 async function enrichPerson(params) {
   if (env("MONID_API_KEY")) {
     const result = await enrichPersonViaMonid(params);
@@ -9268,7 +8983,7 @@ async function enrichPerson(params) {
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   let res;
   try {
-    res = await fetch(`${BASE2}/person/enrich?${qs}`, {
+    res = await fetch(`${BASE}/person/enrich?${qs}`, {
       headers: { "X-Api-Key": key },
       signal: AbortSignal.timeout(1e4)
     });
@@ -9472,6 +9187,317 @@ var peopledatalabsAdapter = {
     }
   }
 };
+
+// server/adapters/dexscreener.ts
+var BASE2 = "https://api.dexscreener.com";
+var MAX_PROMO_LOOKUPS = 8;
+var isRecord = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var recordDex = (op, status, detail) => {
+  recordCall("dexscreener", op, 0, ["keyless", detail].filter(Boolean).join(" \xB7 "), status);
+};
+async function lookupToken(address) {
+  let res;
+  try {
+    res = await fetch(`${BASE2}/latest/dex/tokens/${address}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+  } catch {
+    recordDex("token-pairs", "failed", "transport_error");
+    return null;
+  }
+  if (!res.ok) {
+    recordDex("token-pairs", "failed", `http_${res.status}`);
+    return null;
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    recordDex("token-pairs", "failed", "response_json_error");
+    return null;
+  }
+  if (!isRecord(data) || !Array.isArray(data.pairs)) {
+    recordDex("token-pairs", "partial", "result_shape_error");
+    return null;
+  }
+  if (!data.pairs.length) {
+    recordDex("token-pairs", "succeeded", "no_pairs");
+    return { address };
+  }
+  const pairs = data.pairs.filter(isRecord);
+  if (!pairs.length) {
+    recordDex("token-pairs", "partial", "invalid_pair_rows");
+    return null;
+  }
+  const top = pairs.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
+  const incomplete = pairs.length !== data.pairs.length || !top.chainId && !top.baseToken?.symbol && top.priceUsd == null && top.liquidity?.usd == null;
+  recordDex("token-pairs", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : void 0);
+  return {
+    address,
+    chain: top.chainId,
+    symbol: top.baseToken?.symbol,
+    priceUsd: top.priceUsd ? Number(top.priceUsd) : void 0,
+    liquidityUsd: top.liquidity?.usd,
+    volume24h: top.volume?.h24,
+    fdv: top.fdv,
+    pairCreatedAt: top.pairCreatedAt
+  };
+}
+async function detectTokenLifecycle(ticker, knownAddress) {
+  const sym = ticker.replace(/^\$/, "").trim();
+  if (!sym) return null;
+  let res;
+  try {
+    res = await fetch(`${BASE2}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+  } catch {
+    recordDex("token-search", "failed", "transport_error");
+    return null;
+  }
+  if (!res.ok) {
+    recordDex("token-search", "failed", `http_${res.status}`);
+    return null;
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    recordDex("token-search", "failed", "response_json_error");
+    return null;
+  }
+  if (!isRecord(data) || !Array.isArray(data.pairs)) {
+    recordDex("token-search", "partial", "result_shape_error");
+    return null;
+  }
+  try {
+    const validRows = data.pairs.filter(isRecord);
+    const pairs = validRows.filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
+    if (!pairs.length) {
+      recordDex("token-search", validRows.length === data.pairs.length ? "succeeded" : "partial", validRows.length === data.pairs.length ? "no_match" : "invalid_pair_rows");
+      return null;
+    }
+    const byAddr = /* @__PURE__ */ new Map();
+    let missingAddress = 0;
+    for (const p of pairs) {
+      const a = p.baseToken?.address;
+      if (!a) {
+        missingAddress += 1;
+        continue;
+      }
+      let arr = byAddr.get(a);
+      if (!arr) {
+        arr = [];
+        byAddr.set(a, arr);
+      }
+      arr.push(p);
+    }
+    const generations = [...byAddr.entries()].map(([address, ps]) => {
+      const created = ps.map((p) => p.pairCreatedAt).filter((x) => typeof x === "number");
+      const top = ps.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
+      return {
+        address,
+        chain: top.chainId,
+        firstLaunch: created.length ? Math.min(...created) : void 0,
+        liquidityUsd: ps.reduce((s, p) => s + (p.liquidity?.usd ?? 0), 0),
+        priceUsd: top.priceUsd ? Number(top.priceUsd) : void 0,
+        h24: top.priceChange?.h24
+      };
+    }).sort((a, b) => (a.firstLaunch ?? 0) - (b.firstLaunch ?? 0));
+    const migrated = generations.length >= 2;
+    const canon = knownAddress ? generations.find((g) => g.address.toLowerCase() === knownAddress.toLowerCase()) : null;
+    let dive = null;
+    if (canon) {
+      const nearZeroLiq = canon.liquidityUsd < 5e3;
+      const crashed = (canon.h24 ?? 0) < -60;
+      if (nearZeroLiq || crashed) {
+        dive = {
+          address: canon.address,
+          detail: `liquidity $${Math.round(canon.liquidityUsd).toLocaleString()}${canon.h24 != null ? `, ${Math.round(canon.h24)}% 24h` : ""}${nearZeroLiq ? " (effectively dead)" : ""}`
+        };
+      }
+    }
+    const incomplete = validRows.length !== data.pairs.length || missingAddress > 0;
+    recordDex("token-search", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : void 0);
+    return { ticker: sym, generations, migrated, dive };
+  } catch {
+    recordDex("token-search", "partial", "result_processing_error");
+    return null;
+  }
+}
+var dexscreenerAdapter = {
+  id: "dexscreener",
+  label: "DexScreener",
+  available: () => true,
+  // keyless
+  async run(ctx) {
+    if (ctx.evidence.roles.includes("PROJECT" /* PROJECT */) && !ctx.evidence.roles.includes("KOL" /* KOL */)) {
+      return { state: "skipped", attempts: 0, detail: "project-account token mentions are not KOL promotions" };
+    }
+    const withContract = ctx.evidence.promotions.filter((p) => p.contract_address);
+    if (!withContract.length) return;
+    const promos = withContract.slice(0, MAX_PROMO_LOOKUPS);
+    ctx.emit({ phase: "On-chain", label: "DEX liquidity scan", detail: `Resolving ${promos.length}${withContract.length > promos.length ? ` of ${withContract.length}` : ""} promoted token(s) on DexScreener\u2026`, tone: "neutral" });
+    await Promise.all(promos.map(async (p) => {
+      const snap = await lookupToken(p.contract_address);
+      if (!snap) return;
+      const thin = (snap.liquidityUsd ?? 0) < 1e4;
+      p.perf_current = snap.priceUsd;
+      ctx.recordCheck?.({
+        id: "promoted-token-performance",
+        status: thin ? "finding" : "confirmed",
+        note: `$${snap.symbol ?? p.ticker} liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}${thin ? " (thin liquidity)" : ""}`,
+        provider: "dexscreener",
+        sourceCount: 1
+      });
+      ctx.emit({
+        phase: "On-chain",
+        label: `$${snap.symbol ?? p.ticker}`,
+        detail: `liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}, 24h vol $${Math.round(snap.volume24h ?? 0).toLocaleString()}${thin ? " (thin liquidity, rug-risk flag)" : ""}`,
+        source: "dexscreener",
+        tone: thin ? "warn" : "neutral"
+      });
+    }));
+  }
+};
+
+// src/lib/cadence.ts
+var DAY = 864e5;
+var median = (xs) => {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+function analyzeCadence(posts, now) {
+  const times = posts.map((p) => p.createdAt).filter((t) => Number.isFinite(t)).sort((a, b) => b - a);
+  if (times.length < 4) return null;
+  const gaps = [];
+  for (let i = 0; i < times.length - 1; i++) gaps.push((times[i] - times[i + 1]) / DAY);
+  const medianGapDays = median(gaps);
+  const recentGapDays = gaps[0];
+  const daysSinceLast = (now - times[0]) / DAY;
+  const half = Math.floor(gaps.length / 2);
+  const recentMedian = median(gaps.slice(0, half || 1));
+  const olderMedian = median(gaps.slice(half)) || medianGapDays;
+  const decaying = olderMedian > 0 && recentMedian >= olderMedian * 3 && recentMedian - olderMedian >= 3;
+  const silent = daysSinceLast >= Math.max(21, medianGapDays * 4);
+  const summary = silent ? `Silent ${Math.round(daysSinceLast)}d (typical gap ~${medianGapDays.toFixed(1)}d): went quiet.` : decaying ? `Cadence thinning: recent gaps ~${recentMedian.toFixed(1)}d vs ~${olderMedian.toFixed(1)}d earlier.` : `Posting steady (~${medianGapDays.toFixed(1)}d gap, last post ${Math.round(daysSinceLast)}d ago).`;
+  return { postsAnalyzed: times.length, daysSinceLast, medianGapDays, recentGapDays, decaying, silent, summary };
+}
+
+// src/lib/basicFactQuestions.ts
+var EXPLICIT_EMPTY_PREDICATES = /* @__PURE__ */ new Set(["official_token", "public_security", "security_incident"]);
+function basicFactQuestionOutcome(entry) {
+  if (!entry) return "unresolved";
+  if (entry.status === "answered") return "answered";
+  return entry.providerRuns.at(-1)?.state === "completed_empty" ? "checked_empty" : "unresolved";
+}
+function supportsExplicitEmptyBasicFact(predicate) {
+  return EXPLICIT_EMPTY_PREDICATES.has(canonicalBasicFactPredicate(predicate));
+}
+var PROJECT_QUESTIONS = [
+  ["official_identity", "What is the project's official name and website?"],
+  ["product", "What does the project actually do?"],
+  ["founder", "Who founded it?"],
+  ["executive", "Who operates it today?"],
+  ["founded", "When was it founded?"],
+  ["launched", "When did the product launch?"],
+  ["official_token", "Does it have an official token?"],
+  ["network", "Which networks does it run on?"],
+  ["legal_entity", "Which legal entity is responsible?"],
+  ["security_incident", "Has the project been hacked or lost funds? What happened afterward?"],
+  ["funding", "How much funding has it raised?"],
+  ["investor", "Who funded it?"],
+  ["partnership", "Which material partners or integrations are verified?"],
+  ["governance", "Who controls governance and the treasury?"],
+  ["audit", "Has the code been independently audited?"],
+  ["repository", "Where is the source code maintained?"],
+  ["traction", "Is there evidence of real usage?"]
+];
+var FOUNDER_QUESTIONS = [
+  ["official_identity", "Who is this person?"],
+  ["current_role", "What do they lead or control today?"],
+  ["founder", "Which companies or projects did they found?"],
+  ["prior_role", "What did they do before?"],
+  ["track_record", "What outcomes prove their track record?"],
+  ["exit", "What exits or failures are verified?"],
+  ["control", "What ownership, voting, or treasury control do they hold?"],
+  ["conflict_of_interest", "What material conflicts are disclosed?"],
+  ["legal_regulatory_event", "What legal or regulatory events actually name them?"],
+  ["public_security", "Is a related asset a public security?"],
+  ["official_token", "Is an official crypto token tied to a venture they control?"],
+  ["education", "What education or credentials are verified?"]
+];
+var INVESTOR_QUESTIONS = [
+  ["official_identity", "Who is this investor?"],
+  ["current_role", "Which firm and fund do they represent today?"],
+  ["investor", "Which investments are directly attributed to them?"],
+  ["track_record", "What realized outcomes prove their track record?"],
+  ["exit", "Which portfolio exits are verified?"],
+  ["legal_entity", "Which legal entity manages the fund?"],
+  ["control", "What board, voting, or investment control do they hold?"],
+  ["conflict_of_interest", "What material conflicts are disclosed?"],
+  ["legal_regulatory_event", "What legal or regulatory events name them or their firm?"],
+  ["public_security", "Is a related asset a public security?"],
+  ["official_token", "Is a crypto token directly tied to a venture they control?"]
+];
+var PERSON_QUESTIONS = [
+  ["official_identity", "Who is this person?"],
+  ["current_role", "What do they do today?"],
+  ["prior_role", "What did they do before?"],
+  ["founder", "What have they founded?"],
+  ["track_record", "What outcomes are verified?"],
+  ["legal_regulatory_event", "What material legal or regulatory events name them?"],
+  ["official_token", "Is an official token tied to them?"]
+];
+var QUESTION_MAPS = {
+  project: new Map(PROJECT_QUESTIONS),
+  founder: new Map(FOUNDER_QUESTIONS),
+  investor: new Map(INVESTOR_QUESTIONS),
+  person: new Map(PERSON_QUESTIONS)
+};
+var PREDICATE_ALIASES = {
+  identity: "official_identity",
+  founders: "founder",
+  cofounders: "founder",
+  co_founders: "founder",
+  team: "executive",
+  leadership: "executive",
+  core_team: "executive",
+  token: "official_token",
+  // A supply or allocation disclosure answers its own question. It must never
+  // reconcile against the token symbol, where the singleton rule would present
+  // it as a fake conflict with the verified official token.
+  tokeneconomics: "tokenomics",
+  launch_date: "launched",
+  launch: "launched",
+  founding_date: "founded",
+  incorporation: "legal_entity",
+  company: "legal_entity",
+  investors: "investor",
+  partners: "partnership",
+  partnerships: "partnership",
+  integration: "partnership",
+  integrations: "partnership",
+  fundraising: "funding",
+  security_audits: "audit",
+  audits: "audit",
+  hack: "security_incident",
+  hacks: "security_incident",
+  exploit: "security_incident",
+  exploits: "security_incident",
+  security_event: "security_incident",
+  security_events: "security_incident",
+  github: "repository",
+  repositories: "repository",
+  usage: "traction",
+  adoption: "traction"
+};
+function canonicalBasicFactPredicate(value) {
+  const normalized4 = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  return PREDICATE_ALIASES[normalized4] ?? normalized4;
+}
 
 // server/adapters/github.ts
 var GH = "https://api.github.com";
@@ -22056,6 +22082,34 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     if (evidence.roles.includes("PROJECT" /* PROJECT */)) {
       checkTracker.record({ id: "project-backing-partners", status: "unavailable", note: detail, provider: "project-core-evidence" });
       checkTracker.record({ id: "project-transparency", status: "unavailable", note: detail, provider: "project-disclosure-collector" });
+    }
+  }
+  if (evidence.roles.includes("PROJECT" /* PROJECT */) && (evidence.webTeam?.length ?? 0) > 0) {
+    const leaderCompany = evidence.projectToken?.name?.trim() || evidence.profile.display_name.trim();
+    try {
+      const departures = await checkLeaderDepartures(evidence.webTeam ?? [], leaderCompany);
+      const left = departures.filter((row) => row.state === "departed");
+      if (departures.length) {
+        evidence.leaderDepartures = departures.map((row) => ({ ...row }));
+        checkTracker.record({
+          id: "founder-company-relationships",
+          status: left.length ? "finding" : "confirmed",
+          note: left.length ? left.map((row) => row.summary).join(" ") : `${departures.length} named leader${departures.length === 1 ? "" : "s"} still list ${leaderCompany} as a current role`,
+          provider: "peopledatalabs",
+          sourceCount: departures.length
+        });
+      }
+      if (left.length) {
+        emit({
+          phase: "P1 \xB7 Team",
+          label: `${left.length} named leader${left.length === 1 ? "" : "s"} no longer list this project`,
+          detail: `${left[0].summary} The licensed record can lag a live profile, so confirm on the person's own page before relying on it.`,
+          source: "peopledatalabs",
+          tone: "warn"
+        });
+      }
+    } catch (error) {
+      emit({ phase: "P1 \xB7 Team", label: "Leadership currency check failed", detail: String(error), source: "peopledatalabs", tone: "warn" });
     }
   }
   if (evidence.roles.includes("INVESTOR" /* INVESTOR */)) {
