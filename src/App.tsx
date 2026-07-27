@@ -623,6 +623,7 @@ export default function App() {
     if (!persistedVersionId) return;
     void syncReport("person", d.handle, d.handle, d, d.report.composite_verdict, d.report.governing_score);
     logAudit({
+      id: persistedVersionId,
       kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
       image: d.avatar_url, // real X photo (falls back to unavatar in auditImage when absent)
       summary: d.headline,

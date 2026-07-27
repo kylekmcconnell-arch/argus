@@ -65,9 +65,11 @@ function makeId(ts: number): string {
   return `${ts.toString(36)}-${counter.toString(36)}`;
 }
 
-export function logAudit(e: Omit<LogEntry, "id" | "ts">): LogEntry {
+// `id` may be supplied as the report version id so the row the SERVER wrote
+// at persist time and this one are the same entry, not two.
+export function logAudit(e: Omit<LogEntry, "id" | "ts"> & { id?: string }): LogEntry {
   const ts = Date.now();
-  const entry: LogEntry = { ...e, id: makeId(ts), ts };
+  const entry: LogEntry = { ...e, id: e.id?.trim() || makeId(ts), ts };
   let isNew = true;
   try {
     const log = getLog();

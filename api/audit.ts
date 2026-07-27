@@ -7,6 +7,7 @@ import {
   consumeInvestigationQuota,
   requireArgusAuth,
   serviceCredentials,
+  serviceHeaders,
   type AuthContext,
 } from "./_auth.js";
 import { activateReportVersion, persistReportVersionBundle } from "./_provenance.js";
@@ -53,6 +54,64 @@ export function isDecisionlessIncomplete(dossier: ServerDossier): boolean {
     || Array.isArray(roleReport.axes)
     || Object.keys(roleReport.axes).length === 0,
   );
+}
+
+/**
+ * Write the shared activity-log row for a scan that just persisted.
+ *
+ * The rail used to be written only by the browser after the report rendered,
+ * fire and forget with every error swallowed. A tab that crashed or was closed
+ * between the save and the render dropped the row silently, so a completed,
+ * paid scan vanished from the other analysts' view while its immutable report
+ * sat in the database. The server owns the row now, keyed on the report
+ * version so a re-persist and the client's own later sync collapse onto the
+ * same entry. Never throws: a log row must not be able to fail an audit.
+ */
+async function recordSharedAuditLogEntry(
+  credentials: NonNullable<ReturnType<typeof serviceCredentials>>,
+  auth: AuthContext,
+  entry: {
+    reportVersionId: string;
+    kind: string;
+    query: string;
+    ref: string;
+    verdict: string | null;
+    score: number | null;
+    summary: string;
+    coverage: string;
+    roles: readonly string[];
+  },
+): Promise<void> {
+  try {
+    const response = await fetch(
+      `${credentials.url}/rest/v1/audit_log?on_conflict=organization_id,client_id`,
+      {
+        method: "POST",
+        headers: serviceHeaders(credentials.key, { prefer: "resolution=ignore-duplicates,return=minimal" }),
+        body: JSON.stringify({
+          organization_id: auth.organizationId,
+          client_id: `${auth.userId}:${entry.reportVersionId}`,
+          ts: new Date().toISOString(),
+          kind: entry.kind,
+          query: entry.query.slice(0, 500),
+          ref: entry.ref.slice(0, 500),
+          verdict: entry.verdict,
+          score: entry.score,
+          summary: entry.summary.slice(0, 500),
+          coverage: entry.coverage,
+          flags: entry.roles.slice(0, 12).map((role) => `role:${role}`),
+          contributor: auth.displayName.slice(0, 80),
+          contributor_user_id: auth.userId,
+        }),
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    if (!response.ok) {
+      console.warn("[api/audit] shared activity row rejected", response.status, (await response.text()).slice(0, 200));
+    }
+  } catch (error) {
+    console.warn("[api/audit] shared activity row failed", String(error));
+  }
 }
 
 export async function persistServerDossier(
@@ -145,6 +204,19 @@ export async function persistServerDossier(
   if (!activatedWithGraph) {
     await activateReportVersion(credentials, auth.organizationId, reportVersionId);
   }
+  await recordSharedAuditLogEntry(credentials, auth, {
+    reportVersionId,
+    kind: "person",
+    query,
+    ref,
+    verdict,
+    score,
+    summary: typeof dossier.headline === "string" ? dossier.headline : "",
+    coverage: qualifiedCompleteness,
+    roles: Array.isArray(dossier?.report?.roles)
+      ? dossier.report.roles.filter((role): role is string => typeof role === "string")
+      : [],
+  });
   return reportVersionId;
 }
 
