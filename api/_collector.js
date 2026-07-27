@@ -3328,6 +3328,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const artifactIds = (values) => [...new Set(values.map((row) => typeof row.artifactId === "string" ? row.artifactId : "").filter(Boolean))];
   const basicFacts = records(packet.basicFacts);
   const verifiedFacts = (...predicates) => basicFacts.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.floorEligible !== false);
+  const ceilingOnlyFacts = (...predicates) => basicFacts.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.floorEligible === false);
   const factText = (facts) => facts.map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`).join(" ");
   const team = records(packet.team).filter((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
   const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
@@ -3360,6 +3361,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const repositoryFacts = verifiedFacts("repository", "repositories");
   const leaderFacts = verifiedFacts("founder", "founders", "executive");
   const productFacts = verifiedFacts("product", "launched", "launch_date");
+  const ceilingProductFacts = ceilingOnlyFacts("product", "launched", "launch_date");
   const auditFacts = verifiedFacts("audit", "audits");
   const securityAudits = packet.securityAudits && typeof packet.securityAudits === "object" && !Array.isArray(packet.securityAudits) ? packet.securityAudits : void 0;
   const selfAttestedAuditorCount = Array.isArray(securityAudits?.selfAttested) ? securityAudits.selfAttested.filter((name) => typeof name === "string" && name.trim()).length : 0;
@@ -3431,8 +3433,8 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...Boolean(profile?.website) || officialFacts.length ? ["official identity linkage"] : [],
     ...legalFacts.length || namedLeaderCount >= 2 ? ["operator corroboration"] : []
   ], artifactIds([...leaders, ...leaderFacts, ...officialFacts, ...legalFacts, ...profile ? [profile] : []]));
-  const p2Anchors = [...repositoryFacts, ...productFacts, ...auditFacts, ...productPress, ...productActivity];
-  const productProof = productFacts.length > 0 || productPress.length > 0 || productActivity.length > 0;
+  const p2Anchors = [...repositoryFacts, ...productFacts, ...ceilingProductFacts, ...auditFacts, ...productPress, ...productActivity];
+  const productProof = productFacts.length > 0 || ceilingProductFacts.length > 0 || productPress.length > 0 || productActivity.length > 0;
   const verifiedProductProof = productFacts.length > 0 || productActivity.length > 0;
   let p2FloorTier = repositoryFacts.length || verifiedProductProof ? "emerging" : "none";
   if (!earlyStage && repositoryFacts.length > 0 && verifiedProductProof) p2FloorTier = "solid";

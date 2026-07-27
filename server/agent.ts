@@ -1703,6 +1703,15 @@ export function deriveProjectStrengthBands(
     && fact.artifact_verified === true
     && (fact.status === "verified" || fact.status === "corroborated")
     && fact.floorEligible !== false);
+  // Ceiling-only sibling: verified facts whose floorEligible flag was cleared
+  // (a self-description, ARGUS's own live-site fetch, recall corroboration).
+  // Press headlines already open band ceilings, and these are strictly
+  // stronger evidence than press; the enforced floors never see them (H2).
+  const ceilingOnlyFacts = (...predicates: string[]): Record<string, unknown>[] => basicFacts.filter((fact) =>
+    predicates.includes(String(fact.predicate ?? "").toLowerCase())
+    && fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated")
+    && fact.floorEligible === false);
   const factText = (facts: readonly Record<string, unknown>[]): string => facts
     .map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`)
     .join(" ");
@@ -1754,6 +1763,7 @@ export function deriveProjectStrengthBands(
   const repositoryFacts = verifiedFacts("repository", "repositories");
   const leaderFacts = verifiedFacts("founder", "founders", "executive");
   const productFacts = verifiedFacts("product", "launched", "launch_date");
+  const ceilingProductFacts = ceilingOnlyFacts("product", "launched", "launch_date");
   const auditFacts = verifiedFacts("audit", "audits");
   // Audit CEILING signal (never a floor). The security-audit collector only ever
   // records selfAttested names that match its curated AUDITOR_REGISTRY (Trail of
@@ -1886,8 +1896,8 @@ export function deriveProjectStrengthBands(
     ...((legalFacts.length || namedLeaderCount >= 2) ? ["operator corroboration"] : []),
   ], artifactIds([...leaders, ...leaderFacts, ...officialFacts, ...legalFacts, ...(profile ? [profile] : [])]));
 
-  const p2Anchors = [...repositoryFacts, ...productFacts, ...auditFacts, ...productPress, ...productActivity];
-  const productProof = productFacts.length > 0 || productPress.length > 0 || productActivity.length > 0;
+  const p2Anchors = [...repositoryFacts, ...productFacts, ...ceilingProductFacts, ...auditFacts, ...productPress, ...productActivity];
+  const productProof = productFacts.length > 0 || ceilingProductFacts.length > 0 || productPress.length > 0 || productActivity.length > 0;
   // Verified-only ladder (press excluded): the enforced score floor may only
   // come from records ARGUS actually verified, never from search headlines.
   const verifiedProductProof = productFacts.length > 0 || productActivity.length > 0;

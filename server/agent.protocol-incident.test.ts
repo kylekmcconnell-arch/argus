@@ -74,6 +74,36 @@ const packet = (hacks: Array<Record<string, unknown>>) => buildScoringEvidencePa
   })),
 }, projectAxes);
 
+describe("ceiling-only product evidence", () => {
+  it("opens the P2 ceiling from a floor-ineligible live-site fact without moving the floor", () => {
+    // The @orbitgroup_ai case: no repository, no press, no token, but ARGUS
+    // itself fetched a live official site bound to the account. That fact is
+    // deliberately floor-ineligible; it must still lift the band ceiling off
+    // "none" so the analyst can assess instead of abstaining.
+    const siteOnly = buildScoringEvidencePacket({
+      profile: {
+        handle: "@orbitgroup_ai",
+        display_name: "Orbit",
+        website: "https://orbitgroup.ai/",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-26T10:00:00.000Z",
+      },
+      basicFacts: [{
+        predicate: "product",
+        value: "orbitgroup.ai",
+        status: "verified",
+        artifact_verified: true,
+        floorEligible: false,
+      }],
+    }, projectAxes);
+    const bands = deriveProjectStrengthBands(siteOnly, projectAxes);
+    expect(bands.P2_product_substance?.tier).toBe("emerging");
+    expect(bands.P2_product_substance?.floorTier ?? "none").toBe("none");
+    expect(bands.P2_product_substance?.reasons).toContain("source-backed product operation");
+  });
+});
+
 describe("project security incident strength caps", () => {
   it("caps product and token/control axes at emerging for a material incident without recorded recovery", () => {
     const clean = deriveProjectStrengthBands(packet([]), projectAxes);

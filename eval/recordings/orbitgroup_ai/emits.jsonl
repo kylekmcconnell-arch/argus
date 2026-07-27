@@ -5,23 +5,22 @@
 {"phase":"P0 · Intake","label":"Handle history","detail":"No prior X handle on record for this account (no rebrand found; memory.lol coverage is partial).","source":"memory.lol","tone":"neutral"}
 {"phase":"P0 · Intake","label":"Recent activity","detail":"Assembled a 5-post claim corpus (5 recent originals + 0 from keyword search over full history) to mine for self-claims.","source":"twitterapi.io","tone":"neutral"}
 {"phase":"P0 · Intake","label":"Extract claims","detail":"Reading the subject's bio and posts for self-claims to verify…","tone":"neutral"}
-{"phase":"P0 · Intake","label":"Claims extracted","detail":"1 self-claims across PROJECT. Role candidates remain non-governing until independently verified.","source":"AI analyst","tone":"neutral"}
+{"phase":"P0 · Intake","label":"Claims extracted","detail":"2 self-claims across PROJECT. Role candidates remain non-governing until independently verified.","source":"AI analyst","tone":"neutral"}
 {"phase":"P0 · Intake","label":"Discover affiliations","detail":"Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts…","source":"grok","tone":"neutral"}
-{"phase":"P1 · Team","label":"Identities linked","detail":"Resolved X/LinkedIn for 1 of 3 name-only team members.","source":"grok","tone":"good"}
-{"phase":"P1 · Team","label":"Team evidence verified","detail":"8 project team identities passed first-party or deterministic verification: Niklas Homan, Naeem Zafar, Alexander Vermeulen, Carlota Homan, Henry Harari, Filippo Caratozzolo.","source":"team-search","tone":"good"}
+{"phase":"P1 · Team","label":"Identities linked","detail":"Resolved X/LinkedIn for 4 of 8 name-only team members.","source":"grok","tone":"good"}
+{"phase":"P1 · Team","label":"Team evidence verified","detail":"8 project team identities passed first-party or deterministic verification: Niklas Homan @unknown, Naeem Zafar, Alexander Vermeulen, Carlota Homan, Henry Harari, Filippo Caratozzolo.","source":"team-search","tone":"good"}
 {"phase":"P1 · Team","label":"Identity probable","detail":"Project identity resolved through independently fetched team evidence; a brand handle over a public team is not an anonymity flag.","source":"team-page / post scan","tone":"good"}
-{"phase":"P0 · Intake","label":"Named only","detail":"Also named without a handle (not auditable): Niklas Homan (founder), Fabian Wong (founder), Alexander Vermeulen (founder), Oriol Blanch (founder).","source":"grok","tone":"neutral"}
+{"phase":"P0 · Intake","label":"Named only","detail":"Also named without a handle (not auditable): Niklas Homan (founder), Fabian Wong (founder), Alexander Vermeulen (founder).","source":"grok","tone":"neutral"}
 {"phase":"P0 · Intake","label":"No affiliations found","detail":"No public company affiliations could be attributed to this person via web/X search.","source":"grok","tone":"neutral"}
-{"phase":"P0 · Intake","label":"Dormant account","detail":"No posts in 293 days. A project or account gone quiet is a liveness flag.","source":"twitterapi.io","tone":"warn"}
+{"phase":"P0 · Intake","label":"Dormant account","detail":"No posts in 294 days. A project or account gone quiet is a liveness flag.","source":"twitterapi.io","tone":"warn"}
 {"phase":"P0 · Intake","label":"Notable followers","detail":"Checking which top funds, founders, and KOLs follow the subject…","source":"twitterapi.io","tone":"neutral"}
 {"phase":"P0 · Intake","label":"Notable followers","detail":"None of the 364 known funds/founders/KOLs checked follow this subject.","source":"twitterapi.io","tone":"neutral"}
 {"phase":"Off-chain","label":"Photo / news / legal / sanctions","detail":"Freezing the official profile-photo and exact-name/handle news outcomes before scoring; legal and OFAC require a resolved real person.","tone":"neutral"}
 {"phase":"Off-chain","label":"Off-chain evidence frozen","detail":"0 source artifacts available before scoring.","source":"claude-vision · google-news · courtlistener · opensanctions","tone":"neutral"}
 {"phase":"P0 · Intake","label":"Basic facts research","detail":"Searching for foundational facts, then independently fetching and checking every cited passage…","source":"Claude web search · public source verification","tone":"neutral"}
-{"phase":"P0 · Intake","label":"Basic facts need review","detail":"0/7 leads matched subject, value, and predicate language in fetched source text; 0 met the first-party or two-source publication threshold; 13 critical questions remain open.","source":"public-web","tone":"warn"}
+{"phase":"P0 · Intake","label":"Basic facts verified","detail":"1/9 leads matched subject, value, and predicate language in fetched source text; 1 met the first-party or two-source publication threshold; 12 critical questions remain open.","source":"public-web","tone":"good"}
 {"phase":"Adverse","label":"Scam / rug sweep","detail":"Searching for rug, slow-rug, liquidity-pull, drain, and FUD signals across the subject, $ORBIT, 0 projects, and 0 associates…","source":"grok","tone":"neutral"}
-{"phase":"Cadence","label":"Went quiet","detail":"Silent 294d (typical gap ~9.2d): went quiet.","source":"twitterapi.io","tone":"bad"}
-{"phase":"Adverse","label":"Manipulation-tooling lead","detail":"Candidate connection surfaced for Orbit Sniper (snipe bot); independent artifact verification is still required before this can affect a hard cap.","source":"grok","tone":"warn"}
+{"phase":"Cadence","label":"Went quiet","detail":"Silent 295d (typical gap ~9.2d): went quiet.","source":"twitterapi.io","tone":"bad"}
 {"phase":"Adverse","label":"No adverse leads surfaced","detail":"The model search returned no candidate rug/scam/drain/FUD source URLs for follow-up; this is not proof that none exist.","source":"grok","tone":"neutral"}
 {"phase":"P0 · Routing","label":"Classify roles","detail":"Provider-backed evidence routed to PROJECT, FOUNDER.","tone":"neutral"}
 {"phase":"Network","label":"Trust graph unavailable","detail":"Trust-graph reconciliation requires a valid authenticated organization identifier.","source":"argus-graph","tone":"warn"}
@@ -32,4 +31,4 @@
 {"phase":"Finalize","label":"Incomplete","detail":"Not enough validated evidence to score every required axis; publishing an incomplete report with no verdict score.","tone":"warn"}
 {"phase":"Finalize","label":"Govern composite","detail":"Applying caps and selecting the governing role.","tone":"neutral"}
 {"phase":"Finalize","label":"Provider failures this run: 1","detail":"wallet-resolve api.warpcast.com (http_400). Fallbacks are disabled: affected lanes completed without this provider instead of switching the spend elsewhere.","source":"argus","tone":"bad"}
-{"phase":"Finalize","label":"Audit cost","detail":"~$1.07 this audit (Grok $0.00 across 0 calls, ≈0 search sources · Claude $1.07 across 21 calls).","tone":"neutral"}
+{"phase":"Finalize","label":"Audit cost","detail":"~$1.08 this audit (Grok $0.00 across 0 calls, ≈0 search sources · Claude $1.08 across 21 calls).","tone":"neutral"}
