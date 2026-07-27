@@ -755,8 +755,8 @@ export function InvestigationReport({
   })();
   // Investigator rail: deterministic anomalies computed from the frozen stats
   // so the few numbers that change a decision stop hiding inside stat grids.
-  const lpLockedOrBurnedPct = token.safetyChecked && token.safety.available
-    ? token.safety.lpLockedPct + token.safety.lpBurnedPct
+  const lpLockedOrBurnedPct = token.safetyChecked && token.safety?.available
+    ? (token.safety.lpLockedPct ?? 0) + (token.safety.lpBurnedPct ?? 0)
     : projectAccount?.holderProfile?.lpLockedOrBurnedPct ?? null;
   const top10FromRows = token.topHolders?.length === 10
     ? token.topHolders.reduce((sum, holder) => sum + (holder.percent ?? 0), 0)
@@ -771,7 +771,7 @@ export function InvestigationReport({
   const upcomingUnlocks = projectAccount?.tokenUnlocks;
   const noticedSignals = deriveNoticedSignals({
     lpLockedPct: lpLockedOrBurnedPct,
-    largestHolderPct: token.safety.topHolderPct ?? projectAccount?.holderProfile?.topHolderPct,
+    largestHolderPct: token.safety?.topHolderPct ?? projectAccount?.holderProfile?.topHolderPct,
     top10HolderPct: projectAccount?.holderProfile?.top10Pct ?? top10FromRows,
     circulatingPct: circulatingSupplyPct,
     fdvUsd: fullyDilutedValue ?? null,
@@ -1141,7 +1141,7 @@ export function InvestigationReport({
                 </div>
                 <div>
                   <dt className="stat-label">Holders</dt>
-                  <dd className="stat-value mt-1">{token.safety.holderCount ? token.safety.holderCount.toLocaleString() : "N/A"}</dd>
+                  <dd className="stat-value mt-1">{token.safety?.holderCount ? token.safety.holderCount.toLocaleString() : "N/A"}</dd>
                 </div>
               </dl>
               <p className="mono mt-5 border-t border-line/70 pt-3 text-[10.5px] uppercase tracking-[0.08em] text-signal-lift">
