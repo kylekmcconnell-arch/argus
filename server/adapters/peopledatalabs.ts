@@ -7,6 +7,7 @@ import { recordCall, recordPdlMatch } from "../cost";
 import { env } from "../config";
 import { enrichPersonViaMonid } from "./monid";
 import { VentureOutcome } from "../../src/engine";
+import { employmentCurrency } from "../../src/lib/employmentCurrency";
 
 const BASE = "https://api.peopledatalabs.com/v5";
 type JsonRecord = Record<string, unknown>;
@@ -213,6 +214,7 @@ export const peopledatalabsAdapter: Adapter = {
     const byName = new Map(ctx.evidence.ventures.map((v) => [v.project_name.toLowerCase(), v]));
     const added: string[] = [];
     const confirmed: string[] = [];
+    const departures: { company: string; summary: string; ended?: string }[] = [];
     for (const x of person.experience) {
       const company = (x.company ?? "").trim();
       if (!company) continue;
@@ -220,6 +222,13 @@ export const peopledatalabsAdapter: Adapter = {
       const title = x.title || "role on record";
       const period = [x.start, x.end].filter(Boolean).join("–");
       const ex = byName.get(key);
+      // Whether the record still calls this role current, and when it ended if
+      // not. A founder who quietly stopped listing the company is a finding no
+      // team page will ever show, and it sits in the record ARGUS already paid for.
+      const currency = employmentCurrency(person.experience, company, person.fullName ?? undefined);
+      if (currency.state === "departed" && !departures.some((row) => row.company === company)) {
+        departures.push({ company, summary: currency.summary, ...(currency.end ? { ended: currency.end } : {}) });
+      }
       if (ex) {
         if (!/corroborated:/i.test(ex.notes ?? "")) {
           const base = (ex.notes ?? "").replace(/\s*·\s*single-source lead, unverified\s*$/i, "");
@@ -261,6 +270,27 @@ export const peopledatalabsAdapter: Adapter = {
     }
     if (confirmed.length) {
       ctx.emit({ phase: "P1 · Identity", label: "Cross-source corroboration", detail: `PDL employment independently confirms: ${confirmed.slice(0, 5).join(", ")}.`, source: "peopledatalabs", tone: "good" });
+    }
+    // A role the subject is still publicly associated with, which their own
+    // employment record has closed, is the kind of thing a reader must be told
+    // plainly. Reported as a dated record, never as a reason for leaving.
+    if (departures.length) {
+      ctx.evidence.employmentDepartures = departures.map((row) => ({ ...row }));
+      const newest = [...departures].sort((a, b) => String(b.ended ?? "").localeCompare(String(a.ended ?? "")))[0];
+      ctx.emit({
+        phase: "P1 · Identity",
+        label: `Ended role${departures.length === 1 ? "" : "s"} on record`,
+        detail: `${newest.summary}${departures.length > 1 ? ` ${departures.length - 1} other closed role${departures.length === 2 ? "" : "s"} on record.` : ""}`,
+        source: "peopledatalabs",
+        tone: "warn",
+      });
+      ctx.recordCheck?.({
+        id: "identity-continuity",
+        status: "finding",
+        note: departures.map((row) => row.summary).join(" "),
+        provider: "peopledatalabs",
+        sourceCount: departures.length,
+      });
     }
   },
 };

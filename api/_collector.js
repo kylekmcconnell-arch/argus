@@ -4047,16 +4047,16 @@ var sourceArtifactEligibleAxes = (value, sourceArtifactPeers = [], subjectHandle
   return eligible;
 };
 var stableJson = (value) => {
-  const normalize2 = (candidate) => {
+  const normalize3 = (candidate) => {
     if (candidate == null || typeof candidate === "string" || typeof candidate === "boolean") return candidate;
     if (typeof candidate === "number") return Number.isFinite(candidate) ? candidate : null;
-    if (Array.isArray(candidate)) return candidate.map(normalize2);
+    if (Array.isArray(candidate)) return candidate.map(normalize3);
     if (typeof candidate !== "object") return null;
     return Object.fromEntries(
-      Object.keys(candidate).sort().filter((key) => candidate[key] !== void 0).map((key) => [key, normalize2(candidate[key])])
+      Object.keys(candidate).sort().filter((key) => candidate[key] !== void 0).map((key) => [key, normalize3(candidate[key])])
     );
   };
-  return JSON.stringify(normalize2(value));
+  return JSON.stringify(normalize3(value));
 };
 var evidencePayload = (value) => {
   const base = value && typeof value === "object" && !Array.isArray(value) ? { ...value } : { value };
@@ -9095,6 +9095,57 @@ async function enrichPersonViaMonid(params, fetcher = fetch) {
   return { outcome: "match", record: record3 };
 }
 
+// src/lib/employmentCurrency.ts
+var normalize = (value) => value.toLowerCase().replace(/\b(?:inc|llc|ltd|limited|corp|corporation|labs?|group|holdings?|technologies|tech|foundation|protocol|network|ai)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+function sameCompany(recordName, target) {
+  const a = normalize(recordName);
+  const b = normalize(target);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const aTokens = a.split(" ").filter(Boolean);
+  const bTokens = b.split(" ").filter(Boolean);
+  if (!aTokens.length || !bTokens.length) return false;
+  const [shorter, longer] = aTokens.length <= bTokens.length ? [aTokens, bTokens] : [bTokens, aTokens];
+  return shorter.every((token) => longer.includes(token));
+}
+var monthYear = (value) => {
+  const match = value.match(/^(\d{4})-(\d{2})/);
+  if (!match) return value;
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const month = months[Number(match[2]) - 1];
+  return month ? `${month} ${match[1]}` : match[1];
+};
+function employmentCurrency(records, company, person) {
+  const who = person?.trim() ? person.trim() : "This person";
+  const matches = records.filter((record3) => typeof record3.company === "string" && sameCompany(record3.company, company));
+  if (!matches.length) {
+    return {
+      state: "absent",
+      summary: `${who} has no ${company} role on their employment record. That record may simply be incomplete, so it is not evidence they were never involved.`
+    };
+  }
+  const open = matches.find((record3) => !record3.end?.trim());
+  if (open) {
+    return {
+      state: "current",
+      company: open.company ?? company,
+      ...open.title ? { title: open.title } : {},
+      ...open.start ? { start: open.start } : {},
+      summary: `${who} still lists ${open.title ? `${open.title} at ` : ""}${open.company ?? company} as a current role${open.start ? `, held since ${monthYear(open.start)}` : ""}.`
+    };
+  }
+  const latest = [...matches].sort((a, b) => String(b.end ?? "").localeCompare(String(a.end ?? "")))[0];
+  const ended = String(latest.end ?? "").trim();
+  return {
+    state: "departed",
+    company: latest.company ?? company,
+    ...latest.title ? { title: latest.title } : {},
+    ...latest.start ? { start: latest.start } : {},
+    ...ended ? { end: ended } : {},
+    summary: `${who} no longer lists ${latest.company ?? company} as a current role: the record ends ${ended ? monthYear(ended) : "on an unstated date"}${latest.title ? ` (${latest.title})` : ""}.`
+  };
+}
+
 // server/adapters/peopledatalabs.ts
 var BASE2 = "https://api.peopledatalabs.com/v5";
 var asRecord3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -9258,6 +9309,7 @@ var peopledatalabsAdapter = {
     const byName = new Map(ctx.evidence.ventures.map((v) => [v.project_name.toLowerCase(), v]));
     const added = [];
     const confirmed = [];
+    const departures = [];
     for (const x of person.experience) {
       const company = (x.company ?? "").trim();
       if (!company) continue;
@@ -9265,6 +9317,10 @@ var peopledatalabsAdapter = {
       const title = x.title || "role on record";
       const period = [x.start, x.end].filter(Boolean).join("\u2013");
       const ex = byName.get(key);
+      const currency = employmentCurrency(person.experience, company, person.fullName ?? void 0);
+      if (currency.state === "departed" && !departures.some((row) => row.company === company)) {
+        departures.push({ company, summary: currency.summary, ...currency.end ? { ended: currency.end } : {} });
+      }
       if (ex) {
         if (!/corroborated:/i.test(ex.notes ?? "")) {
           const base = (ex.notes ?? "").replace(/\s*·\s*single-source lead, unverified\s*$/i, "");
@@ -9301,6 +9357,24 @@ var peopledatalabsAdapter = {
     }
     if (confirmed.length) {
       ctx.emit({ phase: "P1 \xB7 Identity", label: "Cross-source corroboration", detail: `PDL employment independently confirms: ${confirmed.slice(0, 5).join(", ")}.`, source: "peopledatalabs", tone: "good" });
+    }
+    if (departures.length) {
+      ctx.evidence.employmentDepartures = departures.map((row) => ({ ...row }));
+      const newest = [...departures].sort((a, b) => String(b.ended ?? "").localeCompare(String(a.ended ?? "")))[0];
+      ctx.emit({
+        phase: "P1 \xB7 Identity",
+        label: `Ended role${departures.length === 1 ? "" : "s"} on record`,
+        detail: `${newest.summary}${departures.length > 1 ? ` ${departures.length - 1} other closed role${departures.length === 2 ? "" : "s"} on record.` : ""}`,
+        source: "peopledatalabs",
+        tone: "warn"
+      });
+      ctx.recordCheck?.({
+        id: "identity-continuity",
+        status: "finding",
+        note: departures.map((row) => row.summary).join(" "),
+        provider: "peopledatalabs",
+        sourceCount: departures.length
+      });
     }
   }
 };
@@ -10061,8 +10135,8 @@ function basicFactsResearchQuestions(ctx) {
   }));
 }
 var clean = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
-var normalize = (value) => value.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
-var searchable = (value) => normalize(value).toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
+var normalize2 = (value) => value.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
+var searchable = (value) => normalize2(value).toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
 var looseTokens = (value) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
 var looseContainsPhrase = (text2, phrase) => {
   const haystack = ` ${looseTokens(text2).join(" ")} `;
@@ -10355,7 +10429,7 @@ function verifiedPublicSecurityValue(value, passage) {
 function fundingAmounts(value) {
   const pattern = /(?:\b(?:usd|us\$)\s*|[$€£]\s*)\d[\d,]*(?:\.\d+)?\s*(?:thousand|million|billion|[kmb])?\b|\b\d[\d,]*(?:\.\d+)?\s*(?:thousand|million|billion)\s+(?:u\.s\.\s+)?dollars?\b/gi;
   return [...value.matchAll(pattern)].flatMap((match) => {
-    const display = normalize(match[0]);
+    const display = normalize2(match[0]);
     const normalized4 = display.toLowerCase().replace(/,/g, "").replace(/\s+/g, " ");
     const numeric = normalized4.match(/\d+(?:\.\d+)?/)?.[0];
     if (!numeric) return [];
@@ -10371,7 +10445,7 @@ function verifiedFundingValue(value, passage) {
     const match = observed.find((source2) => source2.key === candidate.key);
     return match ? [match.display] : [];
   })[0];
-  if (!amount) return looseContainsPhrase(passage, value) ? normalize(value) : null;
+  if (!amount) return looseContainsPhrase(passage, value) ? normalize2(value) : null;
   const round = [
     /\bpre[- ]seed\b/i,
     /\bseed(?:\s+round)?\b/i,
@@ -10379,7 +10453,7 @@ function verifiedFundingValue(value, passage) {
     /\bstrategic\s+(?:financing|funding|round)\b/i,
     /\btoken\s+sale\b/i
   ].map((pattern) => pattern.exec(value)?.[0]).find((candidate) => candidate && looseContainsPhrase(passage, candidate));
-  return normalize(`${amount}${round ? ` ${round}` : ""}`);
+  return normalize2(`${amount}${round ? ` ${round}` : ""}`);
 }
 function safeCandidateUrl(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
@@ -10415,13 +10489,13 @@ function isAtomicValue(predicate, value) {
   return true;
 }
 function atomicPersonVentureValue(value) {
-  const candidate = normalize(value);
+  const candidate = normalize2(value);
   if (!candidate || candidate.length > 120 || /[()[\]{}/|;]/.test(candidate) || /\b(?:also known as|formerly|originally|previously|rebrand(?:ed)?|aka)\b/i.test(candidate) || /\b(?:co[- ]?)?founder\s+(?:of|at)\b/i.test(candidate) || /\s(?:and|&)\s/i.test(candidate)) return null;
   const tokens = looseTokens(candidate);
   return tokens.length >= 1 && tokens.length <= 8 ? candidate : null;
 }
 function canonicalOfficialTokenLeadValue(value) {
-  const normalized4 = normalize(value);
+  const normalized4 = normalize2(value);
   const symbol = "\\$?[A-Za-z][A-Za-z0-9.-]{1,15}";
   const leading = new RegExp(`^(${symbol})\\s*\\([^)]{2,100}\\)\\s*(?:[\xB7:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized4)?.[1];
   if (leading) return leading;
@@ -10431,7 +10505,7 @@ function canonicalOfficialTokenLeadValue(value) {
   return named ?? normalized4;
 }
 function canonicalLeadValueCore(value) {
-  const normalized4 = normalize(value);
+  const normalized4 = normalize2(value);
   const MEANING_BEARING = /\b(?:also known as|formerly|originally|previously|rebrand(?:ed)?|aka|f\.?k\.?a\.?|not|never|no longer|denies|denied|disputed|contested|alleged(?:ly)?|unproven|unconfirmed|rumou?red|purported(?:ly)?|claimed|proposed|planned|abandoned|withdrawn|parody|fake|impersonat\w*|different|unrelated|another|against|until|but|however|pleaded|charged|indicted)\b/i;
   if (MEANING_BEARING.test(normalized4)) return { value: normalized4 };
   const parenthetical = /^(.*?[^\s(])\s*\(([^()]{2,160})\)$/.exec(normalized4);
@@ -10444,7 +10518,7 @@ function canonicalLeadValueCore(value) {
   return { value: normalized4 };
 }
 function canonicalOfficialIdentityLeadValue(value) {
-  const normalized4 = normalize(value);
+  const normalized4 = normalize2(value);
   if (/\b(?:alleged|claimed|purported|self[- ]?described|unconfirmed|unverified)\b/i.test(normalized4)) return null;
   const nameToken = "[\\p{L}\\p{M}][\\p{L}\\p{M}'\u2019.-]*";
   const role = "(?:co[- ]?)?founder|chief executive officer|chief technology officer|chief operating officer|chief financial officer|ceo|cto|coo|cfo|president|chair(?:man|woman|person)?|partner|principal|entrepreneur|investor";
@@ -10453,12 +10527,12 @@ function canonicalOfficialIdentityLeadValue(value) {
     "iu"
   ).exec(normalized4);
   if (!match?.[1]) return /[,;:()[\]\u2013\u2014]/u.test(normalized4) ? null : normalized4;
-  const candidate = normalize(match[1]);
+  const candidate = normalize2(match[1]);
   return plausiblePersonIdentity(candidate) ? candidate : null;
 }
 function isEmptyAssetPlaceholder(predicate, value) {
   if (!supportsExplicitEmptyBasicFact(predicate)) return false;
-  const normalized4 = normalize(value).toLowerCase().replace(/[.!]+$/, "").trim();
+  const normalized4 = normalize2(value).toLowerCase().replace(/[.!]+$/, "").trim();
   return /^(?:n\/?a|none|no|not applicable|not found|unknown|unavailable)$/.test(normalized4) || /^(?:no|does not have|has no)\s+(?:known\s+|verified\s+|official\s+|native\s+|governance\s+)?(?:crypto\s+)?(?:token|security|stock|bond)s?$/.test(normalized4);
 }
 function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-search", questions = []) {
@@ -10533,7 +10607,7 @@ function subjectName(ctx) {
 }
 function handleDerivedPersonName(ctx) {
   if (researchAudience(ctx) === "project") return null;
-  const display = normalize(ctx.evidence.profile.display_name);
+  const display = normalize2(ctx.evidence.profile.display_name);
   if (looseTokens(display).length !== 1 || !new RegExp("^\\p{L}[\\p{L}\\p{M}'\u2019.-]*$", "u").test(display)) return null;
   const handle = ctx.handle.replace(/^@/, "").trim();
   if (!handle.toLocaleLowerCase().startsWith(display.toLocaleLowerCase())) return null;
@@ -11191,9 +11265,9 @@ function extractJsonLdText(html) {
   return objects.join(` ${JSON_LD_OBJECT_BOUNDARY} `);
 }
 function documentText(document) {
-  if (!/html|xhtml/i.test(document.contentType)) return normalize(document.text);
+  if (!/html|xhtml/i.test(document.contentType)) return normalize2(document.text);
   const jsonLd = extractJsonLdText(document.text);
-  return normalize(decodeHtmlEntities(`${jsonLd}${jsonLd ? ` ${JSON_LD_OBJECT_BOUNDARY} ` : ""}${document.text.replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<br\s*\/?\s*>|<\/(?:p|div|section|article|li|h[1-6]|tr|td|th|main|header|footer|blockquote)>/gi, ". ").replace(/<[^>]+>/g, " ")}`));
+  return normalize2(decodeHtmlEntities(`${jsonLd}${jsonLd ? ` ${JSON_LD_OBJECT_BOUNDARY} ` : ""}${document.text.replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<br\s*\/?\s*>|<\/(?:p|div|section|article|li|h[1-6]|tr|td|th|main|header|footer|blockquote)>/gi, ". ").replace(/<[^>]+>/g, " ")}`));
 }
 var PREDICATE_PATTERNS = {
   official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company|person|entrepreneur|investor|(?:co[- ]?)?founder|chief executive officer|ceo)\b/i,
@@ -11265,23 +11339,23 @@ function exactTokenPassage(page, excerpt) {
   if (!excerptTokens.length || excerptTokens.length > pageTokens.length) return null;
   for (let index = 0; index <= pageTokens.length - excerptTokens.length; index += 1) {
     if (!excerptTokens.every((token, offset) => pageTokens[index + offset].key === token)) continue;
-    return normalize(page.slice(pageTokens[index].start, pageTokens[index + excerptTokens.length - 1].end));
+    return normalize2(page.slice(pageTokens[index].start, pageTokens[index + excerptTokens.length - 1].end));
   }
   return null;
 }
 function sourceSegments(page) {
-  return page.split(JSON_LD_OBJECT_BOUNDARY).map((segment) => normalize(segment)).filter(Boolean);
+  return page.split(JSON_LD_OBJECT_BOUNDARY).map((segment) => normalize2(segment)).filter(Boolean);
 }
 function sourceSentencePassages(page) {
   const passages = [];
   for (const segment of sourceSegments(page)) {
     const sentences = [...segment.matchAll(/[^.!?]+(?:[.!?]+|$)/g)].flatMap((match) => {
-      if (match.index === void 0 || !normalize(match[0])) return [];
+      if (match.index === void 0 || !normalize2(match[0])) return [];
       return [{ start: match.index, end: match.index + match[0].length }];
     });
     for (let start = 0; start < sentences.length; start += 1) {
       for (let count = 0; count < 3 && start + count < sentences.length; count += 1) {
-        const passage = normalize(segment.slice(sentences[start].start, sentences[start + count].end));
+        const passage = normalize2(segment.slice(sentences[start].start, sentences[start + count].end));
         if (passage.length > MAX_SUPPORT_PASSAGE_CHARS) break;
         passages.push(passage);
       }
@@ -11297,7 +11371,7 @@ function sourceAnchorPassages(page, value) {
     return phraseTokenStarts(tokens, value).map((start) => {
       const from = Math.max(0, start - 28);
       const to = Math.min(tokens.length - 1, start + valueTokens.length - 1 + 28);
-      return normalize(segment.slice(tokens[from].start, tokens[to].end));
+      return normalize2(segment.slice(tokens[from].start, tokens[to].end));
     }).filter((passage) => passage.length <= MAX_SUPPORT_PASSAGE_CHARS);
   });
 }
@@ -11337,14 +11411,14 @@ function individualSentences(value) {
     /\b(?:Mr|Mrs|Ms|Dr|Inc|Ltd|Corp|Co|No|U\.S)\./g,
     (match) => match.replace(/\./g, marker2)
   );
-  return [...protectedValue.matchAll(/[^.!?]+(?:[.!?]+|$)/g)].map((match) => normalize(match[0].replaceAll(marker2, "."))).filter(Boolean);
+  return [...protectedValue.matchAll(/[^.!?]+(?:[.!?]+|$)/g)].map((match) => normalize2(match[0].replaceAll(marker2, "."))).filter(Boolean);
 }
 function attributionClauses(value) {
   return individualSentences(value).flatMap((sentence) => sentence.split(/\s*(?:;|,\s*(?:and|but|while|whereas|which|who|that)|\s+(?:but|while|whereas)\s+)\s*/i).flatMap((clause) => clause.split(
     /\s+and\s+(?=(?:(?:[A-Z][A-Za-z0-9.'’-]*)\s+){0,3}(?:[A-Z][A-Za-z0-9.'’-]*)\s+(?:is|was|has|had|serves?|served|settled|reported|announced|founded|co[- ]?founded|leads?|led|works?|worked|went|became)\b)/
   )).flatMap((clause) => clause.split(
     /\s+and\s+(?=(?:founded|co[- ]?founded|serves?|served|works?|worked|reported|announced|settled|went|became|launched|built|created|led|leads)\b)/i
-  )).map(normalize).filter(Boolean));
+  )).map(normalize2).filter(Boolean));
 }
 function hasSubjectAlias(value, aliases) {
   if (aliases.some((alias) => looseContainsPhrase(value, alias))) return true;
@@ -11907,7 +11981,7 @@ function overlapScore(left, right) {
   return rightTokens.length ? rightTokens.filter((token) => leftTokens.has(token)).length / rightTokens.length : 0;
 }
 function supportingSourcePassage(page, lead, aliases, trustedContextTokens = /* @__PURE__ */ new Set()) {
-  const excerpt = normalize(decodeHtmlEntities(lead.excerpt));
+  const excerpt = normalize2(decodeHtmlEntities(lead.excerpt));
   const exact = page.includes(excerpt) ? excerpt : exactTokenPassage(page, excerpt);
   if (exact && passageSupportsLead(exact, lead, aliases, trustedContextTokens)) return exact;
   const candidates = [.../* @__PURE__ */ new Set([
@@ -12153,15 +12227,15 @@ function coinbaseWrappedAssetLocaleFallback(raw) {
 }
 function coinbaseWrappedAssetProductPassage(title, body, symbol) {
   if (!looseContainsPhrase(title, "Coinbase") || !looseContainsPhrase(title, symbol) || /\b(?:404|not found|page unavailable)\b/i.test(title)) return null;
-  const normalizedBody = normalize(decodeHtmlEntities(body.replace(/<[^>]+>/g, " ")));
+  const normalizedBody = normalize2(decodeHtmlEntities(body.replace(/<[^>]+>/g, " ")));
   if (searchable(symbol) === "cbbtc") {
     const wrappedCustody = /\bCoinbase\s+wrapped\s+assets?\b[^.!?]{0,220}\bbacked\s+1:1\b[^.!?]{0,160}\bheld\s+in\s+custody\s+by\s+Coinbase\b/i.exec(normalizedBody);
-    return wrappedCustody ? normalize(`${title}. ${wrappedCustody[0]}`) : null;
+    return wrappedCustody ? normalize2(`${title}. ${wrappedCustody[0]}`) : null;
   }
   if (searchable(symbol) === "cbeth") {
     const productClass = /(?:\bliquid\s+staking\s+token\b|\bwrap\s+your\s+staked\s+ETH\s+to\s+cbETH\b|\bcbETH\b[^.!?]{0,120}\btraded\s+on\s+Coinbase\b)/i.exec(normalizedBody);
     const ventureWhitepaper = /(?:\bCoinbase['’]s\s+whitepaper\b[^.!?]{0,260}\bcbETH\b|\bcbETH\b[^.!?]{0,260}\bCoinbase['’]s\s+whitepaper\b)/i.exec(normalizedBody);
-    return productClass && ventureWhitepaper ? normalize(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`) : null;
+    return productClass && ventureWhitepaper ? normalize2(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`) : null;
   }
   return null;
 }
@@ -12178,7 +12252,7 @@ function isExpectedCoinbaseWrappedAssetPage(result, fallbackUrl) {
   if (!exactProductPath || searchable(pathSegments.at(-1) ?? "") !== searchable(symbol)) return false;
   const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(result.text);
   const htmlTitle = /<title\b[^>]*>([\s\S]{1,1000}?)<\/title>/i.exec(result.text)?.[1];
-  const title = normalize(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
+  const title = normalize2(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
   const body = metadata?.[1] && metadata.index === 0 ? result.text.slice(metadata[0].length) : result.text;
   return Boolean(coinbaseWrappedAssetProductPassage(title, body, symbol));
 }
@@ -12187,7 +12261,7 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
   const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(page);
   const htmlTitle = /html|xhtml/i.test(document.contentType) ? /<title\b[^>]*>([\s\S]{1,1000}?)<\/title>/i.exec(document.text)?.[1] : void 0;
   if ((!metadata?.[1] || metadata.index !== 0) && !htmlTitle) return null;
-  const title = normalize(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
+  const title = normalize2(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
   const body = metadata?.[1] && metadata.index === 0 ? page.slice(metadata[0].length) : page;
   let pathSymbol;
   try {
@@ -12213,7 +12287,7 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
       "i"
     ).exec(body);
     if (wrappedCustody) {
-      const passage2 = normalize(`${title}. ${wrappedCustody[0]}`);
+      const passage2 = normalize2(`${title}. ${wrappedCustody[0]}`);
       if (passage2.length <= MAX_SUPPORT_PASSAGE_CHARS && !TOKEN_PAGE_UNCERTAINTY.test(passage2)) return passage2;
     }
     const tokenClass = new RegExp(
@@ -12230,7 +12304,7 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
     ).exec(body);
     const productClass = tokenClass ?? wrappedStakingProduct;
     if (!productClass || !ventureWhitepaper) continue;
-    const passage = normalize(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`);
+    const passage = normalize2(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`);
     if (passage.length <= MAX_SUPPORT_PASSAGE_CHARS && looseContainsPhrase(passage, relationship.name) && looseContainsPhrase(passage, lead.value) && !TOKEN_PAGE_UNCERTAINTY.test(passage)) return passage;
   }
   return null;
@@ -12769,8 +12843,8 @@ function verifiedVentureAssetRelationships(ctx) {
   });
 }
 function currentRoleRelationshipParts(value) {
-  const direct = /^(.{2,160}?)\s+(?:at|of)\s+(.{2,160})$/i.exec(normalize(value));
-  const comma = direct ? null : /^(.{2,160}?),\s+(.{2,160})$/.exec(normalize(value));
+  const direct = /^(.{2,160}?)\s+(?:at|of)\s+(.{2,160})$/i.exec(normalize2(value));
+  const comma = direct ? null : /^(.{2,160}?),\s+(.{2,160})$/.exec(normalize2(value));
   const role = clean(direct?.[1] ?? comma?.[1], 160);
   const name = clean(direct?.[2] ?? comma?.[2], 160);
   return role && name && CURRENT_CONTROL_ROLE.test(role) ? { role, name } : null;

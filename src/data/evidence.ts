@@ -752,6 +752,12 @@ export interface CollectedEvidence {
   basicFactLeads?: BasicFactLead[];
   /** Role-specific questions and their verified answer/gap state for this scan. */
   basicFactQuestionLedger?: BasicFactQuestionLedgerEntry[];
+  /**
+   * Roles the subject's own employment record has CLOSED, with the date it
+   * ends. A founder who quietly stopped listing a venture is a finding no
+   * team page shows; the record states the end date and nothing about why.
+   */
+  employmentDepartures?: { company: string; summary: string; ended?: string }[];
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to
