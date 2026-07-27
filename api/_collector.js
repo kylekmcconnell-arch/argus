@@ -7385,6 +7385,54 @@ async function discoverTeamDocumentUrls(domain) {
   }));
   return [...new Set(bodies.flatMap((body) => teamDocumentUrlsFromIndex(d, body)))];
 }
+var PROFILE_ANCHOR = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]{0,200}?)<\/a>/gi;
+function profileAnchors(html) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const match of html.matchAll(PROFILE_ANCHOR)) {
+    const href = match[1].trim();
+    const anchorText = htmlToText(match[2]).slice(0, 120);
+    const index = match.index ?? 0;
+    const linkedin = href.match(/linkedin\.com\/in\/([A-Za-z0-9%._-]{2,100})/i);
+    if (linkedin) {
+      const value = `linkedin.com/in/${linkedin[1].replace(/\/$/, "").toLowerCase()}`;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      out.push({ value, kind: "linkedin", anchorText, index });
+      continue;
+    }
+    const x = href.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})(?:[/?#]|$)/i);
+    if (x && !/\/(?:status|intent|share|home|i)\b/i.test(href)) {
+      const value = `@${x[1]}`;
+      if (seen.has(value.toLowerCase())) continue;
+      seen.add(value.toLowerCase());
+      out.push({ value, kind: "x", anchorText, index });
+    }
+  }
+  return out;
+}
+var nameTokens = (value) => value.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 1);
+function bindProfileAnchor(name, html, anchors, kind) {
+  const tokens = nameTokens(name);
+  if (tokens.length < 2) return void 0;
+  const candidates = anchors.filter((anchor) => anchor.kind === kind);
+  if (!candidates.length) return void 0;
+  const byAnchorText = candidates.find((anchor) => {
+    const text2 = nameTokens(anchor.anchorText);
+    return tokens.every((token) => text2.includes(token));
+  });
+  if (byAnchorText) return byAnchorText.value;
+  const bySlug = candidates.find((anchor) => {
+    const slug = nameTokens(anchor.value.replace(/^linkedin\.com\/in\//, "").replace(/^@/, ""));
+    const joined = slug.join("");
+    return tokens.every((token) => joined.includes(token));
+  });
+  if (bySlug) return bySlug.value;
+  const namePosition = html.toLowerCase().indexOf(tokens.join(" "));
+  if (namePosition < 0) return void 0;
+  const near = candidates.filter((anchor) => Math.abs(anchor.index - namePosition) <= 1200).sort((a, b) => Math.abs(a.index - namePosition) - Math.abs(b.index - namePosition))[0];
+  return near?.value;
+}
 function htmlToText(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 }
@@ -7435,7 +7483,7 @@ async function fetchPage(url, expectedApex) {
     return null;
   }
   recordCall("site-fetch", "team-page", 0, void 0, "succeeded");
-  return { url: finalUrl, text: text2 };
+  return { url: finalUrl, text: text2, html: raw, anchors: profileAnchors(raw) };
 }
 var roleEvidencePattern = (role) => {
   if (/founder/i.test(role)) return /\b(?:co-?founders?|founders?|started|founded)\b/i;
@@ -7517,9 +7565,11 @@ ${corpus}`,
     const role = (person.role || "team").toString();
     const kind = /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
     const handle = person.twitter && /^@?[A-Za-z0-9_]{2,30}$/.test(person.twitter.replace(/^@/, "")) ? "@" + person.twitter.replace(/^@/, "") : void 0;
-    const linkedin = person.linkedin && /linkedin\.com\/(in|company)\//i.test(person.linkedin) ? person.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
+    const modelLinkedin = person.linkedin && /linkedin\.com\/(in|company)\//i.test(person.linkedin) ? person.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
     const claimedSource = canonicalSourceUrl(person.source_url);
     const sourcePage = selectedPages.find((page) => canonicalSourceUrl(page.url) === claimedSource);
+    const linkedin = modelLinkedin ?? (sourcePage?.html && sourcePage.anchors ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "linkedin") : void 0);
+    const boundHandle = handle ?? (sourcePage?.html && sourcePage.anchors ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "x") : void 0);
     if (!sourcePage || !teamMemberIsDirectlySupported(
       sourcePage.text,
       displayName,
@@ -7529,7 +7579,7 @@ ${corpus}`,
     )) return [];
     return [{
       name: displayName,
-      handle,
+      handle: boundHandle,
       role,
       kind,
       linkedin,

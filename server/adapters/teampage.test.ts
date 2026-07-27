@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { teamDocumentUrlsFromIndex, teamMemberIsDirectlySupported } from "./teampage";
+import { bindProfileAnchor, profileAnchors, teamDocumentUrlsFromIndex, teamMemberIsDirectlySupported } from "./teampage";
 
 const structuredMock = vi.hoisted(() => vi.fn());
 
@@ -138,5 +138,53 @@ describe("official project team document discovery", () => {
     expect(team).toEqual([]);
     // The off-domain roster must never reach extraction as first-party content.
     expect(structuredMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("profile anchors on a team page", () => {
+  // The shape of the Orbit roster: each person's name wrapped in a link to
+  // their LinkedIn. htmlToText deleted these hrefs before anything read them.
+  const roster = `
+    <div class="member">
+      <h3>Niklas Homan</h3><p>Founder &amp; Chief Executive Officer</p>
+      <a href="https://www.linkedin.com/in/niklas-homan/">LinkedIn</a>
+    </div>
+    <div class="member">
+      <h3>Alexander Vermeulen</h3><p>Founder &amp; Chief Technology Officer</p>
+      <a href="https://linkedin.com/in/avermeulen">Alexander Vermeulen</a>
+      <a href="https://x.com/avermeulen">Twitter</a>
+    </div>
+    <div class="footer">
+      <a href="https://www.linkedin.com/company/orbitgroup">Company page</a>
+      <a href="https://x.com/orbitgroup_ai/status/123">Latest post</a>
+    </div>`;
+
+  it("reads profile links out of the markup and ignores company pages and status links", () => {
+    const anchors = profileAnchors(roster);
+    expect(anchors.map((a) => a.value)).toEqual([
+      "linkedin.com/in/niklas-homan",
+      "linkedin.com/in/avermeulen",
+      "@avermeulen",
+    ]);
+    expect(anchors.some((a) => a.value.includes("company"))).toBe(false);
+  });
+
+  it("binds a profile by nearby position, by anchor text, and by slug", () => {
+    const anchors = profileAnchors(roster);
+    // Anchor text is just "LinkedIn", so this one binds by proximity.
+    expect(bindProfileAnchor("Niklas Homan", roster, anchors, "linkedin"))
+      .toBe("linkedin.com/in/niklas-homan");
+    // Anchor text carries the full name.
+    expect(bindProfileAnchor("Alexander Vermeulen", roster, anchors, "linkedin"))
+      .toBe("linkedin.com/in/avermeulen");
+    expect(bindProfileAnchor("Alexander Vermeulen", roster, anchors, "x"))
+      .toBe("@avermeulen");
+  });
+
+  it("never attaches a profile to someone the page does not name", () => {
+    const anchors = profileAnchors(roster);
+    expect(bindProfileAnchor("Satoshi Nakamoto", roster, anchors, "linkedin")).toBeUndefined();
+    // A single-token name is too weak to bind on.
+    expect(bindProfileAnchor("Niklas", roster, anchors, "linkedin")).toBeUndefined();
   });
 });

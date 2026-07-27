@@ -112,6 +112,98 @@ async function discoverTeamDocumentUrls(domain: string): Promise<string[]> {
   return [...new Set(bodies.flatMap((body) => teamDocumentUrlsFromIndex(d, body)))];
 }
 
+export interface ProfileAnchor {
+  /** linkedin.com/in/slug (no scheme, no trailing slash) or an @handle. */
+  value: string;
+  kind: "linkedin" | "x";
+  /** Visible text of the anchor, often the person's name. */
+  anchorText: string;
+  /** Character offset in the source HTML, for nearest-name binding. */
+  index: number;
+}
+
+const PROFILE_ANCHOR =
+  /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]{0,200}?)<\/a>/gi;
+
+/**
+ * Profile links a team page states in its markup.
+ *
+ * htmlToText deletes every tag, so an `href` to a person's LinkedIn is gone
+ * before the extractor reads the page: Orbit's roster linked all six profiles
+ * and ARGUS stored linkedin: null for every one. Anchors are read from the raw
+ * HTML first and bound to people deterministically afterwards, which needs no
+ * model call and cannot hallucinate a profile that was not on the page.
+ */
+export function profileAnchors(html: string): ProfileAnchor[] {
+  const out: ProfileAnchor[] = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(PROFILE_ANCHOR)) {
+    const href = match[1].trim();
+    const anchorText = htmlToText(match[2]).slice(0, 120);
+    const index = match.index ?? 0;
+    const linkedin = href.match(/linkedin\.com\/in\/([A-Za-z0-9%._-]{2,100})/i);
+    if (linkedin) {
+      const value = `linkedin.com/in/${linkedin[1].replace(/\/$/, "").toLowerCase()}`;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      out.push({ value, kind: "linkedin", anchorText, index });
+      continue;
+    }
+    const x = href.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})(?:[/?#]|$)/i);
+    if (x && !/\/(?:status|intent|share|home|i)\b/i.test(href)) {
+      const value = `@${x[1]}`;
+      if (seen.has(value.toLowerCase())) continue;
+      seen.add(value.toLowerCase());
+      out.push({ value, kind: "x", anchorText, index });
+    }
+  }
+  return out;
+}
+
+const nameTokens = (value: string): string[] =>
+  value.toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 1);
+
+/**
+ * Bind a page's profile anchors to a named person: the anchor's own text, then
+ * the link slug (linkedin.com/in/niklas-homan for "Niklas Homan"), then the
+ * anchor physically nearest the name in the markup. Every rule requires the
+ * person's own name tokens, so a page's generic company LinkedIn is never
+ * attached to an individual.
+ */
+export function bindProfileAnchor(
+  name: string,
+  html: string,
+  anchors: readonly ProfileAnchor[],
+  kind: ProfileAnchor["kind"],
+): string | undefined {
+  const tokens = nameTokens(name);
+  if (tokens.length < 2) return undefined;
+  const candidates = anchors.filter((anchor) => anchor.kind === kind);
+  if (!candidates.length) return undefined;
+
+  const byAnchorText = candidates.find((anchor) => {
+    const text = nameTokens(anchor.anchorText);
+    return tokens.every((token) => text.includes(token));
+  });
+  if (byAnchorText) return byAnchorText.value;
+
+  const bySlug = candidates.find((anchor) => {
+    const slug = nameTokens(anchor.value.replace(/^linkedin\.com\/in\//, "").replace(/^@/, ""));
+    const joined = slug.join("");
+    return tokens.every((token) => joined.includes(token));
+  });
+  if (bySlug) return bySlug.value;
+
+  // Nearest anchor after the name appears in the markup, bounded so an
+  // unrelated link further down the page is never adopted.
+  const namePosition = html.toLowerCase().indexOf(tokens.join(" "));
+  if (namePosition < 0) return undefined;
+  const near = candidates
+    .filter((anchor) => Math.abs(anchor.index - namePosition) <= 1200)
+    .sort((a, b) => Math.abs(a.index - namePosition) - Math.abs(b.index - namePosition))[0];
+  return near?.value;
+}
+
 export function htmlToText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -122,7 +214,7 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-async function fetchPage(url: string, expectedApex: string): Promise<{ url: string; text: string } | null> {
+async function fetchPage(url: string, expectedApex: string): Promise<TeamPage | null> {
   let response: Response;
   try {
     response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,text/markdown,text/plain" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
@@ -175,7 +267,7 @@ async function fetchPage(url: string, expectedApex: string): Promise<{ url: stri
     return null;
   }
   recordCall("site-fetch", "team-page", 0, undefined, "succeeded");
-  return { url: finalUrl, text };
+  return { url: finalUrl, text, html: raw, anchors: profileAnchors(raw) };
 }
 
 const roleEvidencePattern = (role: string): RegExp => {
@@ -218,7 +310,7 @@ const canonicalSourceUrl = (value: string): string | null => {
   }
 };
 
-type TeamPage = { url: string; text: string };
+type TeamPage = { url: string; text: string; html?: string; anchors?: ProfileAnchor[] };
 
 const pageScore = (page: TeamPage) =>
   (/\/(?:team|leadership|founders?|people)(?:[/.?#-]|$)/i.test(page.url) ? 100 : 0)
@@ -285,9 +377,18 @@ async function extractTeamFromPages(
       const role = (person.role || "team").toString();
       const kind: "team" | "advisor" = /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
       const handle = person.twitter && /^@?[A-Za-z0-9_]{2,30}$/.test(person.twitter.replace(/^@/, "")) ? "@" + person.twitter.replace(/^@/, "") : undefined;
-      const linkedin = person.linkedin && /linkedin\.com\/(in|company)\//i.test(person.linkedin) ? person.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : undefined;
+      const modelLinkedin = person.linkedin && /linkedin\.com\/(in|company)\//i.test(person.linkedin) ? person.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : undefined;
       const claimedSource = canonicalSourceUrl(person.source_url);
       const sourcePage = selectedPages.find((page) => canonicalSourceUrl(page.url) === claimedSource);
+      // The page's own markup is the authority on which profile belongs to whom.
+      const linkedin = modelLinkedin
+        ?? (sourcePage?.html && sourcePage.anchors
+          ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "linkedin")
+          : undefined);
+      const boundHandle = handle
+        ?? (sourcePage?.html && sourcePage.anchors
+          ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "x")
+          : undefined);
       if (!sourcePage || !teamMemberIsDirectlySupported(
         sourcePage.text,
         displayName,
@@ -297,7 +398,7 @@ async function extractTeamFromPages(
       )) return [];
       return [{
         name: displayName,
-        handle,
+        handle: boundHandle,
         role,
         kind,
         linkedin,
