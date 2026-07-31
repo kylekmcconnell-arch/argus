@@ -1589,7 +1589,7 @@ function mergeMeta(current, next) {
   if (!clean4 || current?.includes(clean4)) return current;
   return [current, clean4].filter(Boolean).join(" \xB7 ").slice(0, 500);
 }
-function recordCall(provider, op, usd = 0, meta, status = "succeeded") {
+function recordCall(provider, op, usd2 = 0, meta, status = "succeeded") {
   const { ledger } = currentState();
   const key = `${provider}|${op}`;
   const cur = ledger.get(key);
@@ -1600,11 +1600,11 @@ function recordCall(provider, op, usd = 0, meta, status = "succeeded") {
     cur.failed += status === "failed" ? 1 : 0;
     cur.cached += status === "cached" ? 1 : 0;
     cur.status = aggregateStatus(cur);
-    cur.usd += usd;
+    cur.usd += usd2;
     cur.meta = mergeMeta(cur.meta, meta);
   } else {
     const counts = statusCounts(status);
-    ledger.set(key, { provider, op, calls: 1, ...counts, status, usd, ...meta ? { meta } : {} });
+    ledger.set(key, { provider, op, calls: 1, ...counts, status, usd: usd2, ...meta ? { meta } : {} });
   }
 }
 function recordTwitterapi(op, status = "succeeded", meta) {
@@ -1661,13 +1661,13 @@ function addClaudeUsage(u, op = "analysis", status = "succeeded", outcomeMeta, m
   );
 }
 function addOpenRouterUsage(usage, op, status = "succeeded", model, outcomeMeta) {
-  const usd = typeof usage?.cost === "number" && usage.cost >= 0 ? usage.cost : 0;
+  const usd2 = typeof usage?.cost === "number" && usage.cost >= 0 ? usage.cost : 0;
   const tin = usage?.prompt_tokens ?? 0;
   const tout = usage?.completion_tokens ?? 0;
   recordCall(
     "openrouter",
     op,
-    usd,
+    usd2,
     [`${tin + tout} tok`, model, outcomeMeta].filter(Boolean).join(" \xB7 "),
     status
   );
@@ -19838,6 +19838,164 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
   };
 }
 
+// server/adapters/operatorLaunches.ts
+var PUMPFUN_API = "https://frontend-api-v3.pump.fun";
+var DEXSCREENER_API = "https://api.dexscreener.com";
+var REQUEST_TIMEOUT_MS = 12e3;
+async function getJson2(url) {
+  try {
+    const res = await fetch(url, {
+      headers: { accept: "application/json", "user-agent": "argus-diligence" },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+var asRecord5 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
+var num2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+function normalizeXHandle(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const fromUrl = raw.match(/(?:x\.com|twitter\.com)\/(?!i\/|search|home)([A-Za-z0-9_]{1,30})/i);
+  const handle = fromUrl ? fromUrl[1] : raw.replace(/^@/, "");
+  return /^[A-Za-z0-9_]{1,30}$/.test(handle) ? handle.toLowerCase() : null;
+}
+async function pumpfunCoin(mint) {
+  const data = asRecord5(await getJson2(`${PUMPFUN_API}/coins/${encodeURIComponent(mint)}`));
+  recordCall("pumpfun", "coin", 0, mint.slice(0, 8), data ? "succeeded" : "failed");
+  if (!data || typeof data.creator !== "string" || !data.creator) return null;
+  const handle = typeof data.twitter === "string" ? normalizeXHandle(data.twitter) : null;
+  const created = num2(data.created_timestamp);
+  return {
+    creator: data.creator,
+    symbol: typeof data.symbol === "string" ? data.symbol : "",
+    ...typeof data.name === "string" ? { name: data.name } : {},
+    ...handle ? { xHandle: handle } : {},
+    ...created ? { createdAt: new Date(created).toISOString() } : {}
+  };
+}
+async function launchesBySameCreator(mint, creator) {
+  const data = await getJson2(`${PUMPFUN_API}/coins?creator=${encodeURIComponent(creator)}&offset=0&limit=50`);
+  recordCall("pumpfun", "creator-coins", 0, creator.slice(0, 8), Array.isArray(data) ? "succeeded" : "failed");
+  if (!Array.isArray(data)) return [];
+  const out = [];
+  for (const row of data) {
+    const coin = asRecord5(row);
+    const coinMint = coin && typeof coin.mint === "string" ? coin.mint : "";
+    if (!coin || !coinMint || coinMint === mint) continue;
+    const created = num2(coin.created_timestamp);
+    const handle = typeof coin.twitter === "string" ? normalizeXHandle(coin.twitter) : null;
+    out.push({
+      symbol: typeof coin.symbol === "string" ? coin.symbol : "",
+      ...typeof coin.name === "string" ? { name: coin.name } : {},
+      mint: coinMint,
+      chain: "solana",
+      fdvUsd: num2(coin.usd_market_cap),
+      liquidityUsd: null,
+      ...handle ? { xHandle: handle } : {},
+      ...created ? { createdAt: new Date(created).toISOString() } : {},
+      url: `https://pump.fun/coin/${coinMint}`,
+      link: "same_creator_wallet"
+    });
+  }
+  return out.slice(0, 12);
+}
+var HANDLE_SUFFIXES = /(?:nfts?|bot|sol|coin|token|official|hq|labs?|app|fi|dao|xyz|io|ai|eth|network|protocol|finance|cash|erc|meme)$/i;
+function handleSearchTerms(handle) {
+  const terms = /* @__PURE__ */ new Set();
+  const base = handle.replace(/^@/, "");
+  if (base) terms.add(base);
+  const stem = base.replace(HANDLE_SUFFIXES, "");
+  if (stem.length >= 3 && stem !== base) terms.add(stem);
+  const undigited = base.replace(/[0-9_]+$/g, "");
+  if (undigited.length >= 3 && undigited !== base) terms.add(undigited);
+  return [...terms].slice(0, 3);
+}
+async function launchForOperatorHandle(handle) {
+  const wanted = normalizeXHandle(handle);
+  if (!wanted) return null;
+  const pairs = [];
+  for (const term of handleSearchTerms(wanted)) {
+    const data = asRecord5(await getJson2(`${DEXSCREENER_API}/latest/dex/search?q=${encodeURIComponent(term)}`));
+    recordCall("dexscreener", "search", 0, term, data ? "succeeded" : "failed");
+    const found = Array.isArray(data?.pairs) ? data.pairs : [];
+    pairs.push(...found);
+    if (found.some((row) => {
+      const info = asRecord5(asRecord5(row)?.info);
+      const socials = Array.isArray(info?.socials) ? info.socials : [];
+      return socials.some((entry) => {
+        const social = asRecord5(entry);
+        return social && typeof social.url === "string" && normalizeXHandle(social.url) === wanted;
+      });
+    })) break;
+  }
+  let best = null;
+  for (const row of pairs) {
+    const pair = asRecord5(row);
+    if (!pair) continue;
+    const info = asRecord5(pair.info);
+    const socials = Array.isArray(info?.socials) ? info.socials : [];
+    const claimsHandle = socials.some((entry) => {
+      const social = asRecord5(entry);
+      return social && typeof social.url === "string" && normalizeXHandle(social.url) === wanted;
+    });
+    if (!claimsHandle) continue;
+    const base = asRecord5(pair.baseToken);
+    const mint = base && typeof base.address === "string" ? base.address : "";
+    if (!mint) continue;
+    const liquidity = num2(asRecord5(pair.liquidity)?.usd);
+    const candidate = {
+      symbol: base && typeof base.symbol === "string" ? base.symbol : "",
+      ...base && typeof base.name === "string" ? { name: base.name } : {},
+      mint,
+      chain: typeof pair.chainId === "string" ? pair.chainId : "solana",
+      fdvUsd: num2(pair.fdv),
+      liquidityUsd: liquidity,
+      xHandle: wanted,
+      url: typeof pair.url === "string" ? pair.url : `https://dexscreener.com/${pair.chainId}/${mint}`,
+      link: "operator_bio_project"
+    };
+    if (!best || (candidate.liquidityUsd ?? 0) > (best.liquidityUsd ?? 0)) best = candidate;
+  }
+  return best;
+}
+async function collectOperatorLaunches(mint, operatorBioHandles = []) {
+  const coin = await pumpfunCoin(mint);
+  const subjectHandle = coin?.xHandle;
+  const sameCreator = coin ? await launchesBySameCreator(mint, coin.creator) : [];
+  const bioHandles = [...new Set(
+    operatorBioHandles.map((entry) => normalizeXHandle(entry)).filter((entry) => Boolean(entry) && entry !== subjectHandle)
+  )].slice(0, 5);
+  const fromBio = (await Promise.all(bioHandles.map((entry) => launchForOperatorHandle(entry)))).filter((entry) => Boolean(entry));
+  const byMint = /* @__PURE__ */ new Map();
+  for (const launch of [...sameCreator, ...fromBio]) {
+    if (launch.mint === mint || byMint.has(launch.mint)) continue;
+    byMint.set(launch.mint, launch);
+  }
+  const launches = [...byMint.values()];
+  return {
+    ...coin?.creator ? { creatorWallet: coin.creator } : {},
+    launches,
+    totalLaunches: launches.length + 1
+  };
+}
+var usd = (value) => {
+  if (value === null || !(value > 0)) return "an unreported value";
+  if (value >= 1e9) return `$${(value / 1e9).toFixed(1)}B`;
+  if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
+  if (value >= 1e4) return `$${Math.round(value / 1e3)}K`;
+  if (value >= 1e3) return `$${(value / 1e3).toFixed(1)}K`;
+  return `$${Math.round(value)}`;
+};
+function describeLaunchHistory(history) {
+  if (!history.launches.length) return null;
+  const parts = history.launches.slice(0, 6).map((launch) => `${launch.symbol || launch.mint.slice(0, 6)} now ${usd(launch.fdvUsd)}`);
+  return `This is launch ${history.totalLaunches} tied to the same operator. Earlier launches: ${parts.join("; ")}.`;
+}
+
 // server/orchestrate.ts
 var VENTURE_ROLE_TOKENS = /\b(?:co[- ]?founders?|founders?|creators?|ceo|cto|coo|cfo|chief\s+\w+(?:\s+officer)?|presidents?|chair(?:man|woman|person)?|executives?)\b/gi;
 var BIO_FOUNDER_CLAIM = /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i;
@@ -20535,6 +20693,39 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
     if (n) byName.set(n, rec);
+  }
+  const launchMint = ctx.evidence.projectToken?.verified === true ? ctx.evidence.projectToken.address : "";
+  if (launchMint && ctx.evidence.projectToken?.chain === "solana") {
+    try {
+      const operatorHandles = operatorTeam.flatMap((member) => (member.projects ?? []).map((project) => project.name));
+      const history = await collectOperatorLaunches(launchMint, operatorHandles);
+      const narrative = describeLaunchHistory(history);
+      if (narrative && history.launches.length) {
+        ctx.evidence.findings.push({
+          finding_type: "OperatorLaunchHistory",
+          claim: narrative,
+          source_url: history.launches[0].url,
+          source_date: "",
+          source_author: "pump.fun + dexscreener",
+          verification_status: "Verified",
+          independent_source_count: history.launches.length,
+          // Informational base rate, not an accusation: the current values of
+          // earlier launches are stated and the reader weighs them.
+          polarity: 0,
+          evidence_origin: "deterministic",
+          artifact_verified: true
+        });
+        ctx.emit({
+          phase: "P1 \xB7 Team",
+          label: `Operator has launched before \xB7 ${history.totalLaunches} tokens`,
+          detail: narrative,
+          source: "pump.fun + dexscreener",
+          tone: "warn"
+        });
+      }
+    } catch (error) {
+      ctx.emit({ phase: "P1 \xB7 Team", label: "Prior-launch check error", detail: String(error), tone: "warn" });
+    }
   }
   const subj = norm3(ctx.handle);
   const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || operatorTeam.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm3(t.handle) === subj);
@@ -22738,7 +22929,7 @@ async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
   }
 }
 var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-var num2 = (s) => s == null || s === "" ? null : Number(s);
+var num3 = (s) => s == null || s === "" ? null : Number(s);
 var t1 = (s) => s === "1";
 var solFlag = (x) => x?.status === "1";
 function band(score) {
@@ -22780,9 +22971,9 @@ function evmSafety(gp, sim) {
     openSource: t1(gp?.is_open_source),
     cannotSellAll: t1(gp?.cannot_sell_all),
     metadataMutable: false,
-    buyTax: s?.simSuccess ? s.buyTax : (num2(gp?.buy_tax) ?? 0) * 100,
-    sellTax: s?.simSuccess ? s.sellTax : (num2(gp?.sell_tax) ?? 0) * 100,
-    holderCount: num2(gp?.holder_count) ?? 0,
+    buyTax: s?.simSuccess ? s.buyTax : (num3(gp?.buy_tax) ?? 0) * 100,
+    sellTax: s?.simSuccess ? s.sellTax : (num3(gp?.sell_tax) ?? 0) * 100,
+    holderCount: num3(gp?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct,
@@ -22797,7 +22988,7 @@ function evmSafety(gp, sim) {
     tradingCooldown: t1(gp?.trading_cooldown),
     externalCall: t1(gp?.external_call),
     ownerChangeBalance: t1(gp?.owner_change_balance),
-    creatorPercent: (num2(gp?.creator_percent) ?? 0) * 100
+    creatorPercent: (num3(gp?.creator_percent) ?? 0) * 100
   };
 }
 function solanaSafety(sol) {
@@ -22834,7 +23025,7 @@ function solanaSafety(sol) {
     metadataMutable: solFlag(sol?.metadata_mutable),
     buyTax: 0,
     sellTax: 0,
-    holderCount: num2(sol?.holder_count) ?? 0,
+    holderCount: num3(sol?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct: 0,

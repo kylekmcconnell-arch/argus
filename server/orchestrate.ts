@@ -82,6 +82,7 @@ import {
   collectProjectCompanyEnrichment,
   companyEnrichmentMatchesOfficialDomain,
 } from "./adapters/monid";
+import { collectOperatorLaunches, describeLaunchHistory } from "./adapters/operatorLaunches";
 import {
   hydrateOfficialProjectIdentityFromFacts,
   verifiedOfficialProjectIdentity,
@@ -1064,6 +1065,45 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
     if (n) byName.set(n, rec);
+  }
+
+  // PRIOR LAUNCHES: a launchpad token's risk lives in the operator's history,
+  // not its (renounced, LP-locked) contract. Same-wallet history plus the
+  // OTHER projects the operator's own bio claims, each resolved to a traded
+  // token only when that token's own metadata names the exact handle. Free,
+  // keyless, and silent unless the subject really is a launchpad token.
+  const launchMint = ctx.evidence.projectToken?.verified === true ? ctx.evidence.projectToken.address : "";
+  if (launchMint && ctx.evidence.projectToken?.chain === "solana") {
+    try {
+      const operatorHandles = operatorTeam.flatMap((member) => (member.projects ?? []).map((project) => project.name));
+      const history = await collectOperatorLaunches(launchMint, operatorHandles);
+      const narrative = describeLaunchHistory(history);
+      if (narrative && history.launches.length) {
+        ctx.evidence.findings.push({
+          finding_type: "OperatorLaunchHistory",
+          claim: narrative,
+          source_url: history.launches[0].url,
+          source_date: "",
+          source_author: "pump.fun + dexscreener",
+          verification_status: "Verified",
+          independent_source_count: history.launches.length,
+          // Informational base rate, not an accusation: the current values of
+          // earlier launches are stated and the reader weighs them.
+          polarity: 0,
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+        });
+        ctx.emit({
+          phase: "P1 · Team",
+          label: `Operator has launched before · ${history.totalLaunches} tokens`,
+          detail: narrative,
+          source: "pump.fun + dexscreener",
+          tone: "warn",
+        });
+      }
+    } catch (error) {
+      ctx.emit({ phase: "P1 · Team", label: "Prior-launch check error", detail: String(error), tone: "warn" });
+    }
   }
 
   // Does the ACCOUNT ITSELF vouch for this team, or was it only matched by NAME?
