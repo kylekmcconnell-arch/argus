@@ -1123,6 +1123,130 @@ const BEFORE_ROLE_CONNECTORS = new Set(["is", "was", "as", "the", "a", "an", "ou
 const AFTER_ROLE_CONNECTORS = new Set(["is", "was", "the", "a", "an", "our", "own", "core", "aka"]);
 const connectorAllowed = (gap: string, allowed: Set<string>): boolean =>
   (gap.toLowerCase().match(/[a-z']+/g) ?? []).every((word) => allowed.has(word));
+
+/**
+ * OPERATOR ATTRIBUTION: who actually runs this project account?
+ *
+ * A project/token account's FOLLOWING list is small and deliberate (a fresh
+ * launchpad account often follows only its own dev), and builders routinely
+ * state the affiliation in their own bio ("Building @linkrbot"). Neither
+ * signal is a model guess: the project account vouches by following, and the
+ * person claims the project in first-party profile text. Crossing them
+ * resolves the operator deterministically for exactly the accounts where a
+ * team page, press coverage and a CoinGecko listing all do not exist yet.
+ *
+ * Bounded by design: at most MAX_FOLLOWING_PAGES pages, and a candidate is
+ * only returned when their bio names THIS subject next to a builder verb.
+ */
+const OPERATOR_VERB = "building|builder|build|dev(?:eloper)?|developing|creator|created|creating|founder|co-?founder|behind|maker|making|shipping|ships|working\\s+on|work\\s+on|author\\s+of|team\\s+behind";
+const MAX_FOLLOWING_PAGES = 2;
+const FOLLOWING_PAGE_SIZE = 100;
+
+/** Bio text that claims the subject, with the matched phrase for evidence. */
+export function operatorClaimInBio(
+  bio: string,
+  subjectHandle: string,
+  subjectName?: string,
+): { role: string; phrase: string } | null {
+  const text = String(bio ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  const handle = subjectHandle.replace(/^@/, "");
+  if (!handle) return null;
+  // The subject may be named by @handle or by a distinctive display name; a
+  // very short name (<=3 chars) is too collision-prone to accept alone.
+  const names = [regexEscape(handle)];
+  const trimmedName = subjectName?.trim();
+  if (trimmedName && trimmedName.length > 3 && trimmedName.toLowerCase() !== handle.toLowerCase()) {
+    names.push(regexEscape(trimmedName));
+  }
+  const subject = `(?:@?(?:${names.join("|")}))`;
+  // Verb before the subject ("building @x") or after it ("@x dev").
+  const before = new RegExp(`\\b(${OPERATOR_VERB})\\b[^@|,.\\n]{0,24}${subject}\\b`, "i");
+  const after = new RegExp(`${subject}\\b[^@|,.\\n]{0,16}\\b(${OPERATOR_VERB})\\b`, "i");
+  const match = text.match(before) ?? text.match(after);
+  if (!match) return null;
+  const verb = (match[1] ?? "").toLowerCase();
+  const role = /founder/.test(verb)
+    ? verb.replace(/\s+/g, " ")
+    : /creator|created|creating|maker|making/.test(verb)
+      ? "creator"
+      : /dev/.test(verb)
+        ? "developer"
+        : "operator";
+  return { role, phrase: match[0].trim().slice(0, 160) };
+}
+
+/** Other @projects the same bio claims, for the serial-launcher venture graph. */
+function otherProjectsInBio(bio: string, subjectHandle: string): { name: string }[] {
+  const handle = subjectHandle.replace(/^@/, "").toLowerCase();
+  const out: { name: string }[] = [];
+  const seen = new Set<string>();
+  for (const match of String(bio ?? "").matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
+    const other = match[1].toLowerCase();
+    if (other === handle || seen.has(other)) continue;
+    seen.add(other);
+    out.push({ name: `@${match[1]}` });
+  }
+  return out.slice(0, 6);
+}
+
+/**
+ * Accounts the subject follows whose own bio claims they build the subject.
+ * Returns [] (never throws) when twitterapi is unset or the account follows
+ * too many accounts to scan within the bounded page budget.
+ */
+export async function discoverOperatorsFromFollowings(
+  subjectHandle: string,
+  subjectName?: string,
+): Promise<TeamMember[]> {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return [];
+  const handle = subjectHandle.replace(/^@/, "");
+  const out: TeamMember[] = [];
+  const seen = new Set<string>();
+  let cursor = "";
+  for (let page = 0; page < MAX_FOLLOWING_PAGES; page += 1) {
+    const url = `${TWITTERAPI}/twitter/user/followings?userName=${encodeURIComponent(handle)}`
+      + `&pageSize=${FOLLOWING_PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await twFetch(url, key);
+    if (!res || !res.ok) break;
+    let payload: Record<string, unknown>;
+    try {
+      payload = asRecord(await res.json()) ?? {};
+    } catch {
+      break;
+    }
+    const rows = (payload.followings ?? payload.users ?? payload.data) as unknown;
+    const list = Array.isArray(rows) ? rows : [];
+    for (const row of list) {
+      const person = asRecord(row);
+      if (!person) continue;
+      const userName = typeof person.userName === "string" ? person.userName : typeof person.screen_name === "string" ? person.screen_name : "";
+      const bio = typeof person.description === "string" ? person.description : "";
+      if (!userName || seen.has(userName.toLowerCase())) continue;
+      seen.add(userName.toLowerCase());
+      const claim = operatorClaimInBio(bio, handle, subjectName);
+      if (!claim) continue;
+      out.push({
+        name: typeof person.name === "string" && person.name.trim() ? person.name.trim() : `@${userName}`,
+        handle: `@${userName}`,
+        role: claim.role,
+        kind: "team",
+        evidence: `the official account follows @${userName}, whose own X bio states "${claim.phrase}"`,
+        source: "operator attribution (followings + bio claim)",
+        sourceUrl: `https://x.com/${userName}`,
+        projects: otherProjectsInBio(bio, handle),
+      });
+    }
+    const next = typeof payload.next_cursor === "string" ? payload.next_cursor
+      : typeof payload.nextCursor === "string" ? payload.nextCursor : "";
+    const hasNext = payload.has_next_page === true || payload.hasNextPage === true;
+    if (!next || !hasNext || !list.length) break;
+    cursor = next;
+  }
+  return out.slice(0, 6);
+}
+
 export function scanPostsForRoles(posts: string[], projectName?: string): TeamMember[] {
   const out: TeamMember[] = [];
   const seen = new Set<string>();

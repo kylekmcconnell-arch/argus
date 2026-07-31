@@ -30,7 +30,7 @@ import {
 import { getCost, providerFailureLines, withCostLedger } from "./cost";
 import { PersonCheckTracker, type ProviderRunState } from "./checks";
 
-import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
@@ -851,6 +851,11 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       : Promise.resolve([] as TeamMember[]),
     // Read the project's own /team page directly (Grok's summary can miss it).
     fetchTeamPage(teamDomain, ctx.evidence.profile.display_name),
+    // Operator attribution: the accounts THIS account follows whose own bio
+    // claims they build it. For a fresh launchpad project with no team page,
+    // no press and no listing, this is often the only first-party operator
+    // evidence that exists (and it is two crossing signals, not a guess).
+    discoverOperatorsFromFollowings(ctx.handle, ctx.evidence.profile.display_name),
   ]);
 
   const claims = await claimsPromise;
@@ -925,7 +930,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // is where the team page actually lives — mine it like Site recon would.
   // discoverAffiliations now covers the reverse-mention angle too (was a second
   // Grok search call — merged to halve intake search spend).
-  const [bySubject, people, siteTeam, pageTeam] = await discoveryPromise;
+  const [bySubject, people, siteTeam, pageTeam, operatorTeam] = await discoveryPromise;
 
   // Auto-pivot team: merge everyone found across the website search, the account's
   // own X content, and a deterministic post role-word scan (founder/CEO/CTO...).
@@ -981,6 +986,18 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "deterministic" as const,
+    })),
+    // Both halves are first-party provider records: the subject's own
+    // following edge and the candidate's own profile text. The handle IS the
+    // evidence, so the identity link is deterministic; the OTHER projects
+    // named in that bio stay model-free leads (self-claimed, unverified).
+    ...operatorTeam.map((member) => ({
+      ...member,
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic" as const,
+      projects_evidence_origin: "model_lead" as const,
     })),
   ];
   for (const t of teamCandidates) {
@@ -1061,6 +1078,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   const subj = norm(ctx.handle);
   const accountVouchesTeam = !!domain
     || postRoleTeam.length > 0
+    || operatorTeam.length > 0
     || webTeam.some((t) => t.artifact_verified === true && norm(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });

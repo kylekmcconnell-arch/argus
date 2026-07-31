@@ -7045,6 +7045,86 @@ var regexEscape2 = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var BEFORE_ROLE_CONNECTORS = /* @__PURE__ */ new Set(["is", "was", "as", "the", "a", "an", "our", "own", "core", "now", "currently", "serves", "joins", "named", "appointed"]);
 var AFTER_ROLE_CONNECTORS = /* @__PURE__ */ new Set(["is", "was", "the", "a", "an", "our", "own", "core", "aka"]);
 var connectorAllowed = (gap, allowed) => (gap.toLowerCase().match(/[a-z']+/g) ?? []).every((word) => allowed.has(word));
+var OPERATOR_VERB = "building|builder|build|dev(?:eloper)?|developing|creator|created|creating|founder|co-?founder|behind|maker|making|shipping|ships|working\\s+on|work\\s+on|author\\s+of|team\\s+behind";
+var MAX_FOLLOWING_PAGES = 2;
+var FOLLOWING_PAGE_SIZE = 100;
+function operatorClaimInBio(bio, subjectHandle, subjectName3) {
+  const text2 = String(bio ?? "").replace(/\s+/g, " ").trim();
+  if (!text2) return null;
+  const handle = subjectHandle.replace(/^@/, "");
+  if (!handle) return null;
+  const names = [regexEscape2(handle)];
+  const trimmedName = subjectName3?.trim();
+  if (trimmedName && trimmedName.length > 3 && trimmedName.toLowerCase() !== handle.toLowerCase()) {
+    names.push(regexEscape2(trimmedName));
+  }
+  const subject = `(?:@?(?:${names.join("|")}))`;
+  const before = new RegExp(`\\b(${OPERATOR_VERB})\\b[^@|,.\\n]{0,24}${subject}\\b`, "i");
+  const after = new RegExp(`${subject}\\b[^@|,.\\n]{0,16}\\b(${OPERATOR_VERB})\\b`, "i");
+  const match = text2.match(before) ?? text2.match(after);
+  if (!match) return null;
+  const verb = (match[1] ?? "").toLowerCase();
+  const role = /founder/.test(verb) ? verb.replace(/\s+/g, " ") : /creator|created|creating|maker|making/.test(verb) ? "creator" : /dev/.test(verb) ? "developer" : "operator";
+  return { role, phrase: match[0].trim().slice(0, 160) };
+}
+function otherProjectsInBio(bio, subjectHandle) {
+  const handle = subjectHandle.replace(/^@/, "").toLowerCase();
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const match of String(bio ?? "").matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
+    const other = match[1].toLowerCase();
+    if (other === handle || seen.has(other)) continue;
+    seen.add(other);
+    out.push({ name: `@${match[1]}` });
+  }
+  return out.slice(0, 6);
+}
+async function discoverOperatorsFromFollowings(subjectHandle, subjectName3) {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return [];
+  const handle = subjectHandle.replace(/^@/, "");
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  let cursor = "";
+  for (let page = 0; page < MAX_FOLLOWING_PAGES; page += 1) {
+    const url = `${TWITTERAPI}/twitter/user/followings?userName=${encodeURIComponent(handle)}&pageSize=${FOLLOWING_PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await twFetch(url, key);
+    if (!res || !res.ok) break;
+    let payload;
+    try {
+      payload = asRecord2(await res.json()) ?? {};
+    } catch {
+      break;
+    }
+    const rows = payload.followings ?? payload.users ?? payload.data;
+    const list = Array.isArray(rows) ? rows : [];
+    for (const row of list) {
+      const person = asRecord2(row);
+      if (!person) continue;
+      const userName = typeof person.userName === "string" ? person.userName : typeof person.screen_name === "string" ? person.screen_name : "";
+      const bio = typeof person.description === "string" ? person.description : "";
+      if (!userName || seen.has(userName.toLowerCase())) continue;
+      seen.add(userName.toLowerCase());
+      const claim = operatorClaimInBio(bio, handle, subjectName3);
+      if (!claim) continue;
+      out.push({
+        name: typeof person.name === "string" && person.name.trim() ? person.name.trim() : `@${userName}`,
+        handle: `@${userName}`,
+        role: claim.role,
+        kind: "team",
+        evidence: `the official account follows @${userName}, whose own X bio states "${claim.phrase}"`,
+        source: "operator attribution (followings + bio claim)",
+        sourceUrl: `https://x.com/${userName}`,
+        projects: otherProjectsInBio(bio, handle)
+      });
+    }
+    const next = typeof payload.next_cursor === "string" ? payload.next_cursor : typeof payload.nextCursor === "string" ? payload.nextCursor : "";
+    const hasNext = payload.has_next_page === true || payload.hasNextPage === true;
+    if (!next || !hasNext || !list.length) break;
+    cursor = next;
+  }
+  return out.slice(0, 6);
+}
 function scanPostsForRoles(posts, projectName2) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
@@ -20281,7 +20361,12 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     // many project accounts put no plain domain in the bio.
     domain || ctx.evidence.profile.display_name ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([]),
     // Read the project's own /team page directly (Grok's summary can miss it).
-    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name)
+    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name),
+    // Operator attribution: the accounts THIS account follows whose own bio
+    // claims they build it. For a fresh launchpad project with no team page,
+    // no press and no listing, this is often the only first-party operator
+    // evidence that exists (and it is two crossing signals, not a guess).
+    discoverOperatorsFromFollowings(ctx.handle, ctx.evidence.profile.display_name)
   ]);
   const claims = await claimsPromise;
   if (claims) {
@@ -20341,7 +20426,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"}. Role candidates remain non-governing until independently verified.`, source: "AI analyst", tone: "neutral" });
   }
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
-  const [bySubject, people, siteTeam, pageTeam] = await discoveryPromise;
+  const [bySubject, people, siteTeam, pageTeam, operatorTeam] = await discoveryPromise;
   const postRoleTeam = scanPostsForRoles(posts, ctx.evidence.profile.display_name);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   const norm3 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
@@ -20385,6 +20470,18 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic",
       projects_evidence_origin: "deterministic"
+    })),
+    // Both halves are first-party provider records: the subject's own
+    // following edge and the candidate's own profile text. The handle IS the
+    // evidence, so the identity link is deterministic; the OTHER projects
+    // named in that bio stay model-free leads (self-claimed, unverified).
+    ...operatorTeam.map((member) => ({
+      ...member,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic",
+      projects_evidence_origin: "model_lead"
     }))
   ];
   for (const t of teamCandidates) {
@@ -20440,7 +20537,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     if (n) byName.set(n, rec);
   }
   const subj = norm3(ctx.handle);
-  const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm3(t.handle) === subj);
+  const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || operatorTeam.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm3(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
     for (const member of webTeam) {
