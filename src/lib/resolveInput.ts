@@ -1,5 +1,8 @@
-// Classify whatever the user pasted: an X handle (person audit) or a token
-// (contract address or DexScreener URL → token audit).
+// Classify whatever the user pasted: an X handle (person audit), a token
+// (contract address or DexScreener URL → token audit), a site, or a Polymarket
+// trader profile.
+
+import { normalizeWalletInput } from "../polymarket/trader";
 
 export type TokenInput = {
   kind: "token";
@@ -11,9 +14,22 @@ export type RunnableTokenInput = Omit<TokenInput, "via"> & {
   via: "evm" | "solana" | "dexscreener";
 };
 
+/**
+ * A Polymarket trader profile. `ref` is the lowercase 0x wallet the URL named.
+ *
+ * This kind is only ever reached from a polymarket.com/profile link, never from
+ * a bare address. The same 0x string is a valid EVM token contract and a valid
+ * Polymarket wallet, and no offline test tells them apart: choosing by guess
+ * would silently reroute every token contract anybody pastes. The path is what
+ * carries the intent, so the path is what decides. A bare 0x address stays a
+ * token contract, exactly as it was.
+ */
+export type PolymarketInput = { kind: "polymarket"; ref: string };
+
 export type ResolvedInput =
   | { kind: "handle"; ref: string }
   | TokenInput
+  | PolymarketInput
   | { kind: "site"; ref: string };
 
 export function isRunnableTokenInput(input: ResolvedInput): input is RunnableTokenInput {
@@ -57,13 +73,33 @@ export function resolveInput(raw: string): ResolvedInput {
     : null;
   if (dexPath && parsedUrl) return { kind: "token", ref: parsedUrl.href, via: "dexscreener" };
 
+  // A Polymarket profile LINK, and only a link. The host and path rule is the
+  // adapter's, imported rather than restated, because it is the rule that
+  // decides whose trading history a report is about: an address sitting in some
+  // other site's /profile/ path was never published by Polymarket as that
+  // trader's wallet.
+  //
+  // The `!EVM.test` guard is the whole disambiguation and is not redundant with
+  // the branch order below. normalizeWalletInput accepts a BARE 0x address as
+  // well as a link, because a caller that already knows it holds a wallet wants
+  // both. Here we do not know that: the identical string is a valid EVM token
+  // contract and a valid Polymarket wallet, and nothing offline separates them.
+  // Passing it through unguarded would reroute every token contract anybody
+  // pastes into a trader report. The path is the only published intent, so only
+  // the path routes here, and a bare address stays a token contract.
+  //
+  // Checked above the generic URL branches so it beats the site-recon fallback,
+  // which would otherwise scrape the profile page as a project website.
+  const polymarketWallet = EVM.test(s) ? null : normalizeWalletInput(s);
+  if (polymarketWallet) return { kind: "polymarket", ref: polymarketWallet };
+
   // A leading $ is explicit token intent. It must be resolved to one exact
   // contract before any audit starts; it is never a valid X handle fallback.
   if (TICKER.test(s)) return { kind: "token", ref: s, via: "ticker" };
   if (s.startsWith("$")) return { kind: "token", ref: s, via: "address-candidate" };
 
   if (EVM.test(s)) return { kind: "token", ref: s, via: "evm" };
-  // Solana base58 — guard against matching short handles by requiring length >= 32
+  // Solana base58: guard against matching short handles by requiring length >= 32
   if (!s.startsWith("@") && !isXUrl && SOLANA.test(s) && s.length >= 32) {
     return { kind: "token", ref: s, via: "solana" };
   }

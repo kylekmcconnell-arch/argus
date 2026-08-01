@@ -60,6 +60,7 @@ const ProjectView = lazy(() => import("./components/ProjectView").then((module) 
 const ProjectsPage = lazy(() => import("./components/ProjectsPage").then((module) => ({ default: module.ProjectsPage })));
 const ProvidersPage = lazy(() => import("./components/ProvidersPage").then((module) => ({ default: module.ProvidersPage })));
 const RadarPage = lazy(() => import("./components/RadarPage").then((module) => ({ default: module.RadarPage })));
+const PolymarketTraderRun = lazy(() => import("./components/PolymarketTraderRun").then((module) => ({ default: module.PolymarketTraderRun })));
 const ReconPage = lazy(() => import("./components/ReconPage").then((module) => ({ default: module.ReconPage })));
 const Report = lazy(() => import("./components/Report").then((module) => ({ default: module.Report })));
 const TokenReport = lazy(() => import("./components/TokenReport").then((module) => ({ default: module.TokenReport })));
@@ -122,6 +123,7 @@ type Phase =
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "investigation" | "investigation-report"
+  | "polymarket"
   | "resolving"
   | "token-choice"
   | "project"
@@ -286,6 +288,10 @@ export default function App() {
   const [tokenDossier, setTokenDossier] = useState<TokenDossier | null>(null);
   const [tokenBriefTarget, setTokenBriefTarget] = useState<CaseBriefTarget | null>(null);
   const [reconUrl, setReconUrl] = useState<string | null>(boot.phase === "recon" ? boot.query : null);
+  // The wallet a Polymarket profile link named. Held as the normalized lowercase
+  // address rather than the pasted URL, so the page, the route and the record all
+  // name the same wallet.
+  const [polymarketWallet, setPolymarketWallet] = useState<string | null>(null);
   const [storedRecon, setStoredRecon] = useState<Recon | null>(null);
   const [storedReconBriefTarget, setStoredReconBriefTarget] = useState<CaseBriefTarget | null>(null);
   const [storedReconVersionContext, setStoredReconVersionContext] = useState<ReportVersionContext | null>(null);
@@ -401,6 +407,17 @@ export default function App() {
       setPhase("token-run");
       return;
     }
+    // A Polymarket profile link. Checked before "site" because the fallback
+    // below would otherwise send a trader's profile to site recon, which would
+    // scrape the page as a project website and read a trading record as a
+    // marketing claim.
+    if (resolved.kind === "polymarket") {
+      setQuery(raw);
+      setLiveError(null);
+      setPolymarketWallet(resolved.ref);
+      setPhase("polymarket");
+      return;
+    }
     if (resolved.kind === "site") {
       setQuery(raw);
       setReconUrl(resolved.ref);
@@ -425,7 +442,7 @@ export default function App() {
     } else {
       setPhase("notfound");
     }
-  }, [closeCaseBriefForNavigation, leaveEvidenceReview, setLiveError, setPhase, setPrivateMode, setQuery, setReconUrl, setTokenInput, showPrivacyConflict]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, setLiveError, setPhase, setPolymarketWallet, setPrivateMode, setQuery, setReconUrl, setTokenInput, showPrivacyConflict]);
 
   // The main search bar runs the full autonomous investigation for a contract;
   // handles and sites fall through to the normal routing. Internal clicks
@@ -1298,6 +1315,10 @@ export default function App() {
       {phase === "alerts" && <AlertsPage onOpen={onOpenRecent} />}
 
       {phase === "recon" && <ReconPage key={storedRecon ? `stored:${storedRecon.retrieval.url}:${storedReconVersionContext?.reportVersionId ?? "legacy"}` : reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialRecon={storedRecon ?? undefined} initialVersionContext={storedReconVersionContext ?? undefined} initialPrivate={privateMode} onAudit={onSafeAudit} onInvestigate={onSafeInvestigationAudit} onOpenRecent={onOpenRecent} onOpenBrief={!evidenceReviewVersionId && !privateMode && storedReconBriefTarget ? () => setCaseBriefTarget(storedReconBriefTarget) : undefined} onStartFresh={leaveEvidenceReview} />}
+
+      {phase === "polymarket" && polymarketWallet && (
+        <PolymarketTraderRun key={polymarketWallet} wallet={polymarketWallet} onReset={reset} />
+      )}
 
       {phase === "find" && <FindWallet onAudit={onSafeAudit} onReset={reset} onOpenRecent={onOpenRecent} />}
 
