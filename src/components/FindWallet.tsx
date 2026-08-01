@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { recordContribution, walletContribution, knownAddresses } from "../graph/store";
 import { explorer, shortAddr } from "../lib/wallets";
+import { walletAgeFact } from "../lib/operatorTrace";
 import { FunderSweep } from "./FunderSweep";
 import { ScoreTicker } from "./ScoreTicker";
 import type { ReportKind } from "../lib/reports";
@@ -281,25 +282,61 @@ function CopyBtn({ text }: { text: string }) {
   );
 }
 
+// What the funding trace can tell us about one wallet. `failed` is set here, not
+// by the server: a request that never completed has established nothing about
+// this wallet's funding, and must not be shown as a finished trace.
+interface Trail {
+  note?: string;
+  tokensCreated?: number | null;
+  serialDeployer?: boolean | null;
+  walletAgeDays?: number | null;
+  walletAgeMinutes?: number | null;
+  walletAgeBasis?: "mint" | "scan";
+  terminatesAtCex?: boolean;
+  origin?: { address: string; label: string | null; kind: string } | null;
+  failed?: boolean;
+}
+
 // One resolved wallet: address, source, explorer link, and (Solana) an on-chain
-// funding-trail trace via /api/deployer — who funded it, its age, tokens minted —
-// plus a serial-launch sweep (the wallet's own launches + deployers it seeded).
+// funding-trail trace: who funded it, its age, tokens minted, plus a
+// serial-launch sweep (the wallet's own launches + deployers it seeded).
+//
+// /api/deployer-origin, not /api/deployer: the panel route requires a signed
+// capability bound to a PERSISTED report version, and this page has no report at
+// all. Every trace it made therefore answered 409, and the 409 body was rendered
+// as if it were trace data: an empty bordered box under a button that had
+// already flipped to "traced".
 function WalletRow({ w, onAudit }: { w: Wallet; onAudit?: (q: string) => void }) {
-  const [trail, setTrail] = useState<any | null>(null);
+  const [trail, setTrail] = useState<Trail | null>(null);
   const [tracing, setTracing] = useState(false);
+  const traced = !!trail && !trail.failed;
   const trace = async () => {
-    if (tracing || trail) return;
+    if (tracing || traced) return;
     setTracing(true);
     try {
-      const res = await fetch(`/api/deployer?wallet=${encodeURIComponent(w.address)}`);
-      const d = await res.json();
-      setTrail(d?.available === false ? { note: d.note ?? "Funding trail unavailable." } : d);
+      const res = await fetch(`/api/deployer-origin?wallet=${encodeURIComponent(w.address)}`);
+      const d = await res.json().catch(() => null) as (Trail & { available?: boolean; error?: unknown }) | null;
+      if (!res.ok || !d || d.error) {
+        setTrail({ failed: true, note: "Funding trail could not be traced, so nothing about this wallet's funding was established either way. Try again." });
+      } else if (d.available === false) {
+        // The provider itself said it could not answer. Its own wording is the
+        // honest one, and an unanswered check is not a clean one.
+        setTrail({ failed: true, note: d.note ?? "Funding trail unavailable." });
+      } else {
+        setTrail(d);
+      }
     } catch {
-      setTrail({ note: "Trace failed." });
+      setTrail({ failed: true, note: "Funding trail could not be traced: the request did not complete. Nothing about this wallet's funding was established either way." });
     } finally {
       setTracing(false);
     }
   };
+  // Facts only appear for a trace that finished. The age carries its own basis,
+  // and the exchange is stated as the SOURCE of the money: this walk only ever
+  // goes upstream, so an arrow pointing at the exchange asserts the opposite of
+  // the evidence.
+  const age = traced ? walletAgeFact({ ageMinutes: trail.walletAgeMinutes, ageDays: trail.walletAgeDays, ageBasis: trail.walletAgeBasis }) : null;
+  const facts = traced && (age || trail.tokensCreated != null || (trail.terminatesAtCex && trail.origin?.label));
   const unconfirmed = /unconfirmed/i.test(w.source);
   return (
     <div className="panel-inset p-2.5">
@@ -310,18 +347,22 @@ function WalletRow({ w, onAudit }: { w: Wallet; onAudit?: (q: string) => void })
         <span className={`text-[11px] ${unconfirmed ? "font-medium text-caution" : "text-ink-faint"}`}>{w.source}</span>
         {w.chain === "solana" && (
           <button onClick={trace} disabled={tracing} className="btn-chip tint-signal ml-auto disabled:opacity-50">
-            {tracing ? "tracing…" : trail ? "traced" : "trace funding →"}
+            {tracing ? "tracing…" : traced ? "traced" : "trace funding →"}
           </button>
         )}
       </div>
       {trail && (
         <div className="mt-2 border-t border-line pt-2 text-[12.5px] leading-relaxed text-ink-dim">
           {trail.note && <div>{trail.note}</div>}
-          {(trail.tokensCreated != null || trail.walletAgeDays != null) && (
+          {facts && (
             <div className="mono mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-faint">
-              {trail.walletAgeDays != null && <span>age {trail.walletAgeDays}d</span>}
-              {trail.tokensCreated != null && <span>{trail.tokensCreated} token{trail.tokensCreated === 1 ? "" : "s"} minted{trail.serialDeployer ? " · serial" : ""}</span>}
-              {trail.terminatesAtCex && trail.origin?.label && <span className="text-signal-lift">funds → {trail.origin.label}</span>}
+              {age && <span>{age}</span>}
+              {/* A floor, and it has to look like one. The count comes from the
+                  wallet's last 100 transactions, so it is "at least this many",
+                  never the wallet's lifetime total. The serial chip has always
+                  written it this way. */}
+              {trail.tokensCreated != null && <span title="Counted from the wallet's most recent transactions, so this is a floor rather than a lifetime total.">{trail.tokensCreated}+ tokens minted{trail.serialDeployer ? " · serial" : ""}</span>}
+              {trail.terminatesAtCex && trail.origin?.label && <span className="text-signal-lift">funded from {trail.origin.label}</span>}
             </div>
           )}
         </div>

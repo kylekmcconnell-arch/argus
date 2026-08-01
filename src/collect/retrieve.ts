@@ -22,6 +22,15 @@ export interface Retrieval {
   status: RetrievalStatus;
   content: string;       // best text obtained (markdown / visible text). "" on gap.
   title: string | null;
+  /**
+   * Anchor hrefs lifted from the raw HTML BEFORE the tags were stripped. An href
+   * only ever lives inside a tag, so visibleText() erases every one of them: an
+   * icon-only <a href="https://x.com/..."><svg/></a> leaves nothing at all in
+   * `content`. Undefined means there was no raw HTML to read them out of (the
+   * rendering crawler hands back markdown, which carries its URLs inline), never
+   * that the page has no links.
+   */
+  links?: string[];
   stages: RetrievalStage[];
   /** honest, human one-liner about what we did and did not get */
   coverageNote: string;
@@ -35,6 +44,32 @@ export function normalizeUrl(raw: string): string {
   let u = raw.trim();
   if (!/^https?:\/\//i.test(u)) u = "https://" + u;
   return u;
+}
+
+// Bounded: a Retrieval is stored with its report, so a nav-heavy or paginated
+// page must not carry an unbounded list into the record.
+const MAX_LINKS = 300;
+const SKIP_HREF = /^(?:#|javascript:|mailto:|tel:|data:)/i;
+
+/**
+ * Every anchor href in the raw HTML, deterministically. This is the same fix the
+ * LinkedIn extraction miss got: read the markup, do not ask a model what the page
+ * links to. Extraction only. Nothing here is ever fetched.
+ */
+export function extractLinks(html: string): string[] {
+  const markup = html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ");
+  const out = new Set<string>();
+  // The \s before href is load-bearing: it stops data-href and similar
+  // author-defined attributes from being read as real destinations.
+  for (const m of markup.matchAll(/<a\b[^>]*?\shref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+))/gi)) {
+    const href = (m[1] ?? m[2] ?? m[3] ?? "").trim().replace(/&amp;/gi, "&");
+    if (!href || SKIP_HREF.test(href)) continue;
+    out.add(href);
+    if (out.size >= MAX_LINKS) break;
+  }
+  return [...out];
 }
 
 export function visibleText(html: string): string {
@@ -98,10 +133,14 @@ export async function retrieveSite(
       "Host did not return a usable response. Escalating.",
   });
 
+  // Whatever raw HTML we hold, we hold its hrefs too. Pull them before the tag
+  // strip, or they are gone for the rest of the pipeline.
+  const rawLinks = directHtml ? extractLinks(directHtml) : undefined;
+
   if (directOutcome === "ok" && directHtml) {
     const text = visibleText(directHtml);
     return {
-      url: u, status: "rendered", content: text, title: titleOf(directHtml), stages,
+      url: u, status: "rendered", content: text, links: rawLinks, title: titleOf(directHtml), stages,
       coverageNote: "Retrieved directly; full page content available.",
     };
   }
@@ -127,13 +166,18 @@ export async function retrieveSite(
 
   if (renderOutcome === "ok" && renderedRaw) {
     const { title, content } = parseRendered(renderedRaw);
+    // The markdown carries its own URLs inline, so `links` here is only the extra
+    // an app shell happened to serve (a static footer, say). Undefined when the
+    // direct fetch returned no HTML at all.
     return {
-      url: u, status: "recovered", content, title, stages,
+      url: u, status: "recovered", content, links: rawLinks, title, stages,
       coverageNote: "Direct retrieval failed; content recovered by rendering the JavaScript app.",
     };
   }
 
   // ---- Both failed: a COVERAGE GAP, never an absence claim ----
+  // No `links` here on purpose: a gap asserts nothing about the page, and a
+  // half-read shell must not become a partial inventory of the site.
   return {
     url: u, status: "gap", content: "", title: null, stages,
     coverageNote:

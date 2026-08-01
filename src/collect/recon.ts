@@ -31,6 +31,10 @@ export interface Recon {
 }
 
 const SOCIAL = /\bhttps?:\/\/(?:www\.)?(x\.com|twitter\.com|t\.me|discord\.(?:gg|com)|github\.com|linkedin\.com)\/[^\s)"'<>]+/gi;
+// A share button points at the reader's own account, not the project's. Reading
+// the markup surfaces these for the first time, and "x.com/intent/tweet" is not
+// a social presence, so they are dropped from both scans.
+const SHARE_INTENT = /(?:x\.com|twitter\.com)\/(?:intent|share)(?:\/|\?|$)|linkedin\.com\/(?:shareArticle|sharing|cws\/share)|t\.me\/share(?:\/|\?|$)|\/sharer(?:\/|\?|$)/i;
 const TEAM_HEADING = /\b(the team|our team|meet the team|leadership|founders?|built by|who we are|advisors?)\b/i;
 const TOKEN_SIG = /\b(token|tokenomics|airdrop|presale|\$[A-Z]{2,8}\b|on-chain|onchain|solana|ethereum|tge|staking|whitepaper)\b/i;
 // A VC / fund / studio / advisory site naturally discusses "tokens" and
@@ -105,15 +109,28 @@ export function analyzeContent(retrieval: Retrieval): Recon {
   // Full social URLs, PLUS bare handles the page shows as text (@EnigmaFund) or
   // protocol-less links (x.com/foo) — a JS-rendered site often surfaces the
   // handle without a full anchor, so a URL-only scan wrongly reported "no socials".
+  //
+  // The scan covers the extracted anchors as well as the text. It has to: the
+  // retrieval strips every tag, so a footer of icon-only anchors (an <svg> inside
+  // the <a>, no link text at all) leaves nothing in `content` and used to report
+  // "no social links" about a page whose socials were sitting right there in the
+  // markup. Same deterministic fix as the LinkedIn extraction miss: read the
+  // anchors, do not ask a model. We read them, we never follow them.
+  const anchors = retrieval.links ?? [];
+  const socialScan = anchors.length ? `${c}\n${anchors.join("\n")}` : c;
   const socialSet = new Map<string, { label: string; url: string }>();
-  for (const raw of c.match(SOCIAL) ?? []) {
-    const url = raw.replace(/[).,]+$/, "");
+  for (const raw of socialScan.match(SOCIAL) ?? []) {
+    // Trailing punctuation is prose noise; a trailing slash is markup noise. Both
+    // must go, or the same account arrives twice from the two scans.
+    const url = raw.replace(/[).,]+$/, "").replace(/\/+$/, "");
+    if (SHARE_INTENT.test(url)) continue;
     const label = (url.match(/\/\/(?:www\.)?([^/]+)/)?.[1] ?? url).replace(/^www\./, "");
     socialSet.set(url.toLowerCase(), { label, url });
   }
   // protocol-less social links: x.com/foo, t.me/bar
-  for (const m of c.matchAll(/\b((?:x\.com|twitter\.com|t\.me|discord\.gg)\/[A-Za-z0-9_]{2,40})\b/gi)) {
+  for (const m of socialScan.matchAll(/\b((?:x\.com|twitter\.com|t\.me|discord\.gg)\/[A-Za-z0-9_]{2,40})\b/gi)) {
     const url = "https://" + m[1];
+    if (SHARE_INTENT.test(url)) continue;
     if (!socialSet.has(url.toLowerCase())) socialSet.set(url.toLowerCase(), { label: m[1].split("/")[0], url });
   }
   // bare @handles (the common JS-rendered case) — conservative: real-looking

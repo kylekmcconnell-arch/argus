@@ -20,6 +20,12 @@ const CRITICAL = new Set<BasicFactPredicate>([
   "security_incident",
 ]);
 
+/**
+ * Cap on aggregator-attributed backers published as facts. The published list
+ * is a floor drawn from one index, never a cap table.
+ */
+const MAX_INDEXED_BACKERS = 12;
+
 const FOUNDER_ROLE = /\b(?:co[- ]?)?founder\b|\bcreator\b/i;
 const CURRENT_AUTHORITY_ROLE = /\b(?:co[- ]?)?founder\b|\b(?:chief\s+executive\s+officer|ceo|chair(?:man|woman)?|president|owner|managing\s+partner|general\s+partner|director|head|lead)\b/i;
 
@@ -871,6 +877,73 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     // record cannot establish an exhaustive total or lift the P4 score floor.
     projectedFundingFact.floorEligible = false;
     projected.push(projectedFundingFact);
+  }
+
+  // "Who funded it?" is a project question of its own. The funding fact above
+  // answers "how much?" and inlines the backers into its prose, so the investor
+  // question resolved to nothing and an allocator got no named names. One fact
+  // per distinct named backer resolves it, and each name carries the aggregator
+  // row it came from. DeFiLlama keeps leadInvestors and otherInvestors apart:
+  // a name is published at the role the aggregator gave it and is never
+  // promoted to lead.
+  const indexedFunding = isProject ? evidence.protocolFunding : undefined;
+  if (indexedFunding?.rounds.length) {
+    const backers = new Map<string, {
+      name: string;
+      lead: boolean;
+      round: string;
+      date: string | null;
+      amountUsd: number | null;
+    }>();
+    // Leads first so the most material attributions survive the cap.
+    for (const lead of [true, false]) {
+      for (const round of indexedFunding.rounds) {
+        for (const named of lead ? round.leadInvestors : round.otherInvestors) {
+          const name = named.trim();
+          const key = normalizeValue(name);
+          if (!name || !key || backers.has(key)) continue;
+          backers.set(key, { name, lead, round: round.round, date: round.date, amountUsd: round.amountUsd });
+        }
+      }
+    }
+    // The cap has to declare itself. Publishing 12 of 20 names with nothing
+    // saying so hands a reader a list that looks like the cap table it is not,
+    // which is the same overreach the per-fact caveat exists to prevent.
+    const published = [...backers.values()].slice(0, MAX_INDEXED_BACKERS);
+    const capped = backers.size > published.length
+      ? ` ARGUS publishes ${published.length} of the ${backers.size} backers this index names, leads first, so the list here is a floor and not the full set.`
+      : "";
+    for (const backer of published) {
+      const role = backer.lead ? "a lead investor" : "an investor";
+      // An absent date or amount is missing from the index, not zero and not
+      // undated in reality, so each says so in its own words.
+      const dated = backer.date ? ` dated ${backer.date}` : " with no round date on record";
+      const sized = backer.amountUsd && backer.amountUsd > 0
+        ? `, indexed at ${formatUsd(backer.amountUsd)}`
+        : ", with no round amount on record";
+      const investorFact = makeFact(
+        evidence,
+        "investor",
+        backer.name,
+        [source({
+          url: indexedFunding.sourceUrl,
+          title: "DeFiLlama funding record",
+          excerpt: `DeFiLlama's funding index names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}`,
+          capturedAt: indexedFunding.capturedAt,
+          provider: "defillama",
+          sourceClass: "other_public",
+        })],
+        // Deliberately no qualifier. The fact sheet merges same-predicate rows
+        // by concatenating each answer WITH its qualifier, so a per-backer
+        // round tag would repeat itself once per name and bury the list the
+        // question actually asks for. Round, date, role and the attribution
+        // caveat all live in the source excerpt instead.
+      );
+      // Same standing as the funding fact it comes from: an attribution can be
+      // cited, but it cannot lift the P4 score floor on its own.
+      investorFact.floorEligible = false;
+      projected.push(investorFact);
+    }
   }
 
   // On-chain TVL → traction (P5). Security incidents from the same document

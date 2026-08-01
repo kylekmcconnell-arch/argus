@@ -21,7 +21,8 @@
    "api/challenge-verdict.ts": "adversarial second-opinion review",
    "api/health.ts": "zero-spend provider-readiness + extraction-routing diagnostic (check env wiring here before spending on a test audit)",
    "api/sweep.ts": "manual watchlist sweep; deliberately NO cron",
-   "forensicFamily": "arkham*, deployer*, evm-*, holders, bytecode, site-infra, sanctions*, legal-screen, news, pfp-check, recon-team, find-wallet, vc-portfolio, project-docs, namesake, cryptorank"
+   "forensicFamily": "arkham*, deployer*, evm-*, holders, bytecode, site-infra, sanctions*, legal-screen, news, pfp-check, recon-team, find-wallet, vc-portfolio, project-docs, namesake, cryptorank",
+   "panelVsScanTime": "A forensic route gated on an x-argus-panel-token needs a PERSISTED report version to bill against, so a LIVE scan (which is still producing that version) gets 409 from it. Scan-time callers need an ungated sibling, analyst-metered by middleware, on the api/deployer-risk.ts pattern: api/deployer.ts (panel) / api/deployer-origin.ts (scan-time) are the worked example. The two return the identical wire shape and import every user-facing sentence from api/deployer.ts so they cannot word the same fact differently; the RPC walk itself is still duplicated, and extracting it into api/_deployer-core.ts is the open follow-up."
   }
  },
  "pipeline": {
@@ -77,7 +78,8 @@
    },
    "defiLlama.ts": {
     "collects": "TVL(+trend) / fees(+30d-over-30d trend) / funding rounds / audit links",
-    "via": "api.llama.fi, free"
+    "via": "api.llama.fi, free",
+    "note": "funding rounds also project one `investor` basic fact per distinct named backer (server/basicFactsProjection.ts), answering the project ledger's investor question. Leads and other investors keep their aggregator role and are never promoted. providerProjection:true / floorEligible:false, so they are never written back to the KB and cannot lift the P4 floor. Capped at 12 backers, and the cap declares itself in the excerpt when it bites."
    },
    "tokenUnlocks.ts": {
     "collects": "upcoming unlock date/allocation/%supply/$ + 90d load",
@@ -86,7 +88,8 @@
    },
    "tokenHolders.ts": {
     "collects": "float control: top-10 holder %, LP lock/burn",
-    "via": "GoPlus, free",
+    "via": "GoPlus, free; RugCheck (free, keyless) on Solana",
+    "solanaLpLock": "GoPlus returns no lp_holders rows on Solana, so the ONE RugCheck report fetch the Solana scan already makes now also answers the LP lock, supplies the labelled accounts that drop pools/exchanges out of holder concentration, and carries its rugged flag and largest connected cluster as findings. Every one of those is RugCheck's own reading and is published named and sourced 'rugcheck'. A RugCheck lpLockedPct of 0 counts as measured ONLY when the report also shows a market it could have read (src/token/sources.ts lockedShare); an unevidenced zero stays unmeasured, because it is the same value the field carries when RugCheck holds no market at all.",
     "note": "GoPlus holder ORDER is untrusted on chains in GOPLUS_UNSORTED_HOLDER_CHAINS (Robinhood 4663 returned a ~0.36% sample while the real top holder held 4.17%); blockscoutHolders in src/token/sources.ts supplies the ordered top ten from the chain's keyless CORS-open explorer, and with no explorer result the distribution goes silent rather than falling back"
    },
    "trustgraph.ts": {
@@ -132,7 +135,8 @@
     "collects": "investor I2 portfolio + I3 fund scale"
    },
    "coingecko/dexscreener/onchain(Helius)/sitecheck/teampage/wayback/wallet/notableAccounts": {
-    "collects": "market data, rug signals, Solana wallets, site substance, /team fetch, archive corroboration, wallet resolution, reverse-follow references"
+    "collects": "market data, rug signals, Solana wallets, site substance, /team fetch, archive corroboration, wallet resolution, reverse-follow references",
+    "waybackSampling": "archivedAffiliation reads the NEWEST capture first and returns there when it still names both parties (the common case still costs one snapshot fetch). Only a silent newest capture buys a bounded spread of older ones, <=4 per path, via a SINGLE collapse=timestamp:4 field (the CDX server honours the first collapse field and silently ignores any others). A tie surviving only in older captures returns `disappearance` {lastSeen,newestChecked,capturesChecked,note}; orchestrate records it through archiveCorroborationLabels(). It reports two dates and a sampled floor, never that the affiliation ended: pages get restructured and re-pathed."
    },
    "teampage.ts": {
     "collects": "first-party /team roster; profileAnchors reads LinkedIn and X hrefs from the RAW html (htmlToText deletes tags, which silently dropped every profile link) and bindProfileAnchor attaches one to a person by anchor text, then slug, then nearest position, each requiring that person's own name tokens",

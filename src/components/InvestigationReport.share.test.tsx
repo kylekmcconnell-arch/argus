@@ -258,9 +258,13 @@ describe("investigation exact sharing", () => {
     const capital = container.querySelector('[aria-label="Company funding and token market"]');
     expect(capital?.textContent).toContain("Company funding and the $VVV token");
     expect(capital?.textContent).toContain("$65.00M");
-    expect(capital?.textContent).toContain("Series A · Jul 1, 2026");
+    // The round schedule carries the name and date per row; the summed total
+    // above it is labelled as a floor, not a lifetime raise.
+    expect(capital?.textContent).toContain("Series A");
+    expect(capital?.textContent).toContain("Jul 1, 2026");
+    expect(capital?.textContent).toContain("Sum of 1 priced round");
     expect(capital?.textContent).toContain("Company valuation $1.00B");
-    expect(capital?.textContent).toContain("Led or backed by Dragonfly");
+    expect(capital?.textContent).toContain("Led by Dragonfly");
     expect(capital?.textContent).toContain("$582.76M");
     expect(capital?.textContent).toContain("Value if all tokens circulated $990.28M");
     expect(capital?.textContent).toContain("Company ownership · not token ownership");

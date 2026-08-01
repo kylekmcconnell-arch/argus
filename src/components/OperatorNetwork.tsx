@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { shortAddr } from "../lib/wallets";
-import { traceOperator, type OperatorCluster } from "../lib/operatorTrace";
+import { traceOperator, walletAgeFact, type OperatorCluster } from "../lib/operatorTrace";
 import { useArkhamLabels, arkhamOf } from "../lib/useArkhamLabels";
 import { ArkhamName } from "./ArkhamName";
 import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
@@ -28,14 +28,18 @@ function NetIcon({ live }: { live?: boolean }) {
   );
 }
 
-export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToken, record = true, roleLabel }: { deployer?: string | null; chain?: string; label?: string; onAudit?: (q: string) => void; panelCostToken?: string; record?: boolean; roleLabel?: string }) {
+export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToken, record = true, roleLabel, mintedAt }: { deployer?: string | null; chain?: string; label?: string; onAudit?: (q: string) => void; panelCostToken?: string; record?: boolean; roleLabel?: string; mintedAt?: string | number | null }) {
   const [cluster, setCluster] = useState<OperatorCluster | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [failure, setFailure] = useState<{ key: string; failure: PanelRequestFailure } | null>(null);
   const requestKey = [deployer ?? "", chain ?? "", panelCostToken ?? ""].join("\u0000");
-  const currentFailure = failure?.key === requestKey ? failure.failure : null;
+  // The launch instant belongs to the request too: it decides whether the server
+  // can measure the wallet's age at the mint at all, so a changed one is a new
+  // trace and must not inherit the previous one's failure.
+  const traceKey = `${requestKey}|${mintedAt ?? ""}`;
+  const currentFailure = failure?.key === traceKey ? failure.failure : null;
   const running = useRef(false);
 
   useEffect(() => () => { running.current = false; }, []);
@@ -64,12 +68,16 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
         chain,
         record,
         panelCostToken,
+        // Only pass an instant we actually have. An absent one is not "now": the
+        // server answers with a scan-dated age and labels it, rather than
+        // publishing today's number as a fact about the launch.
+        ...(mintedAt == null || mintedAt === "" ? {} : { mintedAt }),
       }, (s) => setSteps((prev) => [...prev, s]));
       if (!running.current) return; // unmounted mid-run
       setCluster(c);
       setDone(true);
     } catch (error) {
-      if (running.current) setFailure({ key: requestKey, failure: panelRequestFailure(error) });
+      if (running.current) setFailure({ key: traceKey, failure: panelRequestFailure(error) });
     } finally {
       if (running.current) setLoading(false);
       running.current = false;
@@ -141,6 +149,11 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
     .filter((w) => w.role === "deployer")
     .sort((a, b) => (b.tokensCreated ?? 0) - (a.tokensCreated ?? 0));
   const noCluster = stats.deployers <= 1 && stats.tokens === 0;
+  // The root deployer is the wallet this token was launched from, and the only
+  // one whose seed funding and age describe THIS launch. A funder's own age is a
+  // different wallet's story.
+  const rootWallet = cluster.wallets.find((w) => w.isRoot);
+  const rootAge = walletAgeFact(rootWallet);
 
   return (
     <div className={`panel p-4 ${verdict.tone === "good" ? "" : "tint-var"}`} style={verdict.tone === "good" ? undefined : ({ "--tint": tone } as React.CSSProperties)}>
@@ -160,12 +173,23 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
 
       {label && <ArkhamGraphBridge subject={label} labels={arkham} />}
 
+      {/* The seed fact, stated flat. A CEX withdrawal shortly before a launch is
+          also the most common legitimate first-launch pattern, so the sentence
+          comes through from the server unedited: it reports, the reader judges. */}
+      {rootWallet?.note && (
+        <p className="mt-2.5 text-[12px] leading-relaxed text-ink-dim">{rootWallet.note}</p>
+      )}
+
       {/* Funding spine: where the root wallet's money ultimately came from. */}
       <div className="mono mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-dim">
         <span className="rounded border border-line px-1.5 py-0.5 text-ink">{label || (roleLabel ?? "creator or authority").toLowerCase()} {nameOf(cluster.rootDeployer)}</span>
         {hub && hub !== cluster.rootDeployer && (<><span className="text-ink-faint">← funded via</span><a href={`${acct(hub)}`} target="_blank" rel="noreferrer" className="tint-var rounded border px-1.5 py-0.5 hover:underline" style={{ "--tint": tone } as React.CSSProperties}>hub {nameOf(hub)}</a></>)}
         {origin && (<><span className="text-ink-faint">←</span><span className="rounded border border-line px-1.5 py-0.5" style={{ color: origin.kind === "cex" ? "var(--color-pass)" : "var(--color-ink-dim)" }}>{origin.kind === "cex" ? origin.label ?? "CEX" : `anon ${shortAddr(origin.address)}`}</span></>)}
       </div>
+
+      {/* Stated as a measurement, with the instant it was measured to, because a
+          scan-basis age reads differently every time the report is reopened. */}
+      {rootAge && <div className="mono mt-1.5 text-[11px] text-ink-faint">{rootAge}</div>}
 
       {noCluster ? null : (
         <div className="mt-3 space-y-2 border-t border-line pt-2.5">
@@ -175,7 +199,9 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
             return (
               <div key={w.address} className="flex flex-wrap items-center gap-1.5">
                 <ArkhamName address={w.address} chain={chain ?? "ethereum"} labels={arkham} fallback={`${shortAddr(w.address)}${w.isRoot ? " (this token)" : ""}`} className="text-[11px]" />
-                {typeof w.tokensCreated === "number" && w.tokensCreated > 0 && <span className="text-[11px] text-ink-faint">{w.tokensCreated} minted</span>}
+                {/* A floor. The server counts mints inside the wallet's recent
+                    transaction window, so this is "at least", never a total. */}
+                {typeof w.tokensCreated === "number" && w.tokensCreated > 0 && <span className="text-[11px] text-ink-faint">{w.tokensCreated}+ minted</span>}
                 {toks.slice(0, 6).map((t) => (
                   <button
                     key={t.mint}

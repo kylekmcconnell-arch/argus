@@ -608,11 +608,17 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
           <Card title="Liquidity & holders">
             <div className="divide-y divide-line/60">
+              {/* On Solana the lock can be measured by RugCheck while GoPlus is
+                  down, in which case GoPlus availability is the wrong gate: it
+                  would print n/a over an answer the report already holds. An
+                  explicit lpAssessed therefore stands on its own. Everything
+                  else is unchanged, including a frozen dossier that predates the
+                  flag, where undefined still follows GoPlus. */}
               <Check
                 label="Liquidity locked / burned"
                 ok={s.lpBurnedPct >= 50 || s.lpLockedPct >= 50}
-                value={gp && s.lpAssessed !== false ? (s.lpBurnedPct >= 50 ? `burned ${s.lpBurnedPct.toFixed(0)}%` : s.lpLockedPct >= 50 ? `locked ${s.lpLockedPct.toFixed(0)}%` : s.lpTopUnlockedEoaPct >= 50 ? `1 wallet ${s.lpTopUnlockedEoaPct.toFixed(0)}%` : "not locked") : undefined}
-                na={!gp || s.lpAssessed === false}
+                value={(gp || s.lpAssessed === true) && s.lpAssessed !== false ? (s.lpBurnedPct >= 50 ? `burned ${s.lpBurnedPct.toFixed(0)}%` : s.lpLockedPct >= 50 ? `locked ${s.lpLockedPct.toFixed(0)}%` : s.lpTopUnlockedEoaPct >= 50 ? `1 wallet ${s.lpTopUnlockedEoaPct.toFixed(0)}%` : "not locked") : undefined}
+                na={(!gp && s.lpAssessed !== true) || s.lpAssessed === false}
               />
               <Check label="Liquidity depth" ok={(d.liquidityUsd ?? 0) >= 50000} value={money(d.liquidityUsd)} />
               <Check label="Creator holdings" ok={s.creatorPercent < 5} value={s.creatorPercentAssessed ? creatorPercentLabel : undefined} na={!s.creatorPercentAssessed} />

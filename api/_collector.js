@@ -1599,7 +1599,7 @@ function mergeMeta(current, next) {
   if (!clean4 || current?.includes(clean4)) return current;
   return [current, clean4].filter(Boolean).join(" \xB7 ").slice(0, 500);
 }
-function recordCall(provider, op, usd2 = 0, meta, status = "succeeded") {
+function recordCall(provider, op, usd3 = 0, meta, status = "succeeded") {
   const { ledger } = currentState();
   const key = `${provider}|${op}`;
   const cur = ledger.get(key);
@@ -1610,11 +1610,11 @@ function recordCall(provider, op, usd2 = 0, meta, status = "succeeded") {
     cur.failed += status === "failed" ? 1 : 0;
     cur.cached += status === "cached" ? 1 : 0;
     cur.status = aggregateStatus(cur);
-    cur.usd += usd2;
+    cur.usd += usd3;
     cur.meta = mergeMeta(cur.meta, meta);
   } else {
     const counts = statusCounts(status);
-    ledger.set(key, { provider, op, calls: 1, ...counts, status, usd: usd2, ...meta ? { meta } : {} });
+    ledger.set(key, { provider, op, calls: 1, ...counts, status, usd: usd3, ...meta ? { meta } : {} });
   }
 }
 function recordTwitterapi(op, status = "succeeded", meta) {
@@ -1671,13 +1671,13 @@ function addClaudeUsage(u, op = "analysis", status = "succeeded", outcomeMeta, m
   );
 }
 function addOpenRouterUsage(usage, op, status = "succeeded", model, outcomeMeta) {
-  const usd2 = typeof usage?.cost === "number" && usage.cost >= 0 ? usage.cost : 0;
+  const usd3 = typeof usage?.cost === "number" && usage.cost >= 0 ? usage.cost : 0;
   const tin = usage?.prompt_tokens ?? 0;
   const tout = usage?.completion_tokens ?? 0;
   recordCall(
     "openrouter",
     op,
-    usd2,
+    usd3,
     [`${tin + tout} tok`, model, outcomeMeta].filter(Boolean).join(" \xB7 "),
     status
   );
@@ -7420,8 +7420,8 @@ function candidateUrlTiers(domain) {
 }
 var TEAM_DOCUMENT_HINT = /(?:^|[\/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[\/_\-.]|$)/i;
 function teamDocumentUrlsFromIndex(domain, raw) {
-  const apex2 = normalizedApex(domain);
-  if (!apex2 || !raw) return [];
+  const apex = normalizedApex(domain);
+  if (!apex || !raw) return [];
   const matches = raw.match(/https?:\/\/[^\s<>"'\])}]+/gi) ?? [];
   const out = [];
   const seen = /* @__PURE__ */ new Set();
@@ -7429,7 +7429,7 @@ function teamDocumentUrlsFromIndex(domain, raw) {
     try {
       const url = new URL(value.replace(/&amp;/g, "&").replace(/[.,;:]+$/, ""));
       const host = url.hostname.toLowerCase();
-      if (host !== apex2 && !host.endsWith(`.${apex2}`)) continue;
+      if (host !== apex && !host.endsWith(`.${apex}`)) continue;
       if (!TEAM_DOCUMENT_HINT.test(`${url.hostname}${url.pathname}`)) continue;
       url.hash = "";
       url.search = "";
@@ -7684,11 +7684,11 @@ ${corpus}`,
   });
 }
 async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
-  const apex2 = normalizedApex(domain);
-  if (!apex2 || !verifiedTeam.length) return [];
+  const apex = normalizedApex(domain);
+  if (!apex || !verifiedTeam.length) return [];
   const verifiedAuthors = new Set(verifiedTeam.flatMap((person) => [person.name, person.handle?.replace(/^@/, "")]).filter((value) => Boolean(value?.trim())).map((value) => value.trim().toLowerCase()));
   const searches = ["cofounder", "co-founder"];
-  const hosts = [`discuss.${apex2}`, `forum.${apex2}`];
+  const hosts = [`discuss.${apex}`, `forum.${apex}`];
   const results = await Promise.all(hosts.flatMap((host) => searches.map(async (query) => {
     try {
       const response = await fetch(`https://${host}/search.json?q=${encodeURIComponent(query)}`, {
@@ -7712,22 +7712,22 @@ async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
   return [...new Set(results.flat())].slice(0, 8);
 }
 async function fetchTeamPage(domain, projectName2) {
-  const apex2 = normalizedApex(domain);
-  if (!apex2) return [];
+  const apex = normalizedApex(domain);
+  if (!apex) return [];
   const [primaryCandidates = [], fallbackCandidates = []] = candidateUrlTiers(domain);
   const primaryUrls = [.../* @__PURE__ */ new Set([
     ...await discoverTeamDocumentUrls(domain),
     ...primaryCandidates
   ])];
   if (!primaryUrls.length) return [];
-  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex2)))).filter(Boolean);
+  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex)))).filter(Boolean);
   if (!pages.length && fallbackCandidates.length) {
-    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex2)))).filter(Boolean);
+    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex)))).filter(Boolean);
   }
   if (!pages.length) return [];
   const directTeam = await extractTeamFromPages(pages, projectName2);
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
-  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex2)))).filter(Boolean);
+  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex)))).filter(Boolean);
   const forumTeam = await extractTeamFromPages(forumPages, projectName2, true);
   const seen = /* @__PURE__ */ new Set();
   return [...directTeam, ...forumTeam].filter((person) => {
@@ -8072,7 +8072,216 @@ async function resolveLinkHubWebsite(rawHubUrl, handle, fetchDoc = fetchPublicTe
 // server/adapters/domainAge.ts
 var RDAP_BASE = "https://rdap.org/domain/";
 var REGISTRATION_EVENTS = /* @__PURE__ */ new Set(["registration", "last changed registration", "registrar registration"]);
-var apex = (value) => value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[/?#].*$/, "").replace(/\.$/, "");
+var DEEP_REGISTRY_SUFFIXES = /* @__PURE__ */ new Set([
+  "co.uk",
+  "org.uk",
+  "me.uk",
+  "net.uk",
+  "ltd.uk",
+  "plc.uk",
+  "sch.uk",
+  "ac.uk",
+  "gov.uk",
+  "com.au",
+  "net.au",
+  "org.au",
+  "edu.au",
+  "gov.au",
+  "asn.au",
+  "id.au",
+  "co.nz",
+  "net.nz",
+  "org.nz",
+  "ac.nz",
+  "govt.nz",
+  "school.nz",
+  "co.jp",
+  "ne.jp",
+  "or.jp",
+  "ac.jp",
+  "go.jp",
+  "lg.jp",
+  "com.cn",
+  "net.cn",
+  "org.cn",
+  "edu.cn",
+  "gov.cn",
+  "ac.cn",
+  "com.br",
+  "net.br",
+  "org.br",
+  "gov.br",
+  "co.in",
+  "net.in",
+  "org.in",
+  "firm.in",
+  "gen.in",
+  "ind.in",
+  "ac.in",
+  "gov.in",
+  "co.za",
+  "org.za",
+  "net.za",
+  "web.za",
+  "ac.za",
+  "gov.za",
+  "co.kr",
+  "ne.kr",
+  "or.kr",
+  "re.kr",
+  "pe.kr",
+  "go.kr",
+  "com.mx",
+  "org.mx",
+  "net.mx",
+  "edu.mx",
+  "gob.mx",
+  "com.tr",
+  "net.tr",
+  "org.tr",
+  "edu.tr",
+  "gov.tr",
+  "co.il",
+  "org.il",
+  "net.il",
+  "ac.il",
+  "gov.il",
+  "com.sg",
+  "net.sg",
+  "org.sg",
+  "edu.sg",
+  "gov.sg",
+  "com.hk",
+  "net.hk",
+  "org.hk",
+  "idv.hk",
+  "edu.hk",
+  "gov.hk",
+  "com.tw",
+  "net.tw",
+  "org.tw",
+  "edu.tw",
+  "gov.tw",
+  "com.ar",
+  "net.ar",
+  "org.ar",
+  "gob.ar",
+  "com.es",
+  "org.es",
+  "nom.es",
+  "edu.es",
+  "gob.es",
+  "com.pl",
+  "net.pl",
+  "org.pl",
+  "edu.pl",
+  "gov.pl",
+  "com.ua",
+  "net.ua",
+  "org.ua",
+  "kiev.ua",
+  "co.id",
+  "or.id",
+  "ac.id",
+  "web.id",
+  "go.id",
+  "com.ph",
+  "net.ph",
+  "org.ph",
+  "co.th",
+  "in.th",
+  "ac.th",
+  "or.th",
+  "go.th",
+  "com.vn",
+  "net.vn",
+  "org.vn",
+  "edu.vn",
+  "gov.vn",
+  "com.my",
+  "net.my",
+  "org.my",
+  "edu.my",
+  "gov.my",
+  "com.ru",
+  "net.ru",
+  "org.ru",
+  "com.gr",
+  "net.gr",
+  "org.gr",
+  "edu.gr",
+  "gov.gr",
+  "co.ke",
+  "com.ng",
+  "com.pk",
+  "com.eg",
+  "com.sa"
+]);
+var SHARED_HOST_SUFFIXES = /* @__PURE__ */ new Set([
+  "github.io",
+  "gitlab.io",
+  "pages.dev",
+  "workers.dev",
+  "vercel.app",
+  "netlify.app",
+  "web.app",
+  "firebaseapp.com",
+  "herokuapp.com",
+  "fly.dev",
+  "onrender.com",
+  "glitch.me",
+  "repl.co",
+  "replit.app",
+  "notion.site",
+  "webflow.io",
+  "wixsite.com",
+  "eth.limo",
+  "dweb.link",
+  // Every one of these answers RDAP with a real date, so an omission here is not
+  // a missing lookup, it is the platform's date published as the project's:
+  // checked keyless 2026-08-01, myshopify.com registered 2006-03-03,
+  // wordpress.com 2000-03-03, blogspot.com 2000-07-31, substack.com 2010-04-27,
+  // azurewebsites.net 2012-01-24, mystrikingly.com 2018-11-28, framer.app
+  // 2020-10-02, softr.app 2021-01-13, super.site 2021-06-04, 4everland.app
+  // 2021-07-08, framer.website 2021-11-19, w3s.link 2022-06-27.
+  "myshopify.com",
+  "wordpress.com",
+  "blogspot.com",
+  "substack.com",
+  "squarespace.com",
+  "azurewebsites.net",
+  "mystrikingly.com",
+  "softr.app",
+  "bubbleapps.io",
+  "durable.co",
+  "framer.app",
+  "framer.website",
+  "super.site",
+  "gitbook.io",
+  "surge.sh",
+  "4everland.app",
+  "on-fleek.app",
+  "w3s.link",
+  "nftstorage.link",
+  "ipfs.io"
+]);
+var normalizeHostname = (value) => value.trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, "").replace(/^[^/@]*@/, "").replace(/[/?#].*$/, "").replace(/:\d+$/, "").replace(/\.$/, "").replace(/^www\./, "");
+function resolveDomainScope(website) {
+  const hostname2 = website ? normalizeHostname(website) : "";
+  const labels = hostname2.split(".");
+  const tld = labels[labels.length - 1];
+  if (labels.length < 2 || labels.some((label) => !label) || !/^(?:[a-z]{2,}|xn--[a-z0-9-]+)$/.test(tld)) {
+    return { hostname: hostname2, registrable: null };
+  }
+  const lastTwo = labels.slice(-2).join(".");
+  if (SHARED_HOST_SUFFIXES.has(lastTwo)) {
+    return labels.length > 2 ? { hostname: hostname2, registrable: null, sharedHost: lastTwo } : { hostname: hostname2, registrable: lastTwo };
+  }
+  if (DEEP_REGISTRY_SUFFIXES.has(lastTwo)) {
+    return { hostname: hostname2, registrable: labels.length > 2 ? labels.slice(-3).join(".") : null };
+  }
+  return { hostname: hostname2, registrable: lastTwo };
+}
 function monthsBetween(fromIso, now) {
   const from = new Date(fromIso);
   if (!Number.isFinite(from.getTime())) return 0;
@@ -8090,8 +8299,16 @@ function registrationEventDate(events) {
   return dates[0] ?? null;
 }
 async function collectDomainRegistration(website, fetchImpl = fetch, now = /* @__PURE__ */ new Date()) {
-  const domain = website ? apex(website) : "";
-  if (!domain || !domain.includes(".")) {
+  const scope = resolveDomainScope(website);
+  if (scope.sharedHost) {
+    return {
+      available: false,
+      reason: "not_applicable",
+      note: `${scope.hostname} is hosted under ${scope.sharedHost}, which the project does not register, so it has no registration date of its own`
+    };
+  }
+  const domain = scope.registrable;
+  if (!domain) {
     return { available: false, reason: "no_domain", note: "no official domain to age" };
   }
   let response;
@@ -8108,6 +8325,14 @@ async function collectDomainRegistration(website, fetchImpl = fetch, now = /* @_
   if (response.status === 404) {
     recordCall("rdap", "domain-age", 0, "no_record_404", "succeeded");
     return { available: false, reason: "not_found", note: `no RDAP record for ${domain}` };
+  }
+  if (response.status === 400) {
+    recordCall("rdap", "domain-age", 0, "not_applicable_400", "succeeded");
+    return {
+      available: false,
+      reason: "not_applicable",
+      note: `RDAP does not serve ${domain} (rejected the query as out of scope), so no registration date exists to read`
+    };
   }
   if (!response.ok) {
     recordCall("rdap", "domain-age", 0, `http_${response.status}`, "failed");
@@ -8130,6 +8355,7 @@ async function collectDomainRegistration(website, fetchImpl = fetch, now = /* @_
     available: true,
     value: {
       domain,
+      hostname: scope.hostname,
       registeredAt,
       ageMonths: monthsBetween(registeredAt, now),
       source: `${RDAP_BASE}${domain}`,
@@ -15036,45 +15262,95 @@ var offchainAdapter = {
 
 // server/adapters/wayback.ts
 var CDX = "https://web.archive.org/cdx/search/cdx";
-async function newestSnapshot(urlPath) {
+var MAX_CAPTURES_PER_PATH = 4;
+function archiveCorroborationLabels(arch) {
+  const labels = [`archived ${arch.where} page (${arch.year})`];
+  if (arch.disappearance) {
+    labels.push(`both names absent from the ${arch.disappearance.newestChecked} capture of that page, the most recent one read`);
+  }
+  return labels;
+}
+async function sampledSnapshots(urlPath) {
   let response;
   try {
-    const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-1`;
+    const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=timestamp:4`;
     response = await fetch(CDX + qs, { signal: AbortSignal.timeout(4e3) });
   } catch {
     recordCall("wayback", "cdx-search", 0, "transport_error", "failed");
-    return null;
+    return [];
   }
   if (!response.ok) {
     recordCall("wayback", "cdx-search", 0, `http_${response.status}`, "failed");
-    return null;
+    return [];
   }
   let parsed;
   try {
     parsed = await response.json();
   } catch {
     recordCall("wayback", "cdx-search", 0, "response_json_error", "failed");
-    return null;
+    return [];
   }
   if (!Array.isArray(parsed) || !parsed.every(Array.isArray)) {
     recordCall("wayback", "cdx-search", 0, "invalid_result_shape", "partial");
-    return null;
+    return [];
   }
   const rows = parsed;
   if (rows.length < 2) {
     recordCall("wayback", "cdx-search", 0, "no_snapshot", "succeeded");
-    return null;
+    return [];
   }
   const header = rows[0];
-  const last = rows[rows.length - 1];
   const ti = header.indexOf("timestamp");
   const oi = header.indexOf("original");
-  if (ti < 0 || oi < 0 || typeof last[ti] !== "string" || typeof last[oi] !== "string") {
-    recordCall("wayback", "cdx-search", 0, "invalid_result_shape", "partial");
-    return null;
+  const all = [];
+  if (ti >= 0 && oi >= 0) {
+    for (const row of rows.slice(1)) {
+      if (typeof row[ti] === "string" && typeof row[oi] === "string") {
+        all.push({ timestamp: row[ti], original: row[oi] });
+      }
+    }
   }
+  if (!all.length) {
+    recordCall("wayback", "cdx-search", 0, "invalid_result_shape", "partial");
+    return [];
+  }
+  all.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   recordCall("wayback", "cdx-search", 0, void 0, "succeeded");
-  return { timestamp: last[ti], original: last[oi] };
+  return spreadSample(all, MAX_CAPTURES_PER_PATH);
+}
+function spreadSample(all, max) {
+  if (all.length <= max) return all;
+  const picks = /* @__PURE__ */ new Set([0, all.length - 1]);
+  for (let i = 1; i < max - 1; i += 1) picks.add(Math.round(i * (all.length - 1) / (max - 1)));
+  return [...picks].sort((a, b) => a - b).map((i) => all[i]);
+}
+async function readCapture(snap) {
+  try {
+    const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
+    const response = await fetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
+    if (!response.ok) {
+      recordCall("wayback", "snapshot-fetch", 0, `http_${response.status}`, "failed");
+      return { snap, text: null };
+    }
+    let text2;
+    try {
+      text2 = htmlToText(await response.text());
+    } catch {
+      recordCall("wayback", "snapshot-fetch", 0, "response_text_error", "failed");
+      return { snap, text: null };
+    }
+    if (!text2.trim()) {
+      recordCall("wayback", "snapshot-fetch", 0, "empty_snapshot", "partial");
+      return { snap, text: null };
+    }
+    return { snap, text: text2 };
+  } catch {
+    recordCall("wayback", "snapshot-fetch", 0, "transport_error", "failed");
+    return { snap, text: null };
+  }
+}
+function captureDate(timestamp) {
+  return `${timestamp.slice(0, 4)}-${timestamp.slice(4, 6)}-${timestamp.slice(6, 8)}`;
 }
 async function archivedAffiliation(domain, subjectName3, ventureName) {
   const clean4 = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
@@ -15084,41 +15360,42 @@ async function archivedAffiliation(domain, subjectName3, ventureName) {
   const domainRoot = clean4.split(".")[0] ?? "";
   const ventureNeedles = [ventureName.trim().toLowerCase(), domainRoot].filter((t) => t.length >= 3).map(needleRegex);
   if (!ventureNeedles.length) return null;
+  const namesBoth = (read) => {
+    const text2 = read.text;
+    if (text2 === null) return false;
+    const hit = subjectNeedles.some((n) => n.test(text2)) && ventureNeedles.some((n) => n.test(text2));
+    recordCall("wayback", "snapshot-fetch", 0, hit ? "subject_and_venture_match" : "no_match", "succeeded");
+    return hit;
+  };
+  const cite = (read, where) => ({
+    url: `https://web.archive.org/web/${read.snap.timestamp}/${read.snap.original}`,
+    year: read.snap.timestamp.slice(0, 4),
+    where
+  });
   const paths = [`${clean4}/team`, `${clean4}/about`];
   for (const p of paths) {
-    const snap = await newestSnapshot(p);
-    if (!snap) continue;
-    let response;
-    try {
-      const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
-      response = await fetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
-      if (!response.ok) {
-        recordCall("wayback", "snapshot-fetch", 0, `http_${response.status}`, "failed");
-        continue;
-      }
-      let text2;
-      try {
-        text2 = htmlToText(await response.text());
-      } catch {
-        recordCall("wayback", "snapshot-fetch", 0, "response_text_error", "failed");
-        continue;
-      }
-      if (!text2.trim()) {
-        recordCall("wayback", "snapshot-fetch", 0, "empty_snapshot", "partial");
-        continue;
-      }
-      const matched = subjectNeedles.some((n) => n.test(text2)) && ventureNeedles.some((n) => n.test(text2));
-      recordCall("wayback", "snapshot-fetch", 0, matched ? "subject_and_venture_match" : "no_match", "succeeded");
-      if (matched) {
-        return {
-          url: `https://web.archive.org/web/${snap.timestamp}/${snap.original}`,
-          year: snap.timestamp.slice(0, 4),
-          where: p.replace(clean4, "").replace(/^\//, "") || "team"
-        };
-      }
-    } catch {
-      recordCall("wayback", "snapshot-fetch", 0, "transport_error", "failed");
+    const snaps = await sampledSnapshots(p);
+    if (!snaps.length) continue;
+    const where = p.replace(clean4, "").replace(/^\//, "") || "team";
+    const newest = await readCapture(snaps[snaps.length - 1]);
+    if (namesBoth(newest)) return cite(newest, where);
+    const older = await Promise.all(snaps.slice(0, -1).map(readCapture));
+    const matches = older.filter(namesBoth);
+    if (!matches.length) continue;
+    const best = matches[matches.length - 1];
+    const out = cite(best, where);
+    if (newest.text !== null) {
+      const lastSeen = captureDate(best.snap.timestamp);
+      const newestChecked = captureDate(newest.snap.timestamp);
+      const capturesChecked = older.length + 1;
+      out.disappearance = {
+        lastSeen,
+        newestChecked,
+        capturesChecked,
+        note: `Both names appear on the archived ${where} page in the ${lastSeen} capture and do not appear in the ${newestChecked} capture, the most recent one read. ${capturesChecked} captures were sampled across the archived range, so that is a floor on what the archive holds, not a total. Archived pages get restructured and re-pathed, so the later absence is not by itself evidence that the affiliation ended.`
+      };
     }
+    return out;
   }
   return null;
 }
@@ -18432,6 +18709,7 @@ var CRITICAL = /* @__PURE__ */ new Set([
   "official_token",
   "security_incident"
 ]);
+var MAX_INDEXED_BACKERS = 12;
 var FOUNDER_ROLE = /\b(?:co[- ]?)?founder\b|\bcreator\b/i;
 var CURRENT_AUTHORITY_ROLE = /\b(?:co[- ]?)?founder\b|\b(?:chief\s+executive\s+officer|ceo|chair(?:man|woman)?|president|owner|managing\s+partner|general\s+partner|director|head|lead)\b/i;
 var normalizeValue = (value) => value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
@@ -19005,6 +19283,47 @@ function projectProviderBackedBasicFacts(evidence) {
     projectedFundingFact.floorEligible = false;
     projected.push(projectedFundingFact);
   }
+  const indexedFunding = isProject ? evidence.protocolFunding : void 0;
+  if (indexedFunding?.rounds.length) {
+    const backers = /* @__PURE__ */ new Map();
+    for (const lead of [true, false]) {
+      for (const round of indexedFunding.rounds) {
+        for (const named of lead ? round.leadInvestors : round.otherInvestors) {
+          const name = named.trim();
+          const key = normalizeValue(name);
+          if (!name || !key || backers.has(key)) continue;
+          backers.set(key, { name, lead, round: round.round, date: round.date, amountUsd: round.amountUsd });
+        }
+      }
+    }
+    const published = [...backers.values()].slice(0, MAX_INDEXED_BACKERS);
+    const capped = backers.size > published.length ? ` ARGUS publishes ${published.length} of the ${backers.size} backers this index names, leads first, so the list here is a floor and not the full set.` : "";
+    for (const backer of published) {
+      const role = backer.lead ? "a lead investor" : "an investor";
+      const dated = backer.date ? ` dated ${backer.date}` : " with no round date on record";
+      const sized = backer.amountUsd && backer.amountUsd > 0 ? `, indexed at ${formatUsd2(backer.amountUsd)}` : ", with no round amount on record";
+      const investorFact = makeFact(
+        evidence,
+        "investor",
+        backer.name,
+        [source({
+          url: indexedFunding.sourceUrl,
+          title: "DeFiLlama funding record",
+          excerpt: `DeFiLlama's funding index names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}`,
+          capturedAt: indexedFunding.capturedAt,
+          provider: "defillama",
+          sourceClass: "other_public"
+        })]
+        // Deliberately no qualifier. The fact sheet merges same-predicate rows
+        // by concatenating each answer WITH its qualifier, so a per-backer
+        // round tag would repeat itself once per name and bury the list the
+        // question actually asks for. Round, date, role and the attribution
+        // caveat all live in the source excerpt instead.
+      );
+      investorFact.floorEligible = false;
+      projected.push(investorFact);
+    }
+  }
   const tvlSnapshot = isProject ? evidence.protocolTvl : void 0;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
     const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
@@ -19469,6 +19788,83 @@ async function goplusSolana(mint) {
     return null;
   }
 }
+var SOLANA_ADDRESS4 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function supplySharePercent(amount, supply) {
+  const balance = Number(amount);
+  const total = Number(supply);
+  if (!Number.isFinite(balance) || balance < 0) return null;
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const percent = balance / total * 100;
+  return percent >= 0 && percent <= 100 ? percent : null;
+}
+function lockedShare(lpLockedPct, markets) {
+  const percent = boundedPercent(lpLockedPct);
+  if (percent == null) return null;
+  if (percent > 0) return percent;
+  const marketsSeen = Array.isArray(markets) ? markets.length : 0;
+  return marketsSeen > 0 ? percent : null;
+}
+function boundedPercent(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const percent = Number(value);
+  if (!Number.isFinite(percent)) return null;
+  return percent >= 0 && percent <= 100 ? percent : null;
+}
+function finiteCount(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : null;
+}
+function parseKnownAccounts(value) {
+  const accounts = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return accounts;
+  for (const [address, entry] of Object.entries(value)) {
+    if (!address.trim() || !entry || typeof entry !== "object") continue;
+    const record3 = entry;
+    accounts[address] = {
+      ...typeof record3.name === "string" ? { name: record3.name } : {},
+      ...typeof record3.type === "string" ? { type: record3.type } : {}
+    };
+  }
+  return accounts;
+}
+function largestInsiderClusterPercent(networks) {
+  const measured = networks.map((network) => network.percent).filter((percent) => percent != null);
+  return measured.length ? Math.max(...measured) : null;
+}
+async function rugcheckReport(mint, fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, {
+      signal: AbortSignal.timeout(12e3),
+      headers: { accept: "application/json" }
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const creator = typeof d?.creator === "string" && SOLANA_ADDRESS4.test(d.creator.trim()) ? d.creator.trim() : null;
+    const supply = d?.token?.supply;
+    const networks = Array.isArray(d?.insiderNetworks) ? d.insiderNetworks : [];
+    return {
+      creator,
+      // With no creator there is nobody for a balance to belong to, and a bare
+      // zero would read as "the creator sold out" rather than "not measured".
+      creatorPercent: creator ? supplySharePercent(d?.creatorBalance, supply) : null,
+      lpLockedPct: lockedShare(d?.lpLockedPct, d?.markets),
+      rugged: d?.rugged === true,
+      knownAccounts: parseKnownAccounts(d?.knownAccounts),
+      insiderNetworks: networks.map((network) => ({
+        // Null, not zero. A cluster whose wallet count RugCheck did not report
+        // is not a cluster of nobody, and "0 linked wallets" is the reading that
+        // would talk a reader out of looking.
+        size: finiteCount(network?.size ?? network?.activeAccounts),
+        percent: supplySharePercent(network?.tokenAmount, supply)
+      })),
+      graphInsidersDetected: finiteCount(d?.graphInsidersDetected)
+    };
+  } catch {
+    return null;
+  }
+}
 async function goplus(chainId, address) {
   const once = async () => {
     try {
@@ -19870,82 +20266,10 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
   };
 }
 
-// src/lib/priceHistory.ts
-var NETWORK = {
-  solana: "solana",
-  ethereum: "eth",
-  eth: "eth",
-  bsc: "bsc",
-  base: "base",
-  arbitrum: "arbitrum",
-  polygon: "polygon_pos",
-  "polygon_pos": "polygon_pos",
-  avalanche: "avax",
-  avax: "avax",
-  optimism: "optimism",
-  fantom: "ftm",
-  sui: "sui",
-  ton: "ton",
-  tron: "tron",
-  blast: "blast",
-  sei: "sei-evm"
-};
-var GT = "https://api.geckoterminal.com/api/v2";
-function record2(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-async function gt(path) {
-  try {
-    const r = await fetch(`${GT}${path}`, {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(8e3)
-    });
-    return r.ok ? await r.json() : null;
-  } catch {
-    return null;
-  }
-}
-async function topPool(network, address) {
-  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
-  const rows = record2(d).data;
-  const first = Array.isArray(rows) ? record2(rows[0]) : {};
-  const attributes = record2(first.attributes);
-  const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
-  return id ? id.replace(`${network}_`, "") : null;
-}
-async function fetchPriceHistory(address, chain, pairAddress) {
-  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
-  if (!network || !address) return null;
-  const pool = pairAddress || await topPool(network, address);
-  if (!pool) return null;
-  for (const timeframe of ["day", "hour"]) {
-    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
-    const rawList = record2(record2(record2(d).data).attributes).ohlcv_list;
-    const list = Array.isArray(rawList) ? rawList.filter((row) => Array.isArray(row) && row.length >= 5 && row.every((value) => typeof value === "number")) : [];
-    if (list.length < 3) continue;
-    const rows = [...list].sort((a, b) => a[0] - b[0]);
-    const points = rows.map((r) => r[4]).filter((n) => typeof n === "number" && n > 0);
-    if (points.length < 3) continue;
-    const first = points[0];
-    const last = points[points.length - 1];
-    const peak = Math.max(...points);
-    return {
-      points,
-      first,
-      last,
-      peak,
-      changePct: first > 0 ? (last - first) / first * 100 : 0,
-      drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
-      timeframe,
-      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-  }
-  return null;
-}
-
 // server/adapters/operatorLaunches.ts
 var PUMPFUN_API = "https://frontend-api-v3.pump.fun";
 var DEXSCREENER_API = "https://api.dexscreener.com";
+var GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2";
 var REQUEST_TIMEOUT_MS = 12e3;
 async function getJson2(url) {
   try {
@@ -19962,7 +20286,7 @@ async function getJson2(url) {
 var asRecord5 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
 var num2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
 var MAX_PLAUSIBLE_ATH_USD = 1e10;
-var ATH_CORROBORATION_FACTOR = 3;
+var ATH_CORROBORATION_FACTOR = 1.5;
 var plausiblePeak = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_PLAUSIBLE_ATH_USD ? value : null;
 function resolveLaunchPeak(input) {
   const current = typeof input.currentUsd === "number" && input.currentUsd > 0 && Number.isFinite(input.currentUsd) ? input.currentUsd : 0;
@@ -19987,10 +20311,56 @@ function resolveLaunchPeak(input) {
   if (!(athUsd > current)) return void 0;
   return { athUsd, ...athAt ? { athAt } : {} };
 }
-function seriesPeakUsd(history, currentUsd) {
-  if (!history || !currentUsd || !(currentUsd > 0)) return null;
-  if (!(history.peak > 0) || !(history.last > 0)) return null;
-  return currentUsd * (history.peak / history.last);
+var GECKOTERMINAL_NETWORK2 = {
+  solana: "solana",
+  ethereum: "eth",
+  eth: "eth",
+  bsc: "bsc",
+  base: "base",
+  arbitrum: "arbitrum",
+  polygon: "polygon_pos",
+  polygon_pos: "polygon_pos",
+  avalanche: "avax",
+  avax: "avax",
+  optimism: "optimism",
+  fantom: "ftm",
+  sui: "sui",
+  ton: "ton",
+  tron: "tron",
+  blast: "blast",
+  sei: "sei-evm"
+};
+async function fetchLaunchSeries(mint, chain) {
+  const network = GECKOTERMINAL_NETWORK2[chain?.toLowerCase()] ?? chain?.toLowerCase();
+  if (!network || !mint) return null;
+  const pools = asRecord5(await getJson2(
+    `${GECKOTERMINAL_API}/networks/${network}/tokens/${encodeURIComponent(mint)}/pools?page=1`
+  ));
+  const rows = Array.isArray(pools?.data) ? pools.data : [];
+  const top = asRecord5(rows[0]);
+  const address = asRecord5(top?.attributes)?.address;
+  const id = top?.id;
+  const pool = typeof address === "string" && address ? address : typeof id === "string" && id ? id.replace(`${network}_`, "") : "";
+  if (!pool) return null;
+  for (const timeframe of ["day", "hour"]) {
+    const data = asRecord5(await getJson2(
+      `${GECKOTERMINAL_API}/networks/${network}/pools/${encodeURIComponent(pool)}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`
+    ));
+    const raw = asRecord5(asRecord5(data?.data)?.attributes)?.ohlcv_list;
+    const candles = (Array.isArray(raw) ? raw : []).filter((row) => Array.isArray(row) && row.length >= 5 && row.every((value) => typeof value === "number" && Number.isFinite(value)));
+    if (candles.length < 3) continue;
+    const chronological = [...candles].sort((left, right) => left[0] - right[0]);
+    const closes = chronological.map((row) => row[4]).filter((value) => value > 0);
+    const highs = chronological.map((row) => row[2]).filter((value) => value > 0);
+    if (closes.length < 3 || !highs.length) continue;
+    return { peak: Math.max(...highs), last: closes[closes.length - 1], timeframe };
+  }
+  return null;
+}
+function seriesPeakUsd(series, currentUsd) {
+  if (!series || !currentUsd || !(currentUsd > 0)) return null;
+  if (!(series.peak > 0) || !(series.last > 0)) return null;
+  return currentUsd * (series.peak / series.last);
 }
 function normalizeXHandle(value) {
   const raw = String(value ?? "").trim();
@@ -20109,7 +20479,7 @@ async function launchForOperatorHandle(handle) {
   return best;
 }
 var LAUNCH_CLAIM = /\b(?:is\s+(?:now\s+)?live|now\s+live|going\s+live|just\s+(?:launched|shipped|deployed)|i\s+(?:just\s+)?launched|we\s+(?:just\s+)?launched|i\s+(?:just\s+)?built|we\s+(?:just\s+)?built|my\s+(?:project|token|coin)|introducing|launching)\b/i;
-var SOLANA_ADDRESS4 = /\b[1-9A-HJ-NP-Za-km-z]{43,44}\b/g;
+var SOLANA_ADDRESS5 = /\b[1-9A-HJ-NP-Za-km-z]{43,44}\b/g;
 var TICKER_CLAIM = /\$([A-Za-z][A-Za-z0-9]{1,9})\b/g;
 var HANDLE_CLAIM = /@([A-Za-z0-9_]{2,30})\b/g;
 var BARE_NAME_CLAIM = /(?:^|[.!?\n]\s*)([A-Za-z][A-Za-z0-9]{2,20})\s+is\s+(?:now\s+)?live\b/g;
@@ -20166,7 +20536,7 @@ async function operatorLaunchAnnouncements(handle) {
     const post = asRecord5(row);
     const text2 = post && typeof post.text === "string" ? post.text : "";
     if (!text2 || !LAUNCH_CLAIM.test(text2)) continue;
-    const mints = [...new Set(text2.match(SOLANA_ADDRESS4) ?? [])];
+    const mints = [...new Set(text2.match(SOLANA_ADDRESS5) ?? [])];
     const tickers = [...new Set([...text2.matchAll(TICKER_CLAIM)].map((match) => match[1].toUpperCase()))];
     const handles = [...new Set([...text2.matchAll(HANDLE_CLAIM)].map((match) => match[1].toLowerCase()))];
     const names = [...new Set([...text2.matchAll(BARE_NAME_CLAIM)].map((match) => match[1]).filter((name) => !NOT_A_PROJECT.has(name.toLowerCase())))];
@@ -20248,18 +20618,18 @@ var PEAK_ENRICH_LIMIT = 6;
 async function enrichLaunchPeaks(launches) {
   const enriched = await Promise.all(launches.slice(0, PEAK_ENRICH_LIMIT).map(async (launch) => {
     const coin = launch.chain === "solana" ? await pumpfunCoin(launch.mint).catch(() => null) : null;
-    const history = await fetchPriceHistory(launch.mint, launch.chain).catch(() => null);
+    const series = await fetchLaunchSeries(launch.mint, launch.chain).catch(() => null);
     recordCall(
       "geckoterminal",
       "prior-launch-ohlcv",
       0,
       `keyless \xB7 ${launch.symbol || launch.mint.slice(0, 8)}`,
-      history ? "succeeded" : "failed"
+      series ? "succeeded" : "failed"
     );
     const currentUsd = launch.fdvUsd ?? coin?.fdvUsd ?? null;
     const peak = resolveLaunchPeak({
       currentUsd,
-      seriesPeakUsd: seriesPeakUsd(history, currentUsd),
+      seriesPeakUsd: seriesPeakUsd(series, currentUsd),
       launchpadAthUsd: coin?.athUsd ?? null,
       ...coin?.athAt ? { launchpadAthAt: coin.athAt } : {}
     });
@@ -20270,6 +20640,27 @@ async function enrichLaunchPeaks(launches) {
     };
   }));
   return [...enriched, ...launches.slice(PEAK_ENRICH_LIMIT)];
+}
+function byMintDateDesc(launches) {
+  return [...launches].sort((left, right) => {
+    const leftAt = left.mintedAt ? Date.parse(left.mintedAt) : NaN;
+    const rightAt = right.mintedAt ? Date.parse(right.mintedAt) : NaN;
+    if (!Number.isFinite(leftAt) && !Number.isFinite(rightAt)) return 0;
+    if (!Number.isFinite(leftAt)) return 1;
+    if (!Number.isFinite(rightAt)) return -1;
+    return rightAt - leftAt;
+  });
+}
+function subjectLaunchOrdinal(launches, subjectMintedAt) {
+  const subject = subjectMintedAt ? Date.parse(subjectMintedAt) : NaN;
+  if (!Number.isFinite(subject)) return void 0;
+  let earlier = 0;
+  for (const launch of launches) {
+    const minted = launch.mintedAt ? Date.parse(launch.mintedAt) : NaN;
+    if (!Number.isFinite(minted)) return void 0;
+    if (minted < subject) earlier += 1;
+  }
+  return earlier + 1;
 }
 async function collectOperatorLaunches(mint, operatorBioHandles = [], operatorHandle, subject = {}) {
   const coin = await pumpfunCoin(mint);
@@ -20362,11 +20753,15 @@ async function collectOperatorLaunches(mint, operatorBioHandles = [], operatorHa
       });
     }
   }
+  const enriched = byMintDateDesc(await enrichLaunchPeaks(launches));
+  const ordinal = subjectLaunchOrdinal(enriched, coin?.createdAt);
   return {
     ...coin?.creator ? { creatorWallet: coin.creator } : {},
-    launches: await enrichLaunchPeaks(launches),
+    launches: enriched,
     ...coin?.createdAt ? { subjectMintedAt: coin.createdAt } : {},
-    totalLaunches: launches.length + 1,
+    ...subjectSymbol ? { subjectSymbol } : {},
+    totalLaunches: enriched.length + 1,
+    ...ordinal ? { subjectLaunchNumber: ordinal } : {},
     claimedProjects: claimedProjects.slice(0, 10)
   };
 }
@@ -20407,7 +20802,8 @@ function describeLaunchHistory(history) {
       const now = `${launch.symbol || launch.mint.slice(0, 6)} now ${usd(launch.fdvUsd)}`;
       return `${now}${describeDecline(launch)}`;
     });
-    sentences.push(`This is launch ${history.totalLaunches} tied to the same operator. Earlier launches: ${parts.join("; ")}.`);
+    const lead = history.subjectLaunchNumber ? `This is launch ${history.subjectLaunchNumber} of ${history.totalLaunches} tied to the same operator.` : `There are ${history.totalLaunches} launches tied to the same operator, including this one.`;
+    sentences.push(`${lead} Their other launches: ${parts.join("; ")}.`);
     const spacing = describeLaunchSpacing(history);
     if (spacing) sentences.push(spacing);
   }
@@ -21332,7 +21728,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
           if (v.domain) {
             const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name);
             if (arch) {
-              corrob.push(`archived ${arch.where} page (${arch.year})`);
+              corrob.push(...archiveCorroborationLabels(arch));
               rec.evidence_url = arch.url;
               archiveVerified = true;
             }
@@ -23173,6 +23569,79 @@ function runAudit(rawHandle, emit, options) {
   return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
 }
 
+// src/lib/priceHistory.ts
+var NETWORK = {
+  solana: "solana",
+  ethereum: "eth",
+  eth: "eth",
+  bsc: "bsc",
+  base: "base",
+  arbitrum: "arbitrum",
+  polygon: "polygon_pos",
+  "polygon_pos": "polygon_pos",
+  avalanche: "avax",
+  avax: "avax",
+  optimism: "optimism",
+  fantom: "ftm",
+  sui: "sui",
+  ton: "ton",
+  tron: "tron",
+  blast: "blast",
+  sei: "sei-evm"
+};
+var GT = "https://api.geckoterminal.com/api/v2";
+function record2(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+async function gt(path) {
+  try {
+    const r = await fetch(`${GT}${path}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(8e3)
+    });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+async function topPool(network, address) {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
+  const rows = record2(d).data;
+  const first = Array.isArray(rows) ? record2(rows[0]) : {};
+  const attributes = record2(first.attributes);
+  const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
+  return id ? id.replace(`${network}_`, "") : null;
+}
+async function fetchPriceHistory(address, chain, pairAddress) {
+  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
+  if (!network || !address) return null;
+  const pool = pairAddress || await topPool(network, address);
+  if (!pool) return null;
+  for (const timeframe of ["day", "hour"]) {
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
+    const rawList = record2(record2(record2(d).data).attributes).ohlcv_list;
+    const list = Array.isArray(rawList) ? rawList.filter((row) => Array.isArray(row) && row.length >= 5 && row.every((value) => typeof value === "number")) : [];
+    if (list.length < 3) continue;
+    const rows = [...list].sort((a, b) => a[0] - b[0]);
+    const points = rows.map((r) => r[4]).filter((n) => typeof n === "number" && n > 0);
+    if (points.length < 3) continue;
+    const first = points[0];
+    const last = points[points.length - 1];
+    const peak = Math.max(...points);
+    return {
+      points,
+      first,
+      last,
+      peak,
+      changePct: first > 0 ? (last - first) / first * 100 : 0,
+      drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
+      timeframe,
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  return null;
+}
+
 // src/token/scannerEvasion.ts
 var DETECTOR_PATTERNS = [
   [/\bgmgn\b/i, "GMGN"],
@@ -23302,7 +23771,273 @@ function classifyMarketAddress(address, context = {}) {
   return null;
 }
 
+// src/token/cloneCheck.ts
+var ORDERING_MARGIN_MS = 6e4;
+var BURST_WINDOW_MS = 15 * 6e4;
+var DEFAULT_LOOKUP_LIMIT = 8;
+var LOOKUP_CONCURRENCY = 4;
+var SEARCH_TIMEOUT_MS = 8e3;
+var LOOKUP_TIMEOUT_MS = 9e3;
+var EVM_ADDRESS3 = /^0x[0-9a-f]{40}$/i;
+var INVISIBLE = new RegExp("[\\u200B-\\u200F\\u2060\\uFEFF]|\\p{Cc}", "gu");
+function normalizeTicker(symbol) {
+  if (!symbol || typeof symbol !== "string") return "";
+  return symbol.normalize("NFKC").replace(INVISIBLE, "").replace(/\s+/g, " ").trim().toUpperCase();
+}
+function mintKey(chain, address) {
+  return `${chain}:${EVM_ADDRESS3.test(address) ? address.toLowerCase() : address}`;
+}
+async function rugcheckFirstSeen(mint, chain, fetchImpl = fetch) {
+  if (chain !== "solana") return null;
+  try {
+    const response = await fetchImpl(
+      `https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`,
+      { signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) }
+    );
+    if (!response.ok) return null;
+    const body = await response.json();
+    const at = typeof body?.detectedAt === "string" ? Date.parse(body.detectedAt) : NaN;
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+async function searchSameTicker(symbol, fetchImpl) {
+  try {
+    const response = await fetchImpl(
+      `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(symbol)}`,
+      { signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }
+    );
+    if (!response.ok) return null;
+    const body = await response.json();
+    return Array.isArray(body?.pairs) ? body.pairs : [];
+  } catch {
+    return null;
+  }
+}
+function num3(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function foldByMint(pairs, ticker) {
+  const byMint = /* @__PURE__ */ new Map();
+  const deepestPool = /* @__PURE__ */ new Map();
+  for (const pair of pairs) {
+    const address = pair.baseToken?.address;
+    const chain = pair.chainId;
+    if (!address || !chain) continue;
+    if (normalizeTicker(pair.baseToken?.symbol) !== ticker) continue;
+    const key = mintKey(chain, address);
+    const created = num3(pair.pairCreatedAt);
+    const liquidity = num3(pair.liquidity?.usd);
+    const row = byMint.get(key);
+    if (!row) {
+      byMint.set(key, {
+        mint: address,
+        chain,
+        pairCreatedAt: created,
+        firstSeenAt: created,
+        firstSeenBasis: created === null ? "unknown" : "listing",
+        liquidityUsd: liquidity,
+        marketCapUsd: num3(pair.marketCap) ?? num3(pair.fdv),
+        url: pair.url ?? null
+      });
+      deepestPool.set(key, liquidity ?? -1);
+      continue;
+    }
+    if (created !== null && (row.pairCreatedAt === null || created < row.pairCreatedAt)) {
+      row.pairCreatedAt = created;
+      row.firstSeenAt = created;
+      row.firstSeenBasis = "listing";
+    }
+    if (liquidity !== null) row.liquidityUsd = (row.liquidityUsd ?? 0) + liquidity;
+    if (liquidity !== null && liquidity > (deepestPool.get(key) ?? -1)) {
+      deepestPool.set(key, liquidity);
+      row.marketCapUsd = num3(pair.marketCap) ?? num3(pair.fdv) ?? row.marketCapUsd;
+      if (pair.url) row.url = pair.url;
+    }
+  }
+  return byMint;
+}
+function lookupTargets(audited, peers, limit) {
+  const auditedAt = audited.firstSeenAt;
+  const earlier = peers.filter((peer) => peer.firstSeenAt !== null && (auditedAt === null || peer.firstSeenAt < auditedAt)).sort((a, b) => (a.firstSeenAt ?? 0) - (b.firstSeenAt ?? 0));
+  const deepest = [...peers].sort((a, b) => (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0));
+  const picked = [audited];
+  const seen = /* @__PURE__ */ new Set([mintKey(audited.chain, audited.mint)]);
+  for (const candidate of [...earlier, ...deepest]) {
+    if (picked.length >= limit) break;
+    const key = mintKey(candidate.chain, candidate.mint);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picked.push(candidate);
+  }
+  return picked;
+}
+async function applyCreationTimes(targets, resolve, fetchImpl) {
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < targets.length) {
+      const row = targets[cursor++];
+      const createdAt = await resolve(row.mint, row.chain, fetchImpl).catch(() => null);
+      if (createdAt === null) continue;
+      if (row.pairCreatedAt === null || createdAt <= row.pairCreatedAt + ORDERING_MARGIN_MS) {
+        row.firstSeenBasis = "creation";
+      }
+      row.firstSeenAt = row.firstSeenAt === null ? createdAt : Math.min(row.firstSeenAt, createdAt);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(LOOKUP_CONCURRENCY, targets.length) }, worker));
+}
+var usd2 = (value) => `$${Math.round(value).toLocaleString("en-US")}`;
+var plural = (count, one, many) => count === 1 ? one : many;
+function describeSpan(ms, round) {
+  const span = Math.max(0, ms);
+  if (span < 90 * 6e4) {
+    const minutes = Math.max(1, round(span / 6e4));
+    return `${minutes} ${plural(minutes, "minute", "minutes")}`;
+  }
+  if (span < 48 * 36e5) {
+    const hours = Math.max(1, round(span / 36e5));
+    return `${hours} ${plural(hours, "hour", "hours")}`;
+  }
+  const days = Math.max(1, round(span / 864e5));
+  return `${days} ${plural(days, "day", "days")}`;
+}
+var COUNT_IS_A_FLOOR = "A clone with no liquidity pool is often not listed at all, so that count is a floor.";
+var SWEEP_IS_A_FLOOR = "A clone with no liquidity pool is often not listed at all, so this sweep can miss one.";
+var CHECK_ADDRESS = "Check the contract address before you buy.";
+function earliestNote(ticker, auditedAt, clones) {
+  const burst = clones.filter((clone) => clone.firstSeenAt !== null && clone.firstSeenAt <= auditedAt + BURST_WINDOW_MS);
+  const rest = clones.length - burst.length;
+  const tail = rest > 0 ? ` ${rest} more ${plural(rest, "has", "have")} used the ticker since. ${COUNT_IS_A_FLOOR}` : ` ${COUNT_IS_A_FLOOR}`;
+  if (!burst.length) {
+    return `${clones.length} other ${plural(clones.length, "mint uses", "mints use")} the ticker $${ticker}, every one of them first seen after this mint. ${CHECK_ADDRESS}${tail}`;
+  }
+  const window = describeSpan(
+    Math.max(...burst.map((clone) => (clone.firstSeenAt ?? auditedAt) - auditedAt)),
+    Math.ceil
+  );
+  const deepest = Math.max(...burst.map((clone) => clone.liquidityUsd ?? 0));
+  const money = deepest > 0 ? `, the largest holding ${usd2(deepest)} of liquidity` : ", none of them with any liquidity";
+  return `${burst.length} other ${plural(burst.length, "token", "tokens")} using the ticker $${ticker} appeared within ${window} of this one${money}. ${CHECK_ADDRESS}${tail}`;
+}
+function laterNote(ticker, gapMs, audited, earliest) {
+  const theirs = earliest.liquidityUsd ?? 0;
+  const ours = audited.liquidityUsd ?? 0;
+  let money = "";
+  if (theirs > 0) {
+    money = ours > 0 ? `, holding ${usd2(theirs)} of liquidity against this mint's ${usd2(ours)}` : `, holding ${usd2(theirs)} of liquidity where this mint has none`;
+  }
+  return `This is not the first mint using the ticker $${ticker}. Another appeared ${describeSpan(gapMs, Math.floor)} earlier at ${earliest.mint}${money}. ${CHECK_ADDRESS} Which mint the project itself issued is not something these timestamps settle.`;
+}
+async function checkForClones(input, options = {}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const resolveCreatedAt = options.resolveCreatedAt ?? rugcheckFirstSeen;
+  const limit = options.lookupLimit ?? DEFAULT_LOOKUP_LIMIT;
+  const ticker = normalizeTicker(input.symbol);
+  const chain = input.chain;
+  const callerPairCreatedAt = num3(input.pairCreatedAt);
+  const callerLiquidity = num3(input.liquidityUsd);
+  if (!ticker || !input.mint || !chain) {
+    return {
+      audited: "unresolved",
+      clones: [],
+      checked: false,
+      note: "There is no ticker to sweep for, so no same ticker mint has been ruled in or out."
+    };
+  }
+  const pairs = await searchSameTicker(ticker, fetchImpl);
+  if (pairs === null) {
+    return {
+      audited: "unresolved",
+      clones: [],
+      checked: false,
+      note: `The ticker sweep for $${ticker} did not complete, so no same ticker mint has been ruled in or out.`
+    };
+  }
+  const byMint = foldByMint(pairs, ticker);
+  const auditedKey = mintKey(chain, input.mint);
+  const audited = byMint.get(auditedKey) ?? {
+    mint: input.mint,
+    chain,
+    pairCreatedAt: callerPairCreatedAt,
+    firstSeenAt: callerPairCreatedAt,
+    firstSeenBasis: callerPairCreatedAt === null ? "unknown" : "listing",
+    liquidityUsd: callerLiquidity,
+    marketCapUsd: null,
+    url: null
+  };
+  if (callerPairCreatedAt !== null && (audited.pairCreatedAt === null || callerPairCreatedAt < audited.pairCreatedAt)) {
+    audited.pairCreatedAt = callerPairCreatedAt;
+    audited.firstSeenAt = audited.firstSeenAt === null ? callerPairCreatedAt : Math.min(audited.firstSeenAt, callerPairCreatedAt);
+    audited.firstSeenBasis = "listing";
+  }
+  if (callerLiquidity !== null) audited.liquidityUsd = callerLiquidity;
+  byMint.set(auditedKey, audited);
+  const clones = [...byMint.values()].filter((row) => mintKey(row.chain, row.mint) !== auditedKey);
+  if (!clones.length) {
+    return {
+      audited: "only",
+      clones: [],
+      checked: true,
+      note: `No other mint using the ticker $${ticker} is listed on dexscreener. ${SWEEP_IS_A_FLOOR}`
+    };
+  }
+  await applyCreationTimes(lookupTargets(audited, clones, limit), resolveCreatedAt, fetchImpl);
+  clones.sort((a, b) => (a.firstSeenAt ?? Infinity) - (b.firstSeenAt ?? Infinity));
+  const auditedAt = audited.firstSeenAt;
+  const dated = clones.filter((clone) => clone.firstSeenAt !== null);
+  const cohort = `${clones.length} other ${plural(clones.length, "mint uses", "mints use")} the ticker $${ticker}`;
+  if (auditedAt === null || !dated.length) {
+    return {
+      audited: "unresolved",
+      clones,
+      checked: true,
+      note: `${cohort}. There is no public creation record to order them against this mint, so which came first is unsettled. ${CHECK_ADDRESS}`
+    };
+  }
+  const earliest = dated[0];
+  if (earliest.firstSeenAt + ORDERING_MARGIN_MS <= auditedAt) {
+    const gap = auditedAt - earliest.firstSeenAt;
+    if (audited.firstSeenBasis !== "creation") {
+      return {
+        audited: "unresolved",
+        clones,
+        checked: true,
+        note: `${cohort}, and one at ${earliest.mint} has a public record ${describeSpan(gap, Math.floor)} older than this mint's first listing. A first listing can trail a mint by hours, so that does not establish which was minted first. ${CHECK_ADDRESS}`
+      };
+    }
+    return {
+      audited: "later",
+      clones,
+      checked: true,
+      earliestMint: earliest.mint,
+      note: laterNote(ticker, gap, audited, earliest)
+    };
+  }
+  if (auditedAt + ORDERING_MARGIN_MS <= earliest.firstSeenAt) {
+    return {
+      audited: "earliest",
+      clones,
+      checked: true,
+      earliestMint: audited.mint,
+      note: earliestNote(ticker, auditedAt, clones)
+    };
+  }
+  return {
+    audited: "unresolved",
+    clones,
+    checked: true,
+    note: `${cohort}, first seen within ${describeSpan(Math.abs(auditedAt - earliest.firstSeenAt), Math.ceil)} of this one, too close together to order. ${CHECK_ADDRESS}`
+  };
+}
+
 // src/token/audit.ts
+function deployerRoleLabel(attribution, form = "title") {
+  const proven = attribution?.kind === "deployer";
+  const base = proven ? "Deployer" : "Creator or authority";
+  return form === "wallet" ? `${base} wallet` : base;
+}
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
 async function screenDeployerRisk(address, fetchImpl = fetch) {
   if (!address || address.length < 8) return void 0;
@@ -23322,6 +24057,22 @@ async function screenDeployerRisk(address, fetchImpl = fetch) {
     };
   } catch {
     return { available: false, paths: [], completedAt };
+  }
+}
+var SIGNED_THE_CREATION = /* @__PURE__ */ new Set(["mint feePayer", "creation-tx fee payer"]);
+async function resolveDeployerViaRoute(mint, fetchImpl = fetch) {
+  const origin = globalThis.location?.origin;
+  if (!origin) return null;
+  try {
+    const r = await fetchImpl(`/api/resolve-deployer?mint=${encodeURIComponent(mint)}`, { signal: AbortSignal.timeout(2e4) });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const address = typeof d?.deployer === "string" ? d.deployer.trim() : "";
+    if (!address) return null;
+    const via = typeof d?.via === "string" && d.via.trim() ? d.via.trim() : "resolver";
+    return { address, source: "helius", method: via, kind: SIGNED_THE_CREATION.has(via) ? "deployer" : "attributed" };
+  } catch {
+    return null;
   }
 }
 async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
@@ -23358,7 +24109,7 @@ async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
   }
 }
 var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-var num3 = (s) => s == null || s === "" ? null : Number(s);
+var num4 = (s) => s == null || s === "" ? null : Number(s);
 var t1 = (s) => s === "1";
 var solFlag = (x) => x?.status === "1";
 function band(score) {
@@ -23386,6 +24137,7 @@ function evmSafety(gp, sim) {
     else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
   }
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
+  const creatorShare = num4(gp?.creator_percent);
   return {
     available: !!gp || !!s,
     simChecked: !!s,
@@ -23403,9 +24155,9 @@ function evmSafety(gp, sim) {
     openSource: t1(gp?.is_open_source),
     cannotSellAll: t1(gp?.cannot_sell_all),
     metadataMutable: false,
-    buyTax: s?.simSuccess ? s.buyTax : (num3(gp?.buy_tax) ?? 0) * 100,
-    sellTax: s?.simSuccess ? s.sellTax : (num3(gp?.sell_tax) ?? 0) * 100,
-    holderCount: num3(gp?.holder_count) ?? 0,
+    buyTax: s?.simSuccess ? s.buyTax : (num4(gp?.buy_tax) ?? 0) * 100,
+    sellTax: s?.simSuccess ? s.sellTax : (num4(gp?.sell_tax) ?? 0) * 100,
+    holderCount: num4(gp?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct,
@@ -23420,7 +24172,8 @@ function evmSafety(gp, sim) {
     tradingCooldown: t1(gp?.trading_cooldown),
     externalCall: t1(gp?.external_call),
     ownerChangeBalance: t1(gp?.owner_change_balance),
-    creatorPercent: (num3(gp?.creator_percent) ?? 0) * 100,
+    creatorPercent: (creatorShare ?? 0) * 100,
+    creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
     lpAssessed: lpRowsSeen > 0
   };
 }
@@ -23460,7 +24213,7 @@ function solanaSafety(sol) {
     metadataMutable: solFlag(sol?.metadata_mutable),
     buyTax: 0,
     sellTax: 0,
-    holderCount: num3(sol?.holder_count) ?? 0,
+    holderCount: num4(sol?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct: 0,
@@ -23474,9 +24227,13 @@ function solanaSafety(sol) {
     slippageModifiable: false,
     blacklist: false,
     tradingCooldown: false,
+    // GoPlus has no creator balance on this chain. The audit fills it in from
+    // RugCheck once a creator resolves; until then it stays unmeasured, because
+    // a hardcoded 0 published "creator holds nothing" about every Solana token.
     externalCall: false,
     ownerChangeBalance: false,
-    creatorPercent: 0
+    creatorPercent: 0,
+    creatorPercentAssessed: false
   };
 }
 function emptySafety() {
@@ -23515,6 +24272,7 @@ function emptySafety() {
     externalCall: false,
     ownerChangeBalance: false,
     creatorPercent: 0,
+    creatorPercentAssessed: false,
     lpAssessed: false
   };
 }
@@ -23574,10 +24332,42 @@ async function runTokenAudit(input, emit, opts) {
   let sol = null;
   let explorerHolders = null;
   let contractSource = null;
+  let deployerAttribution = null;
+  let rugcheck = null;
+  let lpLockSource = "goplus";
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders\u2026", tone: "neutral" });
     sol = await goplusSolana(address);
     safety = solanaSafety(sol);
+    const goplusCreator = (sol?.creators ?? []).map((c) => c?.address).find((a) => typeof a === "string" && a.trim().length > 0)?.trim() ?? null;
+    const routeResolver = goplusCreator || opts?.skipSim ? Promise.resolve(null) : resolveDeployerViaRoute(address).catch(() => null);
+    const [routed, rug] = await Promise.all([
+      routeResolver,
+      rugcheckReport(address).catch(() => null)
+    ]);
+    rugcheck = rug;
+    deployerAttribution = goplusCreator ? { address: goplusCreator, source: "goplus", method: "metadata creator", kind: "attributed" } : routed ?? (rug?.creator ? { address: rug.creator, source: "rugcheck", method: "creator field", kind: "attributed" } : null);
+    if (deployerAttribution && rug?.creator === deployerAttribution.address && rug.creatorPercent != null) {
+      safety = { ...safety, creatorPercent: rug.creatorPercent, creatorPercentAssessed: true };
+    }
+    if (!safety.lpAssessed && rug?.lpLockedPct != null) {
+      safety = { ...safety, lpLockedPct: rug.lpLockedPct, lpLocked: rug.lpLockedPct >= 50, lpAssessed: true };
+      lpLockSource = "rugcheck";
+      step({
+        phase: "Contract",
+        label: "LP lock",
+        detail: `RugCheck reports ${rug.lpLockedPct.toFixed(1)}% of the liquidity locked. GoPlus returned no LP holder records for this mint.`,
+        source: "rugcheck",
+        tone: rug.lpLockedPct >= 50 ? "good" : "warn"
+      });
+    }
+    step(deployerAttribution ? {
+      phase: "Contract",
+      label: deployerRoleLabel(deployerAttribution),
+      detail: `${deployerAttribution.address} via ${deployerAttribution.source} ${deployerAttribution.method}${safety.creatorPercentAssessed ? `, holding ${safety.creatorPercent.toFixed(2)}% of supply` : ", holdings not reported"}.`,
+      source: deployerAttribution.source,
+      tone: "neutral"
+    } : { phase: "Contract", label: "Deployer unresolved", detail: "No source named a creator for this mint, so deployer forensics could not run.", tone: "warn" });
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders\u2026" : "GoPlus + honeypot.is buy/sell simulation\u2026", tone: "neutral" });
     const [gp, sim, explorer, source2] = await Promise.all([
@@ -23594,6 +24384,9 @@ async function runTokenAudit(input, emit, opts) {
     explorerHolders = explorer;
     contractSource = source2;
     safety = evmSafety(gp, sim);
+    const evmCreator = gp?.creator_address?.trim();
+    const evmOwner = gp?.owner_address?.trim();
+    deployerAttribution = evmCreator ? { address: evmCreator, source: "goplus", method: "contract creator", kind: "deployer" } : evmOwner && !/^0x0+$/.test(evmOwner) ? { address: evmOwner, source: "goplus", method: "current owner", kind: "attributed" } : null;
     if (explorerHolders?.length) {
       safety = { ...safety, topHolderPct: explorerHolders[0].percent };
     } else if (GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain)) {
@@ -23673,7 +24466,8 @@ async function runTokenAudit(input, emit, opts) {
     if (s.blacklist && ownerActive) findings.push({ claim: "Owner can blacklist addresses, so your wallet can be blocked from selling.", tone: "warn", source: "goplus" });
     if (s.tradingCooldown && ownerActive) findings.push({ claim: "Trading cooldown is enforceable, so sells can be delayed.", tone: "warn", source: "goplus" });
     if (s.externalCall) findings.push({ claim: "Contract makes external calls, so behavior can change via an external dependency.", tone: "warn", source: "goplus" });
-    if (s.creatorPercent >= 5) findings.push({ claim: `Creator still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: "goplus" });
+    const creatorHolder = deployerAttribution && deployerAttribution.kind !== "deployer" ? "The creator or authority wallet" : "Creator";
+    if (s.creatorPercent >= 5) findings.push({ claim: `${creatorHolder} still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: chain === "solana" ? "rugcheck" : "goplus" });
     if (chain === "solana") {
       if (s.balanceMutable) {
         if (broadlyTraded) findings.push({ claim: "A balance-mutable authority exists, but broad market presence indicates it is not an active threat.", tone: "warn", source: "argus" });
@@ -23685,12 +24479,39 @@ async function runTokenAudit(input, emit, opts) {
       if (s.transferHook) findings.push({ claim: "Transfer hook active: an external program runs on every transfer and can block sells.", tone: "bad", source: "goplus-sol" });
       if (s.transferFee) findings.push({ claim: "A Token-2022 transfer fee is configured: a built-in tax on every transfer.", tone: "warn", source: "goplus-sol" });
     }
+    const lockedByRugcheck = lpLockSource === "rugcheck";
     if (s.lpBurnedPct >= 50) findings.push({ claim: `Liquidity is burned (~${s.lpBurnedPct.toFixed(0)}%) and permanently removed; it cannot be pulled.`, tone: "good", source: "goplus" });
-    else if (s.lpLockedPct >= 50) findings.push({ claim: `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: "goplus" });
+    else if (s.lpLockedPct >= 50) findings.push({ claim: lockedByRugcheck ? `RugCheck reports liquidity is locked (~${s.lpLockedPct.toFixed(0)}%). This is RugCheck's reading of the pool, since GoPlus returns no LP holder records on this chain.` : `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: lpLockSource });
     else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet and can be pulled at any time.`, tone: "bad", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet and removable at will.`, tone: "warn", source: "goplus" });
-    else if (s.lpAssessed) findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
+    else if (s.lpAssessed) findings.push({ claim: lockedByRugcheck ? `RugCheck reports only ~${s.lpLockedPct.toFixed(0)}% of the LP locked, so the liquidity is not lock protected. This is RugCheck's reading of the pool, since GoPlus returns no LP holder records on this chain.` : "Liquidity does not appear locked or burned.", tone: "warn", source: lpLockSource });
     else findings.push({ claim: "LP lock was not measured: the free data tier returned no LP holder records for this chain. Not scored either way.", tone: "warn", source: "goplus" });
+  }
+  if (rugcheck?.rugged) {
+    findings.push({
+      claim: "RugCheck flags this token as rugged. That is RugCheck's own verdict on the mint, not an on-chain event ARGUS reproduced.",
+      tone: "bad",
+      source: "rugcheck"
+    });
+    step({ phase: "Contract", label: "Rugged flag", detail: "RugCheck flags this mint as rugged.", source: "rugcheck", tone: "bad" });
+  }
+  const insiderClusterPct = rugcheck ? largestInsiderClusterPercent(rugcheck.insiderNetworks) : null;
+  const linkedWallets = rugcheck?.graphInsidersDetected ?? null;
+  const megaHolderBase = s.holderCount >= 5e4;
+  if (!megaHolderBase && insiderClusterPct != null && linkedWallets != null && linkedWallets >= 15) {
+    if (insiderClusterPct >= 30) {
+      findings.push({
+        claim: `RugCheck traces ${linkedWallets.toLocaleString()} wallets to a common funding source, and its largest single cluster holds ~${insiderClusterPct.toFixed(0)}% of supply. Clusters overlap, so this is the biggest one rather than a total.`,
+        tone: "bad",
+        source: "rugcheck"
+      });
+    } else if (insiderClusterPct >= 12) {
+      findings.push({
+        claim: `RugCheck traces ${linkedWallets.toLocaleString()} connected wallets, whose largest single cluster holds ~${insiderClusterPct.toFixed(0)}% of supply. Clusters overlap, so this is the biggest one rather than a total.`,
+        tone: "warn",
+        source: "rugcheck"
+      });
+    }
   }
   if (liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
@@ -23717,17 +24538,19 @@ async function runTokenAudit(input, emit, opts) {
     ...pair?.pairAddress ? [pair.pairAddress] : [],
     ...allPairs.map((candidate) => candidate.pairAddress).filter((value) => Boolean(value))
   ];
+  const knownAccounts = rugcheck?.knownAccounts;
   const marketRows = [];
   const walletRows = rawHolders.filter((h) => {
     const address2 = h.address ?? h.account ?? "";
-    const market = classifyMarketAddress(address2, { poolAddresses });
+    const market = classifyMarketAddress(address2, { poolAddresses, knownAccounts });
     if (!market) return true;
     const percent = Number(h.percent) * 100;
     marketRows.push({
       address: address2,
       percent: Number.isFinite(percent) ? percent : 0,
       label: market.label,
-      kind: market.kind
+      kind: market.kind,
+      labelledByRugcheck: Boolean(knownAccounts?.[address2]?.type)
     });
     return false;
   });
@@ -23750,10 +24573,11 @@ async function runTokenAudit(input, emit, opts) {
   }
   if (marketRows.length) {
     const named = marketRows.slice(0, 3).map((row) => `${row.label} (${row.percent.toFixed(1)}%)`).join(", ");
+    const viaRugcheck = marketRows.some((row) => row.labelledByRugcheck);
     findings.push({
-      claim: `Excluded from concentration: ${named}. These are the market itself, not wallets that can dump.`,
+      claim: `Excluded from concentration: ${named}. These are the market itself, not wallets that can dump.${viaRugcheck ? " The labelled venues are RugCheck's own account labels." : ""}`,
       tone: "good",
-      source: chain === "solana" ? "goplus-sol" : "goplus"
+      source: viaRugcheck ? "rugcheck" : chain === "solana" ? "goplus-sol" : "goplus"
     });
   }
   const axes = [];
@@ -23800,7 +24624,8 @@ async function runTokenAudit(input, emit, opts) {
   if (s.cannotSellAll || s.nonTransferable) aT3 = 0;
   if (s.slippageModifiable && !s.ownerRenounced) aT3 = clamp(aT3 - 5, 0, 12);
   if (s.transferFee) aT3 = clamp(aT3 - 5, 0, 12);
-  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? chain === "solana" ? "no transfer tax detected." : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.` : "Tax not verifiable keyless." });
+  const solanaTaxRationale = s.transferFee ? "a Token-2022 transfer fee is configured on this mint." : "no Token-2022 transfer fee is configured.";
+  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? chain === "solana" ? solanaTaxRationale : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.` : "Tax not verifiable keyless." });
   const topPct = holdersReliable ? concentrationTopPct : null;
   let aT4 = s.holderCount < 50 ? 3 : s.holderCount < 500 ? 7 : s.holderCount < 5e3 ? 11 : 14;
   if (topPct != null) {
@@ -23845,7 +24670,8 @@ async function runTokenAudit(input, emit, opts) {
     verdict = ceiling <= 10 ? "AVOID" : band(score);
   } else verdict = band(score);
   const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) || (cg?.twitter ? "@" + cg.twitter : null);
-  const deployer = chain === "solana" ? sol?.creators?.[0]?.address ?? null : gpEvm?.creator_address || (gpEvm?.owner_address && !/^0x0+$/.test(gpEvm.owner_address) ? gpEvm.owner_address : null) || null;
+  const deployer = deployerAttribution?.address ?? null;
+  const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
   const topHolders = rawHolders.slice(0, 10).map((h) => ({
     address: h.address ?? h.account ?? "",
     percent: Number(h.percent) * 100,
@@ -23869,13 +24695,13 @@ async function runTokenAudit(input, emit, opts) {
       const hopStr = p.hops ? `, ${p.hops} hop${p.hops === 1 ? "" : "s"} away` : "";
       const amt = p.usd >= 1 ? `~$${Math.round(p.usd).toLocaleString()} ` : "";
       findings.push({
-        claim: p.direction === "backward" ? `Deployer wallet received ${amt}traceable to ${who}${hopStr}. ${severe ? "This is a serious funding-provenance risk." : "Worth scrutiny on where the launch capital came from."}` : `Deployer wallet sent ${amt}to ${who}${hopStr}. ${severe ? "This is a serious counterparty risk." : "Worth scrutiny on where the funds moved."}`,
+        claim: p.direction === "backward" ? `${deployerRole} received ${amt}traceable to ${who}${hopStr}. ${severe ? "This is a serious funding-provenance risk." : "Worth scrutiny on where the launch capital came from."}` : `${deployerRole} sent ${amt}to ${who}${hopStr}. ${severe ? "This is a serious counterparty risk." : "Worth scrutiny on where the funds moved."}`,
         tone: severe ? "bad" : "warn",
         source: "arkham"
       });
     }
     const lead = deployerRisk.paths[0];
-    step({ phase: "Finalize", label: "Funding trace", detail: `Deployer ${lead.direction === "backward" ? "funded via" : "exposed to"} ${lead.seedName || lead.category || "a flagged entity"}${lead.hops ? ` (${lead.hops} hop${lead.hops === 1 ? "" : "s"})` : ""}.`, tone: SEVERE_RISK_CATEGORY.test(lead.category ?? "") ? "bad" : "warn" });
+    step({ phase: "Finalize", label: "Funding trace", detail: `${deployerRole} ${lead.direction === "backward" ? "funded via" : "exposed to"} ${lead.seedName || lead.category || "a flagged entity"}${lead.hops ? ` (${lead.hops} hop${lead.hops === 1 ? "" : "s"})` : ""}.`, tone: SEVERE_RISK_CATEGORY.test(lead.category ?? "") ? "bad" : "warn" });
   }
   if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
     findings.push({
@@ -23888,7 +24714,31 @@ async function runTokenAudit(input, emit, opts) {
     verdict = "AVOID";
     step({ phase: "Finalize", label: "OFAC sanctions", detail: `${sanctionsScreen.sanctioned.length} sanctioned address(es): verdict forced to AVOID.`, tone: "bad" });
   }
-  const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
+  const cloneCheck = await checkForClones({
+    mint: address,
+    symbol: pair.baseToken.symbol,
+    chain,
+    pairCreatedAt: pair.pairCreatedAt ?? null,
+    liquidityUsd
+  }).catch(() => null);
+  if (cloneCheck?.checked && cloneCheck.clones.length) {
+    if (cloneCheck.audited === "later") {
+      findings.push({ claim: cloneCheck.note, tone: "bad", source: "dexscreener" });
+    } else {
+      findings.push({
+        claim: `${cloneCheck.clones.length} other ${cloneCheck.clones.length === 1 ? "mint trades" : "mints trade"} under the ticker $${pair.baseToken.symbol}. Verify you hold the address in this report before buying.`,
+        tone: "warn",
+        source: "dexscreener"
+      });
+    }
+    step({
+      phase: "Finalize",
+      label: "Ticker collision",
+      detail: cloneCheck.note,
+      tone: cloneCheck.audited === "later" ? "bad" : "warn"
+    });
+  }
+  const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployerAttribution, topHolders, socials);
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} \xB7 ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
   return {
@@ -23905,17 +24755,26 @@ async function runTokenAudit(input, emit, opts) {
     liquidityUsd,
     vol24,
     ageDays,
+    // Keep the raw instant, not just the day count derived from it above. The
+    // operator trace ages the deployer wallet against this launch, and a wallet
+    // minutes older than the token it launched is 0 days old in every direction.
+    pairCreatedAt: pair.pairCreatedAt ?? null,
     priceChange: pair.priceChange,
     ...priceHistory ? { priceHistory } : {},
+    // The pool exclusion has to reach the number a reader actually sees. Leaving
+    // the raw provider top holder on the dossier put "top holder 37%" on the same
+    // page as the finding explaining that the 37% line is the pool itself.
     verdict,
     score,
     capApplied,
     headline,
     axes,
-    safety: s,
+    safety: { ...s, topHolderPct: concentrationTopPct },
     socials,
+    holdersAssessed: holdersReliable,
     projectX,
     deployer,
+    ...deployerAttribution ? { deployerAttribution } : {},
     topHolders,
     insiderPct,
     bundleCount,
@@ -23927,10 +24786,11 @@ async function runTokenAudit(input, emit, opts) {
     live: true,
     safetyChecked: s.available,
     sanctionsScreen,
-    deployerRisk
+    deployerRisk,
+    ...cloneCheck ? { cloneCheck } : {}
   };
 }
-function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders, socials) {
+function buildGraph(chain, address, symbol, verdict, projectX, attribution, holders, socials) {
   const center = tokenEntityKey(chain, address);
   const nodes = [{
     type: "Token",
@@ -23947,10 +24807,10 @@ function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders
     nodes.push({ type: "Person", key: projectX });
     edges.push({ src: center, dst: projectX, type: "TEAM" });
   }
-  if (deployer) {
-    const k = walletEntityKey(chain, deployer);
-    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + deployer.slice(0, 8), chain, address: deployer });
-    edges.push({ src: center, dst: k, type: "DEPLOYED_BY" });
+  if (attribution) {
+    const k = walletEntityKey(chain, attribution.address);
+    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + attribution.address.slice(0, 8), chain, address: attribution.address });
+    edges.push({ src: center, dst: k, type: attribution.kind === "deployer" ? "DEPLOYED_BY" : "ATTRIBUTED_CREATOR", source: attribution.source });
   }
   holders.slice(0, 4).forEach((h) => {
     const k = walletEntityKey(chain, h.address);

@@ -60,7 +60,7 @@ import {
   refreshResolvedNameOffchain,
   resolvedOffchainName,
 } from "./adapters/offchain";
-import { archivedAffiliation } from "./adapters/wayback";
+import { archiveCorroborationLabels, archivedAffiliation } from "./adapters/wayback";
 import { resolveForHandle } from "./adapters/wallet";
 import { collectTrustGraph } from "./adapters/trustgraph";
 import { collectPortfolioRelationships } from "./adapters/portfolio";
@@ -1347,7 +1347,12 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
             // own /team or /about page, so this is a genuine first-party team tie
             // (not a coincidental mention on a wrong or misguessed domain).
             const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name);
-            if (arch) { corrob.push(`archived ${arch.where} page (${arch.year})`); rec.evidence_url = arch.url; archiveVerified = true; }
+            // The archive now reads a bounded spread of captures rather than only
+            // the newest, so a name scrubbed from a current team page still
+            // corroborates. When the tie survives only in the older captures the
+            // adapter also hands back that fact, dated, and it is recorded next
+            // to the corroboration rather than quietly dropped.
+            if (arch) { corrob.push(...archiveCorroborationLabels(arch)); rec.evidence_url = arch.url; archiveVerified = true; }
           }
           if (xHandle) {
             const follows = await followsSubject("@" + xHandle.replace(/^@/, ""), ctx.handle);

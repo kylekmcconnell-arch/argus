@@ -65,7 +65,8 @@ import {
 import { formatRoleLabel, plainLanguageSummary } from "../lib/plainLanguage";
 import { deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
 import { NoticedRail } from "./InvestigatorBrief";
-import { summarizeFundingEvidence } from "../lib/fundingEvidence";
+import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
+import { walletAgeFact } from "../lib/operatorTrace";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -368,6 +369,79 @@ function fundingDate(value: string | null): string | null {
     : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
+/** Rounds shown in full before the schedule collapses to a floor note. */
+const MAX_SCHEDULED_ROUNDS = 8;
+
+/**
+ * The whole financing schedule, newest first, in the fact sheet's round-list
+ * language: a name, a date, an amount, and a bar sized against the largest
+ * priced round. A single summed total hides which round was which and who
+ * backed it, so every row keeps its own date, amount, valuation and backers.
+ * A round the record never priced reads as undisclosed, never as zero. An
+ * undated round does sort last, having no date to sort by, but it says "date
+ * not recorded" on its own row rather than borrowing a neighbour's.
+ */
+function FundingRoundSchedule({ rounds }: { rounds: readonly FundingEvidenceRound[] }) {
+  const ordered = [...rounds].sort((left, right) =>
+    String(right.date ?? "").localeCompare(String(left.date ?? "")));
+  const shown = ordered.slice(0, MAX_SCHEDULED_ROUNDS);
+  const largest = Math.max(...shown.map((round) => round.amountUsd ?? 0), 0);
+  return (
+    <>
+      <ol className="mt-3.5 divide-y divide-line/50 border-t border-line/60" aria-label="Disclosed funding rounds">
+        {shown.map((round, index) => {
+          const leads = round.leadInvestors.filter(Boolean);
+          const others = round.otherInvestors.filter(Boolean);
+          const priced = round.amountUsd != null && round.amountUsd > 0;
+          const dated = fundingDate(round.date);
+          const valued = round.valuationUsd != null && round.valuationUsd > 0;
+          const attribution = [
+            // Both lists declare their own truncation. A row that silently drops
+            // the fourth lead reads as the complete set of leads for that round.
+            leads.length > 0
+              ? `led by ${leads.slice(0, 3).join(", ")}${leads.length > 3 ? ` and ${leads.length - 3} more` : ""}`
+              : "",
+            others.length > 0
+              ? `with ${others.slice(0, 4).join(", ")}${others.length > 4 ? ` and ${others.length - 4} more` : ""}`
+              : "",
+            valued ? `${money(round.valuationUsd ?? undefined)} valuation` : "",
+          ].filter(Boolean).join(" · ");
+          return (
+            <li
+              key={`${round.round}:${round.date ?? "undated"}:${index}`}
+              className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 py-2 text-[12px]"
+            >
+              <span className="font-medium text-ink">{round.round}</span>
+              <span className="mono text-[10.5px] text-ink-faint">{dated ?? "date not recorded"}</span>
+              <span className={`mono ml-auto font-semibold tabular-nums ${priced ? "text-ink" : "text-ink-faint"}`}>
+                {priced ? money(round.amountUsd ?? undefined) : "amount undisclosed"}
+              </span>
+              {largest > 0 && (
+                <span className="block h-1 min-w-full overflow-hidden rounded-full bg-line/50" aria-hidden="true">
+                  {priced && (
+                    <span
+                      className="block h-full rounded-full bg-signal-lift/70"
+                      style={{ width: `${Math.max(2, ((round.amountUsd ?? 0) / largest) * 100)}%` }}
+                    />
+                  )}
+                </span>
+              )}
+              {attribution && (
+                <span className="min-w-full text-[11px] leading-snug text-ink-faint">{attribution}</span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {ordered.length > shown.length && (
+        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+          Showing the {shown.length} most recent of {ordered.length} documented rounds.
+        </p>
+      )}
+    </>
+  );
+}
+
 function CapitalStructurePanel({
   facts,
   indexedRounds,
@@ -398,16 +472,25 @@ function CapitalStructurePanel({
       candidate.url
       && candidate.provider !== "monid"
       && candidate.provider !== "defillama");
-  const namedInvestors = [...new Set([
-    ...(newestRound?.leadInvestors ?? []),
+  // Backers are unioned across the WHOLE schedule, not read off the newest
+  // round: a fund that led the seed is still a named backer three rounds later.
+  // Leads and other participants stay in separate lines so an aggregator's
+  // "otherInvestors" name is never presented as having led the round.
+  const leadNames = [...new Set(funding.rounds
+    .flatMap((round) => round.leadInvestors)
+    .map((name) => name.trim())
+    .filter(Boolean))];
+  const otherNames = [...new Set([
+    ...funding.rounds.flatMap((round) => round.otherInvestors),
     ...facts
       .filter((fact) =>
         fact.predicate === "investor"
         && (fact.status === "verified" || fact.status === "corroborated"))
-      .map((fact) => typeof fact.value === "string" ? fact.value.trim() : "")
-      .filter(Boolean),
-  ])].slice(0, 4);
-  const roundDate = fundingDate(newestRound?.date ?? null);
+      .map((fact) => typeof fact.value === "string" ? fact.value : ""),
+  ].map((name) => name.trim()).filter(Boolean))]
+    .filter((name) => !leadNames.some((lead) => lead.toLowerCase() === name.toLowerCase()));
+  const pricedRounds = funding.rounds.filter((round) => round.amountUsd != null && round.amountUsd > 0);
+  const unpricedRounds = funding.rounds.length - pricedRounds.length;
   const amountKnown = funding.totalKnownUsd > 0;
 
   return (
@@ -431,31 +514,25 @@ function CapitalStructurePanel({
             <>
               <p className="display-sm mt-4 text-[27px] leading-none text-ink">{money(funding.totalKnownUsd)}</p>
               <p className="mt-1.5 text-[12px] text-ink-dim">
-                {roundCount > 1
-                  ? `At least ${roundCount} documented funding rounds`
-                  : `${newestRound?.round ?? "Documented funding round"}${roundDate ? ` · ${roundDate}` : ""}`}
+                {`Sum of ${pricedRounds.length} priced round${pricedRounds.length === 1 ? "" : "s"}`}
+                {unpricedRounds > 0
+                  ? ` · ${unpricedRounds} round${unpricedRounds === 1 ? "" : "s"} with no disclosed amount`
+                  : ""}
+              </p>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+                A documented floor, not a verified lifetime raise.
               </p>
               {newestRound?.valuationUsd && (
                 <p className="mt-3 text-[12.5px] text-ink">
                   Company valuation <span className="mono font-medium">{money(newestRound.valuationUsd)}</span>
                 </p>
               )}
-              {namedInvestors.length > 0 && (
-                <p className="mt-1.5 text-[12px] leading-relaxed text-ink-dim">
-                  Led or backed by {namedInvestors.join(", ")}
-                </p>
-              )}
-              {source?.url && (
-                <a href={source.url} target="_blank" rel="noreferrer" className="link-ext mt-3 inline-flex text-[11.5px]">
-                  Read the funding source
-                </a>
-              )}
             </>
           ) : fundingRecordFound ? (
             <>
               <p className="mt-4 text-[16px] font-semibold text-ink">Funding record found</p>
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
-                ARGUS found {roundCount || "a"} company funding {roundCount === 1 ? "round" : "rounds"}, but the saved source did not verify the amount, valuation, or investors.
+                ARGUS found {roundCount || "a"} company funding {roundCount === 1 ? "round" : "rounds"}, but no round amount was disclosed in the saved record.
               </p>
             </>
           ) : (
@@ -465,6 +542,24 @@ function CapitalStructurePanel({
                 This report did not confirm a public company funding announcement.
               </p>
             </>
+          )}
+          {funding.rounds.length > 0 && <FundingRoundSchedule rounds={funding.rounds} />}
+          {leadNames.length > 0 && (
+            <p className="mt-2.5 text-[12px] leading-relaxed text-ink-dim">
+              Led by {leadNames.slice(0, 4).join(", ")}
+              {leadNames.length > 4 ? ` and ${leadNames.length - 4} more` : ""}
+            </p>
+          )}
+          {otherNames.length > 0 && (
+            <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">
+              Also named: {otherNames.slice(0, 6).join(", ")}
+              {otherNames.length > 6 ? ` and ${otherNames.length - 6} more` : ""}
+            </p>
+          )}
+          {source?.url && (
+            <a href={source.url} target="_blank" rel="noreferrer" className="link-ext mt-3 inline-flex text-[11.5px]">
+              Read the funding source
+            </a>
           )}
           <p className="mono mt-4 border-t border-line/70 pt-3 text-[10.5px] uppercase tracking-[0.07em] text-ink-faint">
             Company ownership · not token ownership
@@ -543,6 +638,15 @@ export function InvestigationReport({
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
   const { token, projectX, siteUrl, recon, projectAccount, founders, deployerTrail } = inv;
+  // The deployer wallet's age, said in the unit that carries it and stamped with
+  // what it was measured to. Null when the trail never measured one: a wallet
+  // whose first activity sits outside the pagination window is not a new wallet
+  // and is not an old one.
+  const deployerTrailAge = walletAgeFact(deployerTrail && {
+    ageMinutes: deployerTrail.walletAgeMinutes,
+    ageDays: deployerTrail.walletAgeDays,
+    ageBasis: deployerTrail.walletAgeBasis,
+  });
   const investigationBasicFactSnapshot = inv as Investigation & {
     basicFacts?: BasicFactView[];
     basicFactLeads?: BasicFactLeadView[];
@@ -1411,8 +1515,16 @@ export function InvestigationReport({
               <div className="mt-2.5 border-t border-line/60 pt-2.5 text-[11px] text-ink-faint">
                 <div>
                   Deployed by <ArkhamName address={token.deployer} chain={token.chain} labels={arkham} fallback={shortAddr(token.deployer)} className="text-ink-dim" />
-                  {deployerTrail?.walletAgeDays != null && <> · wallet <span className="text-ink-dim">{deployerTrail.walletAgeDays}d</span> old</>}
-                  {deployerTrail?.tokensCreated != null && <> · <span className="text-ink-dim">{deployerTrail.tokensCreated}</span> tokens minted</>}
+                  {/* Whole days alone printed "0d" for a wallet 95 minutes old
+                      at the launch, and said nothing about whether the age was
+                      measured at the launch or at the scan. The shared fact
+                      picks the unit that carries the number and states its
+                      basis, so this line and the operator panel cannot differ. */}
+                  {deployerTrailAge && <> · <span className="text-ink-dim">{deployerTrailAge}</span></>}
+                  {/* Floored, like the serial chip below: the count is read off
+                      the wallet's most recent transactions, so it is a lower
+                      bound and not a lifetime total. */}
+                  {deployerTrail?.tokensCreated != null && <> · <span className="text-ink-dim">{deployerTrail.tokensCreated}+</span> tokens minted</>}
                 </div>
                 {deployerTrail?.chain && deployerTrail.chain.length > 0 ? (
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">

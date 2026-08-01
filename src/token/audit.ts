@@ -15,9 +15,10 @@ import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
 import {
   dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
-  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckCreator,
+  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckReport,
+  largestInsiderClusterPercent,
   type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo, type ExplorerHolder,
-  type ExplorerContractSource, type RugcheckCreator,
+  type ExplorerContractSource, type RugcheckReport,
 } from "./sources";
 
 export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string }
@@ -112,6 +113,20 @@ export function deployerRoleLabel(
 export interface TokenDossier {
   address: string; chain: string; dexId: string; pairAddress?: string; symbol: string; name: string;
   imageUrl?: string; priceUsd?: number; mcap?: number; fdv?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
+  /**
+   * Pool-creation instant from DexScreener, in unix milliseconds. Frozen so a
+   * reopened report ages the deployer against the launch instead of against
+   * today, the same reason `ageDays` alone was not enough: a day count computed
+   * at scan time cannot be re-measured, and it rounds a wallet minted minutes
+   * before its token down to zero.
+   *
+   * It is the closest instant ARGUS holds to the mint, not the mint itself. On a
+   * launchpad the pool is created in the same breath as the mint; a token that
+   * migrated pools later dates its launch to the migration, so everything built
+   * from it says "launch" and never "mint". Null when DexScreener did not report
+   * one, which is unmeasured and never a launch at the epoch.
+   */
+  pairCreatedAt?: number | null;
   priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
   /** Frozen GeckoTerminal series captured during the scan for snapshot-safe rendering. */
   priceHistory?: PriceHistory;
@@ -546,6 +561,13 @@ async function runTokenAudit(
   let explorerHolders: ExplorerHolder[] | null = null;
   let contractSource: ExplorerContractSource | null = null;
   let deployerAttribution: DeployerAttribution | null = null;
+  // The whole RugCheck report for a Solana mint, kept for the passes below: its
+  // labelled accounts feed the concentration exclusion, and its rugged flag and
+  // connected clusters are findings in their own right.
+  let rugcheck: RugcheckReport | null = null;
+  // Who measured the LP lock. GoPlus is the default; on Solana it returns no LP
+  // rows at all, and a claim sourced from RugCheck has to say RugCheck.
+  let lpLockSource: "goplus" | "rugcheck" = "goplus";
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders…", tone: "neutral" });
     sol = await goplusSolana(address);
@@ -561,8 +583,9 @@ async function runTokenAudit(
     const routeResolver = goplusCreator || opts?.skipSim ? Promise.resolve(null) : resolveDeployerViaRoute(address).catch(() => null);
     const [routed, rug] = await Promise.all([
       routeResolver,
-      rugcheckCreator(address).catch((): RugcheckCreator | null => null),
+      rugcheckReport(address).catch((): RugcheckReport | null => null),
     ]);
+    rugcheck = rug;
     deployerAttribution = goplusCreator
       // GoPlus's Solana creators come from token metadata, which the minting
       // program writes; it is an attribution, not proof of who signed.
@@ -574,6 +597,22 @@ async function runTokenAudit(
     // name, so it is only recorded when both sources point at the same address.
     if (deployerAttribution && rug?.creator === deployerAttribution.address && rug.creatorPercent != null) {
       safety = { ...safety, creatorPercent: rug.creatorPercent, creatorPercentAssessed: true };
+    }
+    // GoPlus returns no lp_holders rows for a Solana mint, so the lock read as
+    // unchecked on every token on this chain. RugCheck answers the same
+    // question inside the report this scan already downloaded. It only fills a
+    // gap: a lock GoPlus did measure stays GoPlus's reading, and an
+    // out-of-range figure was discarded upstream and leaves the lock unmeasured.
+    if (!safety.lpAssessed && rug?.lpLockedPct != null) {
+      safety = { ...safety, lpLockedPct: rug.lpLockedPct, lpLocked: rug.lpLockedPct >= 50, lpAssessed: true };
+      lpLockSource = "rugcheck";
+      step({
+        phase: "Contract",
+        label: "LP lock",
+        detail: `RugCheck reports ${rug.lpLockedPct.toFixed(1)}% of the liquidity locked. GoPlus returned no LP holder records for this mint.`,
+        source: "rugcheck",
+        tone: rug.lpLockedPct >= 50 ? "good" : "warn",
+      });
     }
     step(deployerAttribution
       ? {
@@ -749,14 +788,57 @@ async function runTokenAudit(
     }
 
     // ---- LP-holder forensics: where the liquidity actually sits ----
+    // A lock RugCheck measured is RugCheck's assessment of the pool, not an LP
+    // holder list ARGUS read itself, so the claim names it and the source field
+    // says so. Only the locked and the not-locked readings can come from there:
+    // a burn or a single unlocked wallet is a GoPlus LP row.
+    const lockedByRugcheck = lpLockSource === "rugcheck";
     if (s.lpBurnedPct >= 50) findings.push({ claim: `Liquidity is burned (~${s.lpBurnedPct.toFixed(0)}%) and permanently removed; it cannot be pulled.`, tone: "good", source: "goplus" });
-    else if (s.lpLockedPct >= 50) findings.push({ claim: `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: "goplus" });
+    else if (s.lpLockedPct >= 50) findings.push({ claim: lockedByRugcheck ? `RugCheck reports liquidity is locked (~${s.lpLockedPct.toFixed(0)}%). This is RugCheck's reading of the pool, since GoPlus returns no LP holder records on this chain.` : `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: lpLockSource });
     else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet and can be pulled at any time.`, tone: "bad", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet and removable at will.`, tone: "warn", source: "goplus" });
     // No usable LP record is not the same fact as an unlocked pool. Asserting
     // the latter told readers that USDC's liquidity "does not appear locked".
-    else if (s.lpAssessed) findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
+    else if (s.lpAssessed) findings.push({ claim: lockedByRugcheck ? `RugCheck reports only ~${s.lpLockedPct.toFixed(0)}% of the LP locked, so the liquidity is not lock protected. This is RugCheck's reading of the pool, since GoPlus returns no LP holder records on this chain.` : "Liquidity does not appear locked or burned.", tone: "warn", source: lpLockSource });
     else findings.push({ claim: "LP lock was not measured: the free data tier returned no LP holder records for this chain. Not scored either way.", tone: "warn", source: "goplus" });
+  }
+
+  // ---- RugCheck's own assessments of a Solana mint ----
+  // These come from the report the Solana scan already downloaded. Each one is
+  // RugCheck's reading rather than something ARGUS reproduced on-chain, so the
+  // claim names RugCheck and the source field says rugcheck.
+  if (rugcheck?.rugged) {
+    findings.push({
+      claim: "RugCheck flags this token as rugged. That is RugCheck's own verdict on the mint, not an on-chain event ARGUS reproduced.",
+      tone: "bad",
+      source: "rugcheck",
+    });
+    step({ phase: "Contract", label: "Rugged flag", detail: "RugCheck flags this mint as rugged.", source: "rugcheck", tone: "bad" });
+  }
+  // Connected clusters OVERLAP: one wallet can sit in several, so adding them
+  // up invents supply that does not exist. The single largest cluster is the
+  // honest "share in one hidden hand", and the claim says it is the largest so
+  // it can never be read as a total.
+  const insiderClusterPct = rugcheck ? largestInsiderClusterPercent(rugcheck.insiderNetworks) : null;
+  const linkedWallets = rugcheck?.graphInsidersDetected ?? null;
+  // On a mega-holder token the transfer graph balloons and a large linked set
+  // is ordinary market plumbing, so the cluster only reads as a finding on the
+  // thin base a bundled launch actually has.
+  const megaHolderBase = s.holderCount >= 50_000;
+  if (!megaHolderBase && insiderClusterPct != null && linkedWallets != null && linkedWallets >= 15) {
+    if (insiderClusterPct >= 30) {
+      findings.push({
+        claim: `RugCheck traces ${linkedWallets.toLocaleString()} wallets to a common funding source, and its largest single cluster holds ~${insiderClusterPct.toFixed(0)}% of supply. Clusters overlap, so this is the biggest one rather than a total.`,
+        tone: "bad",
+        source: "rugcheck",
+      });
+    } else if (insiderClusterPct >= 12) {
+      findings.push({
+        claim: `RugCheck traces ${linkedWallets.toLocaleString()} connected wallets, whose largest single cluster holds ~${insiderClusterPct.toFixed(0)}% of supply. Clusters overlap, so this is the biggest one rather than a total.`,
+        tone: "warn",
+        source: "rugcheck",
+      });
+    }
   }
   if (liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
@@ -799,10 +881,15 @@ async function runTokenAudit(
     ...(pair?.pairAddress ? [pair.pairAddress] : []),
     ...allPairs.map((candidate) => candidate.pairAddress).filter((value): value is string => Boolean(value)),
   ];
-  const marketRows: Array<{ address: string; percent: number; label: string; kind: string }> = [];
+  // RugCheck labels the pools and exchange accounts it knows, which is the only
+  // free way to recognise a venue whose address is not in ARGUS's own map. The
+  // classifier trusts the structured type and never the name, so an account
+  // whose chosen name merely says "pool" still counts as a wallet that can dump.
+  const knownAccounts = rugcheck?.knownAccounts;
+  const marketRows: Array<{ address: string; percent: number; label: string; kind: string; labelledByRugcheck: boolean }> = [];
   const walletRows = rawHolders.filter((h) => {
     const address = h.address ?? h.account ?? "";
-    const market = classifyMarketAddress(address, { poolAddresses });
+    const market = classifyMarketAddress(address, { poolAddresses, knownAccounts });
     if (!market) return true;
     const percent = Number(h.percent) * 100;
     marketRows.push({
@@ -810,6 +897,7 @@ async function runTokenAudit(
       percent: Number.isFinite(percent) ? percent : 0,
       label: market.label,
       kind: market.kind,
+      labelledByRugcheck: Boolean(knownAccounts?.[address]?.type),
     });
     return false;
   });
@@ -843,10 +931,14 @@ async function runTokenAudit(
       .slice(0, 3)
       .map((row) => `${row.label} (${row.percent.toFixed(1)}%)`)
       .join(", ");
+    // Whoever named the venue owns the claim. When the exclusion rests on
+    // RugCheck's account labels the reader is told that, because it is
+    // RugCheck's assessment of the account and not ARGUS's own address map.
+    const viaRugcheck = marketRows.some((row) => row.labelledByRugcheck);
     findings.push({
-      claim: `Excluded from concentration: ${named}. These are the market itself, not wallets that can dump.`,
+      claim: `Excluded from concentration: ${named}. These are the market itself, not wallets that can dump.${viaRugcheck ? " The labelled venues are RugCheck's own account labels." : ""}`,
       tone: "good",
-      source: chain === "solana" ? "goplus-sol" : "goplus",
+      source: viaRugcheck ? "rugcheck" : chain === "solana" ? "goplus-sol" : "goplus",
     });
   }
 
@@ -1057,7 +1149,12 @@ async function runTokenAudit(
   return {
     address, chain, dexId: pair.dexId, pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
-    mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
+    mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays,
+    // Keep the raw instant, not just the day count derived from it above. The
+    // operator trace ages the deployer wallet against this launch, and a wallet
+    // minutes older than the token it launched is 0 days old in every direction.
+    pairCreatedAt: pair.pairCreatedAt ?? null,
+    priceChange: pair.priceChange,
     ...(priceHistory ? { priceHistory } : {}),
     // The pool exclusion has to reach the number a reader actually sees. Leaving
     // the raw provider top holder on the dossier put "top holder 37%" on the same

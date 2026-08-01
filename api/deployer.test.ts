@@ -204,7 +204,7 @@ describe("seed amount formatting", () => {
 describe("launch origin note", () => {
   it("states when the wallet was funded, with how much, by whom, and how long before the mint", () => {
     expect(launchOriginNote({ funder: CEX_ORIGIN, seed: SEED, mintedAt: MINTED_AT }))
-      .toBe("Wallet first funded 2026-07-30 20:54 UTC with 2.0 SOL from a KYC'd Coinbase account. It minted this token 95 minutes later.");
+      .toBe("Wallet first funded 2026-07-30 20:54 UTC with 2.0 SOL from a KYC'd Coinbase account. It launched this token 95 minutes later.");
   });
 
   it("names an anonymous payer as an address, never as an exchange", () => {
@@ -239,7 +239,7 @@ describe("launch origin note", () => {
 
   it("states the source without the amount when the amount is unknown", () => {
     expect(launchOriginNote({ funder: CEX_ORIGIN, seed: { lamports: null, fundedAt: FIRST_FUNDED_AT }, mintedAt: MINTED_AT }))
-      .toBe("Wallet first funded 2026-07-30 20:54 UTC from a KYC'd Coinbase account. It minted this token 95 minutes later.");
+      .toBe("Wallet first funded 2026-07-30 20:54 UTC from a KYC'd Coinbase account. It launched this token 95 minutes later.");
   });
 
   it("reads sub-minute and multi-day gaps without inventing precision", () => {
@@ -333,7 +333,7 @@ describe("GET /api/deployer", () => {
     expect(body.walletAgeAsOf).toBe("2026-07-30T22:29:08.000Z");
     expect(body.seedFunding).toMatchObject({ from: COINBASE, label: "Coinbase", lamports: 2_000_000_000, sol: 2, at: "2026-07-30T20:54:04.000Z" });
     expect(body.note).toBe(
-      "Wallet first funded 2026-07-30 20:54 UTC with 2.0 SOL from a KYC'd Coinbase account. It minted this token 95 minutes later. Funding trail: deployer ← Coinbase.",
+      "Wallet first funded 2026-07-30 20:54 UTC with 2.0 SOL from a KYC'd Coinbase account. It launched this token 95 minutes later. Funding trail: deployer ← Coinbase.",
     );
   });
 

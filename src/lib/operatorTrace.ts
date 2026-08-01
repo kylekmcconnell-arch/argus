@@ -19,6 +19,14 @@ import { fetchPanelJson, PanelRequestError, requiredPanelHeaders } from "./panel
 const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export type OperatorRole = "deployer" | "funder" | "cex";
+// The first money into a wallet: who paid, how much, and when. Strictly inbound,
+// so nothing built from it may claim where any of that money went afterwards.
+export interface OperatorSeedFunding {
+  from: string;
+  label: string | null;   // CEX name when the payer is a known exchange wallet
+  sol: number | null;
+  at: string | null;      // ISO instant of the funding transaction
+}
 export interface OperatorWallet {
   address: string;
   role: OperatorRole;
@@ -26,6 +34,20 @@ export interface OperatorWallet {
   tokensCreated?: number;      // how many mints this wallet itself launched
   seededCount?: number;        // how many other deployers it funded
   ageDays?: number | null;
+  // Whole minutes of age, for a wallet far too young to register in days: "95
+  // minutes old at this launch" is the fact, and 0 days is not.
+  ageMinutes?: number | null;
+  // "mint" when the age is measured to the launch instant the caller pinned,
+  // "scan" when it is measured to the scan. A scan-basis age drifts every time
+  // the report is reopened, so a reader has to be told which one they are seeing.
+  ageBasis?: "mint" | "scan";
+  ageAsOf?: string;            // ISO instant the age is measured TO
+  seed?: OperatorSeedFunding | null;
+  // The server's finished funding-origin sentence for this wallet. Carried
+  // verbatim rather than rebuilt here: the wording is tone-tested server-side
+  // (api/deployer.test.ts), and a second phrasing of the same fact is a second
+  // thing to get wrong.
+  note?: string;
   depth: number;               // hops from the root deployer (0 = root)
   isRoot?: boolean;
 }
@@ -57,11 +79,13 @@ export interface TraceOpts {
   chain?: string;       // "solana" (default) or an EVM chain id (ethereum/base/…)
   record?: boolean;     // false for historical overlays that must not mutate the graph
   panelCostToken?: string; // signed capability binding provider calls to the saved report
-  // Block time of the mint under investigation (unix seconds or ISO). With it the
-  // root deployer's age comes back measured AT THE LAUNCH, so a frozen report
-  // keeps reading the same number; without it the server dates the age to the
-  // scan instead. Only the root carries it: "how old was this wallet when it
-  // minted this token" is a fact about the launcher, not about a funder upstream.
+  // Block time of the launch under investigation (unix seconds or ISO), which in
+  // practice is the token's first pool creation rather than the mint itself.
+  // With it the root deployer's age comes back measured AT THE LAUNCH, so a
+  // frozen report keeps reading the same number; without it the server dates the
+  // age to the scan instead. Only the root carries it: "how old was this wallet
+  // when it launched this token" is a fact about the launcher, not about a
+  // funder upstream.
   mintedAt?: string | number;
 }
 export type TraceStep = (s: { label: string; detail?: string; tone?: "neutral" | "good" | "warn" | "bad" }) => void;
@@ -76,7 +100,17 @@ interface DeployerTraceResponse {
   available?: boolean;
   tokensCreated?: number;
   deployments?: number;
-  walletAgeDays?: number;
+  walletAgeDays?: number | null;
+  // The three fields that turn a bare day count into a fact about the launch.
+  // They have been on the wire since the endpoint learned to age a wallet at its
+  // mint; this type simply never declared them, so every one was dropped.
+  walletAgeMinutes?: number | null;
+  walletAgeBasis?: "mint" | "scan";
+  walletAgeAsOf?: string;
+  seedFunding?: { from?: string; label?: string | null; sol?: number | null; at?: string | null } | null;
+  // The finished funding-origin sentence, already written and tone-tested by the
+  // server. Same reason: it arrived on every response and was parsed away.
+  note?: string;
   chain?: Array<{ from: string; to: string; label: string | null; kind: "cex" | "wallet" }>;
   funder?: FundingOrigin;
   origin?: FundingOrigin;
@@ -99,6 +133,44 @@ interface FunderSweepResponse {
 }
 
 const short = (a: string) => a.slice(0, 4) + "…" + a.slice(-4);
+
+// ── wallet age, said out loud ───────────────────────────────────────────────
+// A launch wallet minutes older than the token it minted renders as "0 days",
+// which is the one number a reader would act on and the one number that says
+// nothing. These pick the unit that still carries the fact, and floor the way
+// the server's own sentence does so a chip and the sentence above it can never
+// disagree by a rounding step. Shared by every surface that shows an age.
+export interface WalletAgeFacts {
+  ageMinutes?: number | null;
+  ageDays?: number | null;
+  ageBasis?: "mint" | "scan";
+}
+
+export function walletAgeSpan(w: WalletAgeFacts): string | null {
+  if (typeof w.ageMinutes === "number") {
+    if (w.ageMinutes < 1) return "less than a minute";
+    if (w.ageMinutes < 120) return `${w.ageMinutes} minute${w.ageMinutes === 1 ? "" : "s"}`;
+    const hours = Math.floor(w.ageMinutes / 60);
+    if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
+    const days = Math.floor(w.ageMinutes / 1440);
+    return `${days} day${days === 1 ? "" : "s"}`;
+  }
+  if (typeof w.ageDays === "number") return `${w.ageDays} day${w.ageDays === 1 ? "" : "s"}`;
+  // Not measured. A wallet whose first activity sits outside the pagination
+  // window is not a wallet that is zero days old.
+  return null;
+}
+
+// An age is only a fact about the launch when the caller pinned the launch
+// instant; otherwise it is measured to the scan and reads differently every time
+// the report is reopened. Saying which is the difference between a claim and a
+// timestamp, so the two are never formatted apart.
+export function walletAgeFact(w: WalletAgeFacts | null | undefined): string | null {
+  if (!w) return null;
+  const span = walletAgeSpan(w);
+  if (!span) return null;
+  return `wallet ${span} old ${w.ageBasis === "mint" ? "at this launch" : "as of this scan"}`;
+}
 
 // ── the trace ───────────────────────────────────────────────────────────────
 export async function traceOperator(rootDeployer: string, opts: TraceOpts, onStep: TraceStep): Promise<OperatorCluster | null> {
@@ -180,10 +252,26 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     if (d.trailTruncatedAt) unexploredFunders = true;
     const w = wallets.get(addr);
     if (w) {
-      // Solana returns tokensCreated; EVM returns deployments — either is the count.
+      // Solana returns tokensCreated; EVM returns deployments, either is the count.
       const created = typeof d.tokensCreated === "number" ? d.tokensCreated : d.deployments;
       if (typeof created === "number") w.tokensCreated = created;
+      // Each of these is copied only when the server actually measured it. An
+      // absent age is left absent: a wallet whose first activity sits outside
+      // the pagination window is not a wallet that is zero days old.
       if (typeof d.walletAgeDays === "number") w.ageDays = d.walletAgeDays;
+      if (typeof d.walletAgeMinutes === "number") w.ageMinutes = d.walletAgeMinutes;
+      if (d.walletAgeBasis === "mint" || d.walletAgeBasis === "scan") w.ageBasis = d.walletAgeBasis;
+      if (typeof d.walletAgeAsOf === "string") w.ageAsOf = d.walletAgeAsOf;
+      if (typeof d.note === "string" && d.note) w.note = d.note;
+      const seed = d.seedFunding;
+      if (seed && typeof seed.from === "string") {
+        w.seed = {
+          from: seed.from,
+          label: seed.label ?? null,
+          sol: typeof seed.sol === "number" ? seed.sol : null,
+          at: typeof seed.at === "string" ? seed.at : null,
+        };
+      }
     }
     // Solana returns a full hop chain (deployer<-funder<-…<-CEX); EVM returns a
     // single funder, so synthesize a one-hop chain from it. Uniform downstream.

@@ -33,6 +33,15 @@ export interface FounderCandidate {
 
 // The deployer's money trail: the one thing a pseudonymous deployer can't hide.
 export interface FundingHop { from: string; to: string; label: string | null; kind: string }
+// The first money into the deployer: who paid, how much, and when. Strictly
+// inbound, so nothing built from it may claim where that money went afterwards.
+export interface DeployerSeedFunding {
+  from: string;
+  label: string | null;
+  lamports: number | null;
+  sol: number | null;
+  at: string | null;
+}
 export interface DeployerTrail {
   wallet: string;
   funder: { address: string; label: string | null; kind: string } | null;
@@ -43,6 +52,14 @@ export interface DeployerTrail {
   tokensCreated: number | null;
   serialDeployer: boolean;
   walletAgeDays: number | null;
+  // Whole minutes of age, for a launch wallet far too young to register in days.
+  walletAgeMinutes?: number | null;
+  // "mint" when the age is measured to the launch instant the scan pinned,
+  // "scan" when it is measured to the scan itself and therefore drifts. Older
+  // frozen investigations predate both fields.
+  walletAgeBasis?: "mint" | "scan";
+  walletAgeAsOf?: string;
+  seedFunding?: DeployerSeedFunding | null;
   firstActivity: string | null;
   note: string;
 }
@@ -91,9 +108,16 @@ export interface Investigation {
   persistence?: ReportPersistenceContext;
 }
 
-async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null> {
+// /api/deployer-origin, not /api/deployer. The panel route requires a signed
+// capability bound to a PERSISTED report version, and a live scan has none yet:
+// it is still producing the version that token would be issued against. Every
+// scan-time call to it answered 409, so this trail came back null on every
+// investigation and the report published "we could not confirm who owns the
+// wallet that deployed the contract" over a trace the server had already run.
+async function fetchDeployerTrail(wallet: string, mintedAt: number | null): Promise<DeployerTrail | null> {
   try {
-    const res = await fetch(`/api/deployer?wallet=${encodeURIComponent(wallet)}`);
+    const pinned = mintedAt == null ? "" : `&mintedAt=${encodeURIComponent(String(mintedAt))}`;
+    const res = await fetch(`/api/deployer-origin?wallet=${encodeURIComponent(wallet)}${pinned}`);
     if (!res.ok) return null;
     const d = await res.json() as Partial<DeployerTrail> & { available?: boolean; error?: unknown };
     if (d.available === false || d.error) return null;
@@ -101,6 +125,19 @@ async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null>
   } catch {
     return null;
   }
+}
+
+// The instant this token's first pool was created, frozen on the dossier at scan
+// time. It is what the deployer's age is measured against, so the same report
+// reads the same age whenever it is reopened instead of ageing with the calendar.
+//
+// It is the closest instant ARGUS holds to the mint, not the mint itself: on a
+// launchpad the pool is created in the same breath as the mint, but a token that
+// migrated to a new pool later would date its launch to the migration. Read
+// defensively because dossiers frozen before the field existed do not carry it.
+function launchInstant(token: TokenDossier): number | null {
+  const raw = (token as TokenDossier & { pairCreatedAt?: number | null }).pairCreatedAt;
+  return typeof raw === "number" && raw > 0 ? raw : null;
 }
 
 export interface InvestigationHandlers {
@@ -241,7 +278,7 @@ export function streamInvestigation(
       if (token.deployer && token.chain === "solana") {
         h.onHop("tracing who funded the deployer");
         h.onStep(milestone("Step 1b · Deployer funding trail", `Tracing the SOL that funded deployer ${token.deployer.slice(0, 6)}…${token.deployer.slice(-4)}.`, "neutral"));
-        deployerTrail = await fetchDeployerTrail(token.deployer);
+        deployerTrail = await fetchDeployerTrail(token.deployer, launchInstant(token));
         if (!aborted && deployerTrail) {
           const tone = deployerTrail.funder?.kind === "cex" ? "good" : deployerTrail.serialDeployer ? "bad" : "neutral";
           h.onStep(milestone("Deployer trail", deployerTrail.note, tone));

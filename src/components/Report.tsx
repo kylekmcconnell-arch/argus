@@ -790,6 +790,36 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
   );
 }
 
+const SUBJECT_LEAD_RELATIONSHIP = "About this subject";
+
+/**
+ * The caption a lead row carries. Derived once, so the split that decides which
+ * card a lead lands in can never disagree with the label printed on the row: a
+ * sweep row about the subject themselves must not be filed under related
+ * entities, and a row about an associate must not be read as subject evidence.
+ */
+function leadRelationshipLabel(lead: ReportFinding, subject: string): string {
+  const scope = lead.finding_scope;
+  if (scope?.relationship_to_subject === "associate") return "About an associate";
+  if (scope?.relationship_to_subject === "venture") return "About a venture";
+  if (scope?.relationship_to_subject === "self") return SUBJECT_LEAD_RELATIONSHIP;
+  const target = normalizedEntityHandle(findingTarget(lead));
+  return target !== null && target !== normalizedEntityHandle(subject)
+    ? "About a related company"
+    : SUBJECT_LEAD_RELATIONSHIP;
+}
+
+/**
+ * A lead is confirmed about the entity it names only when a deterministic
+ * collector actually fetched the artifact. Model output stays a rumor however
+ * confident it sounds.
+ */
+function leadArtifactConfirmed(lead: ReportFinding): boolean {
+  return lead.verification_status === "Verified"
+    && lead.artifact_verified === true
+    && lead.evidence_origin !== "model_lead";
+}
+
 function InvestigativeLeadsLedger({ leads, subject }: {
   leads: Dossier["report"]["investigative_leads"];
   subject: string;
@@ -800,19 +830,9 @@ function InvestigativeLeadsLedger({ leads, subject }: {
       {leads.map((lead, index) => {
         const scope = lead.finding_scope;
         const target = findingTarget(lead) || "unresolved target";
-        const inferredRelated = !scope
-          && normalizedEntityHandle(target) !== null
-          && normalizedEntityHandle(target) !== normalizedEntityHandle(subject);
-        const relationship = scope?.relationship_to_subject === "associate"
-          ? "About an associate"
-          : scope?.relationship_to_subject === "venture"
-            ? "About a venture"
-            : inferredRelated
-              ? "About a related company"
-              : "About this subject";
-        const verifiedAboutTarget = lead.verification_status === "Verified"
-          && lead.artifact_verified === true
-          && lead.evidence_origin !== "model_lead";
+        const relationship = leadRelationshipLabel(lead, subject);
+        const aboutSubject = relationship === SUBJECT_LEAD_RELATIONSHIP;
+        const verifiedAboutTarget = leadArtifactConfirmed(lead);
         // Keep the not-scored disclosure explicit: these items never count as
         // evidence about the audited subject.
         const attributionStatus = verifiedAboutTarget
@@ -833,7 +853,12 @@ function InvestigativeLeadsLedger({ leads, subject }: {
             <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
               {verifiedAboutTarget
                 ? `This artifact is verified about ${target}, but it is not evidence of conduct by ${subject}.`
-                : `This is an unverified follow-up lead about ${target}, not verified evidence of conduct by ${subject}.`}
+                : aboutSubject
+                  // A lead that names the subject cannot be waved off as
+                  // someone else's problem. The not-scored disclosure is on the
+                  // row already, so this line says only what was not confirmed.
+                  ? `Unverified: no source ARGUS could check corroborates this claim about ${subject}.`
+                  : `This is an unverified follow-up lead about ${target}, not verified evidence of conduct by ${subject}.`}
             </p>
             {source ? (
               <a
@@ -2068,6 +2093,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       && candidate.source_url === finding.source_url,
     ) === index)
     .filter(actionableInvestigativeLead);
+  // The sweep writes subject-scoped and related-entity rows into one array, and
+  // every row is emitted as an unverified model lead. Split them: an adverse
+  // lead that names the SUBJECT is why a favorable report may not print an
+  // all-clear, while a lead about an associate is background reading.
+  const subjectLeads = investigativeLeads.filter((lead) =>
+    leadRelationshipLabel(lead, report.handle) === SUBJECT_LEAD_RELATIONSHIP);
+  const relatedEntityLeads = investigativeLeads.filter((lead) =>
+    leadRelationshipLabel(lead, report.handle) !== SUBJECT_LEAD_RELATIONSHIP);
+  const subjectAdverseLeads = subjectLeads.filter((lead) => lead.polarity < 0);
   const quarantinedRelatedHandles = new Set(quarantinedLegacyFindings
     .map((finding) => normalizedEntityHandle(findingTarget(finding)))
     .filter((target): target is string => Boolean(target && target !== normalizedEntityHandle(report.handle))));
@@ -2480,8 +2514,35 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const adverseVerdictNarrative = [...confidenceLimits, ...lowAxisDrivers]
     .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
     .slice(0, 6);
+  // An unverified lead is not a finding: it never enters the findings ledger and
+  // it never moves the score. What it does do is stop the risk section from
+  // saying "no adverse findings" while the same page carries an accusation
+  // about the subject. Uncorroborated is not the same as untrue, and it is
+  // certainly not clean, so the count and the claims are stated here instead.
+  const oneSubjectLead = subjectAdverseLeads.length === 1;
+  const subjectLeadSummary = subjectAdverseLeads.length === 0
+    ? ""
+    : `${subjectAdverseLeads.length} unverified adverse ${oneSubjectLead ? "lead names" : "leads name"} ${report.handle} directly. ${
+      // "No source ARGUS could check", not "no source". This scan reached the
+      // sources it reached; a flat absence claim would assert a search nobody
+      // ran, which is the same overreach the lead itself is being held to.
+      subjectAdverseLeads.every((lead) => !leadArtifactConfirmed(lead))
+        ? `No source ARGUS could check corroborated ${oneSubjectLead ? "it" : "them"}, so ${oneSubjectLead ? "it is" : "they are"} not recorded as ${oneSubjectLead ? "a finding" : "findings"} and ${oneSubjectLead ? "does" : "do"} not change the score.`
+        : `${oneSubjectLead ? "It is" : "They are"} not recorded as ${oneSubjectLead ? "a finding" : "findings"} about ${report.handle} and ${oneSubjectLead ? "does" : "do"} not change the score.`
+    }`;
+  const subjectLeadNarrative: ReportCanvasNarrativeItem[] = subjectAdverseLeads.slice(0, 4).map((lead, index) => ({
+    id: `subject-lead-${index}`,
+    title: plainLanguageSummary(lead.claim),
+    detail: leadArtifactConfirmed(lead)
+      ? `The artifact is confirmed about the entity it names, but it is not recorded as a finding about ${report.handle}.`
+      : "No source ARGUS could check corroborated this lead.",
+    provenance: "Unverified lead · not scored",
+    href: "#subject-leads" as `#${string}`,
+  }));
   const verdictNarrative = favorableVerdict ? supportNarrative : adverseVerdictNarrative;
-  const countervailingNarrative = favorableVerdict ? confidenceLimits : supportNarrative;
+  const countervailingNarrative = favorableVerdict
+    ? [...confidenceLimits, ...subjectLeadNarrative]
+    : supportNarrative;
 
   const unscoredIntelNarrative: ReportCanvasNarrativeItem[] = [
     ...(f.projectToken ? [{
@@ -3021,9 +3082,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       return <span className="text-avoid">{adverseSignals} warning {adverseSignals === 1 ? "sign" : "signs"}</span>;
                     }
                     // Never assert a zero under an adverse verdict; route to the basis instead.
-                    return favorableVerdict
-                      ? <span>0 warning signs</span>
-                      : <a href="#decision-basis" className="text-avoid underline-offset-2 hover:underline">see why this scored this way</a>;
+                    if (!favorableVerdict) {
+                      return <a href="#decision-basis" className="text-avoid underline-offset-2 hover:underline">see why this scored this way</a>;
+                    }
+                    // No confirmed warning sign is not the same as nothing
+                    // found. An uncorroborated lead naming the subject is still
+                    // on this page, so report it rather than a zero.
+                    if (subjectAdverseLeads.length > 0) {
+                      return (
+                        <a href="#subject-leads" className="text-caution underline-offset-2 hover:underline">
+                          {subjectAdverseLeads.length} unverified {subjectAdverseLeads.length === 1 ? "lead" : "leads"} about this subject
+                        </a>
+                      );
+                    }
+                    return <span>0 warning signs</span>;
                   })()}
                 </p>
               )}
@@ -3254,7 +3326,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   ? "ARGUS needs to confirm what this subject is before it can score it."
                   : "ARGUS identified the subject, but the decision review did not finish."
                 : favorableVerdict
-                  ? "Verified risks and conflicting sources. Unanswered questions are listed separately below."
+                  ? subjectLeadSummary
+                    ? `${subjectLeadSummary} Any verified risk or conflicting source is listed here too.`
+                    : "Verified risks and conflicting sources. Unanswered questions are listed separately below."
                   : "Verified positive findings stay visible so a negative result is shown in context."}
               tone={decisionFrameworkUnavailable ? "caution" : favorableVerdict ? (report.cap_applied ? "avoid" : "caution") : "pass"}
               items={decisionFrameworkUnavailable ? confidenceLimits : countervailingNarrative}
@@ -3263,9 +3337,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   ? "ARGUS could not confirm what this subject is, so it withheld the score."
                   : "The subject was identified, but the review did not finish, so ARGUS withheld the score."
                 : favorableVerdict
-                  ? cleanScreens.length
-                    ? `No adverse findings in the collected evidence. ${cleanScreens.length} ${cleanScreens.length === 1 ? "screen" : "screens"} ran clean, including ${cleanScreens.slice(0, 3).map((check) => check.label.toLowerCase()).join(", ")}.`
-                    : "No adverse findings in the collected evidence."
+                  // Belt and braces. The lead items above already displace this
+                  // copy, but the all-clear sentence must not even be
+                  // constructible while an adverse lead names the subject.
+                  ? subjectLeadSummary
+                    ? subjectLeadSummary
+                    : cleanScreens.length
+                      ? `No adverse findings in the collected evidence. ${cleanScreens.length} ${cleanScreens.length === 1 ? "screen" : "screens"} ran clean, including ${cleanScreens.slice(0, 3).map((check) => check.label.toLowerCase()).join(", ")}.`
+                      : "No adverse findings in the collected evidence."
                   : "No confirmed positive finding is recorded in this report."}
             />
             {!decisionFrameworkUnavailable && decisionQuestionCount > 0 && (
@@ -4023,18 +4102,40 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
 
-        {investigativeLeads.length > 0 && (
+        {/* Leads that name the subject themselves are never filed behind a
+            disclosure the reader has to open: a reader who sees only the
+            collapsed related-entity list would read this page as clean. */}
+        {subjectLeads.length > 0 && (
+          <div id="subject-leads" className="scroll-mt-28">
+            <Section
+              title={`Unverified leads about ${report.handle}`}
+              kicker="these name the subject directly · never counted in this score"
+            >
+              <div className="finding tint-caution px-4 py-3">
+                <p className="text-[12.5px] leading-relaxed text-ink-dim">
+                  {subjectLeadSummary && `${subjectLeadSummary} `}
+                  Read each one before you rely on this result. Not corroborated is not the same as untrue.
+                </p>
+              </div>
+              <div className="mt-2">
+                <InvestigativeLeadsLedger leads={subjectLeads} subject={report.handle} />
+              </div>
+            </Section>
+          </div>
+        )}
+
+        {relatedEntityLeads.length > 0 && (
           <div id="investigative-leads" className="scroll-mt-28">
             <Section title="Worth a second look" kicker="items about related people and companies · never counted in this score">
               <details className="panel px-4 py-3">
                 <summary className="cursor-pointer text-[12.5px] font-medium text-ink-dim">
-                  Review {investigativeLeads.length} unverified follow-up lead{investigativeLeads.length === 1 ? "" : "s"}
+                  Review {relatedEntityLeads.length} unverified follow-up lead{relatedEntityLeads.length === 1 ? "" : "s"}
                 </summary>
                 <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
                   These leads are excluded from the verdict. Expand them only when you want to continue the investigation.
                 </p>
                 <div className="mt-3">
-                  <InvestigativeLeadsLedger leads={investigativeLeads} subject={report.handle} />
+                  <InvestigativeLeadsLedger leads={relatedEntityLeads} subject={report.handle} />
                 </div>
               </details>
             </Section>

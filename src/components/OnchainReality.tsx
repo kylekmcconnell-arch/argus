@@ -120,7 +120,9 @@ export function OnchainReality({ promotions, wallets, symbolHints, onAudit }: { 
           Token creator <span className="mono text-ink">{shortAddr(subject.deployer)}</span>
           {trail?.walletAgeDays != null && <> · wallet {trail.walletAgeDays}d old</>}
           {trail?.tokensCreated != null && (
-            <> · <span className={trail.serialDeployer ? "font-medium text-avoid" : ""}>{trail.tokensCreated} token{trail.tokensCreated === 1 ? "" : "s"} minted{trail.serialDeployer ? " · serial deployer" : ""}</span></>
+            // The same floor every other surface shows: counted from the
+            // wallet's recent transactions, so it is a lower bound.
+            <> · <span className={trail.serialDeployer ? "font-medium text-avoid" : ""}>{trail.tokensCreated}+ tokens minted{trail.serialDeployer ? " · serial deployer" : ""}</span></>
           )}
           {trail?.note && <div className="mt-1 leading-snug text-ink-faint">{trail.note}</div>}
         </div>

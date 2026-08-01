@@ -368,6 +368,267 @@ function classifyMarketAddress(address, context = {}) {
   return null;
 }
 
+// src/token/cloneCheck.ts
+var ORDERING_MARGIN_MS = 6e4;
+var BURST_WINDOW_MS = 15 * 6e4;
+var DEFAULT_LOOKUP_LIMIT = 8;
+var LOOKUP_CONCURRENCY = 4;
+var SEARCH_TIMEOUT_MS = 8e3;
+var LOOKUP_TIMEOUT_MS = 9e3;
+var EVM_ADDRESS2 = /^0x[0-9a-f]{40}$/i;
+var INVISIBLE = new RegExp("[\\u200B-\\u200F\\u2060\\uFEFF]|\\p{Cc}", "gu");
+function normalizeTicker(symbol) {
+  if (!symbol || typeof symbol !== "string") return "";
+  return symbol.normalize("NFKC").replace(INVISIBLE, "").replace(/\s+/g, " ").trim().toUpperCase();
+}
+function mintKey(chain, address) {
+  return `${chain}:${EVM_ADDRESS2.test(address) ? address.toLowerCase() : address}`;
+}
+async function rugcheckFirstSeen(mint, chain, fetchImpl = fetch) {
+  if (chain !== "solana") return null;
+  try {
+    const response = await fetchImpl(
+      `https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`,
+      { signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) }
+    );
+    if (!response.ok) return null;
+    const body = await response.json();
+    const at = typeof body?.detectedAt === "string" ? Date.parse(body.detectedAt) : NaN;
+    return Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+async function searchSameTicker(symbol, fetchImpl) {
+  try {
+    const response = await fetchImpl(
+      `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(symbol)}`,
+      { signal: AbortSignal.timeout(SEARCH_TIMEOUT_MS) }
+    );
+    if (!response.ok) return null;
+    const body = await response.json();
+    return Array.isArray(body?.pairs) ? body.pairs : [];
+  } catch {
+    return null;
+  }
+}
+function num(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function foldByMint(pairs, ticker) {
+  const byMint = /* @__PURE__ */ new Map();
+  const deepestPool = /* @__PURE__ */ new Map();
+  for (const pair of pairs) {
+    const address = pair.baseToken?.address;
+    const chain = pair.chainId;
+    if (!address || !chain) continue;
+    if (normalizeTicker(pair.baseToken?.symbol) !== ticker) continue;
+    const key = mintKey(chain, address);
+    const created = num(pair.pairCreatedAt);
+    const liquidity = num(pair.liquidity?.usd);
+    const row = byMint.get(key);
+    if (!row) {
+      byMint.set(key, {
+        mint: address,
+        chain,
+        pairCreatedAt: created,
+        firstSeenAt: created,
+        firstSeenBasis: created === null ? "unknown" : "listing",
+        liquidityUsd: liquidity,
+        marketCapUsd: num(pair.marketCap) ?? num(pair.fdv),
+        url: pair.url ?? null
+      });
+      deepestPool.set(key, liquidity ?? -1);
+      continue;
+    }
+    if (created !== null && (row.pairCreatedAt === null || created < row.pairCreatedAt)) {
+      row.pairCreatedAt = created;
+      row.firstSeenAt = created;
+      row.firstSeenBasis = "listing";
+    }
+    if (liquidity !== null) row.liquidityUsd = (row.liquidityUsd ?? 0) + liquidity;
+    if (liquidity !== null && liquidity > (deepestPool.get(key) ?? -1)) {
+      deepestPool.set(key, liquidity);
+      row.marketCapUsd = num(pair.marketCap) ?? num(pair.fdv) ?? row.marketCapUsd;
+      if (pair.url) row.url = pair.url;
+    }
+  }
+  return byMint;
+}
+function lookupTargets(audited, peers, limit) {
+  const auditedAt = audited.firstSeenAt;
+  const earlier = peers.filter((peer) => peer.firstSeenAt !== null && (auditedAt === null || peer.firstSeenAt < auditedAt)).sort((a, b) => (a.firstSeenAt ?? 0) - (b.firstSeenAt ?? 0));
+  const deepest = [...peers].sort((a, b) => (b.liquidityUsd ?? 0) - (a.liquidityUsd ?? 0));
+  const picked = [audited];
+  const seen = /* @__PURE__ */ new Set([mintKey(audited.chain, audited.mint)]);
+  for (const candidate of [...earlier, ...deepest]) {
+    if (picked.length >= limit) break;
+    const key = mintKey(candidate.chain, candidate.mint);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picked.push(candidate);
+  }
+  return picked;
+}
+async function applyCreationTimes(targets, resolve, fetchImpl) {
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < targets.length) {
+      const row = targets[cursor++];
+      const createdAt = await resolve(row.mint, row.chain, fetchImpl).catch(() => null);
+      if (createdAt === null) continue;
+      if (row.pairCreatedAt === null || createdAt <= row.pairCreatedAt + ORDERING_MARGIN_MS) {
+        row.firstSeenBasis = "creation";
+      }
+      row.firstSeenAt = row.firstSeenAt === null ? createdAt : Math.min(row.firstSeenAt, createdAt);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(LOOKUP_CONCURRENCY, targets.length) }, worker));
+}
+var usd = (value) => `$${Math.round(value).toLocaleString("en-US")}`;
+var plural = (count, one, many) => count === 1 ? one : many;
+function describeSpan(ms, round) {
+  const span = Math.max(0, ms);
+  if (span < 90 * 6e4) {
+    const minutes = Math.max(1, round(span / 6e4));
+    return `${minutes} ${plural(minutes, "minute", "minutes")}`;
+  }
+  if (span < 48 * 36e5) {
+    const hours = Math.max(1, round(span / 36e5));
+    return `${hours} ${plural(hours, "hour", "hours")}`;
+  }
+  const days = Math.max(1, round(span / 864e5));
+  return `${days} ${plural(days, "day", "days")}`;
+}
+var COUNT_IS_A_FLOOR = "A clone with no liquidity pool is often not listed at all, so that count is a floor.";
+var SWEEP_IS_A_FLOOR = "A clone with no liquidity pool is often not listed at all, so this sweep can miss one.";
+var CHECK_ADDRESS = "Check the contract address before you buy.";
+function earliestNote(ticker, auditedAt, clones) {
+  const burst = clones.filter((clone) => clone.firstSeenAt !== null && clone.firstSeenAt <= auditedAt + BURST_WINDOW_MS);
+  const rest = clones.length - burst.length;
+  const tail = rest > 0 ? ` ${rest} more ${plural(rest, "has", "have")} used the ticker since. ${COUNT_IS_A_FLOOR}` : ` ${COUNT_IS_A_FLOOR}`;
+  if (!burst.length) {
+    return `${clones.length} other ${plural(clones.length, "mint uses", "mints use")} the ticker $${ticker}, every one of them first seen after this mint. ${CHECK_ADDRESS}${tail}`;
+  }
+  const window = describeSpan(
+    Math.max(...burst.map((clone) => (clone.firstSeenAt ?? auditedAt) - auditedAt)),
+    Math.ceil
+  );
+  const deepest = Math.max(...burst.map((clone) => clone.liquidityUsd ?? 0));
+  const money = deepest > 0 ? `, the largest holding ${usd(deepest)} of liquidity` : ", none of them with any liquidity";
+  return `${burst.length} other ${plural(burst.length, "token", "tokens")} using the ticker $${ticker} appeared within ${window} of this one${money}. ${CHECK_ADDRESS}${tail}`;
+}
+function laterNote(ticker, gapMs, audited, earliest) {
+  const theirs = earliest.liquidityUsd ?? 0;
+  const ours = audited.liquidityUsd ?? 0;
+  let money = "";
+  if (theirs > 0) {
+    money = ours > 0 ? `, holding ${usd(theirs)} of liquidity against this mint's ${usd(ours)}` : `, holding ${usd(theirs)} of liquidity where this mint has none`;
+  }
+  return `This is not the first mint using the ticker $${ticker}. Another appeared ${describeSpan(gapMs, Math.floor)} earlier at ${earliest.mint}${money}. ${CHECK_ADDRESS} Which mint the project itself issued is not something these timestamps settle.`;
+}
+async function checkForClones(input, options = {}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const resolveCreatedAt = options.resolveCreatedAt ?? rugcheckFirstSeen;
+  const limit = options.lookupLimit ?? DEFAULT_LOOKUP_LIMIT;
+  const ticker = normalizeTicker(input.symbol);
+  const chain = input.chain;
+  const callerPairCreatedAt = num(input.pairCreatedAt);
+  const callerLiquidity = num(input.liquidityUsd);
+  if (!ticker || !input.mint || !chain) {
+    return {
+      audited: "unresolved",
+      clones: [],
+      checked: false,
+      note: "There is no ticker to sweep for, so no same ticker mint has been ruled in or out."
+    };
+  }
+  const pairs = await searchSameTicker(ticker, fetchImpl);
+  if (pairs === null) {
+    return {
+      audited: "unresolved",
+      clones: [],
+      checked: false,
+      note: `The ticker sweep for $${ticker} did not complete, so no same ticker mint has been ruled in or out.`
+    };
+  }
+  const byMint = foldByMint(pairs, ticker);
+  const auditedKey = mintKey(chain, input.mint);
+  const audited = byMint.get(auditedKey) ?? {
+    mint: input.mint,
+    chain,
+    pairCreatedAt: callerPairCreatedAt,
+    firstSeenAt: callerPairCreatedAt,
+    firstSeenBasis: callerPairCreatedAt === null ? "unknown" : "listing",
+    liquidityUsd: callerLiquidity,
+    marketCapUsd: null,
+    url: null
+  };
+  if (callerPairCreatedAt !== null && (audited.pairCreatedAt === null || callerPairCreatedAt < audited.pairCreatedAt)) {
+    audited.pairCreatedAt = callerPairCreatedAt;
+    audited.firstSeenAt = audited.firstSeenAt === null ? callerPairCreatedAt : Math.min(audited.firstSeenAt, callerPairCreatedAt);
+    audited.firstSeenBasis = "listing";
+  }
+  if (callerLiquidity !== null) audited.liquidityUsd = callerLiquidity;
+  byMint.set(auditedKey, audited);
+  const clones = [...byMint.values()].filter((row) => mintKey(row.chain, row.mint) !== auditedKey);
+  if (!clones.length) {
+    return {
+      audited: "only",
+      clones: [],
+      checked: true,
+      note: `No other mint using the ticker $${ticker} is listed on dexscreener. ${SWEEP_IS_A_FLOOR}`
+    };
+  }
+  await applyCreationTimes(lookupTargets(audited, clones, limit), resolveCreatedAt, fetchImpl);
+  clones.sort((a, b) => (a.firstSeenAt ?? Infinity) - (b.firstSeenAt ?? Infinity));
+  const auditedAt = audited.firstSeenAt;
+  const dated = clones.filter((clone) => clone.firstSeenAt !== null);
+  const cohort = `${clones.length} other ${plural(clones.length, "mint uses", "mints use")} the ticker $${ticker}`;
+  if (auditedAt === null || !dated.length) {
+    return {
+      audited: "unresolved",
+      clones,
+      checked: true,
+      note: `${cohort}. There is no public creation record to order them against this mint, so which came first is unsettled. ${CHECK_ADDRESS}`
+    };
+  }
+  const earliest = dated[0];
+  if (earliest.firstSeenAt + ORDERING_MARGIN_MS <= auditedAt) {
+    const gap = auditedAt - earliest.firstSeenAt;
+    if (audited.firstSeenBasis !== "creation") {
+      return {
+        audited: "unresolved",
+        clones,
+        checked: true,
+        note: `${cohort}, and one at ${earliest.mint} has a public record ${describeSpan(gap, Math.floor)} older than this mint's first listing. A first listing can trail a mint by hours, so that does not establish which was minted first. ${CHECK_ADDRESS}`
+      };
+    }
+    return {
+      audited: "later",
+      clones,
+      checked: true,
+      earliestMint: earliest.mint,
+      note: laterNote(ticker, gap, audited, earliest)
+    };
+  }
+  if (auditedAt + ORDERING_MARGIN_MS <= earliest.firstSeenAt) {
+    return {
+      audited: "earliest",
+      clones,
+      checked: true,
+      earliestMint: audited.mint,
+      note: earliestNote(ticker, auditedAt, clones)
+    };
+  }
+  return {
+    audited: "unresolved",
+    clones,
+    checked: true,
+    note: `${cohort}, first seen within ${describeSpan(Math.abs(auditedAt - earliest.firstSeenAt), Math.ceil)} of this one, too close together to order. ${CHECK_ADDRESS}`
+  };
+}
+
 // src/token/sources.ts
 var GOPLUS_CHAIN = {
   ethereum: "1",
@@ -570,6 +831,83 @@ async function goplusSolana(mint) {
     return null;
   }
 }
+var SOLANA_ADDRESS2 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function supplySharePercent(amount, supply) {
+  const balance = Number(amount);
+  const total = Number(supply);
+  if (!Number.isFinite(balance) || balance < 0) return null;
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const percent = balance / total * 100;
+  return percent >= 0 && percent <= 100 ? percent : null;
+}
+function lockedShare(lpLockedPct, markets) {
+  const percent = boundedPercent(lpLockedPct);
+  if (percent == null) return null;
+  if (percent > 0) return percent;
+  const marketsSeen = Array.isArray(markets) ? markets.length : 0;
+  return marketsSeen > 0 ? percent : null;
+}
+function boundedPercent(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const percent = Number(value);
+  if (!Number.isFinite(percent)) return null;
+  return percent >= 0 && percent <= 100 ? percent : null;
+}
+function finiteCount(value) {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : null;
+}
+function parseKnownAccounts(value) {
+  const accounts = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return accounts;
+  for (const [address, entry] of Object.entries(value)) {
+    if (!address.trim() || !entry || typeof entry !== "object") continue;
+    const record2 = entry;
+    accounts[address] = {
+      ...typeof record2.name === "string" ? { name: record2.name } : {},
+      ...typeof record2.type === "string" ? { type: record2.type } : {}
+    };
+  }
+  return accounts;
+}
+function largestInsiderClusterPercent(networks) {
+  const measured = networks.map((network) => network.percent).filter((percent) => percent != null);
+  return measured.length ? Math.max(...measured) : null;
+}
+async function rugcheckReport(mint, fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, {
+      signal: AbortSignal.timeout(12e3),
+      headers: { accept: "application/json" }
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const creator = typeof d?.creator === "string" && SOLANA_ADDRESS2.test(d.creator.trim()) ? d.creator.trim() : null;
+    const supply = d?.token?.supply;
+    const networks = Array.isArray(d?.insiderNetworks) ? d.insiderNetworks : [];
+    return {
+      creator,
+      // With no creator there is nobody for a balance to belong to, and a bare
+      // zero would read as "the creator sold out" rather than "not measured".
+      creatorPercent: creator ? supplySharePercent(d?.creatorBalance, supply) : null,
+      lpLockedPct: lockedShare(d?.lpLockedPct, d?.markets),
+      rugged: d?.rugged === true,
+      knownAccounts: parseKnownAccounts(d?.knownAccounts),
+      insiderNetworks: networks.map((network) => ({
+        // Null, not zero. A cluster whose wallet count RugCheck did not report
+        // is not a cluster of nobody, and "0 linked wallets" is the reading that
+        // would talk a reader out of looking.
+        size: finiteCount(network?.size ?? network?.activeAccounts),
+        percent: supplySharePercent(network?.tokenAmount, supply)
+      })),
+      graphInsidersDetected: finiteCount(d?.graphInsidersDetected)
+    };
+  } catch {
+    return null;
+  }
+}
 async function goplus(chainId, address) {
   const once = async () => {
     try {
@@ -591,6 +929,11 @@ async function goplus(chainId, address) {
 }
 
 // src/token/audit.ts
+function deployerRoleLabel(attribution, form = "title") {
+  const proven = attribution?.kind === "deployer";
+  const base = proven ? "Deployer" : "Creator or authority";
+  return form === "wallet" ? `${base} wallet` : base;
+}
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
 async function screenDeployerRisk(address, fetchImpl = fetch) {
   if (!address || address.length < 8) return void 0;
@@ -610,6 +953,22 @@ async function screenDeployerRisk(address, fetchImpl = fetch) {
     };
   } catch {
     return { available: false, paths: [], completedAt };
+  }
+}
+var SIGNED_THE_CREATION = /* @__PURE__ */ new Set(["mint feePayer", "creation-tx fee payer"]);
+async function resolveDeployerViaRoute(mint, fetchImpl = fetch) {
+  const origin = globalThis.location?.origin;
+  if (!origin) return null;
+  try {
+    const r = await fetchImpl(`/api/resolve-deployer?mint=${encodeURIComponent(mint)}`, { signal: AbortSignal.timeout(2e4) });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const address = typeof d?.deployer === "string" ? d.deployer.trim() : "";
+    if (!address) return null;
+    const via = typeof d?.via === "string" && d.via.trim() ? d.via.trim() : "resolver";
+    return { address, source: "helius", method: via, kind: SIGNED_THE_CREATION.has(via) ? "deployer" : "attributed" };
+  } catch {
+    return null;
   }
 }
 async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
@@ -646,7 +1005,7 @@ async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
   }
 }
 var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-var num = (s) => s == null || s === "" ? null : Number(s);
+var num2 = (s) => s == null || s === "" ? null : Number(s);
 var t1 = (s) => s === "1";
 var solFlag = (x) => x?.status === "1";
 function band(score) {
@@ -674,6 +1033,7 @@ function evmSafety(gp, sim) {
     else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
   }
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
+  const creatorShare = num2(gp?.creator_percent);
   return {
     available: !!gp || !!s,
     simChecked: !!s,
@@ -691,9 +1051,9 @@ function evmSafety(gp, sim) {
     openSource: t1(gp?.is_open_source),
     cannotSellAll: t1(gp?.cannot_sell_all),
     metadataMutable: false,
-    buyTax: s?.simSuccess ? s.buyTax : (num(gp?.buy_tax) ?? 0) * 100,
-    sellTax: s?.simSuccess ? s.sellTax : (num(gp?.sell_tax) ?? 0) * 100,
-    holderCount: num(gp?.holder_count) ?? 0,
+    buyTax: s?.simSuccess ? s.buyTax : (num2(gp?.buy_tax) ?? 0) * 100,
+    sellTax: s?.simSuccess ? s.sellTax : (num2(gp?.sell_tax) ?? 0) * 100,
+    holderCount: num2(gp?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct,
@@ -708,7 +1068,8 @@ function evmSafety(gp, sim) {
     tradingCooldown: t1(gp?.trading_cooldown),
     externalCall: t1(gp?.external_call),
     ownerChangeBalance: t1(gp?.owner_change_balance),
-    creatorPercent: (num(gp?.creator_percent) ?? 0) * 100,
+    creatorPercent: (creatorShare ?? 0) * 100,
+    creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
     lpAssessed: lpRowsSeen > 0
   };
 }
@@ -748,7 +1109,7 @@ function solanaSafety(sol) {
     metadataMutable: solFlag(sol?.metadata_mutable),
     buyTax: 0,
     sellTax: 0,
-    holderCount: num(sol?.holder_count) ?? 0,
+    holderCount: num2(sol?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct: 0,
@@ -762,9 +1123,13 @@ function solanaSafety(sol) {
     slippageModifiable: false,
     blacklist: false,
     tradingCooldown: false,
+    // GoPlus has no creator balance on this chain. The audit fills it in from
+    // RugCheck once a creator resolves; until then it stays unmeasured, because
+    // a hardcoded 0 published "creator holds nothing" about every Solana token.
     externalCall: false,
     ownerChangeBalance: false,
-    creatorPercent: 0
+    creatorPercent: 0,
+    creatorPercentAssessed: false
   };
 }
 function emptySafety() {
@@ -803,6 +1168,7 @@ function emptySafety() {
     externalCall: false,
     ownerChangeBalance: false,
     creatorPercent: 0,
+    creatorPercentAssessed: false,
     lpAssessed: false
   };
 }
@@ -862,10 +1228,42 @@ async function runTokenAudit(input, emit, opts) {
   let sol = null;
   let explorerHolders = null;
   let contractSource = null;
+  let deployerAttribution = null;
+  let rugcheck = null;
+  let lpLockSource = "goplus";
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders\u2026", tone: "neutral" });
     sol = await goplusSolana(address);
     safety = solanaSafety(sol);
+    const goplusCreator = (sol?.creators ?? []).map((c) => c?.address).find((a) => typeof a === "string" && a.trim().length > 0)?.trim() ?? null;
+    const routeResolver = goplusCreator || opts?.skipSim ? Promise.resolve(null) : resolveDeployerViaRoute(address).catch(() => null);
+    const [routed, rug] = await Promise.all([
+      routeResolver,
+      rugcheckReport(address).catch(() => null)
+    ]);
+    rugcheck = rug;
+    deployerAttribution = goplusCreator ? { address: goplusCreator, source: "goplus", method: "metadata creator", kind: "attributed" } : routed ?? (rug?.creator ? { address: rug.creator, source: "rugcheck", method: "creator field", kind: "attributed" } : null);
+    if (deployerAttribution && rug?.creator === deployerAttribution.address && rug.creatorPercent != null) {
+      safety = { ...safety, creatorPercent: rug.creatorPercent, creatorPercentAssessed: true };
+    }
+    if (!safety.lpAssessed && rug?.lpLockedPct != null) {
+      safety = { ...safety, lpLockedPct: rug.lpLockedPct, lpLocked: rug.lpLockedPct >= 50, lpAssessed: true };
+      lpLockSource = "rugcheck";
+      step({
+        phase: "Contract",
+        label: "LP lock",
+        detail: `RugCheck reports ${rug.lpLockedPct.toFixed(1)}% of the liquidity locked. GoPlus returned no LP holder records for this mint.`,
+        source: "rugcheck",
+        tone: rug.lpLockedPct >= 50 ? "good" : "warn"
+      });
+    }
+    step(deployerAttribution ? {
+      phase: "Contract",
+      label: deployerRoleLabel(deployerAttribution),
+      detail: `${deployerAttribution.address} via ${deployerAttribution.source} ${deployerAttribution.method}${safety.creatorPercentAssessed ? `, holding ${safety.creatorPercent.toFixed(2)}% of supply` : ", holdings not reported"}.`,
+      source: deployerAttribution.source,
+      tone: "neutral"
+    } : { phase: "Contract", label: "Deployer unresolved", detail: "No source named a creator for this mint, so deployer forensics could not run.", tone: "warn" });
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders\u2026" : "GoPlus + honeypot.is buy/sell simulation\u2026", tone: "neutral" });
     const [gp, sim, explorer, source] = await Promise.all([
@@ -882,6 +1280,9 @@ async function runTokenAudit(input, emit, opts) {
     explorerHolders = explorer;
     contractSource = source;
     safety = evmSafety(gp, sim);
+    const evmCreator = gp?.creator_address?.trim();
+    const evmOwner = gp?.owner_address?.trim();
+    deployerAttribution = evmCreator ? { address: evmCreator, source: "goplus", method: "contract creator", kind: "deployer" } : evmOwner && !/^0x0+$/.test(evmOwner) ? { address: evmOwner, source: "goplus", method: "current owner", kind: "attributed" } : null;
     if (explorerHolders?.length) {
       safety = { ...safety, topHolderPct: explorerHolders[0].percent };
     } else if (GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain)) {
@@ -961,7 +1362,8 @@ async function runTokenAudit(input, emit, opts) {
     if (s.blacklist && ownerActive) findings.push({ claim: "Owner can blacklist addresses, so your wallet can be blocked from selling.", tone: "warn", source: "goplus" });
     if (s.tradingCooldown && ownerActive) findings.push({ claim: "Trading cooldown is enforceable, so sells can be delayed.", tone: "warn", source: "goplus" });
     if (s.externalCall) findings.push({ claim: "Contract makes external calls, so behavior can change via an external dependency.", tone: "warn", source: "goplus" });
-    if (s.creatorPercent >= 5) findings.push({ claim: `Creator still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: "goplus" });
+    const creatorHolder = deployerAttribution && deployerAttribution.kind !== "deployer" ? "The creator or authority wallet" : "Creator";
+    if (s.creatorPercent >= 5) findings.push({ claim: `${creatorHolder} still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: chain === "solana" ? "rugcheck" : "goplus" });
     if (chain === "solana") {
       if (s.balanceMutable) {
         if (broadlyTraded) findings.push({ claim: "A balance-mutable authority exists, but broad market presence indicates it is not an active threat.", tone: "warn", source: "argus" });
@@ -973,12 +1375,39 @@ async function runTokenAudit(input, emit, opts) {
       if (s.transferHook) findings.push({ claim: "Transfer hook active: an external program runs on every transfer and can block sells.", tone: "bad", source: "goplus-sol" });
       if (s.transferFee) findings.push({ claim: "A Token-2022 transfer fee is configured: a built-in tax on every transfer.", tone: "warn", source: "goplus-sol" });
     }
+    const lockedByRugcheck = lpLockSource === "rugcheck";
     if (s.lpBurnedPct >= 50) findings.push({ claim: `Liquidity is burned (~${s.lpBurnedPct.toFixed(0)}%) and permanently removed; it cannot be pulled.`, tone: "good", source: "goplus" });
-    else if (s.lpLockedPct >= 50) findings.push({ claim: `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: "goplus" });
+    else if (s.lpLockedPct >= 50) findings.push({ claim: lockedByRugcheck ? `RugCheck reports liquidity is locked (~${s.lpLockedPct.toFixed(0)}%). This is RugCheck's reading of the pool, since GoPlus returns no LP holder records on this chain.` : `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: lpLockSource });
     else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet and can be pulled at any time.`, tone: "bad", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet and removable at will.`, tone: "warn", source: "goplus" });
-    else if (s.lpAssessed) findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
+    else if (s.lpAssessed) findings.push({ claim: lockedByRugcheck ? `RugCheck reports only ~${s.lpLockedPct.toFixed(0)}% of the LP locked, so the liquidity is not lock protected. This is RugCheck's reading of the pool, since GoPlus returns no LP holder records on this chain.` : "Liquidity does not appear locked or burned.", tone: "warn", source: lpLockSource });
     else findings.push({ claim: "LP lock was not measured: the free data tier returned no LP holder records for this chain. Not scored either way.", tone: "warn", source: "goplus" });
+  }
+  if (rugcheck?.rugged) {
+    findings.push({
+      claim: "RugCheck flags this token as rugged. That is RugCheck's own verdict on the mint, not an on-chain event ARGUS reproduced.",
+      tone: "bad",
+      source: "rugcheck"
+    });
+    step({ phase: "Contract", label: "Rugged flag", detail: "RugCheck flags this mint as rugged.", source: "rugcheck", tone: "bad" });
+  }
+  const insiderClusterPct = rugcheck ? largestInsiderClusterPercent(rugcheck.insiderNetworks) : null;
+  const linkedWallets = rugcheck?.graphInsidersDetected ?? null;
+  const megaHolderBase = s.holderCount >= 5e4;
+  if (!megaHolderBase && insiderClusterPct != null && linkedWallets != null && linkedWallets >= 15) {
+    if (insiderClusterPct >= 30) {
+      findings.push({
+        claim: `RugCheck traces ${linkedWallets.toLocaleString()} wallets to a common funding source, and its largest single cluster holds ~${insiderClusterPct.toFixed(0)}% of supply. Clusters overlap, so this is the biggest one rather than a total.`,
+        tone: "bad",
+        source: "rugcheck"
+      });
+    } else if (insiderClusterPct >= 12) {
+      findings.push({
+        claim: `RugCheck traces ${linkedWallets.toLocaleString()} connected wallets, whose largest single cluster holds ~${insiderClusterPct.toFixed(0)}% of supply. Clusters overlap, so this is the biggest one rather than a total.`,
+        tone: "warn",
+        source: "rugcheck"
+      });
+    }
   }
   if (liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
@@ -1005,17 +1434,19 @@ async function runTokenAudit(input, emit, opts) {
     ...pair?.pairAddress ? [pair.pairAddress] : [],
     ...allPairs.map((candidate) => candidate.pairAddress).filter((value) => Boolean(value))
   ];
+  const knownAccounts = rugcheck?.knownAccounts;
   const marketRows = [];
   const walletRows = rawHolders.filter((h) => {
     const address2 = h.address ?? h.account ?? "";
-    const market = classifyMarketAddress(address2, { poolAddresses });
+    const market = classifyMarketAddress(address2, { poolAddresses, knownAccounts });
     if (!market) return true;
     const percent = Number(h.percent) * 100;
     marketRows.push({
       address: address2,
       percent: Number.isFinite(percent) ? percent : 0,
       label: market.label,
-      kind: market.kind
+      kind: market.kind,
+      labelledByRugcheck: Boolean(knownAccounts?.[address2]?.type)
     });
     return false;
   });
@@ -1038,10 +1469,11 @@ async function runTokenAudit(input, emit, opts) {
   }
   if (marketRows.length) {
     const named = marketRows.slice(0, 3).map((row) => `${row.label} (${row.percent.toFixed(1)}%)`).join(", ");
+    const viaRugcheck = marketRows.some((row) => row.labelledByRugcheck);
     findings.push({
-      claim: `Excluded from concentration: ${named}. These are the market itself, not wallets that can dump.`,
+      claim: `Excluded from concentration: ${named}. These are the market itself, not wallets that can dump.${viaRugcheck ? " The labelled venues are RugCheck's own account labels." : ""}`,
       tone: "good",
-      source: chain === "solana" ? "goplus-sol" : "goplus"
+      source: viaRugcheck ? "rugcheck" : chain === "solana" ? "goplus-sol" : "goplus"
     });
   }
   const axes = [];
@@ -1088,7 +1520,8 @@ async function runTokenAudit(input, emit, opts) {
   if (s.cannotSellAll || s.nonTransferable) aT3 = 0;
   if (s.slippageModifiable && !s.ownerRenounced) aT3 = clamp(aT3 - 5, 0, 12);
   if (s.transferFee) aT3 = clamp(aT3 - 5, 0, 12);
-  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? chain === "solana" ? "no transfer tax detected." : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.` : "Tax not verifiable keyless." });
+  const solanaTaxRationale = s.transferFee ? "a Token-2022 transfer fee is configured on this mint." : "no Token-2022 transfer fee is configured.";
+  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? chain === "solana" ? solanaTaxRationale : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.` : "Tax not verifiable keyless." });
   const topPct = holdersReliable ? concentrationTopPct : null;
   let aT4 = s.holderCount < 50 ? 3 : s.holderCount < 500 ? 7 : s.holderCount < 5e3 ? 11 : 14;
   if (topPct != null) {
@@ -1133,7 +1566,8 @@ async function runTokenAudit(input, emit, opts) {
     verdict = ceiling <= 10 ? "AVOID" : band(score);
   } else verdict = band(score);
   const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) || (cg?.twitter ? "@" + cg.twitter : null);
-  const deployer = chain === "solana" ? sol?.creators?.[0]?.address ?? null : gpEvm?.creator_address || (gpEvm?.owner_address && !/^0x0+$/.test(gpEvm.owner_address) ? gpEvm.owner_address : null) || null;
+  const deployer = deployerAttribution?.address ?? null;
+  const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
   const topHolders = rawHolders.slice(0, 10).map((h) => ({
     address: h.address ?? h.account ?? "",
     percent: Number(h.percent) * 100,
@@ -1157,13 +1591,13 @@ async function runTokenAudit(input, emit, opts) {
       const hopStr = p.hops ? `, ${p.hops} hop${p.hops === 1 ? "" : "s"} away` : "";
       const amt = p.usd >= 1 ? `~$${Math.round(p.usd).toLocaleString()} ` : "";
       findings.push({
-        claim: p.direction === "backward" ? `Deployer wallet received ${amt}traceable to ${who}${hopStr}. ${severe ? "This is a serious funding-provenance risk." : "Worth scrutiny on where the launch capital came from."}` : `Deployer wallet sent ${amt}to ${who}${hopStr}. ${severe ? "This is a serious counterparty risk." : "Worth scrutiny on where the funds moved."}`,
+        claim: p.direction === "backward" ? `${deployerRole} received ${amt}traceable to ${who}${hopStr}. ${severe ? "This is a serious funding-provenance risk." : "Worth scrutiny on where the launch capital came from."}` : `${deployerRole} sent ${amt}to ${who}${hopStr}. ${severe ? "This is a serious counterparty risk." : "Worth scrutiny on where the funds moved."}`,
         tone: severe ? "bad" : "warn",
         source: "arkham"
       });
     }
     const lead = deployerRisk.paths[0];
-    step({ phase: "Finalize", label: "Funding trace", detail: `Deployer ${lead.direction === "backward" ? "funded via" : "exposed to"} ${lead.seedName || lead.category || "a flagged entity"}${lead.hops ? ` (${lead.hops} hop${lead.hops === 1 ? "" : "s"})` : ""}.`, tone: SEVERE_RISK_CATEGORY.test(lead.category ?? "") ? "bad" : "warn" });
+    step({ phase: "Finalize", label: "Funding trace", detail: `${deployerRole} ${lead.direction === "backward" ? "funded via" : "exposed to"} ${lead.seedName || lead.category || "a flagged entity"}${lead.hops ? ` (${lead.hops} hop${lead.hops === 1 ? "" : "s"})` : ""}.`, tone: SEVERE_RISK_CATEGORY.test(lead.category ?? "") ? "bad" : "warn" });
   }
   if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
     findings.push({
@@ -1176,7 +1610,31 @@ async function runTokenAudit(input, emit, opts) {
     verdict = "AVOID";
     step({ phase: "Finalize", label: "OFAC sanctions", detail: `${sanctionsScreen.sanctioned.length} sanctioned address(es): verdict forced to AVOID.`, tone: "bad" });
   }
-  const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
+  const cloneCheck = await checkForClones({
+    mint: address,
+    symbol: pair.baseToken.symbol,
+    chain,
+    pairCreatedAt: pair.pairCreatedAt ?? null,
+    liquidityUsd
+  }).catch(() => null);
+  if (cloneCheck?.checked && cloneCheck.clones.length) {
+    if (cloneCheck.audited === "later") {
+      findings.push({ claim: cloneCheck.note, tone: "bad", source: "dexscreener" });
+    } else {
+      findings.push({
+        claim: `${cloneCheck.clones.length} other ${cloneCheck.clones.length === 1 ? "mint trades" : "mints trade"} under the ticker $${pair.baseToken.symbol}. Verify you hold the address in this report before buying.`,
+        tone: "warn",
+        source: "dexscreener"
+      });
+    }
+    step({
+      phase: "Finalize",
+      label: "Ticker collision",
+      detail: cloneCheck.note,
+      tone: cloneCheck.audited === "later" ? "bad" : "warn"
+    });
+  }
+  const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployerAttribution, topHolders, socials);
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} \xB7 ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
   return {
@@ -1193,17 +1651,26 @@ async function runTokenAudit(input, emit, opts) {
     liquidityUsd,
     vol24,
     ageDays,
+    // Keep the raw instant, not just the day count derived from it above. The
+    // operator trace ages the deployer wallet against this launch, and a wallet
+    // minutes older than the token it launched is 0 days old in every direction.
+    pairCreatedAt: pair.pairCreatedAt ?? null,
     priceChange: pair.priceChange,
     ...priceHistory ? { priceHistory } : {},
+    // The pool exclusion has to reach the number a reader actually sees. Leaving
+    // the raw provider top holder on the dossier put "top holder 37%" on the same
+    // page as the finding explaining that the 37% line is the pool itself.
     verdict,
     score,
     capApplied,
     headline,
     axes,
-    safety: s,
+    safety: { ...s, topHolderPct: concentrationTopPct },
     socials,
+    holdersAssessed: holdersReliable,
     projectX,
     deployer,
+    ...deployerAttribution ? { deployerAttribution } : {},
     topHolders,
     insiderPct,
     bundleCount,
@@ -1215,10 +1682,11 @@ async function runTokenAudit(input, emit, opts) {
     live: true,
     safetyChecked: s.available,
     sanctionsScreen,
-    deployerRisk
+    deployerRisk,
+    ...cloneCheck ? { cloneCheck } : {}
   };
 }
-function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders, socials) {
+function buildGraph(chain, address, symbol, verdict, projectX, attribution, holders, socials) {
   const center = tokenEntityKey(chain, address);
   const nodes = [{
     type: "Token",
@@ -1235,10 +1703,10 @@ function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders
     nodes.push({ type: "Person", key: projectX });
     edges.push({ src: center, dst: projectX, type: "TEAM" });
   }
-  if (deployer) {
-    const k = walletEntityKey(chain, deployer);
-    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + deployer.slice(0, 8), chain, address: deployer });
-    edges.push({ src: center, dst: k, type: "DEPLOYED_BY" });
+  if (attribution) {
+    const k = walletEntityKey(chain, attribution.address);
+    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + attribution.address.slice(0, 8), chain, address: attribution.address });
+    edges.push({ src: center, dst: k, type: attribution.kind === "deployer" ? "DEPLOYED_BY" : "ATTRIBUTED_CREATOR", source: attribution.source });
   }
   holders.slice(0, 4).forEach((h) => {
     const k = walletEntityKey(chain, h.address);
@@ -1274,12 +1742,12 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
 }
 
 // src/lib/subjectRef.ts
-var EVM_ADDRESS2 = /^0x[0-9a-f]{40}$/i;
-var SOLANA_ADDRESS2 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+var EVM_ADDRESS3 = /^0x[0-9a-f]{40}$/i;
+var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 function normalizeSubjectRef(value) {
   const clean = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
-  if (SOLANA_ADDRESS2.test(clean)) return clean;
-  if (EVM_ADDRESS2.test(clean)) return clean.toLowerCase();
+  if (SOLANA_ADDRESS3.test(clean)) return clean;
+  if (EVM_ADDRESS3.test(clean)) return clean.toLowerCase();
   return clean.toLowerCase();
 }
 

@@ -444,21 +444,67 @@ export async function goplusSolana(mint: string): Promise<SolanaSecurity | null>
 
 const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
+/** One connected wallet cluster RugCheck traced back to a common funder. */
+export interface RugcheckInsiderNetwork {
+  /** Wallets RugCheck placed in this cluster, or null when it reported no count. */
+  size: number | null;
+  /** The cluster's holdings as a percent of supply, or null when unmeasurable. */
+  percent: number | null;
+}
+
 /**
- * What RugCheck says about a Solana mint's creator. GoPlus returns an empty
- * `creators` array for every mint tested (LINKR, BONK, WIF, JUP, USDC), so this
- * is the only keyless source that names a creator at all, and the only free one
- * that reports the creator's own balance.
+ * What RugCheck says about a Solana mint, from the one report fetch the scan
+ * already makes. GoPlus returns an empty `creators` array for every mint tested
+ * (LINKR, BONK, WIF, JUP, USDC) and no LP holder rows at all, so this is the
+ * only keyless source that names a creator, reports the creator's own balance,
+ * or answers the LP-lock question on this chain.
  *
- * `creator` is RugCheck's own attribution, not a proof of who signed the mint:
- * on a token that never came off a launchpad it is frequently a mint or update
- * authority, which for a bridged or DAO token is a program rather than a
- * person. Callers must present it as an attribution and name the source.
+ * Every field here is RugCheck's own reading rather than something ARGUS
+ * reproduced on-chain. `creator` in particular is an attribution, not proof of
+ * who signed the mint: on a token that never came off a launchpad it is
+ * frequently a mint or update authority, which for a bridged or DAO token is a
+ * program rather than a person. Callers must name the source on every claim.
  */
-export interface RugcheckCreator {
+export interface RugcheckReport {
   creator: string | null;
   /** Creator holdings as a percent of supply, or null when either side is missing. */
   creatorPercent: number | null;
+  /**
+   * Share of the LP RugCheck reports as locked, or null when it did not measure
+   * one. A flat zero from this provider is NOT a measured "nothing is locked":
+   * it is the same value the field carries when RugCheck holds no market record
+   * for the mint at all. See lockedShare below for how the two are told apart.
+   */
+  lpLockedPct: number | null;
+  /**
+   * RugCheck's rugged verdict. A false here only withholds the finding: it is
+   * RugCheck staying silent, and is never published as "this token is clean".
+   */
+  rugged: boolean;
+  /**
+   * RugCheck's own labelled accounts, keyed by address. Only the structured
+   * `type` may be trusted downstream; `name` is attacker-influenced display text.
+   */
+  knownAccounts: Record<string, { name?: string; type?: string }>;
+  /** Connected clusters. They OVERLAP, so callers take the largest, never a sum. */
+  insiderNetworks: RugcheckInsiderNetwork[];
+  /** Wallets RugCheck's transfer graph linked, or null when it reported none. */
+  graphInsidersDetected: number | null;
+}
+
+/**
+ * A holding as a share of supply, gated to a ratio that can actually exist.
+ * A holding cannot exceed the supply it is measured against, so an
+ * out-of-range ratio is a bad payload: reporting it would publish a fabricated
+ * number, and null says "not measured" instead.
+ */
+export function supplySharePercent(amount: unknown, supply: unknown): number | null {
+  const balance = Number(amount);
+  const total = Number(supply);
+  if (!Number.isFinite(balance) || balance < 0) return null;
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const percent = (balance / total) * 100;
+  return percent >= 0 && percent <= 100 ? percent : null;
 }
 
 /**
@@ -467,28 +513,124 @@ export interface RugcheckCreator {
  * panel can never disagree about how much of the supply the creator kept.
  */
 export function creatorSupplyPercent(creatorBalance: unknown, supply: unknown): number | null {
-  const balance = Number(creatorBalance);
-  const total = Number(supply);
-  if (!Number.isFinite(balance) || balance < 0) return null;
-  if (!Number.isFinite(total) || total <= 0) return null;
-  const percent = (balance / total) * 100;
-  // A holding cannot exceed the supply it is measured against. An out-of-range
-  // ratio is a bad payload, and reporting it would publish a fabricated number.
+  return supplySharePercent(creatorBalance, supply);
+}
+
+/**
+ * RugCheck's locked share of the LP, and whether it counts as measured.
+ *
+ * A zero in this field is ambiguous in exactly the way ARGUS must never publish
+ * over: RugCheck reports 0 both for a pool it examined and found unlocked, and
+ * for a mint it holds no market record for at all. Reporting the second as the
+ * first is how "USDC's liquidity does not appear locked" got published, one
+ * provider over.
+ *
+ * So a zero is only a measurement when RugCheck also shows it looked: at least
+ * one market record on the same report. A positive percentage needs no such
+ * corroboration, because the number is itself evidence a lock was read. Anything
+ * unevidenced, absent, or out of range comes back null, which downstream reads
+ * as "not measured" and scores neither way.
+ */
+export function lockedShare(lpLockedPct: unknown, markets: unknown): number | null {
+  const percent = boundedPercent(lpLockedPct);
+  if (percent == null) return null;
+  if (percent > 0) return percent;
+  const marketsSeen = Array.isArray(markets) ? markets.length : 0;
+  return marketsSeen > 0 ? percent : null;
+}
+
+/**
+ * A percentage a provider already expressed as 0 to 100.
+ *
+ * The same range gate creatorSupplyPercent applies to a derived ratio: outside
+ * that range the payload is bad, and an absent field is unmeasured rather than
+ * a measured zero, so both come back null.
+ */
+function boundedPercent(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const percent = Number(value);
+  if (!Number.isFinite(percent)) return null;
   return percent >= 0 && percent <= 100 ? percent : null;
 }
 
-export async function rugcheckCreator(mint: string, fetchImpl: typeof fetch = fetch): Promise<RugcheckCreator | null> {
+function finiteCount(value: unknown): number | null {
+  if (typeof value !== "number" && typeof value !== "string") return null;
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 0 ? count : null;
+}
+
+/** RugCheck's labelled accounts, kept only where the record is shaped as expected. */
+function parseKnownAccounts(value: unknown): Record<string, { name?: string; type?: string }> {
+  const accounts: Record<string, { name?: string; type?: string }> = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return accounts;
+  for (const [address, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!address.trim() || !entry || typeof entry !== "object") continue;
+    const record = entry as { name?: unknown; type?: unknown };
+    accounts[address] = {
+      ...(typeof record.name === "string" ? { name: record.name } : {}),
+      ...(typeof record.type === "string" ? { type: record.type } : {}),
+    };
+  }
+  return accounts;
+}
+
+/**
+ * The biggest single connected cluster, as a percent of supply.
+ *
+ * Networks OVERLAP: one wallet can sit in several, so adding them up invents
+ * supply that does not exist. api/holders.ts reads the same payload the same
+ * way, so the report and the cluster panel can never disagree about how much
+ * sits in one hidden hand. Null when no cluster carried a measurable share,
+ * which is unmeasured and not zero.
+ */
+export function largestInsiderClusterPercent(networks: readonly RugcheckInsiderNetwork[]): number | null {
+  const measured = networks
+    .map((network) => network.percent)
+    .filter((percent): percent is number => percent != null);
+  return measured.length ? Math.max(...measured) : null;
+}
+
+export async function rugcheckReport(mint: string, fetchImpl: typeof fetch = fetch): Promise<RugcheckReport | null> {
   try {
     const res = await fetchImpl(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, {
       signal: AbortSignal.timeout(12_000),
       headers: { accept: "application/json" },
     });
     if (!res.ok) return null;
-    const d = (await res.json()) as { creator?: unknown; creatorBalance?: unknown; token?: { supply?: unknown } };
+    const d = (await res.json()) as {
+      creator?: unknown;
+      creatorBalance?: unknown;
+      token?: { supply?: unknown };
+      lpLockedPct?: unknown;
+      // Read only to tell a measured zero from an unexamined one. Nothing is
+      // published from the market records themselves.
+      markets?: unknown;
+      rugged?: unknown;
+      knownAccounts?: unknown;
+      insiderNetworks?: unknown;
+      graphInsidersDetected?: unknown;
+    };
     const creator = typeof d?.creator === "string" && SOLANA_ADDRESS.test(d.creator.trim()) ? d.creator.trim() : null;
-    // With no creator there is nobody for a balance to belong to, and a bare
-    // zero would read as "the creator sold out" rather than "not measured".
-    return { creator, creatorPercent: creator ? creatorSupplyPercent(d?.creatorBalance, d?.token?.supply) : null };
+    const supply = d?.token?.supply;
+    const networks = Array.isArray(d?.insiderNetworks) ? d.insiderNetworks : [];
+    return {
+      creator,
+      // With no creator there is nobody for a balance to belong to, and a bare
+      // zero would read as "the creator sold out" rather than "not measured".
+      creatorPercent: creator ? supplySharePercent(d?.creatorBalance, supply) : null,
+      lpLockedPct: lockedShare(d?.lpLockedPct, d?.markets),
+      rugged: d?.rugged === true,
+      knownAccounts: parseKnownAccounts(d?.knownAccounts),
+      insiderNetworks: networks.map((network: { size?: unknown; activeAccounts?: unknown; tokenAmount?: unknown }) => ({
+        // Null, not zero. A cluster whose wallet count RugCheck did not report
+        // is not a cluster of nobody, and "0 linked wallets" is the reading that
+        // would talk a reader out of looking.
+        size: finiteCount(network?.size ?? network?.activeAccounts),
+        percent: supplySharePercent(network?.tokenAmount, supply),
+      })),
+      graphInsidersDetected: finiteCount(d?.graphInsidersDetected),
+    };
   } catch {
     return null;
   }

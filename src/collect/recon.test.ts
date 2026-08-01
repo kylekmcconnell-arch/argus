@@ -1,0 +1,106 @@
+// Reproduces the miss against the real modules, with no network: a server
+// rendered page whose socials are icon-only anchors reported "no social or
+// community links found", because the only thing recon ever scanned was text
+// that the tag strip had already thrown the hrefs out of.
+import { describe, expect, it, vi } from "vitest";
+
+import { analyzeContent } from "./recon";
+import { extractLinks, visibleText, type Retrieval } from "./retrieve";
+
+const ICON_FOOTER = `
+  <footer>
+    <a href="https://x.com/enigmafund" aria-label="X"><svg><path d="M1 1"/></svg></a>
+    <a href="https://github.com/enigmafund" aria-label="GitHub"><svg><path d="M2 2"/></svg></a>
+    <a href="https://www.linkedin.com/company/enigmafund" aria-label="LinkedIn"><svg><path d="M3 3"/></svg></a>
+  </footer>`;
+
+function fromHtml(html: string, over: Partial<Retrieval> = {}): Retrieval {
+  return {
+    url: "https://enigma.example",
+    status: "rendered",
+    content: visibleText(html),
+    links: extractLinks(html),
+    title: null,
+    stages: [],
+    coverageNote: "Retrieved directly; full page content available.",
+    ...over,
+  };
+}
+
+describe("social links on a server-rendered page", () => {
+  it("finds the icon-only footer anchors that the text strip erased", () => {
+    const html = `<h1>Enigma</h1><p>Settlement rails for institutions.</p>${ICON_FOOTER}`;
+    const recon = analyzeContent(fromHtml(html));
+
+    expect(recon.socials.map((s) => s.url)).toEqual([
+      "https://x.com/enigmafund",
+      "https://github.com/enigmafund",
+      "https://www.linkedin.com/company/enigmafund",
+    ]);
+    expect(recon.findings.map((f) => f.claim)).not.toContain("No social or community links found in the rendered content.");
+  });
+
+  it("still reads socials written out in the text, with no anchors at all", () => {
+    const recon = analyzeContent(fromHtml("", {
+      content: "Follow us at https://x.com/enigmafund or join https://t.me/enigma. Handle: @enigmafund",
+      links: undefined,
+    }));
+
+    const urls = recon.socials.map((s) => s.url);
+    expect(urls).toContain("https://x.com/enigmafund");
+    expect(urls).toContain("https://t.me/enigma");
+  });
+
+  it("counts a link found in both the text and the markup once", () => {
+    const html = `<p>Follow us at https://x.com/enigmafund</p><a href="https://x.com/enigmafund/">X</a>`;
+    const recon = analyzeContent(fromHtml(html));
+
+    expect(recon.socials.filter((s) => /x\.com\/enigmafund/i.test(s.url))).toHaveLength(1);
+  });
+
+  it("does not report a share button as the project's own account", () => {
+    const html = `
+      <a href="https://x.com/intent/tweet?url=https://enigma.example">Share on X</a>
+      <a href="https://www.linkedin.com/shareArticle?mini=true&amp;url=https://enigma.example">Share</a>
+      <a href="https://t.me/share/url?url=https://enigma.example">Share</a>
+      <a href="https://x.com/enigmafund">Follow</a>`;
+    const recon = analyzeContent(fromHtml(html));
+
+    expect(recon.socials.map((s) => s.url)).toEqual(["https://x.com/enigmafund"]);
+  });
+
+  it("does not let an anchor invent a team name or a funding claim", () => {
+    // The anchor list feeds the social scan only. A slug is not prose, and must
+    // never be read as a roster or a raise.
+    const html = `<a href="https://x.com/Jane-Doe-Founder">x</a><a href="https://example.org/raised-25m-series-a-round">news</a>`;
+    const recon = analyzeContent(fromHtml(html, { content: "A protocol." }));
+
+    expect(recon.team.names).toEqual([]);
+    expect(recon.funding).toEqual([]);
+  });
+
+  it("reads the markup without following any of it", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      analyzeContent(fromHtml(`<p>Enigma</p>${ICON_FOOTER}`));
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps a coverage gap absolute: no anchors are claimed for a site never read", () => {
+    const recon = analyzeContent({
+      url: "https://enigma.example",
+      status: "gap",
+      content: "",
+      title: null,
+      stages: [],
+      coverageNote: "Could not retrieve or render the site.",
+    });
+
+    expect(recon.socials).toEqual([]);
+    expect(recon.team.state).toBe("not-retrieved");
+  });
+});

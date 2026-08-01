@@ -307,10 +307,16 @@ export function launchOriginNote(input: {
   const first = `Wallet first funded ${utcStamp(seed.fundedAt)}${amount} from ${who}.`;
   if (mintedAt == null) return first;
   const gap = mintedAt - seed.fundedAt;
-  // A mint before the funding we matched means we matched the wrong transaction
-  // or the caller's mint time is wrong; either way there is no gap to state.
+  // A launch before the funding we matched means we matched the wrong
+  // transaction or the caller's instant is wrong; either way there is no gap to
+  // state.
   if (gap < 0) return first;
-  return `${first} It minted this token ${humanSpan(gap)} later.`;
+  // "Launched", not "minted". The only instant any caller can supply is the
+  // token's first POOL creation: on a launchpad that is the mint's twin, but a
+  // token that migrated pools would date it days after the actual mint. The
+  // wallet did launch this token at that instant under either reading, and
+  // claiming it signed the mint there is a claim the evidence does not carry.
+  return `${first} It launched this token ${humanSpan(gap)} later.`;
 }
 
 // The user-facing sentence for the trail. Every branch describes an UPSTREAM
