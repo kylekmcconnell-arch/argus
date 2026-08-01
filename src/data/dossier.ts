@@ -33,6 +33,76 @@ export type DossierBasicFact = BasicFact;
 export type DossierBasicFactLead = BasicFactLead;
 export type DossierBasicFactQuestion = BasicFactQuestionLedgerEntry;
 
+/**
+ * One earlier token tied to the operator behind a launchpad launch, with the
+ * value it carries TODAY and how the tie was established.
+ *
+ * This is the CANONICAL shape of a carried prior launch. The collector's
+ * PriorLaunch (server/adapters/operatorLaunches.ts) is structurally identical
+ * and should import this type rather than restate it; the declaration lives in
+ * src/ because src/ can never import server/ (the collector pulls in node
+ * builtins, which the browser tsconfig does not type).
+ */
+export interface OperatorPriorLaunch {
+  symbol: string;
+  name?: string;
+  mint: string;
+  chain: string;
+  /** Current fully diluted value: what the earlier launch is worth now. */
+  fdvUsd: number | null;
+  liquidityUsd: number | null;
+  /** X handle carried in that token's own social metadata, when present. */
+  xHandle?: string;
+  createdAt?: string;
+  /** When the launchpad itself minted the token, on the launchpad's own clock. */
+  mintedAt?: string;
+  /** Highest known value, present only when the peak survived verification. */
+  athUsd?: number;
+  /** When that peak printed, and only when the accepted peak carried a date. */
+  athAt?: string;
+  /** The operator's own post claiming this launch: a receipt the reader opens. */
+  permalink?: string;
+  url: string;
+  /** How the launch was tied to the operator; never an inference. */
+  link: "same_creator_wallet" | "operator_bio_project" | "operator_announcement";
+  /** The operator's own words, when the tie came from a launch announcement. */
+  announcement?: { text: string; at?: string; url?: string };
+}
+
+/**
+ * A project the operator publicly claims to have launched whose token no
+ * longer resolves to a live pool. ARGUS reports the CLAIM and its date in the
+ * operator's own words; it never asserts the project was abandoned, because a
+ * missing pool is an absence of market data, not proof of anything.
+ */
+export interface OperatorClaimedProject {
+  label: string;
+  at?: string;
+  quote: string;
+  /** Permalink to the claim, so the reader can open the operator's own post. */
+  url?: string;
+}
+
+export interface OperatorLaunchHistory {
+  creatorWallet?: string;
+  launches: OperatorPriorLaunch[];
+  /** When the launchpad minted the audited token, on PriorLaunch.mintedAt's clock. */
+  subjectMintedAt?: string;
+  /** This launch plus every prior one tied to the operator. */
+  totalLaunches: number;
+  claimedProjects: OperatorClaimedProject[];
+}
+
+// The collector resolves the full launch history and, until now, flattened it
+// into a single finding sentence. It stamps the structure onto the evidence
+// bag instead; declaring the field here keeps the write site (the collector)
+// and the read site (this assembler) bound to one shape.
+declare module "./evidence" {
+  interface CollectedEvidence {
+    operatorLaunches?: OperatorLaunchHistory;
+  }
+}
+
 export interface Dossier {
   handle: string;
   display_name: string;
@@ -83,6 +153,13 @@ export interface Dossier {
     capturedAt: string | null;
     delta: string;
   };
+  /**
+   * The operator's earlier launches and the earlier projects their own account
+   * claims, carried as structure so a frozen report renders each launch, its
+   * current value and how it was tied to the operator forever, instead of the
+   * one flattened sentence the finding has always carried.
+   */
+  operatorLaunches?: OperatorLaunchHistory;
   completeness_state?: "complete" | "partial" | "failed";
   providerSnapshot?: {
     capturedAt: string;
@@ -320,6 +397,29 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     graph.edges.push({ src: subjectKey, dst: ekey, type: "IDENTITY_EMAIL" });
   }
 
+  // The operator's launch record, frozen into the payload so a saved report
+  // still renders each earlier launch, its current value and how it was tied
+  // to the operator long after the pools are gone.
+  //
+  // An empty history is the same as no history: an operator who has shipped
+  // nothing else must not render a hollow track-record panel, so the field is
+  // omitted rather than carried empty. The record is spread and only its
+  // arrays re-copied, because the collector keeps adding per-launch detail
+  // (mint dates, peaks, permalinks) and a field-by-field rebuild here would
+  // silently drop each new one on its way to the client.
+  const rawLaunches = ev.operatorLaunches;
+  const operatorLaunches: OperatorLaunchHistory | null =
+    rawLaunches && (rawLaunches.launches.length > 0 || rawLaunches.claimedProjects.length > 0)
+      ? {
+          ...rawLaunches,
+          launches: rawLaunches.launches.map((launch) => ({
+            ...launch,
+            ...(launch.announcement ? { announcement: { ...launch.announcement } } : {}),
+          })),
+          claimedProjects: rawLaunches.claimedProjects.map((project) => ({ ...project })),
+        }
+      : null;
+
   return {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
@@ -370,6 +470,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.protocolFees ? { protocolFees: { ...ev.protocolFees } } : {}),
     ...(ev.holderProfile ? { holderProfile: { ...ev.holderProfile } } : {}),
     ...(ev.tokenUnlocks ? { tokenUnlocks: { ...ev.tokenUnlocks } } : {}),
+    ...(operatorLaunches ? { operatorLaunches } : {}),
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...(ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {}),

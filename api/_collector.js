@@ -1170,6 +1170,15 @@ function assembleDossier(ev, live) {
     if (!hasNode(ekey)) graph.nodes.push({ type: "Identity", subtype: "Email", key: ekey, label: email });
     graph.edges.push({ src: subjectKey, dst: ekey, type: "IDENTITY_EMAIL" });
   }
+  const rawLaunches = ev.operatorLaunches;
+  const operatorLaunches = rawLaunches && (rawLaunches.launches.length > 0 || rawLaunches.claimedProjects.length > 0) ? {
+    ...rawLaunches,
+    launches: rawLaunches.launches.map((launch) => ({
+      ...launch,
+      ...launch.announcement ? { announcement: { ...launch.announcement } } : {}
+    })),
+    claimedProjects: rawLaunches.claimedProjects.map((project) => ({ ...project }))
+  } : null;
   return {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
@@ -1220,6 +1229,7 @@ function assembleDossier(ev, live) {
     ...ev.protocolFees ? { protocolFees: { ...ev.protocolFees } } : {},
     ...ev.holderProfile ? { holderProfile: { ...ev.holderProfile } } : {},
     ...ev.tokenUnlocks ? { tokenUnlocks: { ...ev.tokenUnlocks } } : {},
+    ...operatorLaunches ? { operatorLaunches } : {},
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {},
@@ -19860,6 +19870,79 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
   };
 }
 
+// src/lib/priceHistory.ts
+var NETWORK = {
+  solana: "solana",
+  ethereum: "eth",
+  eth: "eth",
+  bsc: "bsc",
+  base: "base",
+  arbitrum: "arbitrum",
+  polygon: "polygon_pos",
+  "polygon_pos": "polygon_pos",
+  avalanche: "avax",
+  avax: "avax",
+  optimism: "optimism",
+  fantom: "ftm",
+  sui: "sui",
+  ton: "ton",
+  tron: "tron",
+  blast: "blast",
+  sei: "sei-evm"
+};
+var GT = "https://api.geckoterminal.com/api/v2";
+function record2(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+async function gt(path) {
+  try {
+    const r = await fetch(`${GT}${path}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(8e3)
+    });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+async function topPool(network, address) {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
+  const rows = record2(d).data;
+  const first = Array.isArray(rows) ? record2(rows[0]) : {};
+  const attributes = record2(first.attributes);
+  const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
+  return id ? id.replace(`${network}_`, "") : null;
+}
+async function fetchPriceHistory(address, chain, pairAddress) {
+  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
+  if (!network || !address) return null;
+  const pool = pairAddress || await topPool(network, address);
+  if (!pool) return null;
+  for (const timeframe of ["day", "hour"]) {
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
+    const rawList = record2(record2(record2(d).data).attributes).ohlcv_list;
+    const list = Array.isArray(rawList) ? rawList.filter((row) => Array.isArray(row) && row.length >= 5 && row.every((value) => typeof value === "number")) : [];
+    if (list.length < 3) continue;
+    const rows = [...list].sort((a, b) => a[0] - b[0]);
+    const points = rows.map((r) => r[4]).filter((n) => typeof n === "number" && n > 0);
+    if (points.length < 3) continue;
+    const first = points[0];
+    const last = points[points.length - 1];
+    const peak = Math.max(...points);
+    return {
+      points,
+      first,
+      last,
+      peak,
+      changePct: first > 0 ? (last - first) / first * 100 : 0,
+      drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
+      timeframe,
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  return null;
+}
+
 // server/adapters/operatorLaunches.ts
 var PUMPFUN_API = "https://frontend-api-v3.pump.fun";
 var DEXSCREENER_API = "https://api.dexscreener.com";
@@ -19878,12 +19961,51 @@ async function getJson2(url) {
 }
 var asRecord5 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : null;
 var num2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+var MAX_PLAUSIBLE_ATH_USD = 1e10;
+var ATH_CORROBORATION_FACTOR = 3;
+var plausiblePeak = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_PLAUSIBLE_ATH_USD ? value : null;
+function resolveLaunchPeak(input) {
+  const current = typeof input.currentUsd === "number" && input.currentUsd > 0 && Number.isFinite(input.currentUsd) ? input.currentUsd : 0;
+  const series = plausiblePeak(input.seriesPeakUsd);
+  const claimed = plausiblePeak(input.launchpadAthUsd);
+  let athUsd = null;
+  let athAt;
+  if (series !== null && claimed !== null) {
+    if (claimed >= series && claimed <= series * ATH_CORROBORATION_FACTOR) {
+      athUsd = claimed;
+      athAt = input.launchpadAthAt;
+    } else {
+      athUsd = series;
+    }
+  } else if (series !== null) {
+    athUsd = series;
+  } else if (claimed !== null) {
+    athUsd = claimed;
+    athAt = input.launchpadAthAt;
+  }
+  if (athUsd === null) return void 0;
+  if (!(athUsd > current)) return void 0;
+  return { athUsd, ...athAt ? { athAt } : {} };
+}
+function seriesPeakUsd(history, currentUsd) {
+  if (!history || !currentUsd || !(currentUsd > 0)) return null;
+  if (!(history.peak > 0) || !(history.last > 0)) return null;
+  return currentUsd * (history.peak / history.last);
+}
 function normalizeXHandle(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return null;
   const fromUrl = raw.match(/(?:x\.com|twitter\.com)\/(?!i\/|search|home)([A-Za-z0-9_]{1,30})/i);
   const handle = fromUrl ? fromUrl[1] : raw.replace(/^@/, "");
   return /^[A-Za-z0-9_]{1,30}$/.test(handle) ? handle.toLowerCase() : null;
+}
+function launchpadPeakClaim(coin) {
+  const ath = num2(coin.ath_market_cap);
+  const at = num2(coin.ath_market_cap_timestamp);
+  return {
+    ...ath !== null ? { athUsd: ath } : {},
+    ...at ? { athAt: new Date(at).toISOString() } : {}
+  };
 }
 async function pumpfunCoin(mint) {
   const data = asRecord5(await getJson2(`${PUMPFUN_API}/coins/${encodeURIComponent(mint)}`));
@@ -19896,7 +20018,9 @@ async function pumpfunCoin(mint) {
     symbol: typeof data.symbol === "string" ? data.symbol : "",
     ...typeof data.name === "string" ? { name: data.name } : {},
     ...handle ? { xHandle: handle } : {},
-    ...created ? { createdAt: new Date(created).toISOString() } : {}
+    ...created ? { createdAt: new Date(created).toISOString() } : {},
+    fdvUsd: num2(data.usd_market_cap),
+    ...launchpadPeakClaim(data)
   };
 }
 async function launchesBySameCreator(mint, creator) {
@@ -19918,7 +20042,7 @@ async function launchesBySameCreator(mint, creator) {
       fdvUsd: num2(coin.usd_market_cap),
       liquidityUsd: null,
       ...handle ? { xHandle: handle } : {},
-      ...created ? { createdAt: new Date(created).toISOString() } : {},
+      ...created ? { createdAt: new Date(created).toISOString(), mintedAt: new Date(created).toISOString() } : {},
       url: `https://pump.fun/coin/${coinMint}`,
       link: "same_creator_wallet"
     });
@@ -19930,7 +20054,7 @@ function handleSearchTerms(handle) {
   const terms = /* @__PURE__ */ new Set();
   const base = handle.replace(/^@/, "");
   if (base) terms.add(base);
-  const stem = base.replace(HANDLE_SUFFIXES, "");
+  const stem = base.replace(HANDLE_SUFFIXES, "").replace(/[_\-.]+$/, "");
   if (stem.length >= 3 && stem !== base) terms.add(stem);
   const undigited = base.replace(/[0-9_]+$/g, "");
   if (undigited.length >= 3 && undigited !== base) terms.add(undigited);
@@ -20018,6 +20142,15 @@ var NOT_A_PROJECT = /* @__PURE__ */ new Set([
   "docs"
 ]);
 var LAUNCH_SEARCH_TERMS = ['"is now live"', '"now live"', '"just launched"', '"my project"', "launching", "introducing"];
+function postPermalink(post) {
+  for (const key of ["url", "twitterUrl"]) {
+    const value = post?.[key];
+    if (typeof value === "string" && /^https:\/\/(?:x|twitter)\.com\/[^/]+\/status\/\d+/.test(value)) return value;
+  }
+  const id = post?.id;
+  const author = asRecord5(post?.author)?.userName;
+  return typeof id === "string" && id && typeof author === "string" && author ? `https://x.com/${author}/status/${id}` : null;
+}
 async function operatorLaunchAnnouncements(handle) {
   const key = env("TWITTERAPI_KEY");
   const clean4 = handle.replace(/^@/, "");
@@ -20039,7 +20172,16 @@ async function operatorLaunchAnnouncements(handle) {
     const names = [...new Set([...text2.matchAll(BARE_NAME_CLAIM)].map((match) => match[1]).filter((name) => !NOT_A_PROJECT.has(name.toLowerCase())))];
     if (!mints.length && !tickers.length && !handles.length && !names.length) continue;
     const at = post && typeof post.createdAt === "string" ? post.createdAt : void 0;
-    out.push({ text: text2.replace(/\s+/g, " ").slice(0, 200), ...at ? { at } : {}, mints, tickers, handles, names });
+    const permalink = postPermalink(post);
+    out.push({
+      text: text2.replace(/\s+/g, " ").slice(0, 200),
+      ...at ? { at } : {},
+      ...permalink ? { url: permalink } : {},
+      mints,
+      tickers,
+      handles,
+      names
+    });
   }
   return out.slice(0, 25);
 }
@@ -20102,13 +20244,52 @@ async function launchForClaimedTicker(ticker, announcedAt) {
   }
   return best;
 }
-async function collectOperatorLaunches(mint, operatorBioHandles = [], operatorHandle) {
+var PEAK_ENRICH_LIMIT = 6;
+async function enrichLaunchPeaks(launches) {
+  const enriched = await Promise.all(launches.slice(0, PEAK_ENRICH_LIMIT).map(async (launch) => {
+    const coin = launch.chain === "solana" ? await pumpfunCoin(launch.mint).catch(() => null) : null;
+    const history = await fetchPriceHistory(launch.mint, launch.chain).catch(() => null);
+    recordCall(
+      "geckoterminal",
+      "prior-launch-ohlcv",
+      0,
+      `keyless \xB7 ${launch.symbol || launch.mint.slice(0, 8)}`,
+      history ? "succeeded" : "failed"
+    );
+    const currentUsd = launch.fdvUsd ?? coin?.fdvUsd ?? null;
+    const peak = resolveLaunchPeak({
+      currentUsd,
+      seriesPeakUsd: seriesPeakUsd(history, currentUsd),
+      launchpadAthUsd: coin?.athUsd ?? null,
+      ...coin?.athAt ? { launchpadAthAt: coin.athAt } : {}
+    });
+    return {
+      ...launch,
+      ...launch.mintedAt ? {} : coin?.createdAt ? { mintedAt: coin.createdAt } : {},
+      ...peak ?? {}
+    };
+  }));
+  return [...enriched, ...launches.slice(PEAK_ENRICH_LIMIT)];
+}
+async function collectOperatorLaunches(mint, operatorBioHandles = [], operatorHandle, subject = {}) {
   const coin = await pumpfunCoin(mint);
-  const subjectHandle = coin?.xHandle;
+  const subjectHandle = coin?.xHandle ?? normalizeXHandle(subject.handle ?? "") ?? void 0;
   const sameCreator = coin ? await launchesBySameCreator(mint, coin.creator) : [];
   const announced = [];
-  const subjectSymbol = coin?.symbol ?? "";
+  const subjectSymbol = coin?.symbol || subject.symbol || "";
   let announcements = [];
+  const withReceipt = (resolved, source2) => ({
+    ...resolved,
+    link: "operator_announcement",
+    ...source2?.url ? { permalink: source2.url } : {},
+    ...source2 ? {
+      announcement: {
+        text: source2.text,
+        ...source2.at ? { at: source2.at } : {},
+        ...source2.url ? { url: source2.url } : {}
+      }
+    } : {}
+  });
   const selfHandles = new Set([
     operatorHandle ? normalizeXHandle(operatorHandle) : null,
     subjectHandle ?? null
@@ -20126,33 +20307,21 @@ async function collectOperatorLaunches(mint, operatorBioHandles = [], operatorHa
       const resolved = await launchForMint(claimed);
       if (!resolved) continue;
       const source2 = announcements.find((entry) => entry.mints.includes(claimed));
-      announced.push({
-        ...resolved,
-        link: "operator_announcement",
-        ...source2 ? { announcement: { text: source2.text, ...source2.at ? { at: source2.at } : {} } } : {}
-      });
+      announced.push(withReceipt(resolved, source2));
     }
     const announcedHandles = [...new Set(announcements.flatMap((entry) => entry.handles))].filter((entry) => !selfHandles.has(entry)).slice(0, 6);
     const announcedTickers = [...new Set(announcements.flatMap((entry) => entry.tickers.map((ticker) => JSON.stringify([ticker, entry.at ?? ""]))))].map((entry) => JSON.parse(entry)).filter(([ticker]) => ticker.toUpperCase() !== subjectSymbol.toUpperCase()).slice(0, 5);
     for (const [ticker, at] of announcedTickers) {
       const resolved = await launchForClaimedTicker(ticker, at || void 0);
       if (!resolved || resolved.mint === mint) continue;
-      const source2 = announcements.find((entry) => entry.tickers.includes(ticker));
-      announced.push({
-        ...resolved,
-        link: "operator_announcement",
-        ...source2 ? { announcement: { text: source2.text, ...source2.at ? { at: source2.at } : {} } } : {}
-      });
+      const source2 = announcements.find((entry) => entry.tickers.includes(ticker) && (entry.at ?? "") === at);
+      announced.push(withReceipt(resolved, source2));
     }
     for (const claimed of announcedHandles) {
       const resolved = await launchForOperatorHandle(claimed);
       if (!resolved) continue;
       const source2 = announcements.find((entry) => entry.handles.includes(claimed));
-      announced.push({
-        ...resolved,
-        link: "operator_announcement",
-        ...source2 ? { announcement: { text: source2.text, ...source2.at ? { at: source2.at } : {} } } : {}
-      });
+      announced.push(withReceipt(resolved, source2));
     }
   }
   const bioHandles = [...new Set(
@@ -20180,20 +20349,23 @@ async function collectOperatorLaunches(mint, operatorBioHandles = [], operatorHa
       ...announcement.names
     ];
     for (const label of labels) {
-      const key = label.toUpperCase().replace(/^[@$]/, "");
+      const bare = label.replace(/^[@$]/, "");
+      const key = (label.startsWith("@") ? handleSearchTerms(bare).at(-1) ?? bare : bare).toUpperCase();
       if (seenClaims.has(key) || resolvedLabels.has(key) || resolvedLabels.has(label.toLowerCase())) continue;
       if (subjectSymbol && key === subjectSymbol.toUpperCase()) continue;
       seenClaims.add(key);
       claimedProjects.push({
         label,
         ...announcement.at ? { at: announcement.at } : {},
-        quote: announcement.text
+        quote: announcement.text,
+        ...announcement.url ? { url: announcement.url } : {}
       });
     }
   }
   return {
     ...coin?.creator ? { creatorWallet: coin.creator } : {},
-    launches,
+    launches: await enrichLaunchPeaks(launches),
+    ...coin?.createdAt ? { subjectMintedAt: coin.createdAt } : {},
     totalLaunches: launches.length + 1,
     claimedProjects: claimedProjects.slice(0, 10)
   };
@@ -20206,6 +20378,22 @@ var usd = (value) => {
   if (value >= 1e3) return `$${(value / 1e3).toFixed(1)}K`;
   return `$${Math.round(value)}`;
 };
+var DAY_MS3 = 24 * 3600 * 1e3;
+var median2 = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+};
+function describeLaunchSpacing(history) {
+  const stamps = [...history.launches.map((launch) => launch.mintedAt), history.subjectMintedAt].map((at) => at ? Date.parse(at) : NaN).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (stamps.length < 2) return null;
+  const gaps = stamps.slice(1).map((value, index) => Math.round((value - stamps[index]) / DAY_MS3));
+  if (gaps.length === 1) {
+    return `There were ${gaps[0]} days between the two dated launches.`;
+  }
+  const span = Math.round((stamps[stamps.length - 1] - stamps[0]) / DAY_MS3);
+  return `There were ${stamps.length} dated launches over ${span} days, a median of ${median2(gaps)} days apart.`;
+}
 function describeLaunchHistory(history) {
   const claimed = history.claimedProjects ?? [];
   if (!history.launches.length && !claimed.length) return null;
@@ -20215,8 +20403,13 @@ function describeLaunchHistory(history) {
   };
   const sentences = [];
   if (history.launches.length) {
-    const parts = history.launches.slice(0, 6).map((launch) => `${launch.symbol || launch.mint.slice(0, 6)} now ${usd(launch.fdvUsd)}`);
+    const parts = history.launches.slice(0, 6).map((launch) => {
+      const now = `${launch.symbol || launch.mint.slice(0, 6)} now ${usd(launch.fdvUsd)}`;
+      return `${now}${describeDecline(launch)}`;
+    });
     sentences.push(`This is launch ${history.totalLaunches} tied to the same operator. Earlier launches: ${parts.join("; ")}.`);
+    const spacing = describeLaunchSpacing(history);
+    if (spacing) sentences.push(spacing);
   }
   if (claimed.length) {
     const parts = claimed.slice(0, 6).map((project) => `${project.label}${month(project.at)}`);
@@ -20225,6 +20418,15 @@ function describeLaunchHistory(history) {
     );
   }
   return sentences.join(" ");
+}
+var MATERIAL_DECLINE_PCT = 10;
+function describeDecline(launch) {
+  const peak = launch.athUsd;
+  const now = launch.fdvUsd;
+  if (!peak || !(peak > 0) || now === null || !(now > 0) || now >= peak) return "";
+  const declinePct = (peak - now) / peak * 100;
+  if (declinePct < MATERIAL_DECLINE_PCT) return "";
+  return `, down ${declinePct.toFixed(1)}% from its peak`;
 }
 
 // server/orchestrate.ts
@@ -20930,8 +21132,14 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     try {
       const operatorHandles = operatorTeam.flatMap((member) => (member.projects ?? []).map((project) => project.name));
       const operatorHandle = operatorTeam.find((member) => member.handle)?.handle;
-      const history = await collectOperatorLaunches(launchMint, operatorHandles, operatorHandle);
+      const history = await collectOperatorLaunches(launchMint, operatorHandles, operatorHandle, {
+        symbol: ctx.evidence.projectToken?.symbol ?? "",
+        handle: ctx.evidence.profile.handle
+      });
       const narrative = describeLaunchHistory(history);
+      if (history.launches.length || history.claimedProjects.length) {
+        ctx.evidence.operatorLaunches = history;
+      }
       if (narrative && history.launches.length) {
         ctx.evidence.findings.push({
           finding_type: "OperatorLaunchHistory",
@@ -22963,79 +23171,6 @@ async function runAuditWithLedger(rawHandle, emit, options) {
 }
 function runAudit(rawHandle, emit, options) {
   return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
-}
-
-// src/lib/priceHistory.ts
-var NETWORK = {
-  solana: "solana",
-  ethereum: "eth",
-  eth: "eth",
-  bsc: "bsc",
-  base: "base",
-  arbitrum: "arbitrum",
-  polygon: "polygon_pos",
-  "polygon_pos": "polygon_pos",
-  avalanche: "avax",
-  avax: "avax",
-  optimism: "optimism",
-  fantom: "ftm",
-  sui: "sui",
-  ton: "ton",
-  tron: "tron",
-  blast: "blast",
-  sei: "sei-evm"
-};
-var GT = "https://api.geckoterminal.com/api/v2";
-function record2(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-async function gt(path) {
-  try {
-    const r = await fetch(`${GT}${path}`, {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(8e3)
-    });
-    return r.ok ? await r.json() : null;
-  } catch {
-    return null;
-  }
-}
-async function topPool(network, address) {
-  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
-  const rows = record2(d).data;
-  const first = Array.isArray(rows) ? record2(rows[0]) : {};
-  const attributes = record2(first.attributes);
-  const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
-  return id ? id.replace(`${network}_`, "") : null;
-}
-async function fetchPriceHistory(address, chain, pairAddress) {
-  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
-  if (!network || !address) return null;
-  const pool = pairAddress || await topPool(network, address);
-  if (!pool) return null;
-  for (const timeframe of ["day", "hour"]) {
-    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
-    const rawList = record2(record2(record2(d).data).attributes).ohlcv_list;
-    const list = Array.isArray(rawList) ? rawList.filter((row) => Array.isArray(row) && row.length >= 5 && row.every((value) => typeof value === "number")) : [];
-    if (list.length < 3) continue;
-    const rows = [...list].sort((a, b) => a[0] - b[0]);
-    const points = rows.map((r) => r[4]).filter((n) => typeof n === "number" && n > 0);
-    if (points.length < 3) continue;
-    const first = points[0];
-    const last = points[points.length - 1];
-    const peak = Math.max(...points);
-    return {
-      points,
-      first,
-      last,
-      peak,
-      changePct: first > 0 ? (last - first) / first * 100 : 0,
-      drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
-      timeframe,
-      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-  }
-  return null;
 }
 
 // src/token/scannerEvasion.ts

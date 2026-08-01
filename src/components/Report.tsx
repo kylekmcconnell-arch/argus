@@ -34,6 +34,7 @@ import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import { CopyTldrButton, OutcomeDeltaStrip, ProviderFailureNotice, ScoreContextStrip } from "./ScoreContext";
 import { UsageVisuals } from "./UsageVisuals";
+import { OperatorTrackRecord } from "./OperatorTrackRecord";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
@@ -1699,6 +1700,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   };
   const webTeam = (dossier.webTeam ?? []).filter(groundedTeamMember).map(sanitizedGroundedTeamMember);
   const webTeamLeads = reportTeamLeads(dossier);
+  // The operator is the verified team member the launch history was traced
+  // through; fall back to the subject's own handle so the panel never renders
+  // an empty attribution.
+  const operatorHandleForDossier = (dossier.webTeam ?? [])
+    .find((member) => member.provider === "twitterapi" && member.artifact_verified === true && member.handle)?.handle
+    ?? (dossier.webTeam ?? []).find((member) => member.handle)?.handle
+    ?? f.handle;
   const placeholderGraphKeys = new Set(graph.nodes
     .filter((node) => placeholderEntityValue(node.key) || placeholderEntityValue(node.label))
     .map((node) => node.key));
@@ -3145,6 +3153,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               audience={basicFactsAudience}
               questionLedger={f.basicFactQuestionLedger}
               fundingRounds={fundingEvidence.rounds}
+            />
+          </div>
+        )}
+
+        {f.operatorLaunches && (
+          <div className="mt-3">
+            <OperatorTrackRecord
+              history={f.operatorLaunches}
+              operatorHandle={operatorHandleForDossier}
+              creatorWallet={f.operatorLaunches.creatorWallet}
             />
           </div>
         )}

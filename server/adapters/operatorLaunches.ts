@@ -16,6 +16,7 @@
 import { recordCall } from "../cost";
 import { env } from "../config";
 import { searchFrom } from "./x";
+import { fetchPriceHistory, type PriceHistory } from "../../src/lib/priceHistory";
 
 const PUMPFUN_API = "https://frontend-api-v3.pump.fun";
 const DEXSCREENER_API = "https://api.dexscreener.com";
@@ -32,11 +33,31 @@ export interface PriorLaunch {
   /** X handle carried in the token's own social metadata, when present. */
   xHandle?: string;
   createdAt?: string;
+  /**
+   * When the launchpad itself minted this token. Separate from createdAt,
+   * which follows whichever source resolved the launch: this one only ever
+   * comes from the launchpad's own coin record, so the gap between two
+   * launches is measured on one clock.
+   */
+  mintedAt?: string;
+  /**
+   * The highest value this token is known to have reached. Only set when the
+   * peak survived resolveLaunchPeak; an unverifiable peak stays undefined
+   * rather than becoming a number the report would have to defend.
+   */
+  athUsd?: number;
+  /** When that peak printed, and only when the accepted peak carried a date. */
+  athAt?: string;
+  /**
+   * The operator's own post claiming this launch: the receipt a reader can
+   * open. Present only for launches the announcement path found.
+   */
+  permalink?: string;
   url: string;
   /** How this launch was tied to the operator; never an inference. */
   link: "same_creator_wallet" | "operator_bio_project" | "operator_announcement";
   /** The operator's own words, when the link came from a launch announcement. */
-  announcement?: { text: string; at?: string };
+  announcement?: { text: string; at?: string; url?: string };
 }
 
 async function getJson(url: string): Promise<unknown | null> {
@@ -58,6 +79,102 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 const num = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
+// ── What a launch was worth at its peak ────────────────────────────────────
+//
+// "uAPE now $7.1K" is only half the story. The half that matters is what it
+// was worth on launch day, and pump.fun publishes exactly that in
+// ath_market_cap. It just cannot be trusted on its own.
+//
+// Sampling the pump.fun top-50 by market cap on 2026-08-01, 8 of the 50 rows
+// came back with a corrupt peak: Fartcoin 4.28e11 against a $129M cap,
+// jellyjelly 4.13e22, arc 1.99e23, ZEREBRO 2.20e20, ACT 1.51e21, Ban 1.48e21,
+// Bert 7.88e20, pippin 9.02e18. Every one of them is a legacy coin, and every
+// one of them would have printed a fabricated "down 99.99% from its peak" in
+// a report. So a peak is published only when it clears two gates: it is not
+// below what the token is worth today, and it is not larger than any
+// launchpad token has ever been.
+//
+// The primary source is the one ARGUS already trusts elsewhere: a keyless
+// GeckoTerminal OHLCV series (src/lib/priceHistory.ts), which is an observed
+// record of trades rather than a stored field. pump.fun is the corroborating
+// second value: it samples intraday, so it may legitimately sit above a
+// daily-close peak, but only by a little. On the two real mints in this
+// investigation it sat at 1.38x (uAPE) and 1.36x (LINKR) of the GeckoTerminal
+// peak, which is the shape of an intraday high, not a disagreement.
+
+/**
+ * No launchpad token has ever been worth this much. Above it the field is
+ * corrupt, not remarkable.
+ */
+const MAX_PLAUSIBLE_ATH_USD = 1e10;
+
+/**
+ * How far pump.fun's intraday peak may exceed an observed daily-close peak
+ * before the two sources are telling different stories and the observed
+ * series wins.
+ */
+const ATH_CORROBORATION_FACTOR = 3;
+
+const plausiblePeak = (value: number | null | undefined): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_PLAUSIBLE_ATH_USD
+    ? value
+    : null;
+
+/**
+ * The peak we are willing to publish, from an observed price series and the
+ * launchpad's own claim. Returns undefined whenever the two cannot support a
+ * number, which is the correct answer far more often than a guess is.
+ */
+export function resolveLaunchPeak(input: {
+  currentUsd: number | null;
+  /** Peak value implied by a GeckoTerminal OHLCV series. */
+  seriesPeakUsd?: number | null;
+  /** pump.fun's ath_market_cap, raw and ungated. */
+  launchpadAthUsd?: number | null;
+  launchpadAthAt?: string;
+}): { athUsd: number; athAt?: string } | undefined {
+  // The floor takes the current value RAW. Running it through the ceiling
+  // would let a token worth more than the ceiling read as worth nothing, and
+  // then any peak at all would clear the floor.
+  const current = typeof input.currentUsd === "number" && input.currentUsd > 0 && Number.isFinite(input.currentUsd)
+    ? input.currentUsd
+    : 0;
+  const series = plausiblePeak(input.seriesPeakUsd);
+  const claimed = plausiblePeak(input.launchpadAthUsd);
+  let athUsd: number | null = null;
+  let athAt: string | undefined;
+  if (series !== null && claimed !== null) {
+    // The launchpad's finer-grained peak is accepted only when the observed
+    // series puts the token in that band. Otherwise the trades win.
+    if (claimed >= series && claimed <= series * ATH_CORROBORATION_FACTOR) {
+      athUsd = claimed;
+      athAt = input.launchpadAthAt;
+    } else {
+      athUsd = series;
+    }
+  } else if (series !== null) {
+    athUsd = series;
+  } else if (claimed !== null) {
+    athUsd = claimed;
+    athAt = input.launchpadAthAt;
+  }
+  if (athUsd === null) return undefined;
+  // A "peak" at or below today's value is not a peak, it is today.
+  if (!(athUsd > current)) return undefined;
+  return { athUsd, ...(athAt ? { athAt } : {}) };
+}
+
+/**
+ * A price series says how far the token is off its high; today's value turns
+ * that ratio back into dollars. Using the ratio rather than the raw price
+ * keeps the answer correct whatever the token's supply is.
+ */
+export function seriesPeakUsd(history: PriceHistory | null, currentUsd: number | null): number | null {
+  if (!history || !currentUsd || !(currentUsd > 0)) return null;
+  if (!(history.peak > 0) || !(history.last > 0)) return null;
+  return currentUsd * (history.peak / history.last);
+}
+
 /** Normalized X handle from any x.com/twitter.com URL or bare @handle. */
 export function normalizeXHandle(value: string): string | null {
   const raw = String(value ?? "").trim();
@@ -67,8 +184,37 @@ export function normalizeXHandle(value: string): string | null {
   return /^[A-Za-z0-9_]{1,30}$/.test(handle) ? handle.toLowerCase() : null;
 }
 
-/** The pump.fun record for a mint: creator wallet plus declared socials. */
-export async function pumpfunCoin(mint: string): Promise<{ creator: string; symbol: string; name?: string; xHandle?: string; createdAt?: string } | null> {
+/**
+ * pump.fun's own peak claim for a coin row, read verbatim and NOT gated here.
+ * Both the coin endpoint and the creator index carry these fields; gating
+ * happens once, in resolveLaunchPeak, so there is a single place where a
+ * number becomes publishable.
+ */
+export function launchpadPeakClaim(coin: Record<string, unknown>): { athUsd?: number; athAt?: string } {
+  const ath = num(coin.ath_market_cap);
+  const at = num(coin.ath_market_cap_timestamp);
+  return {
+    ...(ath !== null ? { athUsd: ath } : {}),
+    ...(at ? { athAt: new Date(at).toISOString() } : {}),
+  };
+}
+
+export interface PumpfunCoin {
+  creator: string;
+  symbol: string;
+  name?: string;
+  xHandle?: string;
+  /** created_timestamp: when the launchpad minted the coin. */
+  createdAt?: string;
+  /** usd_market_cap: what the coin is worth right now. */
+  fdvUsd: number | null;
+  /** ath_market_cap, ungated. Never publish this without resolveLaunchPeak. */
+  athUsd?: number;
+  athAt?: string;
+}
+
+/** The pump.fun record for a mint: creator wallet, declared socials, peak. */
+export async function pumpfunCoin(mint: string): Promise<PumpfunCoin | null> {
   const data = asRecord(await getJson(`${PUMPFUN_API}/coins/${encodeURIComponent(mint)}`));
   recordCall("pumpfun", "coin", 0, mint.slice(0, 8), data ? "succeeded" : "failed");
   if (!data || typeof data.creator !== "string" || !data.creator) return null;
@@ -80,6 +226,8 @@ export async function pumpfunCoin(mint: string): Promise<{ creator: string; symb
     ...(typeof data.name === "string" ? { name: data.name } : {}),
     ...(handle ? { xHandle: handle } : {}),
     ...(created ? { createdAt: new Date(created).toISOString() } : {}),
+    fdvUsd: num(data.usd_market_cap),
+    ...launchpadPeakClaim(data),
   };
 }
 
@@ -107,7 +255,7 @@ export async function launchesBySameCreator(mint: string, creator: string): Prom
       fdvUsd: num(coin.usd_market_cap),
       liquidityUsd: null,
       ...(handle ? { xHandle: handle } : {}),
-      ...(created ? { createdAt: new Date(created).toISOString() } : {}),
+      ...(created ? { createdAt: new Date(created).toISOString(), mintedAt: new Date(created).toISOString() } : {}),
       url: `https://pump.fun/coin/${coinMint}`,
       link: "same_creator_wallet",
     });
@@ -130,7 +278,9 @@ export function handleSearchTerms(handle: string): string[] {
   const terms = new Set<string>();
   const base = handle.replace(/^@/, "");
   if (base) terms.add(base);
-  const stem = base.replace(HANDLE_SUFFIXES, "");
+  // "pmpr_bot" stems to "pmpr", not "pmpr_": a trailing separator is left over
+  // from the suffix and matches nothing.
+  const stem = base.replace(HANDLE_SUFFIXES, "").replace(/[_\-.]+$/, "");
   if (stem.length >= 3 && stem !== base) terms.add(stem);
   const undigited = base.replace(/[0-9_]+$/g, "");
   if (undigited.length >= 3 && undigited !== base) terms.add(undigited);
@@ -219,12 +369,31 @@ const LAUNCH_SEARCH_TERMS = ['"is now live"', '"now live"', '"just launched"', '
 export interface LaunchAnnouncement {
   text: string;
   at?: string;
+  /**
+   * Permalink to the post itself. ARGUS reports a dead prior launch as the
+   * operator's own dated claim, so the claim has to be openable: without this
+   * the reader has a quote and no way to check it.
+   */
+  url?: string;
   mints: string[];
   tickers: string[];
   /** @handles the post claims authorship of ("Why I built @theodevxyz"). */
   handles: string[];
   /** Bare project names ("uAPE is now live"). */
   names: string[];
+}
+
+/** The canonical x.com permalink for a tweet record, when it carries one. */
+function postPermalink(post: Record<string, unknown> | null): string | null {
+  for (const key of ["url", "twitterUrl"]) {
+    const value = post?.[key];
+    if (typeof value === "string" && /^https:\/\/(?:x|twitter)\.com\/[^/]+\/status\/\d+/.test(value)) return value;
+  }
+  const id = post?.id;
+  const author = asRecord(post?.author)?.userName;
+  return typeof id === "string" && id && typeof author === "string" && author
+    ? `https://x.com/${author}/status/${id}`
+    : null;
 }
 
 /** Posts where the operator claims a launch, with the assets they name. */
@@ -253,7 +422,18 @@ export async function operatorLaunchAnnouncements(handle: string): Promise<Launc
       .filter((name) => !NOT_A_PROJECT.has(name.toLowerCase())))];
     if (!mints.length && !tickers.length && !handles.length && !names.length) continue;
     const at = post && typeof post.createdAt === "string" ? post.createdAt : undefined;
-    out.push({ text: text.replace(/\s+/g, " ").slice(0, 200), ...(at ? { at } : {}), mints, tickers, handles, names });
+    // twitterapi returns both `url` (x.com) and `twitterUrl` (twitter.com) on
+    // every tweet; either is a permalink, and x.com is the canonical one.
+    const permalink = postPermalink(post);
+    out.push({
+      text: text.replace(/\s+/g, " ").slice(0, 200),
+      ...(at ? { at } : {}),
+      ...(permalink ? { url: permalink } : {}),
+      mints,
+      tickers,
+      handles,
+      names,
+    });
   }
   return out.slice(0, 25);
 }
@@ -328,9 +508,52 @@ export async function launchForClaimedTicker(ticker: string, announcedAt?: strin
   return best;
 }
 
+/**
+ * How many prior launches get the peak treatment. Both hops are keyless and
+ * free, but they are still network round trips against a rate-limited public
+ * API, and a track record is made by its most recent entries.
+ */
+const PEAK_ENRICH_LIMIT = 6;
+
+/**
+ * Fill in mintedAt and a defensible peak for each launch, from the launchpad
+ * record and an observed price series. Never throws and never downgrades a
+ * launch: a launch whose peak cannot be established comes back unchanged.
+ */
+export async function enrichLaunchPeaks(launches: PriorLaunch[]): Promise<PriorLaunch[]> {
+  const enriched = await Promise.all(launches.slice(0, PEAK_ENRICH_LIMIT).map(async (launch) => {
+    const coin = launch.chain === "solana" ? await pumpfunCoin(launch.mint).catch(() => null) : null;
+    const history = await fetchPriceHistory(launch.mint, launch.chain).catch(() => null);
+    recordCall(
+      "geckoterminal",
+      "prior-launch-ohlcv",
+      0,
+      `keyless · ${launch.symbol || launch.mint.slice(0, 8)}`,
+      history ? "succeeded" : "failed",
+    );
+    // Today's value: dexscreener's fdv when we have it, otherwise the
+    // launchpad's. Both are current-value fields, never a peak.
+    const currentUsd = launch.fdvUsd ?? coin?.fdvUsd ?? null;
+    const peak = resolveLaunchPeak({
+      currentUsd,
+      seriesPeakUsd: seriesPeakUsd(history, currentUsd),
+      launchpadAthUsd: coin?.athUsd ?? null,
+      ...(coin?.athAt ? { launchpadAthAt: coin.athAt } : {}),
+    });
+    return {
+      ...launch,
+      ...(launch.mintedAt ? {} : coin?.createdAt ? { mintedAt: coin.createdAt } : {}),
+      ...(peak ?? {}),
+    };
+  }));
+  return [...enriched, ...launches.slice(PEAK_ENRICH_LIMIT)];
+}
+
 export interface OperatorLaunchHistory {
   creatorWallet?: string;
   launches: PriorLaunch[];
+  /** When the launchpad minted the token under audit, on the same clock as PriorLaunch.mintedAt. */
+  subjectMintedAt?: string;
   /** This launch plus every prior one we could tie to the operator. */
   totalLaunches: number;
   /**
@@ -339,26 +562,54 @@ export interface OperatorLaunchHistory {
    * silence about it would flatter the operator's record: the claim and its
    * date are the evidence.
    */
-  claimedProjects: Array<{ label: string; at?: string; quote: string }>;
+  claimedProjects: Array<{ label: string; at?: string; quote: string; url?: string }>;
 }
 
 /**
  * Full prior-launch picture for a launchpad token: same-wallet history plus
  * the operator's own claimed projects. Deduped by mint; never throws.
+ *
+ * `subject` is who we are auditing, told to this collector rather than
+ * discovered by it. It matters when pump.fun has no record of the mint, which
+ * is every verified solana token that did not launch on pump.fun: without it
+ * the collector knows no symbol and no handle for the subject, and the
+ * operator's own launch post about THIS project ("$DRIFT is now live") comes
+ * back as an earlier project of theirs with no live market. The subject is
+ * never its own prior launch and never its own dead claim.
  */
 export async function collectOperatorLaunches(
   mint: string,
   operatorBioHandles: readonly string[] = [],
   operatorHandle?: string,
+  subject: { symbol?: string; handle?: string } = {},
 ): Promise<OperatorLaunchHistory> {
   const coin = await pumpfunCoin(mint);
-  const subjectHandle = coin?.xHandle;
+  const subjectHandle = coin?.xHandle ?? normalizeXHandle(subject.handle ?? "") ?? undefined;
   const sameCreator = coin ? await launchesBySameCreator(mint, coin.creator) : [];
   // The operator's own launch posts: the only path that reaches a launch made
   // from a different wallet and never mentioned in the bio.
   const announced: PriorLaunch[] = [];
-  const subjectSymbol = coin?.symbol ?? "";
+  const subjectSymbol = coin?.symbol || subject.symbol || "";
   let announcements: LaunchAnnouncement[] = [];
+  // Every announced launch carries the post that claimed it, so the reader can
+  // open the receipt instead of taking the link on trust.
+  const withReceipt = (
+    resolved: Omit<PriorLaunch, "link">,
+    source: LaunchAnnouncement | undefined,
+  ): PriorLaunch => ({
+    ...resolved,
+    link: "operator_announcement",
+    ...(source?.url ? { permalink: source.url } : {}),
+    ...(source
+      ? {
+        announcement: {
+          text: source.text,
+          ...(source.at ? { at: source.at } : {}),
+          ...(source.url ? { url: source.url } : {}),
+        },
+      }
+      : {}),
+  });
   const selfHandles = new Set([
     operatorHandle ? normalizeXHandle(operatorHandle) : null,
     subjectHandle ?? null,
@@ -376,11 +627,7 @@ export async function collectOperatorLaunches(
       const resolved = await launchForMint(claimed);
       if (!resolved) continue;
       const source = announcements.find((entry) => entry.mints.includes(claimed));
-      announced.push({
-        ...resolved,
-        link: "operator_announcement",
-        ...(source ? { announcement: { text: source.text, ...(source.at ? { at: source.at } : {}) } } : {}),
-      });
+      announced.push(withReceipt(resolved, source));
     }
     // Handles named inside a launch claim resolve through the same rule the
     // bio path uses: the token's own metadata must name that exact handle.
@@ -395,22 +642,19 @@ export async function collectOperatorLaunches(
     for (const [ticker, at] of announcedTickers) {
       const resolved = await launchForClaimedTicker(ticker, at || undefined);
       if (!resolved || resolved.mint === mint) continue;
-      const source = announcements.find((entry) => entry.tickers.includes(ticker));
-      announced.push({
-        ...resolved,
-        link: "operator_announcement",
-        ...(source ? { announcement: { text: source.text, ...(source.at ? { at: source.at } : {}) } } : {}),
-      });
+      // The receipt has to be the post that MADE the tie. A ticker is resolved
+      // against one post's date (the pool has to exist within 30 days of that
+      // claim), and an operator mentions their own ticker over and over, so
+      // taking the first post that merely says the ticker would quote and link
+      // a post that proves nothing about this launch.
+      const source = announcements.find((entry) => entry.tickers.includes(ticker) && (entry.at ?? "") === at);
+      announced.push(withReceipt(resolved, source));
     }
     for (const claimed of announcedHandles) {
       const resolved = await launchForOperatorHandle(claimed);
       if (!resolved) continue;
       const source = announcements.find((entry) => entry.handles.includes(claimed));
-      announced.push({
-        ...resolved,
-        link: "operator_announcement",
-        ...(source ? { announcement: { text: source.text, ...(source.at ? { at: source.at } : {}) } } : {}),
-      });
+      announced.push(withReceipt(resolved, source));
     }
   }
   const bioHandles = [...new Set(
@@ -443,7 +687,13 @@ export async function collectOperatorLaunches(
       ...announcement.names,
     ];
     for (const label of labels) {
-      const key = label.toUpperCase().replace(/^[@$]/, "");
+      // "@pmpr_bot" and "$PMPR" are one project claimed two ways. Reduce a
+      // handle to its stem before comparing, so the count the panel prints is
+      // projects rather than mentions. Stems only ever MERGE claims; a wrong
+      // merge undercounts, which is the safe direction for a count ARGUS
+      // publishes about a person.
+      const bare = label.replace(/^[@$]/, "");
+      const key = (label.startsWith("@") ? handleSearchTerms(bare).at(-1) ?? bare : bare).toUpperCase();
       if (seenClaims.has(key) || resolvedLabels.has(key) || resolvedLabels.has(label.toLowerCase())) continue;
       if (subjectSymbol && key === subjectSymbol.toUpperCase()) continue;
       seenClaims.add(key);
@@ -451,12 +701,14 @@ export async function collectOperatorLaunches(
         label,
         ...(announcement.at ? { at: announcement.at } : {}),
         quote: announcement.text,
+        ...(announcement.url ? { url: announcement.url } : {}),
       });
     }
   }
   return {
     ...(coin?.creator ? { creatorWallet: coin.creator } : {}),
-    launches,
+    launches: await enrichLaunchPeaks(launches),
+    ...(coin?.createdAt ? { subjectMintedAt: coin.createdAt } : {}),
     totalLaunches: launches.length + 1,
     claimedProjects: claimedProjects.slice(0, 10),
   };
@@ -471,10 +723,54 @@ const usd = (value: number | null): string => {
   return `$${Math.round(value)}`;
 };
 
+const DAY_MS = 24 * 3600 * 1000;
+
+const median = (values: number[]): number => {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+};
+
+/**
+ * The spacing between this operator's launches, in the operator's own dates.
+ *
+ * Two launches are ONE interval, and one interval is not a rate. Saying "a
+ * launch every 78 days" from two points invents a pattern the evidence does
+ * not contain, so the two-point case reports the gap and nothing more. Only
+ * from three dated launches, which is two intervals, does a typical spacing
+ * exist to report at all.
+ *
+ * Every sentence here is about the DATED launches and says so. A launch
+ * resolved through dexscreener rather than the launchpad carries no mint date,
+ * so the dated pair is not necessarily the last two, and the dated count is
+ * not the operator's launch count. Calling them "the last two launches" or
+ * "4 launches" would assert an order and a total the dates cannot support,
+ * and would contradict the launch count in the sentence before it.
+ */
+export function describeLaunchSpacing(history: OperatorLaunchHistory): string | null {
+  const stamps = [...history.launches.map((launch) => launch.mintedAt), history.subjectMintedAt]
+    .map((at) => (at ? Date.parse(at) : NaN))
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  if (stamps.length < 2) return null;
+  const gaps = stamps.slice(1).map((value, index) => Math.round((value - stamps[index]) / DAY_MS));
+  if (gaps.length === 1) {
+    return `There were ${gaps[0]} days between the two dated launches.`;
+  }
+  const span = Math.round((stamps[stamps.length - 1] - stamps[0]) / DAY_MS);
+  return `There were ${stamps.length} dated launches over ${span} days, a median of ${median(gaps)} days apart.`;
+}
+
 /**
  * One plain sentence per prior launch plus the count. Every number is the
- * CURRENT state of a token that already had its run, which is the only
- * honest way to describe a track record of launches.
+ * CURRENT state of a token that already had its run, set against the peak it
+ * reached when a peak survived resolveLaunchPeak, which is the only honest
+ * way to describe a track record of launches.
+ *
+ * What the decline is NOT allowed to become: a rug, an abandonment, an exit.
+ * ARGUS cannot see intent, and a token trading far under its launch-day high
+ * is the ordinary fate of most launchpad tokens. The number is stated and the
+ * reader draws the conclusion.
  */
 export function describeLaunchHistory(history: OperatorLaunchHistory): string | null {
   const claimed = history.claimedProjects ?? [];
@@ -487,10 +783,13 @@ export function describeLaunchHistory(history: OperatorLaunchHistory): string | 
   };
   const sentences: string[] = [];
   if (history.launches.length) {
-    const parts = history.launches
-      .slice(0, 6)
-      .map((launch) => `${launch.symbol || launch.mint.slice(0, 6)} now ${usd(launch.fdvUsd)}`);
+    const parts = history.launches.slice(0, 6).map((launch) => {
+      const now = `${launch.symbol || launch.mint.slice(0, 6)} now ${usd(launch.fdvUsd)}`;
+      return `${now}${describeDecline(launch)}`;
+    });
     sentences.push(`This is launch ${history.totalLaunches} tied to the same operator. Earlier launches: ${parts.join("; ")}.`);
+    const spacing = describeLaunchSpacing(history);
+    if (spacing) sentences.push(spacing);
   }
   if (claimed.length) {
     const parts = claimed.slice(0, 6).map((project) => `${project.label}${month(project.at)}`);
@@ -499,4 +798,17 @@ export function describeLaunchHistory(history: OperatorLaunchHistory): string | 
     );
   }
   return sentences.join(" ");
+}
+
+/** Below this a move off the peak is market noise, not a track record. */
+const MATERIAL_DECLINE_PCT = 10;
+
+/** ", down 97.5% from its peak", or nothing at all when no peak survived. */
+function describeDecline(launch: PriorLaunch): string {
+  const peak = launch.athUsd;
+  const now = launch.fdvUsd;
+  if (!peak || !(peak > 0) || now === null || !(now > 0) || now >= peak) return "";
+  const declinePct = ((peak - now) / peak) * 100;
+  if (declinePct < MATERIAL_DECLINE_PCT) return "";
+  return `, down ${declinePct.toFixed(1)}% from its peak`;
 }

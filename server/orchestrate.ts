@@ -1079,8 +1079,29 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       // The operator's own account is the one place a launch from a different
       // wallet still gets claimed out loud.
       const operatorHandle = operatorTeam.find((member) => member.handle)?.handle;
-      const history = await collectOperatorLaunches(launchMint, operatorHandles, operatorHandle);
+      // Who we are auditing. pump.fun knows this for its own mints, but a
+      // verified solana token that launched anywhere else has no launchpad
+      // record, and then the collector cannot recognise the subject in the
+      // operator's own posts. Told here, the audited project is never listed
+      // among the operator's earlier projects.
+      const history = await collectOperatorLaunches(launchMint, operatorHandles, operatorHandle, {
+        symbol: ctx.evidence.projectToken?.symbol ?? "",
+        handle: ctx.evidence.profile.handle,
+      });
       const narrative = describeLaunchHistory(history);
+      // Stamp the STRUCTURE, not only the sentence. This is the join no other
+      // tool makes (an X following edge to a bio claim to a launch announcement
+      // to a launchpad creator index), and flattening it to prose threw away
+      // every per-launch value, tie and date before the client ever saw them.
+      // The record travels with the frozen payload, so a saved report can still
+      // show each earlier launch years from now.
+      //
+      // Carried even when no launch resolved to a live pool: the operator's own
+      // dated claims of earlier projects are evidence in their own right. They
+      // stay CLAIMS, quoted and dated, never an assertion of abandonment.
+      if (history.launches.length || history.claimedProjects.length) {
+        ctx.evidence.operatorLaunches = history;
+      }
       if (narrative && history.launches.length) {
         ctx.evidence.findings.push({
           finding_type: "OperatorLaunchHistory",
