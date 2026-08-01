@@ -1076,7 +1076,10 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   if (launchMint && ctx.evidence.projectToken?.chain === "solana") {
     try {
       const operatorHandles = operatorTeam.flatMap((member) => (member.projects ?? []).map((project) => project.name));
-      const history = await collectOperatorLaunches(launchMint, operatorHandles);
+      // The operator's own account is the one place a launch from a different
+      // wallet still gets claimed out loud.
+      const operatorHandle = operatorTeam.find((member) => member.handle)?.handle;
+      const history = await collectOperatorLaunches(launchMint, operatorHandles, operatorHandle);
       const narrative = describeLaunchHistory(history);
       if (narrative && history.launches.length) {
         ctx.evidence.findings.push({

@@ -593,7 +593,7 @@ async function lastTweetsPage(handle: string, key: string, cursor?: string): Pro
   return { tweets, next: d.has_next_page ? d.next_cursor : undefined };
 }
 
-async function searchFrom(handle: string, terms: string[], key: string): Promise<any[]> {
+export async function searchFrom(handle: string, terms: string[], key: string): Promise<any[]> {
   const q = `from:${handle} (${terms.join(" OR ")})`;
   const res = await twFetch(`${TWITTERAPI}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Top`, key);
   if (!res || !res.ok) return [];

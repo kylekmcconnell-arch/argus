@@ -60,7 +60,10 @@ describe("collectUpcomingUnlocks", () => {
       return String(url).includes("/currencies/map") ? jsonResponse(mapBody) : jsonResponse(eventsBody);
     }));
 
-    const out = await collectUpcomingUnlocks("Uniswap", "UNI");
+    // Pinned clock: both fixture events sit in 2026, so a real-clock run
+    // silently changes what "the next 90 days" contains once the first one
+    // passes (it did, on 2026-08-01 UTC).
+    const out = await collectUpcomingUnlocks("Uniswap", "UNI", { nowMs: Date.UTC(2026, 6, 15) });
     expect(out.available).toBe(true);
     if (!out.available) throw new Error("expected available");
     expect(out.value.nextUnlockDate).toBe("2026-08-01");
