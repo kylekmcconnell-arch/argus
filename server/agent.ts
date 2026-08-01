@@ -1847,6 +1847,13 @@ export function deriveProjectStrengthBands(
     artifact.operation === `checkOutcomes:${checkId}`
     && isSubstantiveArtifact(artifact)
     && artifact.eligibleAxes.includes(axis)) ?? null;
+  // A check that RAN and found nothing is an answer about the subject, not a
+  // hole in coverage. "unavailable" (the check never completed) stays a hole.
+  // Without this distinction a young subject - whose backing, press and repeat
+  // funding genuinely do not exist yet - can never be scored at all.
+  const assessedEmptyAxes = new Set(catalog
+    .filter((artifact) => artifact.section === "checkOutcomes" && artifact.verification === "checked_empty")
+    .flatMap((artifact) => artifact.eligibleAxes));
   const bands: Record<string, ProjectScoreBand> = {};
   const setBand = (
     axis: string,
@@ -1862,7 +1869,10 @@ export function deriveProjectStrengthBands(
     const spec = projectAxes.find((candidate) => candidate.axis === axis);
     if (!spec) return;
     const limiting = limitingByAxis.get(axis) ?? [];
-    const effectiveTier = tier === "none" && limiting.length > 0 ? "adverse" : tier;
+    const assessedEmpty = tier === "none" && !limiting.length && assessedEmptyAxes.has(axis);
+    const effectiveTier: ProjectStrengthTier = tier === "none" && limiting.length > 0
+      ? "adverse"
+      : assessedEmpty ? "assessed_null" : tier;
     const range = projectBandRange(spec.weight, effectiveTier);
     const widenedByUnverified = floorTier !== undefined && floorTier !== effectiveTier && effectiveTier !== "adverse";
     // Persistence enforces the band contract strictly: at least one reason for
@@ -1870,7 +1880,8 @@ export function deriveProjectStrengthBands(
     // composition slip here must degrade to a generic reason, never to a
     // rejected immutable save (the P4 investor-only path shipped empty once).
     const composedReasons = [...new Set([
-      ...(effectiveTier !== tier ? ["verified score-limiting evidence"] : []),
+      ...(assessedEmpty ? ["completed assessment found no verified record for this axis"] : []),
+      ...(effectiveTier !== tier && !assessedEmpty ? ["verified score-limiting evidence"] : []),
       ...(widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : []),
       ...reasons,
     ].map((reason) => reason.slice(0, 240)).filter(Boolean))].slice(0, 12);
@@ -3555,10 +3566,18 @@ export function inspectAnalystScoringPreflight(
     };
   }
   const projectBands = deriveProjectStrengthBands(evidenceJson, axisCatalog);
+  // Same rule as the bands above: an axis whose checks COMPLETED with no
+  // record is assessed (and scores in the bottom band), while an axis whose
+  // checks never ran still blocks scoring. Abstaining on a subject we did
+  // examine tells the reader nothing; scoring it low tells them the truth.
+  const assessedEmptyAxes = new Set(evidenceCatalog
+    .filter((artifact) => artifact.section === "checkOutcomes" && artifact.verification === "checked_empty")
+    .flatMap((artifact) => artifact.eligibleAxes));
   const missingSubstantiveAxes = axisCatalog
     .filter((axis) =>
-      !evidenceCatalog.some((artifact) =>
+      (!evidenceCatalog.some((artifact) =>
         isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis))
+        && !assessedEmptyAxes.has(axis.axis))
       || (axis.role === "PROJECT" && projectBands[axis.axis]?.tier === "none"))
     .map(({ axis }) => axis);
   return {

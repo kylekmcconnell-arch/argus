@@ -137,5 +137,13 @@
     "mustNotAppear": [
       "supergut|marc washington|30\\.2m"
     ]
+  },
+  "linkrbot": {
+    "minVerifiedFacts": 4,
+    "expectedRole": "PROJECT",
+    "mustSurface": [
+      "s0ldev"
+    ],
+    "_note": "the miss that started this: a day-old pump.fun launch whose dev is one hop away (project account follows @S0Ldev, whose bio claims it). Fresh-launch baseline for the memecoin lane; verdict deliberately unconstrained."
   }
 }

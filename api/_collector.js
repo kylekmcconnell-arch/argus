@@ -3406,16 +3406,19 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   });
   const limitingByAxis = new Map(projectAxes.map(({ axis }) => [axis, catalog.filter((artifact) => isVerifiedCounterArtifact(artifact, axis)).map((artifact) => artifact.artifactId)]));
   const assessmentArtifactFor = (axis, checkId) => catalog.find((artifact) => artifact.operation === `checkOutcomes:${checkId}` && isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis)) ?? null;
+  const assessedEmptyAxes = new Set(catalog.filter((artifact) => artifact.section === "checkOutcomes" && artifact.verification === "checked_empty").flatMap((artifact) => artifact.eligibleAxes));
   const bands = {};
   const setBand = (axis, tier, reasons, anchors, floorTier) => {
     const spec = projectAxes.find((candidate) => candidate.axis === axis);
     if (!spec) return;
     const limiting = limitingByAxis.get(axis) ?? [];
-    const effectiveTier = tier === "none" && limiting.length > 0 ? "adverse" : tier;
+    const assessedEmpty = tier === "none" && !limiting.length && assessedEmptyAxes.has(axis);
+    const effectiveTier = tier === "none" && limiting.length > 0 ? "adverse" : assessedEmpty ? "assessed_null" : tier;
     const range = projectBandRange(spec.weight, effectiveTier);
     const widenedByUnverified = floorTier !== void 0 && floorTier !== effectiveTier && effectiveTier !== "adverse";
     const composedReasons = [...new Set([
-      ...effectiveTier !== tier ? ["verified score-limiting evidence"] : [],
+      ...assessedEmpty ? ["completed assessment found no verified record for this axis"] : [],
+      ...effectiveTier !== tier && !assessedEmpty ? ["verified score-limiting evidence"] : [],
       ...widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : [],
       ...reasons
     ].map((reason) => reason.slice(0, 240)).filter(Boolean))].slice(0, 12);
@@ -4718,7 +4721,8 @@ function inspectAnalystScoringPreflight(axisCatalog2, evidenceJson) {
     };
   }
   const projectBands = deriveProjectStrengthBands(evidenceJson, axisCatalog2);
-  const missingSubstantiveAxes = axisCatalog2.filter((axis) => !evidenceCatalog.some((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)) || axis.role === "PROJECT" && projectBands[axis.axis]?.tier === "none").map(({ axis }) => axis);
+  const assessedEmptyAxes = new Set(evidenceCatalog.filter((artifact) => artifact.section === "checkOutcomes" && artifact.verification === "checked_empty").flatMap((artifact) => artifact.eligibleAxes));
+  const missingSubstantiveAxes = axisCatalog2.filter((axis) => !evidenceCatalog.some((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)) && !assessedEmptyAxes.has(axis.axis) || axis.role === "PROJECT" && projectBands[axis.axis]?.tier === "none").map(({ axis }) => axis);
   return {
     state: missingSubstantiveAxes.length > 0 ? "insufficient_evidence" : "ready",
     requestedAxisCount: axisCatalog2.length,

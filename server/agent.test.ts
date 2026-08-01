@@ -6068,3 +6068,38 @@ describe("project band reasons contract (failed-persist regression)", () => {
     }
   });
 });
+
+// A check that RAN and found nothing is an answer about the subject; a check
+// that never ran is a hole. Conflating them made ARGUS abstain entirely on
+// young subjects whose backing, press and repeat funding genuinely do not
+// exist yet, publishing INCOMPLETE instead of an honest low score.
+describe("completed-empty checks are assessed, not missing", () => {
+  const founderAxes = Object.entries(getProfile(SubjectClass.FOUNDER).axes)
+    .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.FOUNDER }));
+
+  const packetWith = (repeatBackingStatus: string) => buildScoringEvidencePacket({
+    profile: {
+      handle: "@builder",
+      display_name: "Builder",
+      bio: "Shipping",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-31T00:00:00.000Z",
+    },
+    // No ventures or testimonials: the repeat-backing check is the ONLY thing
+    // that can speak to F3 here, so the assertion isolates the status rule.
+    checkOutcomes: [
+      { checkId: "founder-repeat-backing", label: "Repeat backing", status: repeatBackingStatus, decisionCritical: true },
+    ],
+  }, founderAxes);
+
+  it("treats a completed no-record check as assessed, not as missing evidence", () => {
+    const assessed = inspectAnalystScoringPreflight(founderAxes, packetWith("checked-empty"));
+    expect(assessed.missingSubstantiveAxes).not.toContain("F3_repeat_backing");
+  });
+
+  it("still treats a check that never completed as missing", () => {
+    const unavailable = inspectAnalystScoringPreflight(founderAxes, packetWith("unavailable"));
+    expect(unavailable.missingSubstantiveAxes).toContain("F3_repeat_backing");
+  });
+});
