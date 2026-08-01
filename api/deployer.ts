@@ -18,8 +18,13 @@ export const config = { maxDuration: 30 };
 const MAX_SIG_PAGES = 10; // 1000 sigs/page; bounds pagination on busy wallets
 interface ProviderUsage { calls: number; succeeded: number }
 
-// Well-known Solana CEX hot wallets. A funder match here means the trail leads to
-// a KYC'd exchange account (a real subpoena target), not an anonymous wallet.
+// Well-known Solana CEX hot wallets. A funder match here means the trail leads
+// back to a KYC'd exchange account (a real subpoena target), not an anonymous
+// wallet. It says where the SOL CAME FROM; it says nothing about where any of it
+// went afterwards.
+// Duplicated verbatim in api/cluster.ts and api/funder.ts. Left duplicated on
+// purpose: those two files are owned by a separate change, and a shared module
+// has to land with all three call sites at once.
 const CEX: Record<string, string> = {
   "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9": "Binance",
   "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S": "Binance",
@@ -71,56 +76,66 @@ async function oldestActivity(url: string, wallet: string, usage: ProviderUsage,
 
 interface Hop { from: string; to: string; label: string | null; kind: "cex" | "wallet" }
 
-// Follow the money back hop by hop: deployer <- funder <- funder's funder <- ...
-// until the trail reaches a CEX (the KYC'd cash-out origin), runs dry, loops, or
-// hits the hop/time budget. Intermediary hops use shallow pagination to stay fast;
-// a deep, multi-hop chain through fresh wallets is the classic launder-before-launch
-// pattern, and a CEX terminus is where a subpoena would actually land.
-async function traceChain(url: string, deployer: string, maxHops: number, deadline: number, usage: ProviderUsage): Promise<{ chain: Hop[]; origin: { address: string; label: string | null; kind: "cex" | "wallet" } | null; truncatedAt: string | null }> {
+interface Account { address: string; label: string | null; kind: "cex" | "wallet" }
+
+// Follow the money BACK hop by hop: deployer <- funder <- funder's funder <- ...
+// until the trail reaches a CEX (the KYC'd account the SOL was withdrawn from),
+// runs dry, loops, or hits the hop/time budget. `fundedFrom` is therefore the
+// furthest UPSTREAM account reached, never a destination: this walk never follows
+// a lamport forward, so nothing here can support a claim about where money went.
+// Intermediary hops use shallow pagination to stay fast; a deep, multi-hop chain
+// through fresh wallets is the classic launder-before-launch pattern, and a CEX
+// origin is where a subpoena would actually land.
+async function traceChain(url: string, deployer: string, maxHops: number, deadline: number, usage: ProviderUsage): Promise<{ chain: Hop[]; fundedFrom: Account | null; truncatedAt: string | null }> {
   const chain: Hop[] = [];
   const seen = new Set<string>([deployer]);
   let current = deployer;
   for (let hop = 0; hop < maxHops; hop++) {
-    if (Date.now() > deadline) return { chain, origin: chain.length ? { address: current, label: CEX[current] ?? null, kind: CEX[current] ? "cex" : "wallet" } : null, truncatedAt: current };
+    if (Date.now() > deadline) return { chain, fundedFrom: chain.length ? { address: current, label: CEX[current] ?? null, kind: CEX[current] ? "cex" : "wallet" } : null, truncatedAt: current };
     const { oldestSigs, truncated } = await oldestActivity(url, current, usage, hop === 0 ? MAX_SIG_PAGES : 3);
-    const funder = oldestSigs.length ? await fundingSource(url, current, oldestSigs, usage) : null;
+    const funder = oldestSigs.length ? await inboundFunder(url, current, oldestSigs, usage) : null;
     if (!funder) {
       const originAddr = chain.length ? current : null;
-      return { chain, origin: originAddr ? { address: originAddr, label: CEX[originAddr] ?? null, kind: CEX[originAddr] ? "cex" : "wallet" } : null, truncatedAt: truncated ? current : null };
+      return { chain, fundedFrom: originAddr ? { address: originAddr, label: CEX[originAddr] ?? null, kind: CEX[originAddr] ? "cex" : "wallet" } : null, truncatedAt: truncated ? current : null };
     }
     const label = CEX[funder] ?? null;
     const kind: "cex" | "wallet" = label ? "cex" : "wallet";
     chain.push({ from: current, to: funder, label, kind });
-    if (label) return { chain, origin: { address: funder, label, kind }, truncatedAt: null }; // reached a CEX
-    if (seen.has(funder)) return { chain, origin: { address: funder, label: null, kind: "wallet" }, truncatedAt: null }; // cycle
+    if (label) return { chain, fundedFrom: { address: funder, label, kind }, truncatedAt: null }; // reached a CEX
+    if (seen.has(funder)) return { chain, fundedFrom: { address: funder, label: null, kind: "wallet" }, truncatedAt: null }; // cycle
     seen.add(funder);
     current = funder;
   }
   const last = chain[chain.length - 1];
-  return { chain, origin: last ? { address: last.to, label: last.label, kind: last.kind } : null, truncatedAt: null };
+  return { chain, fundedFrom: last ? { address: last.to, label: last.label, kind: last.kind } : null, truncatedAt: null };
+}
+
+// Strictly INBOUND: matches only instructions where the wallet is the RECEIVING
+// side and returns the account that paid. An instruction where the wallet is the
+// source is money leaving, which this trace does not model, so it is skipped
+// rather than reported in the opposite direction.
+export function inboundFunderFromInstructions(instrs: any[], wallet: string): string | null {
+  for (const ix of instrs ?? []) {
+    const p = ix.parsed;
+    if (!p?.info) continue;
+    // plain SOL transfer to the wallet
+    if (p.type === "transfer" && p.info.destination === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
+    // wallet created + funded by another account (rent-funding the new account)
+    if ((p.type === "createAccount" || p.type === "createAccountWithSeed") && p.info.newAccount === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
+  }
+  return null;
 }
 
 // Find the account that first sent SOL INTO the wallet, scanning the oldest few
 // transactions (oldest first) and recognising the common funding shapes.
-async function fundingSource(url: string, wallet: string, sigs: string[], usage: ProviderUsage): Promise<string | null> {
-  const scan = (instrs: any[]): string | null => {
-    for (const ix of instrs ?? []) {
-      const p = ix.parsed;
-      if (!p?.info) continue;
-      // plain SOL transfer to the wallet
-      if (p.type === "transfer" && p.info.destination === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
-      // wallet created + funded by another account (rent-funding the new account)
-      if ((p.type === "createAccount" || p.type === "createAccountWithSeed") && p.info.newAccount === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
-    }
-    return null;
-  };
+async function inboundFunder(url: string, wallet: string, sigs: string[], usage: ProviderUsage): Promise<string | null> {
   for (const sig of sigs) {
     const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
     if (!tx) continue;
-    const direct = scan(tx.transaction?.message?.instructions);
+    const direct = inboundFunderFromInstructions(tx.transaction?.message?.instructions, wallet);
     if (direct) return direct;
     for (const inner of tx.meta?.innerInstructions ?? []) {
-      const s = scan(inner.instructions);
+      const s = inboundFunderFromInstructions(inner.instructions, wallet);
       if (s) return s;
     }
     // Balance-delta fallback: if the wallet gained SOL in this tx, the account
@@ -170,6 +185,37 @@ async function tokensCreated(key: string, wallet: string, usage: ProviderUsage):
   }
 }
 
+// The user-facing sentence for the trail. Every branch describes an UPSTREAM
+// origin: the deployer wallet was FUNDED FROM the account we traced back to.
+// Nothing in this endpoint follows a lamport forward, so no branch may say the
+// money cashes out, withdraws, or lands anywhere. A KYC'd exchange on the
+// inbound side and a KYC'd exchange on the outbound side are opposite claims,
+// and only the inbound one is evidenced here.
+export function fundingTrailNote(input: {
+  funder: Account | null;
+  fundedFrom: Account | null;
+  hops: number;
+  anonHops: number;
+  truncatedAt: string | null;
+  walletTooActive: boolean;
+}): string {
+  const { funder, fundedFrom, hops, anonHops, truncatedAt, walletTooActive } = input;
+  if (!funder) {
+    return walletTooActive
+      ? "Wallet too active to trace the original funder within limits."
+      : "No clear funding source found on-chain.";
+  }
+  const hopCount = `${hops} hop${hops === 1 ? "" : "s"}`;
+  if (fundedFrom?.kind === "cex") {
+    const via = anonHops > 0 ? ` through ${anonHops} intermediary wallet${anonHops === 1 ? "" : "s"}` : "";
+    return `Funding trail: deployer ${"← anon ".repeat(Math.max(0, anonHops))}← ${fundedFrom.label}. The deployer wallet was funded from a KYC'd ${fundedFrom.label} account${via}.`;
+  }
+  if (truncatedAt) {
+    return `Funding trail runs ${hopCount} back, then goes cold at a high-activity wallet (${truncatedAt.slice(0, 6)}…). No KYC'd exchange origin reached.`;
+  }
+  return `Funding trail runs ${hopCount} back to an anonymous wallet (${fundedFrom?.address.slice(0, 6)}…), with no KYC'd exchange origin. Shared funders across launches expose a serial operator.`;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireArgusAuth(req, res, "analyst");
   if (!auth) return;
@@ -201,31 +247,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       oldestActivity(url, wallet, usage).then((a) => ({ firstBlockTime: a.firstBlockTime, truncated: a.truncated })),
       traceChain(url, wallet, 4, deadline, usage),
     ]);
-    const { chain, origin, truncatedAt } = traced;
+    const { chain, fundedFrom, truncatedAt } = traced;
     const walletAgeDays = ageInfo.firstBlockTime ? Math.max(0, Math.round((Date.now() / 1000 - ageInfo.firstBlockTime) / 86400)) : null;
     const funder = chain[0] ? { address: chain[0].to, label: chain[0].label, kind: chain[0].kind } : null;
-    const terminatesAtCex = origin?.kind === "cex";
+    const fundedFromCex = fundedFrom?.kind === "cex";
     const anonHops = chain.filter((h) => h.kind === "wallet").length;
 
-    const note = !funder
-      ? ageInfo.truncated
-        ? "Wallet too active to trace the original funder within limits."
-        : "No clear funding source found on-chain."
-      : terminatesAtCex
-        ? `Funding trail: deployer ${"← anon ".repeat(Math.max(0, anonHops))}← ${origin!.label}. The money cashes out at a KYC'd ${origin!.label} account${anonHops > 0 ? ` through ${anonHops} intermediary wallet${anonHops === 1 ? "" : "s"}` : ""}.`
-      : truncatedAt
-        ? `Funding trail runs ${chain.length} hop${chain.length === 1 ? "" : "s"} back, then goes cold at a high-activity wallet (${truncatedAt.slice(0, 6)}…). No CEX terminus reached.`
-        : `Funding trail runs ${chain.length} hop${chain.length === 1 ? "" : "s"} back to an anonymous wallet (${origin?.address.slice(0, 6)}…), with no CEX terminus. Shared funders across launches expose a serial operator.`;
+    const note = fundingTrailNote({ funder, fundedFrom, hops: chain.length, anonHops, truncatedAt, walletTooActive: ageInfo.truncated });
 
     res.status(200).json({
       wallet,
       available: true,
+      // `funder`, `origin` and `terminatesAtCex` are all UPSTREAM facts (who paid
+      // this wallet, and the furthest account back). The wire names predate the
+      // fundedFrom vocabulary and are read by src/lib/investigation.ts and three
+      // report components, so they stay until that change lands with them.
       funder,
       chain,
-      origin,
-      terminatesAtCex,
+      origin: fundedFrom,
+      terminatesAtCex: fundedFromCex,
       hops: chain.length,
       tokensCreated: created,
+      // Counts mints in the DEPLOYER's own recent transactions (see tokensCreated),
+      // not launches it bankrolled. A floor, not a total: the enhanced-tx window is
+      // the last 100 transactions, and an unavailable count reads as false here.
       serialDeployer: typeof created === "number" && created >= 5,
       walletAgeDays,
       firstActivity: ageInfo.firstBlockTime ? new Date(ageInfo.firstBlockTime * 1000).toISOString().slice(0, 10) : null,

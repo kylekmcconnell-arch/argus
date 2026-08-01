@@ -48,6 +48,7 @@ const personStages: StageDefinition[] = [
       "reputation",
       "corroborate",
       "on-chain",
+      "off-chain",
       "token",
       "cadence",
       "adverse",
@@ -75,6 +76,7 @@ const tokenStages: StageDefinition[] = [
   { key: "market", label: "Market evidence", matches: (step) => includes(step.phase, ["market"]) },
   { key: "contract", label: "Contract checks", matches: (step) => includes(step.phase, ["contract"]) },
   { key: "corroborate", label: "Corroboration", matches: (step) => includes(step.phase, ["corroborate"]) },
+  { key: "screen", label: "Deployer screening", matches: (step) => includes(step.phase, ["screen"]) },
   { key: "finalize", label: "Verdict assembly", matches: (step) => includes(step.phase, ["finalize"]) },
 ];
 
@@ -82,7 +84,7 @@ const investigationStages: StageDefinition[] = [
   {
     key: "token",
     label: "Token evidence",
-    matches: (step) => includes(step.phase, ["intake", "market", "contract", "corroborate"])
+    matches: (step) => includes(step.phase, ["intake", "market", "contract", "corroborate", "screen"])
       || includes(step.label, ["step 1 · on-chain", "token audited"]),
     hopMatches: (hop) => includes(hop, ["auditing the token"]),
   },
@@ -116,6 +118,7 @@ const investigationStages: StageDefinition[] = [
         "investor",
         "reputation",
         "on-chain",
+        "off-chain",
         "cadence",
         "adverse",
         "network",

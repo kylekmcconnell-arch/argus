@@ -68,7 +68,7 @@ async function ghJson<T>(path: string, key: string): Promise<T | null> {
   return value as T;
 }
 
-interface GhUser { login: string; name?: string; bio?: string; company?: string; twitter_username?: string; blog?: string }
+interface GhUser { login: string; name?: string; bio?: string; company?: string; twitter_username?: string; blog?: string; public_repos?: number; created_at?: string }
 interface GhOrg { login: string; description?: string }
 interface GhRepo { name: string; html_url: string; owner: { login: string; type: string }; stargazers_count?: number; fork?: boolean }
 
@@ -89,6 +89,40 @@ const apexOf = (value: string | undefined): string => {
   }
 };
 
+// A display name is as often decoration as it is a name, and GitHub's user
+// search matches it literally: q="Hayden Adams 🦄" returns zero results while
+// q="Hayden Adams" returns haydenadams first. Fold accents onto their base
+// letters, drop whatever is still outside printable ASCII, and close the gaps
+// that removal leaves. The raw name trails as a fallback so a wholly non-Latin
+// name is still searched rather than silently reduced to nothing.
+export function searchQueryVariants(raw: string): string[] {
+  const original = raw.replace(/\s+/g, " ").trim();
+  if (!original) return [];
+  const ascii = original
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\u0020-\u007e]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return ascii && ascii !== original ? [ascii, original] : [original];
+}
+
+// A GitHub account that merely shares the X username, has published nothing,
+// and was registered AFTER the X account is a name squatter, not the subject:
+// a real builder identity cannot be both empty and newer than the handle it is
+// supposed to belong to. /users/VitalikButerin is the case that proves it (0
+// repos, created 2016, against an X account from 2011). Suppress it; we never
+// substitute a guess at the account it is squatting on.
+function isEmptyAndNewerThanSubject(u: GhUser, subjectCreatedAt: string | undefined): boolean {
+  if (u.public_repos !== 0) return false;
+  const subjectMs = Date.parse(subjectCreatedAt ?? "");
+  const githubMs = Date.parse(u.created_at ?? "");
+  // Unverifiable dates leave the lead standing: absence of a check is not proof
+  // of a squatter any more than it is proof of a builder.
+  if (!Number.isFinite(subjectMs) || !Number.isFinite(githubMs)) return false;
+  return githubMs > subjectMs;
+}
+
 // Resolve the subject's GitHub account. Gold = the account's twitter_username
 // points at the subject AND the subject's side points back (X bio/website
 // references github.com/<login>, or the account's blog is the subject's own
@@ -99,14 +133,20 @@ export async function resolveGithub(
   handle: string,
   name: string | undefined,
   key: string,
-  subject?: { bioText?: string; siteDomain?: string },
+  subject?: { bioText?: string; siteDomain?: string; accountCreatedAt?: string },
 ): Promise<GithubMatch | null> {
   const h = handle.replace(/^@/, "").toLowerCase();
   const candidates = new Set<string>([h]);
   for (const q of [name, handle.replace(/^@/, "")]) {
     if (!q) continue;
-    const found = await ghJson<{ items?: { login: string }[] }>(`/search/users?q=${encodeURIComponent(q)}&per_page=5`, key);
-    for (const it of found?.items ?? []) candidates.add(it.login);
+    for (const variant of searchQueryVariants(q)) {
+      const found = await ghJson<{ items?: { login: string }[] }>(`/search/users?q=${encodeURIComponent(variant)}&per_page=5`, key);
+      const items = found?.items ?? [];
+      for (const it of items) candidates.add(it.login);
+      // The raw name is only worth a second call when the ASCII form found no
+      // one; spending it after a hit would just re-search the same person.
+      if (items.length) break;
+    }
   }
   const bioText = (subject?.bioText ?? "").toLowerCase();
   const siteApex = apexOf(subject?.siteDomain);
@@ -123,7 +163,7 @@ export async function resolveGithub(
       }
       if (!claimed) claimed = { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "claimed" };
     }
-    if (!weak && u.login.toLowerCase() === h) {
+    if (!weak && u.login.toLowerCase() === h && !isEmptyAndNewerThanSubject(u, subject?.accountCreatedAt)) {
       weak = { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "weak" };
     }
   }
@@ -159,6 +199,7 @@ export const githubAdapter: Adapter = {
     const match = await resolveGithub(ctx.handle, name, key, {
       bioText: [ctx.evidence.profile.bio, ctx.evidence.profile.website].filter(Boolean).join(" "),
       siteDomain: ctx.evidence.profile.website,
+      accountCreatedAt: ctx.evidence.profile.account_created_at,
     });
     if (!match) {
       ctx.recordCheck?.({

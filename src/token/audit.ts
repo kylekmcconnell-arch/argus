@@ -48,10 +48,11 @@ export interface NormalizedSafety {
   lpBurnedPct: number;        // sent to a null/dead address — permanently unpullable
   lpLockedPct: number;        // held in a locker / locked, excluding burns
   lpTopUnlockedEoaPct: number; // largest share in a single unlocked non-contract wallet (rug-ready)
-  /** Whether ANY usable LP holder record was returned. False means the lock
-   *  state is unknown, which is different from unlocked and must not be scored
-   *  as if the liquidity were provably loose. */
-  lpAssessed: boolean;
+  /** Whether ANY usable LP holder record was returned. Absent or false means
+   *  the lock state is unknown, which is different from unlocked and must not
+   *  be scored as if the liquidity were provably loose. Optional so reports
+   *  frozen before this field existed also read as unmeasured. */
+  lpAssessed?: boolean;
   // Solana (Token-2022) risk vectors
   balanceMutable: boolean;    // controller can rewrite holder balances
   transferHook: boolean;      // a program runs on every transfer (can block sells)

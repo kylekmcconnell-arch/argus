@@ -832,6 +832,56 @@ describe("private person report evidence boundary", () => {
       expect.objectContaining({ snapshotVersion: 6 }),
     );
   });
+
+  it("marks an informational polarity-0 finding neutral rather than adverse", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const subjectFinding = (finding_type: string, claim: string, polarity: number) => ({
+      finding_type,
+      claim,
+      source_url: `https://example.com/${finding_type.toLowerCase()}`,
+      source_date: "2026-05-01",
+      source_author: "pump.fun + dexscreener",
+      verification_status: "Verified" as const,
+      independent_source_count: 2,
+      polarity,
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      finding_scope: {
+        scope: "direct_subject" as const,
+        target_entity_key: base.report.handle,
+        target_entity_type: "person" as const,
+        relationship_to_subject: "self" as const,
+        relationship_label: "audited subject",
+      },
+    });
+    const dossier = {
+      ...base,
+      report: {
+        ...base.report,
+        publishable_findings: [
+          subjectFinding("OperatorLaunchHistory", "The operator launched 6 earlier tokens; 4 now trade under $5k.", 0),
+          subjectFinding("Exit", "An earlier venture was acquired in 2022.", 1),
+          subjectFinding("AdvisoryRug", "Advised a project that rugged in 2024.", -1),
+        ],
+        investigative_leads: [],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const ledger = container.querySelector("#publishable-findings");
+    expect(ledger).not.toBeNull();
+    expect(ledger?.textContent).toContain("The operator launched 6 earlier tokens");
+    const tint = (label: string) => ledger?.querySelector<HTMLElement>(`[aria-label="${label}"]`)?.style.background;
+    // A base rate the reader weighs is not an accusation, so it never takes the
+    // avoid tint reserved for adverse evidence.
+    expect(tint("Neutral finding")).toBe("var(--color-ink-faint)");
+    expect(tint("Neutral finding")).not.toBe("var(--color-avoid)");
+    expect(tint("Positive finding")).toBe("var(--color-pass)");
+    expect(tint("Adverse finding")).toBe("var(--color-avoid)");
+  });
 });
 
 describe("decision-safe person report presentation", () => {

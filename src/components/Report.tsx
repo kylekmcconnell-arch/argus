@@ -721,6 +721,14 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
         }
 
         const sourceCountLabel = `${f.independent_source_count} independent source${f.independent_source_count === 1 ? "" : "s"} recorded · ${source ? "1 link stored" : "no link stored"}`;
+        // Polarity is signed. A 0 finding is informational context the reader
+        // weighs, so it must not borrow the adverse hue and read as an
+        // accusation the evidence never made.
+        const polarityTone = f.polarity > 0
+          ? { color: "var(--color-pass)", label: "Positive finding" }
+          : f.polarity < 0
+            ? { color: "var(--color-avoid)", label: "Adverse finding" }
+            : { color: "var(--color-ink-faint)", label: "Neutral finding" };
         const statusColor = f.verification_status === "Verified"
           ? "var(--color-pass)"
           : f.verification_status === "Rumor"
@@ -731,8 +739,10 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
           <Card key={i} className="p-3.5">
             <div className="flex items-start gap-3">
               <span
+                role="img"
+                aria-label={polarityTone.label}
                 className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full"
-                style={{ background: f.polarity > 0 ? "var(--color-pass)" : "var(--color-avoid)" }}
+                style={{ background: polarityTone.color }}
               />
               <div className="min-w-0 flex-1">
                 <p className="text-[13.5px] leading-snug text-ink">{f.claim}</p>

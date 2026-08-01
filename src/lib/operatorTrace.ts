@@ -41,7 +41,9 @@ export interface OperatorCluster {
   origin: { address: string; label: string | null; kind: "cex" | "wallet" } | null;
   hub: string | null;          // the anon wallet that seeded the most deployers
   stats: { deployers: number; tokens: number; deadTokens: number; hops: number; sweeps: number };
-  verdict: { tone: "good" | "warn" | "bad"; line: string };
+  // "neutral" is the unknown state: nothing incriminating was found AND nothing
+  // was ruled out either, because the forward sweep never ran to completion.
+  verdict: { tone: "good" | "warn" | "bad" | "neutral"; line: string };
   budgetExhausted: boolean;
 }
 
@@ -118,6 +120,11 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   let origin: OperatorCluster["origin"] = null;
   let sweeps = 0, traces = 0, maxHops = 0;
   let budgetExhausted = false;
+  // A hub we knew about but never swept. The sweep queue empties for two very
+  // different reasons: every anon hub was actually swept (a real negative), or
+  // the queue was abandoned/never filled (no evidence either way). Only the
+  // first can rule siblings out, so the verdict has to tell them apart.
+  let unsweptHubs = false;
   const overBudget = () => Date.now() > deadline;
 
   const addWallet = (addr: string, role: OperatorRole, depth: number, extra?: Partial<OperatorWallet>) => {
@@ -182,7 +189,10 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   // Forward-sweep a hub: every fresh deployer it seeded + those deployers' tokens.
   // This is the reveal — one wallet standing behind a fan of launches.
   async function sweepForward(addr: string, depth: number): Promise<void> {
-    if (sweptForward.has(addr) || sweeps >= maxSweeps || overBudget()) { if (sweeps >= maxSweeps) budgetExhausted = true; return; }
+    if (sweptForward.has(addr)) return;
+    // Bailing on a hub we were asked to sweep leaves its siblings unchecked, on
+    // the deadline as much as on the call cap. Both have to be recorded.
+    if (sweeps >= maxSweeps || overBudget()) { budgetExhausted = true; unsweptHubs = true; return; }
     sweptForward.add(addr);
     sweeps++;
     onStep({ label: `Sweeping forward from ${short(addr)}`, detail: "every wallet this hub seeded, and which of them minted tokens…", tone: "neutral" });
@@ -229,7 +239,7 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     if (sweptForward.has(next.address)) continue;
     await sweepForward(next.address, next.depth);
   }
-  if (sweepQueue.length && sweeps >= maxSweeps) budgetExhausted = true;
+  if (sweepQueue.some((q) => !sweptForward.has(q.address))) { budgetExhausted = true; unsweptHubs = true; }
 
   // 3. Liveness: which of the surfaced tokens are actually dead now? Cheap batched
   //    dexscreener reads turn "M tokens" into "K of M dead" — the real indictment.
@@ -248,7 +258,10 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   const hubSeeded = hub ? seededBy.get(hub)! : 0;
   const stats = { deployers: deployerWallets.length, tokens: tokens.size, deadTokens, hops: maxHops, sweeps };
 
-  const verdict = buildVerdict({ hub, hubSeeded, stats, origin });
+  // The forward sweep is the only thing that can rule siblings OUT, so a clean
+  // verdict requires one that actually ran and finished.
+  const sweepComplete = sweeps > 0 && !unsweptHubs;
+  const verdict = buildVerdict({ hub, hubSeeded, stats, origin, sweepComplete });
 
   const cluster: OperatorCluster = {
     rootDeployer, rootLabel: opts.rootLabel,
@@ -260,8 +273,8 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   return cluster;
 }
 
-function buildVerdict(a: { hub: string | null; hubSeeded: number; stats: OperatorCluster["stats"]; origin: OperatorCluster["origin"] }): OperatorCluster["verdict"] {
-  const { hub, hubSeeded, stats, origin } = a;
+function buildVerdict(a: { hub: string | null; hubSeeded: number; stats: OperatorCluster["stats"]; origin: OperatorCluster["origin"]; sweepComplete: boolean }): OperatorCluster["verdict"] {
+  const { hub, hubSeeded, stats, origin, sweepComplete } = a;
   const dead = stats.deadTokens ? `, ${stats.deadTokens} now dead` : "";
   // A shared hand behind several deployers, or a large token fan, is a factory.
   if ((hub && hubSeeded >= 3) || stats.deployers >= 4 || stats.tokens >= 6) {
@@ -270,10 +283,23 @@ function buildVerdict(a: { hub: string | null; hubSeeded: number; stats: Operato
   if (stats.deployers >= 2 || stats.tokens >= 2) {
     return { tone: "warn", line: `The deployer shares a funder with ${stats.deployers - 1 || 1} other launch wallet${stats.deployers - 1 === 1 ? "" : "s"} (${stats.tokens} tokens${dead}). A small cluster worth watching.` };
   }
-  if (origin?.kind === "cex") {
-    return { tone: "good", line: `Funded from a KYC'd ${origin.label ?? "exchange"} account with no sibling launches found. Isolated and traceable, not a serial pattern.` };
+  // Below here the finding is an ABSENCE of siblings, which is only a finding at
+  // all when a forward sweep completed. An exchange hop ends the trail: a CEX is
+  // deliberately never expanded (its omnibus wallet is not the operator), so the
+  // sweep queue can empty without a single hub having been swept. Calling that
+  // "isolated" would assert exactly what was never checked. It is not a warning
+  // either: withdrawing from an exchange to fund a launch is also the single
+  // most common legitimate path, so the unknown must not read as an accusation.
+  if (!sweepComplete) {
+    const line = origin?.kind === "cex"
+      ? `The funding trail ends at a KYC'd ${origin.label ?? "exchange"} account, and an exchange hop ends the trail: ARGUS cannot see which other wallets that account paid out to, so sibling launch wallets were neither found nor ruled out. Funding a launch from an exchange withdrawal is also the most common legitimate path, so treat this as unchecked rather than clean or suspicious.`
+      : `No forward sweep completed around this deployer${origin ? `, and the trail stops at ${short(origin.address)}` : ""}, so sibling launch wallets were neither found nor ruled out. Treat this as unchecked rather than clean.`;
+    return { tone: "neutral", line };
   }
-  return { tone: "good", line: `No serial-launch cluster found around this deployer. It traces back${origin ? ` to ${short(origin.address)}` : ""} without fanning out into other launches.` };
+  if (origin?.kind === "cex") {
+    return { tone: "good", line: `Funded from a KYC'd ${origin.label ?? "exchange"} account, and a completed forward sweep of the wallets in between found no sibling launches. Isolated and traceable, not a serial pattern.` };
+  }
+  return { tone: "good", line: `A completed forward sweep found no serial-launch cluster around this deployer. It traces back${origin ? ` to ${short(origin.address)}` : ""} without fanning out into other launches.` };
 }
 
 // dexscreener tokens endpoint: up to 30 mints per call. A mint with no live pair,

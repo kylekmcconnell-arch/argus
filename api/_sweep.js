@@ -306,6 +306,68 @@ function scannerEvasionClaim(finding) {
   return `The deployer writes about ${surfaces} in the contract source: "${finding.quote}" Read as stated, the flagged behaviour was removed rather than hidden, so the clean scanner result is accurate. It is recorded because a deployer iterating against scanner heuristics is worth knowing, not because it is misconduct.`;
 }
 
+// src/lib/marketAddresses.ts
+var SOLANA_CEX_WALLETS = {
+  "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9": "Binance",
+  "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S": "Binance",
+  "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM": "Binance",
+  GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE: "Coinbase",
+  H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS: "Coinbase",
+  "2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm": "Coinbase",
+  FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5: "Kraken",
+  AobVSwdW9BbpMdJvTqeCN4hPAmh4rHm7vwLnQ5ATSyrS: "OKX",
+  "5VVBHtk2QQBy5rZ2pBdgcb4yj9DBYy8tDksBs2pWnUKr": "Bybit",
+  "9un5wqE3q4oCjyrDkwsdD48KteCJitQX5978Vh7KKxHo": "Gate.io",
+  "6gnCPhXtLnUD76HjQuSYPENLSZdG8RvDB1pTLM5aLSss": "MEXC"
+};
+var EVM_CEX_WALLETS = {
+  "0x28c6c06298d514db089934071355e5743bf21d60": "Binance",
+  "0x21a31ee1afc51d94c2efccaa2092ad1028285549": "Binance",
+  "0xdfd5293d8e347dfe59e90efd55b2956a1343963d": "Binance",
+  "0x56eddb7aa87536c09ccc2793473599fd21a8b17f": "Binance",
+  "0xf977814e90da44bfa03b6295a0616a897441acec": "Binance",
+  "0x71660c4005ba85c37ccec55d0c4493e66fe775d3": "Coinbase",
+  "0x503828976d22510aad0201ac7ec88293211d23da": "Coinbase",
+  "0xddfabcdc4d8ffc6d5beaf154f18b778f892a0740": "Coinbase",
+  "0x3cc936b795a188f0e246cbb2d74c5bd190aecf18": "OKX",
+  "0x2b5634c42055806a59e9107ed44d43c426e58258": "Kucoin",
+  "0x0d0707963952f2fba59dd06f2b425ace40b492fe": "Gate.io",
+  "0xf89d7b9c864f589bbF53a82105107622B35EaA40": "Bybit"
+};
+var normalize = (address) => {
+  const value = String(address ?? "").trim();
+  return /^0x[0-9a-fA-F]{40}$/.test(value) ? value.toLowerCase() : value;
+};
+var lookup = (map, address) => {
+  const direct = map[address];
+  if (direct) return direct;
+  const lowered = normalize(address);
+  for (const [candidate, name] of Object.entries(map)) {
+    if (normalize(candidate) === lowered) return name;
+  }
+  return void 0;
+};
+function classifyMarketAddress(address, context = {}) {
+  const value = String(address ?? "").trim();
+  if (!value) return null;
+  const pool = (context.poolAddresses ?? []).some((candidate) => normalize(candidate) === normalize(value));
+  if (pool) return { label: "liquidity pool", kind: "pool" };
+  const exchange = lookup(SOLANA_CEX_WALLETS, value) ?? lookup(EVM_CEX_WALLETS, value);
+  if (exchange) return { label: exchange, kind: "exchange" };
+  const known = context.knownAccounts?.[value];
+  const type = String(known?.type ?? "").toUpperCase();
+  if (type === "AMM" || type === "MARKET" || type === "POOL") {
+    return { label: known?.name?.trim() || "liquidity pool", kind: "pool" };
+  }
+  if (type === "LOCKER" || type === "VAULT") {
+    return { label: known?.name?.trim() || "locked vault", kind: "locker" };
+  }
+  if (type === "EXCHANGE" || type === "CEX") {
+    return { label: known?.name?.trim() || "exchange", kind: "exchange" };
+  }
+  return null;
+}
+
 // src/token/sources.ts
 var GOPLUS_CHAIN = {
   ethereum: "1",
@@ -601,8 +663,11 @@ function evmSafety(gp, sim) {
   const s = sim;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
   let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
+  let lpRowsSeen = 0;
   for (const h of gp?.lp_holders ?? []) {
     const pct = Number(h.percent) * 100;
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
+    lpRowsSeen += 1;
     if (!Number.isFinite(pct)) continue;
     if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
     else if (h.is_locked === 1) lpLockedPct += pct;
@@ -643,15 +708,18 @@ function evmSafety(gp, sim) {
     tradingCooldown: t1(gp?.trading_cooldown),
     externalCall: t1(gp?.external_call),
     ownerChangeBalance: t1(gp?.owner_change_balance),
-    creatorPercent: (num(gp?.creator_percent) ?? 0) * 100
+    creatorPercent: (num(gp?.creator_percent) ?? 0) * 100,
+    lpAssessed: lpRowsSeen > 0
   };
 }
 function solanaSafety(sol) {
   const topHolderPct = sol?.holders?.length ? Number(sol.holders[0].percent) * 100 : null;
   let lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
+  let lpRowsSeen = 0;
   for (const h of sol?.lp_holders ?? []) {
     const pct = Number(h.percent) * 100;
-    if (!Number.isFinite(pct)) continue;
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
+    lpRowsSeen += 1;
     if (h.is_locked === 1) lpLockedPct += pct;
     else lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
   }
@@ -686,6 +754,7 @@ function solanaSafety(sol) {
     lpBurnedPct: 0,
     lpLockedPct,
     lpTopUnlockedEoaPct,
+    lpAssessed: lpRowsSeen > 0,
     balanceMutable: solFlag(sol?.balance_mutable_authority),
     transferHook: (sol?.transfer_hook?.length ?? 0) > 0,
     transferFee: Object.keys(sol?.transfer_fee ?? {}).length > 0,
@@ -733,7 +802,8 @@ function emptySafety() {
     tradingCooldown: false,
     externalCall: false,
     ownerChangeBalance: false,
-    creatorPercent: 0
+    creatorPercent: 0,
+    lpAssessed: false
   };
 }
 var _cache = /* @__PURE__ */ new Map();
@@ -757,12 +827,17 @@ async function runTokenAudit(input, emit, opts) {
   };
   step({ phase: "P0 \xB7 Intake", label: "Resolve token", detail: `Resolving ${input.ref.slice(0, 42)} on DexScreener\u2026`, tone: "neutral" });
   let pair = null;
+  let allPairs = [];
   if (input.via === "dexscreener") {
     const m = input.ref.match(/dexscreener\.com\/([a-z0-9]+)\/([a-zA-Z0-9]+)/i);
     if (m) pair = await dexByPair(m[1], m[2]);
-    if (!pair && m) pair = pickPair(await dexByToken(m[2]), m[2]);
+    if (!pair && m) {
+      allPairs = await dexByToken(m[2]);
+      pair = pickPair(allPairs, m[2]);
+    }
   } else {
-    pair = pickPair(await dexByToken(input.ref), input.ref);
+    allPairs = await dexByToken(input.ref);
+    pair = pickPair(allPairs, input.ref);
   }
   if (!pair || !pair.baseToken) {
     step({ phase: "P0 \xB7 Intake", label: "Not found", detail: "No DEX pair found for this contract.", tone: "warn" });
@@ -902,7 +977,8 @@ async function runTokenAudit(input, emit, opts) {
     else if (s.lpLockedPct >= 50) findings.push({ claim: `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet and can be pulled at any time.`, tone: "bad", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet and removable at will.`, tone: "warn", source: "goplus" });
-    else findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
+    else if (s.lpAssessed) findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
+    else findings.push({ claim: "LP lock was not measured: the free data tier returned no LP holder records for this chain. Not scored either way.", tone: "warn", source: "goplus" });
   }
   if (liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
@@ -925,11 +1001,31 @@ async function runTokenAudit(input, emit, opts) {
     is_contract: holder.isContract ? 1 : 0
   })) : GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? [] : gpEvm?.holders ?? [];
   const rawHolders = chain === "solana" ? sol?.holders ?? [] : evmHolders;
-  const eoaHolders = rawHolders.filter(
+  const poolAddresses = [
+    ...pair?.pairAddress ? [pair.pairAddress] : [],
+    ...allPairs.map((candidate) => candidate.pairAddress).filter((value) => Boolean(value))
+  ];
+  const marketRows = [];
+  const walletRows = rawHolders.filter((h) => {
+    const address2 = h.address ?? h.account ?? "";
+    const market = classifyMarketAddress(address2, { poolAddresses });
+    if (!market) return true;
+    const percent = Number(h.percent) * 100;
+    marketRows.push({
+      address: address2,
+      percent: Number.isFinite(percent) ? percent : 0,
+      label: market.label,
+      kind: market.kind
+    });
+    return false;
+  });
+  const eoaHolders = walletRows.filter(
     (h) => !(h.is_contract === 1 || h.is_contract === "1") && h.is_locked !== 1 && !/lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(h.tag || "")
   );
   const topSum = eoaHolders.slice(0, 15).reduce((a, h) => a + Number(h.percent) * 100, 0);
   const holdersReliable = rawHolders.length > 0 && topSum <= 101;
+  const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
+  const concentrationTopPct = topWalletPct ?? s.topHolderPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
   const bundleCount = holdersReliable ? eoaHolders.filter((h) => Number(h.percent) * 100 >= 1).length : 0;
   const bundleRisk = !holdersReliable ? "low" : insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
@@ -937,6 +1033,14 @@ async function runTokenAudit(input, emit, opts) {
     findings.push({
       claim: `Concentrated supply: ${bundleCount} non-contract wallets hold ~${insiderPct}%. This may indicate a bundled launch or coordinated snipe.`,
       tone: bundleRisk === "high" ? "bad" : "warn",
+      source: chain === "solana" ? "goplus-sol" : "goplus"
+    });
+  }
+  if (marketRows.length) {
+    const named = marketRows.slice(0, 3).map((row) => `${row.label} (${row.percent.toFixed(1)}%)`).join(", ");
+    findings.push({
+      claim: `Excluded from concentration: ${named}. These are the market itself, not wallets that can dump.`,
+      tone: "good",
       source: chain === "solana" ? "goplus-sol" : "goplus"
     });
   }
@@ -955,9 +1059,11 @@ async function runTokenAudit(input, emit, opts) {
   } else if (s.available && s.lpTopUnlockedEoaPct >= 50) {
     aT1 = clamp(aT1 - 4, 0, 24);
     lpNote = ", LP mostly in one wallet";
-  } else if (s.available) {
+  } else if (s.available && s.lpAssessed) {
     aT1 = clamp(aT1 - 3, 0, 24);
     lpNote = ", LP not locked";
+  } else if (s.available) {
+    lpNote = ", LP lock not measured";
   }
   axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${lpNote}.` });
   let aT2 = 26;
@@ -983,7 +1089,7 @@ async function runTokenAudit(input, emit, opts) {
   if (s.slippageModifiable && !s.ownerRenounced) aT3 = clamp(aT3 - 5, 0, 12);
   if (s.transferFee) aT3 = clamp(aT3 - 5, 0, 12);
   axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? chain === "solana" ? "no transfer tax detected." : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.` : "Tax not verifiable keyless." });
-  const topPct = holdersReliable ? s.topHolderPct : null;
+  const topPct = holdersReliable ? concentrationTopPct : null;
   let aT4 = s.holderCount < 50 ? 3 : s.holderCount < 500 ? 7 : s.holderCount < 5e3 ? 11 : 14;
   if (topPct != null) {
     if (topPct > 50) aT4 -= 8;
