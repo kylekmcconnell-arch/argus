@@ -11,6 +11,7 @@ import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { tokenEntityKey, walletEntityKey } from "../graph/network";
 import { fetchPriceHistory, type PriceHistory } from "../lib/priceHistory";
 import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
+import { classifyMarketAddress } from "../lib/marketAddresses";
 import {
   dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
   GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource,
@@ -47,6 +48,10 @@ export interface NormalizedSafety {
   lpBurnedPct: number;        // sent to a null/dead address — permanently unpullable
   lpLockedPct: number;        // held in a locker / locked, excluding burns
   lpTopUnlockedEoaPct: number; // largest share in a single unlocked non-contract wallet (rug-ready)
+  /** Whether ANY usable LP holder record was returned. False means the lock
+   *  state is unknown, which is different from unlocked and must not be scored
+   *  as if the liquidity were provably loose. */
+  lpAssessed: boolean;
   // Solana (Token-2022) risk vectors
   balanceMutable: boolean;    // controller can rewrite holder balances
   transferHook: boolean;      // a program runs on every transfer (can block sells)
@@ -268,8 +273,11 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
   // contract, as PEPE shows) is not a rug signal — only an unlocked non-contract
   // wallet holding the LP is rug-ready.
   let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
+  let lpRowsSeen = 0;
   for (const h of gp?.lp_holders ?? []) {
     const pct = Number(h.percent) * 100;
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
+    lpRowsSeen += 1;
     if (!Number.isFinite(pct)) continue;
     if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
     else if (h.is_locked === 1) lpLockedPct += pct;
@@ -307,15 +315,21 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     externalCall: t1(gp?.external_call),
     ownerChangeBalance: t1(gp?.owner_change_balance),
     creatorPercent: (num(gp?.creator_percent) ?? 0) * 100,
+    lpAssessed: lpRowsSeen > 0,
   };
 }
 
 function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
   const topHolderPct = sol?.holders?.length ? Number(sol.holders[0].percent) * 100 : null;
   let lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
+  let lpRowsSeen = 0;
   for (const h of sol?.lp_holders ?? []) {
     const pct = Number(h.percent) * 100;
-    if (!Number.isFinite(pct)) continue;
+    // A share of a pool cannot exceed the pool. The free tier occasionally
+    // returns a raw balance here instead of a ratio, which once published
+    // "1 wallet 25532435%" about a top-100 token in an immutable report.
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) continue;
+    lpRowsSeen += 1;
     if (h.is_locked === 1) lpLockedPct += pct;
     else lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
   }
@@ -345,7 +359,7 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
     holderCount: num(sol?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
-    lpBurnedPct: 0, lpLockedPct, lpTopUnlockedEoaPct,
+    lpBurnedPct: 0, lpLockedPct, lpTopUnlockedEoaPct, lpAssessed: lpRowsSeen > 0,
     balanceMutable: solFlag(sol?.balance_mutable_authority),
     transferHook: (sol?.transfer_hook?.length ?? 0) > 0,
     transferFee: Object.keys(sol?.transfer_fee ?? {}).length > 0,
@@ -363,7 +377,7 @@ function emptySafety(): NormalizedSafety {
     lpBurnedPct: 0, lpLockedPct: 0, lpTopUnlockedEoaPct: 0,
     balanceMutable: false, transferHook: false, transferFee: false,
     proxy: false, slippageModifiable: false, blacklist: false, tradingCooldown: false,
-    externalCall: false, ownerChangeBalance: false, creatorPercent: 0,
+    externalCall: false, ownerChangeBalance: false, creatorPercent: 0, lpAssessed: false,
   };
 }
 
@@ -399,12 +413,19 @@ async function runTokenAudit(
   step({ phase: "P0 · Intake", label: "Resolve token", detail: `Resolving ${input.ref.slice(0, 42)} on DexScreener…`, tone: "neutral" });
 
   let pair: DexPair | null = null;
+  // Every pool for this token, not just the deepest one: each pool address is
+  // market infrastructure that must be excluded from holder concentration.
+  let allPairs: DexPair[] = [];
   if (input.via === "dexscreener") {
     const m = input.ref.match(/dexscreener\.com\/([a-z0-9]+)\/([a-zA-Z0-9]+)/i);
     if (m) pair = await dexByPair(m[1], m[2]);
-    if (!pair && m) pair = pickPair(await dexByToken(m[2]), m[2]);
+    if (!pair && m) {
+      allPairs = await dexByToken(m[2]);
+      pair = pickPair(allPairs, m[2]);
+    }
   } else {
-    pair = pickPair(await dexByToken(input.ref), input.ref);
+    allPairs = await dexByToken(input.ref);
+    pair = pickPair(allPairs, input.ref);
   }
   if (!pair || !pair.baseToken) {
     step({ phase: "P0 · Intake", label: "Not found", detail: "No DEX pair found for this contract.", tone: "warn" });
@@ -594,7 +615,10 @@ async function runTokenAudit(
     else if (s.lpLockedPct >= 50) findings.push({ claim: `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet and can be pulled at any time.`, tone: "bad", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet and removable at will.`, tone: "warn", source: "goplus" });
-    else findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
+    // No usable LP record is not the same fact as an unlocked pool. Asserting
+    // the latter told readers that USDC's liquidity "does not appear locked".
+    else if (s.lpAssessed) findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
+    else findings.push({ claim: "LP lock was not measured: the free data tier returned no LP holder records for this chain. Not scored either way.", tone: "warn", source: "goplus" });
   }
   if (liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
@@ -629,7 +653,29 @@ async function runTokenAudit(
       }))
     : GOPLUS_UNSORTED_HOLDER_CHAINS.has(chain) ? [] : gpEvm?.holders ?? [];
   const rawHolders = (chain === "solana" ? sol?.holders ?? [] : evmHolders) as Array<{ address?: string; account?: string; percent?: string; is_contract?: number | string; is_locked?: number; tag?: string }>;
-  const eoaHolders = rawHolders.filter(
+  // The pool is the market, not a holder, and an exchange hot wallet is
+  // thousands of customers. Counting either inverts what concentration means:
+  // on a fresh launchpad token the pool IS the top holder, so every one of them
+  // reads as dangerously concentrated while the real wallet split goes unsaid.
+  const poolAddresses = [
+    ...(pair?.pairAddress ? [pair.pairAddress] : []),
+    ...allPairs.map((candidate) => candidate.pairAddress).filter((value): value is string => Boolean(value)),
+  ];
+  const marketRows: Array<{ address: string; percent: number; label: string; kind: string }> = [];
+  const walletRows = rawHolders.filter((h) => {
+    const address = h.address ?? h.account ?? "";
+    const market = classifyMarketAddress(address, { poolAddresses });
+    if (!market) return true;
+    const percent = Number(h.percent) * 100;
+    marketRows.push({
+      address,
+      percent: Number.isFinite(percent) ? percent : 0,
+      label: market.label,
+      kind: market.kind,
+    });
+    return false;
+  });
+  const eoaHolders = walletRows.filter(
     (h) => !(h.is_contract === 1 || h.is_contract === "1") && h.is_locked !== 1 && !/lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(h.tag || ""),
   );
   // Free-tier GoPlus sometimes returns a short, self-inconsistent holder list
@@ -638,6 +684,9 @@ async function runTokenAudit(
   // nonsensical figure.
   const topSum = eoaHolders.slice(0, 15).reduce((a, h) => a + Number(h.percent) * 100, 0);
   const holdersReliable = rawHolders.length > 0 && topSum <= 101;
+  // Top-holder concentration must also read the wallet list, not the pool.
+  const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
+  const concentrationTopPct = topWalletPct ?? s.topHolderPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
   const bundleCount = holdersReliable ? eoaHolders.filter((h) => Number(h.percent) * 100 >= 1).length : 0;
   const bundleRisk: "low" | "elevated" | "high" =
@@ -646,6 +695,19 @@ async function runTokenAudit(
     findings.push({
       claim: `Concentrated supply: ${bundleCount} non-contract wallets hold ~${insiderPct}%. This may indicate a bundled launch or coordinated snipe.`,
       tone: bundleRisk === "high" ? "bad" : "warn",
+      source: chain === "solana" ? "goplus-sol" : "goplus",
+    });
+  }
+  // Name what was excluded and why. A reader comparing ARGUS to an explorer
+  // must be able to see that the biggest line item was left out deliberately.
+  if (marketRows.length) {
+    const named = marketRows
+      .slice(0, 3)
+      .map((row) => `${row.label} (${row.percent.toFixed(1)}%)`)
+      .join(", ");
+    findings.push({
+      claim: `Excluded from concentration: ${named}. These are the market itself, not wallets that can dump.`,
+      tone: "good",
       source: chain === "solana" ? "goplus-sol" : "goplus",
     });
   }
@@ -659,7 +721,10 @@ async function runTokenAudit(
   else if (s.lpLockedPct >= 50) { aT1 = clamp(aT1 + 2, 0, 24); lpNote = ", LP locked"; }
   else if (s.available && s.lpTopUnlockedEoaPct >= 80) { aT1 = clamp(aT1 - 6, 0, 24); lpNote = ", LP in one unlocked wallet"; }
   else if (s.available && s.lpTopUnlockedEoaPct >= 50) { aT1 = clamp(aT1 - 4, 0, 24); lpNote = ", LP mostly in one wallet"; }
-  else if (s.available) { aT1 = clamp(aT1 - 3, 0, 24); lpNote = ", LP not locked"; }
+  else if (s.available && s.lpAssessed) { aT1 = clamp(aT1 - 3, 0, 24); lpNote = ", LP not locked"; }
+  // No usable LP record: the lock is UNKNOWN. Scoring it as loose told readers
+  // that USDC's liquidity "does not appear locked or burned" and docked it.
+  else if (s.available) { lpNote = ", LP lock not measured"; }
   axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${lpNote}.` });
 
   let aT2 = 26;
@@ -689,7 +754,7 @@ async function runTokenAudit(
   if (s.transferFee) aT3 = clamp(aT3 - 5, 0, 12);
   axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? (chain === "solana" ? "no transfer tax detected." : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.`) : "Tax not verifiable keyless." });
 
-  const topPct = holdersReliable ? s.topHolderPct : null;
+  const topPct = holdersReliable ? concentrationTopPct : null;
   let aT4 = s.holderCount < 50 ? 3 : s.holderCount < 500 ? 7 : s.holderCount < 5000 ? 11 : 14;
   if (topPct != null) {
     if (topPct > 50) aT4 -= 8;
