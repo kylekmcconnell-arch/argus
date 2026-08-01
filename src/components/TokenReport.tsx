@@ -3,7 +3,7 @@ import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
 import { verdictMeta } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
-import type { TokenDossier } from "../token/audit";
+import { deployerRoleLabel, type TokenDossier } from "../token/audit";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
@@ -212,6 +212,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const s = d.safety;
   const gp = d.safetyChecked;
   const isSol = d.chain === "solana";
+  const attribution = d.deployerAttribution;
+  const deployerLabel = deployerRoleLabel(attribution);
+  const creatorPercentLabel = s.creatorPercent >= 10 ? `${s.creatorPercent.toFixed(0)}%` : `${s.creatorPercent.toFixed(1)}%`;
   const topSum = d.topHolders.reduce((a, h) => a + h.percent, 0);
   const projectSite = d.socials.find((x) => x.label === "site" && /^https?:\/\//i.test(x.url))?.url;
   const projectDomain = projectSite ? projectSite.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase() : null;
@@ -532,7 +535,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-4">
             <OnChainForensics token={d} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
-            {d.deployer && <div className="mt-3"><MoneyFlowStory address={d.deployer} chain={d.chain} panelCostToken={panelCostToken} /></div>}
+            {d.deployer && <div className="mt-3"><MoneyFlowStory address={d.deployer} chain={d.chain} panelCostToken={panelCostToken} roleLabel={deployerLabel} /></div>}
             {d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} /></div>}
             {d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} panelCostToken={panelCostToken} /></div>}
             {d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} panelCostToken={panelCostToken} /></div>}
@@ -610,7 +613,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 na={!gp}
               />
               <Check label="Liquidity depth" ok={(d.liquidityUsd ?? 0) >= 50000} value={money(d.liquidityUsd)} />
-              {!isSol && <Check label="Creator holdings" ok={s.creatorPercent < 5} value={gp ? `${s.creatorPercent.toFixed(0)}%` : undefined} na={!gp} />}
+              <Check label="Creator holdings" ok={s.creatorPercent < 5} value={s.creatorPercentAssessed ? creatorPercentLabel : undefined} na={!s.creatorPercentAssessed} />
               <Check label="Holders" ok={Number(s.holderCount) >= 500} value={gp ? Number(s.holderCount).toLocaleString() : undefined} na={!gp} />
               <Check label="Top holder concentration" ok={s.topHolderPct == null || Number(s.topHolderPct) <= 25} value={s.topHolderPct != null ? `${Number(s.topHolderPct).toFixed(0)}%` : undefined} na={s.topHolderPct == null} />
               <Check label="Bundle / snipe concentration" ok={d.bundleRisk === "low"} value={gp ? `${d.insiderPct}% · ${d.bundleCount} wallets` : undefined} na={!gp} />
@@ -667,9 +670,17 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               </div>
             )}
             {d.deployer && (
-              <div className="flex items-center justify-between gap-2 border-t border-line/60 py-1.5">
-                <span className="text-[12.5px] text-ink-dim">Deployer</span>
-                <span className="mono text-[11px] text-ink-faint">{shortAddr(d.deployer)}</span>
+              <div className="border-t border-line/60 py-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[12.5px] text-ink-dim">{deployerLabel}</span>
+                  <span className="mono text-[11px] text-ink-faint">{shortAddr(d.deployer)}</span>
+                </div>
+                {attribution && (
+                  <div className="mt-0.5 text-[11px] leading-snug text-ink-faint">
+                    named by {attribution.source} ({attribution.method})
+                    {attribution.kind !== "deployer" && ". No source confirmed this wallet signed the token's creation, so it may be a mint or update authority rather than the person who launched it."}
+                  </div>
+                )}
               </div>
             )}
             {d.topHolders.length > 0 && (
@@ -732,7 +743,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             plainLanguageSummary(d.headline),
             `early score ${d.verdict} ${d.score ?? ""}`,
             `report status ${readiness.status}: ${readiness.successful}/${readiness.applicable} checks finished, ${readiness.unresolved} open`,
-            d.deployer ? `deployer ${d.deployer}` : "",
+            d.deployer ? `${deployerLabel.toLowerCase()} ${d.deployer}${attribution ? ` (named by ${attribution.source} ${attribution.method})` : ""}` : "",
             d.cg ? `${d.cg.cexCount} CEX listings${d.cg.rank ? `, rank #${d.cg.rank}` : ""}` : "not on CoinGecko",
             projectSite ? `site ${projectSite}` : "",
             d.projectX ? `project X ${d.projectX}` : "",

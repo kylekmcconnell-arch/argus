@@ -12,11 +12,12 @@ import { tokenEntityKey, walletEntityKey } from "../graph/network";
 import { fetchPriceHistory, type PriceHistory } from "../lib/priceHistory";
 import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import { classifyMarketAddress } from "../lib/marketAddresses";
+import { checkForClones, type CloneCheckResult } from "./cloneCheck";
 import {
   dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
-  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource,
+  GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckCreator,
   type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo, type ExplorerHolder,
-  type ExplorerContractSource,
+  type ExplorerContractSource, type RugcheckCreator,
 } from "./sources";
 
 export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string }
@@ -65,6 +66,47 @@ export interface NormalizedSafety {
   externalCall: boolean;
   ownerChangeBalance: boolean;
   creatorPercent: number;
+  /** Whether a source actually reported the creator's balance. Absent or false
+   *  means the holding is unknown, which is not the same fact as a creator who
+   *  holds nothing. Optional so reports frozen before this field existed also
+   *  read as unmeasured. */
+  creatorPercentAssessed?: boolean;
+}
+
+/**
+ * Who a source says created the token, and how strongly.
+ *
+ * "deployer" means a source identified the wallet that signed the mint or
+ * contract creation. "attributed" means a source names the address without that
+ * proof: a metadata creator record, a current owner, a mint or update
+ * authority. On a bridged or DAO token an authority is routinely a program
+ * rather than a person, so an attributed address must never be presented as the
+ * human who shipped the token.
+ */
+export type DeployerAttributionKind = "deployer" | "attributed";
+export interface DeployerAttribution {
+  address: string;
+  /** Provider that answered: goplus, helius, rugcheck. */
+  source: string;
+  /** The record inside that provider, shown in the report. */
+  method: string;
+  kind: DeployerAttributionKind;
+}
+
+/**
+ * What to call the wallet on screen. Only a source that saw the creation signed
+ * earns the word "deployer"; a metadata creator, a current owner or a mint
+ * authority is an attributed address, and on a bridged or DAO token that is
+ * often a program rather than a person. Absent attribution is not proof of a
+ * deployment either, so it takes the cautious label too.
+ */
+export function deployerRoleLabel(
+  attribution: DeployerAttribution | null | undefined,
+  form: "title" | "wallet" = "title",
+): string {
+  const proven = attribution?.kind === "deployer";
+  const base = proven ? "Deployer" : "Creator or authority";
+  return form === "wallet" ? `${base} wallet` : base;
 }
 
 export interface TokenDossier {
@@ -79,6 +121,8 @@ export interface TokenDossier {
   socials: { label: string; url: string }[];
   projectX: string | null;
   deployer: string | null;
+  /** Which source named the deployer, and whether it proved the creation. */
+  deployerAttribution?: DeployerAttribution;
   topHolders: Holder[];
   insiderPct: number;
   bundleCount: number;
@@ -93,6 +137,8 @@ export interface TokenDossier {
   sanctionsScreen?: SanctionsScreenOutcome;
   /** Arkham funding/risk trace on the deployer wallet, recorded at scan time. */
   deployerRisk?: DeployerRiskOutcome;
+  /** Other mints trading under the same ticker, and what the public records order. */
+  cloneCheck?: CloneCheckResult;
   /** Frozen server-side evidence/check context for a persisted report version. */
   versionContext?: ReportVersionContext;
   /** Snapshot framing inherited from a parent investigation facet. */
@@ -193,6 +239,35 @@ export async function screenDeployerRisk(
   }
 }
 
+// Resolver methods that identify the wallet which SIGNED the creation. Anything
+// else the route can return (a metadata creator record, an update authority) is
+// an attribution, so it is reported as one.
+const SIGNED_THE_CREATION = new Set(["mint feePayer", "creation-tx fee payer"]);
+
+// Browser default: ask ARGUS's own Solana deployer resolver. api/resolve-deployer
+// reads the Helius DAS creators/authority and the mint's oldest-transaction fee
+// payer, filtering the launchpad and system programs that are never a dev.
+// Same shape as screenDeployerRisk: a relative URL only resolves in a browser,
+// so a server or Node audit skips it and falls through to the keyless source.
+export async function resolveDeployerViaRoute(
+  mint: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DeployerAttribution | null> {
+  const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
+  if (!origin) return null;
+  try {
+    const r = await fetchImpl(`/api/resolve-deployer?mint=${encodeURIComponent(mint)}`, { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) return null;
+    const d = await r.json() as { deployer?: unknown; via?: unknown };
+    const address = typeof d?.deployer === "string" ? d.deployer.trim() : "";
+    if (!address) return null;
+    const via = typeof d?.via === "string" && d.via.trim() ? d.via.trim() : "resolver";
+    return { address, source: "helius", method: via, kind: SIGNED_THE_CREATION.has(via) ? "deployer" : "attributed" };
+  } catch {
+    return null;
+  }
+}
+
 // OFAC SDN address screen, recorded as a real check outcome for the checklist.
 // Never throws: an unreachable screen records available:false so the checklist
 // shows "unavailable" instead of silently claiming a clean pass.
@@ -285,6 +360,7 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
   }
   const lpLocked = lpBurnedPct + lpLockedPct >= 50;
+  const creatorShare = num(gp?.creator_percent);
   return {
     available: !!gp || !!s,
     simChecked: !!s,
@@ -315,7 +391,8 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     tradingCooldown: t1(gp?.trading_cooldown),
     externalCall: t1(gp?.external_call),
     ownerChangeBalance: t1(gp?.owner_change_balance),
-    creatorPercent: (num(gp?.creator_percent) ?? 0) * 100,
+    creatorPercent: (creatorShare ?? 0) * 100,
+    creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
     lpAssessed: lpRowsSeen > 0,
   };
 }
@@ -365,7 +442,10 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
     transferHook: (sol?.transfer_hook?.length ?? 0) > 0,
     transferFee: Object.keys(sol?.transfer_fee ?? {}).length > 0,
     proxy: false, slippageModifiable: false, blacklist: false, tradingCooldown: false,
-    externalCall: false, ownerChangeBalance: false, creatorPercent: 0,
+    // GoPlus has no creator balance on this chain. The audit fills it in from
+    // RugCheck once a creator resolves; until then it stays unmeasured, because
+    // a hardcoded 0 published "creator holds nothing" about every Solana token.
+    externalCall: false, ownerChangeBalance: false, creatorPercent: 0, creatorPercentAssessed: false,
   };
 }
 
@@ -378,7 +458,7 @@ function emptySafety(): NormalizedSafety {
     lpBurnedPct: 0, lpLockedPct: 0, lpTopUnlockedEoaPct: 0,
     balanceMutable: false, transferHook: false, transferFee: false,
     proxy: false, slippageModifiable: false, blacklist: false, tradingCooldown: false,
-    externalCall: false, ownerChangeBalance: false, creatorPercent: 0, lpAssessed: false,
+    externalCall: false, ownerChangeBalance: false, creatorPercent: 0, creatorPercentAssessed: false, lpAssessed: false,
   };
 }
 
@@ -459,10 +539,45 @@ async function runTokenAudit(
   let sol: SolanaSecurity | null = null;
   let explorerHolders: ExplorerHolder[] | null = null;
   let contractSource: ExplorerContractSource | null = null;
+  let deployerAttribution: DeployerAttribution | null = null;
   if (chain === "solana") {
     step({ phase: "Contract", label: "Solana safety", detail: "GoPlus Solana: mint authority, freeze authority, transfer hooks, holders…", tone: "neutral" });
     sol = await goplusSolana(address);
     safety = solanaSafety(sol);
+    // GoPlus returns an empty creators array for every Solana mint, which left
+    // the token with no deployer, no deployer forensics, and a creator holding
+    // hardcoded to zero. ARGUS's own resolver answers first; RugCheck is the
+    // keyless fallback and the only free source for the creator's balance.
+    const goplusCreator = (sol?.creators ?? []).map((c) => c?.address).find((a): a is string => typeof a === "string" && a.trim().length > 0)?.trim() ?? null;
+    // The resolver route spends metered Helius credits per mint, so the fast
+    // bulk scan (Radar sweeps 16 tokens at a time) takes the keyless answer
+    // only. RugCheck is free, so the creator's balance is measured either way.
+    const routeResolver = goplusCreator || opts?.skipSim ? Promise.resolve(null) : resolveDeployerViaRoute(address).catch(() => null);
+    const [routed, rug] = await Promise.all([
+      routeResolver,
+      rugcheckCreator(address).catch((): RugcheckCreator | null => null),
+    ]);
+    deployerAttribution = goplusCreator
+      // GoPlus's Solana creators come from token metadata, which the minting
+      // program writes; it is an attribution, not proof of who signed.
+      ? { address: goplusCreator, source: "goplus", method: "metadata creator", kind: "attributed" }
+      : routed
+        ?? (rug?.creator ? { address: rug.creator, source: "rugcheck", method: "creator field", kind: "attributed" } : null);
+    // The balance belongs to RugCheck's creator. Attaching it to an address the
+    // resolver named instead would report one wallet's holding under another's
+    // name, so it is only recorded when both sources point at the same address.
+    if (deployerAttribution && rug?.creator === deployerAttribution.address && rug.creatorPercent != null) {
+      safety = { ...safety, creatorPercent: rug.creatorPercent, creatorPercentAssessed: true };
+    }
+    step(deployerAttribution
+      ? {
+          phase: "Contract",
+          label: deployerRoleLabel(deployerAttribution),
+          detail: `${deployerAttribution.address} via ${deployerAttribution.source} ${deployerAttribution.method}${safety.creatorPercentAssessed ? `, holding ${safety.creatorPercent.toFixed(2)}% of supply` : ", holdings not reported"}.`,
+          source: deployerAttribution.source,
+          tone: "neutral",
+        }
+      : { phase: "Contract", label: "Deployer unresolved", detail: "No source named a creator for this mint, so deployer forensics could not run.", tone: "warn" });
   } else if (gpChain) {
     step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders…" : "GoPlus + honeypot.is buy/sell simulation…", tone: "neutral" });
     const [gp, sim, explorer, source] = await Promise.all([
@@ -479,6 +594,15 @@ async function runTokenAudit(
     explorerHolders = explorer;
     contractSource = source;
     safety = evmSafety(gp, sim);
+    const evmCreator = gp?.creator_address?.trim();
+    const evmOwner = gp?.owner_address?.trim();
+    deployerAttribution = evmCreator
+      ? { address: evmCreator, source: "goplus", method: "contract creator", kind: "deployer" }
+      // The current owner is whoever holds the contract NOW, which after a
+      // transfer or a multisig handover is not the wallet that deployed it.
+      : evmOwner && !/^0x0+$/.test(evmOwner)
+        ? { address: evmOwner, source: "goplus", method: "current owner", kind: "attributed" }
+        : null;
     // The largest-holder figure must come from the ordered source, and must go
     // silent rather than report an unordered sample as if it were measured.
     if (explorerHolders?.length) {
@@ -599,7 +723,14 @@ async function runTokenAudit(
     if (s.blacklist && ownerActive) findings.push({ claim: "Owner can blacklist addresses, so your wallet can be blocked from selling.", tone: "warn", source: "goplus" });
     if (s.tradingCooldown && ownerActive) findings.push({ claim: "Trading cooldown is enforceable, so sells can be delayed.", tone: "warn", source: "goplus" });
     if (s.externalCall) findings.push({ claim: "Contract makes external calls, so behavior can change via an external dependency.", tone: "warn", source: "goplus" });
-    if (s.creatorPercent >= 5) findings.push({ claim: `Creator still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: "goplus" });
+    // The percent is measured against whichever address a source called the
+    // creator, and when that is an attribution the same report already says the
+    // wallet was never shown to have signed anything. RugCheck names GRASS's
+    // mint authority as its creator, and that wallet holds 25.9% of supply, so
+    // the flat wording would call a live project's authority account its dev.
+    // The holding is the finding; the role is only claimed when a source proved it.
+    const creatorHolder = deployerAttribution && deployerAttribution.kind !== "deployer" ? "The creator or authority wallet" : "Creator";
+    if (s.creatorPercent >= 5) findings.push({ claim: `${creatorHolder} still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: chain === "solana" ? "rugcheck" : "goplus" });
 
     // ---- Solana (Token-2022) vectors ----
     if (chain === "solana") {
@@ -815,7 +946,11 @@ async function runTokenAudit(
     handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) ||
     handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) ||
     (cg?.twitter ? "@" + cg.twitter : null); // CoinGecko's official X account (blue-chip fallback)
-  const deployer = chain === "solana" ? sol?.creators?.[0]?.address ?? null : gpEvm?.creator_address || (gpEvm?.owner_address && !/^0x0+$/.test(gpEvm.owner_address) ? gpEvm.owner_address : null) || null;
+  const deployer = deployerAttribution?.address ?? null;
+  // What the report is allowed to call this wallet. Only a source that saw the
+  // creation signed earns the word "deployer"; everything else is an address a
+  // source attributes, which can be a program holding an authority.
+  const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
   const topHolders: Holder[] = rawHolders.slice(0, 10).map((h) => ({
     address: h.address ?? h.account ?? "",
     percent: Number(h.percent) * 100,
@@ -846,14 +981,14 @@ async function runTokenAudit(
       const amt = p.usd >= 1 ? `~$${Math.round(p.usd).toLocaleString()} ` : "";
       findings.push({
         claim: p.direction === "backward"
-          ? `Deployer wallet received ${amt}traceable to ${who}${hopStr}. ${severe ? "This is a serious funding-provenance risk." : "Worth scrutiny on where the launch capital came from."}`
-          : `Deployer wallet sent ${amt}to ${who}${hopStr}. ${severe ? "This is a serious counterparty risk." : "Worth scrutiny on where the funds moved."}`,
+          ? `${deployerRole} received ${amt}traceable to ${who}${hopStr}. ${severe ? "This is a serious funding-provenance risk." : "Worth scrutiny on where the launch capital came from."}`
+          : `${deployerRole} sent ${amt}to ${who}${hopStr}. ${severe ? "This is a serious counterparty risk." : "Worth scrutiny on where the funds moved."}`,
         tone: severe ? "bad" : "warn",
         source: "arkham",
       });
     }
     const lead = deployerRisk.paths[0];
-    step({ phase: "Finalize", label: "Funding trace", detail: `Deployer ${lead.direction === "backward" ? "funded via" : "exposed to"} ${lead.seedName || lead.category || "a flagged entity"}${lead.hops ? ` (${lead.hops} hop${lead.hops === 1 ? "" : "s"})` : ""}.`, tone: SEVERE_RISK_CATEGORY.test(lead.category ?? "") ? "bad" : "warn" });
+    step({ phase: "Finalize", label: "Funding trace", detail: `${deployerRole} ${lead.direction === "backward" ? "funded via" : "exposed to"} ${lead.seedName || lead.category || "a flagged entity"}${lead.hops ? ` (${lead.hops} hop${lead.hops === 1 ? "" : "s"})` : ""}.`, tone: SEVERE_RISK_CATEGORY.test(lead.category ?? "") ? "bad" : "warn" });
   }
   if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
     findings.push({
@@ -872,7 +1007,37 @@ async function runTokenAudit(
     step({ phase: "Finalize", label: "OFAC sanctions", detail: `${sanctionsScreen.sanctioned.length} sanctioned address(es): verdict forced to AVOID.`, tone: "bad" });
   }
 
-  const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
+  // Ticker collisions. A buyer who typed a ticker instead of pasting an address
+  // is the person this check is for, so it runs on every audit and its result is
+  // frozen into the report rather than recomputed at read time.
+  const cloneCheck = await checkForClones({
+    mint: address,
+    symbol: pair.baseToken.symbol,
+    chain,
+    pairCreatedAt: pair.pairCreatedAt ?? null,
+    liquidityUsd,
+  }).catch(() => null);
+  if (cloneCheck?.checked && cloneCheck.clones.length) {
+    // Only "later" is a claim about this mint. "earliest" and "only" are floors
+    // on what a capped search listed, so neither is published as reassurance.
+    if (cloneCheck.audited === "later") {
+      findings.push({ claim: cloneCheck.note, tone: "bad", source: "dexscreener" });
+    } else {
+      findings.push({
+        claim: `${cloneCheck.clones.length} other ${cloneCheck.clones.length === 1 ? "mint trades" : "mints trade"} under the ticker $${pair.baseToken.symbol}. Verify you hold the address in this report before buying.`,
+        tone: "warn",
+        source: "dexscreener",
+      });
+    }
+    step({
+      phase: "Finalize",
+      label: "Ticker collision",
+      detail: cloneCheck.note,
+      tone: cloneCheck.audited === "later" ? "bad" : "warn",
+    });
+  }
+
+  const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployerAttribution, topHolders, socials);
 
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} · ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
@@ -883,13 +1048,15 @@ async function runTokenAudit(
     mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
     ...(priceHistory ? { priceHistory } : {}),
     verdict, score, capApplied, headline, axes, safety: s, socials,
-    projectX, deployer, topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
+    projectX, deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
+    topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
     sanctionsScreen,
     deployerRisk,
+    ...(cloneCheck ? { cloneCheck } : {}),
   };
 }
 
-function buildGraph(chain: string, address: string, symbol: string, verdict: string, projectX: string | null, deployer: string | null, holders: Holder[], socials: { label: string; url: string }[]): { nodes: PanoptesNode[]; edges: PanoptesEdge[] } {
+function buildGraph(chain: string, address: string, symbol: string, verdict: string, projectX: string | null, attribution: DeployerAttribution | null, holders: Holder[], socials: { label: string; url: string }[]): { nodes: PanoptesNode[]; edges: PanoptesEdge[] } {
   const center = tokenEntityKey(chain, address);
   const nodes: PanoptesNode[] = [{
     type: "Token",
@@ -906,10 +1073,13 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
     nodes.push({ type: "Person", key: projectX });
     edges.push({ src: center, dst: projectX, type: "TEAM" });
   }
-  if (deployer) {
-    const k = walletEntityKey(chain, deployer);
-    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + deployer.slice(0, 8), chain, address: deployer });
-    edges.push({ src: center, dst: k, type: "DEPLOYED_BY" });
+  if (attribution) {
+    const k = walletEntityKey(chain, attribution.address);
+    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + attribution.address.slice(0, 8), chain, address: attribution.address });
+    // The edge states what the evidence supports. An address a provider merely
+    // names as creator or authority has not been shown to deploy anything, and
+    // this graph is reconciled across reports, so the weaker claim travels.
+    edges.push({ src: center, dst: k, type: attribution.kind === "deployer" ? "DEPLOYED_BY" : "ATTRIBUTED_CREATOR", source: attribution.source });
   }
   holders.slice(0, 4).forEach((h) => {
     // Roles and short labels are display metadata; the identity is always the

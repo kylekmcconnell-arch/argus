@@ -5,6 +5,7 @@ import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { xAvatar, personAvatar } from "../lib/avatars";
 import { OnChainForensics } from "./OnChainForensics";
+import { deployerRoleLabel } from "../token/audit";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
@@ -1543,7 +1544,7 @@ export function InvestigationReport({
               <PanelRequestNotice failure={arkhamState} label="Wallet identity labels" className="mt-3" />
             )}
             {canRecordCurrentIntelligence && <ArkhamGraphBridge subject={`$${token.symbol}`} labels={arkham} />}
-            {token.deployer && <MoneyFlowStory address={token.deployer} chain={token.chain} panelCostToken={panelCostToken} />}
+            {token.deployer && <MoneyFlowStory address={token.deployer} chain={token.chain} panelCostToken={panelCostToken} roleLabel={deployerRoleLabel(token.deployerAttribution)} />}
             {token.deployer && <Counterparties address={token.deployer} subject={`$${token.symbol}`} chain={token.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
             {token.deployer && <RiskPaths address={token.deployer} panelCostToken={panelCostToken} />}
             {token.deployer && <div className="mt-3"><Holdings address={token.deployer} symbol={token.symbol} panelCostToken={panelCostToken} /></div>}

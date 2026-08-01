@@ -16,10 +16,10 @@
 import { recordCall } from "../cost";
 import { env } from "../config";
 import { searchFrom } from "./x";
-import { fetchPriceHistory, type PriceHistory } from "../../src/lib/priceHistory";
 
 const PUMPFUN_API = "https://frontend-api-v3.pump.fun";
 const DEXSCREENER_API = "https://api.dexscreener.com";
+const GECKOTERMINAL_API = "https://api.geckoterminal.com/api/v2";
 const REQUEST_TIMEOUT_MS = 12_000;
 
 export interface PriorLaunch {
@@ -85,22 +85,24 @@ const num = (value: unknown): number | null =>
 // was worth on launch day, and pump.fun publishes exactly that in
 // ath_market_cap. It just cannot be trusted on its own.
 //
-// Sampling the pump.fun top-50 by market cap on 2026-08-01, 8 of the 50 rows
-// came back with a corrupt peak: Fartcoin 4.28e11 against a $129M cap,
-// jellyjelly 4.13e22, arc 1.99e23, ZEREBRO 2.20e20, ACT 1.51e21, Ban 1.48e21,
-// Bert 7.88e20, pippin 9.02e18. Every one of them is a legacy coin, and every
-// one of them would have printed a fabricated "down 99.99% from its peak" in
-// a report. So a peak is published only when it clears two gates: it is not
-// below what the token is worth today, and it is not larger than any
-// launchpad token has ever been.
+// Sampling the pump.fun top-50 by market cap on 2026-08-01, 9 of the 50 rows
+// came back with a corrupt peak: Fartcoin 4.28e11 against a $126M cap,
+// jellyjelly 4.13e22, arc 1.99e23, AVA 4.54e20, ZEREBRO 2.20e20, ACT 1.51e21,
+// Ban 1.48e21, Bert 7.88e20, pippin 9.02e18. Every one of them is a legacy
+// coin, and every one of them would have printed a fabricated "down 99.99%
+// from its peak" in a report. So a peak is published only when it clears two
+// gates: it is not below what the token is worth today, and it is not larger
+// than any launchpad token has ever been.
 //
 // The primary source is the one ARGUS already trusts elsewhere: a keyless
-// GeckoTerminal OHLCV series (src/lib/priceHistory.ts), which is an observed
-// record of trades rather than a stored field. pump.fun is the corroborating
-// second value: it samples intraday, so it may legitimately sit above a
-// daily-close peak, but only by a little. On the two real mints in this
-// investigation it sat at 1.38x (uAPE) and 1.36x (LINKR) of the GeckoTerminal
-// peak, which is the shape of an intraday high, not a disagreement.
+// GeckoTerminal OHLCV series, which is an observed record of trades rather
+// than a stored field. The peak has to be read out of the HIGH column and not
+// the close, because a token that runs and dumps inside one day is the exact
+// shape this whole feature exists to show and a daily-CLOSE series records
+// that day as flat. RACC (Crgxrddc8wLmDzD1nBVxGGbMFhtY4vxddJsQ9t8npump)
+// traded to a $1.66M cap on 2026-07-28 and closed the same day back at $2.5K:
+// off the closes its peak is 1.05x today's value and the entire run vanishes;
+// off the highs it is $1.66M and matches pump.fun to within 0.4%.
 
 /**
  * No launchpad token has ever been worth this much. Above it the field is
@@ -109,11 +111,18 @@ const num = (value: unknown): number | null =>
 const MAX_PLAUSIBLE_ATH_USD = 1e10;
 
 /**
- * How far pump.fun's intraday peak may exceed an observed daily-close peak
- * before the two sources are telling different stories and the observed
- * series wins.
+ * How far pump.fun's peak may exceed the observed one before the two sources
+ * are telling different stories and the trades win.
+ *
+ * Both fields sample intraday, so once the series peak is a HIGH they should
+ * nearly agree, and on live data they do. Measured 2026-08-01 as
+ * ath_market_cap over the GeckoTerminal daily-high peak: TROLL 1.00x, RACC
+ * 1.00x, ANSEM 1.01x, Doggocoin 1.01x, Spain 1.01x, uAPE 1.02x, LINKR 1.03x,
+ * Buttcoin 1.27x. Against daily CLOSES the same coins scatter from 1.07x to
+ * 664x, which is why the old 3x band could pass junk and still throw away the
+ * real peak of every single-day runner.
  */
-const ATH_CORROBORATION_FACTOR = 3;
+const ATH_CORROBORATION_FACTOR = 1.5;
 
 const plausiblePeak = (value: number | null | undefined): number | null =>
   typeof value === "number" && Number.isFinite(value) && value > 0 && value <= MAX_PLAUSIBLE_ATH_USD
@@ -165,14 +174,74 @@ export function resolveLaunchPeak(input: {
 }
 
 /**
+ * dexscreener chainId -> GeckoTerminal network slug. src/lib/priceHistory.ts
+ * carries the same mapping for the close series it returns; the peak is read
+ * from the raw candles here because that module only ever exposes closes.
+ */
+const GECKOTERMINAL_NETWORK: Record<string, string> = {
+  solana: "solana", ethereum: "eth", eth: "eth", bsc: "bsc", base: "base",
+  arbitrum: "arbitrum", polygon: "polygon_pos", polygon_pos: "polygon_pos",
+  avalanche: "avax", avax: "avax", optimism: "optimism", fantom: "ftm",
+  sui: "sui", ton: "ton", tron: "tron", blast: "blast", sei: "sei-evm",
+};
+
+/** The traded record behind one launch, in the series' own price units. */
+export interface LaunchSeries {
+  /** Highest INTRADAY high in the window, never a close. */
+  peak: number;
+  /** Most recent close. */
+  last: number;
+  timeframe: "day" | "hour";
+}
+
+/** GeckoTerminal's own candles for a launch: keyless, and observed trades. */
+export async function fetchLaunchSeries(mint: string, chain: string): Promise<LaunchSeries | null> {
+  const network = GECKOTERMINAL_NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
+  if (!network || !mint) return null;
+  const pools = asRecord(await getJson(
+    `${GECKOTERMINAL_API}/networks/${network}/tokens/${encodeURIComponent(mint)}/pools?page=1`,
+  ));
+  const rows = Array.isArray(pools?.data) ? pools!.data as unknown[] : [];
+  const top = asRecord(rows[0]);
+  const address = asRecord(top?.attributes)?.address;
+  const id = top?.id;
+  const pool = typeof address === "string" && address
+    ? address
+    : typeof id === "string" && id
+      ? id.replace(`${network}_`, "")
+      : "";
+  if (!pool) return null;
+  // Daily candles first; a token too young to have three of them still has
+  // hourly ones, and a launch-day runner is exactly that token.
+  for (const timeframe of ["day", "hour"] as const) {
+    const data = asRecord(await getJson(
+      `${GECKOTERMINAL_API}/networks/${network}/pools/${encodeURIComponent(pool)}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`,
+    ));
+    const raw = asRecord(asRecord(data?.data)?.attributes)?.ohlcv_list;
+    // Each row is [timestamp, open, HIGH, low, close, volume].
+    const candles = (Array.isArray(raw) ? raw : []).filter((row): row is number[] =>
+      Array.isArray(row)
+      && row.length >= 5
+      && row.every((value) => typeof value === "number" && Number.isFinite(value)));
+    if (candles.length < 3) continue;
+    const chronological = [...candles].sort((left, right) => left[0] - right[0]);
+    const closes = chronological.map((row) => row[4]).filter((value) => value > 0);
+    const highs = chronological.map((row) => row[2]).filter((value) => value > 0);
+    if (closes.length < 3 || !highs.length) continue;
+    return { peak: Math.max(...highs), last: closes[closes.length - 1], timeframe };
+  }
+  return null;
+}
+
+/**
  * A price series says how far the token is off its high; today's value turns
  * that ratio back into dollars. Using the ratio rather than the raw price
  * keeps the answer correct whatever the token's supply is.
  */
-export function seriesPeakUsd(history: PriceHistory | null, currentUsd: number | null): number | null {
-  if (!history || !currentUsd || !(currentUsd > 0)) return null;
-  if (!(history.peak > 0) || !(history.last > 0)) return null;
-  return currentUsd * (history.peak / history.last);
+export function seriesPeakUsd(series: LaunchSeries | null, currentUsd: number | null): number | null {
+  if (!series || !currentUsd || !(currentUsd > 0)) return null;
+  if (!(series.peak > 0) || !(series.last > 0)) return null;
+  return currentUsd * (series.peak / series.last);
 }
 
 /** Normalized X handle from any x.com/twitter.com URL or bare @handle. */
@@ -523,20 +592,20 @@ const PEAK_ENRICH_LIMIT = 6;
 export async function enrichLaunchPeaks(launches: PriorLaunch[]): Promise<PriorLaunch[]> {
   const enriched = await Promise.all(launches.slice(0, PEAK_ENRICH_LIMIT).map(async (launch) => {
     const coin = launch.chain === "solana" ? await pumpfunCoin(launch.mint).catch(() => null) : null;
-    const history = await fetchPriceHistory(launch.mint, launch.chain).catch(() => null);
+    const series = await fetchLaunchSeries(launch.mint, launch.chain).catch(() => null);
     recordCall(
       "geckoterminal",
       "prior-launch-ohlcv",
       0,
       `keyless · ${launch.symbol || launch.mint.slice(0, 8)}`,
-      history ? "succeeded" : "failed",
+      series ? "succeeded" : "failed",
     );
     // Today's value: dexscreener's fdv when we have it, otherwise the
     // launchpad's. Both are current-value fields, never a peak.
     const currentUsd = launch.fdvUsd ?? coin?.fdvUsd ?? null;
     const peak = resolveLaunchPeak({
       currentUsd,
-      seriesPeakUsd: seriesPeakUsd(history, currentUsd),
+      seriesPeakUsd: seriesPeakUsd(series, currentUsd),
       launchpadAthUsd: coin?.athUsd ?? null,
       ...(coin?.athAt ? { launchpadAthAt: coin.athAt } : {}),
     });
@@ -551,11 +620,20 @@ export async function enrichLaunchPeaks(launches: PriorLaunch[]): Promise<PriorL
 
 export interface OperatorLaunchHistory {
   creatorWallet?: string;
+  /** Newest first on the launchpad clock; undated launches trail the dated ones. */
   launches: PriorLaunch[];
   /** When the launchpad minted the token under audit, on the same clock as PriorLaunch.mintedAt. */
   subjectMintedAt?: string;
-  /** This launch plus every prior one we could tie to the operator. */
+  /** The audited token's own ticker, so the panel can mark it inside the launch order. */
+  subjectSymbol?: string;
+  /** This launch plus every other one we could tie to the operator. */
   totalLaunches: number;
+  /**
+   * Which of the operator's launches the audited one is, 1-based and counted
+   * from their first. See subjectLaunchOrdinal: absent whenever the order is
+   * not established, and then only the count may be published.
+   */
+  subjectLaunchNumber?: number;
   /**
    * Projects the operator publicly claims to have launched but whose token no
    * longer resolves to a live pool. A dead launch leaves no market data, and
@@ -563,6 +641,47 @@ export interface OperatorLaunchHistory {
    * date are the evidence.
    */
   claimedProjects: Array<{ label: string; at?: string; quote: string; url?: string }>;
+}
+
+/**
+ * Newest launch first, on the launchpad's own clock.
+ *
+ * pump.fun's creator index is not ordered and carries no date filter, so a
+ * sibling the operator minted AFTER the audited token arrives mixed in with
+ * the earlier ones. Sorting is what lets the report place the audited token in
+ * the operator's launch order instead of assuming it sits at the end.
+ */
+function byMintDateDesc(launches: PriorLaunch[]): PriorLaunch[] {
+  return [...launches].sort((left, right) => {
+    const leftAt = left.mintedAt ? Date.parse(left.mintedAt) : NaN;
+    const rightAt = right.mintedAt ? Date.parse(right.mintedAt) : NaN;
+    if (!Number.isFinite(leftAt) && !Number.isFinite(rightAt)) return 0;
+    // A launch with no launchpad date cannot be placed, so it trails the dated
+    // ones rather than taking a position the evidence does not support.
+    if (!Number.isFinite(leftAt)) return 1;
+    if (!Number.isFinite(rightAt)) return -1;
+    return rightAt - leftAt;
+  });
+}
+
+/**
+ * Which launch of the operator's the audited token is, 1-based.
+ *
+ * An ordinal is an assertion about ORDER, so it is only made when the order is
+ * established: the audited token needs a launchpad mint date and so does every
+ * launch tied to it. One undated launch could sit on either side of the
+ * subject, and "launch 3 of 5" would then be a guess dressed as a count.
+ */
+export function subjectLaunchOrdinal(launches: PriorLaunch[], subjectMintedAt?: string): number | undefined {
+  const subject = subjectMintedAt ? Date.parse(subjectMintedAt) : NaN;
+  if (!Number.isFinite(subject)) return undefined;
+  let earlier = 0;
+  for (const launch of launches) {
+    const minted = launch.mintedAt ? Date.parse(launch.mintedAt) : NaN;
+    if (!Number.isFinite(minted)) return undefined;
+    if (minted < subject) earlier += 1;
+  }
+  return earlier + 1;
 }
 
 /**
@@ -705,11 +824,17 @@ export async function collectOperatorLaunches(
       });
     }
   }
+  // Ordered only AFTER enrichment, because that hop is where a launch resolved
+  // through dexscreener picks up the launchpad mint date it is sorted on.
+  const enriched = byMintDateDesc(await enrichLaunchPeaks(launches));
+  const ordinal = subjectLaunchOrdinal(enriched, coin?.createdAt);
   return {
     ...(coin?.creator ? { creatorWallet: coin.creator } : {}),
-    launches: await enrichLaunchPeaks(launches),
+    launches: enriched,
     ...(coin?.createdAt ? { subjectMintedAt: coin.createdAt } : {}),
-    totalLaunches: launches.length + 1,
+    ...(subjectSymbol ? { subjectSymbol } : {}),
+    totalLaunches: enriched.length + 1,
+    ...(ordinal ? { subjectLaunchNumber: ordinal } : {}),
     claimedProjects: claimedProjects.slice(0, 10),
   };
 }
@@ -771,6 +896,12 @@ export function describeLaunchSpacing(history: OperatorLaunchHistory): string | 
  * ARGUS cannot see intent, and a token trading far under its launch-day high
  * is the ordinary fate of most launchpad tokens. The number is stated and the
  * reader draws the conclusion.
+ *
+ * The lead sentence says "launch N of M" only when subjectLaunchNumber placed
+ * the audited token, and the panel reads the same field, so the two can never
+ * print different positions. Without it the count still carries the
+ * serial-launch story: M launches tied to one operator is the finding, and
+ * which one of them is being audited is a separate claim that needs dates.
  */
 export function describeLaunchHistory(history: OperatorLaunchHistory): string | null {
   const claimed = history.claimedProjects ?? [];
@@ -787,7 +918,13 @@ export function describeLaunchHistory(history: OperatorLaunchHistory): string | 
       const now = `${launch.symbol || launch.mint.slice(0, 6)} now ${usd(launch.fdvUsd)}`;
       return `${now}${describeDecline(launch)}`;
     });
-    sentences.push(`This is launch ${history.totalLaunches} tied to the same operator. Earlier launches: ${parts.join("; ")}.`);
+    // Never "earlier launches": a sibling the operator minted after this one is
+    // in the same list, and the creator index gives no reason to think the
+    // audited token is the newest thing the wallet has shipped.
+    const lead = history.subjectLaunchNumber
+      ? `This is launch ${history.subjectLaunchNumber} of ${history.totalLaunches} tied to the same operator.`
+      : `There are ${history.totalLaunches} launches tied to the same operator, including this one.`;
+    sentences.push(`${lead} Their other launches: ${parts.join("; ")}.`);
     const spacing = describeLaunchSpacing(history);
     if (spacing) sentences.push(spacing);
   }

@@ -160,7 +160,7 @@ describe("operator launch history reaches the client", () => {
     // The narrative wording belongs to describeLaunchHistory and keeps growing;
     // what must not regress is that a stored report still carries the count and
     // the earlier launch's CURRENT value in prose.
-    expect(finding?.claim).toContain("This is launch 2 tied to the same operator.");
+    expect(finding?.claim).toContain("This is launch 2 of 2 tied to the same operator.");
     expect(finding?.claim).toContain("uAPE now $7.1K");
   });
 
@@ -175,6 +175,15 @@ describe("operator launch history reaches the client", () => {
     // A saved report is JSON on disk; the structure has to survive that.
     const reopened = JSON.parse(JSON.stringify(dossier)) as typeof dossier;
     expect(reopened.operatorLaunches).toEqual(evidence.operatorLaunches);
+    // The panel places the audited token in the operator's launch order from
+    // these two fields. src/data/dossier.ts carries the record by spreading it
+    // rather than rebuilding it field by field, which is the only reason they
+    // reach the client at all, so the round trip is asserted through the raw
+    // JSON where the canonical type does not yet name them.
+    expect(JSON.parse(JSON.stringify(dossier)).operatorLaunches).toMatchObject({
+      subjectSymbol: "LINKR",
+      subjectLaunchNumber: 2,
+    });
   });
 
   it("passes the strict lineage validator, and each prior launch becomes its own provenance row", async () => {
@@ -208,6 +217,79 @@ describe("operator launch history reaches the client", () => {
     expect(evidence.operatorLaunches).toBeUndefined();
     expect(evidence.findings.some((entry) => entry.finding_type === "OperatorLaunchHistory")).toBe(false);
     expect(assembleDossier(evidence, true)).not.toHaveProperty("operatorLaunches");
+  });
+
+  // Every fixture above nulls TWITTERAPI_KEY, so the announcement path never
+  // ran and the whole claims-only half of the stamp was unexercised: replacing
+  // `history.launches.length || history.claimedProjects.length` with
+  // `history.launches.length` kept the suite green while silently dropping an
+  // operator's own dated claims out of the report. This drives the real
+  // followings -> bio-claim -> advanced_search chain instead.
+  it("carries an operator's claimed projects even when no launch resolves to a market", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    const fetchMock = vi.fn((input: unknown) => {
+      const url = String(input);
+      const json = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }));
+      // The subject's own following list, with the dev whose bio claims it.
+      if (url.includes("/twitter/user/followings")) {
+        return json({
+          followings: [{
+            userName: "S0Ldev",
+            name: "S0Ldev",
+            description: "Building @linkrbot | shipping onchain agents",
+          }],
+          has_next_page: false,
+        });
+      }
+      // The operator's own launch posts. Neither project resolves to a pool.
+      if (url.includes("/twitter/tweet/advanced_search")) {
+        return json({
+          tweets: [
+            {
+              text: "Excited to announce the launch of my project @craftadotfun. Crafta builds end-to-end web apps.",
+              createdAt: "Mon Jan 19 00:21:41 +0000 2026",
+              url: "https://x.com/S0Ldev/status/2013044154205442169",
+            },
+            {
+              text: "Splitr is now live. Creators of different tokens should not have to chase devs to get paid out.",
+              createdAt: "Wed Dec 17 21:22:17 +0000 2025",
+              url: "https://x.com/S0Ldev/status/1999354838000000000",
+            },
+          ],
+        });
+      }
+      // The creator index names only the audited token: no same-wallet history.
+      if (url.includes("pump.fun/coins?creator=")) return json([LINKR_COIN]);
+      if (url.includes("pump.fun/coins/")) return json(LINKR_COIN);
+      // dexscreener finds no traded market for either claimed project.
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const evidence = linkrEvidence();
+
+    await runIntake(evidence);
+    const dossier = assembleDossier(evidence, true);
+
+    // The operator really was resolved by the followings + bio-claim cross.
+    expect(evidence.webTeam?.some((member) => member.handle === "@S0Ldev")).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("advanced_search"))).toBe(true);
+
+    expect(evidence.operatorLaunches?.launches).toEqual([]);
+    expect(evidence.operatorLaunches?.claimedProjects.map((project) => project.label))
+      .toEqual(["@craftadotfun", "Splitr"]);
+    expect(evidence.operatorLaunches?.claimedProjects[0]).toMatchObject({
+      quote: expect.stringContaining("launch of my project @craftadotfun"),
+      url: "https://x.com/S0Ldev/status/2013044154205442169",
+    });
+    // No launch resolved, so there is no launch finding to make; the claims are
+    // carried as structure and quoted in the operator's own dated words.
+    expect(evidence.findings.some((entry) => entry.finding_type === "OperatorLaunchHistory")).toBe(false);
+    expect(dossier.operatorLaunches?.claimedProjects).toHaveLength(2);
+    expect(dossier.operatorLaunches?.creatorWallet).toBe(CREATOR);
   });
 
   it("never runs the launchpad path for a token that is not a verified solana launch", async () => {

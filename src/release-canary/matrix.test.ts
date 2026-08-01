@@ -7,10 +7,11 @@ describe("deterministic offline release canary", () => {
 
     expect(summary.mode).toBe("offline-fixtures");
     expect(summary.unexpectedUrls).toEqual([]);
-    // 5 provider fixtures each for the clean, honeypot, and OFAC-sanctioned
+    // 6 provider fixtures each for the clean, honeypot, and OFAC-sanctioned
     // token scans (the sanctioned scan reuses the clean-token fixtures with an
-    // injected screener, so it adds no /api/sanctions request).
-    expect(summary.interceptedFixtureRequests).toBe(15);
+    // injected screener, so it adds no /api/sanctions request). The sixth is the
+    // same-ticker sweep, which runs once per token scan.
+    expect(summary.interceptedFixtureRequests).toBe(18);
     expect(summary.results.map((result) => result.id)).toEqual([
       "person-founder-known-good",
       "person-investor-known-good",

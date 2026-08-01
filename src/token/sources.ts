@@ -442,6 +442,58 @@ export async function goplusSolana(mint: string): Promise<SolanaSecurity | null>
   }
 }
 
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/**
+ * What RugCheck says about a Solana mint's creator. GoPlus returns an empty
+ * `creators` array for every mint tested (LINKR, BONK, WIF, JUP, USDC), so this
+ * is the only keyless source that names a creator at all, and the only free one
+ * that reports the creator's own balance.
+ *
+ * `creator` is RugCheck's own attribution, not a proof of who signed the mint:
+ * on a token that never came off a launchpad it is frequently a mint or update
+ * authority, which for a bridged or DAO token is a program rather than a
+ * person. Callers must present it as an attribution and name the source.
+ */
+export interface RugcheckCreator {
+  creator: string | null;
+  /** Creator holdings as a percent of supply, or null when either side is missing. */
+  creatorPercent: number | null;
+}
+
+/**
+ * Creator holdings as a share of supply. api/holders.ts derives the same ratio
+ * for the Solana cluster panel, so it lives in one place: the report and the
+ * panel can never disagree about how much of the supply the creator kept.
+ */
+export function creatorSupplyPercent(creatorBalance: unknown, supply: unknown): number | null {
+  const balance = Number(creatorBalance);
+  const total = Number(supply);
+  if (!Number.isFinite(balance) || balance < 0) return null;
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const percent = (balance / total) * 100;
+  // A holding cannot exceed the supply it is measured against. An out-of-range
+  // ratio is a bad payload, and reporting it would publish a fabricated number.
+  return percent >= 0 && percent <= 100 ? percent : null;
+}
+
+export async function rugcheckCreator(mint: string, fetchImpl: typeof fetch = fetch): Promise<RugcheckCreator | null> {
+  try {
+    const res = await fetchImpl(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, {
+      signal: AbortSignal.timeout(12_000),
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const d = (await res.json()) as { creator?: unknown; creatorBalance?: unknown; token?: { supply?: unknown } };
+    const creator = typeof d?.creator === "string" && SOLANA_ADDRESS.test(d.creator.trim()) ? d.creator.trim() : null;
+    // With no creator there is nobody for a balance to belong to, and a bare
+    // zero would read as "the creator sold out" rather than "not measured".
+    return { creator, creatorPercent: creator ? creatorSupplyPercent(d?.creatorBalance, d?.token?.supply) : null };
+  } catch {
+    return null;
+  }
+}
+
 export async function goplus(chainId: string, address: string): Promise<GoPlusSecurity | null> {
   const once = async (): Promise<GoPlusSecurity | null> => {
     try {

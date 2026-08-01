@@ -9,6 +9,7 @@ import { traceOperator } from "./operatorTrace";
 const root = "0x1111111111111111111111111111111111111111";
 const anonFunder = "0x2222222222222222222222222222222222222222";
 const exchange = "0x3333333333333333333333333333333333333333";
+const higherFunder = "0x5555555555555555555555555555555555555555";
 
 const opts = { chain: "ethereum", panelCostToken: "signed-panel-capability", checkLiveness: false, record: false };
 
@@ -81,6 +82,82 @@ describe("operator trace verdict", () => {
     // Not a clean bill, and not an accusation either.
     expect(cluster?.verdict.line).not.toContain("Isolated and traceable");
     expect(cluster?.verdict.line).not.toContain("no sibling launches");
+  });
+
+  // The sweep of the known hub can finish while the walk UP from it never runs.
+  // The wallet above the hub is then never discovered, so it is never swept, and
+  // the cousins it may have seeded are unknown.
+  it("reports a funding trail we stopped walking as unknown, not as isolated", async () => {
+    stubRoutes([
+      {
+        match: `evm-deployer?wallet=${root}`,
+        body: {
+          available: true,
+          deployments: 1,
+          funder: { address: anonFunder, label: null, kind: "wallet" },
+        },
+      },
+      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, seededCount: 0, seededDeployers: [] } },
+      {
+        match: `evm-deployer?wallet=${anonFunder}`,
+        body: { available: true, funder: { address: higherFunder, label: null, kind: "wallet" } },
+      },
+    ]);
+
+    // One trace call covers the root, leaving the hub's own funder untraced.
+    const cluster = await traceOperator(root, { ...opts, maxTraces: 1 }, () => {});
+
+    expect(cluster?.stats.sweeps).toBe(1);
+    expect(cluster?.verdict.tone).toBe("neutral");
+    expect(cluster?.verdict.line).toContain("not followed to its end");
+    expect(cluster?.verdict.line).toContain("neither found nor ruled out");
+    expect(cluster?.verdict.line).not.toContain("Isolated and traceable");
+    expect(cluster?.verdict.line).not.toContain("no serial-launch cluster");
+  });
+
+  // Same evidence state, reported by the server instead of hit locally: the
+  // deployer route walked up as far as its own budget allowed and said so.
+  it("treats a server-truncated trail as unfinished, whatever the client budget allowed", async () => {
+    stubRoutes([
+      {
+        match: `evm-deployer?wallet=${root}`,
+        body: {
+          available: true,
+          deployments: 1,
+          funder: { address: anonFunder, label: null, kind: "wallet" },
+          trailTruncatedAt: anonFunder,
+        },
+      },
+      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, seededCount: 0, seededDeployers: [] } },
+      { match: `evm-deployer?wallet=${anonFunder}`, body: { available: true } },
+    ]);
+
+    const cluster = await traceOperator(root, opts, () => {});
+
+    expect(cluster?.stats.sweeps).toBe(1);
+    expect(cluster?.budgetExhausted).toBe(false);
+    expect(cluster?.verdict.tone).toBe("neutral");
+    expect(cluster?.verdict.line).toContain("neither found nor ruled out");
+    expect(cluster?.verdict.line).not.toContain("no serial-launch cluster");
+  });
+
+  // The root's age is a fact about the launch, so it is measured at the mint. A
+  // funder upstream did not mint this token, so that instant says nothing about it.
+  it("asks for the root deployer's age at the mint, and only the root's", async () => {
+    const fetchMock = stubRoutes([
+      {
+        match: `evm-deployer?wallet=${root}`,
+        body: { available: true, deployments: 1, funder: { address: anonFunder, label: null, kind: "wallet" } },
+      },
+      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, seededCount: 0, seededDeployers: [] } },
+      { match: `evm-deployer?wallet=${anonFunder}`, body: { available: true } },
+    ]);
+
+    await traceOperator(root, { ...opts, mintedAt: 1785450548 }, () => {});
+
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.find((u) => u.includes(`wallet=${root}`))).toContain("mintedAt=1785450548");
+    expect(urls.find((u) => u.includes(`wallet=${anonFunder}`) && u.includes("deployer"))).not.toContain("mintedAt");
   });
 
   it("reports an abandoned sweep queue as unknown rather than clean", async () => {

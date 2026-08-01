@@ -28,7 +28,7 @@ function NetIcon({ live }: { live?: boolean }) {
   );
 }
 
-export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToken, record = true }: { deployer?: string | null; chain?: string; label?: string; onAudit?: (q: string) => void; panelCostToken?: string; record?: boolean }) {
+export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToken, record = true, roleLabel }: { deployer?: string | null; chain?: string; label?: string; onAudit?: (q: string) => void; panelCostToken?: string; record?: boolean; roleLabel?: string }) {
   const [cluster, setCluster] = useState<OperatorCluster | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(false);
@@ -160,9 +160,9 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
 
       {label && <ArkhamGraphBridge subject={label} labels={arkham} />}
 
-      {/* Funding spine: where the root deployer's money ultimately came from. */}
+      {/* Funding spine: where the root wallet's money ultimately came from. */}
       <div className="mono mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-dim">
-        <span className="rounded border border-line px-1.5 py-0.5 text-ink">{label || "deployer"} {nameOf(cluster.rootDeployer)}</span>
+        <span className="rounded border border-line px-1.5 py-0.5 text-ink">{label || (roleLabel ?? "creator or authority").toLowerCase()} {nameOf(cluster.rootDeployer)}</span>
         {hub && hub !== cluster.rootDeployer && (<><span className="text-ink-faint">← funded via</span><a href={`${acct(hub)}`} target="_blank" rel="noreferrer" className="tint-var rounded border px-1.5 py-0.5 hover:underline" style={{ "--tint": tone } as React.CSSProperties}>hub {nameOf(hub)}</a></>)}
         {origin && (<><span className="text-ink-faint">←</span><span className="rounded border border-line px-1.5 py-0.5" style={{ color: origin.kind === "cex" ? "var(--color-pass)" : "var(--color-ink-dim)" }}>{origin.kind === "cex" ? origin.label ?? "CEX" : `anon ${shortAddr(origin.address)}`}</span></>)}
       </div>

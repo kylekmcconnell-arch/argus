@@ -81,14 +81,24 @@ async function firstTxSigner(url: string, mint: string): Promise<string | null> 
 // type and gives a parsed feePayer, so we can reach the mint's CREATE / TOKEN_MINT
 // tx directly without paginating the whole busy history. The feePayer of that tx
 // is the dev — the reliable pump.fun deployer source.
-async function fromEnhancedCreate(key: string, mint: string): Promise<string | null> {
+const ENHANCED_TX_LIMIT = 100;
+
+export async function fromEnhancedCreate(key: string, mint: string): Promise<string | null> {
   for (const type of ["CREATE", "TOKEN_MINT"]) {
     try {
-      const r = await fetch(`https://api.helius.xyz/v0/addresses/${mint}/transactions?api-key=${key}&type=${type}&limit=100`, { signal: AbortSignal.timeout(12000) });
+      const r = await fetch(`https://api.helius.xyz/v0/addresses/${mint}/transactions?api-key=${key}&type=${type}&limit=${ENHANCED_TX_LIMIT}`, { signal: AbortSignal.timeout(12000) });
       if (!r.ok) continue;
       const txs = await r.json();
       if (!Array.isArray(txs) || !txs.length) continue;
-      // the creation is the OLDEST matching tx; the batch is newest-first
+      // The oldest row of a FULL batch is not the creation. No cursor is sent, so
+      // a full page only proves there is a window, not that its far end is the
+      // beginning: on a mint that is still minted into (a stablecoin, a staking
+      // token, anything with emissions) that row is a recent operator. Callers
+      // publish this answer as the wallet that SIGNED the creation, so a short
+      // batch, which is proof every matching transaction was seen, is the only
+      // shape allowed to make that claim. Otherwise fall through to the bounded
+      // oldest-signature walk, which returns null rather than guess.
+      if (txs.length >= ENHANCED_TX_LIMIT) continue;
       const create = txs[txs.length - 1];
       const payer = create?.feePayer;
       if (ok(payer)) return payer;

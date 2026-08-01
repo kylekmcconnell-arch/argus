@@ -5,8 +5,9 @@
 // withdrawal (KYC'd, traceable by subpoena) or another wallet. When several
 // deployers trace back to the SAME funding wallet, that funder is a serial-launch
 // hub, and that pattern is invisible in any single token's page. This endpoint
-// pulls the trail: who funded the deployer, how old the wallet is, and how many
-// tokens it has minted (a one-shot deployer vs a serial factory).
+// pulls the trail: who funded the deployer, how much SOL seeded it, how old the
+// wallet was WHEN IT MINTED, and how many tokens it has minted (a one-shot
+// deployer vs a serial factory).
 //
 // Solana only (Helius RPC). Gated on HELIUS_API_KEY. ~a few RPC calls per wallet.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
@@ -78,6 +79,12 @@ interface Hop { from: string; to: string; label: string | null; kind: "cex" | "w
 
 interface Account { address: string; label: string | null; kind: "cex" | "wallet" }
 
+// The first SOL that landed in the deployer: who paid, how much, and when. The
+// amount and the timestamp are the difference between "funded by Coinbase" and a
+// fact a reader can act on, and the timestamp is what anchors the wallet's age to
+// the launch instead of to today.
+interface SeedFunding { source: string; lamports: number | null; fundedAt: number | null }
+
 // Follow the money BACK hop by hop: deployer <- funder <- funder's funder <- ...
 // until the trail reaches a CEX (the KYC'd account the SOL was withdrawn from),
 // runs dry, loops, or hits the hop/time budget. `fundedFrom` is therefore the
@@ -86,60 +93,75 @@ interface Account { address: string; label: string | null; kind: "cex" | "wallet
 // Intermediary hops use shallow pagination to stay fast; a deep, multi-hop chain
 // through fresh wallets is the classic launder-before-launch pattern, and a CEX
 // origin is where a subpoena would actually land.
-async function traceChain(url: string, deployer: string, maxHops: number, deadline: number, usage: ProviderUsage): Promise<{ chain: Hop[]; fundedFrom: Account | null; truncatedAt: string | null }> {
+async function traceChain(url: string, deployer: string, maxHops: number, deadline: number, usage: ProviderUsage): Promise<{ chain: Hop[]; fundedFrom: Account | null; truncatedAt: string | null; unresolvedAt: string | null; seed: SeedFunding | null }> {
   const chain: Hop[] = [];
   const seen = new Set<string>([deployer]);
   let current = deployer;
+  let seed: SeedFunding | null = null;
   for (let hop = 0; hop < maxHops; hop++) {
-    if (Date.now() > deadline) return { chain, fundedFrom: chain.length ? { address: current, label: CEX[current] ?? null, kind: CEX[current] ? "cex" : "wallet" } : null, truncatedAt: current };
+    if (Date.now() > deadline) return { chain, fundedFrom: chain.length ? { address: current, label: CEX[current] ?? null, kind: CEX[current] ? "cex" : "wallet" } : null, truncatedAt: current, unresolvedAt: current, seed };
     const { oldestSigs, truncated } = await oldestActivity(url, current, usage, hop === 0 ? MAX_SIG_PAGES : 3);
-    const funder = oldestSigs.length ? await inboundFunder(url, current, oldestSigs, usage) : null;
-    if (!funder) {
+    const funding = oldestSigs.length ? await inboundFunding(url, current, oldestSigs, usage) : null;
+    // Only the first hop's seed describes THIS deployer; upstream hops describe
+    // the funder's own funding, which is a different wallet's story.
+    if (hop === 0) seed = funding;
+    if (!funding) {
       const originAddr = chain.length ? current : null;
-      return { chain, fundedFrom: originAddr ? { address: originAddr, label: CEX[originAddr] ?? null, kind: CEX[originAddr] ? "cex" : "wallet" } : null, truncatedAt: truncated ? current : null };
+      return { chain, fundedFrom: originAddr ? { address: originAddr, label: CEX[originAddr] ?? null, kind: CEX[originAddr] ? "cex" : "wallet" } : null, truncatedAt: truncated ? current : null, unresolvedAt: truncated ? current : null, seed };
     }
+    const funder = funding.source;
     const label = CEX[funder] ?? null;
     const kind: "cex" | "wallet" = label ? "cex" : "wallet";
     chain.push({ from: current, to: funder, label, kind });
-    if (label) return { chain, fundedFrom: { address: funder, label, kind }, truncatedAt: null }; // reached a CEX
-    if (seen.has(funder)) return { chain, fundedFrom: { address: funder, label: null, kind: "wallet" }, truncatedAt: null }; // cycle
+    if (label) return { chain, fundedFrom: { address: funder, label, kind }, truncatedAt: null, unresolvedAt: null, seed }; // reached a CEX
+    if (seen.has(funder)) return { chain, fundedFrom: { address: funder, label: null, kind: "wallet" }, truncatedAt: null, unresolvedAt: null, seed }; // cycle
     seen.add(funder);
     current = funder;
   }
   const last = chain[chain.length - 1];
-  return { chain, fundedFrom: last ? { address: last.to, label: last.label, kind: last.kind } : null, truncatedAt: null };
+  // The hop budget ran out with the trail still live. `truncatedAt` stays null
+  // because that field drives the "goes cold at a high-activity wallet" copy and
+  // this wallet is not that; `unresolvedAt` records the honest fact that the walk
+  // stopped where it did, so no consumer can read this as a finished trail.
+  return { chain, fundedFrom: last ? { address: last.to, label: last.label, kind: last.kind } : null, truncatedAt: null, unresolvedAt: current, seed };
 }
 
 // Strictly INBOUND: matches only instructions where the wallet is the RECEIVING
-// side and returns the account that paid. An instruction where the wallet is the
-// source is money leaving, which this trace does not model, so it is skipped
-// rather than reported in the opposite direction.
-export function inboundFunderFromInstructions(instrs: any[], wallet: string): string | null {
+// side and returns the account that paid plus the amount it paid. An instruction
+// where the wallet is the source is money leaving, which this trace does not
+// model, so it is skipped rather than reported in the opposite direction.
+export function inboundFundingFromInstructions(instrs: any[], wallet: string): { source: string; lamports: number | null } | null {
   for (const ix of instrs ?? []) {
     const p = ix.parsed;
     if (!p?.info) continue;
+    const lamports = typeof p.info.lamports === "number" ? p.info.lamports : null;
     // plain SOL transfer to the wallet
-    if (p.type === "transfer" && p.info.destination === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
+    if (p.type === "transfer" && p.info.destination === wallet && p.info.source && p.info.source !== wallet) return { source: p.info.source, lamports };
     // wallet created + funded by another account (rent-funding the new account)
-    if ((p.type === "createAccount" || p.type === "createAccountWithSeed") && p.info.newAccount === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
+    if ((p.type === "createAccount" || p.type === "createAccountWithSeed") && p.info.newAccount === wallet && p.info.source && p.info.source !== wallet) return { source: p.info.source, lamports };
   }
   return null;
 }
 
 // Find the account that first sent SOL INTO the wallet, scanning the oldest few
-// transactions (oldest first) and recognising the common funding shapes.
-async function inboundFunder(url: string, wallet: string, sigs: string[], usage: ProviderUsage): Promise<string | null> {
+// transactions (oldest first) and recognising the common funding shapes. Returns
+// the seed amount and the block time of the funding transaction with it, because
+// "2.0 SOL on 2026-07-30 20:54 UTC" is checkable and "funded by Coinbase" is not.
+async function inboundFunding(url: string, wallet: string, sigs: string[], usage: ProviderUsage): Promise<SeedFunding | null> {
   for (const sig of sigs) {
     const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
     if (!tx) continue;
-    const direct = inboundFunderFromInstructions(tx.transaction?.message?.instructions, wallet);
-    if (direct) return direct;
+    const fundedAt = typeof tx.blockTime === "number" ? tx.blockTime : null;
+    const direct = inboundFundingFromInstructions(tx.transaction?.message?.instructions, wallet);
+    if (direct) return { ...direct, fundedAt };
     for (const inner of tx.meta?.innerInstructions ?? []) {
-      const s = inboundFunderFromInstructions(inner.instructions, wallet);
-      if (s) return s;
+      const s = inboundFundingFromInstructions(inner.instructions, wallet);
+      if (s) return { ...s, fundedAt };
     }
     // Balance-delta fallback: if the wallet gained SOL in this tx, the account
-    // that lost the most SOL is the funder. Skip system/vote programs.
+    // that lost the most SOL is the funder. Skip system/vote programs. The amount
+    // reported is what the WALLET gained, not what the payer lost: the payer's
+    // drop also carries the fee, and the credited amount is the checkable one.
     const keys: string[] = (tx.transaction?.message?.accountKeys ?? []).map((k: any) => (typeof k === "string" ? k : k.pubkey));
     const pre: number[] = tx.meta?.preBalances ?? [];
     const post: number[] = tx.meta?.postBalances ?? [];
@@ -151,7 +173,7 @@ async function inboundFunder(url: string, wallet: string, sigs: string[], usage:
         const drop = (pre[i] ?? 0) - (post[i] ?? 0);
         if (drop > bestDrop && drop > 1_000_000) { bestDrop = drop; best = i; } // > ~0.001 SOL
       }
-      if (best >= 0) return keys[best];
+      if (best >= 0) return { source: keys[best], lamports: (post[wi] ?? 0) - (pre[wi] ?? 0), fundedAt };
     }
   }
   return null;
@@ -185,6 +207,112 @@ async function tokensCreated(key: string, wallet: string, usage: ProviderUsage):
   }
 }
 
+// How old the wallet was AT THE MINT, not how old it is today. Age against
+// Date.now() is not a fact about the launch: the same frozen report reads "2 days"
+// this week and "30 days" next month, and the number a reader acts on silently
+// changes under them. The mint instant is the fixed reference; when the caller
+// cannot supply one the age is still measured, but stamped `scan` and dated so
+// nothing reads as a launch-time fact.
+export interface WalletAgeAtLaunch {
+  basis: "mint" | "scan";
+  asOf: number;              // unix seconds the age is measured TO
+  ageSeconds: number | null;
+  ageMinutes: number | null;
+  ageDays: number | null;
+}
+
+export function walletAgeAtLaunch(input: { firstActivityAt: number | null; mintedAt: number | null; nowSeconds: number }): WalletAgeAtLaunch {
+  const { firstActivityAt, mintedAt, nowSeconds } = input;
+  const basis = mintedAt != null ? "mint" : "scan";
+  const asOf = mintedAt ?? nowSeconds;
+  const span = firstActivityAt == null ? null : asOf - firstActivityAt;
+  // A mint that predates the oldest signature we reached means the wallet's real
+  // first activity is outside our pagination window, so its age at the mint is
+  // unknown. A negative span reported as an age would invent the one number the
+  // reader is here for.
+  const ageSeconds = span == null || span < 0 ? null : span;
+  return {
+    basis,
+    asOf,
+    ageSeconds,
+    // Age floors: a wallet 20 hours old is 0 days old, not 1.
+    ageMinutes: ageSeconds == null ? null : Math.floor(ageSeconds / 60),
+    ageDays: ageSeconds == null ? null : Math.floor(ageSeconds / 86400),
+  };
+}
+
+// Accepts unix seconds, unix milliseconds, or an ISO timestamp, and refuses
+// anything outside plausible Solana history so a malformed caller value can never
+// masquerade as a launch instant.
+const MINT_TIME_FLOOR = 1_577_836_800; // 2020-01-01, before any Solana SPL launch ARGUS audits
+export function parseMintedAt(raw: unknown, nowSeconds: number): number | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const value = raw.trim();
+  let seconds: number | null = null;
+  if (/^\d+$/.test(value)) {
+    const n = Number(value);
+    seconds = n > 1e11 ? Math.floor(n / 1000) : n; // millisecond epochs are common in JS callers
+  } else {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) seconds = Math.floor(parsed / 1000);
+  }
+  if (seconds == null || !Number.isFinite(seconds)) return null;
+  if (seconds < MINT_TIME_FLOOR || seconds > nowSeconds + 300) return null; // 300s of clock skew
+  return seconds;
+}
+
+export function formatSol(lamports: number): string {
+  const sol = lamports / 1_000_000_000;
+  if (sol >= 100) return `${Math.round(sol)} SOL`;
+  if (sol >= 0.01) {
+    const fixed = sol.toFixed(2);
+    return `${fixed.endsWith("0") ? fixed.slice(0, -1) : fixed} SOL`;
+  }
+  return `${sol.toFixed(4)} SOL`;
+}
+
+function utcStamp(unixSeconds: number): string {
+  const iso = new Date(unixSeconds * 1000).toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+}
+
+// Elapsed whole units, floored, so the sentence and the walletAgeMinutes field
+// can never disagree by a rounding step in the same card.
+function humanSpan(seconds: number): string {
+  if (seconds < 60) return "less than a minute";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 120) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours < 48) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const days = Math.floor(seconds / 86400);
+  return `${days} day${days === 1 ? "" : "s"}`;
+}
+
+// The seed fact, stated flat: when the wallet was first funded, with how much,
+// by whom, and how long after that it minted.
+//
+// A Coinbase withdrawal 95 minutes before a launch is ALSO the most common
+// legitimate first-time-launcher pattern, so this sentence carries no adjective,
+// no comparison and no tone. It reports; the reader judges. Anything here that
+// reads as an accusation is a bug, and the copy test enforces it.
+export function launchOriginNote(input: {
+  funder: Account | null;
+  seed: { lamports: number | null; fundedAt: number | null } | null;
+  mintedAt: number | null;
+}): string {
+  const { funder, seed, mintedAt } = input;
+  if (!funder || !seed?.fundedAt) return "";
+  const who = funder.kind === "cex" && funder.label ? `a KYC'd ${funder.label} account` : `${funder.address.slice(0, 6)}…${funder.address.slice(-4)}`;
+  const amount = typeof seed.lamports === "number" && seed.lamports > 0 ? ` with ${formatSol(seed.lamports)}` : "";
+  const first = `Wallet first funded ${utcStamp(seed.fundedAt)}${amount} from ${who}.`;
+  if (mintedAt == null) return first;
+  const gap = mintedAt - seed.fundedAt;
+  // A mint before the funding we matched means we matched the wrong transaction
+  // or the caller's mint time is wrong; either way there is no gap to state.
+  if (gap < 0) return first;
+  return `${first} It minted this token ${humanSpan(gap)} later.`;
+}
+
 // The user-facing sentence for the trail. Every branch describes an UPSTREAM
 // origin: the deployer wallet was FUNDED FROM the account we traced back to.
 // Nothing in this endpoint follows a lamport forward, so no branch may say the
@@ -198,8 +326,11 @@ export function fundingTrailNote(input: {
   anonHops: number;
   truncatedAt: string | null;
   walletTooActive: boolean;
+  // True when launchOriginNote already stated the dated, amounted seed from this
+  // same direct funder. The generic restatement then adds words, not evidence.
+  seedStated?: boolean;
 }): string {
-  const { funder, fundedFrom, hops, anonHops, truncatedAt, walletTooActive } = input;
+  const { funder, fundedFrom, hops, anonHops, truncatedAt, walletTooActive, seedStated } = input;
   if (!funder) {
     return walletTooActive
       ? "Wallet too active to trace the original funder within limits."
@@ -208,7 +339,11 @@ export function fundingTrailNote(input: {
   const hopCount = `${hops} hop${hops === 1 ? "" : "s"}`;
   if (fundedFrom?.kind === "cex") {
     const via = anonHops > 0 ? ` through ${anonHops} intermediary wallet${anonHops === 1 ? "" : "s"}` : "";
-    return `Funding trail: deployer ${"← anon ".repeat(Math.max(0, anonHops))}← ${fundedFrom.label}. The deployer wallet was funded from a KYC'd ${fundedFrom.label} account${via}.`;
+    const arrows = `Funding trail: deployer ${"← anon ".repeat(Math.max(0, anonHops))}← ${fundedFrom.label}.`;
+    // With intermediaries the hop count is a fact the seed sentence never made,
+    // so it is still worth its own clause.
+    if (seedStated && anonHops === 0) return arrows;
+    return `${arrows} The deployer wallet was funded from a KYC'd ${fundedFrom.label} account${via}.`;
   }
   if (truncatedAt) {
     return `Funding trail runs ${hopCount} back, then goes cold at a high-activity wallet (${truncatedAt.slice(0, 6)}…). No KYC'd exchange origin reached.`;
@@ -228,6 +363,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const key = process.env.HELIUS_API_KEY;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  // Optional: the block time of the mint this wallet is being investigated FOR.
+  // With it the wallet's age is a fixed fact about the launch; without it the
+  // response says so in walletAgeBasis rather than passing today's number off as
+  // a launch-time one.
+  const mintedAt = parseMintedAt(req.query.mintedAt, nowSeconds);
   const wallet = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
   if (!wallet || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet)) {
     res.status(400).json({ error: "valid Solana wallet required" });
@@ -247,13 +388,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       oldestActivity(url, wallet, usage).then((a) => ({ firstBlockTime: a.firstBlockTime, truncated: a.truncated })),
       traceChain(url, wallet, 4, deadline, usage),
     ]);
-    const { chain, fundedFrom, truncatedAt } = traced;
-    const walletAgeDays = ageInfo.firstBlockTime ? Math.max(0, Math.round((Date.now() / 1000 - ageInfo.firstBlockTime) / 86400)) : null;
+    const { chain, fundedFrom, truncatedAt, unresolvedAt, seed } = traced;
     const funder = chain[0] ? { address: chain[0].to, label: chain[0].label, kind: chain[0].kind } : null;
     const fundedFromCex = fundedFrom?.kind === "cex";
     const anonHops = chain.filter((h) => h.kind === "wallet").length;
+    const age = walletAgeAtLaunch({ firstActivityAt: ageInfo.firstBlockTime, mintedAt, nowSeconds });
 
-    const note = fundingTrailNote({ funder, fundedFrom, hops: chain.length, anonHops, truncatedAt, walletTooActive: ageInfo.truncated });
+    const originNote = launchOriginNote({ funder, seed, mintedAt });
+    const trailNote = fundingTrailNote({ funder, fundedFrom, hops: chain.length, anonHops, truncatedAt, walletTooActive: ageInfo.truncated, seedStated: !!originNote });
+    const note = [originNote, trailNote].filter(Boolean).join(" ");
 
     res.status(200).json({
       wallet,
@@ -267,13 +410,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       origin: fundedFrom,
       terminatesAtCex: fundedFromCex,
       hops: chain.length,
+      // Where the upward walk stopped without resolving an origin (pagination went
+      // cold, the hop budget ran out, or the deadline hit). A client that treats a
+      // truncated trail as a finished one publishes a clean bill for a check that
+      // never completed.
+      trailTruncatedAt: unresolvedAt,
       tokensCreated: created,
-      // Counts mints in the DEPLOYER's own recent transactions (see tokensCreated),
-      // not launches it bankrolled. A floor, not a total: the enhanced-tx window is
-      // the last 100 transactions, and an unavailable count reads as false here.
-      serialDeployer: typeof created === "number" && created >= 5,
-      walletAgeDays,
+      // Verified: `created` counts DISTINCT mints inside the DEPLOYER's OWN recent
+      // transactions (tokensCreated above), so this flag is about launches this
+      // wallet minted itself, never launches it bankrolled. That second question
+      // is the funder-hub one and lives in api/funder.ts, so the flag is named for
+      // what it measures. A floor, not a total: the enhanced-tx window is the last
+      // 100 transactions. Null when the count is unavailable, because an absent
+      // check is not a "no".
+      serialMinter: typeof created === "number" ? created >= 5 : null,
+      // Legacy wire name for serialMinter, read by src/lib/investigation.ts and
+      // three report components. It stays until that rename lands with them.
+      serialDeployer: typeof created === "number" ? created >= 5 : null,
+      // Age AT THE MINT when the caller supplied one, otherwise as of this scan.
+      // walletAgeBasis says which, and walletAgeAsOf dates it, so a number pulled
+      // into a frozen report can never drift into a different claim.
+      walletAgeDays: age.ageDays,
+      walletAgeMinutes: age.ageMinutes,
+      walletAgeBasis: age.basis,
+      walletAgeAsOf: new Date(age.asOf * 1000).toISOString(),
+      mintedAt: mintedAt ? new Date(mintedAt * 1000).toISOString() : null,
+      seedFunding: seed
+        ? {
+            from: seed.source,
+            label: CEX[seed.source] ?? null,
+            lamports: seed.lamports,
+            sol: typeof seed.lamports === "number" ? seed.lamports / 1_000_000_000 : null,
+            at: seed.fundedAt ? new Date(seed.fundedAt * 1000).toISOString() : null,
+          }
+        : null,
       firstActivity: ageInfo.firstBlockTime ? new Date(ageInfo.firstBlockTime * 1000).toISOString().slice(0, 10) : null,
+      firstActivityAt: ageInfo.firstBlockTime ?? null,
       truncated: ageInfo.truncated,
       note,
     });

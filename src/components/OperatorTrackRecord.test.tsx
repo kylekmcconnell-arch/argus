@@ -111,7 +111,11 @@ const history = (overrides: Partial<OperatorLaunchHistoryView> = {}): OperatorLa
   creatorWallet: CREATOR_WALLET,
   launches: [uape],
   subjectMintedAt: SUBJECT_MINTED_AT,
+  subjectSymbol: "LINKR",
   totalLaunches: 2,
+  // Both mints are dated in the recording, so the collector could establish the
+  // order: LINKR really is the newer of the two.
+  subjectLaunchNumber: 2,
   claimedProjects: [],
   ...overrides,
 });
@@ -151,7 +155,9 @@ describe("OperatorTrackRecord", () => {
 
   it("gives a resolved prior launch its own row: symbol, mint date, value now, and how it was tied", () => {
     render({ history: history(), operatorHandle: "S0Ldev" });
-    const row = container.querySelector("ol li");
+    // Newest first, and LINKR is launch 2 of 2, so the audited token leads and
+    // the prior launch is the row under it.
+    const row = container.querySelectorAll("ol li")[1];
     expect(row).not.toBeNull();
     expect(row?.textContent).toContain("uAPE");
     expect(row?.textContent).toContain("minted May 2026");
@@ -175,6 +181,9 @@ describe("OperatorTrackRecord", () => {
     expect(container.textContent).toContain("The two dated launches are 11 weeks apart.");
     // fdv 7082 against ath_market_cap 288970.58, peaked the day it minted.
     expect(container.textContent).toContain("down 97.5% from its $289K peak in May 2026");
+    // A peak is two sources agreeing, so the traded series is named alongside
+    // the launchpad rather than left implied by "dexscreener markets".
+    expect(container.textContent).toContain("GeckoTerminal trade history");
   });
 
   it("says nothing about a peak the sources could not vet, and never prices a missing market", () => {
@@ -183,8 +192,9 @@ describe("OperatorTrackRecord", () => {
       operatorHandle: "S0Ldev",
     });
     // Not in a row, and not in the footer either: a panel with no vetted peak
-    // never uses the word.
+    // never uses the word, and never cites the series it did not publish from.
     expect(container.textContent).not.toContain("peak");
+    expect(container.textContent).not.toContain("GeckoTerminal");
     expect(container.textContent).toContain("Each launch's value now is what the market says today.");
 
     render({
@@ -231,7 +241,7 @@ describe("OperatorTrackRecord", () => {
 
   it("reports a claim as a claim and never as an outcome", () => {
     render({
-      history: history({ launches: [uape, walletSibling], totalLaunches: 3, claimedProjects }),
+      history: history({ launches: [uape, walletSibling], totalLaunches: 3, subjectLaunchNumber: 3, claimedProjects }),
       operatorHandle: "S0Ldev",
       creatorWallet: CREATOR_WALLET,
     });
@@ -282,20 +292,81 @@ describe("the interval between launches", () => {
   });
 
   it("stays silent unless exactly two launches carry a launchpad date", () => {
+    // An undated launch also costs the ordinal, so the count stands alone.
     render({
-      history: history({ launches: [{ ...uape, mintedAt: undefined }] }),
+      history: history({ launches: [{ ...uape, mintedAt: undefined }], subjectLaunchNumber: undefined }),
       operatorHandle: "S0Ldev",
     });
-    expect(container.textContent).toContain("Launch 2 of 2 traced to this operator.");
+    expect(container.textContent).toContain("2 launches traced to this operator, including this one.");
     expect(container.textContent).not.toContain("apart");
 
     // Three dates is two intervals, which is a rate this panel will not claim.
     render({
-      history: history({ launches: [uape, walletSibling], totalLaunches: 3 }),
+      history: history({ launches: [uape, walletSibling], totalLaunches: 3, subjectLaunchNumber: 3 }),
       operatorHandle: "S0Ldev",
     });
     expect(container.textContent).toContain("Launch 3 of 3 traced to this operator.");
     expect(container.textContent).not.toContain("apart");
+  });
+});
+
+/**
+ * pump.fun's creator index carries no date filter, so a token the operator
+ * minted AFTER the audited one arrives in the same list. "Launch N of N" then
+ * tells the reader this is the operator's most recent launch, which is the one
+ * thing that row disproves.
+ */
+describe("the audited token's place in the launch order", () => {
+  const newerSibling = { ...walletSibling, mintedAt: "2026-08-14T00:00:00.000Z" };
+
+  it("places the audited token instead of assuming it came last", () => {
+    render({
+      history: history({
+        launches: [newerSibling, uape],
+        totalLaunches: 3,
+        subjectLaunchNumber: 2,
+      }),
+      operatorHandle: "S0Ldev",
+    });
+
+    expect(container.textContent).toContain("Launch 2 of 3 traced to this operator.");
+    expect(container.textContent).not.toContain("Launch 3 of 3");
+    const rows = [...container.querySelectorAll("ol li")].map((row) => row.textContent ?? "");
+    expect(rows).toHaveLength(3);
+    // Newest first: the sibling minted after this token, then this token, then
+    // the launch that really was earlier.
+    expect(rows[0]).toContain("PRIOR");
+    expect(rows[1]).toContain("LINKR");
+    expect(rows[1]).toContain("the token under audit");
+    expect(rows[1]).toContain("minted Jul 2026");
+    expect(rows[2]).toContain("uAPE");
+    // The audited token is marked, not priced: this panel never had its value.
+    expect(rows[1]).not.toContain("value now");
+  });
+
+  it("publishes only the count when the launch order was never established", () => {
+    render({
+      history: history({
+        launches: [uape, walletSibling],
+        totalLaunches: 3,
+        subjectLaunchNumber: undefined,
+      }),
+      operatorHandle: "S0Ldev",
+    });
+
+    expect(container.textContent).toContain("3 launches traced to this operator, including this one.");
+    expect(container.textContent).not.toMatch(/Launch \d+ of \d+/);
+    // No position claimed means no row claiming a position either.
+    expect(container.querySelectorAll("ol li")).toHaveLength(2);
+    expect(container.textContent).not.toContain("the token under audit");
+  });
+
+  it("marks the audited token first when it really is the operator's latest", () => {
+    render({ history: history(), operatorHandle: "S0Ldev" });
+    const rows = [...container.querySelectorAll("ol li")].map((row) => row.textContent ?? "");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain("the token under audit");
+    expect(rows[1]).toContain("uAPE");
   });
 });
 

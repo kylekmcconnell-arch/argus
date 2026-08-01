@@ -57,10 +57,20 @@ export interface OperatorClaimedProject {
 
 export interface OperatorLaunchHistoryView {
   creatorWallet?: string;
+  /** Newest first on the launchpad clock; undated launches trail the dated ones. */
   launches: OperatorPriorLaunch[];
   /** When the launchpad minted the token under audit, on the same clock as mintedAt. */
   subjectMintedAt?: string;
+  /** The audited token's own ticker, for its row inside the launch order. */
+  subjectSymbol?: string;
   totalLaunches: number;
+  /**
+   * Which of the operator's launches the audited one is, 1-based. The server
+   * sets it only when every launch carries a mint date, because the launchpad's
+   * creator index is unordered and a sibling minted AFTER this token lands in
+   * the same list. Absent, the panel publishes the count and no position.
+   */
+  subjectLaunchNumber?: number;
   claimedProjects: OperatorClaimedProject[];
 }
 
@@ -112,6 +122,82 @@ const shortWallet = (wallet: string): string =>
 
 const bareHandle = (handle: string): string => handle.trim().replace(/^@+/, "");
 
+/** One resolved prior launch: what it is, how it was tied, what it is worth now. */
+function launchRow(launch: OperatorPriorLaunch) {
+  const minted = monthYear(launch.mintedAt ?? launch.createdAt);
+  const drop = declineFromPeak(launch.fdvUsd, launch.athUsd);
+  const peaked = monthYear(launch.athAt);
+  const receipt = launch.permalink ?? launch.announcement?.url;
+  const provenance = [launch.name, LINK_LABEL[launch.link]].filter(Boolean).join(" · ");
+  return (
+    <li key={launch.mint} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
+      <div className="min-w-0">
+        <a
+          href={launch.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="link-ext mono text-[13.5px] font-medium text-ink"
+        >
+          {launch.symbol || launch.mint.slice(0, 6)}
+        </a>
+        {minted && <span className="mono ml-2 text-[11px] text-ink-faint">minted {minted}</span>}
+        {receipt && (
+          <a
+            href={receipt}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="link-ext mono ml-2 text-[11px] text-ink-faint"
+          >
+            the post
+          </a>
+        )}
+        {provenance && <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">{provenance}</p>}
+      </div>
+      <div className="shrink-0 text-right">
+        <div className="stat-label">value now</div>
+        <div className="stat-value">
+          {finite(launch.fdvUsd) && launch.fdvUsd > 0 ? usdCompact(launch.fdvUsd) : "not reported"}
+        </div>
+        {drop && (
+          <div className="mono text-[11px] text-caution">
+            down {drop.pct.toFixed(1)}% from its {usdCompact(drop.peakUsd)} peak{peaked ? ` in ${peaked}` : ""}
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * The launch ledger, newest first, with the audited token slotted into its own
+ * place in the order. Carrying no market value of its own is deliberate: this
+ * panel never priced the subject, and the rest of the report already does.
+ */
+function launchRows(
+  launches: OperatorPriorLaunch[],
+  subjectIndex: number,
+  subjectSymbol?: string,
+  subjectMintedAt?: string,
+) {
+  const rows = launches.map((launch) => launchRow(launch));
+  if (subjectIndex < 0) return rows;
+  const minted = monthYear(subjectMintedAt);
+  rows.splice(Math.min(subjectIndex, rows.length), 0, (
+    <li
+      key="subject-under-audit"
+      aria-current="true"
+      className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5"
+    >
+      <div className="min-w-0">
+        <span className="mono text-[13.5px] font-medium text-ink">{subjectSymbol || "this token"}</span>
+        {minted && <span className="mono ml-2 text-[11px] text-ink-faint">minted {minted}</span>}
+        <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">the token under audit</p>
+      </div>
+    </li>
+  ));
+  return rows;
+}
+
 export function OperatorTrackRecord({
   history,
   operatorHandle,
@@ -130,6 +216,17 @@ export function OperatorTrackRecord({
   const handle = bareHandle(operatorHandle ?? "");
   const wallet = creatorWallet ?? history?.creatorWallet;
   const total = Math.max(history?.totalLaunches ?? 0, launches.length + 1);
+  // Where the audited token sits in the operator's launch order. The launchpad
+  // creator index is unordered and unfiltered, so a sibling minted AFTER this
+  // token is in the same list: "launch N of N" would assert this is the last
+  // thing the operator shipped, which the data does not say. The server places
+  // it only when every launch is dated, and the finding sentence reads the same
+  // field, so the panel and the finding can never disagree about the position.
+  const ordinal = history?.subjectLaunchNumber;
+  const placed = typeof ordinal === "number" && ordinal >= 1 && ordinal <= total ? ordinal : null;
+  // Rows run newest first, so the audited token sits after the launches that
+  // came later than it.
+  const subjectRowIndex = placed === null ? -1 : total - placed;
 
   // Spacing is measured on the launchpad clock only (mintedAt plus the subject's
   // own mint), never on a pool-creation date from whichever source resolved the
@@ -150,6 +247,10 @@ export function OperatorTrackRecord({
     if (launch.announcement) sources.add("the operator's own posts");
   }
   if (claimed.length) sources.add("the operator's own posts");
+  // A peak is never a market-data field on its own: it is the launchpad's own
+  // ath next to an observed candle series, and the footer says a peak is what
+  // "these sources agree on", so the second source has to be named.
+  if (showsPeak) sources.add("GeckoTerminal trade history");
 
   return (
     <section className="panel scroll-mt-28 px-4 py-4 sm:px-5" aria-labelledby="operator-track-record-title">
@@ -185,57 +286,16 @@ export function OperatorTrackRecord({
 
       {launches.length > 0 && (
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink">
-          Launch {total} of {total} traced to this operator.
+          {placed === null
+            ? `${total} launches traced to this operator, including this one.`
+            : `Launch ${placed} of ${total} traced to this operator.`}
           {interval ? ` The two dated launches are ${interval}.` : ""}
         </p>
       )}
 
       {launches.length > 0 && (
         <ol className="mt-3 divide-y divide-line/60 border-t border-line/60">
-          {launches.map((launch) => {
-            const minted = monthYear(launch.mintedAt ?? launch.createdAt);
-            const drop = declineFromPeak(launch.fdvUsd, launch.athUsd);
-            const peaked = monthYear(launch.athAt);
-            const receipt = launch.permalink ?? launch.announcement?.url;
-            const provenance = [launch.name, LINK_LABEL[launch.link]].filter(Boolean).join(" · ");
-            return (
-              <li key={launch.mint} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
-                <div className="min-w-0">
-                  <a
-                    href={launch.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="link-ext mono text-[13.5px] font-medium text-ink"
-                  >
-                    {launch.symbol || launch.mint.slice(0, 6)}
-                  </a>
-                  {minted && <span className="mono ml-2 text-[11px] text-ink-faint">minted {minted}</span>}
-                  {receipt && (
-                    <a
-                      href={receipt}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="link-ext mono ml-2 text-[11px] text-ink-faint"
-                    >
-                      the post
-                    </a>
-                  )}
-                  {provenance && <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">{provenance}</p>}
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="stat-label">value now</div>
-                  <div className="stat-value">
-                    {finite(launch.fdvUsd) && launch.fdvUsd > 0 ? usdCompact(launch.fdvUsd) : "not reported"}
-                  </div>
-                  {drop && (
-                    <div className="mono text-[11px] text-caution">
-                      down {drop.pct.toFixed(1)}% from its {usdCompact(drop.peakUsd)} peak{peaked ? ` in ${peaked}` : ""}
-                    </div>
-                  )}
-                </div>
-              </li>
-            );
-          })}
+          {launchRows(launches, subjectRowIndex, history?.subjectSymbol, history?.subjectMintedAt)}
         </ol>
       )}
 

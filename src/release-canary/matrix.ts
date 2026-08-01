@@ -8,6 +8,8 @@ import { auditToken, type TokenDossier } from "../token/audit";
 
 const CLEAN_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000101";
 const HONEYPOT_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000202";
+/** A second mint carrying the honeypot fixture's ticker. Never audited itself. */
+const COLLIDING_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000203";
 const BURN_ADDRESS = "0x000000000000000000000000000000000000dead";
 
 export type CanaryKind = "person" | "token";
@@ -244,6 +246,28 @@ function fixtureFetch(state: FixtureFetchState): typeof fetch {
       if (address === CLEAN_TOKEN_ADDRESS || address === HONEYPOT_TOKEN_ADDRESS) {
         return json({ pairs: [fixturePair(address)] });
       }
+    }
+
+    // Ticker sweep. TRAP shares its ticker with a second mint so the collision
+    // path stays covered; SAFE sweeps clean, which the report must never render
+    // as proof of originality.
+    if (url.hostname === "api.dexscreener.com" && url.pathname === "/latest/dex/search") {
+      const ticker = (url.searchParams.get("q") ?? "").toUpperCase();
+      if (ticker === "TRAP") {
+        return json({
+          pairs: [
+            fixturePair(HONEYPOT_TOKEN_ADDRESS),
+            {
+              ...fixturePair(HONEYPOT_TOKEN_ADDRESS),
+              pairAddress: "fixture-collision-pair",
+              pairCreatedAt: Date.UTC(2019, 5, 1),
+              liquidity: { usd: 0 },
+              baseToken: { address: COLLIDING_TOKEN_ADDRESS, name: "Canary Collision", symbol: "TRAP" },
+            },
+          ],
+        });
+      }
+      if (ticker === "SAFE") return json({ pairs: [fixturePair(CLEAN_TOKEN_ADDRESS)] });
     }
 
     if (url.hostname === "api.gopluslabs.io" && url.pathname === "/api/v1/token_security/1") {

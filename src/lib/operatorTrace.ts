@@ -57,6 +57,12 @@ export interface TraceOpts {
   chain?: string;       // "solana" (default) or an EVM chain id (ethereum/base/…)
   record?: boolean;     // false for historical overlays that must not mutate the graph
   panelCostToken?: string; // signed capability binding provider calls to the saved report
+  // Block time of the mint under investigation (unix seconds or ISO). With it the
+  // root deployer's age comes back measured AT THE LAUNCH, so a frozen report
+  // keeps reading the same number; without it the server dates the age to the
+  // scan instead. Only the root carries it: "how old was this wallet when it
+  // minted this token" is a fact about the launcher, not about a funder upstream.
+  mintedAt?: string | number;
 }
 export type TraceStep = (s: { label: string; detail?: string; tone?: "neutral" | "good" | "warn" | "bad" }) => void;
 
@@ -74,6 +80,10 @@ interface DeployerTraceResponse {
   chain?: Array<{ from: string; to: string; label: string | null; kind: "cex" | "wallet" }>;
   funder?: FundingOrigin;
   origin?: FundingOrigin;
+  // Set by the server when its own upward walk stopped short (pagination went
+  // cold, hop budget, deadline). The chain it returned is then a prefix, not a
+  // finished trail, and the wallets above it were never looked at.
+  trailTruncatedAt?: string | null;
 }
 
 interface FunderSweepResponse {
@@ -125,6 +135,12 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   // the queue was abandoned/never filled (no evidence either way). Only the
   // first can rule siblings out, so the verdict has to tell them apart.
   let unsweptHubs = false;
+  // A funding trail we stopped walking: a wallet we were asked to trace and did
+  // not, or a server chain that came back truncated. The hub above that point is
+  // never discovered, so it is never swept, so the siblings it may have seeded
+  // are unknown. That is the same evidence state as an unswept hub, and it used
+  // to read as "no serial-launch cluster" instead.
+  let unexploredFunders = false;
   const overBudget = () => Date.now() > deadline;
 
   const addWallet = (addr: string, role: OperatorRole, depth: number, extra?: Partial<OperatorWallet>) => {
@@ -149,16 +165,19 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   // forward-sweep candidate (each is a hub that may have seeded siblings). CEX
   // terminals are recorded but never expanded — an exchange isn't an operator.
   async function traceUp(addr: string, depth: number): Promise<void> {
-    if (tracedFunder.has(addr) || traces >= maxTraces || overBudget()) return;
+    if (tracedFunder.has(addr)) return;
+    if (traces >= maxTraces || overBudget()) { budgetExhausted = true; unexploredFunders = true; return; }
     tracedFunder.add(addr);
     traces++;
+    const mintParam = opts.mintedAt && addr === rootDeployer ? `&mintedAt=${encodeURIComponent(String(opts.mintedAt))}` : "";
     const d = await fetchPanelJson<DeployerTraceResponse>(
-      `${deployerEP}?wallet=${encodeURIComponent(addr)}${cp}`,
+      `${deployerEP}?wallet=${encodeURIComponent(addr)}${cp}${mintParam}`,
       { headers: providerHeaders },
     );
     if (!d || d.available === false) {
       throw new PanelRequestError("unavailable", 200, "Deployer trace provider is unavailable.");
     }
+    if (d.trailTruncatedAt) unexploredFunders = true;
     const w = wallets.get(addr);
     if (w) {
       // Solana returns tokensCreated; EVM returns deployments — either is the count.
@@ -259,9 +278,10 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   const stats = { deployers: deployerWallets.length, tokens: tokens.size, deadTokens, hops: maxHops, sweeps };
 
   // The forward sweep is the only thing that can rule siblings OUT, so a clean
-  // verdict requires one that actually ran and finished.
-  const sweepComplete = sweeps > 0 && !unsweptHubs;
-  const verdict = buildVerdict({ hub, hubSeeded, stats, origin, sweepComplete });
+  // verdict requires one that actually ran and finished, over a funding trail we
+  // followed to its end. A trail we stopped walking hides the hub we never swept.
+  const sweepComplete = sweeps > 0 && !unsweptHubs && !unexploredFunders;
+  const verdict = buildVerdict({ hub, hubSeeded, stats, origin, sweepComplete, trailIncomplete: unexploredFunders });
 
   const cluster: OperatorCluster = {
     rootDeployer, rootLabel: opts.rootLabel,
@@ -273,8 +293,8 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   return cluster;
 }
 
-function buildVerdict(a: { hub: string | null; hubSeeded: number; stats: OperatorCluster["stats"]; origin: OperatorCluster["origin"]; sweepComplete: boolean }): OperatorCluster["verdict"] {
-  const { hub, hubSeeded, stats, origin, sweepComplete } = a;
+function buildVerdict(a: { hub: string | null; hubSeeded: number; stats: OperatorCluster["stats"]; origin: OperatorCluster["origin"]; sweepComplete: boolean; trailIncomplete: boolean }): OperatorCluster["verdict"] {
+  const { hub, hubSeeded, stats, origin, sweepComplete, trailIncomplete } = a;
   const dead = stats.deadTokens ? `, ${stats.deadTokens} now dead` : "";
   // A shared hand behind several deployers, or a large token fan, is a factory.
   if ((hub && hubSeeded >= 3) || stats.deployers >= 4 || stats.tokens >= 6) {
@@ -291,10 +311,16 @@ function buildVerdict(a: { hub: string | null; hubSeeded: number; stats: Operato
   // either: withdrawing from an exchange to fund a launch is also the single
   // most common legitimate path, so the unknown must not read as an accusation.
   if (!sweepComplete) {
-    const line = origin?.kind === "cex"
-      ? `The funding trail ends at a KYC'd ${origin.label ?? "exchange"} account, and an exchange hop ends the trail: ARGUS cannot see which other wallets that account paid out to, so sibling launch wallets were neither found nor ruled out. Funding a launch from an exchange withdrawal is also the most common legitimate path, so treat this as unchecked rather than clean or suspicious.`
-      : `No forward sweep completed around this deployer${origin ? `, and the trail stops at ${short(origin.address)}` : ""}, so sibling launch wallets were neither found nor ruled out. Treat this as unchecked rather than clean.`;
-    return { tone: "neutral", line };
+    // An exchange terminus is only the reason nothing was swept when nothing was
+    // swept. Once a sweep has run, the honest gap is the funding trail we stopped
+    // walking, and naming the wrong gap misdescribes what was checked.
+    if (stats.sweeps === 0 && origin?.kind === "cex") {
+      return { tone: "neutral", line: `The funding trail ends at a KYC'd ${origin.label ?? "exchange"} account, and an exchange hop ends the trail: ARGUS cannot see which other wallets that account paid out to, so sibling launch wallets were neither found nor ruled out. Funding a launch from an exchange withdrawal is also the most common legitimate path, so treat this as unchecked rather than clean or suspicious.` };
+    }
+    if (trailIncomplete) {
+      return { tone: "neutral", line: `The funding trail above this deployer was not followed to its end${origin ? `, stopping at ${short(origin.address)}` : ""}, so any wallet that seeded it further up was never swept and sibling launch wallets were neither found nor ruled out. Treat this as unchecked rather than clean.` };
+    }
+    return { tone: "neutral", line: `No forward sweep completed around this deployer${origin ? `, and the trail stops at ${short(origin.address)}` : ""}, so sibling launch wallets were neither found nor ruled out. Treat this as unchecked rather than clean.` };
   }
   if (origin?.kind === "cex") {
     return { tone: "good", line: `Funded from a KYC'd ${origin.label ?? "exchange"} account, and a completed forward sweep of the wallets in between found no sibling launches. Isolated and traceable, not a serial pattern.` };

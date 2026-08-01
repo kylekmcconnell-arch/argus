@@ -12,6 +12,7 @@ import {
   pumpfunCoin,
   resolveLaunchPeak,
   seriesPeakUsd,
+  subjectLaunchOrdinal,
   type PriorLaunch,
 } from "./operatorLaunches";
 
@@ -46,8 +47,11 @@ const UAPE_COIN = {
   ath_market_cap: 288970.5805422813,
   ath_market_cap_timestamp: 1778716144000,
 };
-// GeckoTerminal daily OHLCV for the uAPE / SOL pool, newest first as the API
-// returns it: [ts, open, high, low, close, volume].
+// GeckoTerminal daily OHLCV for the uAPE / SOL pool
+// (9b9fTcWjUUTdSf9Zd79qysB9apriNfiUJ4BsbGGbWrYe), newest first as the API
+// returns it: [ts, open, high, low, close, volume]. Re-probed 2026-08-01; the
+// launch-day row's HIGH (2.858e-04) is nearly 1.36x its close (2.109e-04),
+// which is the whole difference between the two peak readings below.
 const UAPE_OHLCV = [
   [1785888000, 6.338360097435273e-06, 7.12852930779898e-06, 6.338360097435273e-06, 7.12852930779898e-06, 225.07],
   [1785801600, 6.5632216616863345e-06, 6.917131500586729e-06, 6.293334510151574e-06, 6.338360097435273e-06, 312.19],
@@ -55,6 +59,35 @@ const UAPE_OHLCV = [
   [1778976000, 6.579429746217097e-05, 0.00011024798193443435, 5.094668484126272e-05, 8.210669932410797e-05, 135435.88],
   [1778889600, 0.00021096498242474692, 0.00022209843088250185, 5.223044451164898e-05, 6.579429746217097e-05, 762613.83],
   [1778803200, 3.7398167580862486e-05, 0.0002858845758805126, 2.654506826481542e-05, 0.00021096498242474692, 539383.94],
+];
+
+// RACC (Round Raccoon), probed live 2026-08-01: the single-day pump-and-dump
+// this feature most wants to show, and the case a daily-CLOSE peak erases.
+//   pump.fun /coins/Crgxrddc…pump -> created_timestamp 1785226959000,
+//     usd_market_cap 2387.6933457619407, ath_market_cap 1664721.399533887,
+//     ath_market_cap_timestamp 1785239074000 (3h22m after the mint)
+// The launch-day candle opened at 3.71e-05, printed a 1.66e-03 high, and
+// closed at its low. Off the closes the peak reads $2,507 against $2,388 today
+// (a 4.8% "decline", under the material floor, so nothing publishes at all);
+// off the highs it reads $1.66M, which is pump.fun's own number to 0.4%.
+const RACC_MINT = "Crgxrddc8wLmDzD1nBVxGGbMFhtY4vxddJsQ9t8npump";
+const RACC_COIN = {
+  mint: RACC_MINT,
+  creator: "CKe8kev7FGtnEFST3s7Mfoi3SDHuuMBnL6SwozNxCzTf",
+  symbol: "RACC",
+  name: "Round Raccoon",
+  twitter: "https://x.com/RACC_ONSOL",
+  created_timestamp: 1785226959000,
+  usd_market_cap: 2387.6933457619407,
+  ath_market_cap: 1664721.399533887,
+  ath_market_cap_timestamp: 1785239074000,
+};
+const RACC_OHLCV = [
+  [1785542400, 2.3645445742342687e-06, 2.4245970377982275e-06, 2.355920492458624e-06, 2.3906517666658225e-06, 16.93],
+  [1785456000, 2.4996542873216238e-06, 2.506047947112205e-06, 2.3645445742342687e-06, 2.3645445742342687e-06, 63.97],
+  [1785369600, 2.402752538538239e-06, 2.4996542873216238e-06, 2.396599541486341e-06, 2.4996542873216238e-06, 17.75],
+  [1785283200, 2.5101817726440204e-06, 2.724144390099735e-06, 2.402752538538239e-06, 2.402752538538239e-06, 840.87],
+  [1785196800, 3.708614399820559e-05, 0.0016602435452444315, 2.5101817726440204e-06, 2.5101817726440204e-06, 6079426.28],
 ];
 
 describe("normalizeXHandle + handleSearchTerms", () => {
@@ -141,9 +174,13 @@ describe("collectOperatorLaunches", () => {
     // Self excluded from both paths; the subject's own handle never re-resolves.
     expect(history.launches.map((launch) => launch.symbol).sort()).toEqual(["PMPR", "uAPE"]);
     expect(history.totalLaunches).toBe(3);
+    // uAPE came through dexscreener and carries no launchpad mint date, so the
+    // operator's launch ORDER is not established and no ordinal is claimed.
+    expect(history.subjectLaunchNumber).toBeUndefined();
     // Two dated launches is ONE interval, so the gap is reported and no rate is.
     expect(describeLaunchHistory(history)).toBe(
-      "This is launch 3 tied to the same operator. Earlier launches: PMPR now $4.0K; uAPE now $6.6K."
+      "There are 3 launches tied to the same operator, including this one."
+      + " Their other launches: PMPR now $4.0K; uAPE now $6.6K."
       + " There were 179 days between the two dated launches.",
     );
     // No peak survived, so no launch claims a decline it cannot evidence.
@@ -423,14 +460,34 @@ describe("resolveLaunchPeak", () => {
 
   it("takes the launchpad peak only when the traded series corroborates it", () => {
     // uAPE, live 2026-08-01: pump.fun says $288,970.58 and the GeckoTerminal
-    // daily closes imply $209,588. 1.38x apart, which is what an intraday high
-    // looks like next to a daily close, so the finer-grained value is used.
+    // daily HIGHS imply $284,019. 1.02x apart, so the finer-grained, dated
+    // value is used.
     expect(resolveLaunchPeak({
       currentUsd: 7082,
-      seriesPeakUsd: 209587.97,
+      seriesPeakUsd: 284018.55,
       launchpadAthUsd: 288970.5805422813,
       launchpadAthAt: "2026-05-13T23:49:04.000Z",
     })).toEqual({ athUsd: 288970.5805422813, athAt: "2026-05-13T23:49:04.000Z" });
+  });
+
+  // Once both sides sample intraday they should nearly agree, and on every
+  // live coin measured they did (1.00x to 1.27x). A launchpad number half
+  // again above the observed high is no longer "an intraday high", so the
+  // trades win and the undated observed peak is what gets published.
+  it("rejects a launchpad peak the observed highs do not reach", () => {
+    expect(resolveLaunchPeak({
+      currentUsd: 7082,
+      seriesPeakUsd: 284018.55,
+      launchpadAthUsd: 284018.55 * 2,
+      launchpadAthAt: "2026-05-13T23:49:04.000Z",
+    })).toEqual({ athUsd: 284018.55 });
+    // The old 3x band waved that same number through.
+    expect(resolveLaunchPeak({
+      currentUsd: 7082,
+      seriesPeakUsd: 284018.55,
+      launchpadAthUsd: 284018.55 * 1.4,
+      launchpadAthAt: "2026-05-13T23:49:04.000Z",
+    })).toEqual({ athUsd: 284018.55 * 1.4, athAt: "2026-05-13T23:49:04.000Z" });
   });
 
   it("falls back to the observed series when the launchpad number is nowhere near it", () => {
@@ -447,25 +504,25 @@ describe("resolveLaunchPeak", () => {
   it("prefers the series when the launchpad under-reports it", () => {
     expect(resolveLaunchPeak({
       currentUsd: 7082,
-      seriesPeakUsd: 209587.97,
+      seriesPeakUsd: 284018.55,
       launchpadAthUsd: 20000,
       launchpadAthAt: "2026-05-13T23:49:04.000Z",
-    })).toEqual({ athUsd: 209587.97 });
+    })).toEqual({ athUsd: 284018.55 });
   });
 });
 
 describe("seriesPeakUsd", () => {
+  const series = (peak: number, last: number) => ({ peak, last, timeframe: "day" as const });
+
   it("turns a price series into today's dollars via the ratio, not the raw price", () => {
-    const history = { points: [], first: 1, last: 7.12852930779898e-06, peak: 0.00021096498242474692, changePct: 0, drawdownPct: 0, timeframe: "day" };
-    // uAPE: 29.59x off its daily-close peak, and $7,082 today.
-    expect(seriesPeakUsd(history, 7082)).toBeCloseTo(209587.97, 0);
+    // uAPE: 40.10x off its daily-HIGH peak, and $7,082 today.
+    expect(seriesPeakUsd(series(0.0002858845758805126, 7.12852930779898e-06), 7082)).toBeCloseTo(284018.55, 0);
   });
 
   it("returns null rather than a number it cannot ground", () => {
-    const history = { points: [], first: 1, last: 0, peak: 1, changePct: 0, drawdownPct: 0, timeframe: "day" };
-    expect(seriesPeakUsd(history, 7082)).toBeNull();
+    expect(seriesPeakUsd(series(1, 0), 7082)).toBeNull();
     expect(seriesPeakUsd(null, 7082)).toBeNull();
-    expect(seriesPeakUsd({ ...history, last: 1 }, null)).toBeNull();
+    expect(seriesPeakUsd(series(1, 1), null)).toBeNull();
   });
 });
 
@@ -544,10 +601,39 @@ describe("enrichLaunchPeaks", () => {
 
     const [launch] = await enrichLaunchPeaks([uape]);
 
-    expect(launch.athUsd).toBeCloseTo(209587.97, 0);
+    // The daily HIGHS, not the closes: $284,019 rather than $209,588.
+    expect(launch.athUsd).toBeCloseTo(284018.55, 0);
     // The series carries no timestamp, so no date is invented for the peak.
     expect(launch.athAt).toBeUndefined();
     expect(launch.mintedAt).toBeUndefined();
+  });
+
+  // The case the whole feature exists for, and the one a daily-CLOSE series
+  // silently threw away: RACC ran to a $1.66M cap and closed its launch day
+  // back where it started. Its closes never rise above today's value by more
+  // than 4.8%, so the close-series peak fails the material-decline floor and
+  // the report says NOTHING about a token that is down 99.9%.
+  it("keeps the peak of a token that ran and dumped inside one day", async () => {
+    const racc: PriorLaunch = {
+      symbol: "RACC",
+      name: "Round Raccoon",
+      mint: RACC_MINT,
+      chain: "solana",
+      fdvUsd: 2387.6933457619407,
+      liquidityUsd: 2412.5,
+      url: `https://pump.fun/coin/${RACC_MINT}`,
+      link: "same_creator_wallet",
+    };
+    vi.stubGlobal("fetch", solanaSources({ coin: RACC_COIN, ohlcv: RACC_OHLCV }));
+
+    const [launch] = await enrichLaunchPeaks([racc]);
+
+    expect(launch.athUsd).toBeCloseTo(1664721.4, 1);
+    expect(launch.athAt).toBe("2026-07-28T11:44:34.000Z");
+    expect(launch.mintedAt).toBe("2026-07-28T08:22:39.000Z");
+    // The peak the closes alone would have produced is today's value wearing a
+    // different name, and it is nowhere near what was published.
+    expect(launch.athUsd).toBeGreaterThan(2387.6933457619407 * 100);
   });
 
   it("leaves the peak undefined when neither source can support one", async () => {
@@ -636,9 +722,14 @@ describe("the LINKR track record", () => {
     expect(uape.announcement?.url).toBe("https://x.com/S0Ldev/status/2054689272423502206");
     expect(uape.athUsd).toBeCloseTo(288970.58, 2);
 
+    // Both launches carry a launchpad mint date, so the order IS established
+    // and the audited token really is the newer of the two.
+    expect(history.subjectLaunchNumber).toBe(2);
+    expect(history.subjectSymbol).toBe("LINKR");
     const narrative = describeLaunchHistory(history);
     expect(narrative).toBe(
-      "This is launch 2 tied to the same operator. Earlier launches: uAPE now $7.1K, down 97.5% from its peak."
+      "This is launch 2 of 2 tied to the same operator."
+      + " Their other launches: uAPE now $7.1K, down 97.5% from its peak."
       + " There were 78 days between the two dated launches.",
     );
     // Two launches is one interval. It is never a rate, and never an accusation.
@@ -720,11 +811,71 @@ describe("describeLaunchSpacing", () => {
       totalLaunches: 5,
       claimedProjects: [],
     });
-    expect(many).toContain("This is launch 5 tied to the same operator.");
+    expect(many).toContain("There are 5 launches tied to the same operator, including this one.");
     expect(many).toContain("There were 4 dated launches over 228 days");
-    // "There were 4 launches" next to "this is launch 5" is a contradiction the
+    // "There were 4 launches" next to a count of 5 is a contradiction the
     // reader has no way to resolve.
     expect(many).not.toMatch(/There were 4 launches/);
+  });
+});
+
+// The launchpad's creator index applies no date filter, so a token the
+// operator minted AFTER the audited one comes back in the same list. Calling
+// the audited token "launch N of N" then asserts it is the operator's most
+// recent, which is exactly what that row disproves.
+describe("where the audited token sits in the operator's launch order", () => {
+  const dated = (mint: string, mintedAt: string): PriorLaunch => ({
+    symbol: mint, mint, chain: "solana", fdvUsd: 1, liquidityUsd: null,
+    url: `https://pump.fun/coin/${mint}`, link: "same_creator_wallet", mintedAt,
+  });
+
+  it("counts only the launches the launchpad dates before this one", () => {
+    const launches = [dated("A", "2026-01-01T00:00:00.000Z"), dated("C", "2026-09-01T00:00:00.000Z")];
+    expect(subjectLaunchOrdinal(launches, "2026-05-01T00:00:00.000Z")).toBe(2);
+    expect(subjectLaunchOrdinal(launches, "2025-01-01T00:00:00.000Z")).toBe(1);
+    expect(subjectLaunchOrdinal(launches, "2027-01-01T00:00:00.000Z")).toBe(3);
+  });
+
+  it("refuses an ordinal when any launch is undated, because the order is a guess", () => {
+    const undated = { ...dated("B", "2026-01-01T00:00:00.000Z") };
+    delete undated.mintedAt;
+    expect(subjectLaunchOrdinal([dated("A", "2026-01-01T00:00:00.000Z"), undated], "2026-05-01T00:00:00.000Z"))
+      .toBeUndefined();
+    expect(subjectLaunchOrdinal([dated("A", "2026-01-01T00:00:00.000Z")], undefined)).toBeUndefined();
+  });
+
+  it("never calls the audited token the operator's latest when a sibling is newer", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: Parameters<typeof fetch>[0]) => {
+      const target = String(url);
+      if (target.includes("/coins/MINT_SELF")) {
+        return new Response(JSON.stringify({
+          creator: "wallet1", symbol: "SELF", name: "self",
+          // 2026-05-13; the sibling below is minted two months LATER.
+          created_timestamp: 1778711061000,
+        }), { status: 200 });
+      }
+      if (target.includes("?creator=")) {
+        return new Response(JSON.stringify([
+          { mint: "MINT_SELF", symbol: "SELF", usd_market_cap: 50000, created_timestamp: 1778711061000 },
+          { mint: "MINT_OLDER", symbol: "OLDER", usd_market_cap: 4000, created_timestamp: 1770000000000 },
+          { mint: "MINT_NEWER", symbol: "NEWER", usd_market_cap: 9000, created_timestamp: 1785450548000 },
+        ]), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    }));
+
+    const history = await collectOperatorLaunches("MINT_SELF", []);
+
+    expect(history.totalLaunches).toBe(3);
+    expect(history.subjectLaunchNumber).toBe(2);
+    // Newest first, so the launch that came after this one leads the ledger.
+    expect(history.launches.map((launch) => launch.symbol)).toEqual(["NEWER", "OLDER"]);
+    const narrative = describeLaunchHistory(history);
+    expect(narrative).toContain("This is launch 2 of 3 tied to the same operator.");
+    // The bug: the audited token presented as the operator's most recent, and
+    // a launch minted after it filed under "earlier launches".
+    expect(narrative).not.toContain("This is launch 3");
+    expect(narrative).not.toContain("Earlier launches");
   });
 });
 

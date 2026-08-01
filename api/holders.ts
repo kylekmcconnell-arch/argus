@@ -7,6 +7,7 @@
 // insider concentration), CONNECTED insider clusters (wallets funded from a common
 // source, collapsed into one operator), creator holdings, and LP-lock. Keyless.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { creatorSupplyPercent } from "../src/token/sources";
 
 export const config = { maxDuration: 20 };
 
@@ -44,7 +45,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const nets = (d.insiderNetworks ?? []).map((n: any) => ({ size: Number(n.size ?? n.activeAccounts ?? 0), pct: supply ? Math.min(100, (Number(n.tokenAmount ?? 0) / supply) * 100) : 0 }));
     const insiderClusteredPct = nets.length ? Math.min(100, Math.max(...nets.map((n: any) => n.pct))) : 0;
     const insidersDetected = Number(d.graphInsidersDetected ?? 0);
-    const creatorPct = supply ? (Number(d.creatorBalance ?? 0) / supply) * 100 : 0;
+    // A ratio outside 0-100% is a bad payload, and publishing it would put a
+    // fabricated number on screen. Null means unmeasured, never zero.
+    const creatorPct = creatorSupplyPercent(d.creatorBalance, supply);
     const totalHolders = Number(d.totalHolders ?? 0);
     // Concentration only reads as risk on a THIN base. A mega-holder token (BONK,
     // WIF) with a high top-10 is exchanges + whales in a liquid market, not a rug —
@@ -64,8 +67,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (top10 >= 60) { bump("bad"); bits.push(`top 10 wallets hold ${top10.toFixed(0)}% of a thin base of ${totalHolders.toLocaleString()} holders`); }
       else if (top10 >= 40) { bump("warn"); bits.push(`top 10 hold ${top10.toFixed(0)}% (only ${totalHolders.toLocaleString()} holders)`); }
     }
-    if (creatorPct >= 15) { bump("bad"); bits.push(`the creator still holds ${creatorPct.toFixed(0)}%`); }
-    else if (creatorPct >= 7) { bump("warn"); bits.push(`the creator holds ${creatorPct.toFixed(0)}%`); }
+    if (creatorPct != null && creatorPct >= 15) { bump("bad"); bits.push(`the creator or authority wallet still holds ${creatorPct.toFixed(0)}%`); }
+    else if (creatorPct != null && creatorPct >= 7) { bump("warn"); bits.push(`the creator or authority wallet holds ${creatorPct.toFixed(0)}%`); }
     const line = bits.length
       ? bits.join("; ") + "."
       : `Broadly held: ${totalHolders.toLocaleString()} holders, top 10 hold ${top10.toFixed(0)}%${insidersDetected >= 1000 ? " (a large linked transfer graph, expected for a liquid token)" : ""}.`;

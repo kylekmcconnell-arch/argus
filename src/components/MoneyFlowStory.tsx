@@ -63,10 +63,12 @@ function flowSummary(data: MoneyFlowData): string {
   return `Across Arkham's recorded history, this wallet received ${received} and sent ${sent}. ${netSentence}`;
 }
 
-export function MoneyFlowStory({ address, chain, panelCostToken }: {
+export function MoneyFlowStory({ address, chain, panelCostToken, roleLabel }: {
   address?: string | null;
   chain: string;
   panelCostToken?: string;
+  /** What the traced wallet is called. Falls back to the cautious label. */
+  roleLabel?: string;
 }) {
   const titleId = useId();
   const requestKey = [address ?? "", chain, panelCostToken ?? ""].join("\u0000");
@@ -112,7 +114,7 @@ export function MoneyFlowStory({ address, chain, panelCostToken }: {
     <section className="panel p-4" aria-labelledby={titleId}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span id={titleId} className="eyebrow">The wallet's money story</span>
-        <span className="text-[11.5px] text-ink-dim">where the deployer's money came from and went (Arkham)</span>
+        <span className="text-[11.5px] text-ink-dim">where the {(roleLabel ?? "creator or authority").toLowerCase()} wallet's money came from and went (Arkham)</span>
       </div>
 
       {(labelState === "rescan_required" || labelState === "unavailable") && (

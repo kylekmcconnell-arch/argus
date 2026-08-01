@@ -1,4 +1,4 @@
-import type { TokenDossier } from "../token/audit";
+import { deployerRoleLabel, type TokenDossier } from "../token/audit";
 import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
 import { WalletClusters } from "./WalletClusters";
@@ -39,7 +39,7 @@ export function OnChainForensics({ token, onAudit, panelCostToken, record = true
       {/* how many "top holders" are one hand? */}
       <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} panelCostToken={panelCostToken} record={record} />
       {/* recursive operator trace — isolated project or one node in a serial factory? */}
-      {token.deployer && <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} panelCostToken={panelCostToken} record={record} />}
+      {token.deployer && <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} panelCostToken={panelCostToken} record={record} roleLabel={deployerRoleLabel(token.deployerAttribution)} />}
       {/* EVM deployer trail — who deployed it, who funded the gas, serial launcher? */}
       {isEvm && <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} panelCostToken={panelCostToken} record={record} />}
       {/* EVM bytecode fingerprint — rug-enabling code + byte-identical known-rug clone check */}
