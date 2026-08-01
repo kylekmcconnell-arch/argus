@@ -599,7 +599,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                   <Check label="Source verified" ok={!!s.openSource} na={!gp} />
                 </>
               )}
-              <Check label="Taxes" ok={s.buyTax + s.sellTax < 10} value={gp ? (isSol ? "0%" : `${s.buyTax.toFixed(0)}/${s.sellTax.toFixed(0)}%`) : undefined} na={!gp} />
+              {isSol
+                ? <Check label="Transfer fee" ok={!s.transferFee} value={gp ? (s.transferFee ? "configured" : "none") : undefined} na={!gp} />
+                : <Check label="Taxes" ok={s.buyTax + s.sellTax < 10} value={gp ? `${s.buyTax.toFixed(0)}/${s.sellTax.toFixed(0)}%` : undefined} na={!gp} />}
               {!isSol && <Check label="Tax not modifiable" ok={!s.slippageModifiable} na={!gp} />}
             </div>
           </Card>
@@ -609,14 +611,14 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               <Check
                 label="Liquidity locked / burned"
                 ok={s.lpBurnedPct >= 50 || s.lpLockedPct >= 50}
-                value={gp ? (s.lpBurnedPct >= 50 ? `burned ${s.lpBurnedPct.toFixed(0)}%` : s.lpLockedPct >= 50 ? `locked ${s.lpLockedPct.toFixed(0)}%` : s.lpTopUnlockedEoaPct >= 50 ? `1 wallet ${s.lpTopUnlockedEoaPct.toFixed(0)}%` : "not locked") : undefined}
-                na={!gp}
+                value={gp && s.lpAssessed !== false ? (s.lpBurnedPct >= 50 ? `burned ${s.lpBurnedPct.toFixed(0)}%` : s.lpLockedPct >= 50 ? `locked ${s.lpLockedPct.toFixed(0)}%` : s.lpTopUnlockedEoaPct >= 50 ? `1 wallet ${s.lpTopUnlockedEoaPct.toFixed(0)}%` : "not locked") : undefined}
+                na={!gp || s.lpAssessed === false}
               />
               <Check label="Liquidity depth" ok={(d.liquidityUsd ?? 0) >= 50000} value={money(d.liquidityUsd)} />
               <Check label="Creator holdings" ok={s.creatorPercent < 5} value={s.creatorPercentAssessed ? creatorPercentLabel : undefined} na={!s.creatorPercentAssessed} />
               <Check label="Holders" ok={Number(s.holderCount) >= 500} value={gp ? Number(s.holderCount).toLocaleString() : undefined} na={!gp} />
               <Check label="Top holder concentration" ok={s.topHolderPct == null || Number(s.topHolderPct) <= 25} value={s.topHolderPct != null ? `${Number(s.topHolderPct).toFixed(0)}%` : undefined} na={s.topHolderPct == null} />
-              <Check label="Bundle / snipe concentration" ok={d.bundleRisk === "low"} value={gp ? `${d.insiderPct}% · ${d.bundleCount} wallets` : undefined} na={!gp} />
+              <Check label="Bundle / snipe concentration" ok={d.bundleRisk === "low"} value={gp && d.holdersAssessed !== false ? `${d.insiderPct}% · ${d.bundleCount} wallets` : undefined} na={!gp || d.holdersAssessed === false} />
               <Check label="Pair age" ok={(d.ageDays ?? 0) >= 30} value={d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : undefined} />
               <Check
                 label="CoinGecko listing"

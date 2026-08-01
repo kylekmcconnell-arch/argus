@@ -118,3 +118,63 @@ describe("market infrastructure is not a holder", () => {
     expect(dossier!.axes.find((axis) => axis.key === "T1")?.rationale).not.toContain("25532435");
   });
 });
+
+// The engine learned to record an unmeasured LP lock, an unusable holder list
+// and a pool-excluded top holder. None of that is worth anything if the row a
+// reader looks at still asserts the number the engine refused to publish.
+describe("what the engine refuses to claim, the report must not print", () => {
+  it("publishes the pool-excluded wallet as the top holder, not the pool", async () => {
+    stubNetwork();
+    const dossier = await auditToken({ kind: "token", ref: MINT, via: "solana" }, undefined, { skipSim: true, force: true });
+
+    // The raw provider list leads with the PumpSwap pool at 36.94%. The report
+    // cannot say "top holder 37%" on the same page as "excluded: the pool 36.9%".
+    expect(dossier!.safety.topHolderPct).not.toBeNull();
+    expect(dossier!.safety.topHolderPct!).toBeLessThan(10);
+    const exclusion = dossier!.findings.find((f) => /Excluded from concentration/.test(f.claim));
+    expect(exclusion?.claim).toContain("36.9%");
+  });
+
+  it("marks an unusable holder distribution as unassessed instead of a measured zero", async () => {
+    // Percentages that sum past 100% are a broken payload, and the audit already
+    // suppresses the concentration numbers. The suppression has to be legible.
+    stubNetwork({
+      goplusSol: {
+        code: 1,
+        result: {
+          [MINT]: {
+            ...goplusSolanaBody.result[MINT],
+            holders: [
+              { account: "WalletAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", percent: "0.80", is_contract: 0 },
+              { account: "WalletBbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", percent: "0.75", is_contract: 0 },
+            ],
+          },
+        },
+      },
+    });
+    const dossier = await auditToken({ kind: "token", ref: MINT, via: "solana" }, undefined, { skipSim: true, force: true });
+
+    expect(dossier!.holdersAssessed).toBe(false);
+    expect(dossier!.insiderPct).toBe(0);
+    expect(dossier!.bundleCount).toBe(0);
+  });
+
+  it("reports the Token-2022 transfer fee rather than asserting a 0% tax nothing measured", async () => {
+    stubNetwork();
+    const clean = await auditToken({ kind: "token", ref: MINT, via: "solana" }, undefined, { skipSim: true, force: true });
+    expect(clean!.axes.find((axis) => axis.key === "T3")?.rationale).toBe("no Token-2022 transfer fee is configured.");
+
+    vi.unstubAllGlobals();
+    stubNetwork({
+      goplusSol: {
+        code: 1,
+        result: {
+          [MINT]: { ...goplusSolanaBody.result[MINT], transfer_fee: { fee_rate: "0.05" } },
+        },
+      },
+    });
+    const fee = await auditToken({ kind: "token", ref: MINT, via: "solana" }, undefined, { skipSim: true, force: true });
+    expect(fee!.safety.transferFee).toBe(true);
+    expect(fee!.axes.find((axis) => axis.key === "T3")?.rationale).toContain("transfer fee is configured");
+  });
+});

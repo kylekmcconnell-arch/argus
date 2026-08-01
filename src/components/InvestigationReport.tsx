@@ -761,7 +761,10 @@ export function InvestigationReport({
   })();
   // Investigator rail: deterministic anomalies computed from the frozen stats
   // so the few numbers that change a decision stop hiding inside stat grids.
-  const lpLockedOrBurnedPct = token.safetyChecked && token.safety?.available
+  // An absent LP-holder record is not a zero. Coercing it with ?? 0 published
+  // "None of the trading liquidity is locked" as a red alert about tokens whose
+  // lock was never measured, which is the claim the engine already refuses to make.
+  const lpLockedOrBurnedPct = token.safetyChecked && token.safety?.available && token.safety.lpAssessed !== false
     ? (token.safety.lpLockedPct ?? 0) + (token.safety.lpBurnedPct ?? 0)
     : projectAccount?.holderProfile?.lpLockedOrBurnedPct ?? null;
   const top10FromRows = token.topHolders?.length === 10

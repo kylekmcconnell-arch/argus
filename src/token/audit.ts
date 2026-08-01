@@ -139,6 +139,12 @@ export interface TokenDossier {
   deployerRisk?: DeployerRiskOutcome;
   /** Other mints trading under the same ticker, and what the public records order. */
   cloneCheck?: CloneCheckResult;
+  /**
+   * Whether the holder distribution was usable. False means the provider's list
+   * was self-inconsistent and every concentration number here is a suppressed
+   * zero, not a measured one. Absent on reports frozen before this was recorded.
+   */
+  holdersAssessed?: boolean;
   /** Frozen server-side evidence/check context for a persisted report version. */
   versionContext?: ReportVersionContext;
   /** Snapshot framing inherited from a parent investigation facet. */
@@ -884,7 +890,13 @@ async function runTokenAudit(
   // a modifiable tax with an active owner is a trap even when the tax reads low now
   if (s.slippageModifiable && !s.ownerRenounced) aT3 = clamp(aT3 - 5, 0, 12);
   if (s.transferFee) aT3 = clamp(aT3 - 5, 0, 12);
-  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? (chain === "solana" ? "no transfer tax detected." : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.`) : "Tax not verifiable keyless." });
+  // On Solana the buy/sell tax fields do not exist, so reporting them as 0% was
+  // an assertion nothing measured. A Token-2022 transfer fee is the equivalent
+  // charge and it IS in the payload, so that is what gets reported.
+  const solanaTaxRationale = s.transferFee
+    ? "a Token-2022 transfer fee is configured on this mint."
+    : "no Token-2022 transfer fee is configured.";
+  axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? (chain === "solana" ? solanaTaxRationale : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.`) : "Tax not verifiable keyless." });
 
   const topPct = holdersReliable ? concentrationTopPct : null;
   let aT4 = s.holderCount < 50 ? 3 : s.holderCount < 500 ? 7 : s.holderCount < 5000 ? 11 : 14;
@@ -1047,7 +1059,11 @@ async function runTokenAudit(
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
     mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
     ...(priceHistory ? { priceHistory } : {}),
-    verdict, score, capApplied, headline, axes, safety: s, socials,
+    // The pool exclusion has to reach the number a reader actually sees. Leaving
+    // the raw provider top holder on the dossier put "top holder 37%" on the same
+    // page as the finding explaining that the 37% line is the pool itself.
+    verdict, score, capApplied, headline, axes, safety: { ...s, topHolderPct: concentrationTopPct }, socials,
+    holdersAssessed: holdersReliable,
     projectX, deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
     topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
     sanctionsScreen,

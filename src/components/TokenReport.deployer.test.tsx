@@ -175,3 +175,40 @@ describe("solana deployer surfacing", () => {
     expect(row).not.toContain("0.0%");
   });
 });
+
+// Four rows on this card were asserting checks nobody ran. Each test below is
+// one of them: the number the engine refused to publish must not reappear here.
+describe("the safety card cannot publish a check that did not run", () => {
+  it("marks an unmeasured LP lock unchecked instead of calling it not locked", () => {
+    render(dossier({ safety: { ...safety, lpAssessed: false, lpLockedPct: 0, lpBurnedPct: 0 } }));
+
+    const row = rowText("Liquidity locked / burned");
+    expect(row).toContain("unchecked");
+    expect(row).not.toContain("not locked");
+  });
+
+  it("still reports a measured lock", () => {
+    render(dossier({ safety: { ...safety, lpAssessed: true, lpLockedPct: 96, lpBurnedPct: 0 } }));
+
+    expect(rowText("Liquidity locked / burned")).toContain("locked 96%");
+  });
+
+  it("marks a suppressed holder distribution unchecked instead of a green zero", () => {
+    render(dossier({ holdersAssessed: false, insiderPct: 0, bundleCount: 0 }));
+
+    const row = rowText("Bundle / snipe concentration");
+    expect(row).toContain("unchecked");
+    expect(row).not.toContain("0 wallets");
+  });
+
+  it("reports the Solana transfer fee and never a fabricated 0% tax", () => {
+    render(dossier({ safety: { ...safety, transferFee: false } }));
+    expect(rowText("Transfer fee")).toContain("none");
+    expect(rowText("Taxes")).toBe("");
+
+    render(dossier({ safety: { ...safety, transferFee: true } }));
+    const configured = rowText("Transfer fee");
+    expect(configured).toContain("configured");
+    expect(configured).toContain("✗");
+  });
+});
