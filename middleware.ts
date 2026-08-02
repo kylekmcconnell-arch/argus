@@ -44,6 +44,10 @@ const ROUTE_UNITS: Record<string, number> = {
   "/api/namesake": 3,
   "/api/x-find": 3,
   "/api/recon-team": 3,
+  // Nine keyless upstream requests per call. They cost no money, so this weight
+  // is rate-limit accounting only: without an entry it billed as 1 and a burst
+  // of trader lookups counted as a ninth of the traffic it actually made.
+  "/api/polymarket-trader": 5,
 };
 
 export const config = {
