@@ -2287,7 +2287,14 @@ export async function adverseSignalsAndTooling(
 ) {
   const { evidence } = ctx;
   const self = ctx.handle.replace(/^@/, "").toLowerCase();
-  const ticker = evidence.promotions.find((p) => p.ticker)?.ticker;
+  // The subject's OWN token first. evidence.promotions is everything the account
+  // has ever mentioned, so its first entry is whatever they happened to post
+  // about: on @uniswap that is $ARB from an Arbitrum deployment announcement,
+  // and the sweep screened Arbitrum while never once screening $UNI. A verified
+  // projectToken is the binding this screen is supposed to be about; a promoted
+  // ticker is only the fallback for a subject that has no token of its own.
+  const ticker = (evidence.projectToken?.verified === true ? evidence.projectToken.symbol : null)
+    ?? evidence.promotions.find((p) => p.ticker)?.ticker;
 
   // Targets: the subject, and the top discovered ventures (as
   // projects), each with a recoverable @handle so the search is grounded.

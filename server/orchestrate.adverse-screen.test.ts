@@ -116,3 +116,55 @@ describe("adverse sweep records a checklist outcome", () => {
     });
   });
 });
+
+// Live on @uniswap: the sweep announced it was screening $ARB. promotions holds
+// every ticker the account has ever posted about, and Uniswap's first was an
+// Arbitrum deployment, so a decision-critical screen ran on somebody else's
+// token and never touched $UNI.
+describe("the sweep screens the subject's own token", () => {
+  it("prefers a verified project token over the first ticker the account mentioned", async () => {
+    harness.adverse.mockResolvedValue({ completed: true, signals: [] });
+    harness.tooling.mockResolvedValue(null);
+    const { ctx, evidence, record } = context();
+    evidence.promotions = [{ ticker: "ARB" }] as unknown as typeof evidence.promotions;
+    evidence.projectToken = { verified: true, symbol: "UNI" } as unknown as typeof evidence.projectToken;
+
+    await adverseSignalsAndTooling(ctx, record);
+
+    const announced = (ctx.emit as unknown as { mock: { calls: [{ detail?: string }][] } }).mock.calls
+      .map(([step]) => step.detail ?? "")
+      .join(" ");
+    expect(announced).toContain("$UNI");
+    expect(announced).not.toContain("$ARB");
+  });
+
+  it("still falls back to a promoted ticker when the subject has no token of its own", async () => {
+    harness.adverse.mockResolvedValue({ completed: true, signals: [] });
+    harness.tooling.mockResolvedValue(null);
+    const { ctx, evidence, record } = context();
+    evidence.promotions = [{ ticker: "ARB" }] as unknown as typeof evidence.promotions;
+
+    await adverseSignalsAndTooling(ctx, record);
+
+    const announced = (ctx.emit as unknown as { mock: { calls: [{ detail?: string }][] } }).mock.calls
+      .map(([step]) => step.detail ?? "")
+      .join(" ");
+    expect(announced).toContain("$ARB");
+  });
+
+  it("does not treat an unverified project token as the binding", async () => {
+    harness.adverse.mockResolvedValue({ completed: true, signals: [] });
+    harness.tooling.mockResolvedValue(null);
+    const { ctx, evidence, record } = context();
+    evidence.promotions = [{ ticker: "ARB" }] as unknown as typeof evidence.promotions;
+    evidence.projectToken = { verified: false, symbol: "FAKE" } as unknown as typeof evidence.projectToken;
+
+    await adverseSignalsAndTooling(ctx, record);
+
+    const announced = (ctx.emit as unknown as { mock: { calls: [{ detail?: string }][] } }).mock.calls
+      .map(([step]) => step.detail ?? "")
+      .join(" ");
+    expect(announced).not.toContain("$FAKE");
+    expect(announced).toContain("$ARB");
+  });
+});

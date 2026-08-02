@@ -26,10 +26,17 @@ export interface RecordedCall {
   status: number;
   contentType: string;
   body: string;
+  /**
+   * The structured-output tool the REQUEST asked for, where it named one.
+   * Recorded so a replay can answer an analyst call with the analyst's own
+   * response instead of whatever happened to be next in arrival order.
+   */
+  tool?: string | null;
 }
 
 export interface ReplayFidelity {
   exactHits: number;
+  toolFallbackHits: number;
   urlFallbackHits: number;
   liveAllowed: number;
   liveForced: number;
@@ -133,6 +140,7 @@ export async function withRecordedFetch<T>(
   mkdirSync(dir, { recursive: true });
   const fidelity: ReplayFidelity = {
     exactHits: 0,
+    toolFallbackHits: 0,
     urlFallbackHits: 0,
     liveAllowed: 0,
     liveForced: 0,
@@ -142,10 +150,17 @@ export async function withRecordedFetch<T>(
 
   const byExact = new Map<string, RecordedCall[]>();
   const byUrl = new Map<string, RecordedCall[]>();
+  // Keyed url + tool. A recording made before this field existed simply has no
+  // entries here and falls through to the url tier exactly as it used to.
+  const byTool = new Map<string, RecordedCall[]>();
+  const toolTierKey = (urlKey: string, tool: string | null | undefined): string | null =>
+    tool ? `${urlKey}|${tool}` : null;
   if (mode === "replay") {
     for (const call of loadRecording(dir)) {
       (byExact.get(call.key) ?? byExact.set(call.key, []).get(call.key)!).push(call);
       (byUrl.get(call.urlKey) ?? byUrl.set(call.urlKey, []).get(call.urlKey)!).push(call);
+      const toolKey = toolTierKey(call.urlKey, call.tool);
+      if (toolKey) (byTool.get(toolKey) ?? byTool.set(toolKey, []).get(toolKey)!).push(call);
     }
   }
 
@@ -178,6 +193,13 @@ export async function withRecordedFetch<T>(
       if (index >= 0) urlTier.splice(index, 1);
       if (urlTier.length === 0) byUrl.delete(call.urlKey);
     }
+    const toolKey = toolTierKey(call.urlKey, call.tool);
+    const toolTier = toolKey ? byTool.get(toolKey) : undefined;
+    if (toolKey && toolTier) {
+      const index = toolTier.indexOf(call);
+      if (index >= 0) toolTier.splice(index, 1);
+      if (toolTier.length === 0) byTool.delete(toolKey);
+    }
   };
   const record = (method: string, url: string, body: string, response: Response, sideFile?: string): Promise<Response> => {
     const clone = response.clone();
@@ -191,6 +213,7 @@ export async function withRecordedFetch<T>(
         status: response.status,
         contentType: clone.headers.get("content-type") ?? "",
         body: text,
+        tool: requestTool(body),
       };
       const target = sideFile ?? callsPath(dir);
       mkdirSync(dirname(target), { recursive: true });
@@ -235,12 +258,40 @@ export async function withRecordedFetch<T>(
       const live = await originalFetch(input, init);
       return record(method, url, body, live, join(dir, "live-lane.jsonl"));
     }
+    // The analyst's own calls are the ones an exact match cannot survive: their
+    // request is the assembled evidence packet, so any change upstream rewrites
+    // it. Answering record_verdict with an extraction response fails schema
+    // validation, the agent retries, and one mismatch cascades into exhausting
+    // the recording. Matching on the tool the request asked for keeps a
+    // singleton analyst call bound to its own answer, and the fidelity line
+    // reports the tier so this never reads as an exact replay.
+    const toolKey = toolTierKey(urlOnlyKey(method, url), tool);
+    const toolTier = toolKey ? byTool.get(toolKey) : undefined;
+    if (toolTier?.length) {
+      fidelity.toolFallbackHits += 1;
+      const call = toolTier[0];
+      removeRecordedCall(call);
+      return toResponse(call);
+    }
     const urlTier = byUrl.get(urlOnlyKey(method, url));
     if (urlTier?.length) {
       fidelity.urlFallbackHits += 1;
-      const call = urlTier[0];
-      removeRecordedCall(call);
-      return toResponse(call);
+      // Oldest-first, but never step on a response another call has a stronger
+      // claim to. A recording tagged with a tool is the only answer that call
+      // can use, while an untagged request can be served by anything; taking
+      // the tagged row first is how a retrying extraction call used to eat the
+      // analyst's verdict before the analyst had even run.
+      const call = urlTier.find((candidate) => (candidate.tool ?? null) === tool)
+        ?? urlTier.find((candidate) => !candidate.tool);
+      if (call) {
+        removeRecordedCall(call);
+        return toResponse(call);
+      }
+      // Only tool-tagged rows are left and this request asked for none of them.
+      // Serving one anyway answers a structured call with someone else's answer,
+      // which fails validation, retries, and takes the rest of the recording
+      // down with it. A miss here is the honest outcome and is reported as one.
+      fidelity.urlFallbackHits -= 1;
     }
     fidelity.misses.push({ method, url: scrubUrl(url) });
     throw new Error(`eval replay miss: ${method} ${scrubUrl(url)} has no recording in ${dir}`);

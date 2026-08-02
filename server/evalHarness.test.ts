@@ -192,3 +192,66 @@ describe("eval harness record/replay", () => {
     expect(matchKey("post", "https://a.example/p", "{}")).toBe(matchKey("POST", "https://a.example/p", "{}"));
   });
 });
+
+// A retrying call with no tool used to consume the analyst's own recorded
+// answer, because the url tier took the oldest row regardless of what asked for
+// it. One stolen response fails schema validation, the caller retries, and the
+// rest of the recording goes down with it.
+describe("a tool-tagged response belongs to the call that asked for it", () => {
+  const MODEL = "https://model.example/v1/messages";
+
+  async function twoStage(extraExtractionCalls: number): Promise<string[]> {
+    const out: string[] = [];
+    // Each extraction failure is caught per call, exactly as the real lane does,
+    // so an uncovered extraction cannot stop the analyst from running.
+    for (let i = 0; i < 1 + extraExtractionCalls; i += 1) {
+      try {
+        const r = await fetch(MODEL, { method: "POST", body: JSON.stringify({ extract: `page-${i}` }) });
+        out.push(await r.text());
+      } catch { /* an uncovered extraction is a miss, not a stop */ }
+    }
+    const verdict = await fetch(MODEL, {
+      method: "POST",
+      body: JSON.stringify({ packet: "evidence", tool_choice: { type: "tool", name: "record_verdict" } }),
+    });
+    out.push(await verdict.text());
+    return out;
+  }
+
+  it("answers the verdict call with the verdict, even when an untagged call missed first", async () => {
+    let served = 0;
+    globalThis.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = String(init?.body ?? "");
+      served += 1;
+      return new Response(
+        body.includes("record_verdict")
+          ? JSON.stringify({ content: [{ type: "tool_use", name: "record_verdict", input: { score: 82 } }] })
+          : JSON.stringify({ content: [{ type: "text", text: `extract ${served}` }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    await withRecordedFetch("record", dir, () => twoStage(0));
+
+    // Replay asks for MORE extraction calls than were recorded, which is what a
+    // deadline-driven pipeline does when replayed I/O returns instantly.
+    const replayed = (await withRecordedFetch("replay", dir, () => twoStage(2))).result;
+
+    const verdict = replayed.find((text) => text.includes("record_verdict"));
+    expect(verdict).toBeDefined();
+    expect(JSON.parse(verdict!).content[0].input.score).toBe(82);
+  });
+
+  it("records the tool the request asked for so the tier has something to match on", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(
+      JSON.stringify({ content: [{ type: "tool_use", name: "record_verdict", input: {} }] }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+
+    await withRecordedFetch("record", dir, () => twoStage(0));
+
+    const tagged = loadRecording(dir).filter((call) => call.tool === "record_verdict");
+    expect(tagged).toHaveLength(1);
+    expect(loadRecording(dir).filter((call) => !call.tool).length).toBeGreaterThan(0);
+  });
+});

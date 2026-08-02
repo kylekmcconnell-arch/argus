@@ -214,7 +214,7 @@ async function main(): Promise<void> {
       const drift = baseline
         ? ` · drift vs recording: score ${baseline.score}→${snapshot.score}, facts ${baseline.verifiedFactCount}→${snapshot.verifiedFactCount}`
         : "";
-      const fidelityLine = `exact ${fidelity.exactHits} · url-fallback ${fidelity.urlFallbackHits} · live ${fidelity.liveAllowed} · forced-live ${fidelity.liveForced} · misses ${fidelity.misses.length}`;
+      const fidelityLine = `exact ${fidelity.exactHits} · tool-fallback ${fidelity.toolFallbackHits} · url-fallback ${fidelity.urlFallbackHits} · live ${fidelity.liveAllowed} · forced-live ${fidelity.liveForced} · misses ${fidelity.misses.length}`;
       console.log(`  ${failures.length ? "✗" : "✓"} ${slug}: score ${snapshot.score} ${snapshot.verdict} · ${snapshot.verifiedFactCount} facts (${fidelityLine})${drift}`);
       for (const failure of failures) console.log(`      ▲ ${failure}`);
       if (failures.length) failed += 1;
