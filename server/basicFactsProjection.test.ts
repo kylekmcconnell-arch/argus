@@ -744,10 +744,13 @@ describe("projectProviderBackedBasicFacts", () => {
 
     projectProviderBackedBasicFacts(evidence);
 
-    const control = evidence.basicFacts?.find((fact) => String(fact.value).includes("largest single holder"));
+    // "wallet", not "holder": pools, contracts and locked addresses are
+    // excluded from concentration, so the largest ROW on the register is not
+    // what this number reports.
+    const control = evidence.basicFacts?.find((fact) => String(fact.value).includes("largest single wallet"));
     expect(control?.predicate).toBe("tokenomics");
     expect(control?.value).toBe(
-      "largest single holder ~5.6% of supply · top 10 hold ~31% · 370,041 holders · 85% of DEX liquidity locked or burned",
+      "largest single wallet ~5.6% of supply · top 10 wallets hold ~31% · 370,041 holders · 85% of DEX liquidity locked or burned",
     );
     // Neutral framing: concentration is a fact to verify, not an accusation.
     expect(control?.sources[0].excerpt).toContain("exchanges, custodians, or protocol contracts");

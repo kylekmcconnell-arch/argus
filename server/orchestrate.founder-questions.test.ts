@@ -112,6 +112,7 @@ function founderReadiness(assetObservation: CheckObservation) {
   // complete them before the asset check alone determines readiness.
   tracker.record({ id: "ofac-sanctions-name", status: "checked-empty", note: "no SDN match for the resolved name", provider: "ofac-sdn" });
   tracker.record({ id: "trust-graph-connections", status: "checked-empty", note: "no flagged-subject ties", provider: "trust-graph" });
+  tracker.record({ id: "adverse-screen", status: "checked-empty", note: "the rug, scam, and drain search returned no candidate source", provider: "adverse-sweep" });
   tracker.record(assetObservation);
   return deriveDecisionReadiness(tracker.snapshot([SubjectClass.FOUNDER], { resolvedRealName: true }));
 }
@@ -287,8 +288,8 @@ describe("founder decision question outcomes", () => {
     expect(founderReadiness(observations[0])).toMatchObject({
       status: "ready",
       coveragePercent: 100,
-      successful: 8,
-      applicable: 8,
+      successful: 9,
+      applicable: 9,
       unresolved: 0,
     });
   });
@@ -312,8 +313,8 @@ describe("founder decision question outcomes", () => {
     expect(founderReadiness(observations[0])).toMatchObject({
       status: "ready",
       coveragePercent: 100,
-      successful: 7,
-      applicable: 7,
+      successful: 8,
+      applicable: 8,
       unresolved: 0,
     });
   });
@@ -336,9 +337,9 @@ describe("founder decision question outcomes", () => {
     expect(observations[0]?.note).toContain("Each observed asset claim must be verified in its own category");
     expect(founderReadiness(observations[0])).toMatchObject({
       status: "provisional",
-      coveragePercent: 87,
-      successful: 7,
-      applicable: 8,
+      coveragePercent: 88,
+      successful: 8,
+      applicable: 9,
       unresolved: 1,
     });
   });

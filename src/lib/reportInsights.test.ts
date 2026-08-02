@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument } from "./reportInsights";
+import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument, top10ShareFromRows } from "./reportInsights";
 
 describe("deriveNoticedSignals", () => {
   it("lifts unlocked liquidity and holder concentration out of the stat grid", () => {
@@ -143,5 +143,32 @@ describe("deriveVerdictArgument", () => {
     });
     expect(argument.againstLine).toBeNull();
     expect(argument.moveLine).toContain("rescan");
+  });
+});
+
+// A register the token lane refused to trust must not be summed and handed to
+// the "top 10 wallets hold X%" rail as if it were measured, and ten rows is the
+// only row count that can answer a question about ten wallets.
+describe("top10ShareFromRows", () => {
+  const rows = Array.from({ length: 10 }, () => ({ percent: 2 }));
+
+  it("sums a full, trusted register", () => {
+    expect(top10ShareFromRows(rows, true)).toBe(20);
+  });
+
+  it("returns null when the token lane judged its register self-inconsistent", () => {
+    expect(top10ShareFromRows(rows, false)).toBeNull();
+  });
+
+  it("returns null rather than passing a short register off as a top ten", () => {
+    expect(top10ShareFromRows(rows.slice(0, 4), true)).toBeNull();
+  });
+
+  it("returns null when the summed rows exceed supply", () => {
+    expect(top10ShareFromRows(Array.from({ length: 10 }, () => ({ percent: 40 })), true)).toBeNull();
+  });
+
+  it("returns null when a row carries no measured share", () => {
+    expect(top10ShareFromRows([...rows.slice(0, 9), { percent: null }], true)).toBeNull();
   });
 });

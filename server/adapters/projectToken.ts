@@ -1,5 +1,6 @@
 import type { ProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
 import { canonicalOfficialWebsite } from "../../src/lib/fundScaleEvidence";
+import { readCandle, summarizeCandles, type Candle } from "../../src/lib/priceHistory";
 import { env } from "../config";
 import { recordCall } from "../cost";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
@@ -740,7 +741,7 @@ async function ohlcv(
   chain: string,
   poolAddress: string,
   timeframe: "day" | "hour",
-): Promise<number[][] | null> {
+): Promise<Candle[] | null> {
   const url = geckoTerminalOhlcvUrl(chain, poolAddress, timeframe);
   if (!url) return null;
   let response: Response;
@@ -768,11 +769,13 @@ async function ohlcv(
     recordCall("geckoterminal", `project-token-ohlcv-${timeframe}`, 0, "keyless · result_shape_error", "partial");
     return null;
   }
-  const valid = rows.filter((row): row is number[] =>
-    Array.isArray(row)
-      && row.length >= 6
-      && row.slice(0, 6).every((value) => typeof value === "number" && Number.isFinite(value)),
-  ).slice(0, MAX_HISTORY_POINTS);
+  // Shared with the client sparkline: a row keeps its close even when the high,
+  // low or volume column is missing, so a partly reported candle costs us that
+  // column rather than the whole period.
+  const valid = rows
+    .map(readCandle)
+    .filter((candle): candle is Candle => candle !== null)
+    .slice(0, MAX_HISTORY_POINTS);
   recordCall(
     "geckoterminal",
     `project-token-ohlcv-${timeframe}`,
@@ -789,35 +792,43 @@ async function tokenHistory(
 ): Promise<{ history?: ProjectTokenSnapshot["history"]; attempts: number }> {
   let timeframe: "day" | "hour" = "day";
   let attempts = 1;
-  let rows = await ohlcv(chain, poolAddress, timeframe);
-  if (!rows?.length) {
+  let candles = await ohlcv(chain, poolAddress, timeframe);
+  if (!candles?.length) {
     timeframe = "hour";
     attempts += 1;
-    rows = await ohlcv(chain, poolAddress, timeframe);
+    candles = await ohlcv(chain, poolAddress, timeframe);
   }
-  if (!rows?.length) return { attempts };
-  const chronological = [...rows].sort((left, right) => left[0] - right[0]);
-  const points = chronological.map((row) => row[4]).filter((value) => Number.isFinite(value) && value > 0);
-  if (!points.length) return { attempts };
-  const first = points[0];
-  const last = points[points.length - 1];
-  const peak = Math.max(...points);
+  if (!candles?.length) return { attempts };
+  const summary = summarizeCandles(candles, timeframe);
+  if (!summary) return { attempts };
+  const sourceUrl = geckoTerminalOhlcvUrl(chain, poolAddress, timeframe);
   return {
     attempts,
     history: {
-      points,
-      first,
-      last,
-      peak,
-      changePct: first > 0 ? ((last - first) / first) * 100 : 0,
-      drawdownPct: peak > 0 ? ((last - peak) / peak) * 100 : 0,
+      ...summary,
       timeframe,
       poolAddress,
-      ...(geckoTerminalOhlcvUrl(chain, poolAddress, timeframe) ? {
-        sourceUrl: geckoTerminalOhlcvUrl(chain, poolAddress, timeframe)!,
-      } : {}),
+      ...(sourceUrl ? { sourceUrl } : {}),
     },
   };
+}
+
+/**
+ * What the frozen candle window actually covers, for the traction check note.
+ * Names the span whenever the series has holes so the count can never read as
+ * that many consecutive periods, and reports the volume move only when both
+ * sides of the comparison were measured.
+ */
+function historyCoverageNote(history: ProjectTokenSnapshot["history"]): string {
+  if (!history) return "";
+  const unit = history.timeframe === "day" ? "day" : "hour";
+  const span = history.windowIsPartial && history.spanPeriods
+    ? ` across a partly reported ${history.spanPeriods} ${unit} window`
+    : "";
+  const volume = history.volume
+    ? `, with reported volume ${history.volume.changePct >= 0 ? "up" : "down"} ${Math.abs(history.volume.changePct).toFixed(0)}% against the prior ${history.volume.prior.candles} ${unit}s${history.volume.isFloor ? " (a floor: not every candle reported volume)" : ""}`
+    : "";
+  return ` and ${history.points.length} frozen ${history.timeframe} price points${span}${volume}`;
 }
 
 export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<AdapterRunResult> {
@@ -862,7 +873,7 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
         ctx.recordCheck?.({
           id: "project-traction-liveness",
           status: "confirmed",
-          note: `$${snapshot.symbol} has an identity-bound DEX pool with $${Math.round(snapshot.liquidityUsd ?? 0).toLocaleString()} liquidity${snapshot.history ? ` and ${snapshot.history.points.length} frozen ${snapshot.history.timeframe} price points` : ""}`,
+          note: `$${snapshot.symbol} has an identity-bound DEX pool with $${Math.round(snapshot.liquidityUsd ?? 0).toLocaleString()} liquidity${historyCoverageNote(snapshot.history)}`,
           provider: snapshot.history ? "dexscreener/geckoterminal" : "dexscreener",
           sourceCount: snapshot.history ? 2 : 1,
         });
@@ -1011,7 +1022,7 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     ctx.recordCheck?.({
       id: "project-traction-liveness",
       status: "confirmed",
-      note: `$${snapshot.symbol} has a price-corroborated DEX pool with $${Math.round(pair.liquidityUsd).toLocaleString()} liquidity${history ? ` and ${history.points.length} frozen ${history.timeframe} price points` : ""}`,
+      note: `$${snapshot.symbol} has a price-corroborated DEX pool with $${Math.round(pair.liquidityUsd).toLocaleString()} liquidity${historyCoverageNote(history)}`,
       provider: history ? "dexscreener/geckoterminal" : "dexscreener",
       sourceCount: history ? 2 : 1,
     });

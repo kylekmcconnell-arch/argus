@@ -7,7 +7,7 @@
 // Both read the same free /protocol/{slug} document (the dedicated /raises
 // endpoint is paid; the embedded `raises` array is not). Additive, standalone
 // collectors — the caller decides which evidence/check they feed.
-import { recordCall } from "../cost";
+import { recordCall, type ProviderUsageStatus } from "../cost";
 
 const API_BASE = "https://api.llama.fi";
 
@@ -47,8 +47,96 @@ type ProtocolDocument = {
   otherProtocols?: unknown;
 };
 
+// ---------------------------------------------------------------------------
+// One document, one read
+// ---------------------------------------------------------------------------
+
+/*
+ * collectProtocolTvl, collectProtocolFunding and collectProtocolAuditLinks all
+ * read the SAME free /protocol/{slug} document, so one recorded Uniswap scan
+ * pulled 1.86 MB three times: 5.6 MB of redundant transfer into a serverless
+ * function for a document that had not changed between the reads. Reads are
+ * coalesced on the full URL. A caller that arrives while a read is outstanding
+ * awaits that read; a caller that arrives just after it lands reuses the parsed
+ * document.
+ *
+ * Only a SUCCESS is ever retained. Memoising a failure would freeze one provider
+ * blip into "no funding rounds on record" for every later caller in the run,
+ * turning a transport gap into a clean-looking absence, which is the one thing
+ * this adapter's outcome types exist to prevent. A completed 400 no-match is not
+ * retained either: it is cheap to re-ask and worth nothing to keep.
+ *
+ * Retention is deliberately short. It spans one scan's enrichment burst and
+ * nothing longer, so a document cannot carry from one subject's audit into
+ * another's, and resetDefiLlamaScanMemo() gives a caller with a real scan
+ * boundary a hard one.
+ */
+const SCAN_MEMO_MS = 30_000;
+
+type JsonRead =
+  | { ok: true; data: unknown; fromMemo: boolean }
+  | { ok: false; kind: "transport" | "http" | "unreadable"; status: number | null };
+
+interface MemoSlot {
+  /** the one outstanding read; cleared the moment it settles */
+  inFlight?: Promise<JsonRead>;
+  /** a settled SUCCESS only, with the moment it landed */
+  settled?: { at: number; data: unknown };
+}
+
+const scanMemo = new Map<string, MemoSlot>();
+
+/** Forget every memoised document. Callers with a real scan boundary call this at its start. */
+export function resetDefiLlamaScanMemo(): void {
+  scanMemo.clear();
+}
+
+/** A document served from the memo cost no provider attempt, and the ledger says so. */
+const readStatus = (fromMemo: boolean, live: ProviderUsageStatus): ProviderUsageStatus =>
+  (fromMemo ? "cached" : live);
+
+/** One GET of a free JSON endpoint. Never throws; classifies its own failure mode. */
+async function readJson(url: string, fetcher: typeof fetch): Promise<JsonRead> {
+  let response: Response;
+  try {
+    response = await fetcher(url, { signal: AbortSignal.timeout(20000) });
+  } catch {
+    return { ok: false, kind: "transport", status: null };
+  }
+  if (!response.ok) return { ok: false, kind: "http", status: response.status };
+  try {
+    return { ok: true, data: (await response.json()) ?? {}, fromMemo: false };
+  } catch {
+    return { ok: false, kind: "unreadable", status: response.status };
+  }
+}
+
+async function fetchJsonOnce(url: string, fetcher: typeof fetch): Promise<JsonRead> {
+  const now = Date.now();
+  for (const [key, slot] of scanMemo) {
+    if (!slot.inFlight && (!slot.settled || now - slot.settled.at >= SCAN_MEMO_MS)) scanMemo.delete(key);
+  }
+
+  const existing = scanMemo.get(url);
+  if (existing?.settled) return { ok: true, data: existing.settled.data, fromMemo: true };
+  if (existing?.inFlight) {
+    const shared = await existing.inFlight;
+    // A joiner made no request of its own, whatever the shared read returned.
+    return shared.ok ? { ok: true, data: shared.data, fromMemo: true } : shared;
+  }
+
+  // The stored promise is the already-guarded one: readJson does not reject, but
+  // a joiner must never be handed a rejection it cannot classify.
+  const inFlight = readJson(url, fetcher).catch((): JsonRead => ({ ok: false, kind: "transport", status: null }));
+  scanMemo.set(url, { inFlight });
+  const read = await inFlight;
+  if (read.ok) scanMemo.set(url, { settled: { at: Date.now(), data: read.data } });
+  else scanMemo.delete(url);
+  return read;
+}
+
 type FetchResult =
-  | { ok: true; data: ProtocolDocument }
+  | { ok: true; data: ProtocolDocument; fromMemo: boolean }
   | { ok: false; notFound: boolean; note: string };
 
 /**
@@ -57,27 +145,16 @@ type FetchResult =
  * so callers can record it as a clean result rather than a provider failure.
  */
 async function fetchProtocol(slug: string, fetcher: typeof fetch): Promise<FetchResult> {
-  const url = `${API_BASE}/protocol/${encodeURIComponent(slug)}`;
-  let response: Response;
-  try {
-    response = await fetcher(url, { signal: AbortSignal.timeout(20000) });
-  } catch {
-    return { ok: false, notFound: false, note: "DeFiLlama was unavailable." };
-  }
-  if (!response.ok) {
-    const notFound = response.status === 400;
-    return {
-      ok: false,
-      notFound,
-      note: notFound ? `No DeFiLlama protocol matched "${slug}".` : "DeFiLlama request failed.",
-    };
-  }
-  try {
-    const data = ((await response.json()) ?? {}) as ProtocolDocument;
-    return { ok: true, data };
-  } catch {
-    return { ok: false, notFound: false, note: "DeFiLlama response was unreadable." };
-  }
+  const read = await fetchJsonOnce(`${API_BASE}/protocol/${encodeURIComponent(slug)}`, fetcher);
+  if (read.ok) return { ok: true, data: (read.data ?? {}) as ProtocolDocument, fromMemo: read.fromMemo };
+  if (read.kind === "transport") return { ok: false, notFound: false, note: "DeFiLlama was unavailable." };
+  if (read.kind === "unreadable") return { ok: false, notFound: false, note: "DeFiLlama response was unreadable." };
+  const notFound = read.status === 400;
+  return {
+    ok: false,
+    notFound,
+    note: notFound ? `No DeFiLlama protocol matched "${slug}".` : "DeFiLlama request failed.",
+  };
 }
 
 const strArray = (value: unknown): string[] =>
@@ -167,7 +244,7 @@ export async function collectProtocolTvl(
   const latest = series.length ? series[series.length - 1] : undefined;
   const tvlUsd = typeof latest?.totalLiquidityUSD === "number" ? latest.totalLiquidityUSD : null;
   if (tvlUsd === null || !(tvlUsd > 0)) {
-    recordCall("defillama", "tvl", 0, `${slug} · no_tvl`, "partial");
+    recordCall("defillama", "tvl", 0, `${slug} · no_tvl`, readStatus(result.fromMemo, "partial"));
     return { available: false, note: "DeFiLlama returned no positive TVL for this protocol." };
   }
 
@@ -240,7 +317,7 @@ export async function collectProtocolTvl(
       };
     });
 
-  recordCall("defillama", "tvl", 0, `${slug} · tvl_${Math.round(tvlUsd)}`, "succeeded");
+  recordCall("defillama", "tvl", 0, `${slug} · tvl_${Math.round(tvlUsd)}`, readStatus(result.fromMemo, "succeeded"));
   return {
     available: true,
     value: {
@@ -304,7 +381,7 @@ export async function collectProtocolAuditLinks(
   }
   const fromParent = parseAuditFields(parent.data);
   if (fromParent.links.length) {
-    recordCall("defillama", "audit-links", 0, `${slug} · ${fromParent.links.length}_links`, "succeeded");
+    recordCall("defillama", "audit-links", 0, `${slug} · ${fromParent.links.length}_links`, readStatus(parent.fromMemo, "succeeded"));
     return { available: true, value: { slug, auditCount: fromParent.count, auditLinks: fromParent.links } };
   }
   const children = strArray(parent.data.otherProtocols)
@@ -316,11 +393,13 @@ export async function collectProtocolAuditLinks(
     if (!doc.ok) continue;
     const fields = parseAuditFields(doc.data);
     if (fields.links.length) {
-      recordCall("defillama", "audit-links", 0, `${slug}->${child} · ${fields.links.length}_links`, "succeeded");
+      recordCall("defillama", "audit-links", 0, `${slug}->${child} · ${fields.links.length}_links`, readStatus(doc.fromMemo, "succeeded"));
       return { available: true, value: { slug: child, auditCount: fields.count, auditLinks: fields.links } };
     }
   }
-  recordCall("defillama", "audit-links", 0, `${slug} · none`, "succeeded");
+  // The parent read is the one this answer rests on; a child walk that found
+  // nothing does not change whether a request was actually made for it.
+  recordCall("defillama", "audit-links", 0, `${slug} · none`, readStatus(parent.fromMemo, "succeeded"));
   return { available: false, note: "No audit links listed on DeFiLlama for this protocol." };
 }
 
@@ -360,24 +439,22 @@ export async function collectProtocolFees(
   const fetcher = options.fetcher ?? fetch;
   const slug = options.slug ?? defiLlamaSlug(projectName);
   if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
-  const url = `${API_BASE}/summary/fees/${encodeURIComponent(slug)}`;
-  let response: Response;
-  try {
-    response = await fetcher(url, { signal: AbortSignal.timeout(20000) });
-  } catch {
-    recordCall("defillama", "fees", 0, `${slug} · error`, "failed");
-    return { available: false, note: "DeFiLlama fees endpoint was unavailable." };
-  }
-  if (!response.ok) {
-    recordCall("defillama", "fees", 0, `${slug} · http_${response.status}`, response.status === 400 ? "succeeded" : "failed");
+  // Same coalescing as the protocol document. This endpoint is read once per
+  // scan today, but it is the same free GET on the same host and nothing about
+  // the call sites guarantees it stays that way.
+  const read = await fetchJsonOnce(`${API_BASE}/summary/fees/${encodeURIComponent(slug)}`, fetcher);
+  if (!read.ok) {
+    if (read.kind === "transport") {
+      recordCall("defillama", "fees", 0, `${slug} · error`, "failed");
+      return { available: false, note: "DeFiLlama fees endpoint was unavailable." };
+    }
+    if (read.kind === "unreadable") {
+      return { available: false, note: "DeFiLlama fees response was unreadable." };
+    }
+    recordCall("defillama", "fees", 0, `${slug} · http_${read.status}`, read.status === 400 ? "succeeded" : "failed");
     return { available: false, note: `No DeFiLlama fee record for "${slug}".` };
   }
-  let payload: { total24h?: unknown; total30d?: unknown; change_30dover30d?: unknown };
-  try {
-    payload = ((await response.json()) ?? {}) as { total24h?: unknown; total30d?: unknown; change_30dover30d?: unknown };
-  } catch {
-    return { available: false, note: "DeFiLlama fees response was unreadable." };
-  }
+  const payload = (read.data ?? {}) as { total24h?: unknown; total30d?: unknown; change_30dover30d?: unknown };
   const total24hUsd = typeof payload.total24h === "number" && payload.total24h >= 0 ? Math.round(payload.total24h) : null;
   const total30dUsd = typeof payload.total30d === "number" && payload.total30d >= 0 ? Math.round(payload.total30d) : null;
   // Period-over-period trend; only a finite, sane percent survives (a listing
@@ -388,10 +465,10 @@ export async function collectProtocolFees(
     ? Math.round(payload.change_30dover30d * 10) / 10
     : null;
   if (total24hUsd === null && total30dUsd === null) {
-    recordCall("defillama", "fees", 0, `${slug} · no_totals`, "succeeded");
+    recordCall("defillama", "fees", 0, `${slug} · no_totals`, readStatus(read.fromMemo, "succeeded"));
     return { available: false, note: "DeFiLlama reported no fee totals for this protocol." };
   }
-  recordCall("defillama", "fees", 0, `${slug} · fees30d_${total30dUsd ?? 0}`, "succeeded");
+  recordCall("defillama", "fees", 0, `${slug} · fees30d_${total30dUsd ?? 0}`, readStatus(read.fromMemo, "succeeded"));
   return {
     available: true,
     value: {
@@ -500,13 +577,13 @@ export async function collectProtocolFunding(
     .sort((a, b) => (a.date && b.date ? a.date.localeCompare(b.date) : 0));
 
   if (!rounds.length) {
-    recordCall("defillama", "funding", 0, `${slug} · no_raises`, "succeeded");
+    recordCall("defillama", "funding", 0, `${slug} · no_raises`, readStatus(result.fromMemo, "succeeded"));
     return { available: false, reason: "no_data", note: `No public funding rounds recorded for "${slug}" on DeFiLlama.` };
   }
 
   const leadInvestors = [...new Set(rounds.flatMap((round) => round.leadInvestors))];
   const totalRaisedUsd = rounds.reduce((sum, round) => sum + (round.amountUsd ?? 0), 0);
-  recordCall("defillama", "funding", 0, `${slug} · ${rounds.length}_rounds`, "succeeded");
+  recordCall("defillama", "funding", 0, `${slug} · ${rounds.length}_rounds`, readStatus(result.fromMemo, "succeeded"));
   return {
     available: true,
     value: {

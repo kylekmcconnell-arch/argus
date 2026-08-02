@@ -63,7 +63,7 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { formatRoleLabel, plainLanguageSummary } from "../lib/plainLanguage";
-import { deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
+import { deriveNoticedSignals, deriveVerdictArgument, top10ShareFromRows } from "../lib/reportInsights";
 import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
 import { walletAgeFact } from "../lib/operatorTrace";
@@ -105,6 +105,38 @@ function normalizedPublicUrl(value?: string): string | null {
   } catch {
     return null;
   }
+}
+
+const RECORD_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** The employment record's own date, spelled the way the record spells it. */
+function formatRecordDate(value: string): string {
+  const parts = value.trim().match(/^(\d{4})-(\d{2})/);
+  if (!parts) return value.trim();
+  const month = RECORD_MONTHS[Number(parts[2]) - 1];
+  return month ? `${month} ${parts[1]}` : parts[1];
+}
+
+/**
+ * How old the newest thing this record says about a person is.
+ *
+ * PeopleDataLabs is a licensed copy of a LinkedIn profile and can lag the live
+ * page, so a departure must never read as "as of today". The only date we hold
+ * is the record's own end date; report its age and nothing more.
+ */
+function recordAgeLabel(value: string | undefined, nowMs: number): string | null {
+  const parts = value?.trim().match(/^(\d{4})-(\d{2})/);
+  if (!parts) return null;
+  const endedMs = Date.UTC(Number(parts[1]), Number(parts[2]) - 1, 1);
+  if (!Number.isFinite(endedMs) || endedMs > nowMs) return null;
+  const months = Math.floor((nowMs - endedMs) / (1000 * 60 * 60 * 24 * 30.44));
+  if (months < 1) return "less than a month old";
+  if (months < 24) return `${months} month${months === 1 ? "" : "s"} old`;
+  const years = Math.floor(months / 12);
+  return `${years} years old`;
 }
 
 function projectLeadershipPredicates(role: string): Array<"founder" | "executive"> {
@@ -871,9 +903,10 @@ export function InvestigationReport({
   const lpLockedOrBurnedPct = token.safetyChecked && token.safety?.available && token.safety.lpAssessed !== false
     ? (token.safety.lpLockedPct ?? 0) + (token.safety.lpBurnedPct ?? 0)
     : projectAccount?.holderProfile?.lpLockedOrBurnedPct ?? null;
-  const top10FromRows = token.topHolders?.length === 10
-    ? token.topHolders.reduce((sum, holder) => sum + (holder.percent ?? 0), 0)
-    : null;
+  // Summing the audit's own rows is only a top-ten share when the token lane
+  // trusted its register and returned ten of them; otherwise it is a floor, and
+  // a floor must not backfill a project-side figure that was suppressed.
+  const top10FromRows = top10ShareFromRows(token.topHolders, token.holdersAssessed);
   const circulatingSupplyPct = (() => {
     const circulating = projectAccount?.projectToken?.circulatingSupply;
     const denominator = projectAccount?.projectToken?.maxSupply ?? projectAccount?.projectToken?.totalSupply;
@@ -909,6 +942,14 @@ export function InvestigationReport({
     { label: "Founders", people: founderTeam },
     { label: "Other named team", people: otherNamedTeam },
   ].filter((group) => group.people.length > 0);
+  // The paid leadership-currency answer. An "absent" row means the employment
+  // record held no role for that person at all: not a departure, not a
+  // confirmation, and nothing a reader can act on. Silent is better, so only
+  // the two rows the record actually answered are published.
+  const leadershipCurrency = (projectAccount?.leaderDepartures ?? [])
+    .filter((row) => row.state === "departed" || row.state === "current");
+  const leadershipUnanswered = (projectAccount?.leaderDepartures ?? [])
+    .filter((row) => row.state === "absent").length;
   const advisorChip = (v?: string): { label: string; color: string } => {
     const s = (v ?? "").toLowerCase();
     if (s.includes("corrobor")) return { label: "confirmed twice", color: "var(--color-pass)" };
@@ -1613,6 +1654,50 @@ export function InvestigationReport({
                   <p className="text-[12.5px] font-medium text-ink">No named team was confirmed.</p>
                   <p className="mt-1 text-[12px] leading-relaxed text-ink-faint">{recon ? recon.identityLine : inv.founderNote}</p>
                 </div>
+              )}
+              {leadershipCurrency.length > 0 && (
+                <section
+                  aria-label="Leadership currency"
+                  className={teamPeople.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}
+                >
+                  <div className="eyebrow">Does the named leadership still list this project? ({leadershipCurrency.length})</div>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+                    Checked against a licensed employment record for the named founders and C-level, three people at most.
+                    That record is a copy of a LinkedIn profile and can lag the live page, so each row carries the record's
+                    own date and a link to confirm it against.
+                    {leadershipUnanswered > 0
+                      ? ` The record held no role for ${leadershipUnanswered} other named ${leadershipUnanswered === 1 ? "leader" : "leaders"}; an unanswered lookup is not reported either way.`
+                      : ""}
+                  </p>
+                  <div className="mt-1.5 space-y-1.5">
+                    {leadershipCurrency.map((row) => {
+                      const departed = row.state === "departed";
+                      const profile = normalizedPublicUrl(row.linkedin);
+                      const age = departed ? recordAgeLabel(row.ended, Date.now()) : null;
+                      return (
+                        <div key={`${row.name}-${row.role}`} className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <span className="text-[12.5px] text-ink">{row.name}</span>
+                          {row.role && <span className="text-[11px] text-ink-faint">{formatRoleLabel(row.role)}</span>}
+                          <span className={departed ? "chip tint-avoid" : "chip tint-pass"}>
+                            {departed ? "no longer lists this project" : "still lists this project"}
+                          </span>
+                          {departed && (
+                            <span className="text-[11px] text-ink-dim">
+                              {row.ended
+                                ? `record ends ${formatRecordDate(row.ended)}${age ? ` · that record is ${age}` : ""}`
+                                : "the record does not state an end date"}
+                            </span>
+                          )}
+                          {profile && (
+                            <a href={profile} target="_blank" rel="noreferrer" className="link-ext text-[11px]">
+                              confirm on LinkedIn
+                            </a>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
               )}
               {advisors.length > 0 && (
                 <div className={teamPeople.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>

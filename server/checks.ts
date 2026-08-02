@@ -22,8 +22,29 @@ export interface ProviderSnapshot {
   runs: ProviderRun[];
 }
 
+/**
+ * Check ids this checklist contract owns beyond the adapter-facing
+ * `PersonCheckId` union in server/adapters/types.ts.
+ *
+ * That union is shared adapter surface; these two rows were added here first,
+ * so the widening lives with the contract that defines them. Observations for
+ * them are recorded straight onto the tracker rather than through
+ * `ctx.recordCheck`, whose parameter is still typed by the narrower union.
+ * Fold them into `PersonCheckId` and delete this alias when that file is next
+ * touched.
+ */
+export type ChecklistCheckId =
+  | PersonCheckId
+  | "adverse-screen"
+  | "project-leadership-currency";
+
+/** A `CheckObservation` that may also carry one of the ids above. */
+export interface ChecklistObservation extends Omit<CheckObservation, "id"> {
+  id: ChecklistCheckId;
+}
+
 interface CheckDefinition {
-  id: PersonCheckId;
+  id: ChecklistCheckId;
   label: string;
   defaultNote: string;
   role?: "FOUNDER" | "KOL" | "INVESTOR" | "PROJECT";
@@ -57,6 +78,18 @@ const CHECKS: readonly CheckDefinition[] = [
   { id: "project-token-identity", label: "Canonical project token", defaultNote: "no official token identity was bound to this project account", role: "PROJECT", criticalFor: ["PROJECT"] },
   { id: "project-product-substance", label: "Product and website substance", defaultNote: "no frozen first-party product or website outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
   { id: "project-team-identity", label: "Project team identity", defaultNote: "no first-party team identity outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  // Does the leadership this project claims still claim the project back? The
+  // answer comes from a paid, bounded employment lookup (founders and C-level,
+  // three people at most), and it used to be recorded against
+  // founder-company-relationships, whose FOUNDER role gate then published
+  // "not a founder" on the very run that paid for the answer. This row is the
+  // PROJECT-scoped home for it.
+  //
+  // Not a decision gate: a project with no named leaders, or a scan with no
+  // licensed employment provider, cannot be asked this question at all, and a
+  // question that cannot be asked must not withhold clearance.
+  // project-team-identity remains the gating team row.
+  { id: "project-leadership-currency", label: "Named leadership still current", defaultNote: "no employment-record currency outcome was recorded for the named leadership", role: "PROJECT" },
   { id: "project-backing-partners", label: "Backing and partners", defaultNote: "no source-backed project backing or partnership outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
   { id: "project-traction-liveness", label: "Traction and liveness", defaultNote: "no frozen product, market, or activity-liveness outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
   { id: "project-transparency", label: "Transparency and disclosures", defaultNote: "no frozen token, audit, docs, or disclosure outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
@@ -84,6 +117,23 @@ const CHECKS: readonly CheckDefinition[] = [
   // is not publicly source-backed is scored low on scale, not abstained).
   { id: "investor-fund-scale", label: "Fund scale", defaultNote: "fund AUM or close amount was not assessed against source-backed evidence", role: "INVESTOR" },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
+  // The rug / scam / drain / FUD sweep is the only screen a PSEUDONYMOUS
+  // subject gets: with no resolved real name, both name-based screens below go
+  // not-applicable and nothing else asks whether people are accusing this
+  // subject of taking their money. It previously reported only as a provider
+  // run, which snapshot() and completeness() never read, so skipping it on the
+  // collection-budget path cost zero coverage and the report still published
+  // full clearance. It is a decision question for every person role.
+  //
+  // A sweep that RAN and surfaced nothing records checked-empty and is a
+  // completed answer; only an unprovisioned, skipped, or failed sweep records
+  // unavailable and reads as an open gate.
+  {
+    id: "adverse-screen",
+    label: "Adverse, scam, and rug sweep",
+    defaultNote: "server collector did not run an adverse, scam, or rug sweep",
+    criticalFor: ["FOUNDER", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"],
+  },
   // Sanctions, legal history, and flagged-subject graph reconciliation are
   // legal-grade decision gates, not provider diagnostics. A report must never
   // present as decision-ready clearance while they are unresolved.
@@ -120,7 +170,7 @@ const CHECKS: readonly CheckDefinition[] = [
 ] as const;
 
 /** Stable persisted checklist contract used to qualify immutable reports. */
-export const PERSON_CHECK_IDS: readonly PersonCheckId[] = Object.freeze(CHECKS.map((check) => check.id));
+export const PERSON_CHECK_IDS: readonly ChecklistCheckId[] = Object.freeze(CHECKS.map((check) => check.id));
 
 /**
  * The checklist contract that was frozen into reports before project-specific
@@ -226,6 +276,40 @@ export const REPEAT_BACKING_ERA_PERSON_CHECK_IDS: readonly PersonCheckId[] = Obj
   "trust-graph-connections",
 ]);
 
+/**
+ * Exact checklist frozen after investor fund-scale (I3) shipped and before the
+ * adverse sweep and project leadership-currency rows were added. Reports
+ * persisted under this shape must still qualify for the trust-graph KB after
+ * the new checks land (contract matching is exact-set).
+ */
+export const FUND_SCALE_ERA_PERSON_CHECK_IDS: readonly ChecklistCheckId[] = Object.freeze([
+  "identity-resolution",
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "affiliations-associates",
+  "promoted-token-performance",
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
+  "founder-identity-authority",
+  "founder-company-relationships",
+  "founder-track-record",
+  "founder-control-conflicts",
+  "founder-legal-regulatory",
+  "founder-asset-distinction",
+  "founder-repeat-backing",
+  "vc-portfolio-track-record",
+  "investor-fund-scale",
+  "news-press",
+  "us-legal-history",
+  "ofac-sanctions-name",
+  "trust-graph-connections",
+]);
+
 const STATUS_PRIORITY: Record<CheckStatus, number> = {
   "not-applicable": 0,
   unknown: 1,
@@ -243,7 +327,7 @@ function iso(value?: string): string {
   return Number.isFinite(date.getTime()) ? date.toISOString() : new Date().toISOString();
 }
 
-function uniqueObservations(values: readonly CheckObservation[]): CheckObservation[] {
+function uniqueObservations(values: readonly ChecklistObservation[]): ChecklistObservation[] {
   const seen = new Set<string>();
   return values.filter((value) => {
     const key = `${value.id}\n${value.provider}\n${value.status}\n${value.note}`;
@@ -258,11 +342,11 @@ function uniqueObservations(values: readonly CheckObservation[]): CheckObservati
  * Merely invoking an adapter is tracked separately and never completes a check.
  */
 export class PersonCheckTracker {
-  private readonly observations = new Map<PersonCheckId, CheckObservation[]>();
+  private readonly observations = new Map<ChecklistCheckId, ChecklistObservation[]>();
   private readonly providerRuns = new Map<string, ProviderRun>();
 
-  record(observation: CheckObservation): void {
-    const normalized: CheckObservation = {
+  record(observation: ChecklistObservation): void {
+    const normalized: ChecklistObservation = {
       ...observation,
       note: observation.note.trim(),
       provider: observation.provider.trim(),

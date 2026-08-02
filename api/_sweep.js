@@ -186,9 +186,98 @@ var NETWORK = {
   blast: "blast",
   sei: "sei-evm"
 };
+var PERIOD_SECONDS = { day: 86400, hour: 3600 };
+var VOLUME_WINDOW_MAX = 7;
 var GT = "https://api.geckoterminal.com/api/v2";
 function record(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function finiteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+function readCandle(row) {
+  if (!Array.isArray(row) || row.length < 5) return null;
+  const ts = finiteNumber(row[0]);
+  const close = finiteNumber(row[4]);
+  if (ts === void 0 || close === void 0) return null;
+  const high = finiteNumber(row[2]);
+  const low = finiteNumber(row[3]);
+  const volumeUsd = finiteNumber(row[5]);
+  return {
+    ts,
+    close,
+    ...high === void 0 ? {} : { high },
+    ...low === void 0 ? {} : { low },
+    ...volumeUsd === void 0 || volumeUsd < 0 ? {} : { volumeUsd }
+  };
+}
+function candleRange(series, last) {
+  const measured = series.filter((candle) => candle.high !== void 0 && candle.low !== void 0 && candle.low > 0 && candle.low <= candle.close && candle.high >= candle.close);
+  if (!measured.length) return {};
+  const high = Math.max(...measured.map((candle) => candle.high));
+  const low = Math.min(...measured.map((candle) => candle.low));
+  return {
+    range: {
+      high,
+      low,
+      drawdownFromHighPct: high > 0 ? (last - high) / high * 100 : 0,
+      measuredPoints: measured.length,
+      ...measured.length === series.length ? {
+        highs: measured.map((candle) => candle.high),
+        lows: measured.map((candle) => candle.low)
+      } : {}
+    }
+  };
+}
+function volumeWindow(candles) {
+  const measured = candles.filter((candle) => candle.volumeUsd !== void 0);
+  return {
+    usd: measured.reduce((total, candle) => total + candle.volumeUsd, 0),
+    candles: candles.length,
+    measured: measured.length
+  };
+}
+function volumeTrend(series) {
+  const width = Math.min(VOLUME_WINDOW_MAX, Math.floor(series.length / 2));
+  if (width < 2) return {};
+  const recent = volumeWindow(series.slice(series.length - width));
+  const prior = volumeWindow(series.slice(series.length - width * 2, series.length - width));
+  if (!recent.measured || !prior.measured || prior.usd <= 0) return {};
+  return {
+    volume: {
+      recent,
+      prior,
+      changePct: (recent.usd - prior.usd) / prior.usd * 100,
+      isFloor: recent.measured < recent.candles || prior.measured < prior.candles
+    }
+  };
+}
+function windowShape(series, count, timeframe) {
+  const period = PERIOD_SECONDS[timeframe];
+  const span = series[series.length - 1].ts - series[0].ts;
+  if (!period || span <= 0) return {};
+  const spanPeriods = Math.round(span / period) + 1;
+  if (spanPeriods < count) return {};
+  return { spanPeriods, windowIsPartial: count < spanPeriods };
+}
+function summarizeCandles(candles, timeframe) {
+  const series = [...candles].sort((left, right) => left.ts - right.ts).filter((candle) => candle.close > 0);
+  if (!series.length) return null;
+  const points = series.map((candle) => candle.close);
+  const first = points[0];
+  const last = points[points.length - 1];
+  const peak = Math.max(...points);
+  return {
+    points,
+    first,
+    last,
+    peak,
+    changePct: first > 0 ? (last - first) / first * 100 : 0,
+    drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
+    ...candleRange(series, last),
+    ...volumeTrend(series),
+    ...windowShape(series, points.length, timeframe)
+  };
 }
 async function gt(path) {
   try {
@@ -217,24 +306,11 @@ async function fetchPriceHistory(address, chain, pairAddress) {
   for (const timeframe of ["day", "hour"]) {
     const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
     const rawList = record(record(record(d).data).attributes).ohlcv_list;
-    const list = Array.isArray(rawList) ? rawList.filter((row) => Array.isArray(row) && row.length >= 5 && row.every((value) => typeof value === "number")) : [];
-    if (list.length < 3) continue;
-    const rows = [...list].sort((a, b) => a[0] - b[0]);
-    const points = rows.map((r) => r[4]).filter((n) => typeof n === "number" && n > 0);
-    if (points.length < 3) continue;
-    const first = points[0];
-    const last = points[points.length - 1];
-    const peak = Math.max(...points);
-    return {
-      points,
-      first,
-      last,
-      peak,
-      changePct: first > 0 ? (last - first) / first * 100 : 0,
-      drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
-      timeframe,
-      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
+    const candles = Array.isArray(rawList) ? rawList.map(readCandle).filter((candle) => candle !== null) : [];
+    if (candles.length < 3) continue;
+    const summary = summarizeCandles(candles, timeframe);
+    if (!summary || summary.points.length < 3) continue;
+    return { ...summary, timeframe, capturedAt: (/* @__PURE__ */ new Date()).toISOString() };
   }
   return null;
 }

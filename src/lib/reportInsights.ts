@@ -24,6 +24,28 @@ export interface NoticedSignal {
   anchor?: string;
 }
 
+/**
+ * Top-ten share summed from a token audit's own holder rows.
+ *
+ * Two things make this a floor rather than a total, and both suppress it:
+ * a register the token lane already judged self-inconsistent (`holdersAssessed`
+ * false, which is how it says its percentages summed past supply), and a row
+ * list shorter than ten, which would publish four wallets' share as the top
+ * ten's. It exists so a suppressed project-side concentration figure cannot be
+ * quietly backfilled with an unreliable one.
+ */
+export function top10ShareFromRows(
+  rows: readonly { percent?: number | null }[] | undefined,
+  holdersAssessed: boolean | undefined,
+): number | null {
+  if (holdersAssessed === false || !rows || rows.length < 10) return null;
+  const shares = rows.slice(0, 10).map((row) => row.percent);
+  if (shares.some((share) => typeof share !== "number" || !Number.isFinite(share) || share < 0)) return null;
+  const total = (shares as number[]).reduce((sum, share) => sum + share, 0);
+  // A sum past supply is the same self-inconsistency, caught row-side.
+  return total > 100 ? null : total;
+}
+
 export interface NoticedInputs {
   lpLockedPct?: number | null;
   largestHolderPct?: number | null;

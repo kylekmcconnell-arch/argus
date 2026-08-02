@@ -115,14 +115,38 @@ function FeeStat({ fees }: { fees: ProtocolFeesSnapshot & { capturedAt?: string 
 }
 
 /**
- * Float control as one bar: the largest holder, the rest of the top 10, and
+ * Float control as one bar: the largest wallet, the rest of the top 10, and
  * everyone else. The judgment stays with the reader; the bar just makes the
  * split visible at a glance.
+ *
+ * When the collector SUPPRESSED the distribution there is no bar to draw, and
+ * drawing nothing is not good enough: a reader takes a missing concentration
+ * figure for a low one. The suppressed state renders as "not measured" with the
+ * collector's own reason beside it.
  */
 function HolderBar({ holders }: { holders: HolderProfileSnapshot }) {
   const top1 = holders.topHolderPct;
   const top10 = holders.top10Pct;
-  if (top1 == null || top10 == null || top10 <= 0 || top10 > 100 || top1 < 0 || top1 > top10) return null;
+  if (top1 == null || top10 == null || top10 <= 0 || top10 > 100 || top1 < 0 || top1 > top10) {
+    if (holders.holdersAssessed !== false) return null;
+    return (
+      <div>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="text-[15.5px] font-semibold tracking-tight text-ink-dim">not measured</span>
+          <span className="text-[10px] uppercase tracking-[0.09em] text-ink-faint">supply held by the top 10</span>
+          {holders.holderCount != null && holders.holderCount > 0 && (
+            <span className="mono text-[11px] text-ink-faint">{holders.holderCount.toLocaleString()} holders</span>
+          )}
+        </div>
+        {holders.distributionNote && (
+          <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">{holders.distributionNote}</p>
+        )}
+        {holders.lpLockedOrBurnedPct != null && holders.lpLockedOrBurnedPct > 0 && (
+          <p className="mt-1.5 text-[11px] text-ink-faint">LP {Math.round(holders.lpLockedOrBurnedPct)}% locked or burned</p>
+        )}
+      </div>
+    );
+  }
   const nextNine = Math.max(0, top10 - top1);
   const rest = Math.max(0, 100 - top10);
   const segments = [
@@ -156,6 +180,12 @@ function HolderBar({ holders }: { holders: HolderProfileSnapshot }) {
           <span className="text-[11px] text-ink-faint">LP {Math.round(holders.lpLockedOrBurnedPct)}% locked or burned</span>
         )}
       </div>
+      {/* Which register these figures came from, and what was left out of them.
+          The panel is otherwise cited to one provider, and on some chains the
+          ordered distribution is not that provider's. */}
+      {holders.distributionNote && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">{holders.distributionNote}</p>
+      )}
     </div>
   );
 }
@@ -170,7 +200,9 @@ export function UsageVisuals({ tvl, fees, holders }: {
   const hasTrend = trend.length >= 2;
   const hasBreakdown = breakdown.length >= 2;
   const hasFees = fees != null && fees.total30dUsd != null && fees.total30dUsd > 0;
-  const hasHolders = holders != null && holders.topHolderPct != null && holders.top10Pct != null;
+  // A suppressed distribution still has something to say, so it keeps its slot.
+  const hasHolders = holders != null
+    && ((holders.topHolderPct != null && holders.top10Pct != null) || holders.holdersAssessed === false);
   if (!hasTrend && !hasBreakdown && !hasFees && !hasHolders) return null;
   const capturedAt = tvl?.capturedAt ?? fees?.capturedAt;
   const sourceUrl = tvl?.sourceUrl ?? fees?.sourceUrl;

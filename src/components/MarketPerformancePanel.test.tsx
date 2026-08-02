@@ -201,7 +201,9 @@ describe("MarketPerformancePanel", () => {
       />,
     ));
 
-    expect(container.textContent).toContain("From captured peak");
+    // "Peak" is ambiguous between a close and a reported intraday high, and
+    // this figure is neither an all-time nor a market-wide record.
+    expect(container.textContent).toContain("From the highest close in the window");
     expect(container.textContent).toContain("-16.7%");
     expect(container.textContent).toContain("Check all-time high");
     const button = [...container.querySelectorAll("button")]
@@ -237,5 +239,58 @@ describe("MarketPerformancePanel", () => {
     expect(container.textContent).toContain("From all-time high");
     expect(container.textContent).toContain("-92.2%");
     expect(container.textContent).toContain("CURRENT DATA");
+  });
+
+  // The close series is blind to a candle that ran and gave it back, and a
+  // count of candles is not a count of consecutive periods.
+  it("prefers the reported window high and names it, over a close-based peak", () => {
+    const base = token();
+    act(() => root.render(
+      <MarketPerformancePanel
+        token={{
+          ...base,
+          cg: { ...base.cg!, ath: null },
+          priceHistory: {
+            points: [2, 2, 2],
+            first: 2,
+            last: 2,
+            peak: 2,
+            changePct: 0,
+            drawdownPct: 0,
+            range: { high: 80, low: 1.9, drawdownFromHighPct: -97.5, measuredPoints: 3 },
+            timeframe: "day",
+            capturedAt: "2026-07-20T12:00:00.000Z",
+          },
+        }}
+        showCurrentIntelligence={false}
+        onLoadCurrentIntelligence={vi.fn()}
+      />,
+    ));
+
+    expect(container.textContent).toContain("-97.5%");
+    expect(container.textContent).toContain("From the highest reported day high");
+    // The stat itself must never claim to be the lifetime record.
+    expect(container.textContent).not.toContain("From all-time high");
+  });
+
+  it("states observed periods out of the span when the window has holes", () => {
+    const base = token();
+    act(() => root.render(
+      <MarketPerformancePanel
+        token={{
+          ...base,
+          cg: { ...base.cg!, ath: null },
+          priceHistory: {
+            ...base.priceHistory!,
+            spanPeriods: 30,
+            windowIsPartial: true,
+          },
+        }}
+        showCurrentIntelligence={false}
+        onLoadCurrentIntelligence={vi.fn()}
+      />,
+    ));
+
+    expect(container.textContent).toContain("3 of 30 days observed");
   });
 });

@@ -646,7 +646,9 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("What the market tells us");
     expect(container.textContent).toContain("Market and ownership structure");
     expect(container.textContent).toContain("SAVED JUL 23, 2026");
-    expect(container.textContent).toContain("From captured peak");
+    // Not "peak": the label names which reading this is, and neither the
+    // close-based nor the range-based figure is a lifetime record.
+    expect(container.textContent).toContain("From the highest close in the window");
     expect(harness.livePanel.mock.calls.filter(([name]) => name === "sparkline")).toHaveLength(1);
     expect(harness.livePanel.mock.calls.some(([name]) => name === "project-research")).toBe(false);
     expect(harness.livePanel.mock.calls.some(([name]) => name === "on-chain")).toBe(false);

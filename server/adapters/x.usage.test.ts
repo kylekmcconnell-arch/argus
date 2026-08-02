@@ -178,13 +178,30 @@ describe("X provider attempt accounting", () => {
       relationship_label: "recorded collaborator of @gakonst",
     });
 
-    expect(result).toEqual([expect.objectContaining({
+    expect(result.completed).toBe(true);
+    expect(result.signals).toEqual([expect.objectContaining({
       category: "scam_accusation",
       target_entity_key: "@zhygis",
       target_entity_type: "person",
       relationship_to_subject: "associate",
       relationship_label: "recorded collaborator of @gakonst",
     })]);
+  });
+
+  it("reports an unreadable adverse answer as a screen that did not run", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    // The provider answered, but not with the JSON the prompt asked for. We
+    // cannot tell whether it found nothing, so the screen did not complete.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      output_text: "I could not complete that search right now.",
+      output: [{ type: "web_search_call" }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    })));
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const result = await searchAdverseSignals("@Zhygis", "person", { relationship_to_subject: "self" });
+
+    expect(result).toEqual({ completed: false, signals: [] });
   });
 
   it("counts every Twitter HTTP retry and derives a partial operation status", async () => {
@@ -375,6 +392,18 @@ describe("X provider attempt accounting", () => {
       list: [{ handle: "a16zcrypto", label: "VC · a16z crypto", size: "" }],
       checked: 1,
       coverage: "partial",
+      // One real row was read and a null entry was not. The row answered no
+      // audience question, so every dimension stays at zero measured.
+      audience: {
+        profilesExamined: 1,
+        sampleIsComplete: false,
+        creation: { measured: 0 },
+        posts: { measured: 0, zeroPosts: 0 },
+        avatar: { measured: 0, defaultAvatar: 0 },
+        bio: { measured: 0, empty: 0 },
+        starterProfile: { measured: 0, accounts: 0 },
+        followRatio: { measured: 0, followingHeavy: 0, balanced: 0, followerHeavy: 0 },
+      },
     });
   });
 

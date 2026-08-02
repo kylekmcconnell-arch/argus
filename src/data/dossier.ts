@@ -186,6 +186,12 @@ export interface Dossier {
   contradictions: Contradiction[];
   /** Independently collected team records that may ground identity context. */
   webTeam: WebTeamMember[];
+  /**
+   * Whether each named founder / C-level leader still lists this project as a
+   * current role. A paid, bounded lookup: without this field the answer was
+   * collected, charged for, and then dropped before it could ever render.
+   */
+  leaderDepartures?: CollectedEvidence["leaderDepartures"];
   /** Model-only or otherwise unverified team candidates; never grounded evidence. */
   webTeamLeads?: WebTeamMember[];
   /** Second-hop discovery stays inspectable even when excluded from the graph. */
@@ -460,6 +466,9 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     contradictions: ev.contradictions,
     webTeam: groundedWebTeam,
     ...(webTeamLeads.length ? { webTeamLeads } : {}),
+    ...(ev.leaderDepartures?.length
+      ? { leaderDepartures: ev.leaderDepartures.map((row) => ({ ...row })) }
+      : {}),
     ventureTeams: ev.ventureTeams ?? [],
     portfolioLeads: ev.portfolioLeads ?? [],
     sourceArtifacts: ev.sourceArtifacts,
@@ -468,15 +477,45 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     ...(ev.protocolTvl ? { protocolTvl: { ...ev.protocolTvl, chains: [...ev.protocolTvl.chains], chainBreakdown: ev.protocolTvl.chainBreakdown.map((entry) => ({ ...entry })) } } : {}),
     ...(ev.protocolFunding ? { protocolFunding: { ...ev.protocolFunding, rounds: ev.protocolFunding.rounds.map((round) => ({ ...round })), leadInvestors: [...ev.protocolFunding.leadInvestors] } } : {}),
     ...(ev.protocolFees ? { protocolFees: { ...ev.protocolFees } } : {}),
-    ...(ev.holderProfile ? { holderProfile: { ...ev.holderProfile } } : {}),
+    ...(ev.holderProfile ? {
+      holderProfile: {
+        ...ev.holderProfile,
+        // The GoPlus flag sentences are the report's own copy once frozen; a
+        // shared reference lets a later collector pass reword a published claim.
+        ...(ev.holderProfile.contractFlags
+          ? { contractFlags: ev.holderProfile.contractFlags.map((flag) => ({ ...flag })) }
+          : {}),
+      },
+    } : {}),
     ...(ev.tokenUnlocks ? { tokenUnlocks: { ...ev.tokenUnlocks } } : {}),
     ...(operatorLaunches ? { operatorLaunches } : {}),
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...(ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {}),
       ...(ev.projectToken.ath ? { ath: { ...ev.projectToken.ath } } : {}),
+      // The candle summary is two levels deep now: the range carries per-candle
+      // high and low arrays, and the volume trend carries a window object a
+      // side. Cloning only `points` would leave the rest pointing back at live
+      // collector state, which is the one thing a freeze must not do.
       ...(ev.projectToken.history ? {
-        history: { ...ev.projectToken.history, points: [...ev.projectToken.history.points] },
+        history: {
+          ...ev.projectToken.history,
+          points: [...ev.projectToken.history.points],
+          ...(ev.projectToken.history.range ? {
+            range: {
+              ...ev.projectToken.history.range,
+              ...(ev.projectToken.history.range.highs ? { highs: [...ev.projectToken.history.range.highs] } : {}),
+              ...(ev.projectToken.history.range.lows ? { lows: [...ev.projectToken.history.range.lows] } : {}),
+            },
+          } : {}),
+          ...(ev.projectToken.history.volume ? {
+            volume: {
+              ...ev.projectToken.history.volume,
+              recent: { ...ev.projectToken.history.volume.recent },
+              prior: { ...ev.projectToken.history.volume.prior },
+            },
+          } : {}),
+        },
       } : {}),
     } : undefined,
     ...(ev.basicFacts?.length ? {

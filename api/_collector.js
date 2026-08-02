@@ -1219,6 +1219,7 @@ function assembleDossier(ev, live) {
     contradictions: ev.contradictions,
     webTeam: groundedWebTeam,
     ...webTeamLeads.length ? { webTeamLeads } : {},
+    ...ev.leaderDepartures?.length ? { leaderDepartures: ev.leaderDepartures.map((row) => ({ ...row })) } : {},
     ventureTeams: ev.ventureTeams ?? [],
     portfolioLeads: ev.portfolioLeads ?? [],
     sourceArtifacts: ev.sourceArtifacts,
@@ -1227,15 +1228,43 @@ function assembleDossier(ev, live) {
     ...ev.protocolTvl ? { protocolTvl: { ...ev.protocolTvl, chains: [...ev.protocolTvl.chains], chainBreakdown: ev.protocolTvl.chainBreakdown.map((entry) => ({ ...entry })) } } : {},
     ...ev.protocolFunding ? { protocolFunding: { ...ev.protocolFunding, rounds: ev.protocolFunding.rounds.map((round) => ({ ...round })), leadInvestors: [...ev.protocolFunding.leadInvestors] } } : {},
     ...ev.protocolFees ? { protocolFees: { ...ev.protocolFees } } : {},
-    ...ev.holderProfile ? { holderProfile: { ...ev.holderProfile } } : {},
+    ...ev.holderProfile ? {
+      holderProfile: {
+        ...ev.holderProfile,
+        // The GoPlus flag sentences are the report's own copy once frozen; a
+        // shared reference lets a later collector pass reword a published claim.
+        ...ev.holderProfile.contractFlags ? { contractFlags: ev.holderProfile.contractFlags.map((flag) => ({ ...flag })) } : {}
+      }
+    } : {},
     ...ev.tokenUnlocks ? { tokenUnlocks: { ...ev.tokenUnlocks } } : {},
     ...operatorLaunches ? { operatorLaunches } : {},
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {},
       ...ev.projectToken.ath ? { ath: { ...ev.projectToken.ath } } : {},
+      // The candle summary is two levels deep now: the range carries per-candle
+      // high and low arrays, and the volume trend carries a window object a
+      // side. Cloning only `points` would leave the rest pointing back at live
+      // collector state, which is the one thing a freeze must not do.
       ...ev.projectToken.history ? {
-        history: { ...ev.projectToken.history, points: [...ev.projectToken.history.points] }
+        history: {
+          ...ev.projectToken.history,
+          points: [...ev.projectToken.history.points],
+          ...ev.projectToken.history.range ? {
+            range: {
+              ...ev.projectToken.history.range,
+              ...ev.projectToken.history.range.highs ? { highs: [...ev.projectToken.history.range.highs] } : {},
+              ...ev.projectToken.history.range.lows ? { lows: [...ev.projectToken.history.range.lows] } : {}
+            }
+          } : {},
+          ...ev.projectToken.history.volume ? {
+            volume: {
+              ...ev.projectToken.history.volume,
+              recent: { ...ev.projectToken.history.volume.recent },
+              prior: { ...ev.projectToken.history.volume.prior }
+            }
+          } : {}
+        }
       } : {}
     } : void 0,
     ...ev.basicFacts?.length ? {
@@ -3183,18 +3212,35 @@ var compactProjectToken = (value) => {
       return compacted === void 0 ? [] : [[key, compacted]];
     })),
     ...history ? {
-      history: Object.fromEntries([
-        "first",
-        "last",
-        "peak",
-        "changePct",
-        "drawdownPct",
-        "timeframe",
-        "poolAddress"
-      ].flatMap((key) => {
-        const compacted = compactObject(history[key], 2);
-        return compacted === void 0 ? [] : [[key, compacted]];
-      }))
+      history: {
+        ...Object.fromEntries([
+          // `range` at depth 2 is exactly right: its scalars survive and the
+          // 90-element highs/lows arrays are dropped, which is what a scoring
+          // packet wants. Passing it at depth 1 would truncate those arrays to
+          // eight entries, which reads as a short series rather than a dropped one.
+          "first",
+          "last",
+          "peak",
+          "changePct",
+          "drawdownPct",
+          "range",
+          "spanPeriods",
+          "windowIsPartial",
+          "timeframe",
+          "poolAddress"
+        ].flatMap((key) => {
+          const compacted = compactObject(history[key], 2);
+          return compacted === void 0 ? [] : [[key, compacted]];
+        })),
+        // Volume needs one more level than the rest: at depth 2 it collapses to
+        // {changePct, isFloor} and loses recent/prior, i.e. loses the widths of
+        // the windows being compared. A percentage change with no named span is
+        // the assertion this data exists to prevent.
+        ...(() => {
+          const volume = compactObject(history.volume, 1);
+          return volume === void 0 ? {} : { volume };
+        })()
+      }
     } : {}
   };
 };
@@ -5041,6 +5087,18 @@ var CHECKS = [
   { id: "project-token-identity", label: "Canonical project token", defaultNote: "no official token identity was bound to this project account", role: "PROJECT", criticalFor: ["PROJECT"] },
   { id: "project-product-substance", label: "Product and website substance", defaultNote: "no frozen first-party product or website outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
   { id: "project-team-identity", label: "Project team identity", defaultNote: "no first-party team identity outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  // Does the leadership this project claims still claim the project back? The
+  // answer comes from a paid, bounded employment lookup (founders and C-level,
+  // three people at most), and it used to be recorded against
+  // founder-company-relationships, whose FOUNDER role gate then published
+  // "not a founder" on the very run that paid for the answer. This row is the
+  // PROJECT-scoped home for it.
+  //
+  // Not a decision gate: a project with no named leaders, or a scan with no
+  // licensed employment provider, cannot be asked this question at all, and a
+  // question that cannot be asked must not withhold clearance.
+  // project-team-identity remains the gating team row.
+  { id: "project-leadership-currency", label: "Named leadership still current", defaultNote: "no employment-record currency outcome was recorded for the named leadership", role: "PROJECT" },
   { id: "project-backing-partners", label: "Backing and partners", defaultNote: "no source-backed project backing or partnership outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
   { id: "project-traction-liveness", label: "Traction and liveness", defaultNote: "no frozen product, market, or activity-liveness outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
   { id: "project-transparency", label: "Transparency and disclosures", defaultNote: "no frozen token, audit, docs, or disclosure outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
@@ -5068,6 +5126,23 @@ var CHECKS = [
   // is not publicly source-backed is scored low on scale, not abstained).
   { id: "investor-fund-scale", label: "Fund scale", defaultNote: "fund AUM or close amount was not assessed against source-backed evidence", role: "INVESTOR" },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
+  // The rug / scam / drain / FUD sweep is the only screen a PSEUDONYMOUS
+  // subject gets: with no resolved real name, both name-based screens below go
+  // not-applicable and nothing else asks whether people are accusing this
+  // subject of taking their money. It previously reported only as a provider
+  // run, which snapshot() and completeness() never read, so skipping it on the
+  // collection-budget path cost zero coverage and the report still published
+  // full clearance. It is a decision question for every person role.
+  //
+  // A sweep that RAN and surfaced nothing records checked-empty and is a
+  // completed answer; only an unprovisioned, skipped, or failed sweep records
+  // unavailable and reads as an open gate.
+  {
+    id: "adverse-screen",
+    label: "Adverse, scam, and rug sweep",
+    defaultNote: "server collector did not run an adverse, scam, or rug sweep",
+    criticalFor: ["FOUNDER", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"]
+  },
   // Sanctions, legal history, and flagged-subject graph reconciliation are
   // legal-grade decision gates, not provider diagnostics. A report must never
   // present as decision-ready clearance while they are unresolved.
@@ -5181,6 +5256,33 @@ var REPEAT_BACKING_ERA_PERSON_CHECK_IDS = Object.freeze([
   "founder-asset-distinction",
   "founder-repeat-backing",
   "vc-portfolio-track-record",
+  "news-press",
+  "us-legal-history",
+  "ofac-sanctions-name",
+  "trust-graph-connections"
+]);
+var FUND_SCALE_ERA_PERSON_CHECK_IDS = Object.freeze([
+  "identity-resolution",
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "affiliations-associates",
+  "promoted-token-performance",
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
+  "founder-identity-authority",
+  "founder-company-relationships",
+  "founder-track-record",
+  "founder-control-conflicts",
+  "founder-legal-regulatory",
+  "founder-asset-distinction",
+  "founder-repeat-backing",
+  "vc-portfolio-track-record",
+  "investor-fund-scale",
   "news-press",
   "us-legal-history",
   "ofac-sanctions-name",
@@ -6829,6 +6931,132 @@ async function checkFollow(source2, target) {
     return null;
   }
 }
+function newAudienceTally() {
+  return {
+    profilesExamined: 0,
+    creationMeasured: 0,
+    creationMonths: /* @__PURE__ */ new Map(),
+    postsMeasured: 0,
+    zeroPosts: 0,
+    avatarMeasured: 0,
+    defaultAvatar: 0,
+    bioMeasured: 0,
+    emptyBio: 0,
+    starterMeasured: 0,
+    starterAccounts: 0,
+    ratioMeasured: 0,
+    followingHeavy: 0,
+    balanced: 0,
+    followerHeavy: 0
+  };
+}
+var DEFAULT_AVATAR_URL = /default_profile(?:_images)?[/_]/i;
+var AUDIENCE_RATIO_DOMINANCE = 10;
+var AUDIENCE_SAMPLE_MIN = 50;
+var audienceNumber = (row, ...keys) => {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+    if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+  }
+  return null;
+};
+var audienceMonth = (row) => {
+  const raw = row.createdAt ?? row.created_at;
+  if (typeof raw !== "string") return null;
+  const at = new Date(raw);
+  if (Number.isNaN(at.getTime())) return null;
+  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+function tallyAudienceRow(tally, row) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return;
+  const record3 = row;
+  tally.profilesExamined += 1;
+  const month = audienceMonth(record3);
+  if (month) {
+    tally.creationMeasured += 1;
+    tally.creationMonths.set(month, (tally.creationMonths.get(month) ?? 0) + 1);
+  }
+  const posts = audienceNumber(record3, "statusesCount", "statuses_count", "tweetCount", "tweet_count");
+  if (posts !== null) {
+    tally.postsMeasured += 1;
+    if (posts === 0) tally.zeroPosts += 1;
+  }
+  const avatarUrl = typeof record3.profilePicture === "string" ? record3.profilePicture : typeof record3.profile_image_url_https === "string" ? record3.profile_image_url_https : typeof record3.profile_image_url === "string" ? record3.profile_image_url : null;
+  const defaultAvatar = avatarUrl === null ? null : DEFAULT_AVATAR_URL.test(avatarUrl);
+  if (defaultAvatar !== null) {
+    tally.avatarMeasured += 1;
+    if (defaultAvatar) tally.defaultAvatar += 1;
+  }
+  const bio = typeof record3.description === "string" ? record3.description : null;
+  const emptyBio = bio === null ? null : bio.trim() === "";
+  if (emptyBio !== null) {
+    tally.bioMeasured += 1;
+    if (emptyBio) tally.emptyBio += 1;
+  }
+  if (defaultAvatar !== null && emptyBio !== null) {
+    tally.starterMeasured += 1;
+    if (defaultAvatar && emptyBio) tally.starterAccounts += 1;
+  }
+  const followers = audienceNumber(record3, "followers", "followersCount", "followers_count");
+  const following = audienceNumber(record3, "following", "followingCount", "following_count", "friends_count");
+  if (followers !== null && following !== null) {
+    tally.ratioMeasured += 1;
+    if (followers === 0 && following === 0) tally.balanced += 1;
+    else if (followers >= following * AUDIENCE_RATIO_DOMINANCE) tally.followerHeavy += 1;
+    else if (following >= followers * AUDIENCE_RATIO_DOMINANCE) tally.followingHeavy += 1;
+    else tally.balanced += 1;
+  }
+}
+function sealAudienceSample(tally, sampleIsComplete) {
+  if (tally.profilesExamined <= 0) return void 0;
+  let largestMonth;
+  for (const [month, accounts] of tally.creationMonths) {
+    if (!largestMonth || accounts > largestMonth.accounts) largestMonth = { month, accounts };
+  }
+  return {
+    profilesExamined: tally.profilesExamined,
+    sampleIsComplete,
+    creation: { measured: tally.creationMeasured, ...largestMonth ? { largestMonth } : {} },
+    posts: { measured: tally.postsMeasured, zeroPosts: tally.zeroPosts },
+    avatar: { measured: tally.avatarMeasured, defaultAvatar: tally.defaultAvatar },
+    bio: { measured: tally.bioMeasured, empty: tally.emptyBio },
+    starterProfile: { measured: tally.starterMeasured, accounts: tally.starterAccounts },
+    followRatio: {
+      measured: tally.ratioMeasured,
+      followingHeavy: tally.followingHeavy,
+      balanced: tally.balanced,
+      followerHeavy: tally.followerHeavy
+    }
+  };
+}
+var audienceShare = (part, whole) => `${part} of ${whole} (${Math.round(part / whole * 100)}%)`;
+function describeAudienceSample(sample) {
+  if (!sample) return "No follower profiles were read on this path, so audience shape is not measured.";
+  const profiles = `${sample.profilesExamined} follower profile${sample.profilesExamined === 1 ? "" : "s"}`;
+  if (sample.profilesExamined < AUDIENCE_SAMPLE_MIN) {
+    return `Read ${profiles}, too thin to describe an audience shape, so no share is reported.`;
+  }
+  const parts = [];
+  const thin = [];
+  if (sample.posts.measured >= AUDIENCE_SAMPLE_MIN) {
+    parts.push(`${audienceShare(sample.posts.zeroPosts, sample.posts.measured)} had never posted`);
+  } else thin.push("post counts");
+  if (sample.starterProfile.measured >= AUDIENCE_SAMPLE_MIN) {
+    parts.push(`${audienceShare(sample.starterProfile.accounts, sample.starterProfile.measured)} carried a default avatar over an empty bio`);
+  } else thin.push("avatar and bio");
+  if (sample.creation.measured >= AUDIENCE_SAMPLE_MIN && sample.creation.largestMonth) {
+    parts.push(`the largest single creation cohort was ${sample.creation.largestMonth.month}, ${audienceShare(sample.creation.largestMonth.accounts, sample.creation.measured)} of the rows carrying a creation date`);
+  } else thin.push("creation dates");
+  if (sample.followRatio.measured >= AUDIENCE_SAMPLE_MIN) {
+    const ratio = sample.followRatio;
+    parts.push(`across ${ratio.measured} rows carrying both follow counts, ${ratio.followingHeavy} follow at least ${AUDIENCE_RATIO_DOMINANCE}x more accounts than follow them, ${ratio.balanced} sit in between, and ${ratio.followerHeavy} are followed by at least ${AUDIENCE_RATIO_DOMINANCE}x more than they follow`);
+  } else thin.push("follow counts");
+  const basis = sample.sampleIsComplete ? `all ${profiles}` : `${profiles}, a floor: pagination stopped before the follower list ran out, and the rows read are the most recently gained followers rather than a random draw`;
+  const shape = parts.length ? `${parts.join("; ")}.` : "no dimension came back for enough of the sample to describe.";
+  const gap = thin.length ? ` The provider returned ${thin.join(", ")} for too little of the sample, so ${thin.length === 1 ? "that dimension stays" : "those dimensions stay"} unmeasured.` : "";
+  return `Audience shape across ${basis}: ${shape} This describes the profiles read, not the account's full follower count, and a shape like this is never proof that a follower was bought.${gap}`;
+}
 async function dynamicNotable(organizationId) {
   const org = organizationId?.trim();
   if (!org) return [];
@@ -6867,6 +7095,7 @@ async function notableFollowers(subject, opts) {
     const set = new Map(candidates.map((n) => [n.handle.toLowerCase(), n]));
     const hits2 = [];
     const got = /* @__PURE__ */ new Set();
+    const audience = newAudienceTally();
     const u = subject.replace(/^@/, "");
     let cursor = "";
     let observedFollowers = 0;
@@ -6892,6 +7121,7 @@ async function notableFollowers(subject, opts) {
       observedFollowers += followers.length;
       for (const follower of followers) {
         const f = asRecord2(follower);
+        tallyAudienceRow(audience, follower);
         const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
         const m = set.get(h);
         if (m && !got.has(h)) {
@@ -6912,7 +7142,10 @@ async function notableFollowers(subject, opts) {
     return {
       list: hits2,
       checked: coverageComplete ? total : hits2.length,
-      coverage: coverageComplete ? "complete" : observedPage ? "partial" : "unavailable"
+      coverage: coverageComplete ? "complete" : observedPage ? "partial" : "unavailable",
+      // The sample is complete only when pagination finished; an interrupted
+      // pass reports the rows it read as a floor, never as the audience.
+      audience: sealAudienceSample(audience, coverageComplete)
     };
   }
   const REVERSE_CAP = 500;
@@ -7214,20 +7447,21 @@ function parseTeamJSON(text2, selfHandle, source2) {
     return [];
   }
 }
+var ADVERSE_NOT_ANSWERED = { completed: false, signals: [] };
 async function searchAdverseSignals(handle, kind, context, ticker) {
   const h = handle.replace(/^@/, "");
   const targetEntityKey = `@${h.toLowerCase()}`;
   const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}` : `the person behind X account @${h}`;
   const system = `You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, or general community complaints/FUD. Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. Reply with ONLY compact JSON: {"signals":[{"category":"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud","claim":"","source":"","source_url":""}]}. Never use em dashes.`;
   const text2 = await generalWebSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}` });
-  if (!text2) return [];
+  if (!text2) return ADVERSE_NOT_ANSWERED;
   const m = text2.match(/\{[\s\S]*\}/);
-  if (!m) return [];
+  if (!m) return ADVERSE_NOT_ANSWERED;
   try {
     const parsed = JSON.parse(m[0]);
     const cats = /* @__PURE__ */ new Set(["rug", "slow_rug", "liquidity_pull", "drain", "scam_accusation", "fud"]);
     const out = Array.isArray(parsed.signals) ? parsed.signals : [];
-    return out.filter((s) => s && typeof s.claim === "string" && s.claim.trim() && cats.has(s.category)).map((s) => ({
+    const signals = out.filter((s) => s && typeof s.claim === "string" && s.claim.trim() && cats.has(s.category)).map((s) => ({
       category: s.category,
       claim: s.claim.trim(),
       source: (s.source || "unattributed").toString().trim(),
@@ -7237,8 +7471,9 @@ async function searchAdverseSignals(handle, kind, context, ticker) {
       relationship_to_subject: context.relationship_to_subject,
       relationship_label: context.relationship_label?.trim() || void 0
     })).slice(0, 12);
+    return { completed: true, signals };
   } catch {
-    return [];
+    return ADVERSE_NOT_ANSWERED;
   }
 }
 async function detectManipulationTooling(handle, name) {
@@ -7348,6 +7583,9 @@ var xAdapter = {
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable follower check incomplete", detail: scan.checked > 0 ? `No notable follower was observed in ${scan.checked} returned relationship result${scan.checked === 1 ? "" : "s"}; unobserved accounts remain unknown, so ARGUS withheld the negative conclusion.` : "Some follower data returned, but full reference-set coverage was not established; ARGUS withheld the negative conclusion.", source: "twitterapi.io", tone: "warn" });
       } else {
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable follower check unavailable", detail: "The relationship provider returned no observable results; ARGUS withheld the notable-follower conclusion.", source: "twitterapi.io", tone: "warn" });
+      }
+      if (scan.audience) {
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Audience shape", detail: describeAudienceSample(scan.audience), source: "twitterapi.io", tone: "neutral" });
       }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);
@@ -7744,6 +7982,9 @@ var HARD_COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*so
 var PARKED = /this[\s_-]*domain[\s_-]*is[\s_-]*for[\s_-]*sale|buy[\s_-]*this[\s_-]*domain|hugedomains|sedoparking|parkingcrew|domain[\s_-]*(is[\s_-]*)?parked/i;
 var PRODUCT = /\b(docs|whitepaper|dashboard|pricing|features|roadmap|marketplace|explorer|portfolio|order\s*book|connect\s*wallet|launch\s*app|sign\s*in|log\s*in|deposit|withdraw|governance|staking)\b/i;
 var DNS_CODES = /* @__PURE__ */ new Set(["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "ENODATA", "ENONAME"]);
+var BUNDLE_MARKER = /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i;
+var BUNDLE_READ_CAP_BYTES = 512 * 1024;
+var BUNDLE_READ_CAP_LABEL = "512 KB";
 function stripText(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 }
@@ -7768,6 +8009,35 @@ function isAntiBotResponse(response, body) {
   const challenge = response.headers.get("x-datadome") ?? response.headers.get("x-captcha") ?? "";
   return /challenge|captcha/i.test(`${mitigation} ${challenge}`) || antiBotChallengeBody(response.headers.get("content-type") ?? "text/html", body);
 }
+async function readBody(response, maxBytes) {
+  if (maxBytes === void 0 || !response.body) {
+    return { text: await response.text(), truncated: false };
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text2 = "";
+  let remaining = maxBytes;
+  let truncated = false;
+  try {
+    for (; ; ) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      if (value.byteLength > remaining) {
+        text2 += decoder.decode(value.subarray(0, remaining));
+        truncated = true;
+        break;
+      }
+      text2 += decoder.decode(value, { stream: true });
+      remaining -= value.byteLength;
+    }
+    if (!truncated) text2 += decoder.decode();
+  } finally {
+    await reader.cancel().catch(() => {
+    });
+  }
+  return { text: text2, truncated };
+}
 async function get(url, opts) {
   let response;
   try {
@@ -7791,8 +8061,9 @@ async function get(url, opts) {
     };
   }
   let html;
+  let truncated;
   try {
-    html = await response.text();
+    ({ text: html, truncated } = await readBody(response, opts?.maxBytes));
   } catch {
     recordCall("site-fetch", "substance", 0, "response_text_error", "failed");
     return {
@@ -7854,8 +8125,8 @@ async function get(url, opts) {
       detail: "the homepage returned an empty body; no liveness conclusion can be drawn"
     };
   }
-  recordCall("site-fetch", "substance", 0, void 0, "succeeded");
-  return { kind: "page", url: finalUrl, html };
+  recordCall("site-fetch", "substance", 0, truncated ? "read_capped" : void 0, truncated ? "partial" : "succeeded");
+  return { kind: "page", url: finalUrl, html, truncated };
 }
 function failedSiteResult(domain, failures) {
   const blocked = failures.find((failure) => failure.status === "access_blocked");
@@ -7939,17 +8210,21 @@ async function checkSiteSubstance(domain) {
   const isShell = /id=["'](root|__next|app|__nuxt)["']/i.test(page.html) || /<script[^>]+type=["']module["']/i.test(page.html);
   if (isShell && body.length < 300) {
     let bundleHint = false;
+    let bundleReadCapped = false;
     for (const bundle of bundleUrls(page.html, page.url)) {
-      const js = await get(bundle, { requireHtml: false }).catch(() => null);
+      const js = await get(bundle, { requireHtml: false, maxBytes: BUNDLE_READ_CAP_BYTES }).catch(() => null);
       if (!js || js.kind !== "page") continue;
-      if (COMING.test(js.html) || /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i.test(js.html)) {
+      if (COMING.test(js.html) || BUNDLE_MARKER.test(js.html)) {
         bundleHint = true;
+        break;
       }
+      if (js.truncated) bundleReadCapped = true;
     }
+    const metaNote = meta ? ` ("${meta.slice(0, 80)}")` : "";
     return {
       url: page.url,
       status: "client_rendered",
-      detail: bundleHint ? "client-rendered app; its bundle contains an unrendered coming-soon string, which is not treated as homepage liveness evidence" : `client-rendered app; static read could not confirm a product surface${meta ? ` ("${meta.slice(0, 80)}")` : ""}`
+      detail: bundleHint ? "client-rendered app; its bundle contains an unrendered coming-soon string, which is not treated as homepage liveness evidence" : bundleReadCapped ? `client-rendered app; static read could not confirm a product surface${metaNote}; its script bundles were read only up to ${BUNDLE_READ_CAP_LABEL}, so no coming-soon marker was reached rather than shown to be absent` : `client-rendered app; static read could not confirm a product surface${metaNote}`
     };
   }
   return { url: page.url, status: "live", detail: `site is up${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
@@ -8398,28 +8673,55 @@ function defiLlamaLookupName(name) {
   const normalized4 = name.trim();
   return normalized4.replace(/\s+protocol$/i, "").trim() || normalized4;
 }
-async function fetchProtocol(slug, fetcher) {
-  const url = `${API_BASE}/protocol/${encodeURIComponent(slug)}`;
+var SCAN_MEMO_MS = 3e4;
+var scanMemo = /* @__PURE__ */ new Map();
+function resetDefiLlamaScanMemo() {
+  scanMemo.clear();
+}
+var readStatus = (fromMemo, live) => fromMemo ? "cached" : live;
+async function readJson(url, fetcher) {
   let response;
   try {
     response = await fetcher(url, { signal: AbortSignal.timeout(2e4) });
   } catch {
-    return { ok: false, notFound: false, note: "DeFiLlama was unavailable." };
+    return { ok: false, kind: "transport", status: null };
   }
-  if (!response.ok) {
-    const notFound = response.status === 400;
-    return {
-      ok: false,
-      notFound,
-      note: notFound ? `No DeFiLlama protocol matched "${slug}".` : "DeFiLlama request failed."
-    };
-  }
+  if (!response.ok) return { ok: false, kind: "http", status: response.status };
   try {
-    const data = await response.json() ?? {};
-    return { ok: true, data };
+    return { ok: true, data: await response.json() ?? {}, fromMemo: false };
   } catch {
-    return { ok: false, notFound: false, note: "DeFiLlama response was unreadable." };
+    return { ok: false, kind: "unreadable", status: response.status };
   }
+}
+async function fetchJsonOnce(url, fetcher) {
+  const now = Date.now();
+  for (const [key, slot] of scanMemo) {
+    if (!slot.inFlight && (!slot.settled || now - slot.settled.at >= SCAN_MEMO_MS)) scanMemo.delete(key);
+  }
+  const existing = scanMemo.get(url);
+  if (existing?.settled) return { ok: true, data: existing.settled.data, fromMemo: true };
+  if (existing?.inFlight) {
+    const shared = await existing.inFlight;
+    return shared.ok ? { ok: true, data: shared.data, fromMemo: true } : shared;
+  }
+  const inFlight = readJson(url, fetcher).catch(() => ({ ok: false, kind: "transport", status: null }));
+  scanMemo.set(url, { inFlight });
+  const read = await inFlight;
+  if (read.ok) scanMemo.set(url, { settled: { at: Date.now(), data: read.data } });
+  else scanMemo.delete(url);
+  return read;
+}
+async function fetchProtocol(slug, fetcher) {
+  const read = await fetchJsonOnce(`${API_BASE}/protocol/${encodeURIComponent(slug)}`, fetcher);
+  if (read.ok) return { ok: true, data: read.data ?? {}, fromMemo: read.fromMemo };
+  if (read.kind === "transport") return { ok: false, notFound: false, note: "DeFiLlama was unavailable." };
+  if (read.kind === "unreadable") return { ok: false, notFound: false, note: "DeFiLlama response was unreadable." };
+  const notFound = read.status === 400;
+  return {
+    ok: false,
+    notFound,
+    note: notFound ? `No DeFiLlama protocol matched "${slug}".` : "DeFiLlama request failed."
+  };
 }
 var strArray = (value) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim()) : [];
 var NON_CHAIN_SEGMENT = /(?:^|[-])(?:borrowed|staking|pool2|vesting|treasury|offers|options)(?:$|[-])/i;
@@ -8437,7 +8739,7 @@ async function collectProtocolTvl(projectName2, options = {}) {
   const latest = series.length ? series[series.length - 1] : void 0;
   const tvlUsd = typeof latest?.totalLiquidityUSD === "number" ? latest.totalLiquidityUSD : null;
   if (tvlUsd === null || !(tvlUsd > 0)) {
-    recordCall("defillama", "tvl", 0, `${slug} \xB7 no_tvl`, "partial");
+    recordCall("defillama", "tvl", 0, `${slug} \xB7 no_tvl`, readStatus(result.fromMemo, "partial"));
     return { available: false, note: "DeFiLlama returned no positive TVL for this protocol." };
   }
   const rawChainTvls = data.currentChainTvls && typeof data.currentChainTvls === "object" ? data.currentChainTvls : {};
@@ -8487,7 +8789,7 @@ async function collectProtocolTvl(projectName2, options = {}) {
       technique: typeof entry.technique === "string" ? entry.technique : null
     };
   });
-  recordCall("defillama", "tvl", 0, `${slug} \xB7 tvl_${Math.round(tvlUsd)}`, "succeeded");
+  recordCall("defillama", "tvl", 0, `${slug} \xB7 tvl_${Math.round(tvlUsd)}`, readStatus(result.fromMemo, "succeeded"));
   return {
     available: true,
     value: {
@@ -8522,7 +8824,7 @@ async function collectProtocolAuditLinks(projectName2, options = {}) {
   }
   const fromParent = parseAuditFields(parent.data);
   if (fromParent.links.length) {
-    recordCall("defillama", "audit-links", 0, `${slug} \xB7 ${fromParent.links.length}_links`, "succeeded");
+    recordCall("defillama", "audit-links", 0, `${slug} \xB7 ${fromParent.links.length}_links`, readStatus(parent.fromMemo, "succeeded"));
     return { available: true, value: { slug, auditCount: fromParent.count, auditLinks: fromParent.links } };
   }
   const children = strArray(parent.data.otherProtocols).map((name) => defiLlamaSlug(name)).filter((child) => child && child !== slug).slice(0, options.maxChildren ?? 3);
@@ -8531,43 +8833,38 @@ async function collectProtocolAuditLinks(projectName2, options = {}) {
     if (!doc.ok) continue;
     const fields = parseAuditFields(doc.data);
     if (fields.links.length) {
-      recordCall("defillama", "audit-links", 0, `${slug}->${child} \xB7 ${fields.links.length}_links`, "succeeded");
+      recordCall("defillama", "audit-links", 0, `${slug}->${child} \xB7 ${fields.links.length}_links`, readStatus(doc.fromMemo, "succeeded"));
       return { available: true, value: { slug: child, auditCount: fields.count, auditLinks: fields.links } };
     }
   }
-  recordCall("defillama", "audit-links", 0, `${slug} \xB7 none`, "succeeded");
+  recordCall("defillama", "audit-links", 0, `${slug} \xB7 none`, readStatus(parent.fromMemo, "succeeded"));
   return { available: false, note: "No audit links listed on DeFiLlama for this protocol." };
 }
 async function collectProtocolFees(projectName2, options = {}) {
   const fetcher = options.fetcher ?? fetch;
   const slug = options.slug ?? defiLlamaSlug(projectName2);
   if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
-  const url = `${API_BASE}/summary/fees/${encodeURIComponent(slug)}`;
-  let response;
-  try {
-    response = await fetcher(url, { signal: AbortSignal.timeout(2e4) });
-  } catch {
-    recordCall("defillama", "fees", 0, `${slug} \xB7 error`, "failed");
-    return { available: false, note: "DeFiLlama fees endpoint was unavailable." };
-  }
-  if (!response.ok) {
-    recordCall("defillama", "fees", 0, `${slug} \xB7 http_${response.status}`, response.status === 400 ? "succeeded" : "failed");
+  const read = await fetchJsonOnce(`${API_BASE}/summary/fees/${encodeURIComponent(slug)}`, fetcher);
+  if (!read.ok) {
+    if (read.kind === "transport") {
+      recordCall("defillama", "fees", 0, `${slug} \xB7 error`, "failed");
+      return { available: false, note: "DeFiLlama fees endpoint was unavailable." };
+    }
+    if (read.kind === "unreadable") {
+      return { available: false, note: "DeFiLlama fees response was unreadable." };
+    }
+    recordCall("defillama", "fees", 0, `${slug} \xB7 http_${read.status}`, read.status === 400 ? "succeeded" : "failed");
     return { available: false, note: `No DeFiLlama fee record for "${slug}".` };
   }
-  let payload;
-  try {
-    payload = await response.json() ?? {};
-  } catch {
-    return { available: false, note: "DeFiLlama fees response was unreadable." };
-  }
+  const payload = read.data ?? {};
   const total24hUsd = typeof payload.total24h === "number" && payload.total24h >= 0 ? Math.round(payload.total24h) : null;
   const total30dUsd = typeof payload.total30d === "number" && payload.total30d >= 0 ? Math.round(payload.total30d) : null;
   const change30dOver30dPct = typeof payload.change_30dover30d === "number" && Number.isFinite(payload.change_30dover30d) && Math.abs(payload.change_30dover30d) <= 1e4 ? Math.round(payload.change_30dover30d * 10) / 10 : null;
   if (total24hUsd === null && total30dUsd === null) {
-    recordCall("defillama", "fees", 0, `${slug} \xB7 no_totals`, "succeeded");
+    recordCall("defillama", "fees", 0, `${slug} \xB7 no_totals`, readStatus(read.fromMemo, "succeeded"));
     return { available: false, note: "DeFiLlama reported no fee totals for this protocol." };
   }
-  recordCall("defillama", "fees", 0, `${slug} \xB7 fees30d_${total30dUsd ?? 0}`, "succeeded");
+  recordCall("defillama", "fees", 0, `${slug} \xB7 fees30d_${total30dUsd ?? 0}`, readStatus(read.fromMemo, "succeeded"));
   return {
     available: true,
     value: {
@@ -8611,12 +8908,12 @@ async function collectProtocolFunding(projectName2, options = {}) {
   const raw = Array.isArray(result.data.raises) ? result.data.raises : [];
   const rounds = raw.map(fundingRoundFromRaise).filter((entry) => entry !== null).sort((a, b) => a.date && b.date ? a.date.localeCompare(b.date) : 0);
   if (!rounds.length) {
-    recordCall("defillama", "funding", 0, `${slug} \xB7 no_raises`, "succeeded");
+    recordCall("defillama", "funding", 0, `${slug} \xB7 no_raises`, readStatus(result.fromMemo, "succeeded"));
     return { available: false, reason: "no_data", note: `No public funding rounds recorded for "${slug}" on DeFiLlama.` };
   }
   const leadInvestors = [...new Set(rounds.flatMap((round) => round.leadInvestors))];
   const totalRaisedUsd = rounds.reduce((sum, round) => sum + (round.amountUsd ?? 0), 0);
-  recordCall("defillama", "funding", 0, `${slug} \xB7 ${rounds.length}_rounds`, "succeeded");
+  recordCall("defillama", "funding", 0, `${slug} \xB7 ${rounds.length}_rounds`, readStatus(result.fromMemo, "succeeded"));
   return {
     available: true,
     value: {
@@ -15792,6 +16089,7 @@ var ACCEPTED_CHECK_CONTRACTS = [
   new Set(PROJECT_DILIGENCE_PERSON_CHECK_IDS),
   new Set(FOUNDER_DILIGENCE_PERSON_CHECK_IDS),
   new Set(REPEAT_BACKING_ERA_PERSON_CHECK_IDS),
+  new Set(FUND_SCALE_ERA_PERSON_CHECK_IDS),
   EXPECTED_PERSON_CHECK_IDS
 ];
 var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -17839,6 +18137,155 @@ async function collectFundScale(ctx, dependencies = {}) {
   return { state: "partial", detail: `${successfulFetches} sources inspected \xB7 ${reportedClaims} reported \xB7 0 verified` };
 }
 
+// src/lib/priceHistory.ts
+var NETWORK = {
+  solana: "solana",
+  ethereum: "eth",
+  eth: "eth",
+  bsc: "bsc",
+  base: "base",
+  arbitrum: "arbitrum",
+  polygon: "polygon_pos",
+  "polygon_pos": "polygon_pos",
+  avalanche: "avax",
+  avax: "avax",
+  optimism: "optimism",
+  fantom: "ftm",
+  sui: "sui",
+  ton: "ton",
+  tron: "tron",
+  blast: "blast",
+  sei: "sei-evm"
+};
+var PERIOD_SECONDS = { day: 86400, hour: 3600 };
+var VOLUME_WINDOW_MAX = 7;
+var GT = "https://api.geckoterminal.com/api/v2";
+function record2(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function finiteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+function readCandle(row) {
+  if (!Array.isArray(row) || row.length < 5) return null;
+  const ts = finiteNumber(row[0]);
+  const close = finiteNumber(row[4]);
+  if (ts === void 0 || close === void 0) return null;
+  const high = finiteNumber(row[2]);
+  const low = finiteNumber(row[3]);
+  const volumeUsd = finiteNumber(row[5]);
+  return {
+    ts,
+    close,
+    ...high === void 0 ? {} : { high },
+    ...low === void 0 ? {} : { low },
+    ...volumeUsd === void 0 || volumeUsd < 0 ? {} : { volumeUsd }
+  };
+}
+function candleRange(series, last) {
+  const measured = series.filter((candle) => candle.high !== void 0 && candle.low !== void 0 && candle.low > 0 && candle.low <= candle.close && candle.high >= candle.close);
+  if (!measured.length) return {};
+  const high = Math.max(...measured.map((candle) => candle.high));
+  const low = Math.min(...measured.map((candle) => candle.low));
+  return {
+    range: {
+      high,
+      low,
+      drawdownFromHighPct: high > 0 ? (last - high) / high * 100 : 0,
+      measuredPoints: measured.length,
+      ...measured.length === series.length ? {
+        highs: measured.map((candle) => candle.high),
+        lows: measured.map((candle) => candle.low)
+      } : {}
+    }
+  };
+}
+function volumeWindow(candles) {
+  const measured = candles.filter((candle) => candle.volumeUsd !== void 0);
+  return {
+    usd: measured.reduce((total, candle) => total + candle.volumeUsd, 0),
+    candles: candles.length,
+    measured: measured.length
+  };
+}
+function volumeTrend(series) {
+  const width = Math.min(VOLUME_WINDOW_MAX, Math.floor(series.length / 2));
+  if (width < 2) return {};
+  const recent = volumeWindow(series.slice(series.length - width));
+  const prior = volumeWindow(series.slice(series.length - width * 2, series.length - width));
+  if (!recent.measured || !prior.measured || prior.usd <= 0) return {};
+  return {
+    volume: {
+      recent,
+      prior,
+      changePct: (recent.usd - prior.usd) / prior.usd * 100,
+      isFloor: recent.measured < recent.candles || prior.measured < prior.candles
+    }
+  };
+}
+function windowShape(series, count, timeframe) {
+  const period = PERIOD_SECONDS[timeframe];
+  const span = series[series.length - 1].ts - series[0].ts;
+  if (!period || span <= 0) return {};
+  const spanPeriods = Math.round(span / period) + 1;
+  if (spanPeriods < count) return {};
+  return { spanPeriods, windowIsPartial: count < spanPeriods };
+}
+function summarizeCandles(candles, timeframe) {
+  const series = [...candles].sort((left, right) => left.ts - right.ts).filter((candle) => candle.close > 0);
+  if (!series.length) return null;
+  const points = series.map((candle) => candle.close);
+  const first = points[0];
+  const last = points[points.length - 1];
+  const peak = Math.max(...points);
+  return {
+    points,
+    first,
+    last,
+    peak,
+    changePct: first > 0 ? (last - first) / first * 100 : 0,
+    drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
+    ...candleRange(series, last),
+    ...volumeTrend(series),
+    ...windowShape(series, points.length, timeframe)
+  };
+}
+async function gt(path) {
+  try {
+    const r = await fetch(`${GT}${path}`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(8e3)
+    });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+async function topPool(network, address) {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
+  const rows = record2(d).data;
+  const first = Array.isArray(rows) ? record2(rows[0]) : {};
+  const attributes = record2(first.attributes);
+  const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
+  return id ? id.replace(`${network}_`, "") : null;
+}
+async function fetchPriceHistory(address, chain, pairAddress) {
+  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
+  if (!network || !address) return null;
+  const pool = pairAddress || await topPool(network, address);
+  if (!pool) return null;
+  for (const timeframe of ["day", "hour"]) {
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
+    const rawList = record2(record2(record2(d).data).attributes).ohlcv_list;
+    const candles = Array.isArray(rawList) ? rawList.map(readCandle).filter((candle) => candle !== null) : [];
+    if (candles.length < 3) continue;
+    const summary = summarizeCandles(candles, timeframe);
+    if (!summary || summary.points.length < 3) continue;
+    return { ...summary, timeframe, capturedAt: (/* @__PURE__ */ new Date()).toISOString() };
+  }
+  return null;
+}
+
 // server/adapters/projectToken.ts
 var COINGECKO_PUBLIC = "https://api.coingecko.com/api/v3";
 var COINGECKO_PRO = "https://pro-api.coingecko.com/api/v3";
@@ -17877,7 +18324,7 @@ var geckoTerminalOhlcvUrl = (chain, poolAddress, timeframe) => {
   return network ? `${GECKOTERMINAL}/networks/${encodeURIComponent(network)}/pools/${encodeURIComponent(poolAddress)}/ohlcv/${timeframe}?aggregate=1&limit=${MAX_HISTORY_POINTS}&currency=usd` : null;
 };
 var isRecord3 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-var finiteNumber = (value) => {
+var finiteNumber2 = (value) => {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(parsed) ? parsed : void 0;
 };
@@ -18162,8 +18609,8 @@ function dexProjectCandidates(ctx, query, rows) {
     if (!name || !symbol || !addressValid || !chain || !pairAddress || !sourceUrl || relevance < 500) return [];
     const identity = dexIdentity(ctx, row);
     if (!identity) return [];
-    const liquidity = isRecord3(row.liquidity) ? finiteNumber(row.liquidity.usd) : void 0;
-    const volume = isRecord3(row.volume) ? finiteNumber(row.volume.h24) : void 0;
+    const liquidity = isRecord3(row.liquidity) ? finiteNumber2(row.liquidity.usd) : void 0;
+    const volume = isRecord3(row.volume) ? finiteNumber2(row.volume.h24) : void 0;
     return [{
       name,
       symbol,
@@ -18173,9 +18620,9 @@ function dexProjectCandidates(ctx, query, rows) {
       sourceUrl,
       relevance,
       ...identity,
-      ...finiteNumber(row.priceUsd) !== void 0 ? { priceUsd: finiteNumber(row.priceUsd) } : {},
-      ...finiteNumber(row.marketCap) !== void 0 ? { marketCapUsd: finiteNumber(row.marketCap) } : {},
-      ...finiteNumber(row.fdv) !== void 0 ? { fdvUsd: finiteNumber(row.fdv) } : {},
+      ...finiteNumber2(row.priceUsd) !== void 0 ? { priceUsd: finiteNumber2(row.priceUsd) } : {},
+      ...finiteNumber2(row.marketCap) !== void 0 ? { marketCapUsd: finiteNumber2(row.marketCap) } : {},
+      ...finiteNumber2(row.fdv) !== void 0 ? { fdvUsd: finiteNumber2(row.fdv) } : {},
       ...volume !== void 0 ? { volume24hUsd: volume } : {},
       ...liquidity !== void 0 ? { liquidityUsd: liquidity } : {}
     }];
@@ -18273,8 +18720,8 @@ async function collectSiteDeclaredToken(ctx, fetchImpl = fetch) {
   }
   const [only] = resolved;
   const best = [...only.pairs].sort((left, right) => {
-    const l = isRecord3(left.liquidity) ? finiteNumber(left.liquidity.usd) ?? 0 : 0;
-    const r = isRecord3(right.liquidity) ? finiteNumber(right.liquidity.usd) ?? 0 : 0;
+    const l = isRecord3(left.liquidity) ? finiteNumber2(left.liquidity.usd) ?? 0 : 0;
+    const r = isRecord3(right.liquidity) ? finiteNumber2(right.liquidity.usd) ?? 0 : 0;
     return r - l;
   })[0];
   const base = isRecord3(best.baseToken) ? best.baseToken : {};
@@ -18284,11 +18731,11 @@ async function collectSiteDeclaredToken(ctx, fetchImpl = fetch) {
   const pairAddress = cleanText(best.pairAddress);
   if (!symbol || !chain) return null;
   const info = isRecord3(best.info) ? best.info : {};
-  const priceUsd = finiteNumber(best.priceUsd);
-  const liquidityUsd = isRecord3(best.liquidity) ? finiteNumber(best.liquidity.usd) : void 0;
-  const marketCapUsd = finiteNumber(best.marketCap);
-  const fdvUsd = finiteNumber(best.fdv);
-  const volume24hUsd = isRecord3(best.volume) ? finiteNumber(best.volume.h24) : void 0;
+  const priceUsd = finiteNumber2(best.priceUsd);
+  const liquidityUsd = isRecord3(best.liquidity) ? finiteNumber2(best.liquidity.usd) : void 0;
+  const marketCapUsd = finiteNumber2(best.marketCap);
+  const fdvUsd = finiteNumber2(best.fdv);
+  const volume24hUsd = isRecord3(best.volume) ? finiteNumber2(best.volume.h24) : void 0;
   const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: void 0, attempts: 0 };
   return {
     sourceUrl: scope.canonicalUrl,
@@ -18370,12 +18817,12 @@ function selectPriceCorroboratedPair(rows, token, coingeckoPrice) {
     const quoteToken = isRecord3(row.quoteToken) ? row.quoteToken : {};
     const baseAddress = cleanText(baseToken.address);
     const chain = cleanText(row.chainId).toLowerCase();
-    const priceUsd = finiteNumber(row.priceUsd);
+    const priceUsd = finiteNumber2(row.priceUsd);
     const pairAddress = cleanText(row.pairAddress);
     if (!baseAddress || !sameAddress(baseAddress, token.address) || chain !== token.chain || !priceUsd || priceUsd <= 0 || !pairAddress) return [];
     const difference = Math.abs(priceUsd - coingeckoPrice) / coingeckoPrice;
     if (difference > PRICE_TOLERANCE) return [];
-    const liquidity = isRecord3(row.liquidity) ? finiteNumber(row.liquidity.usd) : void 0;
+    const liquidity = isRecord3(row.liquidity) ? finiteNumber2(row.liquidity.usd) : void 0;
     if (liquidity == null || liquidity < MIN_POOL_LIQUIDITY_USD) return [];
     return [{
       pairAddress,
@@ -18417,9 +18864,7 @@ async function ohlcv(chain, poolAddress, timeframe) {
     recordCall("geckoterminal", `project-token-ohlcv-${timeframe}`, 0, "keyless \xB7 result_shape_error", "partial");
     return null;
   }
-  const valid = rows.filter(
-    (row) => Array.isArray(row) && row.length >= 6 && row.slice(0, 6).every((value) => typeof value === "number" && Number.isFinite(value))
-  ).slice(0, MAX_HISTORY_POINTS);
+  const valid = rows.map(readCandle).filter((candle) => candle !== null).slice(0, MAX_HISTORY_POINTS);
   recordCall(
     "geckoterminal",
     `project-token-ohlcv-${timeframe}`,
@@ -18432,35 +18877,32 @@ async function ohlcv(chain, poolAddress, timeframe) {
 async function tokenHistory(chain, poolAddress) {
   let timeframe = "day";
   let attempts = 1;
-  let rows = await ohlcv(chain, poolAddress, timeframe);
-  if (!rows?.length) {
+  let candles = await ohlcv(chain, poolAddress, timeframe);
+  if (!candles?.length) {
     timeframe = "hour";
     attempts += 1;
-    rows = await ohlcv(chain, poolAddress, timeframe);
+    candles = await ohlcv(chain, poolAddress, timeframe);
   }
-  if (!rows?.length) return { attempts };
-  const chronological = [...rows].sort((left, right) => left[0] - right[0]);
-  const points = chronological.map((row) => row[4]).filter((value) => Number.isFinite(value) && value > 0);
-  if (!points.length) return { attempts };
-  const first = points[0];
-  const last = points[points.length - 1];
-  const peak = Math.max(...points);
+  if (!candles?.length) return { attempts };
+  const summary = summarizeCandles(candles, timeframe);
+  if (!summary) return { attempts };
+  const sourceUrl = geckoTerminalOhlcvUrl(chain, poolAddress, timeframe);
   return {
     attempts,
     history: {
-      points,
-      first,
-      last,
-      peak,
-      changePct: first > 0 ? (last - first) / first * 100 : 0,
-      drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
+      ...summary,
       timeframe,
       poolAddress,
-      ...geckoTerminalOhlcvUrl(chain, poolAddress, timeframe) ? {
-        sourceUrl: geckoTerminalOhlcvUrl(chain, poolAddress, timeframe)
-      } : {}
+      ...sourceUrl ? { sourceUrl } : {}
     }
   };
+}
+function historyCoverageNote(history) {
+  if (!history) return "";
+  const unit = history.timeframe === "day" ? "day" : "hour";
+  const span = history.windowIsPartial && history.spanPeriods ? ` across a partly reported ${history.spanPeriods} ${unit} window` : "";
+  const volume = history.volume ? `, with reported volume ${history.volume.changePct >= 0 ? "up" : "down"} ${Math.abs(history.volume.changePct).toFixed(0)}% against the prior ${history.volume.prior.candles} ${unit}s${history.volume.isFloor ? " (a floor: not every candle reported volume)" : ""}` : "";
+  return ` and ${history.points.length} frozen ${history.timeframe} price points${span}${volume}`;
 }
 async function collectProjectTokenIdentity(ctx) {
   const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
@@ -18499,7 +18941,7 @@ async function collectProjectTokenIdentity(ctx) {
         ctx.recordCheck?.({
           id: "project-traction-liveness",
           status: "confirmed",
-          note: `$${snapshot2.symbol} has an identity-bound DEX pool with $${Math.round(snapshot2.liquidityUsd ?? 0).toLocaleString()} liquidity${snapshot2.history ? ` and ${snapshot2.history.points.length} frozen ${snapshot2.history.timeframe} price points` : ""}`,
+          note: `$${snapshot2.symbol} has an identity-bound DEX pool with $${Math.round(snapshot2.liquidityUsd ?? 0).toLocaleString()} liquidity${historyCoverageNote(snapshot2.history)}`,
           provider: snapshot2.history ? "dexscreener/geckoterminal" : "dexscreener",
           sourceCount: snapshot2.history ? 2 : 1
         });
@@ -18564,16 +19006,16 @@ async function collectProjectTokenIdentity(ctx) {
   }
   const { details, identity, contract } = selected;
   const market = isRecord3(details.market_data) ? details.market_data : {};
-  const currentPrice = isRecord3(market.current_price) ? finiteNumber(market.current_price.usd) : void 0;
-  const marketCap = isRecord3(market.market_cap) ? finiteNumber(market.market_cap.usd) : void 0;
-  const fdv = isRecord3(market.fully_diluted_valuation) ? finiteNumber(market.fully_diluted_valuation.usd) : void 0;
-  const volume = isRecord3(market.total_volume) ? finiteNumber(market.total_volume.usd) : void 0;
-  const circulatingSupply = finiteNumber(market.circulating_supply);
-  const totalSupply = finiteNumber(market.total_supply);
-  const maxSupply = finiteNumber(market.max_supply);
-  const athPrice = isRecord3(market.ath) ? finiteNumber(market.ath.usd) : void 0;
+  const currentPrice = isRecord3(market.current_price) ? finiteNumber2(market.current_price.usd) : void 0;
+  const marketCap = isRecord3(market.market_cap) ? finiteNumber2(market.market_cap.usd) : void 0;
+  const fdv = isRecord3(market.fully_diluted_valuation) ? finiteNumber2(market.fully_diluted_valuation.usd) : void 0;
+  const volume = isRecord3(market.total_volume) ? finiteNumber2(market.total_volume.usd) : void 0;
+  const circulatingSupply = finiteNumber2(market.circulating_supply);
+  const totalSupply = finiteNumber2(market.total_supply);
+  const maxSupply = finiteNumber2(market.max_supply);
+  const athPrice = isRecord3(market.ath) ? finiteNumber2(market.ath.usd) : void 0;
   const athDateRaw = isRecord3(market.ath_date) ? cleanText(market.ath_date.usd) : "";
-  const athDrawdown = isRecord3(market.ath_change_percentage) ? finiteNumber(market.ath_change_percentage.usd) : void 0;
+  const athDrawdown = isRecord3(market.ath_change_percentage) ? finiteNumber2(market.ath_change_percentage.usd) : void 0;
   const ath = athPrice !== void 0 || athDateRaw || athDrawdown !== void 0 ? {
     ...athPrice !== void 0 ? { priceUsd: athPrice } : {},
     ...athDateRaw ? { date: athDateRaw } : {},
@@ -18629,7 +19071,7 @@ async function collectProjectTokenIdentity(ctx) {
     ctx.recordCheck?.({
       id: "project-traction-liveness",
       status: "confirmed",
-      note: `$${snapshot.symbol} has a price-corroborated DEX pool with $${Math.round(pair.liquidityUsd).toLocaleString()} liquidity${history ? ` and ${history.points.length} frozen ${history.timeframe} price points` : ""}`,
+      note: `$${snapshot.symbol} has a price-corroborated DEX pool with $${Math.round(pair.liquidityUsd).toLocaleString()} liquidity${historyCoverageNote(history)}`,
       provider: history ? "dexscreener/geckoterminal" : "dexscreener",
       sourceCount: history ? 2 : 1
     });
@@ -18674,8 +19116,8 @@ async function collectVentureTokenIdentity(venture) {
     const symbol = cleanText(details.symbol).toUpperCase();
     if (!id || !name || !symbol) continue;
     const market = isRecord3(details.market_data) ? details.market_data : {};
-    const currentPrice = isRecord3(market.current_price) ? finiteNumber(market.current_price.usd) : void 0;
-    const marketCap = isRecord3(market.market_cap) ? finiteNumber(market.market_cap.usd) : void 0;
+    const currentPrice = isRecord3(market.current_price) ? finiteNumber2(market.current_price.usd) : void 0;
+    const marketCap = isRecord3(market.market_cap) ? finiteNumber2(market.market_cap.usd) : void 0;
     return {
       verified: true,
       verification: exactX ? "official_x" : "official_domain",
@@ -19477,14 +19919,17 @@ function projectProviderBackedBasicFacts(evidence) {
     ));
   }
   const holderSnapshot = isProject ? evidence.holderProfile : void 0;
-  if (holderSnapshot && (holderSnapshot.topHolderPct !== null || holderSnapshot.lpLockedOrBurnedPct !== null)) {
+  if (holderSnapshot && (holderSnapshot.topHolderPct !== null || holderSnapshot.lpLockedOrBurnedPct !== null || holderSnapshot.holdersAssessed === false)) {
     const fmtPct = (value) => `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10}%`;
+    const suppressed = holderSnapshot.holdersAssessed === false;
     const parts = [
-      ...holderSnapshot.topHolderPct !== null ? [`largest single holder ~${fmtPct(holderSnapshot.topHolderPct)} of supply`] : [],
-      ...holderSnapshot.top10Pct !== null && holderSnapshot.topHolderPct !== null ? [`top 10 hold ~${fmtPct(holderSnapshot.top10Pct)}`] : [],
+      ...holderSnapshot.topHolderPct !== null ? [`largest single wallet ~${fmtPct(holderSnapshot.topHolderPct)} of supply`] : [],
+      ...holderSnapshot.top10Pct !== null && holderSnapshot.topHolderPct !== null ? [`top 10 wallets hold ~${fmtPct(holderSnapshot.top10Pct)}`] : [],
+      ...suppressed ? ["largest holder not measured"] : [],
       ...holderSnapshot.holderCount !== null ? [`${holderSnapshot.holderCount.toLocaleString("en-US")} holders`] : [],
       ...holderSnapshot.lpLockedOrBurnedPct !== null ? [`${fmtPct(holderSnapshot.lpLockedOrBurnedPct)} of DEX liquidity locked or burned`] : []
     ];
+    const provenance = holderSnapshot.distributionNote ? ` ${holderSnapshot.distributionNote}` : "";
     projected.push(makeFact(
       evidence,
       "tokenomics",
@@ -19492,13 +19937,32 @@ function projectProviderBackedBasicFacts(evidence) {
       [source({
         url: holderSnapshot.sourceUrl,
         title: "GoPlus holder register",
-        excerpt: `On-chain holder register: ${parts.join("; ")}. Large holders on established tokens are commonly exchanges, custodians, or protocol contracts; verify before reading concentration as insider control.`,
+        excerpt: `On-chain holder register: ${parts.join("; ")}.${provenance} Large holders on established tokens are commonly exchanges, custodians, or protocol contracts; verify before reading concentration as insider control.`,
         capturedAt: holderSnapshot.capturedAt,
         provider: "goplus",
         sourceClass: "regulatory_or_onchain"
       })],
       `captured ${holderSnapshot.capturedAt.slice(0, 10)}`
     ));
+  }
+  if (holderSnapshot?.contractFlags?.length) {
+    const claims = holderSnapshot.contractFlags.map((flag) => flag.claim);
+    const controlFact = makeFact(
+      evidence,
+      "public_security",
+      claims.join(" "),
+      [source({
+        url: holderSnapshot.sourceUrl,
+        title: "GoPlus contract security flags",
+        excerpt: `GoPlus reported these contract-control and deployer-history flags: ${claims.join(" ")} These are GoPlus's readings of the contract, not verified intent.`,
+        capturedAt: holderSnapshot.capturedAt,
+        provider: "goplus",
+        sourceClass: "regulatory_or_onchain"
+      })],
+      `captured ${holderSnapshot.capturedAt.slice(0, 10)}`
+    );
+    controlFact.floorEligible = false;
+    projected.push(controlFact);
   }
   const unlocksSnapshot = isProject ? evidence.tokenUnlocks : void 0;
   if (unlocksSnapshot) {
@@ -19889,42 +20353,100 @@ async function goplus(chainId, address) {
 var FETCH_TIMEOUT_MS2 = 8e3;
 var isBurnAddr = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
 var isBurnTag = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
+var t1 = (v) => v === "1";
+var AUTHORITY_NOTE = " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup. Confirm the controller.";
+var OWNER_ACTIVE_NOTE = " This is a capability the owner still holds, not proof of intent; on a broadly traded token it is usually a governance or upgrade artifact. Confirm the controller.";
+var OWNER_UNREPORTED_NOTE = " GoPlus reported no owner address for this contract, so whether that control is still held was not measured.";
 async function collectHolderProfile(chain, address) {
-  const chainId = GOPLUS_CHAIN[chain.trim().toLowerCase()];
+  const chainKey = chain.trim().toLowerCase();
+  const chainId = GOPLUS_CHAIN[chainKey];
   if (!chainId || !address) {
     return { available: false, note: `No GoPlus holder register for chain "${chain}".` };
   }
-  const gp = await Promise.race([
-    goplus(chainId, address).catch(() => null),
+  const boxed = (work) => Promise.race([
+    work.catch(() => null),
     new Promise((resolve) => setTimeout(() => resolve(null), FETCH_TIMEOUT_MS2))
+  ]);
+  const unordered = GOPLUS_UNSORTED_HOLDER_CHAINS.has(chainKey);
+  const [gp, explorerHolders] = await Promise.all([
+    boxed(goplus(chainId, address)),
+    unordered ? boxed(blockscoutHolders(chainKey, address)) : Promise.resolve(null)
   ]);
   if (!gp) {
     recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} \xB7 no_data`, "partial");
     return { available: false, note: "GoPlus returned no token security record." };
   }
   const holders = Array.isArray(gp.holders) ? gp.holders : [];
-  const pct = (raw) => {
+  const shareOfSupply = (raw) => {
     const value = Number(raw) * 100;
-    return Number.isFinite(value) && value >= 0 ? value : null;
+    return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
   };
-  const topHolderPct = holders.length ? pct(holders[0].percent) : null;
-  const top10 = holders.slice(0, 10).map((holder) => pct(holder.percent) ?? 0).reduce((total, share) => total + share, 0);
-  const top10Pct = holders.length ? Math.min(100, top10) : null;
+  const isMarketRow = (holder) => holder.is_contract === 1 || holder.is_locked === 1 || /lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(holder.tag ?? "");
+  const goplusWallets = holders.filter((holder) => !isMarketRow(holder));
+  const goplusExcluded = holders.length - goplusWallets.length;
+  const goplusShares = goplusWallets.map((holder) => shareOfSupply(holder.percent)).filter((share) => share !== null).sort((a, b) => b - a);
+  const explorerWallets = (explorerHolders ?? []).filter((holder) => holder.isContract !== true);
+  const explorerExcluded = (explorerHolders?.length ?? 0) - explorerWallets.length;
+  const explorerShares = explorerWallets.map((holder) => holder.percent).filter((share) => Number.isFinite(share) && share >= 0 && share <= 100).sort((a, b) => b - a);
+  const excludedNote = (count, register) => count ? ` ${count} ${register} row${count === 1 ? " was" : "s were"} excluded as a pool, contract, or locked address, so this is wallet concentration and not every address holding supply.` : "";
+  let distributionSource = null;
+  let distributionNote = null;
+  let shares = [];
+  if (unordered && explorerShares.length) {
+    shares = explorerShares;
+    distributionSource = "explorer";
+    distributionNote = `Holder concentration is the chain explorer's ordered register, since GoPlus does not order its holder rows on this chain.${excludedNote(explorerExcluded, "explorer")}`;
+  } else if (unordered) {
+    distributionNote = holders.length ? "GoPlus does not order its holder register on this chain and the chain explorer returned no distribution, so holder concentration is not reported." : "No holder register was returned for this token, so holder concentration is not reported.";
+  } else if (goplusShares.length) {
+    shares = goplusShares;
+    distributionSource = "goplus";
+    distributionNote = excludedNote(goplusExcluded, "GoPlus holder").trim() || null;
+  } else {
+    distributionNote = goplusExcluded ? `Every holder row GoPlus returned was a pool, contract, or locked address, so no wallet concentration figure is reported.` : holders.length ? "The GoPlus holder rows carried no usable share of supply, so holder concentration is not reported." : "No holder register was returned for this token, so holder concentration is not reported.";
+  }
+  const consistencySum = shares.slice(0, 15).reduce((total, share) => total + share, 0);
+  if (shares.length && consistencySum > 101) {
+    const register = distributionSource === "explorer" ? "explorer" : "GoPlus";
+    shares = [];
+    distributionSource = null;
+    distributionNote = `The ${register} holder rows sum past 100% of supply, so the register is self-inconsistent and holder concentration is not reported.`;
+  }
+  const holdersAssessed = shares.length > 0;
+  const topHolderPct = holdersAssessed ? shares[0] : null;
+  const top10Pct = holdersAssessed ? Math.min(100, shares.slice(0, 10).reduce((total, share) => total + share, 0)) : null;
+  if (holdersAssessed && shares.length < 10) {
+    const shortfall = `The register carried ${shares.length} usable wallet row${shares.length === 1 ? "" : "s"}, so the top-ten share is a floor and not a total.`;
+    distributionNote = distributionNote ? `${distributionNote} ${shortfall}` : shortfall;
+  }
   const holderCountRaw = Number(gp.holder_count);
   const holderCount = Number.isFinite(holderCountRaw) && holderCountRaw > 0 ? Math.round(holderCountRaw) : null;
   const lpHolders = Array.isArray(gp.lp_holders) ? gp.lp_holders : [];
   let lpLockedOrBurned = 0;
+  let lpRowsSeen = 0;
   for (const holder of lpHolders) {
-    const share = pct(holder.percent);
+    const share = shareOfSupply(holder.percent);
     if (share === null) continue;
+    lpRowsSeen += 1;
     if (isBurnAddr(holder.address) || isBurnTag(holder.tag) || holder.is_locked === 1) lpLockedOrBurned += share;
   }
-  const lpLockedOrBurnedPct = lpHolders.length ? Math.min(100, lpLockedOrBurned) : null;
-  if (topHolderPct === null && holderCount === null && lpLockedOrBurnedPct === null) {
-    recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} \xB7 empty_register`, "succeeded");
-    return { available: false, note: "GoPlus reported no holder or liquidity register for this token." };
+  const lpLockedOrBurnedPct = lpRowsSeen > 0 ? Math.min(100, lpLockedOrBurned) : null;
+  const contractFlags = readContractFlags(gp);
+  const creatorShare = shareOfSupply(gp.creator_percent);
+  if (creatorShare !== null && creatorShare >= 5) {
+    contractFlags.push({
+      key: "creator_holds_supply",
+      claim: `The creator or authority wallet GoPlus names still holds ~${creatorShare.toFixed(0)}% of supply.`,
+      tone: creatorShare >= 15 ? "bad" : "warn",
+      source: "goplus"
+    });
   }
-  recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} \xB7 top_${topHolderPct === null ? "na" : Math.round(topHolderPct)}pct`, "succeeded");
+  if (topHolderPct === null && holderCount === null && lpLockedOrBurnedPct === null && contractFlags.length === 0 && creatorShare === null) {
+    recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} \xB7 empty_register`, "succeeded");
+    return { available: false, note: "GoPlus reported no holder, liquidity, or contract-control record for this token." };
+  }
+  const meta = `${chain}:${address.slice(0, 10)} \xB7 top_${topHolderPct === null ? "na" : Math.round(topHolderPct)}pct \xB7 flags_${contractFlags.length}`;
+  recordCall("goplus", "holder-profile", 0, meta, "succeeded");
   return {
     available: true,
     value: {
@@ -19932,9 +20454,44 @@ async function collectHolderProfile(chain, address) {
       top10Pct,
       holderCount,
       lpLockedOrBurnedPct,
+      holdersAssessed,
+      distributionSource,
+      distributionNote,
+      contractFlags,
+      creatorPct: creatorShare,
       sourceUrl: `https://gopluslabs.io/token-security/${chainId}/${address}`
     }
   };
+}
+function readContractFlags(gp) {
+  const flags = [];
+  const flag = (key, claim, tone) => flags.push({ key, claim, tone, source: "goplus" });
+  if (t1(gp.honeypot_with_same_creator)) {
+    flag("serial_scammer_creator", "The wallet that deployed this token has created honeypot tokens before. This is a serial-scammer signal.", "bad");
+  }
+  if (t1(gp.is_mintable)) {
+    flag("mint_authority_active", `Mint authority is live: supply can be minted.${AUTHORITY_NOTE}`, "warn");
+  }
+  if (t1(gp.hidden_owner)) {
+    flag("hidden_owner", "Hidden owner detected.", "bad");
+  } else if (t1(gp.can_take_back_ownership)) {
+    flag("reclaimable_ownership", `Ownership can be reclaimed after renouncement.${AUTHORITY_NOTE}`, "warn");
+  }
+  if (t1(gp.selfdestruct)) {
+    flag("selfdestruct", "Contract can self-destruct / be closed.", "bad");
+  }
+  const owner = gp.owner_address?.trim();
+  const ownerRenounced = !!owner && /^0x0+$/.test(owner);
+  const ownerNote = owner ? OWNER_ACTIVE_NOTE : OWNER_UNREPORTED_NOTE;
+  if (!ownerRenounced) {
+    if (t1(gp.owner_change_balance)) {
+      flag("owner_can_modify_balance", `Owner can modify holder balances directly; they can zero your wallet.${ownerNote}`, "warn");
+    }
+    if (t1(gp.transfer_pausable)) {
+      flag("transfer_pausable", `Transfers can be paused.${ownerNote}`, "warn");
+    }
+  }
+  return flags;
 }
 
 // server/adapters/tokenUnlocks.ts
@@ -20996,6 +21553,38 @@ var adapterRunState = (result, attempts) => {
   return observedRunState(attempts);
 };
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
+function leadershipCurrencyObservation(departures, company) {
+  if (!departures.length) return null;
+  const left = departures.filter((row) => row.state === "departed");
+  const stillListed = departures.filter((row) => row.state === "current");
+  const unanswered = departures.filter((row) => row.state === "absent");
+  const lag = "PeopleDataLabs is a licensed copy of a LinkedIn record and can lag the live profile, so each row carries its own dates and profile URL to confirm against.";
+  const unansweredNote = unanswered.length ? ` The employment record holds no ${company} role for ${unanswered.length} other named leader${unanswered.length === 1 ? "" : "s"}, which is an unanswered lookup and not evidence they were never involved.` : "";
+  if (left.length) {
+    return {
+      id: "project-leadership-currency",
+      status: "finding",
+      note: `${left.map((row) => row.summary).join(" ")}${unansweredNote} ${lag}`,
+      provider: "peopledatalabs",
+      sourceCount: left.length
+    };
+  }
+  if (stillListed.length) {
+    return {
+      id: "project-leadership-currency",
+      status: "confirmed",
+      note: `${stillListed.length} named leader${stillListed.length === 1 ? " still lists" : "s still list"} ${company} as a current role, and none of the leaders checked has a closed ${company} role.${unansweredNote} ${lag}`,
+      provider: "peopledatalabs",
+      sourceCount: stillListed.length
+    };
+  }
+  return {
+    id: "project-leadership-currency",
+    status: "checked-empty",
+    note: `The employment record returned no ${company} role for any of the ${departures.length} named leader${departures.length === 1 ? "" : "s"} checked. That record may simply be incomplete, so this is neither a departure nor a confirmation. ${lag}`,
+    provider: "peopledatalabs"
+  };
+}
 function parseOutcome(s) {
   if (!s) return "Unknown" /* UNKNOWN */;
   const match = Object.values(VentureOutcome).find((v) => v.toLowerCase() === s.toLowerCase());
@@ -22165,18 +22754,26 @@ function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
 }
 function recordProjectTokenDrawdownFinding(evidence) {
   const token = evidence.projectToken;
-  const drawdownPct = token?.history?.drawdownPct;
-  const historySourceUrl = token?.history?.sourceUrl;
-  if (!token || typeof drawdownPct !== "number" || !Number.isFinite(drawdownPct) || drawdownPct > -70 || !historySourceUrl) {
+  const history = token?.history;
+  const historySourceUrl = history?.sourceUrl;
+  const closeDrawdown = history?.drawdownPct;
+  const rangeDrawdown = history?.range?.drawdownFromHighPct;
+  const usable = (value) => typeof value === "number" && Number.isFinite(value);
+  const fromRange = usable(rangeDrawdown) && (!usable(closeDrawdown) || rangeDrawdown < closeDrawdown);
+  const drawdownPct = fromRange ? rangeDrawdown : closeDrawdown;
+  if (!token || !usable(drawdownPct) || drawdownPct > -70 || !historySourceUrl) {
     return false;
   }
   if (evidence.findings.some(
     (finding) => finding.finding_type === "ProjectTokenDrawdown" && finding.source_url === historySourceUrl
   )) return false;
-  const timeframe = token.history.timeframe === "hour" ? "hourly" : "daily";
+  const timeframe = history.timeframe === "hour" ? "hourly" : "daily";
+  const period = history.timeframe === "hour" ? "hour" : "day";
+  const measured = fromRange ? `fall from the highest price GeckoTerminal reported inside a single ${period} of` : "fall from the highest close in";
+  const coverage = history.windowIsPartial && history.spanPeriods ? ` That window observed ${history.points.length} of ${history.spanPeriods} ${period}s, so it is a partial read of its own span.` : "";
   evidence.findings.push({
     finding_type: "ProjectTokenDrawdown",
-    claim: `$${token.symbol} recorded a verified ${Math.abs(drawdownPct).toFixed(1)}% peak-to-latest drawdown in the captured GeckoTerminal ${timeframe} OHLCV window. ${token.coingeckoId ? "CoinGecko and DexScreener established" : "DexScreener established"} canonical token and pool context; price drawdown alone does not establish misconduct.`,
+    claim: `$${token.symbol} recorded a verified ${Math.abs(drawdownPct).toFixed(1)}% ${measured} the captured GeckoTerminal ${timeframe} OHLCV window.${coverage} ${token.coingeckoId ? "CoinGecko and DexScreener established" : "DexScreener established"} canonical token and pool context; price drawdown alone does not establish misconduct.`,
     source_url: historySourceUrl,
     source_date: token.capturedAt,
     source_author: "geckoterminal",
@@ -22284,7 +22881,7 @@ function adverseSignalToFinding(sig) {
     }
   };
 }
-async function adverseSignalsAndTooling(ctx) {
+async function adverseSignalsAndTooling(ctx, record3) {
   const { evidence } = ctx;
   const self = ctx.handle.replace(/^@/, "").toLowerCase();
   const ticker = evidence.promotions.find((p) => p.ticker)?.ticker;
@@ -22296,7 +22893,7 @@ async function adverseSignalsAndTooling(ctx) {
   })).filter((v) => v.handle && v.handle.toLowerCase() !== self).slice(0, 4);
   const associateTargets = evidence.associates.map((a) => ({ handle: a.associate_handle, relation: a.relation })).filter((a) => a.handle && a.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 4);
   ctx.emit({ phase: "Adverse", label: "Scam / rug sweep", detail: `Searching for rug, slow-rug, liquidity-pull, drain, and FUD signals across the subject${ticker ? `, $${ticker.replace(/^\$/, "")}` : ""}, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}\u2026`, source: "grok", tone: "neutral" });
-  const [tooling, subjectSigs, projectSigs, assocSigs, ventureTeams] = await Promise.all([
+  const [tooling, subjectScreen, projectScreens, assocScreens, ventureTeams] = await Promise.all([
     detectManipulationTooling(ctx.handle, evidence.profile.display_name),
     searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
@@ -22352,22 +22949,46 @@ async function adverseSignalsAndTooling(ctx) {
       evidence.findings.push(adverseSignalToFinding(s));
     }
   };
+  const screens = [subjectScreen, ...projectScreens, ...assocScreens];
   let totalSigs = 0;
-  pushSigs(subjectSigs);
-  totalSigs += subjectSigs.length;
-  projectSigs.forEach((sigs) => {
-    pushSigs(sigs);
-    totalSigs += sigs.length;
-  });
-  assocSigs.forEach((sigs) => {
-    pushSigs(sigs);
-    totalSigs += sigs.length;
-  });
+  for (const screen of screens) {
+    pushSigs(screen.signals);
+    totalSigs += screen.signals.length;
+  }
   if (totalSigs) {
-    const top = [...subjectSigs, ...projectSigs.flat(), ...assocSigs.flat()].slice(0, 3).map((s) => `${s.relationship_to_subject} ${s.target_entity_key} \xB7 ${s.category.replace(/_/g, " ")}: ${s.claim}`).join(" \xB7 ");
+    const top = screens.flatMap((screen) => screen.signals).slice(0, 3).map((s) => `${s.relationship_to_subject} ${s.target_entity_key} \xB7 ${s.category.replace(/_/g, " ")}: ${s.claim}`).join(" \xB7 ");
     ctx.emit({ phase: "Adverse", label: `${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}`, detail: `Unverified candidate sources for follow-up. ${top}`, source: "grok", tone: "warn" });
   } else {
     ctx.emit({ phase: "Adverse", label: "No adverse leads surfaced", detail: "The model search returned no candidate rug/scam/drain/FUD source URLs for follow-up; this is not proof that none exist.", source: "grok", tone: "neutral" });
+  }
+  const toolingLeads = tooling?.tools.length ?? 0;
+  const answered = screens.filter((screen) => screen.completed).length;
+  const unanswered = screens.length - answered;
+  const swept = `the subject, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}`;
+  const gap = unanswered ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.` : "";
+  if (totalSigs || toolingLeads) {
+    record3({
+      id: "adverse-screen",
+      status: "finding",
+      note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: ${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}${toolingLeads ? ` and ${toolingLeads} manipulation-tooling lead${toolingLeads === 1 ? "" : "s"}` : ""} surfaced. Each is an unverified candidate source for follow-up, not a verified finding.${gap}`,
+      provider: "adverse-sweep",
+      sourceCount: totalSigs + toolingLeads
+    });
+  } else if (!answered) {
+    record3({
+      id: "adverse-screen",
+      status: "unavailable",
+      note: `the model search returned no readable answer for any of the ${screens.length} adverse-screen target${screens.length === 1 ? "" : "s"}, so no rug, scam, or drain search was completed`,
+      provider: "adverse-sweep"
+    });
+  } else {
+    record3({
+      id: "adverse-screen",
+      status: "checked-empty",
+      // A completed empty search is an answer; it is not a clean record.
+      note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: the search returned no candidate source. An empty search is not proof that no adverse record exists.${gap}`,
+      provider: "adverse-sweep"
+    });
   }
   if (projectTargets.length >= 2) {
     ctx.evidence.ventureTeams = projectTargets.map((p, i) => ({
@@ -22720,6 +23341,7 @@ function mergeManagementIntoWebTeam(evidence, emit) {
 }
 async function runAuditWithLedger(rawHandle, emit, options) {
   const runtimeStartedAt = Date.now();
+  resetDefiLlamaScanMemo();
   const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
   const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
@@ -23151,6 +23773,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     });
   };
   const signalPassesStartedAt = startRuntimeStage("signal-passes");
+  const recordAdverseUnavailable = (note) => checkTracker.record({
+    id: "adverse-screen",
+    status: "unavailable",
+    note,
+    provider: "adverse-sweep"
+  });
   if (collectionOverBudget()) {
     for (const [id, label] of [
       ["token-lifecycle", "Promoted-token lifecycle"],
@@ -23159,6 +23787,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     ]) {
       checkTracker.provider(id, label, "unavailable", "collection time budget reached before this pass");
     }
+    recordAdverseUnavailable("the collection time budget was reached before the adverse, scam, and rug sweep ran, so no adverse search was attempted");
     emit({ phase: "Collect", label: "Signal passes skipped", detail: "Collection time budget reached; skipping enrichment passes to leave time to score and persist a partial report.", tone: "warn" });
   } else {
     const signalPasses = [
@@ -23174,11 +23803,19 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
     }
     if (analystAvailable() || env("XAI_API_KEY")) {
-      signalPasses.push(trackedPass("adverse-sweep", "Adverse-signal sweep", ["grok", "cache"], () => adverseSignalsAndTooling(ctx), (e) => {
-        emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
-      }));
+      signalPasses.push(trackedPass(
+        "adverse-sweep",
+        "Adverse-signal sweep",
+        ["grok", "cache"],
+        () => adverseSignalsAndTooling(ctx, (observation) => checkTracker.record(observation)),
+        (e) => {
+          recordAdverseUnavailable(`the adverse, scam, and rug sweep failed before it completed: ${String(e)}`);
+          emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
+        }
+      ));
     } else {
       checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
+      recordAdverseUnavailable("no model search provider is configured, so no adverse, scam, or rug search was attempted");
     }
     await Promise.all(signalPasses);
   }
@@ -23213,15 +23850,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     try {
       const departures = await checkLeaderDepartures(evidence.webTeam ?? [], leaderCompany);
       const left = departures.filter((row) => row.state === "departed");
-      if (departures.length) {
+      const observation = leadershipCurrencyObservation(departures, leaderCompany);
+      if (observation) {
         evidence.leaderDepartures = departures.map((row) => ({ ...row }));
-        checkTracker.record({
-          id: "founder-company-relationships",
-          status: left.length ? "finding" : "confirmed",
-          note: left.length ? left.map((row) => row.summary).join(" ") : `${departures.length} named leader${departures.length === 1 ? "" : "s"} still list ${leaderCompany} as a current role`,
-          provider: "peopledatalabs",
-          sourceCount: departures.length
-        });
+        checkTracker.record(observation);
       }
       if (left.length) {
         emit({
@@ -23233,6 +23865,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         });
       }
     } catch (error) {
+      checkTracker.record({
+        id: "project-leadership-currency",
+        status: "unavailable",
+        note: `the leadership currency lookup failed before it completed: ${String(error)}`,
+        provider: "peopledatalabs"
+      });
       emit({ phase: "P1 \xB7 Team", label: "Leadership currency check failed", detail: String(error), source: "peopledatalabs", tone: "warn" });
     }
   }
@@ -23567,79 +24205,6 @@ async function runAuditWithLedger(rawHandle, emit, options) {
 }
 function runAudit(rawHandle, emit, options) {
   return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
-}
-
-// src/lib/priceHistory.ts
-var NETWORK = {
-  solana: "solana",
-  ethereum: "eth",
-  eth: "eth",
-  bsc: "bsc",
-  base: "base",
-  arbitrum: "arbitrum",
-  polygon: "polygon_pos",
-  "polygon_pos": "polygon_pos",
-  avalanche: "avax",
-  avax: "avax",
-  optimism: "optimism",
-  fantom: "ftm",
-  sui: "sui",
-  ton: "ton",
-  tron: "tron",
-  blast: "blast",
-  sei: "sei-evm"
-};
-var GT = "https://api.geckoterminal.com/api/v2";
-function record2(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-async function gt(path) {
-  try {
-    const r = await fetch(`${GT}${path}`, {
-      headers: { accept: "application/json" },
-      signal: AbortSignal.timeout(8e3)
-    });
-    return r.ok ? await r.json() : null;
-  } catch {
-    return null;
-  }
-}
-async function topPool(network, address) {
-  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
-  const rows = record2(d).data;
-  const first = Array.isArray(rows) ? record2(rows[0]) : {};
-  const attributes = record2(first.attributes);
-  const id = typeof attributes.address === "string" ? attributes.address : typeof first.id === "string" ? first.id : void 0;
-  return id ? id.replace(`${network}_`, "") : null;
-}
-async function fetchPriceHistory(address, chain, pairAddress) {
-  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
-  if (!network || !address) return null;
-  const pool = pairAddress || await topPool(network, address);
-  if (!pool) return null;
-  for (const timeframe of ["day", "hour"]) {
-    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
-    const rawList = record2(record2(record2(d).data).attributes).ohlcv_list;
-    const list = Array.isArray(rawList) ? rawList.filter((row) => Array.isArray(row) && row.length >= 5 && row.every((value) => typeof value === "number")) : [];
-    if (list.length < 3) continue;
-    const rows = [...list].sort((a, b) => a[0] - b[0]);
-    const points = rows.map((r) => r[4]).filter((n) => typeof n === "number" && n > 0);
-    if (points.length < 3) continue;
-    const first = points[0];
-    const last = points[points.length - 1];
-    const peak = Math.max(...points);
-    return {
-      points,
-      first,
-      last,
-      peak,
-      changePct: first > 0 ? (last - first) / first * 100 : 0,
-      drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
-      timeframe,
-      capturedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-  }
-  return null;
 }
 
 // src/token/scannerEvasion.ts
@@ -24110,7 +24675,7 @@ async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
 }
 var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 var num4 = (s) => s == null || s === "" ? null : Number(s);
-var t1 = (s) => s === "1";
+var t12 = (s) => s === "1";
 var solFlag = (x) => x?.status === "1";
 function band(score) {
   return score >= 70 ? "PASS" : score >= 40 ? "CAUTION" : "FAIL";
@@ -24141,19 +24706,19 @@ function evmSafety(gp, sim) {
   return {
     available: !!gp || !!s,
     simChecked: !!s,
-    honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
-    honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
-    serialScammerCreator: t1(gp?.honeypot_with_same_creator),
-    mintable: t1(gp?.is_mintable),
+    honeypot: t12(gp?.is_honeypot) || (s?.isHoneypot ?? false),
+    honeypotOnchain: t12(gp?.is_honeypot) || t12(gp?.cannot_sell_all),
+    serialScammerCreator: t12(gp?.honeypot_with_same_creator),
+    mintable: t12(gp?.is_mintable),
     freezable: false,
     nonTransferable: false,
     ownerRenounced: !gp?.owner_address || /^0x0+$/.test(gp.owner_address || "") || gp.owner_address === "",
-    takeBack: t1(gp?.can_take_back_ownership),
-    hiddenOwner: t1(gp?.hidden_owner),
-    selfdestruct: t1(gp?.selfdestruct),
-    pausable: t1(gp?.transfer_pausable),
-    openSource: t1(gp?.is_open_source),
-    cannotSellAll: t1(gp?.cannot_sell_all),
+    takeBack: t12(gp?.can_take_back_ownership),
+    hiddenOwner: t12(gp?.hidden_owner),
+    selfdestruct: t12(gp?.selfdestruct),
+    pausable: t12(gp?.transfer_pausable),
+    openSource: t12(gp?.is_open_source),
+    cannotSellAll: t12(gp?.cannot_sell_all),
     metadataMutable: false,
     buyTax: s?.simSuccess ? s.buyTax : (num4(gp?.buy_tax) ?? 0) * 100,
     sellTax: s?.simSuccess ? s.sellTax : (num4(gp?.sell_tax) ?? 0) * 100,
@@ -24166,12 +24731,12 @@ function evmSafety(gp, sim) {
     balanceMutable: false,
     transferHook: false,
     transferFee: false,
-    proxy: t1(gp?.is_proxy),
-    slippageModifiable: t1(gp?.slippage_modifiable) || t1(gp?.personal_slippage_modifiable),
-    blacklist: t1(gp?.is_blacklisted),
-    tradingCooldown: t1(gp?.trading_cooldown),
-    externalCall: t1(gp?.external_call),
-    ownerChangeBalance: t1(gp?.owner_change_balance),
+    proxy: t12(gp?.is_proxy),
+    slippageModifiable: t12(gp?.slippage_modifiable) || t12(gp?.personal_slippage_modifiable),
+    blacklist: t12(gp?.is_blacklisted),
+    tradingCooldown: t12(gp?.trading_cooldown),
+    externalCall: t12(gp?.external_call),
+    ownerChangeBalance: t12(gp?.owner_change_balance),
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
     lpAssessed: lpRowsSeen > 0
@@ -24845,6 +25410,26 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
   return "Falls short on the forensic checks. Treat as high risk.";
 }
 
+// src/polymarket/trader.ts
+var EVM_ADDRESS4 = /^0x[0-9a-f]{40}$/i;
+var PROFILE_PATH = /^\/profile\/(0x[0-9a-f]{40})\/?$/i;
+var HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+function normalizeWalletInput(input) {
+  const raw = (input ?? "").trim();
+  if (!raw) return null;
+  if (EVM_ADDRESS4.test(raw)) return raw.toLowerCase();
+  let url;
+  try {
+    url = new URL(HAS_SCHEME.test(raw) ? raw : `https://${raw}`);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase();
+  if (host !== "polymarket.com" && !host.endsWith(".polymarket.com")) return null;
+  const match = PROFILE_PATH.exec(url.pathname);
+  return match ? match[1].toLowerCase() : null;
+}
+
 // src/lib/resolveInput.ts
 var EVM = /^0x[a-fA-F0-9]{40}$/;
 var SOLANA = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -24871,6 +25456,8 @@ function resolveInput(raw) {
   const isXUrl = !!parsedUrl && (approvedHost(hostname2, "x.com") || approvedHost(hostname2, "twitter.com"));
   const dexPath = isDexUrl ? parsedUrl.pathname.match(/^\/([a-z0-9]+)\/([a-zA-Z0-9]+)(?:\/|$)/i) : null;
   if (dexPath && parsedUrl) return { kind: "token", ref: parsedUrl.href, via: "dexscreener" };
+  const polymarketWallet = EVM.test(s) ? null : normalizeWalletInput(s);
+  if (polymarketWallet) return { kind: "polymarket", ref: polymarketWallet };
   if (TICKER.test(s)) return { kind: "token", ref: s, via: "ticker" };
   if (s.startsWith("$")) return { kind: "token", ref: s, via: "address-candidate" };
   if (EVM.test(s)) return { kind: "token", ref: s, via: "evm" };

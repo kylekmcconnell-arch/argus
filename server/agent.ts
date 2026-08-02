@@ -1510,12 +1510,27 @@ const compactProjectToken = (value: unknown): Record<string, unknown> | undefine
       return compacted === undefined ? [] : [[key, compacted]];
     })),
     ...(history ? {
-      history: Object.fromEntries([
-        "first", "last", "peak", "changePct", "drawdownPct", "timeframe", "poolAddress",
-      ].flatMap((key) => {
-        const compacted = compactObject(history[key], 2);
-        return compacted === undefined ? [] : [[key, compacted]];
-      })),
+      history: {
+        ...Object.fromEntries([
+          // `range` at depth 2 is exactly right: its scalars survive and the
+          // 90-element highs/lows arrays are dropped, which is what a scoring
+          // packet wants. Passing it at depth 1 would truncate those arrays to
+          // eight entries, which reads as a short series rather than a dropped one.
+          "first", "last", "peak", "changePct", "drawdownPct", "range",
+          "spanPeriods", "windowIsPartial", "timeframe", "poolAddress",
+        ].flatMap((key) => {
+          const compacted = compactObject(history[key], 2);
+          return compacted === undefined ? [] : [[key, compacted]];
+        })),
+        // Volume needs one more level than the rest: at depth 2 it collapses to
+        // {changePct, isFloor} and loses recent/prior, i.e. loses the widths of
+        // the windows being compared. A percentage change with no named span is
+        // the assertion this data exists to prevent.
+        ...(() => {
+          const volume = compactObject(history.volume, 1);
+          return volume === undefined ? {} : { volume };
+        })(),
+      },
     } : {}),
   };
 };

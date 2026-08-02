@@ -70,7 +70,9 @@ describe("ProjectTokenCard", () => {
     expect(container.textContent).toContain("$JUP");
     expect(container.textContent).toContain("CoinGecko #89");
     expect(container.textContent).toContain("$620.00M");
-    expect(container.textContent).toContain("From captured peak");
+    // Not "peak": the label names which reading this is, and neither the
+    // close-based nor the range-based figure is a lifetime record.
+    expect(container.textContent).toContain("From the highest close in the window");
     expect(container.textContent).toContain("Official site");
     expect(harness.sparkline).toHaveBeenCalledWith(expect.objectContaining({
       address: token.address,

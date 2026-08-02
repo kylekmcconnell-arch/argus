@@ -28,14 +28,14 @@ import {
   scanContradictions,
 } from "./agent";
 import { getCost, providerFailureLines, withCostLedger } from "./cost";
-import { PersonCheckTracker, type ProviderRunState } from "./checks";
+import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
 import { collectDomainRegistration, deriveLaunchWindow } from "./adapters/domainAge";
-import { checkLeaderDepartures } from "./adapters/peopledatalabs";
+import { checkLeaderDepartures, type LeaderDepartureCheck } from "./adapters/peopledatalabs";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
@@ -73,6 +73,7 @@ import {
   collectProtocolFunding,
   collectProtocolTvl,
   defiLlamaLookupName,
+  resetDefiLlamaScanMemo,
 } from "./adapters/defiLlama";
 import { collectHolderProfile } from "./adapters/tokenHolders";
 import { collectUpcomingUnlocks } from "./adapters/tokenUnlocks";
@@ -367,6 +368,61 @@ const adapterRunState = (
 };
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * The checklist outcome for the bounded, paid leadership-currency lookup.
+ *
+ * The lookup answers three different ways and they must not be conflated:
+ *   - a leader with a CLOSED role is a dated finding,
+ *   - an all-still-listed roster is its own confirmed signal,
+ *   - a record that holds no role for anyone answered nobody, which is a
+ *     completed lookup with no answer, not a clean result.
+ * A record with no matching role is "not measured", never "still there", so
+ * absent rows are counted apart from both and never inflate the still-listed
+ * tally. Returns null when no leader was resolved at all, because Kyle's rule
+ * is that an unresolvable leader is skipped and never reported.
+ *
+ * Exported for tests.
+ */
+export function leadershipCurrencyObservation(
+  departures: readonly LeaderDepartureCheck[],
+  company: string,
+): ChecklistObservation | null {
+  if (!departures.length) return null;
+  const left = departures.filter((row) => row.state === "departed");
+  const stillListed = departures.filter((row) => row.state === "current");
+  const unanswered = departures.filter((row) => row.state === "absent");
+  // PDL is a licensed derivative of LinkedIn, so its record is a copy that can
+  // lag the live profile. Say so on every outcome, never only the bad one.
+  const lag = "PeopleDataLabs is a licensed copy of a LinkedIn record and can lag the live profile, so each row carries its own dates and profile URL to confirm against.";
+  const unansweredNote = unanswered.length
+    ? ` The employment record holds no ${company} role for ${unanswered.length} other named leader${unanswered.length === 1 ? "" : "s"}, which is an unanswered lookup and not evidence they were never involved.`
+    : "";
+  if (left.length) {
+    return {
+      id: "project-leadership-currency",
+      status: "finding",
+      note: `${left.map((row) => row.summary).join(" ")}${unansweredNote} ${lag}`,
+      provider: "peopledatalabs",
+      sourceCount: left.length,
+    };
+  }
+  if (stillListed.length) {
+    return {
+      id: "project-leadership-currency",
+      status: "confirmed",
+      note: `${stillListed.length} named leader${stillListed.length === 1 ? " still lists" : "s still list"} ${company} as a current role, and none of the leaders checked has a closed ${company} role.${unansweredNote} ${lag}`,
+      provider: "peopledatalabs",
+      sourceCount: stillListed.length,
+    };
+  }
+  return {
+    id: "project-leadership-currency",
+    status: "checked-empty",
+    note: `The employment record returned no ${company} role for any of the ${departures.length} named leader${departures.length === 1 ? "" : "s"} checked. That record may simply be incomplete, so this is neither a departure nor a confirmation. ${lag}`,
+    provider: "peopledatalabs",
+  };
+}
 
 function parseOutcome(s?: string): VentureOutcome {
   if (!s) return VentureOutcome.UNKNOWN;
@@ -2028,12 +2084,22 @@ export function collectProjectCoreEvidenceOutcomes(
  */
 export function recordProjectTokenDrawdownFinding(evidence: CollectedEvidence): boolean {
   const token = evidence.projectToken;
-  const drawdownPct = token?.history?.drawdownPct;
-  const historySourceUrl = token?.history?.sourceUrl;
+  const history = token?.history;
+  const historySourceUrl = history?.sourceUrl;
+  const closeDrawdown = history?.drawdownPct;
+  // The close series cannot see the shape this finding is for. A token that ran
+  // inside one candle and gave it all back closes flat, so its close-based
+  // drawdown is 0 while the fall from the reported intraday high is 97%. Read
+  // the more severe of the two, and say which one was measured: a candle high
+  // is the highest price ONE source reported inside ONE period, never an
+  // all-time high, and never a peak established across the whole market.
+  const rangeDrawdown = history?.range?.drawdownFromHighPct;
+  const usable = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+  const fromRange = usable(rangeDrawdown) && (!usable(closeDrawdown) || rangeDrawdown < closeDrawdown);
+  const drawdownPct = fromRange ? rangeDrawdown : closeDrawdown;
   if (
     !token
-    || typeof drawdownPct !== "number"
-    || !Number.isFinite(drawdownPct)
+    || !usable(drawdownPct)
     || drawdownPct > -70
     || !historySourceUrl
   ) {
@@ -2044,10 +2110,19 @@ export function recordProjectTokenDrawdownFinding(evidence: CollectedEvidence): 
     && finding.source_url === historySourceUrl,
   )) return false;
 
-  const timeframe = token.history!.timeframe === "hour" ? "hourly" : "daily";
+  const timeframe = history!.timeframe === "hour" ? "hourly" : "daily";
+  const period = history!.timeframe === "hour" ? "hour" : "day";
+  const measured = fromRange
+    ? `fall from the highest price GeckoTerminal reported inside a single ${period} of`
+    : "fall from the highest close in";
+  // A window with holes covers fewer periods than it spans, so the claim states
+  // what it observed rather than implying an unbroken stretch.
+  const coverage = history!.windowIsPartial && history!.spanPeriods
+    ? ` That window observed ${history!.points.length} of ${history!.spanPeriods} ${period}s, so it is a partial read of its own span.`
+    : "";
   evidence.findings.push({
     finding_type: "ProjectTokenDrawdown",
-    claim: `$${token.symbol} recorded a verified ${Math.abs(drawdownPct).toFixed(1)}% peak-to-latest drawdown in the captured GeckoTerminal ${timeframe} OHLCV window. ${token.coingeckoId ? "CoinGecko and DexScreener established" : "DexScreener established"} canonical token and pool context; price drawdown alone does not establish misconduct.`,
+    claim: `$${token.symbol} recorded a verified ${Math.abs(drawdownPct).toFixed(1)}% ${measured} the captured GeckoTerminal ${timeframe} OHLCV window.${coverage} ${token.coingeckoId ? "CoinGecko and DexScreener established" : "DexScreener established"} canonical token and pool context; price drawdown alone does not establish misconduct.`,
     source_url: historySourceUrl,
     source_date: token.capturedAt,
     source_author: "geckoterminal",
@@ -2196,7 +2271,20 @@ export function adverseSignalToFinding(sig: AdverseSignal): Finding {
   };
 }
 
-async function adverseSignalsAndTooling(ctx: CollectContext) {
+/**
+ * The sweep answers a decision question ("is anyone accusing this subject of
+ * taking their money?"), so it must record a checklist OUTCOME, not just a
+ * provider run: provider runs are invisible to the coverage snapshot, which is
+ * how a report with no sweep at all was still publishing full clearance.
+ *
+ * `record` is the tracker's own recorder rather than ctx.recordCheck because
+ * the adverse-screen id is not in the adapter-facing PersonCheckId union yet
+ * (see ChecklistCheckId in server/checks.ts). Exported for tests.
+ */
+export async function adverseSignalsAndTooling(
+  ctx: CollectContext,
+  record: (observation: ChecklistObservation) => void,
+) {
   const { evidence } = ctx;
   const self = ctx.handle.replace(/^@/, "").toLowerCase();
   const ticker = evidence.promotions.find((p) => p.ticker)?.ticker;
@@ -2221,7 +2309,7 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
 
   // All searches + the tooling probe run concurrently and time-boxed, so the
   // whole sweep costs one slow call, not the sum.
-  const [tooling, subjectSigs, projectSigs, assocSigs, ventureTeams] = await Promise.all([
+  const [tooling, subjectScreen, projectScreens, assocScreens, ventureTeams] = await Promise.all([
     detectManipulationTooling(ctx.handle, evidence.profile.display_name),
     searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
@@ -2286,20 +2374,63 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
       evidence.findings.push(adverseSignalToFinding(s));
     }
   };
+  const screens = [subjectScreen, ...projectScreens, ...assocScreens];
   let totalSigs = 0;
-  pushSigs(subjectSigs);
-  totalSigs += subjectSigs.length;
-  projectSigs.forEach((sigs) => { pushSigs(sigs); totalSigs += sigs.length; });
-  assocSigs.forEach((sigs) => { pushSigs(sigs); totalSigs += sigs.length; });
+  for (const screen of screens) {
+    pushSigs(screen.signals);
+    totalSigs += screen.signals.length;
+  }
 
   if (totalSigs) {
-    const top = [...subjectSigs, ...projectSigs.flat(), ...assocSigs.flat()]
+    const top = screens.flatMap((screen) => screen.signals)
       .slice(0, 3)
       .map((s) => `${s.relationship_to_subject} ${s.target_entity_key} · ${s.category.replace(/_/g, " ")}: ${s.claim}`)
       .join(" · ");
     ctx.emit({ phase: "Adverse", label: `${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}`, detail: `Unverified candidate sources for follow-up. ${top}`, source: "grok", tone: "warn" });
   } else {
     ctx.emit({ phase: "Adverse", label: "No adverse leads surfaced", detail: "The model search returned no candidate rug/scam/drain/FUD source URLs for follow-up; this is not proof that none exist.", source: "grok", tone: "neutral" });
+  }
+
+  // Record the sweep's outcome HERE, the moment it is known, so a later error
+  // in the cross-project hop below cannot lose the answer we already paid for.
+  //
+  // A search that never answered is not a search that answered nothing. The
+  // provider returning nothing, an unreadable answer and a genuinely empty
+  // result all arrive as zero leads, and this row now completes a coverage
+  // question, so publishing them alike would turn a model-search outage into
+  // "swept, nothing found" and RAISE the report's clearance for it.
+  const toolingLeads = tooling?.tools.length ?? 0;
+  const answered = screens.filter((screen) => screen.completed).length;
+  const unanswered = screens.length - answered;
+  const swept = `the subject, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}`;
+  // The empty answer covers only the targets that answered, so the gap is named
+  // beside it rather than left for the reader to assume away.
+  const gap = unanswered
+    ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.`
+    : "";
+  if (totalSigs || toolingLeads) {
+    record({
+      id: "adverse-screen",
+      status: "finding",
+      note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: ${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}${toolingLeads ? ` and ${toolingLeads} manipulation-tooling lead${toolingLeads === 1 ? "" : "s"}` : ""} surfaced. Each is an unverified candidate source for follow-up, not a verified finding.${gap}`,
+      provider: "adverse-sweep",
+      sourceCount: totalSigs + toolingLeads,
+    });
+  } else if (!answered) {
+    record({
+      id: "adverse-screen",
+      status: "unavailable",
+      note: `the model search returned no readable answer for any of the ${screens.length} adverse-screen target${screens.length === 1 ? "" : "s"}, so no rug, scam, or drain search was completed`,
+      provider: "adverse-sweep",
+    });
+  } else {
+    record({
+      id: "adverse-screen",
+      status: "checked-empty",
+      // A completed empty search is an answer; it is not a clean record.
+      note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: the search returned no candidate source. An empty search is not proof that no adverse record exists.${gap}`,
+      provider: "adverse-sweep",
+    });
   }
 
   // 3. Cross-project overlap ("the Venn"): second hop over the ventures' teams to
@@ -2726,6 +2857,12 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
 
 async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
   const runtimeStartedAt = Date.now();
+  // The DeFiLlama reader coalesces reads of the same URL for a short window so
+  // one protocol document is not pulled three times per scan. That window is
+  // already far shorter than a scan, but a warm serverless container can start
+  // the next subject inside it, so the real scan boundary is made explicit
+  // here: a document can never carry from one subject's audit into another's.
+  resetDefiLlamaScanMemo();
   // Single source of truth for the analyst start-by deadline (the route passes
   // it; fall back to the same formula for direct/test callers). Collection must
   // stop launching new provider work COLLECTION_ANALYST_RESERVE_MS before it, so
@@ -3307,6 +3444,14 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     });
   };
   const signalPassesStartedAt = startRuntimeStage("signal-passes");
+  // Skipping the sweep is a coverage GAP, not a silent saving: the checklist
+  // row has to say so, or the report reads as if the sweep finished clean.
+  const recordAdverseUnavailable = (note: string) => checkTracker.record({
+    id: "adverse-screen",
+    status: "unavailable",
+    note,
+    provider: "adverse-sweep",
+  });
   if (collectionOverBudget()) {
     // Over the collection budget already: skip these enrichment passes (the
     // slowest is the Grok adverse sweep) and preserve time to score + persist.
@@ -3317,6 +3462,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     ] as const) {
       checkTracker.provider(id, label, "unavailable", "collection time budget reached before this pass");
     }
+    recordAdverseUnavailable("the collection time budget was reached before the adverse, scam, and rug sweep ran, so no adverse search was attempted");
     emit({ phase: "Collect", label: "Signal passes skipped", detail: "Collection time budget reached; skipping enrichment passes to leave time to score and persist a partial report.", tone: "warn" });
   } else {
     const signalPasses: Promise<void>[] = [
@@ -3332,11 +3478,22 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
     }
     if (analystAvailable() || env("XAI_API_KEY")) {
-      signalPasses.push(trackedPass("adverse-sweep", "Adverse-signal sweep", ["grok", "cache"], () => adverseSignalsAndTooling(ctx), (e) => {
-        emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
-      }));
+      signalPasses.push(trackedPass(
+        "adverse-sweep",
+        "Adverse-signal sweep",
+        ["grok", "cache"],
+        () => adverseSignalsAndTooling(ctx, (observation) => checkTracker.record(observation)),
+        (e) => {
+          // The sweep records its own completed outcome the moment it has one,
+          // and a completed outcome outranks this row, so an error after that
+          // point cannot downgrade an answer we already have.
+          recordAdverseUnavailable(`the adverse, scam, and rug sweep failed before it completed: ${String(e)}`);
+          emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
+        },
+      ));
     } else {
       checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
+      recordAdverseUnavailable("no model search provider is configured, so no adverse, scam, or rug search was attempted");
     }
     await Promise.all(signalPasses);
   }
@@ -3388,17 +3545,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     try {
       const departures = await checkLeaderDepartures(evidence.webTeam ?? [], leaderCompany);
       const left = departures.filter((row) => row.state === "departed");
-      if (departures.length) {
+      const observation = leadershipCurrencyObservation(departures, leaderCompany);
+      if (observation) {
         evidence.leaderDepartures = departures.map((row) => ({ ...row }));
-        checkTracker.record({
-          id: "founder-company-relationships",
-          status: left.length ? "finding" : "confirmed",
-          note: left.length
-            ? left.map((row) => row.summary).join(" ")
-            : `${departures.length} named leader${departures.length === 1 ? "" : "s"} still list ${leaderCompany} as a current role`,
-          provider: "peopledatalabs",
-          sourceCount: departures.length,
-        });
+        checkTracker.record(observation);
       }
       if (left.length) {
         emit({
@@ -3410,6 +3560,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         });
       }
     } catch (error) {
+      checkTracker.record({
+        id: "project-leadership-currency",
+        status: "unavailable",
+        note: `the leadership currency lookup failed before it completed: ${String(error)}`,
+        provider: "peopledatalabs",
+      });
       emit({ phase: "P1 · Team", label: "Leadership currency check failed", detail: String(error), source: "peopledatalabs", tone: "warn" });
     }
   }

@@ -18,6 +18,33 @@ const dnsError = (code = "ENOTFOUND") => Object.assign(
   { cause: { code } },
 );
 
+// A body delivered chunk by chunk, counting how much of it the reader actually
+// pulled. That count is the whole point: a capped read must leave the tail of a
+// large bundle untransferred, and only a streamed fixture can prove it.
+const streamedResponse = (
+  chunks: string[],
+  contentType: string,
+  pulled: { chunks: number },
+) => {
+  let index = 0;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (index >= chunks.length) {
+          controller.close();
+          return;
+        }
+        pulled.chunks += 1;
+        controller.enqueue(new TextEncoder().encode(chunks[index]));
+        index += 1;
+      },
+    }),
+    { status: 200, headers: { "content-type": contentType } },
+  );
+};
+
+const SHELL = '<div id="root"></div><script type="module" src="/app.js"></script>';
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -258,6 +285,68 @@ describe("checkSiteSubstance attribution", () => {
       detail: expect.stringContaining("unrendered coming-soon string"),
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps a huge script bundle instead of buffering all of it, and says the marker search was capped", async () => {
+    // app.uniswap.org serves a 9.01 MB Vite chunk. The real scan buffered the
+    // whole thing into a string to run one regex over it.
+    const filler = "x".repeat(64 * 1024);
+    const chunks = [...Array.from({ length: 39 }, () => filler), 'const route = "ComingSoonApp";'];
+    const pulled = { chunks: 0 };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(SHELL))
+      .mockResolvedValueOnce(streamedResponse(chunks, "application/javascript", pulled)));
+
+    const captured = await withCostLedger(async () => ({
+      result: await checkSiteSubstance("example.org"),
+      cost: getCost(),
+    }));
+
+    // 512 KB of a 2.5 MB bundle (plus whatever the stream reads ahead): the
+    // tail, marker and all, never crosses the wire.
+    expect(pulled.chunks).toBeLessThanOrEqual(12);
+    expect(captured.result).toMatchObject({ status: "client_rendered" });
+    // The marker was never reached. Saying nothing about it would let a
+    // truncated read pass for a completed one.
+    expect(captured.result?.detail).not.toContain("unrendered coming-soon string");
+    expect(captured.result?.detail).toContain("read only up to");
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "site-fetch",
+      op: "substance",
+      calls: 2,
+      succeeded: 1,
+      partial: 1,
+      meta: expect.stringContaining("read_capped"),
+    }));
+  });
+
+  it("stops walking bundles once one of them already carries a coming-soon marker", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(
+        '<div id="root"></div><script type="module" src="/a.js"></script><script type="module" src="/b.js"></script>',
+      ))
+      .mockResolvedValueOnce(response('const route = "ComingSoonApp";', 200, "application/javascript"))
+      .mockResolvedValueOnce(response('const other = "ComingSoonApp";', 200, "application/javascript"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(checkSiteSubstance("example.org")).resolves.toMatchObject({
+      status: "client_rendered",
+      detail: expect.stringContaining("unrendered coming-soon string"),
+    });
+    // The hint cannot get any stronger, so the second bundle is never bought.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not claim a capped bundle read found nothing when a smaller bundle answered first", async () => {
+    // A fully read bundle keeps the plain wording: only a truncated read is a floor.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(SHELL))
+      .mockResolvedValueOnce(response("const app = 1;", 200, "application/javascript"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await checkSiteSubstance("example.org");
+    expect(result?.detail).toContain("static read could not confirm");
+    expect(result?.detail).not.toContain("read only up to");
   });
 
   it("does not let a blocked bundle turn an accessible app shell into an access-blocked homepage", async () => {

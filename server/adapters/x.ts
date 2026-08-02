@@ -758,6 +758,257 @@ export interface NotableScan {
   /** Directly observed candidate relationships, or the full reference set after complete enumeration. */
   checked: number;
   coverage: "complete" | "partial" | "unavailable";
+  /**
+   * Audience shape over the follower profiles this scan actually read. Present
+   * ONLY on the enumerate path, which downloads real profile rows. The
+   * reverse-check path never sees a follower profile, so it reports nothing
+   * rather than an empty (and falsely measured) sample.
+   */
+  audience?: AudienceSample;
+}
+
+// Audience shape, read off rows we already paid for.
+//
+// The enumerate path downloads a FULL profile object for every follower (on one
+// real project, 1,173 of them across 6 provider calls) and used to keep the
+// handle and throw the rest away. A farmed or purchased audience has a
+// distinctive shape, and that shape is already sitting in those rows: one
+// narrow creation cohort, accounts that have never posted, a default avatar
+// over an empty bio, a follow ratio pinned to one side. So tally it in the same
+// pass that matches the reference set, and hand it back with the list.
+//
+// Three rules govern every number below, and they are the reason for the shape
+// of this structure:
+//   1. Every figure is a COUNT over a denominator carried beside it. These rows
+//      are the newest slice of a follower list, never a random draw, so nothing
+//      here is ever projected onto the account's real follower total.
+//   2. A field the provider omitted is UNMEASURED. An absent created_at must
+//      never be counted as "not recently created", so each group carries its
+//      own `measured` count and an omission simply never enters it.
+//   3. A shape is not a verdict. Anyone can be followed by bots without having
+//      bought a single one, so this reports the distribution and labels no
+//      account.
+export interface AudienceSample {
+  /** Follower profile rows this scan actually read. */
+  profilesExamined: number;
+  /** True only when pagination completed. Otherwise these rows are a floor. */
+  sampleIsComplete: boolean;
+  /** Creation cohorts among the rows that carried a creation date. */
+  creation: { measured: number; largestMonth?: { month: string; accounts: number } };
+  /** Rows carrying a post count, and how many of those sit at zero. */
+  posts: { measured: number; zeroPosts: number };
+  /** Rows carrying an avatar URL, and how many still show X's default image. */
+  avatar: { measured: number; defaultAvatar: number };
+  /** Rows carrying a bio field, and how many carried an empty one. */
+  bio: { measured: number; empty: number };
+  /** Rows carrying BOTH of those fields, and how many were default on both. */
+  starterProfile: { measured: number; accounts: number };
+  /** Rows carrying both follow counts, bucketed by which side dominates. */
+  followRatio: { measured: number; followingHeavy: number; balanced: number; followerHeavy: number };
+}
+
+/** Running counters for one enumerate pass. Rows are never retained: a 30k
+ *  follower scan must not hold 30k profile objects to answer four questions. */
+export interface AudienceTally {
+  profilesExamined: number;
+  creationMeasured: number;
+  creationMonths: Map<string, number>;
+  postsMeasured: number;
+  zeroPosts: number;
+  avatarMeasured: number;
+  defaultAvatar: number;
+  bioMeasured: number;
+  emptyBio: number;
+  starterMeasured: number;
+  starterAccounts: number;
+  ratioMeasured: number;
+  followingHeavy: number;
+  balanced: number;
+  followerHeavy: number;
+}
+
+export function newAudienceTally(): AudienceTally {
+  return {
+    profilesExamined: 0,
+    creationMeasured: 0,
+    creationMonths: new Map(),
+    postsMeasured: 0,
+    zeroPosts: 0,
+    avatarMeasured: 0,
+    defaultAvatar: 0,
+    bioMeasured: 0,
+    emptyBio: 0,
+    starterMeasured: 0,
+    starterAccounts: 0,
+    ratioMeasured: 0,
+    followingHeavy: 0,
+    balanced: 0,
+    followerHeavy: 0,
+  };
+}
+
+/** X serves this path for every account that never set a profile photo. */
+const DEFAULT_AVATAR_URL = /default_profile(?:_images)?[/_]/i;
+
+/** One side of an account's follow graph counts as dominant at this multiple.
+ *  Named so the bucket and the sentence describing it can never drift apart. */
+export const AUDIENCE_RATIO_DOMINANCE = 10;
+
+/** Below this many measured rows a single account moves a share by more than
+ *  two points, so a percentage would be noise wearing a finding's clothes.
+ *  Applied per dimension, because the provider can answer one field for the
+ *  whole page and omit another entirely. */
+export const AUDIENCE_SAMPLE_MIN = 50;
+
+/** A count the provider returned, under any of its field spellings. A missing,
+ *  boolean, or negative value is unknown, never zero. */
+const audienceNumber = (row: JsonRecord, ...keys: string[]): number | null => {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+    if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+  }
+  return null;
+};
+
+/** The row's creation month in UTC, or null when the provider omitted it or
+ *  sent something unparseable. */
+const audienceMonth = (row: JsonRecord): string | null => {
+  const raw = row.createdAt ?? row.created_at;
+  if (typeof raw !== "string") return null;
+  const at = new Date(raw);
+  if (Number.isNaN(at.getTime())) return null;
+  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+export function tallyAudienceRow(tally: AudienceTally, row: unknown): void {
+  // A null entry in the page array is not a profile and must not dilute a
+  // denominator. A row carrying only a handle IS a profile we read, and simply
+  // measures nothing.
+  if (!row || typeof row !== "object" || Array.isArray(row)) return;
+  const record = row as JsonRecord;
+  tally.profilesExamined += 1;
+
+  const month = audienceMonth(record);
+  if (month) {
+    tally.creationMeasured += 1;
+    tally.creationMonths.set(month, (tally.creationMonths.get(month) ?? 0) + 1);
+  }
+
+  const posts = audienceNumber(record, "statusesCount", "statuses_count", "tweetCount", "tweet_count");
+  if (posts !== null) {
+    tally.postsMeasured += 1;
+    if (posts === 0) tally.zeroPosts += 1;
+  }
+
+  const avatarUrl = typeof record.profilePicture === "string"
+    ? record.profilePicture
+    : typeof record.profile_image_url_https === "string"
+      ? record.profile_image_url_https
+      : typeof record.profile_image_url === "string"
+        ? record.profile_image_url
+        : null;
+  const defaultAvatar = avatarUrl === null ? null : DEFAULT_AVATAR_URL.test(avatarUrl);
+  if (defaultAvatar !== null) {
+    tally.avatarMeasured += 1;
+    if (defaultAvatar) tally.defaultAvatar += 1;
+  }
+
+  const bio = typeof record.description === "string" ? record.description : null;
+  const emptyBio = bio === null ? null : bio.trim() === "";
+  if (emptyBio !== null) {
+    tally.bioMeasured += 1;
+    if (emptyBio) tally.emptyBio += 1;
+  }
+
+  // The pair counts only where BOTH fields came back: half an answer is not an
+  // empty profile.
+  if (defaultAvatar !== null && emptyBio !== null) {
+    tally.starterMeasured += 1;
+    if (defaultAvatar && emptyBio) tally.starterAccounts += 1;
+  }
+
+  const followers = audienceNumber(record, "followers", "followersCount", "followers_count");
+  // `following` is a COUNT on a user row but a BOOLEAN on relationship payloads;
+  // audienceNumber ignores the boolean and falls through to the next spelling.
+  const following = audienceNumber(record, "following", "followingCount", "following_count", "friends_count");
+  if (followers !== null && following !== null) {
+    tally.ratioMeasured += 1;
+    if (followers === 0 && following === 0) tally.balanced += 1; // an account at zero on both sides leans neither way
+    else if (followers >= following * AUDIENCE_RATIO_DOMINANCE) tally.followerHeavy += 1;
+    else if (following >= followers * AUDIENCE_RATIO_DOMINANCE) tally.followingHeavy += 1;
+    else tally.balanced += 1;
+  }
+}
+
+export function sealAudienceSample(tally: AudienceTally, sampleIsComplete: boolean): AudienceSample | undefined {
+  // No row read means nothing to say. An all-zero sample here would read as a
+  // measured zero, which is exactly the assertion we are not entitled to make.
+  if (tally.profilesExamined <= 0) return undefined;
+  let largestMonth: { month: string; accounts: number } | undefined;
+  for (const [month, accounts] of tally.creationMonths) {
+    // A tie keeps the first month encountered: arbitrary but stable, and it is
+    // the size of the cohort that carries the signal, not which month won.
+    if (!largestMonth || accounts > largestMonth.accounts) largestMonth = { month, accounts };
+  }
+  return {
+    profilesExamined: tally.profilesExamined,
+    sampleIsComplete,
+    creation: { measured: tally.creationMeasured, ...(largestMonth ? { largestMonth } : {}) },
+    posts: { measured: tally.postsMeasured, zeroPosts: tally.zeroPosts },
+    avatar: { measured: tally.avatarMeasured, defaultAvatar: tally.defaultAvatar },
+    bio: { measured: tally.bioMeasured, empty: tally.emptyBio },
+    starterProfile: { measured: tally.starterMeasured, accounts: tally.starterAccounts },
+    followRatio: {
+      measured: tally.ratioMeasured,
+      followingHeavy: tally.followingHeavy,
+      balanced: tally.balanced,
+      followerHeavy: tally.followerHeavy,
+    },
+  };
+}
+
+const audienceShare = (part: number, whole: number): string =>
+  `${part} of ${whole} (${Math.round((part / whole) * 100)}%)`;
+
+/** One sentence over the sample, wording the denominators out loud. The shape
+ *  speaks; this never names the account a bot farm or a buyer. */
+export function describeAudienceSample(sample?: AudienceSample): string {
+  if (!sample) return "No follower profiles were read on this path, so audience shape is not measured.";
+  const profiles = `${sample.profilesExamined} follower profile${sample.profilesExamined === 1 ? "" : "s"}`;
+  // A percentage of a handful is an invented number. Under the floor we say the
+  // sample is thin and stop, rather than dressing 3 accounts up as 30%.
+  if (sample.profilesExamined < AUDIENCE_SAMPLE_MIN) {
+    return `Read ${profiles}, too thin to describe an audience shape, so no share is reported.`;
+  }
+  const parts: string[] = [];
+  const thin: string[] = [];
+  if (sample.posts.measured >= AUDIENCE_SAMPLE_MIN) {
+    parts.push(`${audienceShare(sample.posts.zeroPosts, sample.posts.measured)} had never posted`);
+  } else thin.push("post counts");
+  if (sample.starterProfile.measured >= AUDIENCE_SAMPLE_MIN) {
+    parts.push(`${audienceShare(sample.starterProfile.accounts, sample.starterProfile.measured)} carried a default avatar over an empty bio`);
+  } else thin.push("avatar and bio");
+  if (sample.creation.measured >= AUDIENCE_SAMPLE_MIN && sample.creation.largestMonth) {
+    parts.push(`the largest single creation cohort was ${sample.creation.largestMonth.month}, ${audienceShare(sample.creation.largestMonth.accounts, sample.creation.measured)} of the rows carrying a creation date`);
+  } else thin.push("creation dates");
+  if (sample.followRatio.measured >= AUDIENCE_SAMPLE_MIN) {
+    const ratio = sample.followRatio;
+    parts.push(`across ${ratio.measured} rows carrying both follow counts, ${ratio.followingHeavy} follow at least ${AUDIENCE_RATIO_DOMINANCE}x more accounts than follow them, ${ratio.balanced} sit in between, and ${ratio.followerHeavy} are followed by at least ${AUDIENCE_RATIO_DOMINANCE}x more than they follow`);
+  } else thin.push("follow counts");
+  // An interrupted pass is not a random draw: the provider pages newest first,
+  // so the rows in hand skew to the most recently gained followers, which are
+  // also the newest ACCOUNTS. Saying "floor" alone would hide that skew.
+  const basis = sample.sampleIsComplete
+    ? `all ${profiles}`
+    : `${profiles}, a floor: pagination stopped before the follower list ran out, and the rows read are the most recently gained followers rather than a random draw`;
+  const shape = parts.length
+    ? `${parts.join("; ")}.`
+    : "no dimension came back for enough of the sample to describe.";
+  const gap = thin.length
+    ? ` The provider returned ${thin.join(", ")} for too little of the sample, so ${thin.length === 1 ? "that dimension stays" : "those dimensions stay"} unmeasured.`
+    : "";
+  return `Audience shape across ${basis}: ${shape} This describes the profiles read, not the account's full follower count, and a shape like this is never proof that a follower was bought.${gap}`;
 }
 
 // AUTO-GROW: every person ARGUS has audited and PASSed is a verified-legit account
@@ -814,6 +1065,7 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
     const set = new Map(candidates.map((n) => [n.handle.toLowerCase(), n]));
     const hits: NotableFollower[] = [];
     const got = new Set<string>();
+    const audience = newAudienceTally();
     const u = subject.replace(/^@/, "");
     let cursor = "";
     let observedFollowers = 0;
@@ -845,6 +1097,9 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
       observedFollowers += followers.length;
       for (const follower of followers) {
         const f = asRecord(follower);
+        // The whole row was paid for whether or not it matches the reference
+        // set, so read its shape before dropping everything but the handle.
+        tallyAudienceRow(audience, follower);
         const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
         const m = set.get(h);
         if (m && !got.has(h)) { got.add(h); hits.push({ handle: m.handle, label: m.label, size: "" }); }
@@ -870,6 +1125,9 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
       list: hits,
       checked: coverageComplete ? total : hits.length,
       coverage: coverageComplete ? "complete" : observedPage ? "partial" : "unavailable",
+      // The sample is complete only when pagination finished; an interrupted
+      // pass reports the rows it read as a floor, never as the audience.
+      audience: sealAudienceSample(audience, coverageComplete),
     };
   }
 
@@ -1358,12 +1616,31 @@ export interface AdverseSignal {
   relationship_label?: string;
 }
 
+/**
+ * One target's screen result.
+ *
+ * An empty list has four causes and only one of them is an answer: the provider
+ * returned nothing, the answer carried no JSON, the JSON did not parse, or a
+ * search that really did run and surface no lead. Returning a bare array made
+ * all four look identical, and once the sweep started completing a coverage row
+ * that collapse would have published a model-search outage as "nothing adverse
+ * found". `completed` keeps the search that never answered separate from the
+ * search that answered nothing.
+ */
+export interface AdverseSweepResult {
+  /** True only when the provider answered AND its answer parsed. */
+  completed: boolean;
+  signals: AdverseSignal[];
+}
+
+const ADVERSE_NOT_ANSWERED: AdverseSweepResult = { completed: false, signals: [] };
+
 export async function searchAdverseSignals(
   handle: string,
   kind: "person" | "project",
   context: AdverseSearchContext,
   ticker?: string,
-): Promise<AdverseSignal[]> {
+): Promise<AdverseSweepResult> {
   const h = handle.replace(/^@/, "");
   const targetEntityKey = `@${h.toLowerCase()}`;
   const subject = kind === "project"
@@ -1375,14 +1652,15 @@ export async function searchAdverseSignals(
     "Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. " +
     "Reply with ONLY compact JSON: {\"signals\":[{\"category\":\"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud\",\"claim\":\"\",\"source\":\"\",\"source_url\":\"\"}]}. Never use em dashes.";
   const text = await generalWebSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}` });
-  if (!text) return [];
+  // No answer, and an answer we cannot read, are both screens that did not run.
+  if (!text) return ADVERSE_NOT_ANSWERED;
   const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return [];
+  if (!m) return ADVERSE_NOT_ANSWERED;
   try {
     const parsed = JSON.parse(m[0]);
     const cats = new Set<AdverseCategory>(["rug", "slow_rug", "liquidity_pull", "drain", "scam_accusation", "fud"]);
     const out: any[] = Array.isArray(parsed.signals) ? parsed.signals : [];
-    return out
+    const signals = out
       .filter((s) => s && typeof s.claim === "string" && s.claim.trim() && cats.has(s.category))
       .map((s): AdverseSignal => ({
         category: s.category as AdverseCategory,
@@ -1395,8 +1673,9 @@ export async function searchAdverseSignals(
         relationship_label: context.relationship_label?.trim() || undefined,
       }))
       .slice(0, 12);
+    return { completed: true, signals };
   } catch {
-    return [];
+    return ADVERSE_NOT_ANSWERED;
   }
 }
 
@@ -1545,6 +1824,13 @@ export const xAdapter: Adapter = {
         ctx.emit({ phase: "P0 · Intake", label: "Notable follower check incomplete", detail: scan.checked > 0 ? `No notable follower was observed in ${scan.checked} returned relationship result${scan.checked === 1 ? "" : "s"}; unobserved accounts remain unknown, so ARGUS withheld the negative conclusion.` : "Some follower data returned, but full reference-set coverage was not established; ARGUS withheld the negative conclusion.", source: "twitterapi.io", tone: "warn" });
       } else {
         ctx.emit({ phase: "P0 · Intake", label: "Notable follower check unavailable", detail: "The relationship provider returned no observable results; ARGUS withheld the notable-follower conclusion.", source: "twitterapi.io", tone: "warn" });
+      }
+      // The follower rows the enumerate path already downloaded carry an
+      // audience shape no user can assemble by hand. Report the distribution
+      // and stop: the tone stays neutral because a shape is not a verdict, and
+      // the reverse-check path reads no profile at all, so it says nothing.
+      if (scan.audience) {
+        ctx.emit({ phase: "P0 · Intake", label: "Audience shape", detail: describeAudienceSample(scan.audience), source: "twitterapi.io", tone: "neutral" });
       }
     }
 

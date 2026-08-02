@@ -134,4 +134,57 @@ describe("UsageVisuals", () => {
     });
     expect(container.querySelector('[aria-label^="Supply split"]')).toBeNull();
   });
+
+  // The collector can suppress concentration (unordered register, a register
+  // that sums past supply, or every row a pool). Rendering nothing leaves the
+  // reader to conclude concentration was fine; it was never measured.
+  it("says a suppressed distribution was not measured, and why", () => {
+    act(() => {
+      root.render(
+        <UsageVisuals
+          holders={{
+            topHolderPct: null,
+            top10Pct: null,
+            holderCount: 140_972,
+            lpLockedOrBurnedPct: 62,
+            holdersAssessed: false,
+            distributionSource: null,
+            distributionNote: "The GoPlus holder rows sum past 100% of supply, so the register is self-inconsistent and holder concentration is not reported.",
+            contractFlags: [],
+            creatorPct: null,
+            sourceUrl: "https://gopluslabs.io/",
+            capturedAt: "2026-07-22T21:24:00.000Z",
+          }}
+        />,
+      );
+    });
+    expect(container.querySelector('[aria-label^="Supply split"]')).toBeNull();
+    expect(container.textContent).toContain("not measured");
+    expect(container.textContent).toContain("sum past 100% of supply");
+    // Never a zero and never an empty bar standing in for the missing figure.
+    expect(container.textContent).not.toContain("of supply sits with the top 10");
+  });
+
+  it("carries the explorer attribution when the figures are not GoPlus's own", () => {
+    act(() => {
+      root.render(
+        <UsageVisuals
+          holders={{
+            topHolderPct: 4.17,
+            top10Pct: 22,
+            holderCount: 900,
+            lpLockedOrBurnedPct: null,
+            holdersAssessed: true,
+            distributionSource: "explorer",
+            distributionNote: "Holder concentration is the chain explorer's ordered register, since GoPlus does not order its holder rows on this chain.",
+            contractFlags: [],
+            creatorPct: null,
+            sourceUrl: "https://gopluslabs.io/",
+            capturedAt: "2026-07-22T21:24:00.000Z",
+          }}
+        />,
+      );
+    });
+    expect(container.textContent).toContain("chain explorer's ordered register");
+  });
 });

@@ -8,6 +8,8 @@ const SOLANA_TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const OTHER_TOKEN = "So11111111111111111111111111111111111111112";
 const PONS_TOKEN = "0x39dBED3a2bd333467115dE45665cC57F813C4571";
 const PONS_POOL = "0x10CC6BD38112cAc182db90B6a71d8Bb5939526bA";
+/** Seconds between two daily GeckoTerminal candles. */
+const DAY = 86_400;
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -131,6 +133,79 @@ describe("verified project-token collection", () => {
     }));
     expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
       id: "project-traction-liveness", status: "confirmed", provider: "dexscreener/geckoterminal",
+    }));
+  });
+
+  it("freezes the intraday range, the volume trend and the partial window, not just the closes", async () => {
+    const { ctx, evidence } = context();
+    // Fourteen daily candles that skip days 8 and 9, close flat all the way
+    // through, run 40x inside day 12 alone, and stop trading in the back half.
+    // On closes this token is indistinguishable from one that never moved.
+    const quiet = [
+      ...Array.from({ length: 7 }, (_, index) => [(index + 1) * DAY, 0.5, 0.52, 0.48, 0.5, 100_000]),
+      ...Array.from({ length: 7 }, (_, index) => [
+        (index + 10) * DAY,
+        0.5,
+        index === 2 ? 20 : 0.52,
+        0.48,
+        0.5,
+        5_000,
+      ]),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search?")) return json(search());
+      if (url.includes("/coins/project-token?")) return json(details());
+      if (url.includes("dexscreener.com")) return json({ pairs: [pair()] });
+      if (url.includes("/ohlcv/day?")) return json({ data: { attributes: { ohlcv_list: [...quiet].reverse() } } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    const history = evidence.projectToken?.history;
+    expect(history?.peak).toBe(0.5);
+    expect(history?.drawdownPct).toBeCloseTo(0, 6);
+    expect(history?.range).toMatchObject({ high: 20, low: 0.48, measuredPoints: 14 });
+    expect(history?.range?.drawdownFromHighPct).toBeCloseTo(-97.5, 3);
+    expect(history?.range?.highs).toHaveLength(14);
+    expect(history?.volume).toMatchObject({
+      recent: { usd: 35_000, candles: 7, measured: 7 },
+      prior: { usd: 700_000, candles: 7, measured: 7 },
+      isFloor: false,
+    });
+    expect(history).toMatchObject({ spanPeriods: 16, windowIsPartial: true });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-traction-liveness",
+      note: expect.stringContaining("14 frozen day price points across a partly reported 16 day window, with reported volume down 95% against the prior 7 days"),
+    }));
+  });
+
+  it("keeps a candle whose volume column is missing and calls that volume a floor", async () => {
+    const { ctx, evidence } = context();
+    const rows = Array.from({ length: 14 }, (_, index) => index === 13
+      ? [(index + 1) * DAY, 0.5, 0.52, 0.48, 0.5]
+      : [(index + 1) * DAY, 0.5, 0.52, 0.48, 0.5, index < 7 ? 100_000 : 10_000]);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search?")) return json(search());
+      if (url.includes("/coins/project-token?")) return json(details());
+      if (url.includes("dexscreener.com")) return json({ pairs: [pair()] });
+      if (url.includes("/ohlcv/day?")) return json({ data: { attributes: { ohlcv_list: [...rows].reverse() } } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    const history = evidence.projectToken?.history;
+    // The unpriced day still carried a close, so it stays in the window and its
+    // volume is simply unmeasured; the sum it is missing from is a floor.
+    expect(history?.points).toHaveLength(14);
+    expect(history?.volume).toMatchObject({
+      recent: { usd: 60_000, candles: 7, measured: 6 },
+      isFloor: true,
+    });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-traction-liveness",
+      note: expect.stringContaining("(a floor: not every candle reported volume)"),
     }));
   });
 

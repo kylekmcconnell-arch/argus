@@ -152,18 +152,36 @@ export function MarketPerformancePanel({
   const liquidity = projectToken?.liquidityUsd ?? token?.liquidityUsd;
   const currentPrice = projectToken?.priceUsd ?? token?.priceUsd;
   const rank = projectToken?.rank ?? token?.cg?.rank ?? liveMarket?.rank;
-  const observedDrawdown = history && finite(history.drawdownPct) ? history.drawdownPct : null;
+  // The close series cannot see a candle that ran and gave it back, so prefer
+  // the fall from the reported in-window high when the source carried one. The
+  // label always names which reading it is: "peak" reads as a record, and this
+  // is neither an all-time nor a market-wide one.
+  const period = history?.timeframe === "hour" ? "hour" : "day";
+  const rangeDrawdown = history && finite(history.range?.drawdownFromHighPct)
+    ? history.range!.drawdownFromHighPct
+    : null;
+  const closeDrawdown = history && finite(history.drawdownPct) ? history.drawdownPct : null;
+  const observedDrawdown = rangeDrawdown ?? closeDrawdown;
   const hasTrueAth = finite(ath?.drawdownPct);
   const performanceValue = hasTrueAth ? ath.drawdownPct : observedDrawdown;
-  const performanceLabel = hasTrueAth ? "From all-time high" : "From captured peak";
+  const performanceLabel = hasTrueAth
+    ? "From all-time high"
+    : rangeDrawdown !== null
+      ? `From the highest reported ${period} high`
+      : "From the highest close in the window";
+  // A count of candles is not a count of consecutive periods: a gapped window
+  // that returned 30 candles across 34 days observed 30 of 34, not 30 straight.
+  const observedPeriods = history
+    ? history.windowIsPartial && history.spanPeriods
+      ? `${history.points.length} of ${history.spanPeriods} ${period}s observed`
+      : `${history.points.length} ${period} observations`
+    : null;
   const performanceDetail = hasTrueAth
     ? [
         finite(ath?.priceUsd) ? `ATH ${price(ath.priceUsd)}` : null,
         displayDate(ath?.date),
       ].filter(Boolean).join(" · ")
-    : history
-      ? `${history.points.length} ${history.timeframe === "day" ? "day" : "hour"} observations`
-      : "Refresh the lifetime market record";
+    : observedPeriods ?? "Refresh the lifetime market record";
   const liveAth = hasTrueAth && !finite(frozenAth?.drawdownPct);
   const liveMarketCap = finite(marketCap)
     && !finite(frozenMarketCap)

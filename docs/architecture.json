@@ -66,7 +66,8 @@
    "x.ts": {
     "collects": "X profile/posts/follow-graph + general web discovery",
     "via": "twitterapi.io + dispatcher generalWebSearch: grounded(Serper)->claudeWebSearch->grok",
-    "cost": "twitterapi $0.0002/call; grok ceiling ARGUS_GROK_AUDIT_CEILING_USD=$8"
+    "cost": "twitterapi $0.0002/call; grok ceiling ARGUS_GROK_AUDIT_CEILING_USD=$8",
+    "note": "searchAdverseSignals returns {completed, signals}: an empty list from a provider that never answered, or answered unparseably, is a screen that did NOT run and must not record as a completed empty sweep. The enumerate path also tallies an AudienceSample off the follower rows it already paid for (creation cohort, zero-post, default avatar over empty bio, follow ratio), every figure a count over its own denominator, gated at AUDIENCE_SAMPLE_MIN=50 per dimension, never projected onto the account follower total, and never labelled as bought or fake."
    },
    "groundedSearch.ts": {
     "collects": "decoupled search+extract",
@@ -80,7 +81,7 @@
    "defiLlama.ts": {
     "collects": "TVL(+trend) / fees(+30d-over-30d trend) / funding rounds / audit links",
     "via": "api.llama.fi, free",
-    "note": "funding rounds also project one `investor` basic fact per distinct named backer (server/basicFactsProjection.ts), answering the project ledger's investor question. Leads and other investors keep their aggregator role and are never promoted. providerProjection:true / floorEligible:false, so they are never written back to the KB and cannot lift the P4 floor. Capped at 12 backers, and the cap declares itself in the excerpt when it bites."
+    "note": "funding rounds also project one `investor` basic fact per distinct named backer (server/basicFactsProjection.ts), answering the project ledger's investor question. Leads and other investors keep their aggregator role and are never promoted. providerProjection:true / floorEligible:false, so they are never written back to the KB and cannot lift the P4 floor. Capped at 12 backers, and the cap declares itself in the excerpt when it bites. TVL, funding and audit-links all read the SAME /protocol/{slug} document; reads are coalesced on the full URL with a short scan-scoped memo (fetchJsonOnce, 30s, cleared at the top of runAudit), collapsing three 1.86 MB pulls into one. Only a SUCCESS is ever retained: a transport failure, an HTTP failure, an unreadable body and a completed 400 no-match are all dropped immediately, so a provider blip can never freeze into a clean-looking absence. A document served from the memo books as ledger status \"cached\", never as a second provider attempt."
    },
    "tokenUnlocks.ts": {
     "collects": "upcoming unlock date/allocation/%supply/$ + 90d load",
@@ -88,10 +89,10 @@
     "dormantUntil": "CRYPTORANK_API_KEY"
    },
    "tokenHolders.ts": {
-    "collects": "float control: top-10 holder %, LP lock/burn",
+    "collects": "float control: top-10 WALLET %, LP lock/burn, plus GoPlus contract-control and deployer-history flags (serial-scammer creator, mint, take-back, hidden owner, selfdestruct, pausable, owner-change-balance, creator share)",
     "via": "GoPlus, free; RugCheck (free, keyless) on Solana",
     "solanaLpLock": "GoPlus returns no lp_holders rows on Solana, so the ONE RugCheck report fetch the Solana scan already makes now also answers the LP lock, supplies the labelled accounts that drop pools/exchanges out of holder concentration, and carries its rugged flag and largest connected cluster as findings. Every one of those is RugCheck's own reading and is published named and sourced 'rugcheck'. A RugCheck lpLockedPct of 0 counts as measured ONLY when the report also shows a market it could have read (src/token/sources.ts lockedShare); an unevidenced zero stays unmeasured, because it is the same value the field carries when RugCheck holds no market at all.",
-    "note": "GoPlus holder ORDER is untrusted on chains in GOPLUS_UNSORTED_HOLDER_CHAINS (Robinhood 4663 returned a ~0.36% sample while the real top holder held 4.17%); blockscoutHolders in src/token/sources.ts supplies the ordered top ten from the chain's keyless CORS-open explorer, and with no explorer result the distribution goes silent rather than falling back"
+    "note": "GoPlus holder ORDER is untrusted on chains in GOPLUS_UNSORTED_HOLDER_CHAINS (Robinhood 4663 returned a ~0.36% sample while the real top holder held 4.17%); blockscoutHolders in src/token/sources.ts supplies the ordered top ten from the chain's keyless CORS-open explorer, and with no explorer result the distribution goes silent rather than falling back. The project lane applies the same rule: it takes its distribution from blockscoutHolders or goes silent, it measures concentration over NON-CONTRACT wallets (pools, locked and exchange-tagged rows are excluded and the exclusion is named in distributionNote), and it additionally suppresses on the sum-past-100 self-inconsistency gate. Suppression is explicit: holdersAssessed=false means suppressed, never low; distributionSource says which register produced the figures; a register shorter than ten wallet rows declares the top-ten share a floor. Contract flags carry the token lane sentences verbatim so the two lanes cannot word the same GoPlus flag differently, and they project as a disclosure-only public_security fact (floorEligible:false). An empty contractFlags array means no flag fired, never clean."
    },
    "trustgraph.ts": {
     "collects": "frozen cross-report graph reconciliation (never-waive screen)",
@@ -111,7 +112,7 @@
     "via": "Claude vision"
    },
    "peopledatalabs.ts": {
-    "collects": "identity + off-LinkedIn career (F1/F2); employment records carry start AND end dates, so src/lib/employmentCurrency.ts derives current/departed/absent per company and a departure lands as a dated identity-continuity finding plus evidence.employmentDepartures",
+    "collects": "identity + off-LinkedIn career (F1/F2); employment records carry start AND end dates, so src/lib/employmentCurrency.ts derives current/departed/absent per company and a departure lands as a dated identity-continuity finding plus evidence.employmentDepartures. For a PROJECT, checkLeaderDepartures answers whether the named founders/C-level still list the project, recorded on the project-leadership-currency checklist row (NOT founder-company-relationships, whose FOUNDER role gate published \"not a founder\" on the very run that paid for the answer). Three states stay apart: dated departure = finding, all-still-listed = confirmed, a record matching nobody = checked-empty. Absent rows are counted separately and never inflate the still-listed tally.",
     "cost": "~$0.10/match",
     "dormantUntil": "PDL_API_KEY"
    },
@@ -126,7 +127,8 @@
     "note": "management profiles merge into webTeam as verified leadership rows (mergeManagementIntoWebTeam)"
    },
    "projectToken.ts": {
-    "collects": "canonical token binding via official-X/official-domain (never a name match)"
+    "collects": "canonical token binding via official-X/official-domain (never a name match); frozen GeckoTerminal candle window",
+    "note": "The frozen history is derived by src/lib/priceHistory.ts (summarizeCandles), shared with the live client sparkline so a frozen series and a refresh cannot describe the same candle differently. Beyond closes it carries the reported per-candle highs and lows (range), a recent-vs-prior volume trend with both window widths, and spanPeriods/windowIsPartial. A candle high is ONE source reading inside ONE period, never an all-time high; a gapped window reports itself partial; a window whose candles did not all report volume reports a floor."
    },
    "linkHub.ts": {
     "collects": "official-site dereference when the profile website is a link aggregator (linktr.ee etc); hub page must link the exact audited handle AND the extracted site must link back; ambiguity fails closed",
@@ -169,7 +171,8 @@
     "ofac-sanctions-address",
     "trust-graph-connections",
     "founder-asset-distinction"
-   ]
+   ],
+   "checklistRows": "27 rows (server/checks.ts CHECKS). Two were added after the fund-scale era: adverse-screen (decision-critical for FOUNDER/KOL/INVESTOR/ADVISOR/AGENCY/MEMBER; the adverse sweep is a RECORDED check now, not only a provider run) and project-leadership-currency (PROJECT-scoped, deliberately not decision-critical: a project with no named leaders or no licensed employment provider cannot be asked it). Contract matching in trustgraph.ts is exact-set, so FUND_SCALE_ERA_PERSON_CHECK_IDS pins the 25-row shape reports were frozen under before them."
   },
   "presentation": "presentPublicReport: complete+band-matching -> DECISION-READY; partial+all-axes-supported+PASS -> PROVISIONAL; adverse+partial -> RISK SIGNAL; else INCOMPLETE. Score/verdict mismatch fails closed"
  },
@@ -263,6 +266,8 @@
   "after editing server/, run `npm run build` to regenerate api/_collector.js - routes import the bundle, not source",
   "a completed scan registers in the shared audit_log server-side at persist time; a client that crashes must never be able to lose it",
   "routing classifies the bio, and falls back to the account's OWN posts (profile.self_post_sample) when the bio is empty; a model lead never routes a role",
-  "a provider that returns holder data is not trusted to have ORDERED it; unordered chains take their distribution from an explorer or go silent"
+  "a provider that returns holder data is not trusted to have ORDERED it; unordered chains take their distribution from an explorer or go silent",
+  "An empty provider result is only an ANSWER when the provider answered: searchAdverseSignals, the holder register and the candle window each separate \"did not run / not measured\" from \"ran and found nothing\", and only the latter completes a coverage row",
+  "A bounded read publishes a floor: a capped bundle read (512 KB), a short holder register, a partly reported candle window and an interrupted follower sample all say so rather than reporting a total"
  ]
 }

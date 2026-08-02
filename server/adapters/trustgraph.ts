@@ -17,6 +17,7 @@ import { env } from "../config";
 import { recordCall } from "../cost";
 import {
   FOUNDER_DILIGENCE_PERSON_CHECK_IDS,
+  FUND_SCALE_ERA_PERSON_CHECK_IDS,
   REPEAT_BACKING_ERA_PERSON_CHECK_IDS,
   LEGACY_PERSON_CHECK_IDS,
   PERSON_CHECK_IDS,
@@ -36,11 +37,15 @@ const FINAL_VERDICTS = new Set(["PASS", "CAUTION", "FAIL", "AVOID", "UNVERIFIABL
 const ADVERSE_VERDICTS = new Set(["FAIL", "AVOID"]);
 const HARD_TIE_KEY = /^(?:code:|email:|wallet:|funder:|mint:|token:|ga:|gtm:|adsense:|fbpixel:)/i;
 const EXPECTED_PERSON_CHECK_IDS = new Set<string>(PERSON_CHECK_IDS);
+// Contract matching is exact-set, so every checklist shape a report was ever
+// frozen under has to stay listed here. Adding a check id without adding the
+// era it replaced silently disqualifies every report persisted before it.
 const ACCEPTED_CHECK_CONTRACTS = [
   new Set<string>(LEGACY_PERSON_CHECK_IDS),
   new Set<string>(PROJECT_DILIGENCE_PERSON_CHECK_IDS),
   new Set<string>(FOUNDER_DILIGENCE_PERSON_CHECK_IDS),
   new Set<string>(REPEAT_BACKING_ERA_PERSON_CHECK_IDS),
+  new Set<string>(FUND_SCALE_ERA_PERSON_CHECK_IDS),
   EXPECTED_PERSON_CHECK_IDS,
 ] as const;
 

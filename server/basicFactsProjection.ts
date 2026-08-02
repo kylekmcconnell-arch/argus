@@ -1144,14 +1144,24 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // exchanges, custodians, or protocol contracts, so concentration is stated
   // as a fact to check, never as an insider accusation.
   const holderSnapshot = isProject ? evidence.holderProfile : undefined;
-  if (holderSnapshot && (holderSnapshot.topHolderPct !== null || holderSnapshot.lpLockedOrBurnedPct !== null)) {
+  if (holderSnapshot && (holderSnapshot.topHolderPct !== null || holderSnapshot.lpLockedOrBurnedPct !== null || holderSnapshot.holdersAssessed === false)) {
     const fmtPct = (value: number) => `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10}%`;
+    // A distribution the collector SUPPRESSED has to say so. Letting the clause
+    // vanish would leave a report that never mentions concentration, which a
+    // reader takes for "concentration was fine" rather than "not measured".
+    const suppressed = holderSnapshot.holdersAssessed === false;
     const parts = [
-      ...(holderSnapshot.topHolderPct !== null ? [`largest single holder ~${fmtPct(holderSnapshot.topHolderPct)} of supply`] : []),
-      ...(holderSnapshot.top10Pct !== null && holderSnapshot.topHolderPct !== null ? [`top 10 hold ~${fmtPct(holderSnapshot.top10Pct)}`] : []),
+      ...(holderSnapshot.topHolderPct !== null ? [`largest single wallet ~${fmtPct(holderSnapshot.topHolderPct)} of supply`] : []),
+      ...(holderSnapshot.top10Pct !== null && holderSnapshot.topHolderPct !== null ? [`top 10 wallets hold ~${fmtPct(holderSnapshot.top10Pct)}`] : []),
+      ...(suppressed ? ["largest holder not measured"] : []),
       ...(holderSnapshot.holderCount !== null ? [`${holderSnapshot.holderCount.toLocaleString("en-US")} holders`] : []),
       ...(holderSnapshot.lpLockedOrBurnedPct !== null ? [`${fmtPct(holderSnapshot.lpLockedOrBurnedPct)} of DEX liquidity locked or burned`] : []),
     ];
+    // The concentration numbers are not always GoPlus's. On a chain where GoPlus
+    // does not order its register they come from the chain explorer, and the
+    // note carries that sentence ready to state, so the excerpt cannot cite
+    // GoPlus for a figure GoPlus did not produce.
+    const provenance = holderSnapshot.distributionNote ? ` ${holderSnapshot.distributionNote}` : "";
     projected.push(makeFact(
       evidence,
       "tokenomics",
@@ -1159,13 +1169,40 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       [source({
         url: holderSnapshot.sourceUrl,
         title: "GoPlus holder register",
-        excerpt: `On-chain holder register: ${parts.join("; ")}. Large holders on established tokens are commonly exchanges, custodians, or protocol contracts; verify before reading concentration as insider control.`,
+        excerpt: `On-chain holder register: ${parts.join("; ")}.${provenance} Large holders on established tokens are commonly exchanges, custodians, or protocol contracts; verify before reading concentration as insider control.`,
         capturedAt: holderSnapshot.capturedAt,
         provider: "goplus",
         sourceClass: "regulatory_or_onchain",
       })],
       `captured ${holderSnapshot.capturedAt.slice(0, 10)}`,
     ));
+  }
+
+  // Contract control and deployer history are a different question from float:
+  // a serial-scammer deployer is not a tokenomics fact. Only flags that FIRED
+  // are ever present, so an empty list projects nothing at all: GoPlus omitting
+  // a field is an absent record, never a clean bill. The sentences are the
+  // collector's, reproduced verbatim, so the project lane and the token lane
+  // cannot word the same provider flag differently.
+  if (holderSnapshot?.contractFlags?.length) {
+    const claims = holderSnapshot.contractFlags.map((flag) => flag.claim);
+    const controlFact = makeFact(
+      evidence,
+      "public_security",
+      claims.join(" "),
+      [source({
+        url: holderSnapshot.sourceUrl,
+        title: "GoPlus contract security flags",
+        excerpt: `GoPlus reported these contract-control and deployer-history flags: ${claims.join(" ")} These are GoPlus's readings of the contract, not verified intent.`,
+        capturedAt: holderSnapshot.capturedAt,
+        provider: "goplus",
+        sourceClass: "regulatory_or_onchain",
+      })],
+      `captured ${holderSnapshot.capturedAt.slice(0, 10)}`,
+    );
+    // A provider's own flag is disclosure, never a score floor on its own.
+    controlFact.floorEligible = false;
+    projected.push(controlFact);
   }
 
   // Upcoming unlocks → the vesting disclosure a buyer actually needs: when is

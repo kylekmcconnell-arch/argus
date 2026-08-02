@@ -247,6 +247,7 @@ describe("PersonCheckTracker", () => {
       "affiliations-associates",
       "news-press",
       "trust-graph-connections",
+      "adverse-screen",
     ] as const) {
       tracker.record({ id, status: "checked-empty", note: `${id} completed`, provider: "test-provider" });
     }
@@ -311,10 +312,10 @@ describe("PersonCheckTracker", () => {
     }
 
     // Provider tranches completed: the OFAC screen counts (it is a founder
-    // decision gate), but the six founder questions and the trust-graph
-    // reconciliation remain open — far from decision-ready.
+    // decision gate), but the six founder questions, the adverse sweep, and the
+    // trust-graph reconciliation remain open: far from decision-ready.
     const readiness = deriveDecisionReadiness(tracker.snapshot(["FOUNDER"], { resolvedRealName: true }));
-    expect(readiness).toMatchObject({ status: "incomplete", successful: 1, applicable: 8, coveragePercent: 12 });
+    expect(readiness).toMatchObject({ status: "incomplete", successful: 1, applicable: 9, coveragePercent: 11 });
   });
 
   it("reaches decision-ready founder coverage from investor questions plus the legal-grade screens, not optional provider bookkeeping", () => {
@@ -328,6 +329,7 @@ describe("PersonCheckTracker", () => {
       "founder-asset-distinction",
       "ofac-sanctions-name",
       "trust-graph-connections",
+      "adverse-screen",
     ] as const) {
       tracker.record({ id, status: "checked-empty", note: `${id} completed`, provider: "test-provider" });
     }
@@ -335,7 +337,7 @@ describe("PersonCheckTracker", () => {
     const checks = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
     const readiness = deriveDecisionReadiness(checks);
 
-    expect(readiness).toMatchObject({ status: "ready", successful: 8, applicable: 8, coveragePercent: 100 });
+    expect(readiness).toMatchObject({ status: "ready", successful: 9, applicable: 9, coveragePercent: 100 });
     expect(tracker.completeness(["FOUNDER"], { resolvedRealName: true })).toBe("complete");
     // Photo, news, GitHub, and handle-history stay non-gating diagnostics…
     expect(byId(tracker, ["FOUNDER"], "profile-photo-authenticity")?.decisionCritical).toBe(false);
@@ -387,12 +389,18 @@ describe("PersonCheckTracker", () => {
     ] as const) {
       tracker.record({ id, status: "confirmed", note: `${id} verified`, provider: "test-provider", sourceCount: 1 });
     }
-    // us-legal-history / ofac-sanctions-name / trust-graph-connections unresolved.
+    // us-legal-history / ofac-sanctions-name / trust-graph-connections and the
+    // adverse sweep all unresolved.
 
-    const readiness = deriveDecisionReadiness(tracker.snapshot(["KOL"], { resolvedRealName: true }));
+    const checks = tracker.snapshot(["KOL"], { resolvedRealName: true });
+    const readiness = deriveDecisionReadiness(checks);
     expect(readiness.status).not.toBe("ready");
-    expect(readiness.applicable).toBe(6);
+    expect(readiness.applicable).toBe(7);
     expect(readiness.successful).toBe(3);
+    expect(checks.find((check) => check.checkId === "adverse-screen")).toMatchObject({
+      status: "unknown",
+      decisionCritical: true,
+    });
   });
 
   it("keeps a fully answered Brian-like founder/member PASS final when photo and CourtListener diagnostics fail", () => {
@@ -451,6 +459,12 @@ describe("PersonCheckTracker", () => {
       note: "no flagged-subject ties in the workspace graph",
       provider: "trust-graph",
     });
+    tracker.record({
+      id: "adverse-screen",
+      status: "checked-empty",
+      note: "the rug, scam, and drain search returned no candidate source; an empty search is not proof that no adverse record exists",
+      provider: "adverse-sweep",
+    });
     tracker.provider(
       "offchain-diligence",
       "News, legal, and sanctions",
@@ -503,8 +517,8 @@ describe("PersonCheckTracker", () => {
     }));
     expect(readiness).toMatchObject({
       status: "ready",
-      successful: 10,
-      applicable: 10,
+      successful: 11,
+      applicable: 11,
       coveragePercent: 100,
       unresolved: 0,
     });

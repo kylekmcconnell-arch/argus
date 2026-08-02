@@ -38,8 +38,18 @@ const HARD_COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*
 const PARKED = /this[\s_-]*domain[\s_-]*is[\s_-]*for[\s_-]*sale|buy[\s_-]*this[\s_-]*domain|hugedomains|sedoparking|parkingcrew|domain[\s_-]*(is[\s_-]*)?parked/i;
 const PRODUCT = /\b(docs|whitepaper|dashboard|pricing|features|roadmap|marketplace|explorer|portfolio|order\s*book|connect\s*wallet|launch\s*app|sign\s*in|log\s*in|deposit|withdraw|governance|staking)\b/i;
 const DNS_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "ENODATA", "ENONAME"]);
+const BUNDLE_MARKER = /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i;
 
-type PageSuccess = { kind: "page"; url: string; html: string };
+// A SPA's script bundle is fetched for one reason: to look for coming-soon
+// markers. A single Vite chunk can be enormous (app.uniswap.org served 9.01 MB),
+// and buffering that whole string inside a serverless function to run one regex
+// buys nothing the first half megabyte does not. The read stops at the cap and
+// the remainder of the stream is cancelled, so the tail never crosses the wire.
+// A capped read reports a FLOOR: see the truncated branch in checkSiteSubstance.
+const BUNDLE_READ_CAP_BYTES = 512 * 1024;
+const BUNDLE_READ_CAP_LABEL = "512 KB";
+
+type PageSuccess = { kind: "page"; url: string; html: string; truncated: boolean };
 type PageFailure = { kind: "failure" } & SiteSubstance;
 type PageResult = PageSuccess | PageFailure;
 
@@ -79,7 +89,46 @@ function isAntiBotResponse(response: Response, body: string): boolean {
     || antiBotChallengeBody(response.headers.get("content-type") ?? "text/html", body);
 }
 
-async function get(url: string, opts?: { requireHtml?: boolean }): Promise<PageResult> {
+/**
+ * Read a response body, optionally stopping at `maxBytes`. Returns whether the
+ * read was cut short, because a caller that regexes the text has to know it is
+ * looking at a window and not at the whole document. With no cap the body is
+ * read in full, exactly as before.
+ */
+async function readBody(response: Response, maxBytes?: number): Promise<{ text: string; truncated: boolean }> {
+  if (maxBytes === undefined || !response.body) {
+    return { text: await response.text(), truncated: false };
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let remaining = maxBytes;
+  let truncated = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      // Once `remaining` reaches 0 any further byte proves the body outran the
+      // cap; a body that ends exactly on the cap was read whole, not truncated.
+      if (value.byteLength > remaining) {
+        text += decoder.decode(value.subarray(0, remaining));
+        truncated = true;
+        break;
+      }
+      text += decoder.decode(value, { stream: true });
+      remaining -= value.byteLength;
+    }
+    if (!truncated) text += decoder.decode();
+  } finally {
+    // Cancel drops the untransferred remainder. Without it the rest of a 9 MB
+    // bundle still arrives even though nothing will ever read it.
+    await reader.cancel().catch(() => { /* the read is already answered */ });
+  }
+  return { text, truncated };
+}
+
+async function get(url: string, opts?: { requireHtml?: boolean; maxBytes?: number }): Promise<PageResult> {
   let response: Response;
   try {
     response = await fetch(url, {
@@ -105,8 +154,9 @@ async function get(url: string, opts?: { requireHtml?: boolean }): Promise<PageR
   }
 
   let html: string;
+  let truncated: boolean;
   try {
-    html = await response.text();
+    ({ text: html, truncated } = await readBody(response, opts?.maxBytes));
   } catch {
     recordCall("site-fetch", "substance", 0, "response_text_error", "failed");
     return {
@@ -177,8 +227,11 @@ async function get(url: string, opts?: { requireHtml?: boolean }): Promise<PageR
       detail: "the homepage returned an empty body; no liveness conclusion can be drawn",
     };
   }
-  recordCall("site-fetch", "substance", 0, undefined, "succeeded");
-  return { kind: "page", url: finalUrl, html };
+  // A capped read answered part of a document, so it is a partial attempt in the
+  // ledger too. Booking it as a clean success would hide that the rest was never
+  // looked at.
+  recordCall("site-fetch", "substance", 0, truncated ? "read_capped" : undefined, truncated ? "partial" : "succeeded");
+  return { kind: "page", url: finalUrl, html, truncated };
 }
 
 function failedSiteResult(domain: string, failures: PageFailure[]): SiteSubstance {
@@ -296,19 +349,30 @@ export async function checkSiteSubstance(domain: string): Promise<SiteSubstance 
   const isShell = /id=["'](root|__next|app|__nuxt)["']/i.test(page.html) || /<script[^>]+type=["']module["']/i.test(page.html);
   if (isShell && body.length < 300) {
     let bundleHint = false;
+    let bundleReadCapped = false;
     for (const bundle of bundleUrls(page.html, page.url)) {
-      const js = await get(bundle, { requireHtml: false }).catch(() => null);
+      const js = await get(bundle, { requireHtml: false, maxBytes: BUNDLE_READ_CAP_BYTES }).catch(() => null);
       if (!js || js.kind !== "page") continue;
-      if (COMING.test(js.html) || /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i.test(js.html)) {
+      if (COMING.test(js.html) || BUNDLE_MARKER.test(js.html)) {
         bundleHint = true;
+        // The hint cannot get stronger than "present", so every further bundle
+        // is transfer bought for an answer already in hand.
+        break;
       }
+      if (js.truncated) bundleReadCapped = true;
     }
+    const metaNote = meta ? ` ("${meta.slice(0, 80)}")` : "";
     return {
       url: page.url,
       status: "client_rendered",
       detail: bundleHint
         ? "client-rendered app; its bundle contains an unrendered coming-soon string, which is not treated as homepage liveness evidence"
-        : `client-rendered app; static read could not confirm a product surface${meta ? ` ("${meta.slice(0, 80)}")` : ""}`,
+        // A capped read that found no marker did not reach the marker. It must
+        // never harden into "the bundle declares nothing", which is the shape a
+        // silent miss would take once it reaches the report.
+        : bundleReadCapped
+          ? `client-rendered app; static read could not confirm a product surface${metaNote}; its script bundles were read only up to ${BUNDLE_READ_CAP_LABEL}, so no coming-soon marker was reached rather than shown to be absent`
+          : `client-rendered app; static read could not confirm a product surface${metaNote}`,
     };
   }
 

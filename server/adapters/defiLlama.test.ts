@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { getCost, withCostLedger } from "../cost";
 import {
+  collectProtocolAuditLinks,
   collectProtocolFees,
   collectProtocolFunding,
   collectProtocolTvl,
@@ -8,7 +10,12 @@ import {
   describeFunding,
   formatTvlUsd,
   formatUsd,
+  resetDefiLlamaScanMemo,
 } from "./defiLlama";
+
+// Every test below is its own "scan": the read memo must not carry a document
+// from one case into the next any more than it may carry one between subjects.
+beforeEach(() => resetDefiLlamaScanMemo());
 
 const protocolBody = (over: Record<string, unknown> = {}) => ({
   name: "Aave",
@@ -247,6 +254,164 @@ describe("collectProtocolFunding", () => {
     if (out.available) throw new Error("expected unavailable");
     expect(out.reason).toBe("unavailable");
     expect(describeFunding(out).status).toBe("unavailable");
+  });
+});
+
+describe("one document, one read", () => {
+  // The recorded Uniswap scan fetched https://api.llama.fi/protocol/uniswap
+  // three times, 1.86 MB each: TVL and funding concurrently, then audit links
+  // straight after. All three read the same document.
+  const countingFetcher = (make: (url: string) => Response) => {
+    const urls: string[] = [];
+    const fetcher = ((input: string | URL | Request) => {
+      urls.push(String(input));
+      return Promise.resolve(make(String(input)));
+    }) as unknown as typeof fetch;
+    return { fetcher, urls };
+  };
+
+  it("collapses three concurrent reads of one protocol document into a single request", async () => {
+    const { fetcher, urls } = countingFetcher(() => jsonResponse(protocolBody({ name: "Uniswap", gecko_id: "uniswap" })));
+
+    const [a, b, c] = await Promise.all([
+      collectProtocolTvl("Uniswap", { fetcher }),
+      collectProtocolTvl("Uniswap", { fetcher }),
+      collectProtocolTvl("Uniswap", { fetcher }),
+    ]);
+
+    expect(urls).toEqual(["https://api.llama.fi/protocol/uniswap"]);
+    expect(a).toEqual(b);
+    expect(b).toEqual(c);
+    expect(a.available).toBe(true);
+  });
+
+  it("shares one request across the TVL, funding and audit-link collectors", async () => {
+    const { fetcher, urls } = countingFetcher(() => jsonResponse(protocolBody({
+      name: "Uniswap",
+      gecko_id: "uniswap",
+      audit_links: ["https://example.org/audit.pdf"],
+    })));
+
+    const [tvl, funding, audits] = await Promise.all([
+      collectProtocolTvl("Uniswap", { fetcher }),
+      collectProtocolFunding("Uniswap", { fetcher }),
+      collectProtocolAuditLinks("Uniswap", { fetcher }),
+    ]);
+
+    expect(urls).toHaveLength(1);
+    expect(tvl.available && funding.available && audits.available).toBe(true);
+  });
+
+  it("serves a repeat read that arrives after the first one landed", async () => {
+    const { fetcher, urls } = countingFetcher(() => jsonResponse(protocolBody({ name: "Uniswap", gecko_id: "uniswap" })));
+
+    await collectProtocolTvl("Uniswap", { fetcher });
+    const audits = await collectProtocolAuditLinks("Uniswap", { fetcher });
+
+    expect(urls).toHaveLength(1);
+    expect(audits.available).toBe(false); // no audit links in this document
+  });
+
+  it("books a reused document as cached, never as a second provider attempt", async () => {
+    const { fetcher } = countingFetcher(() => jsonResponse(protocolBody({ name: "Uniswap", gecko_id: "uniswap" })));
+
+    const cost = await withCostLedger(async () => {
+      await collectProtocolTvl("Uniswap", { fetcher });
+      await collectProtocolFunding("Uniswap", { fetcher });
+      return getCost();
+    });
+
+    expect(cost.calls).toContainEqual(expect.objectContaining({
+      provider: "defillama", op: "tvl", calls: 1, succeeded: 1, cached: 0,
+    }));
+    expect(cost.calls).toContainEqual(expect.objectContaining({
+      provider: "defillama", op: "funding", calls: 1, succeeded: 0, cached: 1, status: "cached",
+    }));
+  });
+
+  it("never memoises a failure, so one blip cannot freeze into an absence", async () => {
+    let attempt = 0;
+    const { fetcher, urls } = countingFetcher(() => {
+      attempt += 1;
+      return attempt === 1
+        ? new Response("upstream error", { status: 503 })
+        : jsonResponse(protocolBody({ name: "Uniswap", gecko_id: "uniswap" }));
+    });
+
+    const blip = await collectProtocolFunding("Uniswap", { fetcher });
+    expect(blip.available).toBe(false);
+    if (blip.available) throw new Error("expected unavailable");
+    expect(blip.reason).toBe("unavailable");
+
+    // The very next caller must ask again rather than inherit "no rounds".
+    const retry = await collectProtocolFunding("Uniswap", { fetcher });
+    expect(urls).toHaveLength(2);
+    expect(retry.available).toBe(true);
+  });
+
+  // The subtlest way a memo can lie: a caller that JOINS a read already in
+  // flight. If it were handed a success shape regardless of what the shared
+  // read returned, one outage would publish as "no funding rounds on record"
+  // for every concurrent caller in the burst.
+  it("hands a joiner the shared read's failure, never a clean answer", async () => {
+    const { fetcher, urls } = countingFetcher(() => new Response("upstream error", { status: 503 }));
+
+    const [tvl, funding] = await Promise.all([
+      collectProtocolTvl("Uniswap", { fetcher }),
+      collectProtocolFunding("Uniswap", { fetcher }),
+    ]);
+
+    expect(urls).toHaveLength(1);
+    expect(tvl.available).toBe(false);
+    expect(funding.available).toBe(false);
+    if (funding.available) throw new Error("expected unavailable");
+    // Not "no_data": the provider never answered, so there is no absence to report.
+    expect(funding.reason).toBe("unavailable");
+
+    // And the failure left nothing behind for the next caller to inherit.
+    const after = await collectProtocolTvl("Uniswap", { fetcher });
+    expect(urls).toHaveLength(2);
+    expect(after.available).toBe(false);
+  });
+
+  it("never memoises a completed no-match either", async () => {
+    const { fetcher, urls } = countingFetcher(() => new Response("Protocol not found", { status: 400 }));
+
+    await collectProtocolTvl("Ghost", { fetcher });
+    await collectProtocolTvl("Ghost", { fetcher });
+
+    expect(urls).toHaveLength(2);
+  });
+
+  it("keys on the full URL, so a different slug or endpoint is its own read", async () => {
+    const { fetcher, urls } = countingFetcher((url) => (
+      url.includes("/summary/fees/")
+        ? jsonResponse({ total24h: 1_000, total30d: 30_000 })
+        : jsonResponse(protocolBody())
+    ));
+
+    await Promise.all([
+      collectProtocolTvl("Aave", { fetcher }),
+      collectProtocolTvl("Aave", { fetcher, slug: "aave-v3" }),
+      collectProtocolFees("Aave", { fetcher }),
+      collectProtocolFees("Aave", { fetcher }),
+    ]);
+
+    expect([...urls].sort()).toEqual([
+      "https://api.llama.fi/protocol/aave",
+      "https://api.llama.fi/protocol/aave-v3",
+      "https://api.llama.fi/summary/fees/aave",
+    ]);
+  });
+
+  it("drops every memoised document on an explicit scan boundary", async () => {
+    const { fetcher, urls } = countingFetcher(() => jsonResponse(protocolBody()));
+
+    await collectProtocolTvl("Aave", { fetcher });
+    resetDefiLlamaScanMemo();
+    await collectProtocolTvl("Aave", { fetcher });
+
+    expect(urls).toHaveLength(2);
   });
 });
 

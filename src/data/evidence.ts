@@ -2,6 +2,7 @@
 // from which the engine produces a verdict. Lives in src/ so both the client and
 // the Node server import the same types.
 
+import type { CandleSummary } from "../lib/priceHistory";
 import type {
   SubjectClass,
   Venture,
@@ -206,13 +207,14 @@ export interface ProjectTokenSnapshot {
     date?: string;
     drawdownPct?: number;
   };
-  history?: {
-    points: number[];
-    first: number;
-    last: number;
-    peak: number;
-    changePct: number;
-    drawdownPct: number;
+  /**
+   * Frozen GeckoTerminal candle window for the canonical pool. The shape is the
+   * client's live price-history summary (src/lib/priceHistory.ts) so a frozen
+   * series and a live refresh cannot describe the same candle differently, and
+   * so the reported highs, lows and volume survive the freeze instead of being
+   * validated and then thrown away.
+   */
+  history?: CandleSummary & {
     timeframe: "day" | "hour";
     poolAddress: string;
     /** Exact GeckoTerminal OHLCV endpoint used for the frozen series. */
@@ -284,12 +286,44 @@ export interface ProtocolTvlSnapshot {
   capturedAt: string;
 }
 
+/**
+ * One GoPlus contract-control or deployer-history flag, already worded by the
+ * collector (server/adapters/tokenHolders.ts owns the sentences, so the project
+ * lane and the token lane cannot describe the same provider flag differently).
+ * Render `claim` as-is; a renderer that rewords it is asserting on GoPlus's
+ * behalf.
+ */
+export interface ContractControlFlagSnapshot {
+  key: string;
+  claim: string;
+  tone: "warn" | "bad";
+  source: "goplus";
+}
+
 /** Frozen float-control profile (GoPlus holder register) for the verified canonical token. Disclosure data, never a verdict. */
 export interface HolderProfileSnapshot {
+  /** Largest single WALLET, percent of supply. Pools, contracts and locked addresses are excluded. */
   topHolderPct: number | null;
+  /** Top ten wallets combined; a FLOOR when the register returned fewer than ten usable wallet rows. */
   top10Pct: number | null;
   holderCount: number | null;
   lpLockedOrBurnedPct: number | null;
+  /**
+   * Whether the holder distribution was usable at all. False means
+   * topHolderPct/top10Pct were SUPPRESSED, never that concentration is low.
+   * Optional because reports frozen before the suppression shipped carry
+   * neither this nor the fields below; treat an absent value as "assessed",
+   * which is what those reports actually recorded.
+   */
+  holdersAssessed?: boolean;
+  /** Which register the concentration figures came from; null while suppressed. */
+  distributionSource?: "goplus" | "explorer" | null;
+  /** Why the distribution is missing, or which register produced it when that is not GoPlus. */
+  distributionNote?: string | null;
+  /** GoPlus flags that FIRED. An empty array means no flag fired, never "clean". */
+  contractFlags?: ContractControlFlagSnapshot[];
+  /** Creator/authority-wallet share of supply. Null when GoPlus reported none, never 0. */
+  creatorPct?: number | null;
   sourceUrl: string;
   capturedAt: string;
 }
