@@ -11,7 +11,7 @@
 // Replay asserts eval/expectations.json and reports drift against the
 // recording-time snapshot. Record mode needs provider keys in .env (never
 // committed); replay needs none.
-import { existsSync, mkdirSync, readFileSync, readdirSync, appendFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { withRecordedFetch, writeSnapshot, readSnapshot, type EvalSnapshot } from "../server/evalHarness";
 import { parseEvalHarnessArgs } from "./evalHarnessArgs";
@@ -62,9 +62,18 @@ interface PipelineOutcome {
   snapshot: EvalSnapshot;
   reportText: string;
   governingRole: string | null;
+  /**
+   * Checks that could not run, with the reason each gave. Some of these are
+   * facts about THIS ENVIRONMENT rather than about the subject: the trust graph
+   * needs an authenticated organization id that prod supplies from the session
+   * and an offline caller has none, so it fails closed on every recording. A
+   * run that silently drops coverage for that reason reads as a product defect,
+   * which is exactly the wrong conclusion to hand somebody.
+   */
+  unavailableChecks: Array<{ id: string; note: string }>;
 }
 
-async function runPipeline(handle: string, dir: string): Promise<PipelineOutcome> {
+async function runPipeline(handle: string, dir: string, mode: "record" | "replay"): Promise<PipelineOutcome> {
   // Offline callers must mirror prod's deadline SHAPE (a short analyst window
   // starves basic-facts and fakes INCOMPLETE), but record mode is not bound by
   // the serverless duration cap and a local machine plus home network runs the
@@ -74,8 +83,13 @@ async function runPipeline(handle: string, dir: string): Promise<PipelineOutcome
   const budgetSeconds = Number(process.env.ARGUS_EVAL_BUDGET_SECONDS || DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 2);
   const { runAudit } = await import("../server/orchestrate");
   const emits: string[] = [];
-  const emitPath = join(dir, "emits.jsonl");
+  // A replay must not write into the recording it is reading. Appending here
+  // meant every replay grew the recorded emit stream, so after one replay the
+  // live run's emits could no longer be told from a replay's, and the fixture
+  // showed as modified in git. Replays get their own file, replaced each run.
+  const emitPath = join(dir, mode === "record" ? "emits.jsonl" : "last-replay-emits.jsonl");
   const startedAt = Date.now();
+  const unavailableChecks: Array<{ id: string; note: string }> = [];
   const dossier = await runAudit(handle, (step) => {
     emits.push(JSON.stringify(step));
   }, {
@@ -84,10 +98,13 @@ async function runPipeline(handle: string, dir: string): Promise<PipelineOutcome
       - ANALYST_FINALIZATION_RESERVE_MS,
   });
   mkdirSync(dir, { recursive: true });
-  appendFileSync(emitPath, `${emits.join("\n")}\n`);
+  writeFileSync(emitPath, `${emits.join("\n")}\n`);
   if (!dossier) throw new Error(`runAudit returned null for ${handle}`);
   // runAudit opens its own cost ledger; the honest spend is what finalize
   // attached to the dossier, not an outer ledger this script could open.
+  for (const run of dossier.checkRuns ?? []) {
+    if (run.status === "unavailable") unavailableChecks.push({ id: run.label, note: run.note ?? "" });
+  }
   const costUsd = dossier.cost && typeof dossier.cost.usd === "number" ? dossier.cost.usd : null;
   return {
     snapshot: {
@@ -99,6 +116,7 @@ async function runPipeline(handle: string, dir: string): Promise<PipelineOutcome
       verifiedFactCount: verifiedFactCount(dossier),
       costUsd,
     },
+    unavailableChecks,
     reportText: JSON.stringify(dossier),
     governingRole: dossier.report.governing_role ? String(dossier.report.governing_role) : null,
   };
@@ -185,12 +203,16 @@ async function main(): Promise<void> {
       rmSync(dir, { recursive: true });
       console.log(`  replaced prior recording for ${slug}`);
     }
-    const { result: outcome, recordedCalls } = await withRecordedFetch("record", dir, () => runPipeline(handle, dir));
+    const { result: outcome, recordedCalls } = await withRecordedFetch("record", dir, () => runPipeline(handle, dir, "record"));
     const snapshot = outcome.snapshot;
     writeSnapshot(dir, snapshot);
     console.log(`  ✓ recorded ${slug}: ${recordedCalls} provider calls, score ${snapshot.score} ${snapshot.verdict}, $${snapshot.costUsd?.toFixed(2)}`);
     const failures = checkExpectations(slug, snapshot, outcome.reportText, outcome.governingRole);
     for (const failure of failures) console.log(`  ▲ ${failure}`);
+    // Name what this environment could not run. A recording made offline has no
+    // authenticated session, so an org-scoped check fails closed and drags
+    // coverage down for a reason that says nothing about the subject.
+    for (const check of outcome.unavailableChecks) console.log(`  · could not run here: ${check.id}${check.note ? ` (${check.note})` : ""}`);
     process.exit(0);
   }
 
@@ -206,7 +228,7 @@ async function main(): Promise<void> {
       const { result: outcome, fidelity } = await withRecordedFetch(
         "replay",
         dir,
-        () => runPipeline(`@${slug}`, dir),
+        () => runPipeline(`@${slug}`, dir, "replay"),
         { allowLiveHosts, forceLiveHosts, forceLiveTools },
       );
       const snapshot = outcome.snapshot;
@@ -217,6 +239,7 @@ async function main(): Promise<void> {
       const fidelityLine = `exact ${fidelity.exactHits} · tool-fallback ${fidelity.toolFallbackHits} · url-fallback ${fidelity.urlFallbackHits} · live ${fidelity.liveAllowed} · forced-live ${fidelity.liveForced} · misses ${fidelity.misses.length}`;
       console.log(`  ${failures.length ? "✗" : "✓"} ${slug}: score ${snapshot.score} ${snapshot.verdict} · ${snapshot.verifiedFactCount} facts (${fidelityLine})${drift}`);
       for (const failure of failures) console.log(`      ▲ ${failure}`);
+      for (const check of outcome.unavailableChecks) console.log(`      · could not run: ${check.id}${check.note ? ` (${check.note})` : ""}`);
       if (failures.length) failed += 1;
     }
     process.exit(failed ? 1 : 0);
