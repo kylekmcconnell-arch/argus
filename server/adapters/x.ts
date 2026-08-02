@@ -702,8 +702,72 @@ export async function followsSubject(endorser: string, subject: string): Promise
 // Curated, deliberately small, high-signal set. Labels/sizes are for context and
 // may drift; the point is WHO. Grow this list as the trust graph matures.
 
+/**
+ * One scan's answers to "does A follow B", so the same metered question is not
+ * bought twice.
+ *
+ * Two lanes ask it about the same pair: the notable-follower pass and the
+ * endorser pass. Whether that cost one call or two was decided by timing, since
+ * a second asker only rode along if the first was still in flight. That showed
+ * up as 15 handles checked twice the moment responses returned quickly, which
+ * is real money at twitterapi's per-call price and made the same audit
+ * non-reproducible.
+ *
+ * Only a settled ANSWER is kept. A null is a failed or unconfigured read and is
+ * cheap to re-ask, and keeping it would freeze one blip into "does not follow"
+ * for the rest of the scan, which is the coercion the code below refuses to
+ * make from a missing field.
+ */
+type FollowAnswer = { following: boolean | null; followedBy: boolean | null };
+interface FollowMemoSlot {
+  /** the one outstanding read; cleared the moment it settles */
+  inFlight?: Promise<FollowAnswer | null>;
+  /** a settled ANSWER only, with the moment it landed */
+  settled?: { at: number; answer: FollowAnswer };
+}
+
+/**
+ * Retention spans one scan's burst and nothing longer. A warm container can
+ * start the next subject moments later, and a follow relationship remembered
+ * without a bound would be answered from a cache for the life of the process.
+ */
+const FOLLOW_MEMO_MS = 30_000;
+const followMemo = new Map<string, FollowMemoSlot>();
+
+/** Forget this scan's follow answers. Callers with a real scan boundary call this at its start. */
+export function resetFollowScanMemo(): void {
+  followMemo.clear();
+}
+
 // Does `source` follow `target`? One call via check_follow_relationship.
 export async function checkFollow(source: string, target: string): Promise<{ following: boolean | null; followedBy: boolean | null } | null> {
+  const now = Date.now();
+  for (const [key, slot] of followMemo) {
+    if (!slot.inFlight && (!slot.settled || now - slot.settled.at >= FOLLOW_MEMO_MS)) followMemo.delete(key);
+  }
+
+  const pairKey = `${source.replace(/^@/, "").toLowerCase()}\u0000${target.replace(/^@/, "").toLowerCase()}`;
+  const existing = followMemo.get(pairKey);
+  if (existing?.settled) return existing.settled.answer;
+  if (existing?.inFlight) return existing.inFlight;
+
+  const pending = checkFollowUncached(source, target);
+  const slot: FollowMemoSlot = { inFlight: pending };
+  followMemo.set(pairKey, slot);
+  // Only an ANSWER is kept. A null is a failed or unconfigured read, cheap to
+  // re-ask, and remembering it would freeze one blip into "does not follow".
+  void pending.then(
+    (answer) => {
+      slot.inFlight = undefined;
+      if (answer === null) followMemo.delete(pairKey);
+      else slot.settled = { at: Date.now(), answer };
+    },
+    () => { followMemo.delete(pairKey); },
+  );
+  return pending;
+}
+
+async function checkFollowUncached(source: string, target: string): Promise<{ following: boolean | null; followedBy: boolean | null } | null> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
   const s = source.replace(/^@/, "");

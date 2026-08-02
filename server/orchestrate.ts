@@ -30,7 +30,7 @@ import {
 import { getCost, providerFailureLines, withCostLedger } from "./cost";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
-import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
@@ -2870,6 +2870,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // the next subject inside it, so the real scan boundary is made explicit
   // here: a document can never carry from one subject's audit into another's.
   resetDefiLlamaScanMemo();
+  // Same boundary, same reason: the follow answers belong to one subject's scan.
+  resetFollowScanMemo();
   // Single source of truth for the analyst start-by deadline (the route passes
   // it; fall back to the same formula for direct/test callers). Collection must
   // stop launching new provider work COLLECTION_ANALYST_RESERVE_MS before it, so

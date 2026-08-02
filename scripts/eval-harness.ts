@@ -240,6 +240,21 @@ async function main(): Promise<void> {
       console.log(`  ${failures.length ? "✗" : "✓"} ${slug}: score ${snapshot.score} ${snapshot.verdict} · ${snapshot.verifiedFactCount} facts (${fidelityLine})${drift}`);
       for (const failure of failures) console.log(`      ▲ ${failure}`);
       for (const check of outcome.unavailableChecks) console.log(`      · could not run: ${check.id}${check.note ? ` (${check.note})` : ""}`);
+      // A miss count alone cannot be acted on. Naming the hosts, and how many
+      // each lost, is the difference between "42 misses" and "the model lane
+      // asked for 42 calls this recording never made".
+      if (fidelity.misses.length) {
+        const byHost = new Map<string, number>();
+        for (const miss of fidelity.misses) {
+          const host = (() => { try { return new URL(miss.url).host; } catch { return miss.url; } })();
+          byHost.set(host, (byHost.get(host) ?? 0) + 1);
+        }
+        const ranked = [...byHost.entries()].sort((a, b) => b[1] - a[1]);
+        console.log(`      · uncovered requests: ${ranked.map(([host, n]) => `${host} x${n}`).join(", ")}`);
+        if (process.env.ARGUS_EVAL_SHOW_MISSES) {
+          for (const miss of fidelity.misses) console.log(`        ${miss.method} ${miss.url}`);
+        }
+      }
       if (failures.length) failed += 1;
     }
     process.exit(failed ? 1 : 0);

@@ -13,6 +13,7 @@ import {
   notableFollowers,
   publicXAccountState,
   searchAdverseSignals,
+  resetFollowScanMemo,
 } from "./x";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
@@ -23,6 +24,9 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 describe("X provider attempt accounting", () => {
   afterEach(() => {
     clearLastTweetsMemo();
+    // Module-level scan memo: without this, one case's follow answer is served
+    // to the next, and a test asserting an unavailable provider gets an answer.
+    resetFollowScanMemo();
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -270,11 +274,14 @@ describe("X provider attempt accounting", () => {
       }));
     vi.stubGlobal("fetch", fetchMock);
 
+    // Distinct pairs: the point here is that BOTH envelope shapes parse, and a
+    // repeat of the same pair is now answered from the scan memo rather than
+    // bought twice, which is asserted in x.followMemo.test.ts.
     await expect(checkFollow("@source", "@target")).resolves.toEqual({
       following: false,
       followedBy: true,
     });
-    await expect(checkFollow("source", "target")).resolves.toEqual({
+    await expect(checkFollow("@legacy", "@target")).resolves.toEqual({
       following: true,
       followedBy: false,
     });
