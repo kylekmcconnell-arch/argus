@@ -41,6 +41,21 @@ export const EVM_CEX_WALLETS: Record<string, string> = {
   "0x2b5634c42055806a59e9107ed44d43c426e58258": "Kucoin",
   "0x0d0707963952f2fba59dd06f2b425ace40b492fe": "Gate.io",
   "0xf89d7b9c864f589bbF53a82105107622B35EaA40": "Bybit",
+  // Merged from the EVM deployer route, which had been carrying a longer list of
+  // its own. Every one of these is exchange custody, so holder concentration was
+  // counting them as insider wallets on any token they hold float in.
+  "0x9696f59e4d72e237be84ffd425dcad154bf96976": "Binance",
+  "0x4976a4a02f38326660d17bf34b431dc6e2eb2327": "Binance",
+  "0x0681d8db095565fe8a346fa0277bffde9c0edbbf": "Binance",
+  "0xddb1b4c4fb1e19bd353bc07d1d46c87d67b8e1e0": "Coinbase",
+  "0x3cd751e6b0078be393132286c442345e5dc49699": "Coinbase",
+  "0xeb2629a2734e272bcc07bda959863f316f4bd4cf": "Coinbase",
+  "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43": "Coinbase",
+  "0x2910543af39aba0cd09dbb2d50200b3e800a63d2": "Kraken",
+  "0x0a869d79a7052c7f1b55a8ebabbea3420f0d1e13": "Kraken",
+  "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b": "OKX",
+  "0x236f9f97e0e62388479bf9e5ba4889e46b0273c3": "OKX",
+  "0x1522900b6dafac587d499a862861c0869be6e428": "Bitfinex",
 };
 
 export interface MarketAddressMatch {

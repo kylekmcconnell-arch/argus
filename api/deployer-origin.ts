@@ -23,6 +23,7 @@
 // both. Extracting the walk into a shared api/_deployer-core.ts is the right
 // end state and needs both routes to move at once.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses";
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import { providerAddressKey } from "../src/lib/providerAddress.js";
 import {
@@ -42,22 +43,6 @@ interface ProviderUsage { calls: number; succeeded: number }
 // back to a KYC'd exchange account (a real subpoena target), not an anonymous
 // wallet. It says where the SOL CAME FROM; it says nothing about where any of it
 // went afterwards.
-// Duplicated verbatim in api/deployer.ts, api/cluster.ts and api/funder.ts. Left
-// duplicated on purpose: a shared module has to land with all four call sites at
-// once, and three of those files are owned by other changes.
-const CEX: Record<string, string> = {
-  "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9": "Binance",
-  "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S": "Binance",
-  "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM": "Binance",
-  GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE: "Coinbase",
-  H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS: "Coinbase",
-  "2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm": "Coinbase",
-  FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5: "Kraken",
-  AobVSwdW9BbpMdJvTqeCN4hPAmh4rHm7vwLnQ5ATSyrS: "OKX",
-  "5VVBHtk2QQBy5rZ2pBdgcb4yj9DBYy8tDksBs2pWnUKr": "Bybit",
-  "9un5wqE3q4oCjyrDkwsdD48KteCJitQX5978Vh7KKxHo": "Gate.io",
-  "6gnCPhXtLnUD76HjQuSYPENLSZdG8RvDB1pTLM5aLSss": "MEXC",
-};
 
 async function rpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<any> {
   usage.calls += 1;

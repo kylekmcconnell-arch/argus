@@ -14,6 +14,7 @@
 //
 // Solana only (Helius). Gated on HELIUS_API_KEY. Bounded + graceful when unset.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { SOLANA_CEX_WALLETS } from "../src/lib/marketAddresses";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
@@ -31,12 +32,9 @@ interface ProviderUsage { calls: number; succeeded: number }
 // CEX hot wallets + program/system accounts to exclude as recipients — they
 // receive SOL constantly and are never a seeded deployer.
 const SKIP = new Set<string>([
-  "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9", "2ojv9BAiHUrvsm9gxDe7fJSzbNZSJcxZvf8dqmWGHG8S",
-  "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", "GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE",
-  "H8sMJSCQxfKiFTCfDR3DUMLPwcRbM61LGFJ8N4dK3WjS", "2AQdpHJ2JpcEgPiATUXjQxA8QmafFegfQwSLWSprPicm",
-  "FWznbcNXWQuHTawe9RxvQ2LdCENssh12dsznf4RiouN5", "AobVSwdW9BbpMdJvTqeCN4hPAmh4rHm7vwLnQ5ATSyrS",
-  "5VVBHtk2QQBy5rZ2pBdgcb4yj9DBYy8tDksBs2pWnUKr", "9un5wqE3q4oCjyrDkwsdD48KteCJitQX5978Vh7KKxHo",
-  "6gnCPhXtLnUD76HjQuSYPENLSZdG8RvDB1pTLM5aLSss",
+  // The exchange wallets come from the one shared map, so a hot wallet added
+  // there is excluded here too rather than only where somebody remembered.
+  ...Object.keys(SOLANA_CEX_WALLETS),
   "11111111111111111111111111111111", // system program
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", // token program
   "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", // token-2022 program

@@ -9,6 +9,7 @@
 //
 // EVM only. Gated on ETHERSCAN_API_KEY. Bounded + graceful when unset.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { EVM_CEX_WALLETS as CEX } from "../src/lib/marketAddresses";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
@@ -23,18 +24,6 @@ const CHAINID: Record<string, number> = {
 // Major CEX hot wallets (lowercased). A funder match here means the deployer's gas
 // traces to a KYC'd exchange withdrawal — a real subpoena target, not an anon hand.
 // Ethereum-mainnet set (several are reused cross-chain by the same exchanges).
-const CEX: Record<string, string> = {
-  "0x28c6c06298d514db089934071355e5743bf21d60": "Binance", "0x21a31ee1afc51d94c2efccaa2092ad1028285549": "Binance",
-  "0xdfd5293d8e347dfe59e90efd55b2956a1343963d": "Binance", "0x56eddb7aa87536c09ccc2793473599fd21a8b17f": "Binance",
-  "0x9696f59e4d72e237be84ffd425dcad154bf96976": "Binance", "0x4976a4a02f38326660d17bf34b431dc6e2eb2327": "Binance",
-  "0x71660c4005ba85c37ccec55d0c4493e66fe775d3": "Coinbase", "0x503828976d22510aad0201ac7ec88293211d23da": "Coinbase",
-  "0xddb1b4c4fb1e19bd353bc07d1d46c87d67b8e1e0": "Coinbase", "0x3cd751e6b0078be393132286c442345e5dc49699": "Coinbase",
-  "0xeb2629a2734e272bcc07bda959863f316f4bd4cf": "Coinbase", "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43": "Coinbase",
-  "0x2910543af39aba0cd09dbb2d50200b3e800a63d2": "Kraken", "0x0a869d79a7052c7f1b55a8ebabbea3420f0d1e13": "Kraken",
-  "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b": "OKX", "0x236f9f97e0e62388479bf9e5ba4889e46b0273c3": "OKX",
-  "0xf89d7b9c864f589bbf53a82105107622b35eaa40": "Bybit", "0x1522900b6dafac587d499a862861c0869be6e428": "Bitfinex",
-  "0x0d0707963952f2fba59dd06f2b425ace40b492fe": "Gate.io", "0x0681d8db095565fe8a346fa0277bffde9c0edbbf": "Binance",
-};
 
 const ES = "https://api.etherscan.io/v2/api";
 interface CallCounter { calls: number; succeeded: number }
