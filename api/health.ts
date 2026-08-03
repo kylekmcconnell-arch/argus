@@ -40,6 +40,20 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     configuredService("serper", "Serper (grounded search)", process.env.SERPER_API_KEY, "configure SERPER_API_KEY"),
     configuredService("openrouter", "OpenRouter (cheap extraction)", process.env.OPENROUTER_API_KEY, "configure OPENROUTER_API_KEY"),
     configuredService("cryptorank", "CryptoRank (unlock schedule)", process.env.CRYPTORANK_API_KEY, "configure CRYPTORANK_API_KEY"),
+    // The rest of the keyed providers. This endpoint exists so a lane can be
+    // confirmed provisioned WITHOUT spending on an audit, and it was answering
+    // that question for six of the nineteen keys the code reads. The thirteen it
+    // omitted include the ones behind the deployer trail, wallet identity, and
+    // employment history, so a dark lane looked identical to a working one until
+    // a report came back missing a panel nobody could explain.
+    configuredService("helius", "Helius (Solana deployer + wallet age)", process.env.HELIUS_API_KEY, "configure HELIUS_API_KEY"),
+    configuredService("etherscan", "Etherscan (EVM contract creation)", process.env.ETHERSCAN_API_KEY, "configure ETHERSCAN_API_KEY"),
+    configuredService("arkham", "Arkham (wallet identity + funding trail)", process.env.ARKHAM_API_KEY, "configure ARKHAM_API_KEY"),
+    configuredService("pdl", "People Data Labs (employment history)", process.env.PDL_API_KEY, "configure PDL_API_KEY"),
+    configuredService("github", "GitHub (code footprint)", process.env.GITHUB_TOKEN, "configure GITHUB_TOKEN"),
+    configuredService("coingecko", "CoinGecko (listings + market data)", process.env.COINGECKO_API_KEY, "configure COINGECKO_API_KEY"),
+    configuredService("crunchbase", "Crunchbase (company funding)", process.env.CRUNCHBASE_API_KEY, "configure CRUNCHBASE_API_KEY"),
+    configuredService("reddit", "Reddit (community signal)", process.env.REDDIT_CLIENT_ID, "configure REDDIT_CLIENT_ID"),
   ];
 
   // Knowledge-base reuse diagnostic: read-through only engages when
