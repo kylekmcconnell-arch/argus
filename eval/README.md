@@ -29,3 +29,21 @@ unique match key. The 9 MB JavaScript bundle body was cut to the first 256 KB,
 which is all a capped read now sees anyway, and five rows that duplicated an
 existing exact-match key were removed. Do not hand-edit a recording without
 checking the key set before and after.
+
+## A recorded cost is not production's cost
+
+Every cheap path is env-gated. An offline shell has none of prod's variables, so
+a harness run takes the most expensive branch available: the analyst default
+rather than ARGUS_ANALYST_MODEL, discovery following the analyst rather than
+Haiku, and Claude web search rather than the grounded Serper route.
+
+The gap is not small. A uniswap recording made with no flags set spent $3.44, of
+which $3.41 was Claude and 95% of that was 24 discovery calls carrying 530,070
+input tokens at Sonnet prices. Production runs the same audit on
+claude-sonnet-5 for the analyst, claude-haiku-4-5 for discovery, and the
+grounded route, which is a different bill entirely.
+
+Record mode prints the stack it ran and says so when the flags are missing.
+`GET /api/health` reports the same three fields for the deployed environment, so
+the two can be compared without spending anything. Quote a recorded cost as
+production's only when those three match.

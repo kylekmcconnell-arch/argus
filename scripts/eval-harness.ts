@@ -73,6 +73,24 @@ interface PipelineOutcome {
   unavailableChecks: Array<{ id: string; note: string }>;
 }
 
+/**
+ * Which cost stack this process is actually running.
+ *
+ * Every cheap path is env-gated, and an offline shell has none of prod's
+ * variables, so a harness run silently takes the most expensive branch: the
+ * analyst default instead of ARGUS_ANALYST_MODEL, discovery following the
+ * analyst instead of Haiku, and Claude web search instead of the grounded
+ * Serper route. A recorded cost from that shell is not a fact about production
+ * and must never be read as one. /api/health reports the same three fields for
+ * the deployed environment, so the two can be compared without spending.
+ */
+function costStack(): { analyst: string; discovery: string; route: string; matchesProd: boolean } {
+  const analyst = process.env.ARGUS_ANALYST_MODEL?.trim() || "claude-sonnet-4-6 (default)";
+  const discovery = process.env.ARGUS_DISCOVERY_MODEL?.trim() || `${analyst} (follows analyst)`;
+  const route = process.env.ARGUS_BASIC_FACTS_PRIMARY?.trim() || "claude-web-search (default)";
+  return { analyst, discovery, route, matchesProd: route !== "claude-web-search (default)" };
+}
+
 async function runPipeline(handle: string, dir: string, mode: "record" | "replay"): Promise<PipelineOutcome> {
   // Offline callers must mirror prod's deadline SHAPE (a short analyst window
   // starves basic-facts and fakes INCOMPLETE), but record mode is not bound by
@@ -206,7 +224,13 @@ async function main(): Promise<void> {
     const { result: outcome, recordedCalls } = await withRecordedFetch("record", dir, () => runPipeline(handle, dir, "record"));
     const snapshot = outcome.snapshot;
     writeSnapshot(dir, snapshot);
+    const stack = costStack();
     console.log(`  ✓ recorded ${slug}: ${recordedCalls} provider calls, score ${snapshot.score} ${snapshot.verdict}, $${snapshot.costUsd?.toFixed(2)}`);
+    console.log(`  · cost stack: analyst ${stack.analyst} · discovery ${stack.discovery} · route ${stack.route}`);
+    if (!stack.matchesProd) {
+      console.log("  ! this shell has no ARGUS_* cost flags set, so the figure above is the UNOPTIMISED path.");
+      console.log("    Production's stack is whatever /api/health reports; do not quote this cost as production's.");
+    }
     const failures = checkExpectations(slug, snapshot, outcome.reportText, outcome.governingRole);
     for (const failure of failures) console.log(`  ▲ ${failure}`);
     // Name what this environment could not run. A recording made offline has no
