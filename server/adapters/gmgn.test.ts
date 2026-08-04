@@ -53,11 +53,14 @@ describe("GMGN is asked only when it can answer", () => {
     expect(intel.note).toContain("does not cover avalanche");
   });
 
-  it("sends the key as a header and never in the url", async () => {
+  it("sends the key as a header and never in the url, with the auth nonces they require", async () => {
     vi.stubEnv("GMGN_API_KEY", "secret-key-value");
     const fetchImpl = vi.fn(async (url: unknown, init: unknown) => {
       expect(String(url)).not.toContain("secret-key-value");
       expect((init as RequestInit).headers).toMatchObject({ "X-APIKEY": "secret-key-value" });
+      // Read routes answer 401 without these, which their public demo key hid.
+      expect(String(url)).toMatch(/[?&]timestamp=\d{9,13}/);
+      expect(String(url)).toMatch(/[?&]client_id=[0-9a-f-]{8,}/i);
       return json({ code: 0, data: { list: [trader()] } });
     }) as unknown as typeof fetch;
 

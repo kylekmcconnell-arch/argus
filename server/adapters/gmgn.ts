@@ -23,6 +23,8 @@
 // key. A diligence product has no business holding one, so nothing here can
 // trade and no signing key is ever read.
 
+import { randomUUID } from "node:crypto";
+
 import { env } from "../config";
 
 const HOST = "https://openapi.gmgn.ai";
@@ -143,8 +145,17 @@ export async function fetchGmgnTokenIntel(
 
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 50);
   const fetchImpl = opts.fetchImpl ?? fetch;
-  const url = `${HOST}/v1/market/token_top_traders?chain=${encodeURIComponent(gmgnChain)}`
-    + `&address=${encodeURIComponent(address)}&limit=${limit}`;
+  // Read routes authenticate on X-APIKEY plus a timestamp and a per-request
+  // client_id, both as QUERY parameters. Their public demo key tolerates their
+  // absence; a real key answers 401 without them.
+  const query = new URLSearchParams({
+    chain: gmgnChain,
+    address,
+    limit: String(limit),
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    client_id: randomUUID(),
+  });
+  const url = `${HOST}/v1/market/token_top_traders?${query.toString()}`;
 
   let body: unknown;
   try {

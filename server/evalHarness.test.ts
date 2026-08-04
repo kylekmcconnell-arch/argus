@@ -255,3 +255,24 @@ describe("a tool-tagged response belongs to the call that asked for it", () => {
     expect(loadRecording(dir).filter((call) => !call.tool).length).toBeGreaterThan(0);
   });
 });
+
+// GMGN's read routes require a fresh unix timestamp and client_id on every
+// request. Without scrubbing them, two identical questions produce two
+// different URLs and a recording can never answer either.
+describe("per-request auth nonces do not defeat replay", () => {
+  it("matches two calls that differ only by timestamp and client_id", () => {
+    const base = "https://openapi.gmgn.ai/v1/market/token_top_traders?chain=sol&address=ABC";
+    const first = `${base}&timestamp=1785816293&client_id=6f1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d`;
+    const second = `${base}&timestamp=1785899999&client_id=aaaabbbb-cccc-dddd-eeee-ffff00001111`;
+
+    expect(scrubVolatile(first)).toBe(scrubVolatile(second));
+    expect(matchKey("GET", first, "")).toBe(matchKey("GET", second, ""));
+  });
+
+  it("still tells two different questions apart", () => {
+    const one = "https://openapi.gmgn.ai/v1/market/token_top_traders?address=ABC&timestamp=1785816293";
+    const two = "https://openapi.gmgn.ai/v1/market/token_top_traders?address=XYZ&timestamp=1785816293";
+
+    expect(matchKey("GET", one, "")).not.toBe(matchKey("GET", two, ""));
+  });
+});

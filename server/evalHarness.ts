@@ -51,6 +51,12 @@ const VOLATILE_PATTERNS: RegExp[] = [
   /\b1[6-9]\d{11}\b/g, // epoch milliseconds
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, // uuids
   /\bPA-[0-9A-F]{10,}\b/g, // report ids
+  // Per-request auth nonces in a query string. GMGN's read routes require a
+  // unix-seconds timestamp and a fresh client_id on every call, so without this
+  // no two requests to the same endpoint ever share a URL and a recording could
+  // never be replayed.
+  /timestamp=\d{9,13}/g,
+  /client_id=[0-9a-zA-Z-]{8,}/g,
 ];
 
 const SENSITIVE_QUERY_PARAM = /^(?:(?:x[-_]api|api|access|refresh|id|oauth|auth|bearer|session|client)[-_]?)?(?:key|token|secret|auth|authorization|signature|sig|credential|password|passwd)$/i;
