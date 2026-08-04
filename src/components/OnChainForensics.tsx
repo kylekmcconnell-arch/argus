@@ -4,6 +4,7 @@ import { HolderForensics } from "./HolderForensics";
 import { WalletClusters } from "./WalletClusters";
 import { OperatorNetwork } from "./OperatorNetwork";
 import { EvmDeployer } from "./EvmDeployer";
+import { GmgnHolderCosts } from "./GmgnHolderCosts";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { SanctionsScreen } from "./SanctionsScreen";
 import { EntityConcentration } from "./EntityConcentration";
@@ -56,6 +57,9 @@ export function OnChainForensics({ token, onAudit, panelCostToken, record = true
       {/* recursive operator trace — isolated project or one node in a serial factory? */}
       {token.deployer && <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} panelCostToken={panelCostToken} record={record} roleLabel={deployerRoleLabel(token.deployerAttribution)} mintedAt={launchedAt} />}
       {/* EVM deployer trail — who deployed it, who funded the gas, serial launcher? */}
+      {/* What the top holders paid: the only source here that answers whether a
+          concentrated holder is sitting on a gain and therefore has a reason to sell. */}
+      <GmgnHolderCosts chain={token.chain} address={token.address} />
       {isEvm && <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} panelCostToken={panelCostToken} record={record} />}
       {/* EVM bytecode fingerprint — rug-enabling code + byte-identical known-rug clone check */}
       {isEvm && <BytecodeForensics address={token.address} chain={token.chain} symbol={token.symbol} record={record} />}
