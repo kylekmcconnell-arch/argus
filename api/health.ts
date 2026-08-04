@@ -54,6 +54,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     configuredService("coingecko", "CoinGecko (listings + market data)", process.env.COINGECKO_API_KEY, "configure COINGECKO_API_KEY"),
     configuredService("crunchbase", "Crunchbase (company funding)", process.env.CRUNCHBASE_API_KEY, "configure CRUNCHBASE_API_KEY"),
     configuredService("reddit", "Reddit (community signal)", process.env.REDDIT_CLIENT_ID, "configure REDDIT_CLIENT_ID"),
+    configuredService("gmgn", "GMGN (holder cost basis + wallet tags)", process.env.GMGN_API_KEY, "configure GMGN_API_KEY (apply at https://gmgn.ai/ai)"),
   ];
 
   // Knowledge-base reuse diagnostic: read-through only engages when

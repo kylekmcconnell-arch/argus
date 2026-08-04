@@ -35,7 +35,7 @@ describe("provider readiness", () => {
     expect(captured.body).toMatchObject({
       available: true,
       mode: "configuration",
-      down: 11, // every provider except xai, anthropic and serper is unconfigured here
+      down: 12, // every provider except xai, anthropic and serper is unconfigured here
       services: [
         { id: "xai", ok: true },
         { id: "anthropic", ok: true },
@@ -51,6 +51,7 @@ describe("provider readiness", () => {
         { id: "coingecko", ok: false, detail: "not configured in this deployment" },
         { id: "crunchbase", ok: false, detail: "not configured in this deployment" },
         { id: "reddit", ok: false, detail: "not configured in this deployment" },
+        { id: "gmgn", ok: false, detail: "not configured in this deployment" },
       ],
       // Serper + a model are set but no OpenRouter key -> grounded search runs on
       // the native Anthropic extractor, not OpenRouter.
@@ -83,7 +84,7 @@ describe("provider readiness", () => {
         { id: "openrouter", ok: true },
         { id: "cryptorank", ok: true },
         { id: "helius" }, { id: "etherscan" }, { id: "arkham" }, { id: "pdl" },
-        { id: "github" }, { id: "coingecko" }, { id: "crunchbase" }, { id: "reddit" },
+        { id: "github" }, { id: "coingecko" }, { id: "crunchbase" }, { id: "reddit" }, { id: "gmgn" },
       ],
       extraction: { extractProvider: "openrouter", groundedSearchActive: true },
       knowledgeBase: { reuse: true },
