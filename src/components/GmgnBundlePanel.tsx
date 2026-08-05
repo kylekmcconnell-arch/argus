@@ -176,7 +176,14 @@ export function GmgnBundlePanel({ chain, address, knownDeployer }: { chain?: str
           )}
           {data.creatorStillHolds === false && "GMGN reports the creator has closed its position in this token."}
           {data.creatorStillHolds === true && "GMGN reports the creator still holds this token."}
-          {data.communityTakeover === true && " GMGN marks the token as a community takeover: by its flag, the original developer is gone."}
+          {/* communityTakeover (GMGN's cto_flag) is deliberately NOT rendered.
+              Measured 2026-08-05 across ten tokens: it is 1 on JUP, WIF, BONK,
+              POPCAT, TRUMP and on three pump.fun tokens minutes old whose
+              creators had launched one token each, and 0 only on USDC. A flag
+              that fires on nine of ten cannot carry "the original developer
+              abandoned this", which is what publishing it asserted about every
+              one of those projects. The field stays in the payload as raw
+              provider data; it does not reach the page. */}
         </p>
       )}
 

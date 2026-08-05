@@ -153,7 +153,16 @@ export interface GmgnBundleReading {
   creatorStillHolds: boolean | null;
   /** Past X handle changes GMGN records for the token's account. */
   twitterRenames: number | null;
-  /** GMGN's community-takeover flag: the original developer is gone. */
+  /**
+   * GMGN's cto_flag, carried as raw provider data and NEVER published.
+   *
+   * Their docs call it "community takeover, original dev abandoned". Measured
+   * 2026-08-05 on ten tokens it was 1 on nine of them: JUP, WIF, BONK, POPCAT,
+   * TRUMP and three pump.fun launches minutes old whose creators had a single
+   * token each, with 0 only on USDC. Whatever it encodes, it is not developer
+   * abandonment, and rendering it accused every one of those projects of it.
+   * Do not publish this without new evidence that it discriminates.
+   */
   communityTakeover: boolean | null;
   /** GMGN's dexscr_boost_fee. Their docs call it 0/1; live tokens carry larger
    * numbers, so it is kept as a number where >0 means paid DEXScreener boost. */

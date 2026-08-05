@@ -112,6 +112,18 @@ describe("how the launch was bought", () => {
     expect(container.textContent).toContain("GMGN reports the creator has closed its position");
   });
 
+  it("never accuses a project of developer abandonment off GMGN's cto_flag", async () => {
+    // Measured 2026-08-05: cto_flag is 1 on JUP, WIF, BONK, POPCAT, TRUMP and
+    // on pump.fun tokens minutes old, and 0 only on USDC. A flag that fires on
+    // nine of ten tokens cannot carry "the original developer is gone", so it
+    // is parsed and never published.
+    stub(payload({ communityTakeover: true }));
+    await render();
+
+    expect(container.textContent).not.toMatch(/takeover/i);
+    expect(container.textContent).not.toMatch(/developer is gone|abandon/i);
+  });
+
   it("publishes the reason instead of an empty grid when GMGN did not answer", async () => {
     stub({ ...payload({ available: false }), note: "GMGN did not respond, so its launch-pattern reading was not collected." });
     await render();
