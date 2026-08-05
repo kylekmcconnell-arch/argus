@@ -49,8 +49,12 @@ describe("provider readiness", () => {
         { id: "pdl", ok: false, detail: "not configured in this deployment" },
         { id: "github", ok: false, detail: "not configured in this deployment" },
         { id: "coingecko", ok: false, detail: "not configured in this deployment" },
-        { id: "crunchbase", ok: false, detail: "not configured in this deployment" },
-        { id: "reddit", ok: false, detail: "not configured in this deployment" },
+        // Retired adapters: commented out of the ADAPTERS registry, so a key
+        // would not bring them back and their absence costs no coverage. They
+        // stay listed because this endpoint answers which keys the build reads,
+        // and they carry no `action` because there is nothing to configure.
+        { id: "crunchbase", ok: false, retired: true, detail: "retired: DeFiLlama and Monid/Akta cover funding and backing" },
+        { id: "reddit", ok: false, retired: true, detail: "retired: Reddit API access was not approved" },
         { id: "gmgn", ok: false, detail: "not configured in this deployment" },
       ],
       // Serper + a model are set but no OpenRouter key -> grounded search runs on

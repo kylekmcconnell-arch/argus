@@ -57,6 +57,33 @@ const UNBOUND_SOCIAL_LEAD_HOSTS = new Set([
   "youtube.com",
 ]);
 
+/**
+ * A LinkedIn PERSON profile, as opposed to a company page.
+ *
+ * The unbound-social rule exists because a name-matched social page is how a
+ * namesake gets in: searching "Clutch" finds linkedin.com/company/clutch for
+ * whichever Clutch ranks, and its caption repeats the display name, so the
+ * page looks bound when it is not. That reasoning is about the ENTITY page.
+ *
+ * `/in/` is a different object. It identifies one named human, it is the
+ * artifact a leadership lead is supposed to point at, and it does not become
+ * this project's page by sharing a name with it. Dropping those cost the token
+ * report its named-leadership leads for nothing, so person profiles are exempt
+ * from the blanket host rule and are judged by the predicate rules below like
+ * any other source.
+ */
+function isLinkedInPersonProfile(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    if (host !== "linkedin.com" && !host.endsWith(".linkedin.com")) return false;
+    return /^\/in\/[^/]+/.test(parsed.pathname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 export function isExactOfficialXProfile(url: string | undefined, handle: string): boolean {
   if (!url) return false;
   try {
@@ -108,8 +135,15 @@ export function projectLeadIsRelevant(subject: ProjectLeadSubject, lead: Project
 
   // A generic-name social result is especially collision-prone and cannot be
   // bound to the project merely because its caption repeats the display name.
-  // The exact official X account and official project domain remain eligible.
-  if (sourceHost && UNBOUND_SOCIAL_LEAD_HOSTS.has(sourceHost) && !officialSource) return false;
+  // The exact official X account and official project domain remain eligible,
+  // as does a LinkedIn person profile, which names a human rather than
+  // competing to be the entity page for this name.
+  if (
+    sourceHost
+    && UNBOUND_SOCIAL_LEAD_HOSTS.has(sourceHost)
+    && !officialSource
+    && !isLinkedInPersonProfile(lead.sourceUrl)
+  ) return false;
 
   // A docs page is not a source-code repository, and merely running on a
   // counterparty's chain is not proof of a partnership. Keep those search hits

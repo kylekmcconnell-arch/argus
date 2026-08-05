@@ -83,15 +83,43 @@ describe("a same-named company in another industry cannot fund this project", ()
   });
 });
 
-describe("the rest of the lead rules are unchanged by the funding fix", () => {
-  it("keeps dropping a name-matched social result off the official scope", () => {
+describe("a LinkedIn person profile is not a name-matched entity page", () => {
+  // The unbound-social rule is about the page that competes to BE this name.
+  // A company page does; one named human's profile does not.
+  it("still drops the company page, which is the collision-prone object", () => {
     expect(projectLeadIsRelevant(CLUTCH, {
-      predicate: "product",
+      predicate: "official_identity",
       value: "Clutch",
       sourceUrl: "https://www.linkedin.com/company/clutch",
       excerpt: "Clutch is a blockchain protocol.",
     })).toBe(false);
   });
+
+  it("lets a person profile reach the predicate rules instead of a blanket ban", () => {
+    expect(projectLeadIsRelevant(CLUTCH, {
+      predicate: "founder",
+      value: "Jesse Proudman",
+      sourceUrl: "https://www.linkedin.com/in/jesseproudman/",
+      sourceTitle: "Jesse Proudman - Clutch",
+      excerpt: "President and CTO at Clutch, building an on-chain trading protocol.",
+    })).toBe(true);
+  });
+
+  // The reason the exemption cannot go further than this: a person employed by
+  // the OTHER Clutch also lists Clutch, so naming the subject is no more of a
+  // guard on a profile than it was on the law firm's page.
+  it("still drops a person profile at the same-named company in another industry", () => {
+    expect(projectLeadIsRelevant(CLUTCH, {
+      predicate: "founder",
+      value: "Dan Park",
+      sourceUrl: "https://www.linkedin.com/in/danpark/",
+      sourceTitle: "Dan Park - Clutch",
+      excerpt: "CEO at Clutch, Canada's largest online used-car retailer.",
+    })).toBe(false);
+  });
+});
+
+describe("the rest of the lead rules are unchanged by the funding fix", () => {
 
   it("keeps requiring relationship language for a partnership", () => {
     expect(projectLeadIsRelevant(CLUTCH, {

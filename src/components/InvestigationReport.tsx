@@ -68,7 +68,6 @@ import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
 import { walletAgeFact } from "../lib/operatorTrace";
 import { projectLeadIsRelevant, type ProjectLeadSubject } from "../lib/projectLeadRelevance";
-import { canonicalBasicFactPredicate } from "../lib/basicFactQuestions";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -711,17 +710,14 @@ export function InvestigationReport({
   const rawProjectBasicFactLeads = projectAccount?.basicFactLeads
     ?? investigationBasicFactSnapshot.basicFactLeads
     ?? [];
-  // Scoped to money on purpose. The dossier report applies the whole rule, and
-  // applying all of it here would also drop LinkedIn leadership leads that this
-  // report shows today, which is a separate product decision rather than part
-  // of this defect. Funding and investor leads are the ones that published
-  // another company's balance sheet, so they are gated now and the remaining
-  // predicates keep their existing behaviour until that call is made.
-  const projectBasicFactLeads = rawProjectBasicFactLeads.filter((lead) => {
-    const predicate = canonicalBasicFactPredicate(lead.predicate);
-    if (predicate !== "funding" && predicate !== "investor") return true;
-    return projectLeadSubject !== null && projectLeadIsRelevant(projectLeadSubject, lead);
-  });
+  // The whole rule, the same one the dossier report applies. This was scoped to
+  // funding and investor for one commit because the shared rule used to drop
+  // every LinkedIn lead, including the person profiles that carry named
+  // leadership; person profiles are now judged on their own text instead of
+  // banned by host, so both surfaces can hold the same line.
+  const projectBasicFactLeads = projectLeadSubject
+    ? rawProjectBasicFactLeads.filter((lead) => projectLeadIsRelevant(projectLeadSubject, lead))
+    : [];
   const tokenSubjectGraphKey = String(token.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
   // Credit org-side outcomes the bound project scan recorded in this same
   // payload; without a confirmed canonical binding this is a no-op.

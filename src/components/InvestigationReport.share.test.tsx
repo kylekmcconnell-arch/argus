@@ -358,27 +358,38 @@ describe("investigation exact sharing", () => {
             relation: "supports",
           }],
         }],
+        // `excerpt` is a required field on a real BasicFactLead: it is the
+        // passage the scout matched, and every lead the pipeline produces
+        // carries one. These fixtures are cast through `unknown`, so they used
+        // to omit it, which left the lead-relevance rule nothing to judge.
         basicFactLeads: [
           {
             predicate: "official_identity",
             value: "Venice",
             sourceUrl: "https://www.linkedin.com/company/venice-ai/",
             sourceTitle: "Venice.ai | LinkedIn",
+            excerpt: "Venice.ai is a private AI application on LinkedIn.",
           },
           {
             predicate: "founder",
             value: "Erik Voorhees",
             sourceUrl: "https://www.linkedin.com/in/erikvoorhees/",
+            sourceTitle: "Erik Voorhees - Venice",
+            excerpt: "Founder and CEO at Venice, a crypto and private AI project.",
           },
           {
             predicate: "founder",
             value: "Jesse Proudman",
             sourceUrl: "https://www.linkedin.com/in/jesseproudman/",
+            sourceTitle: "Jesse Proudman - Venice",
+            excerpt: "President and CTO at Venice, a crypto and private AI project.",
           },
           {
             predicate: "product",
             value: "Private AI",
             sourceUrl: "https://example.com/venice-product",
+            sourceTitle: "Venice ships Private AI",
+            excerpt: "Venice launched Private AI, an inference product paid for with its token.",
           },
         ],
         webTeam: [

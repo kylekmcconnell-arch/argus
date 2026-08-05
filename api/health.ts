@@ -10,6 +10,13 @@ interface Svc {
   ok: boolean;
   detail?: string;
   action?: string;
+  /**
+   * The adapter is retired: it is not in the ADAPTERS registry and cannot run,
+   * so its key being absent costs no coverage. The row stays visible because
+   * this endpoint answers "which keys does this build read", but nothing may
+   * report a retired lane as degraded coverage.
+   */
+  retired?: boolean;
 }
 
 function configuredService(
@@ -25,6 +32,17 @@ function configuredService(
     ok,
     ...(ok ? {} : { detail: "not configured in this deployment", action }),
   };
+}
+
+/**
+ * A lane that was deliberately switched off, listed for completeness only.
+ *
+ * Configuring the key would NOT bring it back: the adapter is commented out of
+ * the registry in server/orchestrate.ts, so there is no action to offer and no
+ * coverage to restore.
+ */
+function retiredService(id: string, label: string, reason: string): Svc {
+  return { id, label, ok: false, retired: true, detail: `retired: ${reason}` };
 }
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
@@ -52,8 +70,8 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     configuredService("pdl", "People Data Labs (employment history)", process.env.PDL_API_KEY, "configure PDL_API_KEY"),
     configuredService("github", "GitHub (code footprint)", process.env.GITHUB_TOKEN, "configure GITHUB_TOKEN"),
     configuredService("coingecko", "CoinGecko (listings + market data)", process.env.COINGECKO_API_KEY, "configure COINGECKO_API_KEY"),
-    configuredService("crunchbase", "Crunchbase (company funding)", process.env.CRUNCHBASE_API_KEY, "configure CRUNCHBASE_API_KEY"),
-    configuredService("reddit", "Reddit (community signal)", process.env.REDDIT_CLIENT_ID, "configure REDDIT_CLIENT_ID"),
+    retiredService("crunchbase", "Crunchbase (company funding)", "DeFiLlama and Monid/Akta cover funding and backing"),
+    retiredService("reddit", "Reddit (community signal)", "Reddit API access was not approved"),
     configuredService("gmgn", "GMGN (holder cost basis + wallet tags)", process.env.GMGN_API_KEY, "configure GMGN_API_KEY (apply at https://gmgn.ai/ai)"),
   ];
 

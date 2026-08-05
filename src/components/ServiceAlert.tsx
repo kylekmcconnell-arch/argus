@@ -1,10 +1,25 @@
 import { useEffect, useState } from "react";
 
-// Loud banner when a critical provider is not configured. The public readiness
-// endpoint is deliberately zero-spend; live credit/key probes belong in an
-// explicit authenticated admin action. Cache one readiness read per session
-// (plus a 5-minute refresh), shared across every report.
-type Svc = { id: string; label: string; ok: boolean; detail?: string; action?: string };
+// Loud banner when a provider that this build actually uses is not configured.
+// The public readiness endpoint is deliberately zero-spend; live credit/key
+// probes belong in an explicit authenticated admin action. Cache one readiness
+// read per session (plus a 5-minute refresh), shared across every report.
+//
+// RETIRED LANES ARE NOT AN OUTAGE. /api/health lists every key the build reads,
+// including adapters commented out of the registry, because it answers a
+// configuration question. This banner answers a different one: has this report
+// lost coverage. Crunchbase and Reddit are retired, so their absent keys were
+// raising a red "2 providers are unavailable, this report has reduced
+// coverage" on every report while costing exactly nothing, and pointed the
+// reader at a rescan that could not change the outcome.
+type Svc = {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail?: string;
+  action?: string;
+  retired?: boolean;
+};
 
 let cache: { at: number; services: Svc[] } | null = null;
 let inflight: Promise<Svc[]> | null = null;
@@ -29,7 +44,9 @@ export function ServiceAlert() {
   const [down, setDown] = useState<Svc[]>([]);
   useEffect(() => {
     let alive = true;
-    void getHealth().then((services) => { if (alive) setDown(services.filter((s) => !s.ok)); });
+    void getHealth().then((services) => {
+      if (alive) setDown(services.filter((s) => !s.ok && !s.retired));
+    });
     return () => { alive = false; };
   }, []);
 
@@ -50,8 +67,11 @@ export function ServiceAlert() {
           </div>
         ))}
       </div>
+      {/* Naming specific lanes here asserted a dependency this banner cannot
+          check: it does not know which of them the missing key feeds. It says
+          what is true of any of them instead. */}
       <p className="mt-1.5 text-[12.5px] text-ink-faint">
-        Deep digs (team search, portfolios, namesake, identity) depend on these. Rescan after configuration is restored.
+        Whatever these providers answer is missing from this report. Rescan after configuration is restored.
       </p>
     </div>
   );
