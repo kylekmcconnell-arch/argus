@@ -92,6 +92,98 @@ export interface GmgnTokenIntel {
 
 const EMPTY = (note: string): GmgnTokenIntel => ({ available: false, holders: [], note, capped: false });
 
+/**
+ * GMGN's per-tag wallet counter stops at exactly this number. BONK reports 1000
+ * for sniper, bundler, rat, whale and fresh alike, which is the cap showing, not
+ * five identical populations. At the cap the count is a FLOOR and must never be
+ * published as a total.
+ */
+export const GMGN_TAG_COUNT_CAP = 1000;
+
+export interface GmgnTagCount {
+  count: number;
+  /** True when the counter sits at GMGN's cap, making the count a floor. */
+  atCap: boolean;
+}
+
+/**
+ * GMGN's launch-pattern reading of a token, from /v1/token/info.
+ *
+ * Field meanings follow GMGN's own documentation: the volume percentages are
+ * ratios of TRADING VOLUME attributed to wallets carrying that tag, and the
+ * wallet counts are how many tagged wallets hold the token. All of it is GMGN's
+ * classification of the chain, reported here with that attribution and never
+ * adopted as an ARGUS finding. Their AI rating is deliberately not read.
+ */
+export interface GmgnBundleReading {
+  /** False when the key is absent, the chain is unsupported, or a call failed. */
+  available: boolean;
+  /** One plain sentence naming why this lane produced nothing. */
+  note: string | null;
+  holderCount: number | null;
+  /** Share of trading volume GMGN attributes to bundler bots. 0-100. */
+  bundlerVolumePct: number | null;
+  /** Share of volume GMGN attributes to rat/insider traders. 0-100. */
+  insiderVolumePct: number | null;
+  /** Share of volume GMGN attributes to entrapment traders. 0-100. */
+  entrapmentVolumePct: number | null;
+  /** Share of volume GMGN attributes to bot degen wallets. 0-100. */
+  botVolumePct: number | null;
+  botWalletCount: number | null;
+  /** Share of HOLDERS GMGN counts as fresh wallets. 0-100. */
+  freshWalletHolderPct: number | null;
+  /** GMGN's top70_sniper_hold_rate, undocumented by them; a hold share. 0-100. */
+  sniperHoldPct: number | null;
+  top10HolderPct: number | null;
+  creatorHoldPct: number | null;
+  devTeamHoldPct: number | null;
+  /** How many other tokens GMGN counts from this creator. */
+  creatorCreatedCount: number | null;
+  /** Tokens GMGN finds carrying this same logo image. Cuts both ways: high on a
+   * widely copied original AND on a copy. It never says which this one is. */
+  imageDupCount: number | null;
+  tagged: {
+    sniper: GmgnTagCount | null;
+    bundler: GmgnTagCount | null;
+    insider: GmgnTagCount | null;
+    fresh: GmgnTagCount | null;
+  };
+  creatorAddress: string | null;
+  /** From creator_token_status: true=holding, false=closed, null=unreported. */
+  creatorStillHolds: boolean | null;
+  /** Past X handle changes GMGN records for the token's account. */
+  twitterRenames: number | null;
+  /** GMGN's community-takeover flag: the original developer is gone. */
+  communityTakeover: boolean | null;
+  /** GMGN's dexscr_boost_fee. Their docs call it 0/1; live tokens carry larger
+   * numbers, so it is kept as a number where >0 means paid DEXScreener boost. */
+  dexscreenerBoost: number | null;
+}
+
+const EMPTY_BUNDLE = (note: string): GmgnBundleReading => ({
+  available: false,
+  note,
+  holderCount: null,
+  bundlerVolumePct: null,
+  insiderVolumePct: null,
+  entrapmentVolumePct: null,
+  botVolumePct: null,
+  botWalletCount: null,
+  freshWalletHolderPct: null,
+  sniperHoldPct: null,
+  top10HolderPct: null,
+  creatorHoldPct: null,
+  devTeamHoldPct: null,
+  creatorCreatedCount: null,
+  imageDupCount: null,
+  tagged: { sniper: null, bundler: null, insider: null, fresh: null },
+  creatorAddress: null,
+  creatorStillHolds: null,
+  twitterRenames: null,
+  communityTakeover: null,
+  dexscreenerBoost: null,
+});
+
 let lastCallAt = 0;
 
 /** Serialize against their one-per-second limit. Shared across a whole process. */
@@ -125,6 +217,60 @@ function tagsOf(row: Record<string, unknown>): string[] {
   return [...out];
 }
 
+type GmgnCall =
+  | { ok: true; data: unknown }
+  | { ok: false; note: string };
+
+/**
+ * One authenticated, paced GET against a GMGN read route. Read routes
+ * authenticate on X-APIKEY plus a timestamp and a per-request client_id, both
+ * as QUERY parameters. Their public demo key tolerates their absence; a real
+ * key answers 401 without them. Failure notes name the reading that was lost so
+ * a caller can say which question went unasked instead of implying the answer
+ * was clean.
+ */
+async function gmgnGet(
+  path: string,
+  params: Record<string, string>,
+  reading: string,
+  fetchImpl: typeof fetch,
+  key: string,
+): Promise<GmgnCall> {
+  const query = new URLSearchParams({
+    ...params,
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    client_id: randomUUID(),
+  });
+  const url = `${HOST}${path}?${query.toString()}`;
+
+  let body: unknown;
+  try {
+    const response = await paced(() => fetchImpl(url, {
+      headers: { "X-APIKEY": key, accept: "application/json" },
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+    }));
+    if (!response.ok) {
+      return {
+        ok: false,
+        note: response.status === 429
+          ? `GMGN rate limited this scan, so its ${reading} was not collected.`
+          : `GMGN returned HTTP ${response.status}, so its ${reading} was not collected.`,
+      };
+    }
+    body = await response.json();
+  } catch {
+    return { ok: false, note: `GMGN did not respond, so its ${reading} was not collected.` };
+  }
+
+  const envelope = body as { code?: unknown; data?: unknown } | null;
+  // Their envelope carries its own status. A non-zero code is a refusal, and a
+  // refusal is not an empty reading.
+  if (!envelope || (envelope.code !== undefined && num(envelope.code) !== 0)) {
+    return { ok: false, note: `GMGN declined the request, so its ${reading} was not collected.` };
+  }
+  return { ok: true, data: envelope.data };
+}
+
 /**
  * The subject's top holders as GMGN sees them, with what they paid.
  *
@@ -144,42 +290,17 @@ export async function fetchGmgnTokenIntel(
   if (!address.trim()) return EMPTY("GMGN was not queried: no token address.");
 
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 50);
-  const fetchImpl = opts.fetchImpl ?? fetch;
-  // Read routes authenticate on X-APIKEY plus a timestamp and a per-request
-  // client_id, both as QUERY parameters. Their public demo key tolerates their
-  // absence; a real key answers 401 without them.
-  const query = new URLSearchParams({
-    chain: gmgnChain,
-    address,
-    limit: String(limit),
-    timestamp: String(Math.floor(Date.now() / 1000)),
-    client_id: randomUUID(),
-  });
-  const url = `${HOST}/v1/market/token_top_traders?${query.toString()}`;
-
-  let body: unknown;
-  try {
-    const response = await paced(() => fetchImpl(url, {
-      headers: { "X-APIKEY": key, accept: "application/json" },
-      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
-    }));
-    if (!response.ok) {
-      return EMPTY(response.status === 429
-        ? "GMGN rate limited this scan, so its holder reading was not collected."
-        : `GMGN returned HTTP ${response.status}, so its holder reading was not collected.`);
-    }
-    body = await response.json();
-  } catch {
-    return EMPTY("GMGN did not respond, so its holder reading was not collected.");
-  }
-
-  const envelope = body as { code?: unknown; data?: { list?: unknown } } | null;
-  // Their envelope carries its own status. A non-zero code is a refusal, and a
-  // refusal is not an empty holder list.
-  if (!envelope || (envelope.code !== undefined && num(envelope.code) !== 0)) {
-    return EMPTY("GMGN declined the request, so its holder reading was not collected.");
-  }
-  const rows = Array.isArray(envelope.data?.list) ? envelope.data.list : null;
+  const call = await gmgnGet(
+    "/v1/market/token_top_traders",
+    { chain: gmgnChain, address, limit: String(limit) },
+    "holder reading",
+    opts.fetchImpl ?? fetch,
+    key,
+  );
+  if (!call.ok) return EMPTY(call.note);
+  const rows = Array.isArray((call.data as { list?: unknown } | null)?.list)
+    ? (call.data as { list: unknown[] }).list
+    : null;
   if (!rows) return EMPTY("GMGN returned no holder list, so its reading was not collected.");
 
   const holders: GmgnHolder[] = [];
@@ -244,6 +365,170 @@ export function describeGmgnHolders(intel: GmgnTokenIntel): string[] {
     claims.push(
       `GMGN reports an entry cost for ${withCost.length} top holders, of which ${up} are showing a gain. `
       + "A holder sitting on a large unrealized gain has more reason to sell than one at break-even, which is what this measures and all it measures.",
+    );
+  }
+  return claims;
+}
+
+/** A 0-1 wire ratio as a 0-100 percentage. Out of range is a bad payload, not a big number. */
+function ratioPct(value: unknown): number | null {
+  const parsed = num(value);
+  return parsed !== null && parsed >= 0 && parsed <= 1 ? parsed * 100 : null;
+}
+
+/** A non-negative integer count, or null. A negative count is a bad payload. */
+function count(value: unknown): number | null {
+  const parsed = num(value);
+  return parsed !== null && parsed >= 0 && Number.isInteger(parsed) ? parsed : null;
+}
+
+function tagCount(value: unknown): GmgnTagCount | null {
+  const parsed = count(value);
+  return parsed === null ? null : { count: parsed, atCap: parsed >= GMGN_TAG_COUNT_CAP };
+}
+
+/**
+ * GMGN's launch-pattern reading: /v1/token/info, one call.
+ *
+ * Everything here is GMGN's classification and is carried with that
+ * attribution. Their AI rating is present in the payload and deliberately
+ * never read: a score ARGUS did not compute must never reach a verdict it
+ * signs.
+ */
+export async function fetchGmgnBundleReading(
+  chain: string,
+  address: string,
+  opts: { fetchImpl?: typeof fetch } = {},
+): Promise<GmgnBundleReading> {
+  const key = env("GMGN_API_KEY");
+  if (!key) return EMPTY_BUNDLE("GMGN was not queried: no API key is configured for this deployment.");
+  const gmgnChain = CHAIN[chain];
+  if (!gmgnChain) return EMPTY_BUNDLE(`GMGN does not cover ${chain}, so its launch-pattern reading was not available for this token.`);
+  if (!address.trim()) return EMPTY_BUNDLE("GMGN was not queried: no token address.");
+
+  const call = await gmgnGet(
+    "/v1/token/info",
+    { chain: gmgnChain, address },
+    "launch-pattern reading",
+    opts.fetchImpl ?? fetch,
+    key,
+  );
+  if (!call.ok) return EMPTY_BUNDLE(call.note);
+  if (!call.data || typeof call.data !== "object") {
+    return EMPTY_BUNDLE("GMGN returned no token record, so its launch-pattern reading was not collected.");
+  }
+
+  const data = call.data as Record<string, unknown>;
+  const stat = (data.stat && typeof data.stat === "object" ? data.stat : {}) as Record<string, unknown>;
+  const dev = (data.dev && typeof data.dev === "object" ? data.dev : {}) as Record<string, unknown>;
+  const tags = (data.wallet_tags_stat && typeof data.wallet_tags_stat === "object" ? data.wallet_tags_stat : {}) as Record<string, unknown>;
+
+  const creatorAddress = typeof dev.creator_address === "string" && dev.creator_address.trim()
+    ? dev.creator_address.trim()
+    : null;
+  // Their status vocabulary: creator_hold / hold means still holding,
+  // creator_close / sell means exited. Anything else stays unreported rather
+  // than guessed.
+  const status = typeof dev.creator_token_status === "string" ? dev.creator_token_status.trim() : "";
+  const creatorStillHolds = status === "creator_hold" || status === "hold"
+    ? true
+    : status === "creator_close" || status === "sell" ? false : null;
+
+  return {
+    available: true,
+    note: null,
+    holderCount: count(data.holder_count) ?? count(stat.holder_count),
+    bundlerVolumePct: ratioPct(stat.top_bundler_trader_percentage),
+    insiderVolumePct: ratioPct(stat.top_rat_trader_percentage),
+    entrapmentVolumePct: ratioPct(stat.top_entrapment_trader_percentage),
+    botVolumePct: ratioPct(stat.top_bot_degen_percentage),
+    botWalletCount: count(stat.bot_degen_count),
+    freshWalletHolderPct: ratioPct(stat.fresh_wallet_rate),
+    sniperHoldPct: ratioPct(stat.top70_sniper_hold_rate),
+    top10HolderPct: ratioPct(stat.top_10_holder_rate),
+    creatorHoldPct: ratioPct(stat.creator_hold_rate),
+    devTeamHoldPct: ratioPct(stat.dev_team_hold_rate),
+    creatorCreatedCount: count(stat.creator_created_count),
+    imageDupCount: count(data.image_dup_count),
+    tagged: {
+      sniper: tagCount(tags.sniper_wallets),
+      bundler: tagCount(tags.bundler_wallets),
+      insider: tagCount(tags.rat_trader_wallets),
+      fresh: tagCount(tags.fresh_wallets),
+    },
+    creatorAddress,
+    creatorStillHolds,
+    twitterRenames: Array.isArray(dev.twitter_name_change_history) ? dev.twitter_name_change_history.length : null,
+    communityTakeover: dev.cto_flag === 1 ? true : dev.cto_flag === 0 ? false : null,
+    dexscreenerBoost: num(dev.dexscr_boost_fee),
+  };
+}
+
+/** "at least 1,000" at the cap; the plain count below it. */
+function tagPhrase(tag: GmgnTagCount): string {
+  return tag.atCap ? `at least ${GMGN_TAG_COUNT_CAP.toLocaleString("en-US")}` : tag.count.toLocaleString("en-US");
+}
+
+const pct = (value: number): string => `${value >= 10 ? value.toFixed(1) : value.toFixed(2)}%`;
+
+/**
+ * What GMGN's launch-pattern reading supports saying out loud.
+ *
+ * Every sentence names GMGN and reports a SHAPE (how much volume their tagged
+ * wallets account for, how many tagged wallets hold), never the conclusion
+ * "this launch was bundled". Their per-tag counter stops at 1,000, so a count
+ * at the cap is always published as a floor.
+ */
+export function describeGmgnBundle(reading: GmgnBundleReading): string[] {
+  if (!reading.available) return [];
+  const claims: string[] = [];
+
+  const volumeShares: Array<[number, string]> = [];
+  if (reading.bundlerVolumePct !== null && reading.bundlerVolumePct > 0) {
+    volumeShares.push([reading.bundlerVolumePct, "bundler bots"]);
+  }
+  if (reading.insiderVolumePct !== null && reading.insiderVolumePct > 0) {
+    volumeShares.push([reading.insiderVolumePct, "insider traders"]);
+  }
+  if (volumeShares.length) {
+    const rendered = volumeShares.map(([share, label], index) =>
+      `${pct(share)}${index === 0 ? " of this token's trading volume" : ""} to wallets it tags as ${label}`);
+    claims.push(
+      `GMGN attributes ${rendered.join(" and ")}. `
+      + "These are GMGN's classifications of the wallets, not findings ARGUS verified independently.",
+    );
+  }
+
+  const tagParts: string[] = [];
+  let anyAtCap = false;
+  for (const [label, tag] of [["snipers", reading.tagged.sniper], ["bundler bots", reading.tagged.bundler], ["insider traders", reading.tagged.insider]] as const) {
+    if (!tag || tag.count === 0) continue;
+    anyAtCap = anyAtCap || tag.atCap;
+    tagParts.push(`${tagPhrase(tag)} as ${label}`);
+  }
+  if (tagParts.length) {
+    claims.push(
+      `Among wallets holding this token, GMGN tags ${tagParts.join(", ")}.`
+      + (anyAtCap ? " GMGN's per-tag counter stops at 1,000, so a count at that number is a floor, never a total." : ""),
+    );
+  }
+
+  if (reading.creatorCreatedCount !== null && reading.creatorCreatedCount > 1) {
+    claims.push(`GMGN counts ${reading.creatorCreatedCount} tokens created by this token's creator.`);
+  }
+  if (reading.imageDupCount !== null && reading.imageDupCount > 0) {
+    claims.push(
+      `GMGN finds ${reading.imageDupCount} other token${reading.imageDupCount === 1 ? "" : "s"} carrying this same logo image. `
+      + "That number is high for a widely copied original and for a copy alike; it does not say which this one is.",
+    );
+  }
+  if (reading.dexscreenerBoost !== null && reading.dexscreenerBoost > 0) {
+    claims.push("GMGN records paid DEXScreener promotion (boost) for this token.");
+  }
+  if (reading.twitterRenames !== null && reading.twitterRenames > 0) {
+    claims.push(
+      `GMGN records ${reading.twitterRenames} past handle change${reading.twitterRenames === 1 ? "" : "s"} on the token's X account. `
+      + "A renamed account may have carried a different project's audience before this one.",
     );
   }
   return claims;

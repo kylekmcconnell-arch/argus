@@ -5,6 +5,8 @@ import { WalletClusters } from "./WalletClusters";
 import { OperatorNetwork } from "./OperatorNetwork";
 import { EvmDeployer } from "./EvmDeployer";
 import { GmgnHolderCosts } from "./GmgnHolderCosts";
+import { GmgnBundlePanel } from "./GmgnBundlePanel";
+import { EarlyBuyerFunding } from "./EarlyBuyerFunding";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { SanctionsScreen } from "./SanctionsScreen";
 import { EntityConcentration } from "./EntityConcentration";
@@ -60,6 +62,12 @@ export function OnChainForensics({ token, onAudit, panelCostToken, record = true
       {/* What the top holders paid: the only source here that answers whether a
           concentrated holder is sitting on a gain and therefore has a reason to sell. */}
       <GmgnHolderCosts chain={token.chain} address={token.address} />
+      {/* GMGN's launch-shape reading (bundler/sniper volume and wallet counts),
+          carried as their classification, never adopted as an ARGUS finding */}
+      <GmgnBundlePanel chain={token.chain} address={token.address} knownDeployer={token.deployer} />
+      {/* ARGUS's own check on the same question: the wallets that took supply in
+          the first transactions, traced to their seed funders (Solana only) */}
+      <EarlyBuyerFunding chain={token.chain} mint={token.address} />
       {isEvm && <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} panelCostToken={panelCostToken} record={record} />}
       {/* EVM bytecode fingerprint — rug-enabling code + byte-identical known-rug clone check */}
       {isEvm && <BytecodeForensics address={token.address} chain={token.chain} symbol={token.symbol} record={record} />}

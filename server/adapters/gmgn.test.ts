@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { describeGmgnHolders, fetchGmgnTokenIntel } from "./gmgn";
+import { describeGmgnBundle, describeGmgnHolders, fetchGmgnBundleReading, fetchGmgnTokenIntel } from "./gmgn";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -176,6 +176,129 @@ describe("what GMGN reported, read honestly", () => {
     expect(intel.holders[0].costUsd).toBeNull();
     expect(intel.holders[0].profitUsd).toBeNull();
     expect(intel.holders[0].suspicious).toBe(false);
+  });
+
+  it("shaped like the live /v1/token/info payload, reads the launch-pattern fields", async () => {
+    vi.stubEnv("GMGN_API_KEY", "test-key");
+    // Trimmed from the live BONK response of 2026-08-05.
+    const intel = await fetchGmgnBundleReading("solana", BONK, {
+      fetchImpl: stub({
+        code: 0,
+        data: {
+          holder_count: 992549,
+          image_dup_count: 46,
+          stat: {
+            top_rat_trader_percentage: 0.0006,
+            top_bundler_trader_percentage: 0.1234,
+            top_entrapment_trader_percentage: 0.7185,
+            top_bot_degen_percentage: 0,
+            bot_degen_count: 130,
+            fresh_wallet_rate: 0.0465,
+            top_10_holder_rate: 0.3117,
+            dev_team_hold_rate: 0.0096,
+            creator_hold_rate: 0.0096,
+            top70_sniper_hold_rate: 0.0095,
+            creator_created_count: 4,
+          },
+          dev: {
+            creator_address: "BpH4h6pdBLBnpwiZAhmGqhvkhFXknWU7QSBLQRHGi1Gt",
+            creator_token_status: "creator_close",
+            twitter_name_change_history: [{ twitter_username: "old_handle", rename_timestamp: 1700000000 }],
+            cto_flag: 1,
+            dexscr_boost_fee: 99,
+          },
+          wallet_tags_stat: { sniper_wallets: 34, bundler_wallets: 249, rat_trader_wallets: 12, fresh_wallets: 802 },
+        },
+      }),
+    });
+
+    expect(intel.available).toBe(true);
+    expect(intel.bundlerVolumePct).toBeCloseTo(12.34);
+    expect(intel.entrapmentVolumePct).toBeCloseTo(71.85);
+    expect(intel.insiderVolumePct).toBeCloseTo(0.06);
+    expect(intel.top10HolderPct).toBeCloseTo(31.17);
+    expect(intel.imageDupCount).toBe(46);
+    expect(intel.creatorCreatedCount).toBe(4);
+    expect(intel.tagged.sniper).toEqual({ count: 34, atCap: false });
+    expect(intel.tagged.bundler).toEqual({ count: 249, atCap: false });
+    expect(intel.creatorAddress).toBe("BpH4h6pdBLBnpwiZAhmGqhvkhFXknWU7QSBLQRHGi1Gt");
+    expect(intel.creatorStillHolds).toBe(false);
+    expect(intel.twitterRenames).toBe(1);
+    expect(intel.communityTakeover).toBe(true);
+    expect(intel.dexscreenerBoost).toBe(99);
+  });
+
+  it("treats a wallet-tag count at 1,000 as a floor, never a total", async () => {
+    vi.stubEnv("GMGN_API_KEY", "test-key");
+    // BONK live: sniper, bundler, rat, whale and fresh all report exactly 1000.
+    // Five identical populations is the counter cap showing, not a coincidence.
+    const intel = await fetchGmgnBundleReading("solana", BONK, {
+      fetchImpl: stub({
+        code: 0,
+        data: { wallet_tags_stat: { sniper_wallets: 1000, bundler_wallets: 1000, fresh_wallets: 1000 } },
+      }),
+    });
+
+    expect(intel.tagged.sniper).toEqual({ count: 1000, atCap: true });
+    expect(intel.tagged.bundler).toEqual({ count: 1000, atCap: true });
+
+    const claims = describeGmgnBundle(intel);
+    const tagClaim = claims.find((claim) => claim.includes("at least 1,000"));
+    expect(tagClaim).toBeDefined();
+    expect(tagClaim).toContain("floor, never a total");
+  });
+
+  it("discards an impossible ratio instead of publishing it", async () => {
+    vi.stubEnv("GMGN_API_KEY", "test-key");
+    const intel = await fetchGmgnBundleReading("solana", BONK, {
+      fetchImpl: stub({
+        code: 0,
+        data: { stat: { top_bundler_trader_percentage: 42, fresh_wallet_rate: -0.2, top_10_holder_rate: 0.31 } },
+      }),
+    });
+
+    // 42 and -0.2 cannot be 0-1 ratios. Unmeasured beats a fabricated number.
+    expect(intel.bundlerVolumePct).toBeNull();
+    expect(intel.freshWalletHolderPct).toBeNull();
+    expect(intel.top10HolderPct).toBeCloseTo(31);
+  });
+
+  it("keeps a refusal and an unsupported chain from posing as a clean launch shape", async () => {
+    vi.stubEnv("GMGN_API_KEY", "test-key");
+    const refused = await fetchGmgnBundleReading("solana", BONK, { fetchImpl: stub({ code: 40001 }) });
+    expect(refused.available).toBe(false);
+    expect(refused.note).toContain("declined");
+    expect(describeGmgnBundle(refused)).toEqual([]);
+
+    const uncovered = await fetchGmgnBundleReading("avalanche", "0xabc", { fetchImpl: vi.fn() as unknown as typeof fetch });
+    expect(uncovered.available).toBe(false);
+    expect(uncovered.note).toContain("does not cover avalanche");
+  });
+
+  it("attributes every bundle sentence to GMGN and reports shape, not a verdict", async () => {
+    vi.stubEnv("GMGN_API_KEY", "test-key");
+    const intel = await fetchGmgnBundleReading("solana", BONK, {
+      fetchImpl: stub({
+        code: 0,
+        data: {
+          image_dup_count: 3,
+          stat: { top_bundler_trader_percentage: 0.249, top_rat_trader_percentage: 0.02, creator_created_count: 7 },
+          dev: { dexscr_boost_fee: 99, twitter_name_change_history: ["a", "b"] },
+          wallet_tags_stat: { sniper_wallets: 34, bundler_wallets: 249 },
+        },
+      }),
+    });
+
+    const claims = describeGmgnBundle(intel);
+    expect(claims.length).toBeGreaterThan(0);
+    for (const claim of claims) expect(claim).toContain("GMGN");
+    // The report never adopts the conclusion; "bundled" may only appear as
+    // GMGN's wallet classification (bundler), not as a verdict on the launch.
+    for (const claim of claims) expect(claim).not.toMatch(/was bundled|launch was/i);
+    expect(claims[0]).toContain("not findings ARGUS verified independently");
+    // The logo-duplicate count must cut both ways explicitly.
+    const dupClaim = claims.find((claim) => claim.includes("logo"));
+    expect(dupClaim).toContain("does not say which");
   });
 
   it("attributes every published sentence to GMGN and calls a capped list a floor", async () => {
