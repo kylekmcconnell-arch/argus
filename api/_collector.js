@@ -11707,10 +11707,12 @@ function deterministicFundingSearchQueries(ctx, questions) {
     host = ctx.evidence.profile.website ? new URL(ctx.evidence.profile.website).hostname : "";
   } catch {
   }
+  const ticker = ctx.evidence.projectToken?.verified ? (ctx.evidence.projectToken.symbol ?? "").replace(/"/g, "").trim() : "";
+  const unscoped = ticker ? `"${subject}" ${ticker.startsWith("$") ? ticker : `$${ticker}`} funding round investors` : `"${subject}" crypto funding round valuation investors`;
   return [
     host ? `site:${host} "${subject}" funding raised financing` : "",
     host ? `site:${host} "${subject}" "Series A" OR "Series B" OR "seed round"` : "",
-    `"${subject}" funding round valuation investors`
+    unscoped
   ].filter(Boolean);
 }
 async function mapDiscoveryGroups(groups, work) {

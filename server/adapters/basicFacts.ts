@@ -1359,10 +1359,23 @@ function deterministicFundingSearchQueries(
   const subject = subjectName(ctx).replace(/"/g, "").trim();
   let host = "";
   try { host = ctx.evidence.profile.website ? new URL(ctx.evidence.profile.website).hostname : ""; } catch { /* no official host */ }
+  // The unscoped query is the one that finds other companies wearing this
+  // project's name. Asked bare, `"Clutch" funding round valuation investors`
+  // returns a Canadian used-car retailer's Series B, and that document then has
+  // to be caught downstream. Qualifying it costs nothing and spends the search
+  // on documents that could actually be about a crypto project. The ticker is
+  // added when the canonical token is verified, because a symbol is the one
+  // token that a namesake in another industry will not share.
+  const ticker = ctx.evidence.projectToken?.verified
+    ? (ctx.evidence.projectToken.symbol ?? "").replace(/"/g, "").trim()
+    : "";
+  const unscoped = ticker
+    ? `"${subject}" ${ticker.startsWith("$") ? ticker : `$${ticker}`} funding round investors`
+    : `"${subject}" crypto funding round valuation investors`;
   return [
     host ? `site:${host} "${subject}" funding raised financing` : "",
     host ? `site:${host} "${subject}" "Series A" OR "Series B" OR "seed round"` : "",
-    `"${subject}" funding round valuation investors`,
+    unscoped,
   ].filter(Boolean);
 }
 

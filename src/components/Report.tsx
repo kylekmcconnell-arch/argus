@@ -86,6 +86,7 @@ import {
   supportsExplicitEmptyBasicFact,
 } from "../lib/basicFactQuestions";
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
+import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
 
@@ -1470,36 +1471,6 @@ function reportProjectProductFromBio(bio?: string): string | null {
   return cleaned;
 }
 
-function isExactOfficialXProfile(url: string | undefined, handle: string): boolean {
-  if (!url) return false;
-  try {
-    const parsed = new URL(url);
-    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
-    const path = parsed.pathname.replace(/\/+$/, "").toLowerCase();
-    return (host === "x.com" || host === "twitter.com")
-      && path === `/${handle.replace(/^@/, "").toLowerCase()}`;
-  } catch {
-    return false;
-  }
-}
-
-function normalizedHost(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function sameHostScope(candidate: string | null, official: string | null): boolean {
-  return Boolean(candidate && official && (
-    candidate === official
-    || candidate!.endsWith(`.${official}`)
-    || official!.endsWith(`.${candidate}`)
-  ));
-}
-
 function authoritativeProjectTokenFact(dossier: Dossier, fact: BasicFactView): boolean {
   if (canonicalBasicFactPredicate(fact.predicate) !== "official_token") return true;
   if (dossier.projectToken?.verified) return true;
@@ -1507,67 +1478,6 @@ function authoritativeProjectTokenFact(dossier: Dossier, fact: BasicFactView): b
     source.sourceClass === "official_subject"
     || source.sourceClass === "official_counterparty"
     || source.sourceClass === "regulatory_or_onchain");
-}
-
-const PROJECT_LEAD_CONTEXT = /\b(?:blockchain|chain|crypto|defi|dex|launchpad|mainnet|memecoin|on[- ]chain|protocol|smart contract|token|trading|wallet)\b/i;
-const PROJECT_RELATIONSHIP_CONTEXT = /\b(?:collaborat|counterpart|integrat|partner|provider|supplier)\w*\b/i;
-const PROJECT_REPOSITORY_CONTEXT = /\b(?:bitbucket|github|gitlab|open[- ]source|repo(?:sitory)?|source code)\b/i;
-const PROJECT_SECURITY_CONTEXT = /\b(?:exchange|issuer|listed|listing|publicly traded|security|stock|ticker|trades under)\b/i;
-const PROJECT_FUNDING_CONTEXT = /\b(?:backed by|financ(?:e|ed|ing)|fund(?:ed|ing|raise)|invest(?:ed|ment|or)|pre[- ]?seed|raise[ds]?|round|seed|series [a-z]|venture capital)\b/i;
-const PROJECT_INVESTOR_CONTEXT = /\b(?:backed by|funded by|invest(?:ed|ment|or)|led (?:the )?(?:financing|round)|participated in (?:the )?(?:financing|round))\b/i;
-const PROJECT_NEGATIVE_AUDIT_CONTEXT = /\b(?:no|not|none|without)\b[^.]{0,80}\baudits?\b|\baudits?\b[^.]{0,80}\b(?:absent|limited|not published|unpublished|unknown)\b/i;
-const UNBOUND_SOCIAL_LEAD_HOSTS = new Set([
-  "facebook.com",
-  "instagram.com",
-  "linkedin.com",
-  "tiktok.com",
-  "youtube.com",
-]);
-
-function projectLeadIsRelevant(dossier: Dossier, lead: BasicFactLeadView): boolean {
-  const sourceHost = normalizedHost(lead.sourceUrl);
-  const officialHost = normalizedHost(dossier.website);
-  const officialSource = sameHostScope(sourceHost, officialHost)
-    || isExactOfficialXProfile(lead.sourceUrl, dossier.handle);
-  const text = [lead.value, lead.qualifier, lead.sourceTitle, lead.excerpt]
-    .filter(Boolean)
-    .join(" ");
-  const handle = dossier.handle.replace(/^@/, "").toLowerCase();
-  const displayName = dossier.display_name.trim().toLowerCase();
-  const normalizedText = text.toLowerCase();
-  const wordText = normalizedText.replace(/[^a-z0-9]+/g, " ").trim();
-  const wordName = displayName.replace(/[^a-z0-9]+/g, " ").trim();
-  const namesSubject = Boolean(
-    (handle && normalizedText.includes(handle))
-    || (wordName.length >= 3 && ` ${wordText} `.includes(` ${wordName} `)),
-  );
-  const predicate = canonicalBasicFactPredicate(lead.predicate);
-
-  // A generic-name social result is especially collision-prone and cannot be
-  // bound to the project merely because its caption repeats the display name.
-  // The exact official X account and official project domain remain eligible.
-  if (sourceHost && UNBOUND_SOCIAL_LEAD_HOSTS.has(sourceHost) && !officialSource) return false;
-
-  // A docs page is not a source-code repository, and merely running on a
-  // counterparty's chain is not proof of a partnership. Keep those search hits
-  // out of the reader-facing lead list until the relationship language exists.
-  if (predicate === "repository") return PROJECT_REPOSITORY_CONTEXT.test(text);
-  if (predicate === "funding") return PROJECT_FUNDING_CONTEXT.test(text);
-  if (predicate === "investor") return PROJECT_INVESTOR_CONTEXT.test(text);
-  // A third-party article saying public audit information is limited does not
-  // prove a negative and merely repeats the dedicated audit/disclosure screen.
-  if (predicate === "audit" && PROJECT_NEGATIVE_AUDIT_CONTEXT.test(text)) return false;
-  if (predicate === "partnership") {
-    return PROJECT_RELATIONSHIP_CONTEXT.test(text)
-      && (officialSource || (namesSubject && PROJECT_LEAD_CONTEXT.test(text)));
-  }
-  if (predicate === "public_security") {
-    return PROJECT_SECURITY_CONTEXT.test(text)
-      && namesSubject
-      && PROJECT_LEAD_CONTEXT.test(text);
-  }
-  if (officialSource) return true;
-  return namesSubject && PROJECT_LEAD_CONTEXT.test(text);
 }
 
 /**
