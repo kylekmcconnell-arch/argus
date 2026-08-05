@@ -7,6 +7,7 @@ import { EvmDeployer } from "./EvmDeployer";
 import { GmgnHolderCosts } from "./GmgnHolderCosts";
 import { GmgnBundlePanel } from "./GmgnBundlePanel";
 import { EarlyBuyerFunding } from "./EarlyBuyerFunding";
+import { GovernancePanel } from "./GovernancePanel";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { SanctionsScreen } from "./SanctionsScreen";
 import { EntityConcentration } from "./EntityConcentration";
@@ -31,7 +32,7 @@ function launchInstant(token: TokenDossier): number | null {
 // from a single TokenDossier: market intel → holder distribution → wallet
 // clustering → operator trace → (EVM) deployer trail → (EVM) bytecode → OFAC
 // sanctions. One source of truth for every token/investigation report.
-export function OnChainForensics({ token, onAudit, panelCostToken, record = true, mintedAt }: { token: TokenDossier; onAudit: (h: string) => void; panelCostToken: string; record?: boolean; mintedAt?: string | number | null }) {
+export function OnChainForensics({ token, onAudit, panelCostToken, record = true, mintedAt, projectHandle, projectWebsite }: { token: TokenDossier; onAudit: (h: string) => void; panelCostToken: string; record?: boolean; mintedAt?: string | number | null; projectHandle?: string | null; projectWebsite?: string | null }) {
   const isEvm = token.chain !== "solana";
   const launchedAt = mintedAt ?? launchInstant(token);
   return (
@@ -68,6 +69,15 @@ export function OnChainForensics({ token, onAudit, panelCostToken, record = true
       {/* ARGUS's own check on the same question: the wallets that took supply in
           the first transactions, traced to their seed funders (Solana only) */}
       <EarlyBuyerFunding chain={token.chain} mint={token.address} />
+      {/* Who decides, not who holds: how few addresses carried the project's
+          last governance votes. Publishes nothing unless the Snapshot space
+          binds to this subject by contract, official account or official domain. */}
+      <GovernancePanel
+        name={token.name || token.symbol}
+        address={token.address}
+        handle={projectHandle}
+        website={projectWebsite}
+      />
       {isEvm && <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} panelCostToken={panelCostToken} record={record} />}
       {/* EVM bytecode fingerprint — rug-enabling code + byte-identical known-rug clone check */}
       {isEvm && <BytecodeForensics address={token.address} chain={token.chain} symbol={token.symbol} record={record} />}

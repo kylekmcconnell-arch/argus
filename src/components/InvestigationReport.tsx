@@ -1768,7 +1768,7 @@ export function InvestigationReport({
             bytecode, and the OFAC sanctions screen, in one canonical order. */}
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-3">
-            <OnChainForensics token={token} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
+            <OnChainForensics token={token} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} projectHandle={projectX} projectWebsite={siteUrl} />
             {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
               <PanelRequestNotice failure={arkhamState} label="Wallet identity labels" className="mt-3" />
             )}
