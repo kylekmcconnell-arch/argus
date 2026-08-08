@@ -163,7 +163,10 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
       <div className="mt-3 grid grid-cols-3 gap-3">
         <Metric label="holders" value={holderCount ? holderCount.toLocaleString() : "N/A"} />
         <Metric label={`top ${top.length} hold`} value={top.length ? `${topSum.toFixed(0)}%` : "N/A"} tone={concentrated ? TONE.bad : undefined} />
-        <Metric label="insider est." value={insiderPct ? `${insiderPct}%` : "N/A"} tone={insiderPct >= 20 ? TONE.warn : undefined} />
+        {/* Not "insider": nothing here ties these wallets to the project. The
+            figure is the share held by the largest non-market wallets, which
+            is a concentration reading and not a claim about who owns them. */}
+        <Metric label="top wallets hold" value={insiderPct ? `${insiderPct}%` : "N/A"} tone={insiderPct >= 20 ? TONE.warn : undefined} />
       </div>
       {top.length > 0 && (
         <div className="mt-3 divide-y divide-line/60">

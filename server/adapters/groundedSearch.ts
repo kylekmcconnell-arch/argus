@@ -303,6 +303,12 @@ export async function groundedSearch(
     "Follow the task's output contract exactly.\n\n" +
     "TASK INSTRUCTIONS:\n" + system;
   const answer = await callExtractModel(wrapSystem, `${user}\n\n${context}`, 3_000, "grounded-extract");
+  // Searches that SUCCEEDED and then lost the extract model are not an empty
+  // result: the lane collected sources and could not read them. Reporting the
+  // same bare null as a genuine empty left the caller unable to recover, and
+  // an extract outage silently reproduced the mechanically empty people
+  // report this lane exists to prevent.
+  if (answer === null) opts?.onProviderUnavailable?.();
   if (answer && cacheKey && !opts?.bypassCache) void cacheSet(cacheKey, answer);
   return answer;
 }

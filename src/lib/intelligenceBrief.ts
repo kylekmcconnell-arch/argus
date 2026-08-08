@@ -161,7 +161,15 @@ export function deriveIntelligenceBrief(
   return {
     supports: orderedSignals.filter((signal) => signal.polarity === "support").map(signalItem),
     pressures: orderedSignals.filter((signal) => signal.polarity === "risk" || signal.polarity === "mixed").map(signalItem),
-    context: orderedSignals.filter((signal) => signal.polarity === "neutral").map(signalItem),
+    // "unknown" polarity belongs with neutral context, not nowhere. Filtering
+    // for "neutral" alone silently dropped every signal the spine declined to
+    // polarize, including the single-signer Safe-compatible authority reading,
+    // so a token whose only derived control concern was that authority
+    // produced a brief that never mentioned it. Context is the honest home:
+    // the reader sees it without ARGUS asserting a polarity it did not derive.
+    context: orderedSignals
+      .filter((signal) => signal.polarity === "neutral" || signal.polarity === "unknown")
+      .map(signalItem),
     questions,
   };
 }

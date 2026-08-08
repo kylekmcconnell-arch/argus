@@ -3582,6 +3582,17 @@ function coverageState(questions, measurementCount) {
   if (questions.length > 0 && questions.every((question) => question.state === "not_applicable")) return "not_applicable";
   return "not_collected";
 }
+function withReferencedDomains(base, questions, measurements) {
+  const present = new Set(base);
+  const extra = /* @__PURE__ */ new Set();
+  for (const domain of [
+    ...questions.map((question) => question.domain),
+    ...measurements.map((measurement) => measurement.domain)
+  ]) {
+    if (!present.has(domain)) extra.add(domain);
+  }
+  return extra.size ? [...base, ...[...extra].sort()] : base;
+}
 function buildCoverage(measurements, questions, domains = DOMAIN_ORDER) {
   return domains.map((domain) => {
     const domainMeasurements = measurements.filter((measurement) => measurement.domain === domain);
@@ -5331,7 +5342,7 @@ function sanitizeIntelligenceSnapshot(snapshot, evidence, options = {}) {
     lenses: ["investment", "alpha_research", "counterparty", "general_diligence"]
   } : null;
   const finalSignals = integritySignal ? [integritySignal, ...signals].sort((left, right) => SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity] || left.id.localeCompare(right.id)) : signals;
-  const domains = options.domains ?? DOMAIN_ORDER;
+  const domains = withReferencedDomains(options.domains ?? DOMAIN_ORDER, questions, measurements);
   const coverage = buildCoverage(measurements, questions, domains);
   const lenses = buildLenses(finalSignals, questions, options.lensDefinitions ?? LENS_DEFINITIONS, domains);
   return {
@@ -5366,7 +5377,7 @@ function buildPointInTimeIntelligence(evidence) {
   const sources = buildSources(evidence);
   const measurements = buildMeasurements(evidence);
   const questions = buildQuestions(evidence, measurements, classification.archetypes, classification.forms);
-  const coverage = buildCoverage(measurements, questions);
+  const coverage = buildCoverage(measurements, questions, withReferencedDomains(DOMAIN_ORDER, questions, measurements));
   const signals = buildSignals(evidence, measurements, questions);
   const lenses = buildLenses(signals, questions);
   return sanitizeIntelligenceSnapshot({
@@ -5518,8 +5529,11 @@ function factSourceClass2(sourceClass3) {
   if (sourceClass3 === "independent_press") return "independent_publication";
   return "other_public";
 }
+function factIsConflicted(fact) {
+  return fact.status === "conflicted" || fact.sources.some((source2) => source2.relation === "contradicts");
+}
 function factEvidenceState(fact, evidence) {
-  if (fact.status === "conflicted") return "bounded";
+  if (factIsConflicted(fact)) return "bounded";
   if (fact.floorEligible === false || fact.providerProjection === true) return "reported_context";
   if (!isOrganizationAccount(evidence) && !evidence.profile.identity_binding) return "reported_context";
   if (fact.sources.length > 0 && fact.sources.every((source2) => source2.sourceClass === "official_subject")) {
@@ -5582,7 +5596,12 @@ function buildSources2(evidence) {
         provider: source2.provider,
         title: source2.title?.trim() || `${fact.predicate.replaceAll("_", " ")} source`,
         sourceClass: factSourceClass2(source2.sourceClass),
-        evidenceState: factEvidenceState(fact, evidence),
+        // A receipt describing SOMEONE ELSE cannot carry the audited subject's
+        // evidence tier. Measurements and questions already exclude non-direct
+        // facts, but the register still rendered a related-entity or
+        // different-subject row as "verified" with no scope qualifier, which
+        // reads as a verified statement about this subject.
+        evidenceState: directSubjectFact(fact, evidence) ? factEvidenceState(fact, evidence) : "reported_context",
         relation: source2.relation,
         sourceUrl: safePublicUrl(source2.url),
         capturedAt: validTime(source2.capturedAt) ? source2.capturedAt : void 0,
@@ -6084,7 +6103,7 @@ function buildQuestions2(evidence, kind, measurements, sources) {
     const facts = directFacts.filter((fact) => (definition.predicates ?? []).includes(fact.predicate));
     const factAnswerRefs = facts.map((fact) => fact.factId);
     const factSourceRefList = unique(facts.flatMap((fact) => factSourceRefs(fact, sources)));
-    const hasConflict = facts.some((fact) => fact.status === "conflicted" || fact.sources.some((source2) => source2.relation === "contradicts"));
+    const hasConflict = facts.some(factIsConflicted);
     const strictFacts = facts.filter((fact) => factEvidenceState(fact, evidence) === "verified");
     const reportedFacts = facts.filter((fact) => factEvidenceState(fact, evidence) === "reported_context");
     const extra = extraEvidence(definition, evidence, measurements);
@@ -6312,7 +6331,7 @@ function buildSignals2(evidence, kind, measurements, questions, sources) {
     }));
   }
   for (const [index, fact] of (evidence.basicFacts ?? []).entries()) {
-    if (!directSubjectFact(fact, evidence) || fact.status !== "conflicted") continue;
+    if (!directSubjectFact(fact, evidence) || !factIsConflicted(fact)) continue;
     const sourceRefs = factSourceRefs(fact, sources);
     if (!sourceRefs.length) continue;
     add(signal({
@@ -11596,11 +11615,17 @@ var evalRequest = (url, options) => globalThis.fetch(
     redirect: "manual"
   }, () => nativeRequest(url, options))
 );
+function evalModeAllowed() {
+  return process.env.VERCEL_ENV === void 0 && process.env.VERCEL === void 0;
+}
+function evalMode() {
+  return evalModeAllowed() ? process.env.ARGUS_EVAL_MODE : void 0;
+}
 function defaultRequestForMode() {
-  return process.env.ARGUS_EVAL_MODE === "record" || process.env.ARGUS_EVAL_MODE === "replay" ? evalRequest : nativeRequest;
+  return evalMode() === "record" || evalMode() === "replay" ? evalRequest : nativeRequest;
 }
 function defaultLookupForMode() {
-  return process.env.ARGUS_EVAL_MODE === "replay" ? replayLookup : defaultLookup;
+  return evalMode() === "replay" ? replayLookup : defaultLookup;
 }
 async function readBoundedText(response) {
   const declared = Number(response.headers.get("content-length"));
@@ -11960,6 +11985,7 @@ ${pagesBlock || "(none fetched successfully)"}`;
   const answer = await callExtractModel(wrapSystem, `${user}
 
 ${context}`, 3e3, "grounded-extract");
+  if (answer === null) opts?.onProviderUnavailable?.();
   if (answer && cacheKey && !opts?.bypassCache) void cacheSet(cacheKey, answer);
   return answer;
 }
@@ -16044,6 +16070,13 @@ function unresolvedIdentityQuestions(evidence, capability) {
   const blockingPredicates = capability === "fund_scale" ? ["official_identity", "legal_entity", "current_role"] : ["official_identity", "current_role"];
   return (evidence.basicFactQuestionLedger ?? []).filter((entry) => entry.status === "unanswered" && entry.critical && blockingPredicates.includes(entry.predicate)).map((entry) => entry.questionId);
 }
+function delegateMatchesRun(delegate, runId2) {
+  const target = delegate.trim().toLowerCase();
+  const run = runId2.trim().toLowerCase();
+  if (!target || !run) return false;
+  if (run === target) return true;
+  return run.startsWith(`${target}-`) || run.startsWith(`${target}:`);
+}
 function nextActions(tasks) {
   return tasks.filter((task) => task.state === "planned" || task.state === "partial" || task.state === "unavailable").sort((a, b) => a.rank - b.rank).slice(0, 5).map((task, index) => ({
     rank: index + 1,
@@ -16112,13 +16145,15 @@ function finalizeResearchPlan(plan, checks, providerRuns = []) {
     const taskChecks = checks.filter((check) => check.checkId && task.checkIds.includes(check.checkId));
     const successful = taskChecks.filter((check) => SUCCESS2.has(check.status));
     const gaps = taskChecks.filter((check) => GAP.has(check.status));
+    const reported = taskChecks.filter((check) => check.status === "reported");
+    const reportedNote = reported.length ? ` (${reported.length} from source-reported context, not ARGUS verification)` : "";
     if (taskChecks.length) {
-      if (successful.length && gaps.length) return { ...task, state: "partial", outcome: `${successful.length} answered; ${gaps.length} unresolved` };
-      if (successful.length) return { ...task, state: "completed", outcome: `${successful.length} evidence question${successful.length === 1 ? "" : "s"} answered` };
+      if (successful.length && gaps.length) return { ...task, state: "partial", outcome: `${successful.length} answered${reportedNote}; ${gaps.length} unresolved` };
+      if (successful.length) return { ...task, state: "completed", outcome: `${successful.length} evidence question${successful.length === 1 ? "" : "s"} answered${reportedNote}` };
       if (gaps.length) return { ...task, state: "unavailable", outcome: `${gaps.length} evidence question${gaps.length === 1 ? "" : "s"} unresolved` };
       if (taskChecks.every((check) => check.status === "not-applicable")) return { ...task, state: "skipped", outcome: "not applicable to the resolved subject" };
     }
-    const runs = providerRuns.filter((run) => task.delegates.some((delegate) => run.id.toLowerCase().includes(delegate.toLowerCase()) || delegate.toLowerCase().includes(run.id.toLowerCase())));
+    const runs = providerRuns.filter((run) => task.delegates.some((delegate) => delegateMatchesRun(delegate, run.id)));
     if (runs.some((run) => run.state === "executed")) return { ...task, state: "partial", outcome: "delegated search completed; no frozen answer was recorded" };
     if (runs.some((run) => run.state === "partial")) return { ...task, state: "partial", outcome: "delegated provider work returned partial coverage" };
     if (runs.some((run) => run.state === "failed" || run.state === "unavailable")) return { ...task, state: "unavailable", outcome: "required provider work was unavailable" };
@@ -29790,8 +29825,9 @@ function strictOrganizationLegalEntity(evidence) {
     const normalizedName = normalized4(name);
     return fact2.sources.some((source2) => source2.relation === "supports" && source2.artifactVerified === true && (source2.sourceClass === "official_subject" || source2.sourceClass === "regulatory_or_onchain") && normalized4(source2.excerpt).includes(normalizedName) && LEGAL_ENTITY_LANGUAGE.test(`${name} ${source2.excerpt}`));
   });
-  if (candidates.length !== 1) return null;
-  const fact = candidates[0];
+  const distinctNames = new Set(candidates.map((fact2) => normalized4(fact2.value)));
+  if (candidates.length === 0 || distinctNames.size !== 1) return null;
+  const fact = [...candidates].sort((left, right) => right.sources.filter((source2) => source2.relation === "supports").length - left.sources.filter((source2) => source2.relation === "supports").length || left.value.localeCompare(right.value))[0];
   const supporting = fact.sources.filter((source2) => source2.relation === "supports");
   return { name: fact.value.replace(/\s+/g, " ").trim(), fact, sourceCount: supporting.length };
 }
@@ -31247,9 +31283,9 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       tone: "warn"
     });
   }
-  hydrateProjectTeamFromVerifiedFacts(evidence);
   const rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
+  hydrateProjectTeamFromVerifiedFacts(evidence);
   const revisedResearchPlan = buildResearchPlan(evidence, researchPlan.intent);
   researchPlan = { ...revisedResearchPlan, createdAt: researchPlan.createdAt };
   evidence.researchPlan = researchPlan;
@@ -31570,9 +31606,25 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       finishRuntimeStage("fund-scale-verification", fundScaleStartedAt);
     }
   } else {
-    const reason = evidence.roles.includes("INVESTOR" /* INVESTOR */) ? `research director did not select investor performance work for ${researchPlan.intent}` : "not a provider-backed investor/fund role";
+    const directorDeselected = evidence.roles.includes("INVESTOR" /* INVESTOR */);
+    const reason = directorDeselected ? `research director did not select investor performance work for ${researchPlan.intent}` : "not a provider-backed investor/fund role";
     checkTracker.provider("portfolio-verification", "Source-backed portfolio verification", "skipped", reason);
     checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "skipped", reason);
+    if (directorDeselected) {
+      const note = `Portfolio and fund-scale work was not dispatched under the ${researchPlan.intent} research intent. This is a deliberate scope choice, not a finding about the subject, and it leaves the investor track-record question open.`;
+      checkTracker.record({
+        id: "vc-portfolio-track-record",
+        status: "unavailable",
+        note,
+        provider: "argus-research-director"
+      });
+      checkTracker.record({
+        id: "investor-fund-scale",
+        status: "unavailable",
+        note,
+        provider: "argus-research-director"
+      });
+    }
   }
   const trustGraphStartedAt = startRuntimeStage("trust-graph");
   if (graphScreenOverBudget()) {

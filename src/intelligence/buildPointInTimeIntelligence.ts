@@ -2311,6 +2311,31 @@ function coverageState(questions: readonly IntelligenceQuestion[], measurementCo
   return "not_collected";
 }
 
+/**
+ * The base domain order plus every domain the snapshot actually used.
+ *
+ * COMPANY_DILIGENCE_QUESTIONS put a CRITICAL question in `operations` and
+ * another in `relationships`, neither of which is in the project base order.
+ * Those questions were tracked and answerable but got no coverage row at all,
+ * so the surface that exists to show what was and was not covered silently
+ * omitted them. Extras are appended in sorted order to stay deterministic.
+ */
+function withReferencedDomains(
+  base: readonly IntelligenceDomain[],
+  questions: readonly IntelligenceQuestion[],
+  measurements: readonly IntelligenceMeasurement[],
+): readonly IntelligenceDomain[] {
+  const present = new Set<IntelligenceDomain>(base);
+  const extra = new Set<IntelligenceDomain>();
+  for (const domain of [
+    ...questions.map((question) => question.domain),
+    ...measurements.map((measurement) => measurement.domain),
+  ]) {
+    if (!present.has(domain)) extra.add(domain);
+  }
+  return extra.size ? [...base, ...[...extra].sort()] : base;
+}
+
 function buildCoverage(
   measurements: readonly IntelligenceMeasurement[],
   questions: readonly IntelligenceQuestion[],
@@ -4350,7 +4375,7 @@ export function sanitizeIntelligenceSnapshot(
         SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity]
         || left.id.localeCompare(right.id))
     : signals;
-  const domains = options.domains ?? DOMAIN_ORDER;
+  const domains = withReferencedDomains(options.domains ?? DOMAIN_ORDER, questions, measurements);
   const coverage = buildCoverage(measurements, questions, domains);
   const lenses = buildLenses(finalSignals, questions, options.lensDefinitions ?? LENS_DEFINITIONS, domains);
 
@@ -4395,7 +4420,7 @@ export function buildPointInTimeIntelligence(
   const sources = buildSources(evidence);
   const measurements = buildMeasurements(evidence);
   const questions = buildQuestions(evidence, measurements, classification.archetypes, classification.forms);
-  const coverage = buildCoverage(measurements, questions);
+  const coverage = buildCoverage(measurements, questions, withReferencedDomains(DOMAIN_ORDER, questions, measurements));
   const signals = buildSignals(evidence, measurements, questions);
   const lenses = buildLenses(signals, questions);
 

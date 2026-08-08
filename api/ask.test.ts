@@ -495,6 +495,25 @@ describe("ask this immutable report", () => {
     expect(captured.body).not.toHaveProperty("answer");
   });
 
+  it("withholds a project-attribution answer on a report that froze no attribution", async () => {
+    // project_attribution is deliberately allowed to carry no URL, so it was
+    // the one basis a model could assert with nothing behind it. The default
+    // stored version has no projectAttributions rows.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(providerResponse({
+      answer: "The project publicly identifies Jane Doe as its founder.",
+      basis: "project_attribution",
+      citationUrls: [],
+    })));
+    const { captured, response } = responseCapture();
+
+    await handler(request({ question: "Who founded this?" }) as never, response as never);
+
+    expect(captured.body).toMatchObject({
+      note: "The model response could not be verified against this frozen report, so ARGUS withheld it.",
+    });
+    expect(captured.body).not.toHaveProperty("answer");
+  });
+
   it("withholds a non-allowlisted URL hidden inside the reasoning chain", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(providerResponse({
       answer: "The stored portfolio evidence supports the score.",

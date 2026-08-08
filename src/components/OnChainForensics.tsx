@@ -53,7 +53,7 @@ export function OnChainForensics({ token, onAudit, panelCostToken, record = true
         <section className="panel tint-var p-4" style={{ "--tint": "var(--color-avoid)" } as React.CSSProperties} aria-label="Current forensic coverage incomplete">
           <div className="eyebrow">Current forensic coverage incomplete</div>
           <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
-            {unavailableChecks.map((check) => check.label).join(", ")} did not finish. These live failures do not change the frozen score, and missing results must not be read as a clean launch or healthy holder base.
+            {unavailableChecks.map((check) => check.label).join(", ")} produced no usable reading. A check here either failed or answered that it cannot cover this token, and neither outcome changes the frozen score. A missing result must not be read as a clean launch or a healthy holder base.
           </p>
         </section>
       )}

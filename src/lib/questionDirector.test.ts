@@ -207,4 +207,49 @@ describe("question director", () => {
       measurements: [expect.objectContaining({ id: "measurement:event-date", value: "2026-09-01" })],
     });
   });
+
+  it("keeps every high-severity adverse signal in focus past the discretionary budget", () => {
+    // A subject with a dozen confirmed adverse findings must not have four of
+    // them fall off the packet the Eye reasons over. The budget bounds
+    // context, never the invariant risk set.
+    const adverse = Array.from({ length: 12 }, (_, index) => ({
+      id: `signal:adverse-${String(index).padStart(2, "0")}`,
+      ruleId: "adverse",
+      ruleVersion: 1,
+      kind: "observation" as const,
+      domain: "legal" as const,
+      severity: "high" as const,
+      polarity: "risk" as const,
+      headline: `Adverse finding ${index}`,
+      finding: "An attributable adverse record is saved.",
+      whyItMatters: "It is material to every decision lens.",
+      changeCondition: "The record is reversed.",
+      evidenceState: "verified" as const,
+      measurementRefs: [],
+      sourceRefs: [],
+      lenses: ["counterparty" as const],
+    }));
+    const withSignals = { ...snapshot, signals: adverse } as IntelligenceSpineSnapshot;
+
+    const route = directInvestigationQuestion("What is the alpha here?", null, withSignals);
+
+    expect(route.evidenceFocus).toHaveLength(12);
+    expect(route.evidenceFocusOmitted).toBe(0);
+    for (const signal of adverse) {
+      expect(route.evidenceFocus.map((item) => item.id)).toContain(signal.id);
+    }
+  });
+
+  it("reports a legacy report with an empty stored plan as an evidence gap", () => {
+    // Callers hand the director an EMPTY OBJECT for a report that never stored
+    // a plan. That is truthy, so a nullish check let every pre-spine report
+    // claim saved-evidence synthesis was possible with nothing saved.
+    const route = directInvestigationQuestion(
+      "Is this a good investment?",
+      { tasks: [] } as unknown as ResearchPlan,
+      null,
+    );
+
+    expect(route.answerMode).toBe("investigate_evidence_gap");
+  });
 });

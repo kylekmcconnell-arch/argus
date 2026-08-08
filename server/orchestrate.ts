@@ -1690,8 +1690,18 @@ export function strictOrganizationLegalEntity(
       && normalized(source.excerpt).includes(normalizedName)
       && LEGAL_ENTITY_LANGUAGE.test(`${name} ${source.excerpt}`));
   });
-  if (candidates.length !== 1) return null;
-  const fact = candidates[0];
+  // Many receipts for ONE entity are corroboration, not ambiguity. Counting
+  // rows instead of distinct names meant two verified facts naming the same
+  // legal entity in different spellings withheld the screen entirely and left
+  // the never-waive gate permanently open, so the report could never clear.
+  // Genuinely DIFFERENT entities still fail closed: picking one of them would
+  // screen an entity the evidence does not single out.
+  const distinctNames = new Set(candidates.map((fact) => normalized(fact.value)));
+  if (candidates.length === 0 || distinctNames.size !== 1) return null;
+  const fact = [...candidates].sort((left, right) =>
+    right.sources.filter((source) => source.relation === "supports").length
+      - left.sources.filter((source) => source.relation === "supports").length
+    || left.value.localeCompare(right.value))[0];
   const supporting = fact.sources.filter((source) => source.relation === "supports");
   return { name: fact.value.replace(/\s+/g, " ").trim(), fact, sourceCount: supporting.length };
 }
@@ -3666,9 +3676,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       tone: "warn",
     });
   }
-  hydrateProjectTeamFromVerifiedFacts(evidence);
   const rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
+  // AFTER the roles are updated, never before. The hydration bails unless
+  // evidence.roles already carries PROJECT, and the sparse or suspended
+  // accounts it exists to rescue are exactly the ones whose PROJECT
+  // classification is first established BY this basic-facts pass. Running it
+  // on the stale role set made it a no-op in its own motivating case, leaving
+  // the report claiming no known team while verified founder facts sat in the
+  // ledger.
+  hydrateProjectTeamFromVerifiedFacts(evidence);
   const revisedResearchPlan = buildResearchPlan(evidence, researchPlan.intent);
   researchPlan = { ...revisedResearchPlan, createdAt: researchPlan.createdAt };
   evidence.researchPlan = researchPlan;
@@ -4093,11 +4110,33 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       finishRuntimeStage("fund-scale-verification", fundScaleStartedAt);
     }
   } else {
-    const reason = evidence.roles.includes(SubjectClass.INVESTOR)
+    const directorDeselected = evidence.roles.includes(SubjectClass.INVESTOR);
+    const reason = directorDeselected
       ? `research director did not select investor performance work for ${researchPlan.intent}`
       : "not a provider-backed investor/fund role";
     checkTracker.provider("portfolio-verification", "Source-backed portfolio verification", "skipped", reason);
     checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "skipped", reason);
+    if (directorDeselected) {
+      // These rows are decision-critical for an INVESTOR, and a narrower
+      // research intent must NOT quietly clear them: the intent arrives from
+      // the caller, so waiving the gate on it would let a query parameter buy
+      // a decision-ready investor report with no track-record evidence. They
+      // record the deliberate reason instead of sitting at an unexplained
+      // "unknown" that reads as a collection failure.
+      const note = `Portfolio and fund-scale work was not dispatched under the ${researchPlan.intent} research intent. This is a deliberate scope choice, not a finding about the subject, and it leaves the investor track-record question open.`;
+      checkTracker.record({
+        id: "vc-portfolio-track-record",
+        status: "unavailable",
+        note,
+        provider: "argus-research-director",
+      });
+      checkTracker.record({
+        id: "investor-fund-scale",
+        status: "unavailable",
+        note,
+        provider: "argus-research-director",
+      });
+    }
   }
 
   // Final deterministic pre-analyst pass: join the freshly collected graph to

@@ -8,6 +8,7 @@
 // users, so adopting that address as wallet identity would create a false
 // bundle finding.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { classifyMarketAddress } from "../src/lib/marketAddresses.js";
 
 export const config = { maxDuration: 30 };
 
@@ -122,6 +123,11 @@ export function reconstructEvmLaunch(input: {
     const hash = typeof log.transactionHash === "string" ? lc(log.transactionHash) : "";
     if (block === null || block <= input.creationBlock || from !== pool || !to || amount === null || amount <= 0n || !hash) continue;
     if (to === pool || to === lc(input.launcher ?? "") || to === lc(input.creator ?? "")) continue;
+    // Exchange custody and other known venues are market infrastructure, not
+    // launch buyers. Excluding only the pool, launcher and creator let a CEX
+    // deposit address inside the window count as a first buyer and inflate
+    // the "still holds" figure with customer float.
+    if (classifyMarketAddress(to)) continue;
     const prior = buyers.get(to);
     if (prior) {
       prior.boughtRaw = (BigInt(prior.boughtRaw) + amount).toString();

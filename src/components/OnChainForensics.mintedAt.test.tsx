@@ -115,7 +115,9 @@ describe("on-chain forensics launch instant", () => {
     });
 
     expect(container.textContent).toContain("Current forensic coverage incomplete");
-    expect(container.textContent).toContain("GMGN launch-pattern reading did not finish");
+    // "did not finish" misdescribed a check that completed and answered that
+    // it cannot cover the token. The banner names the outcome, not a crash.
+    expect(container.textContent).toContain("GMGN launch-pattern reading produced no usable reading");
     expect(container.textContent).toContain("must not be read as a clean launch");
   });
 });

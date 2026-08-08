@@ -334,14 +334,29 @@ const evalRequest: RequestFn = (url, options) => globalThis.fetch(
   }, () => nativeRequest(url, options)),
 );
 
+/**
+ * Eval mode swaps in a transport whose DNS "resolution" returns a fixed public
+ * address, which is correct inside the harness (global fetch is patched and an
+ * uncovered request fails closed) but removes the pinned-address SSRF guard
+ * for every public-web read. It is a harness affordance, so a deployed
+ * environment may never enter it, however the variable happens to be set.
+ */
+function evalModeAllowed(): boolean {
+  return process.env.VERCEL_ENV === undefined && process.env.VERCEL === undefined;
+}
+
+function evalMode(): string | undefined {
+  return evalModeAllowed() ? process.env.ARGUS_EVAL_MODE : undefined;
+}
+
 function defaultRequestForMode(): RequestFn {
-  return process.env.ARGUS_EVAL_MODE === "record" || process.env.ARGUS_EVAL_MODE === "replay"
+  return evalMode() === "record" || evalMode() === "replay"
     ? evalRequest
     : nativeRequest;
 }
 
 function defaultLookupForMode(): LookupFn {
-  return process.env.ARGUS_EVAL_MODE === "replay" ? replayLookup : defaultLookup;
+  return evalMode() === "replay" ? replayLookup : defaultLookup;
 }
 
 async function readBoundedText(response: Response): Promise<Buffer | null> {

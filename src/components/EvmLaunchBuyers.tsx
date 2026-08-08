@@ -71,6 +71,10 @@ export function EvmLaunchBuyers({ chain, address }: { chain?: string | null; add
     if (!supported || !chain || !address) return;
     let live = true;
     setLoading(true);
+    // Clear the previous failure before the retry. Without this a transient
+    // error kept the failure notice pinned over fresh data for the rest of
+    // the mount, because nothing ever reset it.
+    setFailure(null);
     fetchPanelJson<Payload>(`/api/evm-launch-buyers?chain=${encodeURIComponent(chain)}&address=${encodeURIComponent(address)}`)
       .then((payload) => { if (live) setData(payload); })
       .catch((error) => { if (live) setFailure(panelRequestFailure(error)); })
@@ -112,7 +116,6 @@ export function EvmLaunchBuyers({ chain, address }: { chain?: string | null; add
     : null;
   const bursts = (data.sameBlock ?? []).slice(0, 4);
   const origins = (data.sharedOrigins ?? []).slice(0, 4);
-  const contractWallets = buyers.filter((buyer) => buyer.contractWallet === true).length;
   const pct = (value: number | null): string => value === null ? "unreadable" : `${value.toFixed(value >= 10 ? 1 : 2)}%`;
 
   return (
@@ -131,7 +134,12 @@ export function EvmLaunchBuyers({ chain, address }: { chain?: string | null; add
         <Row label="They still hold" value={`${amount(data.remainingRaw, data.decimals ?? 18)} · ${pct(heldPctSupply)} of supply`} />
         <Row label="Net below their early take" value={`${amount(netReductionRaw, data.decimals ?? 18)} · ${retainedPct === null ? "retention unreadable" : `${Math.max(0, 100 - retainedPct).toFixed(1)}% net reduction`}`} />
         <Row label="Creator in first-buyer path" value={creatorConnected === null ? "creator unreadable" : creatorConnected ? "observed" : "not observed"} />
-        <Row label="First cluster buy" value={`block ${Math.min(...buyers.map((buyer) => buyer.firstBlock))}`} />
+        {/* Math.min() over an empty list is Infinity, which would render
+            "block Infinity". The server currently never returns an available
+            reading with zero buyers, but the display must not depend on it. */}
+        {buyers.length > 0 && (
+          <Row label="First cluster buy" value={`block ${Math.min(...buyers.map((buyer) => buyer.firstBlock))}`} />
+        )}
       </div>
 
       {bursts.length > 0 && (
@@ -156,7 +164,7 @@ export function EvmLaunchBuyers({ chain, address }: { chain?: string | null; add
       )}
 
       <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
-        {data.note} {contractWallets > 0 ? `${contractWallets} recipient${contractWallets === 1 ? " is" : "s are"} contract-based accounts; they remain in the measured buyer set.` : ""}
+        {data.note}
         {data.sourceUrl && <> <a className="link-ext" href={data.sourceUrl} target="_blank" rel="noreferrer">Open the transfer ledger ↗</a></>}
       </p>
     </section>

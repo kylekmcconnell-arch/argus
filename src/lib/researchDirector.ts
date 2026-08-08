@@ -243,6 +243,22 @@ function unresolvedIdentityQuestions(evidence: CollectedEvidence, capability: Re
     .map((entry) => entry.questionId);
 }
 
+/**
+ * Attribute a provider run to a delegate on an ID BOUNDARY, never on a bare
+ * substring.
+ *
+ * Bidirectional `includes` matched any short id inside a longer one, so a run
+ * called "x" claimed the "official-x" delegate and a failed run could be
+ * reported against a workstream that never dispatched it.
+ */
+function delegateMatchesRun(delegate: string, runId: string): boolean {
+  const target = delegate.trim().toLowerCase();
+  const run = runId.trim().toLowerCase();
+  if (!target || !run) return false;
+  if (run === target) return true;
+  return run.startsWith(`${target}-`) || run.startsWith(`${target}:`);
+}
+
 function nextActions(tasks: readonly ResearchTask[]): ResearchNextAction[] {
   return tasks
     .filter((task) => task.state === "planned" || task.state === "partial" || task.state === "unavailable")
@@ -332,14 +348,20 @@ export function finalizeResearchPlan(
       const taskChecks = checks.filter((check) => check.checkId && task.checkIds.includes(check.checkId));
       const successful = taskChecks.filter((check) => SUCCESS.has(check.status));
       const gaps = taskChecks.filter((check) => GAP.has(check.status));
+      // "reported" is a COMPLETED read of source-attributed context, not ARGUS
+      // verification. It still closes the workstream, but the narrative must
+      // not let it pass as a verified answer.
+      const reported = taskChecks.filter((check) => check.status === "reported");
+      const reportedNote = reported.length
+        ? ` (${reported.length} from source-reported context, not ARGUS verification)`
+        : "";
       if (taskChecks.length) {
-        if (successful.length && gaps.length) return { ...task, state: "partial", outcome: `${successful.length} answered; ${gaps.length} unresolved` };
-        if (successful.length) return { ...task, state: "completed", outcome: `${successful.length} evidence question${successful.length === 1 ? "" : "s"} answered` };
+        if (successful.length && gaps.length) return { ...task, state: "partial", outcome: `${successful.length} answered${reportedNote}; ${gaps.length} unresolved` };
+        if (successful.length) return { ...task, state: "completed", outcome: `${successful.length} evidence question${successful.length === 1 ? "" : "s"} answered${reportedNote}` };
         if (gaps.length) return { ...task, state: "unavailable", outcome: `${gaps.length} evidence question${gaps.length === 1 ? "" : "s"} unresolved` };
         if (taskChecks.every((check) => check.status === "not-applicable")) return { ...task, state: "skipped", outcome: "not applicable to the resolved subject" };
       }
-      const runs = providerRuns.filter((run) => task.delegates.some((delegate) =>
-        run.id.toLowerCase().includes(delegate.toLowerCase()) || delegate.toLowerCase().includes(run.id.toLowerCase())));
+      const runs = providerRuns.filter((run) => task.delegates.some((delegate) => delegateMatchesRun(delegate, run.id)));
       // A successful provider call proves that the search ran, not that the
       // investigation question was answered. Only a frozen check outcome can
       // complete a workstream; otherwise preserve the epistemic gap.

@@ -30,6 +30,8 @@ interface EyeAnswer {
     blockedBy: string[];
     unresolvedQuestions: Array<{ id: string; prompt: string; state: string; materiality: string }>;
     evidenceFocus: Array<{ id: string; headline: string; polarity: string; evidenceState: string }>;
+    /** Relevant signals left out of the packet. Never a high-severity adverse one. */
+    evidenceFocusOmitted?: number;
     changeConditions: string[];
     claimChains: Array<{
       signalId: string;
@@ -201,6 +203,24 @@ export function ArgusEyeAssistant({
           .filter((item) => item.prompt)
           .slice(0, 4)
         : [];
+      // Parsed before the display slice so the omitted count can include what
+      // THIS component hides as well as what the server left out of the packet.
+      const parsedFocus = Array.isArray(rawRoute?.evidenceFocus)
+        ? rawRoute.evidenceFocus
+          .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item))
+          .map((item) => ({
+            id: typeof item.id === "string" ? item.id : "",
+            headline: typeof item.headline === "string" ? item.headline : "",
+            polarity: typeof item.polarity === "string" ? item.polarity : "",
+            evidenceState: typeof item.evidenceState === "string" ? item.evidenceState : "",
+          }))
+          .filter((item) => item.headline)
+        : [];
+      const serverOmitted = typeof rawRoute?.evidenceFocusOmitted === "number"
+        && Number.isFinite(rawRoute.evidenceFocusOmitted)
+        && rawRoute.evidenceFocusOmitted > 0
+        ? Math.floor(rawRoute.evidenceFocusOmitted)
+        : 0;
       const investigationRoute = rawRoute ? {
         intent: typeof rawRoute.intent === "string" ? rawRoute.intent : "general_diligence",
         reasoningMode: typeof rawRoute.reasoningMode === "string" ? rawRoute.reasoningMode : "answer_question",
@@ -210,18 +230,8 @@ export function ArgusEyeAssistant({
         delegates: strings(rawRoute.delegates, 8),
         blockedBy: strings(rawRoute.blockedBy, 5),
         unresolvedQuestions,
-        evidenceFocus: Array.isArray(rawRoute.evidenceFocus)
-          ? rawRoute.evidenceFocus
-            .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item))
-            .map((item) => ({
-              id: typeof item.id === "string" ? item.id : "",
-              headline: typeof item.headline === "string" ? item.headline : "",
-              polarity: typeof item.polarity === "string" ? item.polarity : "",
-              evidenceState: typeof item.evidenceState === "string" ? item.evidenceState : "",
-            }))
-            .filter((item) => item.headline)
-            .slice(0, 5)
-          : [],
+        evidenceFocus: parsedFocus.slice(0, 5),
+        evidenceFocusOmitted: serverOmitted + Math.max(0, parsedFocus.length - 5),
         changeConditions: strings(rawRoute.changeConditions, 5),
         claimChains: Array.isArray(rawRoute.claimChains)
           ? rawRoute.claimChains
@@ -403,6 +413,13 @@ export function ArgusEyeAssistant({
                                 </li>
                               ))}
                             </ul>
+                            {(answer.investigationRoute.evidenceFocusOmitted ?? 0) > 0 && (
+                              <p className="mt-1 text-ink-faint">
+                                {answer.investigationRoute.evidenceFocusOmitted} further saved signal
+                                {answer.investigationRoute.evidenceFocusOmitted === 1 ? " was" : "s were"} relevant but not
+                                carried into this answer. Every high-severity adverse signal is always included.
+                              </p>
+                            )}
                           </div>
                         )}
                         {answer.investigationRoute.unresolvedQuestions.length > 0 && (

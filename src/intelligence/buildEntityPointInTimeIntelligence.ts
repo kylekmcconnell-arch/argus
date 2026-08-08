@@ -145,11 +145,28 @@ function factSourceClass(sourceClass: string): IntelligenceSourceClass {
   return "other_public";
 }
 
+/**
+ * A fact is in conflict when it is MARKED conflicted or when it still retains
+ * a contradicting source.
+ *
+ * Keying only on status split this file against itself: the question builder
+ * already treated a retained contradicting source as a conflict, while the
+ * evidence state and the conflict signal did not. A legacy fact carrying
+ * status "verified" plus a contradicting source could therefore headline as
+ * verified support and emit no conflict signal, while its own question was
+ * simultaneously marked conflict-partial. The project builder anticipates
+ * exactly this input shape.
+ */
+function factIsConflicted(fact: BasicFact): boolean {
+  return fact.status === "conflicted"
+    || fact.sources.some((source) => source.relation === "contradicts");
+}
+
 function factEvidenceState(
   fact: BasicFact,
   evidence: Readonly<CollectedEvidence>,
 ): IntelligenceEvidenceState {
-  if (fact.status === "conflicted") return "bounded";
+  if (factIsConflicted(fact)) return "bounded";
   if (fact.floorEligible === false || fact.providerProjection === true) return "reported_context";
   if (!isOrganizationAccount(evidence) && !evidence.profile.identity_binding) return "reported_context";
   if (fact.sources.length > 0 && fact.sources.every((source) => source.sourceClass === "official_subject")) {
@@ -224,7 +241,14 @@ function buildSources(evidence: Readonly<CollectedEvidence>): IntelligenceSource
         provider: source.provider,
         title: source.title?.trim() || `${fact.predicate.replaceAll("_", " ")} source`,
         sourceClass: factSourceClass(source.sourceClass),
-        evidenceState: factEvidenceState(fact, evidence),
+        // A receipt describing SOMEONE ELSE cannot carry the audited subject's
+        // evidence tier. Measurements and questions already exclude non-direct
+        // facts, but the register still rendered a related-entity or
+        // different-subject row as "verified" with no scope qualifier, which
+        // reads as a verified statement about this subject.
+        evidenceState: directSubjectFact(fact, evidence)
+          ? factEvidenceState(fact, evidence)
+          : "reported_context",
         relation: source.relation,
         sourceUrl: safePublicUrl(source.url),
         capturedAt: validTime(source.capturedAt) ? source.capturedAt : undefined,
@@ -818,7 +842,7 @@ function buildQuestions(
     const facts = directFacts.filter((fact) => (definition.predicates ?? []).includes(fact.predicate));
     const factAnswerRefs = facts.map((fact) => fact.factId);
     const factSourceRefList = unique(facts.flatMap((fact) => factSourceRefs(fact, sources)));
-    const hasConflict = facts.some((fact) => fact.status === "conflicted" || fact.sources.some((source) => source.relation === "contradicts"));
+    const hasConflict = facts.some(factIsConflicted);
     const strictFacts = facts.filter((fact) => factEvidenceState(fact, evidence) === "verified");
     const reportedFacts = facts.filter((fact) => factEvidenceState(fact, evidence) === "reported_context");
     const extra = extraEvidence(definition, evidence, measurements);
@@ -1081,7 +1105,7 @@ function buildSignals(
   }
 
   for (const [index, fact] of (evidence.basicFacts ?? []).entries()) {
-    if (!directSubjectFact(fact, evidence) || fact.status !== "conflicted") continue;
+    if (!directSubjectFact(fact, evidence) || !factIsConflicted(fact)) continue;
     const sourceRefs = factSourceRefs(fact, sources);
     if (!sourceRefs.length) continue;
     add(signal({

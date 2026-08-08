@@ -81,6 +81,19 @@ interface FrozenChallengePacket extends JsonRecord {
 const OMITTED_BLOB_KEYS = /^(?:base64|body|html|imageBytes|imageData|rawBody|rawHtml|screenshotData)$/i;
 const OMITTED_SENSITIVE_KEYS = /^(?:apiKey|authorization|cookie|password|secret|accessToken|refreshToken|privateKey)$/i;
 const SENSITIVE_URL_PARAM = /^(?:access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|policy)$/i;
+/** URLs appearing inside prose, not as the whole string. Global: used with replace. */
+const EMBEDDED_URL = /https?:\/\/[^\s<>"']+/gi;
+
+function urlCarriesCredentials(candidate: string): boolean {
+  try {
+    const url = new URL(candidate);
+    return Boolean(url.username)
+      || Boolean(url.password)
+      || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM.test(key));
+  } catch {
+    return false;
+  }
+}
 const MAX_FROZEN_STRING_CHARS = 2_000;
 const MAX_FROZEN_ARRAY_ITEMS = 64;
 const MAX_FROZEN_OBJECT_KEYS = 100;
@@ -110,16 +123,29 @@ function compactFrozenValue(value: unknown, path: string, collector: ReceiptColl
   if (value == null || typeof value === "boolean") return value ?? null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value === "string") {
-    const normalized = value.replace(/\s+/g, " ").trim();
+    let normalized = value.replace(/\s+/g, " ").trim();
     if (/^https?:\/\/\S+$/i.test(normalized)) {
-      try {
-        const url = new URL(normalized);
-        if (url.username || url.password || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM.test(key))) {
-          addReceipt(collector, { path, reason: "sensitive_url_omitted", includedUnits: 0 });
-          return null;
-        }
-      } catch {
-        // It is not a parseable URL, so retain it as ordinary frozen text.
+      if (urlCarriesCredentials(normalized)) {
+        addReceipt(collector, { path, reason: "sensitive_url_omitted", includedUnits: 0 });
+        return null;
+      }
+    } else {
+      // A credential-bearing URL EMBEDDED in prose was neither scrubbed nor
+      // receipted, because the check above only fires when the WHOLE string
+      // is a URL. A stored note like "fetched from https://host/r?api_key=X
+      // during the scan" carried the secret into the model packet, and the
+      // model's free-text fields could echo it back to the browser.
+      let redactedCount = 0;
+      const scrubbed = normalized.replace(EMBEDDED_URL, (match) => {
+        const trailing = match.match(/[.,;:!?)\]}]+$/)?.[0] ?? "";
+        const bare = trailing ? match.slice(0, -trailing.length) : match;
+        if (!urlCarriesCredentials(bare)) return match;
+        redactedCount += 1;
+        return `[credential-bearing URL omitted]${trailing}`;
+      });
+      if (redactedCount > 0) {
+        normalized = scrubbed;
+        addReceipt(collector, { path, reason: "sensitive_url_omitted", originalUnits: redactedCount, includedUnits: 0 });
       }
     }
     if (normalized.length > MAX_FROZEN_STRING_CHARS) {

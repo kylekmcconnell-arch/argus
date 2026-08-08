@@ -26,6 +26,13 @@ export interface DirectedInvestigationRoute {
     sourceRefs: string[];
     measurementRefs: string[];
   }>;
+  /**
+   * Signals that met the focus filter but did not fit the packet. Every
+   * high-severity adverse signal is always retained, so this only ever counts
+   * lower-priority context. Published so the Eye can say the focus list is a
+   * selection rather than presenting it as the complete relevant set.
+   */
+  evidenceFocusOmitted: number;
   sourceRefs: string[];
   measurementRefs: string[];
   changeConditions: string[];
@@ -145,6 +152,9 @@ const SEVERITY_RANK: Record<DerivedIntelligenceSignal["severity"], number> = {
   context: 3,
 };
 
+/** Discretionary focus slots. High-severity adverse signals extend past this. */
+const FOCUS_BASE_LIMIT = 8;
+
 function matchedRoutes(value: string): RouteDefinition[] {
   return ROUTES.filter((candidate) => candidate.patterns.some((pattern) => pattern.test(value)));
 }
@@ -200,7 +210,8 @@ export function directInvestigationQuestion(
   const capabilities = unique(supportingRoutes.flatMap((candidate) => candidate.capabilities)) as ResearchCapability[];
   const domains = unique(supportingRoutes.flatMap((candidate) => candidate.domains)) as IntelligenceDomain[];
   const capabilityRank = new Map(capabilities.map((capability, index) => [capability, index]));
-  const tasks = usableTasks(plan)
+  const planTasks = usableTasks(plan);
+  const tasks = planTasks
     .filter((task) => capabilityRank.has(task.capability))
     .sort((left, right) => (capabilityRank.get(left.capability) ?? 99) - (capabilityRank.get(right.capability) ?? 99)
       || left.rank - right.rank);
@@ -221,13 +232,14 @@ export function directInvestigationQuestion(
       materiality: item.materiality,
     }));
   const intentLens = INTENT_LENS[route.intent];
-  const evidenceFocus = [...(snapshot?.signals ?? [])]
+  const invariantRisk = (signal: DerivedIntelligenceSignal): boolean =>
+    signal.severity === "high" && (signal.polarity === "risk" || signal.polarity === "mixed");
+  const focusCandidates = [...(snapshot?.signals ?? [])]
     .filter((signal) => signal.kind !== "coverage_gap")
-    .filter((signal) => domainRank.has(signal.domain)
-      || (signal.severity === "high" && (signal.polarity === "risk" || signal.polarity === "mixed")))
+    .filter((signal) => domainRank.has(signal.domain) || invariantRisk(signal))
     .sort((left, right) => {
-      const leftInvariantRisk = left.severity === "high" && (left.polarity === "risk" || left.polarity === "mixed");
-      const rightInvariantRisk = right.severity === "high" && (right.polarity === "risk" || right.polarity === "mixed");
+      const leftInvariantRisk = invariantRisk(left);
+      const rightInvariantRisk = invariantRisk(right);
       if (leftInvariantRisk !== rightInvariantRisk) return leftInvariantRisk ? -1 : 1;
       const leftLens = left.lenses.includes(intentLens);
       const rightLens = right.lenses.includes(intentLens);
@@ -237,8 +249,18 @@ export function directInvestigationQuestion(
       return leftDomain - rightDomain
         || SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity]
         || left.id.localeCompare(right.id);
-    })
-    .slice(0, 8)
+    });
+  // The base budget is 8, but a high-severity adverse signal is never traded
+  // away for it. A subject with 12 confirmed adverse findings must not have
+  // four of them silently fall off the packet the Eye reasons over: the whole
+  // point of carrying them across every lens is that ordering cannot hide one.
+  const focusLimit = Math.max(
+    FOCUS_BASE_LIMIT,
+    focusCandidates.filter(invariantRisk).length,
+  );
+  const evidenceFocusOmitted = Math.max(0, focusCandidates.length - focusLimit);
+  const evidenceFocus = focusCandidates
+    .slice(0, focusLimit)
     .map((signal) => ({
       id: signal.id,
       headline: signal.headline,
@@ -312,10 +334,16 @@ export function directInvestigationQuestion(
       counterSignalIds,
     };
   });
+  // A report with no planning context cannot have saved evidence synthesized
+  // out of it. Testing the plan for nullishness was not enough: callers hand
+  // this an EMPTY OBJECT for a report that never stored a plan, which is
+  // truthy, so every pre-spine legacy report claimed saved-evidence synthesis
+  // was possible when nothing was saved. Emptiness has to be semantic.
+  const hasPlanningContext = planTasks.length > 0 || Boolean(snapshot);
   const hasOpenWork = tasks.some((task) => task.state === "planned" || task.state === "partial" || task.state === "unavailable")
     || unresolvedQuestions.length > 0
     || blockedBy.length > 0
-    || (!plan && !snapshot);
+    || !hasPlanningContext;
 
   return {
     intent: route.intent,
@@ -327,6 +355,7 @@ export function directInvestigationQuestion(
     blockedBy,
     unresolvedQuestions,
     evidenceFocus,
+    evidenceFocusOmitted,
     sourceRefs,
     measurementRefs,
     changeConditions,

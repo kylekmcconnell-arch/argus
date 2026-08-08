@@ -351,6 +351,8 @@ function frozenPacket(stored: JsonRecord, requestedVersionId: string) {
     match: string;
     note: string;
   }> = [];
+  /** URLs a frozen artifact admissibility gate refused. Never citable. */
+  const inadmissibleSourceUrls = new Set<string>();
   const addCitation = (input: {
     artifactId?: unknown;
     title?: unknown;
@@ -450,6 +452,11 @@ function frozenPacket(stored: JsonRecord, requestedVersionId: string) {
     const match = text(artifact.match, 80);
     if (!CITABLE_SOURCE_MATCHES.has(match)) {
       const sourceUrl = safeSourceUrl(artifact.sourceUrl);
+      // The same URL can also be retained as an Intelligence Spine source,
+      // which citations unconditionally. Without recording the rejection here,
+      // a lead this gate just refused walks back in through the spine and
+      // becomes eligible for cited_evidence.
+      if (sourceUrl) inadmissibleSourceUrls.add(sourceUrl);
       candidateLeads.push({
         title: text(artifact.title, 500) || "Unverified frozen lead",
         ...(sourceUrl ? { sourceUrl } : {}),
@@ -682,7 +689,12 @@ function frozenPacket(stored: JsonRecord, requestedVersionId: string) {
     attestation: text(versionContext.attestationState, 40),
     subject,
     summary,
-    citations: citations.slice(0, MAX_PACKET_CITATIONS),
+    // A refusal anywhere in the frozen record outranks an admission elsewhere:
+    // if any representation of this URL failed a gate, it stays a visible
+    // candidate lead and cannot back a substantive conclusion.
+    citations: citations
+      .filter((citation) => !inadmissibleSourceUrls.has(citation.sourceUrl))
+      .slice(0, MAX_PACKET_CITATIONS),
     projectAttributions: projectAttributions.slice(0, 30),
     candidateLeads: candidateLeads.slice(0, 30),
     researchPlan,
@@ -724,7 +736,11 @@ function frozenPacket(stored: JsonRecord, requestedVersionId: string) {
   return { packet, allowedSourceUrls };
 }
 
-function parseGroundedAnswer(raw: string, allowedSourceUrls: ReadonlySet<string>): {
+function parseGroundedAnswer(
+  raw: string,
+  allowedSourceUrls: ReadonlySet<string>,
+  packetFacts: { hasProjectAttributions: boolean },
+): {
   answer: string;
   basis: "cited_evidence" | "project_attribution" | "coverage_record" | "not_established";
   citations: string[];
@@ -762,6 +778,11 @@ function parseGroundedAnswer(raw: string, allowedSourceUrls: ReadonlySet<string>
       return !sourceUrl || !allowedSourceUrls.has(sourceUrl);
     })) return null;
     if (basis === "cited_evidence" && citations.length === 0) return null;
+    // project_attribution answers a bounded fact ("the project publicly names
+    // X in this role") and is deliberately allowed to carry no URL, so it was
+    // the one basis a model could assert with nothing behind it. It is valid
+    // only when the packet actually froze an attribution row.
+    if (basis === "project_attribution" && !packetFacts.hasProjectAttributions) return null;
 
     const normalizedBasis = basis as "cited_evidence" | "project_attribution" | "coverage_record" | "not_established";
     return {
@@ -868,7 +889,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .map((block) => typeof block.text === "string" ? block.text : "")
       .join(" ")
       .trim();
-    const grounded = parseGroundedAnswer(rawAnswer, allowedSourceUrls);
+    const grounded = parseGroundedAnswer(rawAnswer, allowedSourceUrls, {
+      hasProjectAttributions: Array.isArray(packet.projectAttributions) && packet.projectAttributions.length > 0,
+    });
     if (!grounded) {
       res.status(200).json({
         available: true,
