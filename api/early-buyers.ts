@@ -11,10 +11,15 @@
 // What it never does is conclude. "17 of 36 early buyers share a funder" is a
 // measurement; "this launch was bundled" is a verdict this route does not emit
 // and its numbers set no score floors. Three honesty rules are structural:
-//   1. A shared EXCHANGE hot wallet is not a shared funder. Thousands of
-//      unrelated people withdraw from the same Binance address, so a funder
-//      matching src/lib/marketAddresses.ts custody is reported as CEX-funded
-//      and never clusters wallets together.
+//   1. Shared MARKET INFRASTRUCTURE is not a shared funder. Thousands of
+//      unrelated people withdraw from the same Binance address, and a pool or
+//      launcher vault pays out to every buyer it serves, so a funder that
+//      src/lib/marketAddresses.ts classifies as a venue of ANY kind is
+//      reported as market-funded and never clusters wallets together. The
+//      classification gets the same RugCheck venue context the recipient side
+//      already uses; what it cannot catch is an unrecognized bridge or relayer
+//      payout wallet, and the published copy says so rather than implying the
+//      exclusion list is complete.
 //   2. A wallet whose history was too deep to page is UNRESOLVED, not
 //      independent: reading a funder off the oldest page reached would
 //      describe the wrong era of the wallet.
@@ -185,8 +190,12 @@ export function readEarlyWindow(
 export interface TracedRecipient extends EarlyRecipient {
   /** Seed funder address, when one was resolved from the wallet's first txs. */
   funder: string | null;
-  /** Exchange label when the funder is known CEX custody. */
-  funderExchange: string | null;
+  /**
+   * Venue label when the funder is market infrastructure of ANY kind: exchange
+   * custody, a liquidity pool, or a launcher/locker vault. All of them pay out
+   * to unrelated wallets, so none of them can seed a cluster.
+   */
+  funderMarketVenue: string | null;
   /** True when the wallet's history was too deep to page: unresolved, never independent. */
   historyTruncated: boolean;
 }
@@ -204,14 +213,14 @@ export interface FunderCluster {
 }
 
 /**
- * Group traced recipients by shared seed funder. A CEX-custody funder never
- * forms a cluster (rule 1 above), an unresolved funder never joins one, and a
- * single-member group is not a cluster.
+ * Group traced recipients by shared seed funder. A market-infrastructure
+ * funder of any kind never forms a cluster (rule 1 above), an unresolved
+ * funder never joins one, and a single-member group is not a cluster.
  */
 export function clusterByFunder(traced: TracedRecipient[]): Array<{ funder: string; members: TracedRecipient[] }> {
   const byFunder = new Map<string, TracedRecipient[]>();
   for (const recipient of traced) {
-    if (!recipient.funder || recipient.funderExchange || recipient.historyTruncated) continue;
+    if (!recipient.funder || recipient.funderMarketVenue || recipient.historyTruncated) continue;
     if (SYSTEM.has(recipient.funder)) continue;
     const group = byFunder.get(recipient.funder) ?? [];
     group.push(recipient);
@@ -232,10 +241,10 @@ export function earlyBuyerNote(input: {
   windowSigCount: number;
   windowTxCount: number;
   tracedCount: number;
-  /** Wallets with a readable, non-exchange seed funder. */
+  /** Wallets with a readable seed funder that is not market infrastructure. */
   resolvedFunderCount: number;
   clusters: FunderCluster[];
-  cexFundedCount: number;
+  marketFundedCount: number;
   /** Wallets whose history was too deep to page back to their funding. */
   busyWalletCount: number;
   sameBlock: Array<{ slot: number; count: number }>;
@@ -256,7 +265,7 @@ export function earlyBuyerNote(input: {
         ? "; the group still holds its early take"
         : `; together the group still holds ${top.stillHeldPct.toFixed(0)}% of its early take, the rest sold or moved on`;
     parts.push(
-      `${top.size} of the ${input.resolvedFunderCount} wallets with a readable non-exchange seed funder received their first SOL from the same wallet`
+      `${top.size} of the ${input.resolvedFunderCount} wallets with a readable seed funder that is not market infrastructure received their first SOL from the same wallet`
       + `${top.funderIsCreator ? ", the token's own creator" : ` (${short(top.funder)})`}${held}.`,
     );
     if (input.clusters.length > 1) {
@@ -264,11 +273,11 @@ export function earlyBuyerNote(input: {
     }
   } else if (input.resolvedFunderCount >= 2) {
     parts.push(
-      `No shared non-exchange seed funder was established among the ${input.resolvedFunderCount} wallets whose funding origin was readable.`,
+      `No shared seed funder outside market infrastructure was established among the ${input.resolvedFunderCount} wallets whose funding origin was readable.`,
     );
   } else if (input.tracedCount > 0) {
     parts.push(
-      `Only ${input.resolvedFunderCount} traced wallet${input.resolvedFunderCount === 1 ? " had a" : "s had"} readable non-exchange seed funder; that is too little coverage to test for a shared source.`,
+      `Only ${input.resolvedFunderCount} traced wallet${input.resolvedFunderCount === 1 ? " had a" : "s had"} readable seed funder that is not market infrastructure; that is too little coverage to test for a shared source.`,
     );
   }
   const biggestBlock = [...input.sameBlock].sort((a, b) => b.count - a.count)[0];
@@ -280,9 +289,9 @@ export function earlyBuyerNote(input: {
       `${input.busyWalletCount} of the traced are high-activity wallets whose first funding lies deeper than this trace pages, so their funding stays unresolved; unresolved is never counted as independent.`,
     );
   }
-  if (input.cexFundedCount > 0) {
+  if (input.marketFundedCount > 0) {
     parts.push(
-      `${input.cexFundedCount} ${input.cexFundedCount === 1 ? "was" : "were"} funded straight from exchange custody wallets; thousands of unrelated people withdraw from those, so a shared exchange is never counted as a shared funder.`,
+      `${input.marketFundedCount} ${input.marketFundedCount === 1 ? "was" : "were"} funded straight from market infrastructure such as exchange custody, a pool, or a launcher vault; those pay out to thousands of unrelated wallets, so they are never counted as a shared funder.`,
     );
   }
   return parts.join(" ");
@@ -394,11 +403,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const funder = !truncated && walletSigs.length
         ? await seedFundingSource(url, recipient.address, walletSigs.slice(0, 4), usage)
         : null;
-      const exchange = funder ? classifyMarketAddress(funder) : null;
+      // The venue context this handler already holds MUST reach the funder
+      // classification. Without it a Meteora or pump.fun vault authority that
+      // paid out to unrelated buyers is indistinguishable from a person, and
+      // the route publishes plumbing as a shared-funder relationship.
+      const venue = funder
+        ? classifyMarketAddress(funder, { knownAccounts, poolAddresses })
+        : null;
       return {
         ...recipient,
         funder,
-        funderExchange: exchange?.kind === "exchange" ? exchange.label : null,
+        funderMarketVenue: venue?.label ?? null,
         historyTruncated: truncated,
       };
     })).filter((r): r is TracedRecipient => r !== null);
@@ -439,15 +454,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .map(([slot, n]) => ({ slot, count: n }))
       .sort((a, b) => b.count - a.count);
 
-    const cexFunded = traced
-      .filter((r) => r.funderExchange)
-      .map((r) => ({ address: r.address, exchange: r.funderExchange as string }));
+    const marketFunded = traced
+      .filter((r) => r.funderMarketVenue)
+      .map((r) => ({ address: r.address, venue: r.funderMarketVenue as string }));
     // Two different kinds of "no funder": a deep-history wallet the trace could
     // not page back through (a professional sniper looks like this), and a
     // wallet whose oldest transactions simply showed no readable funding.
     const busyWallets = traced.filter((r) => r.historyTruncated).length;
-    const unresolvedFunding = traced.filter((r) => !r.funder && !r.funderExchange && !r.historyTruncated).length;
-    const resolvedFunders = traced.filter((r) => r.funder && !r.funderExchange && !r.historyTruncated).length;
+    const unresolvedFunding = traced.filter((r) => !r.funder && !r.funderMarketVenue && !r.historyTruncated).length;
+    const resolvedFunders = traced.filter((r) => r.funder && !r.funderMarketVenue && !r.historyTruncated).length;
 
     res.status(200).json({
       mint,
@@ -464,7 +479,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sameBlock,
       sameTx: windowRead.sameTx,
       clusters,
-      cexFunded,
+      marketFunded,
       busyWallets,
       unresolvedFunding,
       note: earlyBuyerNote({
@@ -475,7 +490,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tracedCount: traced.length,
         resolvedFunderCount: resolvedFunders,
         clusters,
-        cexFundedCount: cexFunded.length,
+        marketFundedCount: marketFunded.length,
         busyWalletCount: busyWallets,
         sameBlock,
       }),

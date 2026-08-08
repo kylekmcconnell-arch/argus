@@ -145,6 +145,48 @@ describe("People Data Labs provider attempt accounting", () => {
     ]);
   });
 
+  it("records a provider outage as unavailable coverage, never as a completed pseudonymous screen", async () => {
+    vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("socket hang up")));
+    const evidence = emptyEvidence("@analytical_engine");
+    const recordCheck = vi.fn();
+
+    const result = await withCostLedger(() => peopledatalabsAdapter.run({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: vi.fn(),
+      recordCheck,
+    }));
+
+    expect(recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "identity-resolution",
+      status: "unavailable",
+      note: expect.stringContaining("not pseudonymous"),
+    }));
+    expect(recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ status: "checked-empty" }));
+    expect(result).toMatchObject({ state: "failed" });
+    expect(evidence.profile.resolved_name).toBeUndefined();
+  });
+
+  it("still records a genuine provider no-match as a completed empty screen", async () => {
+    vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ data: null })));
+    const evidence = emptyEvidence("@analytical_engine");
+    const recordCheck = vi.fn();
+
+    await withCostLedger(() => peopledatalabsAdapter.run({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: vi.fn(),
+      recordCheck,
+    }));
+
+    expect(recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "identity-resolution",
+      status: "checked-empty",
+    }));
+  });
+
   it("stores a licensed resolved name without replacing the X display name", async () => {
     vi.stubEnv("PDL_API_KEY", "pdl-test-key");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({

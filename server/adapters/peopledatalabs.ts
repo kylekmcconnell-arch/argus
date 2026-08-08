@@ -78,7 +78,35 @@ export async function checkLeaderDepartures(
   return out;
 }
 
-export async function enrichPerson(params: { profile?: string; name?: string; company?: string }) {
+type EnrichedPerson = ReturnType<typeof parsePdlPerson>["person"];
+
+/**
+ * A licensed-provider read has three outcomes, and collapsing them loses the
+ * only distinction that matters to the report: "the provider answered and
+ * nobody matched" is evidence, while "the provider never answered" is not.
+ * A transport timeout, an HTTP failure, an unreadable body, or a malformed
+ * record must never be published as a completed empty screen.
+ */
+export type PersonEnrichmentOutcome =
+  | { outcome: "matched"; person: EnrichedPerson }
+  | { outcome: "no_match" }
+  | { outcome: "failed"; reason: string };
+
+/**
+ * Back-compatible view for callers that only act on a successful match and
+ * treat every other outcome the same way (leadership-currency lookups skip
+ * unresolved leaders either way).
+ */
+export async function enrichPerson(
+  params: { profile?: string; name?: string; company?: string },
+): Promise<EnrichedPerson | null> {
+  const result = await enrichPersonOutcome(params);
+  return result.outcome === "matched" ? result.person : null;
+}
+
+export async function enrichPersonOutcome(
+  params: { profile?: string; name?: string; company?: string },
+): Promise<PersonEnrichmentOutcome> {
   // Prefer Monid's full-data PDL: our own direct key is on the free tier, which
   // omits the contact fields (emails/phone) that confirm an identity. Same PDL
   // response schema, so parsePdlPerson is shared. Fall back to the direct key
@@ -91,18 +119,18 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
     // outage never reads as a healthy "no person exists".
     if (result.outcome === "error") {
       recordCall("peopledatalabs", "person-enrich:monid", 0, `monid_${result.note}`, "failed");
-      return null;
+      return { outcome: "failed", reason: `monid_${result.note}` };
     }
     if (result.outcome === "no_match") {
       recordCall("peopledatalabs", "person-enrich:monid", 0, "no_match", "succeeded");
-      return null;
+      return { outcome: "no_match" };
     }
     const { person, issues } = parsePdlPerson(result.record);
     recordCall("peopledatalabs", "person-enrich:monid", 0.3, issues.length ? `incomplete:${[...new Set(issues)].join(",")}` : undefined, issues.length ? "partial" : "succeeded");
-    return person;
+    return { outcome: "matched", person };
   }
   const key = env("PDL_API_KEY");
-  if (!key) return null;
+  if (!key) return { outcome: "failed", reason: "provider_not_configured" };
   const qs = new URLSearchParams();
   if (params.profile) qs.set("profile", params.profile);
   if (params.name) qs.set("name", params.name);
@@ -119,11 +147,11 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
     });
   } catch {
     recordPdlMatch(false, "failed", "transport_error");
-    return null;
+    return { outcome: "failed", reason: "transport_error" };
   }
   if (!res.ok) {
     recordPdlMatch(false, "failed", `http_${res.status}`);
-    return null;
+    return { outcome: "failed", reason: `http_${res.status}` };
   }
 
   let raw: unknown;
@@ -131,22 +159,22 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
     raw = await res.json();
   } catch {
     recordPdlMatch(false, "failed", "response_json_error");
-    return null;
+    return { outcome: "failed", reason: "response_json_error" };
   }
 
   const payload = asRecord(raw);
   if (!payload || !("data" in payload)) {
     recordPdlMatch(false, "partial", "missing_data");
-    return null;
+    return { outcome: "failed", reason: "missing_data" };
   }
   if (payload.data == null) {
     recordPdlMatch(false, "succeeded", "no_match");
-    return null;
+    return { outcome: "no_match" };
   }
   const p = asRecord(payload.data);
   if (!p) {
     recordPdlMatch(false, "partial", "invalid_person_shape");
-    return null;
+    return { outcome: "failed", reason: "invalid_person_shape" };
   }
 
   const { person, issues } = parsePdlPerson(p);
@@ -155,7 +183,7 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
     issues.length ? "partial" : "succeeded",
     issues.length ? `incomplete_result:${[...new Set(issues)].join(",")}` : undefined,
   );
-  return person;
+  return { outcome: "matched", person };
 }
 
 // Parse a raw PDL person record into ARGUS's identity shape. No cost recording:
@@ -271,8 +299,27 @@ export const peopledatalabsAdapter: Adapter = {
     const realName = name && name !== handle ? name : undefined;
     ctx.emit({ phase: "P1 · Identity", label: "Identity resolution", detail: `Enriching ${realName ?? "@" + handle} via the exact audited X profile…`, tone: "neutral" });
 
-    const person = await enrichPerson({ profile: `https://twitter.com/${handle}` });
-    if (!person) {
+    const enrichment = await enrichPersonOutcome({ profile: `https://twitter.com/${handle}` });
+    // A provider that never answered has not screened anybody. Publishing that
+    // as a completed empty read would freeze a transport timeout into the
+    // sentence "no real-world identity record matched".
+    if (enrichment.outcome === "failed") {
+      ctx.recordCheck?.({
+        id: "identity-resolution",
+        status: "unavailable",
+        note: `licensed identity provider did not return a usable answer (${enrichment.reason}); identity remains unresolved, not pseudonymous`,
+        provider: "peopledatalabs",
+      });
+      ctx.emit({
+        phase: "P1 · Identity",
+        label: "Identity provider unavailable",
+        detail: "The licensed identity provider did not answer, so this scan cannot say whether a real-world record exists. This is missing coverage, not a finding that the subject is pseudonymous.",
+        source: "peopledatalabs",
+        tone: "warn",
+      });
+      return { state: "failed", detail: `person enrichment unavailable: ${enrichment.reason}` };
+    }
+    if (enrichment.outcome === "no_match") {
       ctx.recordCheck?.({
         id: "identity-resolution",
         status: "checked-empty",
@@ -282,6 +329,7 @@ export const peopledatalabsAdapter: Adapter = {
       ctx.emit({ phase: "P1 · Identity", label: "No match", detail: "No real-world identity record matched; scored as pseudonymous (no penalty).", source: "peopledatalabs", tone: "neutral" });
       return;
     }
+    const person = enrichment.person;
     if (!person.fullName || !personMatchesAuditedHandle(person, handle)) {
       ctx.recordCheck?.({
         id: "identity-resolution",

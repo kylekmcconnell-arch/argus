@@ -148,6 +148,38 @@ describe("deriveIntelligenceBrief", () => {
     expect(text).not.toContain("unowned");
   });
 
+  it("keeps a high-severity risk at the head of pressures under every lens", () => {
+    // Consumers truncate this list, so a lens that sorts a high-severity risk
+    // below the cut removes a direct concern from the surface the reader
+    // reads. The lens may reorder emphasis; it may never bury this.
+    const value = snapshot();
+    // A lens that prioritizes an unrelated domain and never names the risk.
+    value.lenses = [...value.lenses, {
+      id: "alpha_research",
+      label: "Alpha research",
+      question: "What is the non-obvious edge?",
+      domainPriority: ["track_record", "team"],
+      signalIds: ["support-track-record", "context-leadership"],
+      unresolvedQuestionIds: [],
+      changeConditions: [],
+    }];
+    // Enough lens-favoured pressures to fill a truncated list on their own.
+    for (let index = 0; index < 6; index += 1) {
+      value.signals.push({
+        ...value.signals[1],
+        id: `pressure-track-${index}`,
+        domain: "track_record",
+        severity: "medium",
+        lenses: ["alpha_research"],
+      });
+    }
+
+    for (const lensId of ["investment", "alpha_research"] as const) {
+      const brief = deriveIntelligenceBrief(value, lensId);
+      expect(brief.pressures[0]?.id).toBe("intelligence-signal:pressure-control");
+    }
+  });
+
   it.each([
     "person",
     "individual_investor",

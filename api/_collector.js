@@ -2258,9 +2258,12 @@ function isStrictFrozenFundScaleArtifact(artifact, evidence) {
     profile: evidence.profile
   });
 }
+function fundScaleEvidenceState(artifact) {
+  return artifact.fundScaleBasis === "regulatory" ? "verified" : "reported_context";
+}
 function sourceArtifactState(artifact, evidence) {
   if (portfolioRelationshipBinding(artifact, evidence)) return "verified";
-  if (isStrictFrozenFundScaleArtifact(artifact, evidence)) return "verified";
+  if (isStrictFrozenFundScaleArtifact(artifact, evidence)) return fundScaleEvidenceState(artifact);
   if (artifact.coverageState === "unavailable" || artifact.match === "no_match" || artifact.match === "screened_clear") return "bounded";
   return "reported_context";
 }
@@ -3157,7 +3160,8 @@ function buildMeasurements(evidence) {
     strictFundScaleClaims.set(claimId, [...strictFundScaleClaims.get(claimId) ?? [], row]);
   }
   if (strictFundScaleClaims.size > 0) {
-    addNumber(measurements, strictFundScaleClaims.size, { id: "verified_fund_scale_claim_count", domain: "funding", label: "Strict identity-bound fund-scale claims", unit: "count", entityKey, evidenceState: "verified", sourceRefs: strictFundScaleRows.map(({ index }) => sourceArtifactId(index)) });
+    const everyClaimRegulatory = strictFundScaleRows.every(({ artifact }) => fundScaleEvidenceState(artifact) === "verified");
+    addNumber(measurements, strictFundScaleClaims.size, { id: "verified_fund_scale_claim_count", domain: "funding", label: "Strict identity-bound fund-scale claims", unit: "count", entityKey, evidenceState: everyClaimRegulatory ? "verified" : "reported_context", sourceRefs: strictFundScaleRows.map(({ index }) => sourceArtifactId(index)) });
   }
   [...strictFundScaleClaims.entries()].sort(([left], [right]) => left.localeCompare(right)).forEach(([claimId, rows], claimIndex) => {
     const artifact = rows[0].artifact;
@@ -3168,7 +3172,7 @@ function buildMeasurements(evidence) {
       unit: "usd",
       entityKey,
       window: artifact.fundScaleAsOf ? { kind: "historical", asOf: artifact.capturedAt, end: artifact.fundScaleAsOf } : void 0,
-      evidenceState: "verified",
+      evidenceState: fundScaleEvidenceState(artifact),
       sourceRefs: rows.map(({ index }) => sourceArtifactId(index))
     });
   });
@@ -4261,10 +4265,10 @@ function buildSignals(evidence, measurements, questions) {
       severity: "context",
       polarity: "neutral",
       headline: "A strict identity-bound fund-scale claim is retained",
-      finding: `${artifact.fundName} is reported at ${qualifier} $${artifact.fundSizeUsd.toLocaleString("en-US")} for ${temporal}. Claim ${claimId} describes the named fund or vehicle and is not the audited person's personal capital. Multiple vehicle claims are not summed.`,
+      finding: `${artifact.fundName} is reported at ${qualifier} $${artifact.fundSizeUsd.toLocaleString("en-US")} for ${temporal}. ${artifact.fundScaleBasis === "regulatory" ? "The figure comes from a regulatory filing." : artifact.fundScaleBasis === "press_corroborated" ? "The figure is press reported, not taken from a regulatory filing." : "The figure is reported by the manager, not taken from a regulatory filing."} Claim ${claimId} describes the named fund or vehicle and is not the audited person's personal capital. Multiple vehicle claims are not summed.`,
       whyItMatters: "Separating firm-wide AUM, vehicle closes, qualifiers, and time state makes capital-scale context comparable without inflating deployable capital.",
       changeCondition: "Update when the controlling fund, regulatory, manager, or independently corroborated source publishes a newer metric with the same identity and temporal gates.",
-      evidenceState: "verified",
+      evidenceState: fundScaleEvidenceState(artifact),
       measurementRefs: [`verified_fund_scale_usd:${String(claimIndex + 1).padStart(2, "0")}`],
       sourceRefs: rows.map(({ index }) => sourceArtifactId(index)),
       lenses: ["investment", "general_diligence"]
@@ -10524,6 +10528,7 @@ function personChecks(opts) {
 }
 
 // server/checks.ts
+var PERSON_ROLES = ["FOUNDER", "KOL", "ADVISOR", "MEMBER"];
 var CHECKS = [
   {
     id: "identity-resolution",
@@ -10833,6 +10838,7 @@ var PersonCheckTracker = class {
     const heldRoles = new Set(roles);
     const projectOnly = heldRoles.size === 1 && heldRoles.has("PROJECT");
     const organizationSubject = heldRoles.has("PROJECT") || scope.organizationSubject === true;
+    const carriesPersonRole = PERSON_ROLES.some((role) => heldRoles.has(role));
     return CHECKS.map((definition) => {
       const founderLegalSupersedesNameScreen = definition.id === "us-legal-history" && heldRoles.has("FOUNDER");
       const decisionCritical = !founderLegalSupersedesNameScreen && Boolean(
@@ -10862,7 +10868,7 @@ var PersonCheckTracker = class {
           decisionCritical: false
         });
       }
-      if (definition.requiresPersonSubject && organizationSubject) {
+      if (definition.requiresPersonSubject && organizationSubject && !carriesPersonRole) {
         return Object.freeze({
           checkId: definition.id,
           label: definition.label,
@@ -15209,22 +15215,26 @@ async function checkLeaderDepartures(team, company, enrich = enrichPerson) {
   return out;
 }
 async function enrichPerson(params) {
+  const result = await enrichPersonOutcome(params);
+  return result.outcome === "matched" ? result.person : null;
+}
+async function enrichPersonOutcome(params) {
   if (env("MONID_API_KEY")) {
     const result = await enrichPersonViaMonid(params);
     if (result.outcome === "error") {
       recordCall("peopledatalabs", "person-enrich:monid", 0, `monid_${result.note}`, "failed");
-      return null;
+      return { outcome: "failed", reason: `monid_${result.note}` };
     }
     if (result.outcome === "no_match") {
       recordCall("peopledatalabs", "person-enrich:monid", 0, "no_match", "succeeded");
-      return null;
+      return { outcome: "no_match" };
     }
     const { person: person2, issues: issues2 } = parsePdlPerson(result.record);
     recordCall("peopledatalabs", "person-enrich:monid", 0.3, issues2.length ? `incomplete:${[...new Set(issues2)].join(",")}` : void 0, issues2.length ? "partial" : "succeeded");
-    return person2;
+    return { outcome: "matched", person: person2 };
   }
   const key = env("PDL_API_KEY");
-  if (!key) return null;
+  if (!key) return { outcome: "failed", reason: "provider_not_configured" };
   const qs = new URLSearchParams();
   if (params.profile) qs.set("profile", params.profile);
   if (params.name) qs.set("name", params.name);
@@ -15238,32 +15248,32 @@ async function enrichPerson(params) {
     });
   } catch {
     recordPdlMatch(false, "failed", "transport_error");
-    return null;
+    return { outcome: "failed", reason: "transport_error" };
   }
   if (!res.ok) {
     recordPdlMatch(false, "failed", `http_${res.status}`);
-    return null;
+    return { outcome: "failed", reason: `http_${res.status}` };
   }
   let raw;
   try {
     raw = await res.json();
   } catch {
     recordPdlMatch(false, "failed", "response_json_error");
-    return null;
+    return { outcome: "failed", reason: "response_json_error" };
   }
   const payload = asRecord3(raw);
   if (!payload || !("data" in payload)) {
     recordPdlMatch(false, "partial", "missing_data");
-    return null;
+    return { outcome: "failed", reason: "missing_data" };
   }
   if (payload.data == null) {
     recordPdlMatch(false, "succeeded", "no_match");
-    return null;
+    return { outcome: "no_match" };
   }
   const p = asRecord3(payload.data);
   if (!p) {
     recordPdlMatch(false, "partial", "invalid_person_shape");
-    return null;
+    return { outcome: "failed", reason: "invalid_person_shape" };
   }
   const { person, issues } = parsePdlPerson(p);
   recordPdlMatch(
@@ -15271,7 +15281,7 @@ async function enrichPerson(params) {
     issues.length ? "partial" : "succeeded",
     issues.length ? `incomplete_result:${[...new Set(issues)].join(",")}` : void 0
   );
-  return person;
+  return { outcome: "matched", person };
 }
 function parsePdlPerson(p) {
   const issues = [];
@@ -15369,8 +15379,24 @@ var peopledatalabsAdapter = {
     const name = ctx.evidence.profile.display_name;
     const realName = name && name !== handle ? name : void 0;
     ctx.emit({ phase: "P1 \xB7 Identity", label: "Identity resolution", detail: `Enriching ${realName ?? "@" + handle} via the exact audited X profile\u2026`, tone: "neutral" });
-    const person = await enrichPerson({ profile: `https://twitter.com/${handle}` });
-    if (!person) {
+    const enrichment = await enrichPersonOutcome({ profile: `https://twitter.com/${handle}` });
+    if (enrichment.outcome === "failed") {
+      ctx.recordCheck?.({
+        id: "identity-resolution",
+        status: "unavailable",
+        note: `licensed identity provider did not return a usable answer (${enrichment.reason}); identity remains unresolved, not pseudonymous`,
+        provider: "peopledatalabs"
+      });
+      ctx.emit({
+        phase: "P1 \xB7 Identity",
+        label: "Identity provider unavailable",
+        detail: "The licensed identity provider did not answer, so this scan cannot say whether a real-world record exists. This is missing coverage, not a finding that the subject is pseudonymous.",
+        source: "peopledatalabs",
+        tone: "warn"
+      });
+      return { state: "failed", detail: `person enrichment unavailable: ${enrichment.reason}` };
+    }
+    if (enrichment.outcome === "no_match") {
       ctx.recordCheck?.({
         id: "identity-resolution",
         status: "checked-empty",
@@ -15380,6 +15406,7 @@ var peopledatalabsAdapter = {
       ctx.emit({ phase: "P1 \xB7 Identity", label: "No match", detail: "No real-world identity record matched; scored as pseudonymous (no penalty).", source: "peopledatalabs", tone: "neutral" });
       return;
     }
+    const person = enrichment.person;
     if (!person.fullName || !personMatchesAuditedHandle(person, handle)) {
       ctx.recordCheck?.({
         id: "identity-resolution",
@@ -32801,7 +32828,11 @@ async function runTokenAudit(input, emit, opts) {
   const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
   const concentrationTopPct = topWalletPct ?? s.topHolderPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
-  const bundleCount = holdersReliable ? eoaHolders.filter((h) => Number(h.percent) * 100 >= 1).length : 0;
+  const materialWalletPcts = holdersReliable ? eoaHolders.map((h) => Number(h.percent) * 100).filter((pct) => Number.isFinite(pct) && pct >= 1).sort((a, b) => b - a) : [];
+  const bundleCount = materialWalletPcts.length;
+  const topThreeMaterialPct = Math.round(
+    materialWalletPcts.slice(0, 3).reduce((total2, pct) => total2 + pct, 0)
+  );
   const bundleRisk = !holdersReliable ? "low" : insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
   if (s.available && bundleRisk !== "low") {
     findings.push({
@@ -32814,7 +32845,7 @@ async function runTokenAudit(input, emit, opts) {
     if (topWalletPct >= 50) caps.push([39, "single_wallet_majority_supply"]);
     else if (topWalletPct >= 25) caps.push([69, "single_wallet_concentration"]);
   }
-  if (holdersReliable && bundleCount > 0 && bundleCount <= 3 && insiderPct >= 60) {
+  if (holdersReliable && topThreeMaterialPct >= 60) {
     caps.push([69, "few_wallet_concentration"]);
   }
   if (marketRows.length) {

@@ -2652,8 +2652,57 @@ describe("buildPointInTimeIntelligence", () => {
     expect(relationship).toMatchObject({ polarity: "neutral", evidenceState: "verified" });
     expect(relationship?.finding).toContain("does not establish endorsement");
     expect(snapshot.signals.find((signal) => signal.id === "confirmed_portfolio_relationship:002")).toBeUndefined();
-    expect(fundScale).toMatchObject({ polarity: "neutral", evidenceState: "verified" });
+    // A manager-reported close on the fund's own domain is identity-bound but
+    // self-published, so it stays attributed context here exactly as it does
+    // in the entity builder. The two must never tier the same artifact
+    // differently.
+    expect(fundScale).toMatchObject({ polarity: "neutral", evidenceState: "reported_context" });
     expect(fundScale?.finding).toContain("not the audited person's personal capital");
+    expect(fundScale?.finding).toContain("reported by the manager");
+    expect(snapshot.measurements.find((row) => row.id === "verified_fund_scale_usd:01"))
+      .toMatchObject({ value: 125_000_000, evidenceState: "reported_context" });
+    expect(snapshot.measurements.find((row) => row.id === "verified_fund_scale_claim_count"))
+      .toMatchObject({ evidenceState: "reported_context" });
+  });
+
+  it("reaches the verified tier for a fund-scale claim resting on a regulatory filing", () => {
+    const evidence = projectEvidence();
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = CAPTURED_AT;
+    evidence.profile.website = "https://fund.example/";
+    evidence.profile.display_name = "Argus Fixture";
+    evidence.sourceArtifacts = [{
+      kind: "fund_scale",
+      provider: "fund-scale-web",
+      title: "Adviser regulatory AUM",
+      sourceUrl: "https://adviserinfo.sec.gov/firm/summary/123456",
+      capturedAt: CAPTURED_AT,
+      contentHash: "7".repeat(64),
+      sourceContentHash: "8".repeat(64),
+      excerpt: "Argus Fixture reports regulatory assets under management of $125 million.",
+      match: "fund_scale_confirmed",
+      sourceClass: "public_primary",
+      attribution: "direct_subject",
+      subjectName: "Argus Fixture",
+      subjectHandle: "@argusfixture",
+      investorEntityName: "Argus Fixture",
+      investorEntityDomain: "fund.example",
+      fundName: "Argus Fixture",
+      fundSizeUsd: 125_000_000,
+      fundVehicle: "Fund I",
+      fundScaleMetric: "regulatory_aum",
+      fundAmountQualifier: "exact",
+      fundScaleBasis: "regulatory",
+      fundScaleTemporalState: "current",
+      fundScaleAsOf: CAPTURED_AT,
+      fundScaleSourceCount: 1,
+      fundScaleClaimId: "fund-i-final-close",
+    }];
+
+    const snapshot = buildPointInTimeIntelligence(evidence)!;
+    expect(snapshot.signals.find((signal) => signal.id === "verified_fund_scale:01"))
+      .toMatchObject({ evidenceState: "verified" });
     expect(snapshot.measurements.find((row) => row.id === "verified_fund_scale_usd:01"))
       .toMatchObject({ value: 125_000_000, evidenceState: "verified" });
   });

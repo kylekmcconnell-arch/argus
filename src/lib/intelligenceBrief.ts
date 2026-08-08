@@ -107,6 +107,14 @@ export function deriveIntelligenceBrief(
   const orderedSignals = [...snapshot.signals]
     .filter((signal) => signal.kind !== "coverage_gap")
     .sort((left, right) => {
+      // Severity outranks lens relevance for HIGH severity, and only for it.
+      // A lens is meant to change emphasis, but every consumer of this brief
+      // truncates its list, so letting a lens sort a high-severity risk below
+      // the cut is how switching lens makes a direct concern vanish from the
+      // surface a reader actually reads. Lower bands keep full lens ordering.
+      const leftHigh = left.severity === "high" ? 0 : 1;
+      const rightHigh = right.severity === "high" ? 0 : 1;
+      if (leftHigh !== rightHigh) return leftHigh - rightHigh;
       const leftExplicit = explicitSignalRank.get(left.id);
       const rightExplicit = explicitSignalRank.get(right.id);
       if (leftExplicit != null || rightExplicit != null) {

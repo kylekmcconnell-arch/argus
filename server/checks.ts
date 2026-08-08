@@ -56,6 +56,11 @@ interface CheckDefinition {
   requiresOrganizationSubject?: boolean;
 }
 
+// Roles that necessarily describe a natural person. INVESTOR and AGENCY are
+// deliberately absent: both can also describe a firm, which is why their
+// callers pass an evidence-derived organizationSubject flag instead.
+const PERSON_ROLES = ["FOUNDER", "KOL", "ADVISOR", "MEMBER"] as const;
+
 export interface PersonCheckScope {
   resolvedRealName?: boolean;
   /**
@@ -427,6 +432,14 @@ export class PersonCheckTracker {
     // INVESTOR and AGENCY remain ambiguous methodologies, so their callers
     // must pass the organization classification derived from frozen evidence.
     const organizationSubject = heldRoles.has("PROJECT") || scope.organizationSubject === true;
+    // An organization-scoped account can still carry a natural person: a
+    // founder's personal brand account routes PROJECT and FOUNDER together.
+    // The person-name screens are inapplicable only when there is nobody
+    // behind the subject to screen, so a held person role keeps them armed.
+    // Without this the OFAC name gate silently leaves the applicable set for
+    // exactly the mixed accounts that most need it, and the organization
+    // replacement gate does not arm outside INVESTOR/AGENCY.
+    const carriesPersonRole = PERSON_ROLES.some((role) => heldRoles.has(role));
     return CHECKS.map((definition) => {
       // Founder diligence already owns the stricter, attribution-verified
       // legal/regulatory question. A secondary MEMBER classification must not
@@ -460,7 +473,7 @@ export class PersonCheckTracker {
           decisionCritical: false,
         });
       }
-      if (definition.requiresPersonSubject && organizationSubject) {
+      if (definition.requiresPersonSubject && organizationSubject && !carriesPersonRole) {
         return Object.freeze({
           checkId: definition.id,
           label: definition.label,

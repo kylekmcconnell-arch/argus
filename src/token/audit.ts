@@ -918,7 +918,22 @@ async function runTokenAudit(
   const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
   const concentrationTopPct = topWalletPct ?? s.topHolderPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
-  const bundleCount = holdersReliable ? eoaHolders.filter((h) => Number(h.percent) * 100 >= 1).length : 0;
+  // Material wallets, largest first. The register's own order is not trusted
+  // for arithmetic, so the few-wallet ceiling sorts before it sums.
+  const materialWalletPcts = holdersReliable
+    ? eoaHolders
+      .map((h) => Number(h.percent) * 100)
+      .filter((pct) => Number.isFinite(pct) && pct >= 1)
+      .sort((a, b) => b - a)
+    : [];
+  const bundleCount = materialWalletPcts.length;
+  // The ceiling asks what the three largest material wallets hold BETWEEN
+  // them, not how many material wallets exist. Counting them instead let a
+  // 61%-across-three-wallets token escape the cap on a fourth 1% wallet, and
+  // fired the cap on three 17% wallets whose sub-1% dust reached 60%.
+  const topThreeMaterialPct = Math.round(
+    materialWalletPcts.slice(0, 3).reduce((total, pct) => total + pct, 0),
+  );
   const bundleRisk: "low" | "elevated" | "high" =
     !holdersReliable ? "low" : insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
   if (s.available && bundleRisk !== "low") {
@@ -938,7 +953,7 @@ async function runTokenAudit(
     if (topWalletPct >= 50) caps.push([39, "single_wallet_majority_supply"]);
     else if (topWalletPct >= 25) caps.push([69, "single_wallet_concentration"]);
   }
-  if (holdersReliable && bundleCount > 0 && bundleCount <= 3 && insiderPct >= 60) {
+  if (holdersReliable && topThreeMaterialPct >= 60) {
     caps.push([69, "few_wallet_concentration"]);
   }
   // Name what was excluded and why. A reader comparing ARGUS to an explorer

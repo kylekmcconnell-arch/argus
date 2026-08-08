@@ -68,6 +68,9 @@ export function describeWalletClusterTrace(input: {
         + `The largest links ${top.size} wallets whose reported balances sum to ${top.combinedPct.toFixed(1)}% of supply via ${link}`
         + `${top.includesCreator ? ", including the token creator's wallet" : ""}. `
         + "This establishes an on-chain relationship, not that one person owns or controls every wallet."
+        + (top.sharedFunders.length > 0
+          ? " Known exchange custody, pools and launcher vaults are excluded from this reading, but an unrecognized bridge or relayer payout wallet would look the same as a shared funder, so confirm the funder before treating the group as coordinated."
+          : "")
         + coverageSentence,
     };
   }

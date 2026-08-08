@@ -119,3 +119,27 @@ export function classifyMarketAddress(
   }
   return null;
 }
+
+/**
+ * Whether a seed funder can establish a relationship between the wallets it
+ * funded.
+ *
+ * EVERY kind of market infrastructure fails this, not just exchanges. A
+ * pump.fun or Meteora vault authority pays out to unrelated buyers exactly as
+ * a custody wallet does, so treating "shared funder" as a relationship there
+ * manufactures a coordination lead out of plumbing. Callers must pass the
+ * venue context they already hold; without it only the static address maps
+ * can fire and a labelled pool will walk straight through.
+ *
+ * This cannot catch an UNRECOGNIZED relayer or bridge payout wallet. That
+ * residual is disclosed in the published cluster copy rather than silently
+ * assumed away.
+ */
+export function canSeedFunderCluster(
+  address: string | undefined,
+  context: Parameters<typeof classifyMarketAddress>[1] = {},
+): boolean {
+  const value = String(address ?? "").trim();
+  if (!value) return false;
+  return classifyMarketAddress(value, context) === null;
+}

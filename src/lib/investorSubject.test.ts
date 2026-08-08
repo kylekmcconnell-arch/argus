@@ -6,7 +6,7 @@ const subject = (overrides: Partial<{ handle: string; display_name: string; reso
   roles: [SubjectClass.INVESTOR],
   profile: {
     handle: "@theformsvc",
-    display_name: "TheForms — Your Partner",
+    display_name: "TheForms Ventures",
     bio: "We back founders building infrastructure for what comes next.",
     ...overrides,
   },

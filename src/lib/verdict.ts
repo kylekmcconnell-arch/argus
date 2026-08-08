@@ -107,6 +107,11 @@ export const CAP_LABELS: Record<string, string> = {
   recent_critical_protocol_loss_without_recorded_recovery: "Critical protocol loss with no recorded full recovery",
   deception_confirmed: "Confirmed deception finding",
   investigator_verified_fraud: "Investigator-verified fraud",
+  // Holder concentration ceilings. These describe how much supply sits with
+  // wallets that can move it alone, and never claim the wallets are related.
+  single_wallet_majority_supply: "One wallet holds a majority of supply",
+  single_wallet_concentration: "One wallet holds a large share of supply",
+  few_wallet_concentration: "A few wallets hold most of the supply",
 };
 
 export function axisLabel(k: string): string {

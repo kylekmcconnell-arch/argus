@@ -39,7 +39,7 @@ function payload(overrides: Record<string, unknown> = {}) {
       remainingTotalUi: 180,
       stillHeldPct: 12,
     }],
-    cexFunded: [{ address: W2, exchange: "Binance" }],
+    marketFunded: [{ address: W2, venue: "Binance" }],
     unresolvedFunding: 0,
     note: "36 wallets took supply in the token's first 100 transactions. 2 of the 36 traced received their first SOL from the same wallet.",
     ...overrides,

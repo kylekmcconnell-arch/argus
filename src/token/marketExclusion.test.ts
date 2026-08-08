@@ -124,6 +124,67 @@ describe("market infrastructure is not a holder", () => {
     expect(dossier!.axes.find((axis) => axis.key === "T4")?.rationale).not.toContain("fresh wallets");
   });
 
+  it("caps three wallets holding 61 percent even when a fourth material wallet exists", async () => {
+    // The ceiling asks what the three largest material wallets hold BETWEEN
+    // them. Gating on the COUNT of material wallets instead let a fourth
+    // 1.2% wallet lift the gate off a token where three wallets controlled
+    // 61% of supply, and no single wallet reached the 25% single-wallet cap.
+    stubNetwork({
+      goplusSol: {
+        code: 1,
+        result: {
+          [MINT]: {
+            ...goplusSolanaBody.result[MINT],
+            holder_count: "137301",
+            holders: [
+              { account: "WalletAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", percent: "0.24", is_contract: 0 },
+              { account: "WalletBXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", percent: "0.22", is_contract: 0 },
+              { account: "WalletCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", percent: "0.15", is_contract: 0 },
+              { account: "WalletDXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", percent: "0.012", is_contract: 0 },
+            ],
+          },
+        },
+      },
+    });
+
+    const dossier = await auditToken({ kind: "token", ref: MINT, via: "solana" }, undefined, { skipSim: true, force: true });
+
+    expect(dossier!.verdict).not.toBe("PASS");
+    expect(dossier!.score).toBeLessThanOrEqual(69);
+    expect(dossier!.capApplied).toBe("few_wallet_concentration");
+  });
+
+  it("does not fire the few-wallet ceiling on dust that merely sums past 60 percent", async () => {
+    // Three material wallets hold 51% between them. The old condition summed
+    // the top FIFTEEN non-market wallets, so sub-1% dust could push an
+    // otherwise unremarkable distribution over the 60% ceiling.
+    stubNetwork({
+      goplusSol: {
+        code: 1,
+        result: {
+          [MINT]: {
+            ...goplusSolanaBody.result[MINT],
+            holder_count: "137301",
+            holders: [
+              { account: "WalletAXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", percent: "0.17", is_contract: 0 },
+              { account: "WalletBXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", percent: "0.17", is_contract: 0 },
+              { account: "WalletCXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", percent: "0.17", is_contract: 0 },
+              ...Array.from({ length: 12 }, (_, index) => ({
+                account: `DustWallet${String(index).padStart(2, "0")}XXXXXXXXXXXXXXXXXXXXXXXX`,
+                percent: "0.0075",
+                is_contract: 0,
+              })),
+            ],
+          },
+        },
+      },
+    });
+
+    const dossier = await auditToken({ kind: "token", ref: MINT, via: "solana" }, undefined, { skipSim: true, force: true });
+
+    expect(dossier!.capApplied).not.toBe("few_wallet_concentration");
+  });
+
   it("discards an impossible LP share instead of publishing it", async () => {
     // The real WIF payload: GoPlus returned percent "255324.3541", which ARGUS
     // published as "1 wallet 25532435%" about a top-100 token.

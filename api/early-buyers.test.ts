@@ -35,7 +35,7 @@ const traced = (overrides: Partial<TracedRecipient> & { address: string }): Trac
   receivedUi: 1000,
   paidInFirstTx: true,
   funder: null,
-  funderExchange: null,
+  funderMarketVenue: null,
   historyTruncated: false,
   ...overrides,
 });
@@ -155,8 +155,21 @@ describe("clustering by shared funder", () => {
     // Both wallets withdrew from the same Binance address. That is custody,
     // not coordination: thousands of unrelated users share that funder.
     const clusters = clusterByFunder([
-      traced({ address: wallet(1), funder: BINANCE, funderExchange: "Binance" }),
-      traced({ address: wallet(2), funder: BINANCE, funderExchange: "Binance" }),
+      traced({ address: wallet(1), funder: BINANCE, funderMarketVenue: "Binance" }),
+      traced({ address: wallet(2), funder: BINANCE, funderMarketVenue: "Binance" }),
+    ]);
+
+    expect(clusters).toEqual([]);
+  });
+
+  it("never counts a shared pool or launcher vault as a shared funder", () => {
+    // A Meteora or pump.fun vault authority pays SOL out to every buyer it
+    // serves. Excluding only exchange-kind funders let this shape publish as
+    // a coordination lead built entirely on market plumbing.
+    const clusters = clusterByFunder([
+      traced({ address: wallet(1), funder: funder(9), funderMarketVenue: "liquidity pool" }),
+      traced({ address: wallet(2), funder: funder(9), funderMarketVenue: "liquidity pool" }),
+      traced({ address: wallet(3), funder: funder(9), funderMarketVenue: "locked vault" }),
     ]);
 
     expect(clusters).toEqual([]);
@@ -203,12 +216,12 @@ describe("the note reports shape, floors and the exchange rule, never a verdict"
       tracedCount: 36,
       resolvedFunderCount: 36,
       clusters: [cluster()],
-      cexFundedCount: 0,
+      marketFundedCount: 0,
       busyWalletCount: 0,
       sameBlock: [{ slot: 123, count: 9 }],
     });
 
-    expect(note).toContain("17 of the 36 wallets with a readable non-exchange seed funder");
+    expect(note).toContain("17 of the 36 wallets with a readable seed funder that is not market infrastructure");
     expect(note).toContain("still holds 12%");
     expect(note).toContain(", the rest sold or moved on");
     expect(note).toContain("together the group still holds");
@@ -225,7 +238,7 @@ describe("the note reports shape, floors and the exchange rule, never a verdict"
       tracedCount: 10,
       resolvedFunderCount: 10,
       clusters: [cluster({ funderIsCreator: true, size: 4, stillHeldPct: null })],
-      cexFundedCount: 0,
+      marketFundedCount: 0,
       busyWalletCount: 0,
       sameBlock: [],
     });
@@ -244,20 +257,20 @@ describe("the note reports shape, floors and the exchange rule, never a verdict"
       tracedCount: 30,
       resolvedFunderCount: 10,
       clusters: [],
-      cexFundedCount: 1,
+      marketFundedCount: 1,
       busyWalletCount: 19,
       sameBlock: [],
     });
 
     expect(note).toContain("a floor");
-    expect(note).toContain("No shared non-exchange seed funder was established among the 10 wallets whose funding origin was readable.");
+    expect(note).toContain("No shared seed funder outside market infrastructure was established among the 10 wallets whose funding origin was readable.");
     expect(note).not.toContain("No two of the 30 traced wallets share a funding source.");
     expect(note).toContain("never counted as a shared funder");
     // A deep-history sniper wallet is unresolved, never independent, and one
     // exchange-funded wallet gets the singular verb.
     expect(note).toContain("19 of the traced are high-activity wallets");
     expect(note).toContain("unresolved is never counted as independent");
-    expect(note).toContain("1 was funded straight from exchange custody");
+    expect(note).toContain("1 was funded straight from market infrastructure");
   });
 
   it("does not publish unreadable funding as a negative result", () => {
@@ -269,7 +282,7 @@ describe("the note reports shape, floors and the exchange rule, never a verdict"
       tracedCount: 20,
       resolvedFunderCount: 1,
       clusters: [],
-      cexFundedCount: 0,
+      marketFundedCount: 0,
       busyWalletCount: 19,
       sameBlock: [],
     });

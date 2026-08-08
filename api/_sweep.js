@@ -1569,7 +1569,11 @@ async function runTokenAudit(input, emit, opts) {
   const topWalletPct = eoaHolders.length ? Number(eoaHolders[0].percent) * 100 : null;
   const concentrationTopPct = topWalletPct ?? s.topHolderPct;
   const insiderPct = holdersReliable ? Math.round(topSum) : 0;
-  const bundleCount = holdersReliable ? eoaHolders.filter((h) => Number(h.percent) * 100 >= 1).length : 0;
+  const materialWalletPcts = holdersReliable ? eoaHolders.map((h) => Number(h.percent) * 100).filter((pct) => Number.isFinite(pct) && pct >= 1).sort((a, b) => b - a) : [];
+  const bundleCount = materialWalletPcts.length;
+  const topThreeMaterialPct = Math.round(
+    materialWalletPcts.slice(0, 3).reduce((total2, pct) => total2 + pct, 0)
+  );
   const bundleRisk = !holdersReliable ? "low" : insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
   if (s.available && bundleRisk !== "low") {
     findings.push({
@@ -1582,7 +1586,7 @@ async function runTokenAudit(input, emit, opts) {
     if (topWalletPct >= 50) caps.push([39, "single_wallet_majority_supply"]);
     else if (topWalletPct >= 25) caps.push([69, "single_wallet_concentration"]);
   }
-  if (holdersReliable && bundleCount > 0 && bundleCount <= 3 && insiderPct >= 60) {
+  if (holdersReliable && topThreeMaterialPct >= 60) {
     caps.push([69, "few_wallet_concentration"]);
   }
   if (marketRows.length) {

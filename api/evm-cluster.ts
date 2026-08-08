@@ -10,6 +10,7 @@
 //
 // EVM only. Gated on ETHERSCAN_API_KEY (GoPlus is keyless). Bounded + graceful.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { canSeedFunderCluster } from "../src/lib/marketAddresses.js";
 import { describeWalletClusterTrace, type WalletClusterCoverage } from "../src/lib/walletClusterTruth.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
@@ -241,9 +242,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dsu = new DSU();
     for (const w of set) dsu.find(w);
     const links: { a: string; b: string; type: "co-funded" | "transfer"; via?: string }[] = [];
+    // The route's local SKIP list is narrower than the shared custody map, so
+    // the funder is tested against both. Neither can recognize an arbitrary
+    // bridge or relayer payout wallet; the published copy carries that limit.
     const byFunder = new Map<string, string[]>();
     for (const p of profiles) {
       if (!p.funder || SKIP.has(p.funder)) continue;
+      if (!canSeedFunderCluster(p.funder)) continue;
       (byFunder.get(p.funder) ?? byFunder.set(p.funder, []).get(p.funder)!).push(p.wallet);
     }
     for (const [funder, ws] of byFunder) {

@@ -51,7 +51,7 @@ interface EarlyBuyerPayload {
   sameBlock?: Array<{ slot: number; count: number }>;
   sameTx?: Array<{ signature: string; count: number }>;
   clusters?: Cluster[];
-  cexFunded?: Array<{ address: string; exchange: string }>;
+  marketFunded?: Array<{ address: string; venue: string }>;
   unresolvedFunding?: number;
   note?: string | null;
 }
@@ -116,7 +116,7 @@ export function EarlyBuyerFunding({ chain, mint, onStatusChange }: { chain?: str
   }
 
   const clusters = data.clusters ?? [];
-  const cexFunded = data.cexFunded ?? [];
+  const marketFunded = data.marketFunded ?? [];
 
   return (
     <section className="panel p-4">
@@ -158,11 +158,11 @@ export function EarlyBuyerFunding({ chain, mint, onStatusChange }: { chain?: str
         </div>
       ))}
 
-      {cexFunded.length > 0 && (
+      {marketFunded.length > 0 && (
         <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
-          Funded from exchange custody and therefore never clustered:{" "}
-          {cexFunded.slice(0, 6).map((entry) => `${shortAddr(entry.address)} (${entry.exchange})`).join(", ")}
-          {cexFunded.length > 6 ? ` and ${cexFunded.length - 6} more` : ""}.
+          Funded from market infrastructure and therefore never clustered:{" "}
+          {marketFunded.slice(0, 6).map((entry) => `${shortAddr(entry.address)} (${entry.venue})`).join(", ")}
+          {marketFunded.length > 6 ? ` and ${marketFunded.length - 6} more` : ""}.
         </p>
       )}
 

@@ -635,12 +635,24 @@ function isStrictFrozenFundScaleArtifact(
     });
 }
 
+// A strict fund-scale artifact is identity-bound and time-bound, but neither
+// gate says anything about WHO published the amount. Only a regulatory basis
+// is independent of the subject; a manager-reported figure sitting on the
+// fund's own domain stays attributed context. The entity builder already
+// treats the identical artifact this way, and the two must not assign the
+// same record opposite epistemic tiers.
+function fundScaleEvidenceState(
+  artifact: Readonly<FrozenSourceArtifact>,
+): IntelligenceSourceRef["evidenceState"] {
+  return artifact.fundScaleBasis === "regulatory" ? "verified" : "reported_context";
+}
+
 function sourceArtifactState(
   artifact: Readonly<FrozenSourceArtifact>,
   evidence: Readonly<CollectedEvidence>,
 ): IntelligenceSourceRef["evidenceState"] {
   if (portfolioRelationshipBinding(artifact, evidence)) return "verified";
-  if (isStrictFrozenFundScaleArtifact(artifact, evidence)) return "verified";
+  if (isStrictFrozenFundScaleArtifact(artifact, evidence)) return fundScaleEvidenceState(artifact);
   if (artifact.coverageState === "unavailable" || artifact.match === "no_match" || artifact.match === "screened_clear") return "bounded";
   return "reported_context";
 }
@@ -1789,7 +1801,11 @@ function buildMeasurements(evidence: Readonly<CollectedEvidence>): IntelligenceM
     strictFundScaleClaims.set(claimId, [...(strictFundScaleClaims.get(claimId) ?? []), row]);
   }
   if (strictFundScaleClaims.size > 0) {
-    addNumber(measurements, strictFundScaleClaims.size, { id: "verified_fund_scale_claim_count", domain: "funding", label: "Strict identity-bound fund-scale claims", unit: "count", entityKey, evidenceState: "verified", sourceRefs: strictFundScaleRows.map(({ index }) => sourceArtifactId(index)) });
+    // The count only reaches the verified tier when every claim behind it is
+    // regulatory; one manager-reported claim keeps the aggregate attributed.
+    const everyClaimRegulatory = strictFundScaleRows
+      .every(({ artifact }) => fundScaleEvidenceState(artifact) === "verified");
+    addNumber(measurements, strictFundScaleClaims.size, { id: "verified_fund_scale_claim_count", domain: "funding", label: "Strict identity-bound fund-scale claims", unit: "count", entityKey, evidenceState: everyClaimRegulatory ? "verified" : "reported_context", sourceRefs: strictFundScaleRows.map(({ index }) => sourceArtifactId(index)) });
   }
   [...strictFundScaleClaims.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
@@ -1802,7 +1818,7 @@ function buildMeasurements(evidence: Readonly<CollectedEvidence>): IntelligenceM
         unit: "usd",
         entityKey,
         window: artifact.fundScaleAsOf ? { kind: "historical", asOf: artifact.capturedAt, end: artifact.fundScaleAsOf } : undefined,
-        evidenceState: "verified",
+        evidenceState: fundScaleEvidenceState(artifact),
         sourceRefs: rows.map(({ index }) => sourceArtifactId(index)),
       });
     });
@@ -3072,10 +3088,10 @@ function buildSignals(
         severity: "context",
         polarity: "neutral",
         headline: "A strict identity-bound fund-scale claim is retained",
-        finding: `${artifact.fundName} is reported at ${qualifier} $${artifact.fundSizeUsd!.toLocaleString("en-US")} for ${temporal}. Claim ${claimId} describes the named fund or vehicle and is not the audited person's personal capital. Multiple vehicle claims are not summed.`,
+        finding: `${artifact.fundName} is reported at ${qualifier} $${artifact.fundSizeUsd!.toLocaleString("en-US")} for ${temporal}. ${artifact.fundScaleBasis === "regulatory" ? "The figure comes from a regulatory filing." : artifact.fundScaleBasis === "press_corroborated" ? "The figure is press reported, not taken from a regulatory filing." : "The figure is reported by the manager, not taken from a regulatory filing."} Claim ${claimId} describes the named fund or vehicle and is not the audited person's personal capital. Multiple vehicle claims are not summed.`,
         whyItMatters: "Separating firm-wide AUM, vehicle closes, qualifiers, and time state makes capital-scale context comparable without inflating deployable capital.",
         changeCondition: "Update when the controlling fund, regulatory, manager, or independently corroborated source publishes a newer metric with the same identity and temporal gates.",
-        evidenceState: "verified",
+        evidenceState: fundScaleEvidenceState(artifact),
         measurementRefs: [`verified_fund_scale_usd:${String(claimIndex + 1).padStart(2, "0")}`],
         sourceRefs: rows.map(({ index }) => sourceArtifactId(index)),
         lenses: ["investment", "general_diligence"],

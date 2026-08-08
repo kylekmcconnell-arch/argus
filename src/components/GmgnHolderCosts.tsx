@@ -56,13 +56,21 @@ function toneFor(pct: number | null): string {
   return "var(--color-ink-dim)";
 }
 
+// The chains GMGN actually serves (server/adapters/gmgn.ts). A chain outside
+// this set is NOT an outage: querying it returns a truthful "not covered",
+// which the live-forensics rail would then report as a failed check and paint
+// a red coverage warning over an otherwise complete scan. Not covered is a
+// silent absence, so the panel does not run at all.
+const SUPPORTED_CHAINS = new Set(["solana", "ethereum", "base", "bsc"]);
+
 export function GmgnHolderCosts({ chain, address, onStatusChange }: { chain?: string | null; address?: string | null; onStatusChange?: LiveForensicStatusHandler }) {
   const [data, setData] = useState<GmgnHolderPayload | null>(null);
   const [failure, setFailure] = useState<PanelRequestFailure | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const supported = !!chain && SUPPORTED_CHAINS.has(chain.toLowerCase());
   useEffect(() => {
-    if (!chain || !address) return;
+    if (!supported || !chain || !address) return;
     let live = true;
     setLoading(true);
     onStatusChange?.({ id: "gmgn-holder-costs", label: "GMGN holder cost basis", state: "running" });
@@ -79,9 +87,9 @@ export function GmgnHolderCosts({ chain, address, onStatusChange }: { chain?: st
       })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [chain, address, onStatusChange]);
+  }, [supported, chain, address, onStatusChange]);
 
-  if (!chain || !address) return null;
+  if (!supported || !chain || !address) return null;
   if (failure) return <PanelRequestNotice failure={failure} label="Holder cost basis (GMGN)" />;
   if (loading && !data) {
     return (

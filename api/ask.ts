@@ -22,6 +22,13 @@ const CHECK_STATES = new Set<CheckStatus>([
   "confirmed", "reported", "finding", "checked-empty", "not-applicable", "unknown", "unavailable", "stale",
 ]);
 const GAP_STATES = new Set(["unknown", "unavailable", "stale"]);
+/**
+ * Citable frozen sources carried in one packet. This must stay at or above the
+ * number of URL-bearing records the projection can display (the spine alone
+ * projects up to 160 sources), because a URL the model can see but cannot cite
+ * turns a correctly grounded answer into a withheld one.
+ */
+const MAX_PACKET_CITATIONS = 220;
 const CITABLE_SOURCE_MATCHES = new Set([
   "relationship_confirmed",
   "fund_scale_confirmed",
@@ -162,7 +169,6 @@ function intelligenceSnapshot(value: unknown, addCitation: CitationCollector) {
       return sourceRef;
     })
     .filter((source) => source.id);
-  const sourceIds = new Set(sources.map((source) => source.id));
 
   const measurements = (Array.isArray(intelligence.measurements) ? intelligence.measurements : [])
     .slice(0, 160)
@@ -182,9 +188,16 @@ function intelligenceSnapshot(value: unknown, addCitation: CitationCollector) {
         denominatorMeasurementId: text(measurement.denominatorMeasurementId, 180),
         window: record(measurement.window),
         evidenceState: text(measurement.evidenceState, 80),
+        // Refs are NOT filtered against the truncated source list. Dropping a
+        // ref whose source fell outside the projection cap makes an incomplete
+        // chain look fully anchored: the question director counts expected
+        // against resolved refs, so a pre-filtered list can never come out
+        // partial. The saved spine's integrity gate already guarantees these
+        // refs resolve in the report itself; what is unresolved HERE is a
+        // limit of this projection, and it must read as such.
         sourceRefs: (Array.isArray(measurement.sourceRefs) ? measurement.sourceRefs : [])
           .map((ref) => text(ref, 180))
-          .filter((ref) => ref && sourceIds.has(ref))
+          .filter(Boolean)
           .slice(0, 16),
       };
     })
@@ -205,7 +218,7 @@ function intelligenceSnapshot(value: unknown, addCitation: CitationCollector) {
           .map((ref) => text(ref, 180)).filter(Boolean).slice(0, 20),
         sourceRefs: (Array.isArray(question.sourceRefs) ? question.sourceRefs : [])
           .map((ref) => text(ref, 180))
-          .filter((ref) => ref && sourceIds.has(ref))
+          .filter(Boolean)
           .slice(0, 20),
       };
     })
@@ -246,7 +259,7 @@ function intelligenceSnapshot(value: unknown, addCitation: CitationCollector) {
           .map((ref) => text(ref, 180)).filter(Boolean).slice(0, 30),
         sourceRefs: (Array.isArray(signal.sourceRefs) ? signal.sourceRefs : [])
           .map((ref) => text(ref, 180))
-          .filter((ref) => ref && sourceIds.has(ref))
+          .filter(Boolean)
           .slice(0, 30),
         arithmetic: (Array.isArray(signal.arithmetic) ? signal.arithmetic : []).slice(0, 8),
         lenses: (Array.isArray(signal.lenses) ? signal.lenses : [])
@@ -669,7 +682,7 @@ function frozenPacket(stored: JsonRecord, requestedVersionId: string) {
     attestation: text(versionContext.attestationState, 40),
     subject,
     summary,
-    citations: citations.slice(0, 50),
+    citations: citations.slice(0, MAX_PACKET_CITATIONS),
     projectAttributions: projectAttributions.slice(0, 30),
     candidateLeads: candidateLeads.slice(0, 30),
     researchPlan,
@@ -693,10 +706,22 @@ function frozenPacket(stored: JsonRecord, requestedVersionId: string) {
         .slice(0, 30),
     },
   };
-  return {
-    packet,
-    allowedSourceUrls: new Set(packet.citations.map((citation) => citation.sourceUrl)),
-  };
+  // The allowlist and the projection MUST describe the same set of URLs. The
+  // citation cap used to sit below the number of spine source URLs the packet
+  // still displayed, so on a rich report the model would cite a real frozen
+  // source it could see and validation would withhold the whole answer. Any
+  // URL that did not survive the cap is therefore removed from the projection
+  // too: the model can cite everything it is shown, and is shown nothing it
+  // cannot cite.
+  const allowedSourceUrls = new Set(packet.citations.map((citation) => citation.sourceUrl));
+  if (packet.intelligence && Array.isArray(packet.intelligence.sources)) {
+    packet.intelligence.sources = packet.intelligence.sources.map((source) => (
+      source.sourceUrl && !allowedSourceUrls.has(source.sourceUrl)
+        ? { ...source, sourceUrl: undefined }
+        : source
+    ));
+  }
+  return { packet, allowedSourceUrls };
 }
 
 function parseGroundedAnswer(raw: string, allowedSourceUrls: ReadonlySet<string>): {

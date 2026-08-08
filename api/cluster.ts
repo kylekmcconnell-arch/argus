@@ -15,7 +15,7 @@
 //
 // Solana only (Helius RPC + RugCheck). Gated on HELIUS_API_KEY. Bounded + graceful.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
+import { canSeedFunderCluster, SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
 import { describeWalletClusterTrace, type WalletClusterCoverage } from "../src/lib/walletClusterTruth.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
@@ -197,6 +197,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const rc = (await rr.json()) as any;
     usage.rugcheckSucceeded += 1;
     const ka: Record<string, { name?: string; type?: string }> = rc.knownAccounts ?? {};
+    // The pair records name the pools directly, so a pool that RugCheck did
+    // not also label in knownAccounts still cannot seed a cluster.
+    const poolAddresses: string[] = (Array.isArray(rc.markets) ? rc.markets : [])
+      .map((m: any) => (typeof m?.pubkey === "string" ? m.pubkey : null))
+      .filter(Boolean);
     const isMarket = (h: any) => { const lab = ka[h.address] || ka[h.owner]; return !!(lab?.type && MARKET.test(lab.type)); };
     const holders = (rc.topHolders ?? [])
       .map((h: any) => ({ address: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0), insider: !!h.insider, market: isMarket(h) }))
@@ -279,10 +284,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dsu = new DSU();
     for (const w of set) dsu.find(w);
     const links: { a: string; b: string; type: "co-funded" | "transfer"; via?: string }[] = [];
-    // co-funding: group by funder
+    // co-funding: group by funder. The funder must clear the SAME venue test
+    // the holder set already applies, using RugCheck's own labels: a pool or
+    // launcher vault pays out to unrelated buyers exactly as custody does, and
+    // checking only the static CEX map let those form "co-funded" groups.
     const byFunder = new Map<string, string[]>();
     for (const p of profiles) {
-      if (!p.funder || CEX[p.funder] || SYSTEM.has(p.funder)) continue;
+      if (!p.funder || SYSTEM.has(p.funder)) continue;
+      if (!canSeedFunderCluster(p.funder, { knownAccounts: ka, poolAddresses })) continue;
       (byFunder.get(p.funder) ?? byFunder.set(p.funder, []).get(p.funder)!).push(p.wallet);
     }
     for (const [funder, ws] of byFunder) {
