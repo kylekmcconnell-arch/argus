@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   collectLegalCases,
   collectNews,
+  collectOfacEntityName,
   collectOfacName,
   legalCaptionHasFullName,
+  parseOfacEntityNames,
   parseOfacPersonNames,
 } from "./offchainEvidence";
 
@@ -15,6 +17,11 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 const validOfacCache = (...leading: string[]) => [
   ...leading,
   ...Array.from({ length: 5_000 - leading.length }, (_, index) => `test person ${index}`),
+].join("\n");
+
+const validOfacEntityCache = (...leading: string[]) => [
+  ...leading,
+  ...Array.from({ length: 500 - leading.length }, (_, index) => `test entity ${index}`),
 ].join("\n");
 
 describe("shared off-chain provider clients", () => {
@@ -175,6 +182,38 @@ describe("shared off-chain provider clients", () => {
       list: "US Treasury OFAC SDN",
     });
     expect(result.indexHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("separates legal entities from people and screens only the exact entity name", async () => {
+    const csv = [
+      "id,schema,name,aliases",
+      '1,"Person","Example Person","Example Labs"',
+      '2,"Organization","Example Labs LLC","Example Labs;Labs Example"',
+      '3,"Vessel","Example Labs LLC",""',
+    ].join("\n");
+    expect([...parseOfacEntityNames(csv)]).toEqual([
+      "example labs llc",
+      "example labs",
+      "labs example",
+    ]);
+
+    const cache = {
+      read: vi.fn().mockResolvedValue(validOfacEntityCache("example labs llc")),
+      write: vi.fn(),
+    };
+    const fetcher = vi.fn();
+    const exact = await collectOfacEntityName("Example Labs LLC", { fetcher, cache });
+    const reordered = await collectOfacEntityName("LLC Example Labs", { fetcher, cache });
+
+    expect(exact.value).toMatchObject({
+      available: true,
+      name: "Example Labs LLC",
+      listSize: 500,
+      sanctioned: true,
+    });
+    expect(reordered.value).toMatchObject({ available: true, sanctioned: false });
+    expect(exact.indexHash).toMatch(/^[a-f0-9]{64}$/);
     expect(fetcher).not.toHaveBeenCalled();
   });
 

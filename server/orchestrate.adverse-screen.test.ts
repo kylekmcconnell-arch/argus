@@ -97,8 +97,8 @@ describe("adverse sweep records a checklist outcome", () => {
     harness.team.mockResolvedValue([{ name: "Someone", handle: "@someone", role: "CTO" }]);
     const { ctx, evidence, recorded, record } = context();
     evidence.ventures = [
-      { project_name: "One", role: "advisor", x_handle: "@one" },
-      { project_name: "Two", role: "advisor", x_handle: "@two" },
+      { project_name: "One", role: "advisor", x_handle: "@one", artifact_verified: true, evidence_origin: "deterministic" },
+      { project_name: "Two", role: "advisor", x_handle: "@two", artifact_verified: true, evidence_origin: "deterministic" },
     ] as typeof evidence.ventures;
     // Fail the second hop the moment it writes its result back, which is
     // strictly after the paid search resolved.
@@ -114,6 +114,32 @@ describe("adverse sweep records a checklist outcome", () => {
       status: "finding",
       provider: "adverse-sweep",
     });
+  });
+
+  it("does not screen a model-chosen venture as though the relationship were established", async () => {
+    harness.adverse.mockClear();
+    harness.adverse.mockResolvedValue({ completed: true, signals: [] });
+    harness.tooling.mockResolvedValue(null);
+    const { ctx, evidence, record } = context();
+    evidence.ventures = [{
+      project_name: "Namesake Foundation",
+      role: "cofounder",
+      x_handle: "@namesakefoundation",
+      artifact_verified: false,
+      evidence_origin: "model_lead",
+    }] as typeof evidence.ventures;
+
+    await adverseSignalsAndTooling(ctx, record);
+
+    expect(harness.adverse).not.toHaveBeenCalledWith(
+      "namesakefoundation",
+      "project",
+      expect.anything(),
+    );
+    const announced = (ctx.emit as unknown as { mock: { calls: [{ detail?: string }][] } }).mock.calls
+      .map(([step]) => step.detail ?? "")
+      .join(" ");
+    expect(announced).toContain("0 projects");
   });
 });
 

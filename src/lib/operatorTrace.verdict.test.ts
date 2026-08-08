@@ -43,7 +43,7 @@ describe("operator trace verdict", () => {
           origin: { address: exchange, label: "Coinbase", kind: "cex" },
         },
       },
-      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, seededCount: 0, seededDeployers: [] } },
+      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, completed: true, truncated: false, providerFailed: false, seededCount: 0, seededDeployers: [] } },
       {
         match: `evm-deployer?wallet=${anonFunder}`,
         body: { available: true, chain: [{ from: anonFunder, to: exchange, label: "Coinbase", kind: "cex" }] },
@@ -57,6 +57,40 @@ describe("operator trace verdict", () => {
     expect(cluster?.verdict.tone).toBe("good");
     expect(cluster?.verdict.line).toContain("completed forward sweep");
     expect(cluster?.verdict.line).toContain("Isolated and traceable");
+  });
+
+  it.each([
+    ["provider failure", { available: true, completed: false, truncated: false, providerFailed: true, seededCount: null, seededDeployers: [] }],
+    ["capped history", { available: true, completed: false, truncated: true, providerFailed: false, seededCount: null, seededDeployers: [] }],
+    ["legacy response without completion state", { available: true, seededCount: 0, seededDeployers: [] }],
+  ])("never renders a green absence conclusion after %s", async (_label, sweepBody) => {
+    stubRoutes([
+      {
+        match: `evm-deployer?wallet=${root}`,
+        body: {
+          available: true,
+          deployments: 1,
+          chain: [
+            { from: root, to: anonFunder, label: null, kind: "wallet" },
+            { from: anonFunder, to: exchange, label: "Coinbase", kind: "cex" },
+          ],
+          origin: { address: exchange, label: "Coinbase", kind: "cex" },
+        },
+      },
+      { match: `evm-funder?wallet=${anonFunder}`, body: sweepBody },
+      {
+        match: `evm-deployer?wallet=${anonFunder}`,
+        body: { available: true, chain: [{ from: anonFunder, to: exchange, label: "Coinbase", kind: "cex" }] },
+      },
+    ]);
+
+    const cluster = await traceOperator(root, opts, () => {});
+
+    expect(cluster?.stats.sweeps).toBe(1);
+    expect(cluster?.verdict.tone).toBe("neutral");
+    expect(cluster?.verdict.line).toContain("neither found nor ruled out");
+    expect(cluster?.verdict.line).not.toContain("Isolated and traceable");
+    expect(cluster?.verdict.line).not.toContain("no serial-launch cluster");
   });
 
   it("reports a CEX-terminated trail as unknown, never as no siblings found", async () => {
@@ -97,7 +131,7 @@ describe("operator trace verdict", () => {
           funder: { address: anonFunder, label: null, kind: "wallet" },
         },
       },
-      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, seededCount: 0, seededDeployers: [] } },
+      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, completed: true, truncated: false, providerFailed: false, seededCount: 0, seededDeployers: [] } },
       {
         match: `evm-deployer?wallet=${anonFunder}`,
         body: { available: true, funder: { address: higherFunder, label: null, kind: "wallet" } },
@@ -128,7 +162,7 @@ describe("operator trace verdict", () => {
           trailTruncatedAt: anonFunder,
         },
       },
-      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, seededCount: 0, seededDeployers: [] } },
+      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, completed: true, truncated: false, providerFailed: false, seededCount: 0, seededDeployers: [] } },
       { match: `evm-deployer?wallet=${anonFunder}`, body: { available: true } },
     ]);
 
@@ -149,7 +183,7 @@ describe("operator trace verdict", () => {
         match: `evm-deployer?wallet=${root}`,
         body: { available: true, deployments: 1, funder: { address: anonFunder, label: null, kind: "wallet" } },
       },
-      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, seededCount: 0, seededDeployers: [] } },
+      { match: `evm-funder?wallet=${anonFunder}`, body: { available: true, completed: true, truncated: false, providerFailed: false, seededCount: 0, seededDeployers: [] } },
       { match: `evm-deployer?wallet=${anonFunder}`, body: { available: true } },
     ]);
 

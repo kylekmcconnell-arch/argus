@@ -152,7 +152,7 @@ describe("collectProtocolTvl", () => {
       expect.objectContaining({
         date: "2026-04-01",
         amountUsd: 295_000_000,
-        returnedFunds: false,
+        returnedFunds: null,
         returnedAmountUsd: null,
         classification: "Infrastructure",
         technique: "Compromised Admin + Fake Token Price Manipulation",

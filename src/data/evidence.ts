@@ -3,6 +3,7 @@
 // the Node server import the same types.
 
 import type { CandleSummary } from "../lib/priceHistory";
+import type { EvmControlRealitySnapshot } from "./evmControlReality";
 import type {
   SubjectClass,
   Venture,
@@ -42,6 +43,12 @@ export interface SubjectProfile {
   account_created_at?: string;
   identity_confidence: IdentityConfidence;
   identity_note: string;
+  /**
+   * Exact account-to-person bridge established by a source that is not the
+   * audited profile's attacker-controlled display name. This governs whether
+   * a resolved name may join external career, legal, or portfolio records.
+   */
+  identity_binding?: "licensed_exact_social" | "independent_exact_handle";
   prior_handles?: string[]; // past X usernames for the same account id (rebrands)
   last_post_at?: string;    // ISO time of the most recent tweet (dormancy signal)
   days_since_post?: number; // days since that post, computed at collect time
@@ -188,8 +195,25 @@ export interface ProjectTokenSnapshot {
   deployedChains?: string[];
   homepage?: string;
   officialX?: string;
+  /**
+   * Legacy record-level citation. New reports should bind each claim through
+   * `producerSources`, since identity, market, liquidity, and history can come
+   * from different reads.
+   */
   sourceUrl: string;
+  /** Legacy record-level capture time. See `producerSources` for exact reads. */
   capturedAt: string;
+  /**
+   * Exact read that produced each part of the canonical-token snapshot.
+   * Historical reports can omit this object. A missing member means that no
+   * exact producer record was frozen for that part of the snapshot.
+   */
+  producerSources?: {
+    identity: ProjectTokenProducerSource;
+    market?: ProjectTokenProducerSource;
+    liquidity?: ProjectTokenProducerSource;
+    history?: ProjectTokenProducerSource;
+  };
   providers?: Array<"coingecko" | "dexscreener" | "geckoterminal">;
   priceUsd?: number;
   marketCapUsd?: number;
@@ -219,7 +243,18 @@ export interface ProjectTokenSnapshot {
     poolAddress: string;
     /** Exact GeckoTerminal OHLCV endpoint used for the frozen series. */
     sourceUrl?: string;
+    /** Capture time of the exact GeckoTerminal response. */
+    capturedAt?: string;
   };
+}
+
+export interface ProjectTokenProducerSource {
+  provider: "official_site" | "coingecko" | "dexscreener" | "geckoterminal";
+  sourceUrl: string;
+  /** Time ARGUS observed the exact provider response. */
+  capturedAt: string;
+  /** Provider-declared data update time, distinct from ARGUS observation time. */
+  providerUpdatedAt?: string;
 }
 
 /**
@@ -277,7 +312,8 @@ export interface ProtocolTvlSnapshot {
   hacks?: Array<{
     date: string | null;
     amountUsd: number | null;
-    returnedFunds: boolean;
+    /** Explicit provider field; null means the provider record did not answer. */
+    returnedFunds: boolean | null;
     returnedAmountUsd?: number | null;
     classification: string | null;
     technique?: string | null;
@@ -302,10 +338,20 @@ export interface ContractControlFlagSnapshot {
 
 /** Frozen float-control profile (GoPlus holder register) for the verified canonical token. Disclosure data, never a verdict. */
 export interface HolderProfileSnapshot {
+  /** Exact canonical token identity this sidecar was collected for. */
+  binding?: {
+    canonicalAddress: string;
+    chain: string;
+    method: "canonical_token_address_chain";
+  };
   /** Largest single WALLET, percent of supply. Pools, contracts and locked addresses are excluded. */
   topHolderPct: number | null;
-  /** Top ten wallets combined; a FLOOR when the register returned fewer than ten usable wallet rows. */
+  /** Combined share for up to ten assessed wallets. Read the structural fields below before naming it a top-ten total. */
   top10Pct: number | null;
+  /** Number of usable wallet rows included in top10Pct. At most ten. Absent on legacy reports. */
+  assessedWalletCount?: number | null;
+  /** True when top10Pct covers fewer than ten usable wallet rows. Absent on legacy reports. */
+  top10PctIsFloor?: boolean;
   holderCount: number | null;
   lpLockedOrBurnedPct: number | null;
   /**
@@ -320,11 +366,18 @@ export interface HolderProfileSnapshot {
   distributionSource?: "goplus" | "explorer" | null;
   /** Why the distribution is missing, or which register produced it when that is not GoPlus. */
   distributionNote?: string | null;
+  /** Exact ordered holder endpoint when concentration came from an explorer. */
+  distributionSourceUrl?: string;
+  /** Capture time for the exact ordered holder endpoint. */
+  distributionCapturedAt?: string;
   /** GoPlus flags that FIRED. An empty array means no flag fired, never "clean". */
   contractFlags?: ContractControlFlagSnapshot[];
   /** Creator/authority-wallet share of supply. Null when GoPlus reported none, never 0. */
   creatorPct?: number | null;
+  /** GoPlus citation used for holder count, LP rows, and fired contract flags. */
   sourceUrl: string;
+  /** Capture time for the GoPlus token-security response. */
+  sourceCapturedAt?: string;
   capturedAt: string;
 }
 
@@ -337,6 +390,20 @@ export interface TokenUnlocksSnapshot {
   percentOfMcap: number | null;
   cumulativeUnlockedPercent: number | null;
   next90dPercentOfSupply: number | null;
+  /** New reports bind the schedule through CryptoRank's exact contract map. */
+  canonicalAddress?: string;
+  /** Normalized chain proven on both sides of the contract-map join. */
+  chain?: string;
+  /** CryptoRank currency id selected only after the exact contract join. */
+  currencyId?: number;
+  /** Exact API endpoint used to establish the canonical contract mapping. */
+  contractSourceUrl?: string;
+  /** Exact API endpoint that returned the frozen vesting events. */
+  eventsSourceUrl?: string;
+  /** Provider percentage fields rejected during collection as malformed or outside [0, 100]. */
+  percentageValidation?: {
+    invalidFields: Array<"percentOfSupply" | "percentOfMcap" | "cumulativeUnlockedPercent" | "next90dPercentOfSupply">;
+  };
   sourceUrl: string;
   capturedAt: string;
 }
@@ -350,19 +417,38 @@ export interface ProtocolFeesSnapshot {
   change30dOver30dPct?: number | null;
   sourceUrl: string;
   capturedAt: string;
+  /** Identity join performed by orchestration before this sidecar was admitted. */
+  binding?: {
+    canonicalGeckoId: string;
+    protocolSlug: string;
+    method: "matched_protocol_gecko_id";
+  };
 }
 
 /**
- * Frozen independent-audit evidence. `corroborated` entries were confirmed on
- * the auditor's OWN domain (a page there names the subject) and may mint
- * verified audit facts; `selfAttested` names come only from the subject's own
- * security page and stay research leads, never scoring evidence, because any
- * scam can publish an auditor list on its own site.
+ * Frozen independent-audit evidence. New `corroborated` entries were confirmed
+ * on the auditor's own domain with explicit audit context and a canonical
+ * non-name identity anchor. Legacy `selfAttested` is the union of unverified audit
+ * leads from subject pages and curated audit-link URLs; `attestations` preserves
+ * which origin produced each lead on new reports.
  */
 export interface SecurityAuditsSnapshot {
   securityPageUrl: string | null;
   selfAttested: string[];
-  corroborated: Array<{ auditor: string; auditorUrl: string; excerpt: string }>;
+  attestations?: Array<{
+    auditor: string;
+    origin: "subject_page" | "curated_audit_link";
+    sourceUrl: string;
+  }>;
+  corroborated: Array<{
+    auditor: string;
+    auditorUrl: string;
+    excerpt: string;
+    /** Present on records captured after canonical identity anchoring shipped. */
+    matchedIdentityAnchor?:
+      | { type: "official_domain"; value: string }
+      | { type: "canonical_contract"; value: string };
+  }>;
   capturedAt: string;
 }
 
@@ -735,6 +821,8 @@ export interface VentureTeamInput {
 /** Registry record for the project's official domain (RDAP, free and keyless). */
 export interface DomainRegistrationSnapshot {
   domain: string;
+  /** Exact official hostname supplied to the RDAP collector before registrable-domain reduction. */
+  hostname?: string;
   registeredAt: string;
   ageMonths: number;
   source: string;
@@ -779,6 +867,11 @@ export interface CollectedEvidence {
   trustGraphScreen?: TrustGraphScreen;
   /** Verified project-owned token identity and frozen market snapshot. */
   projectToken?: ProjectTokenSnapshot;
+  /**
+   * Fixed-block direct RPC observations for the verified canonical EVM token.
+   * This lane is point-in-time context only and has no v1 scoring impact.
+   */
+  evmControlReality?: EvmControlRealitySnapshot;
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
   protocolFunding?: ProtocolFundingSnapshot;
   /**
@@ -807,6 +900,8 @@ export interface CollectedEvidence {
   basicFactLeads?: BasicFactLead[];
   /** Role-specific questions and their verified answer/gap state for this scan. */
   basicFactQuestionLedger?: BasicFactQuestionLedgerEntry[];
+  /** Evidence-aware delegation plan frozen with the scan for auditability. */
+  researchPlan?: import("../lib/researchDirector").ResearchPlan;
   /**
    * Roles the subject's own employment record has CLOSED, with the date it
    * ends. A founder who quietly stopped listing a venture is a finding no

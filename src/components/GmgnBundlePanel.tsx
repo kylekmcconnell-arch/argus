@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { shortAddr } from "../lib/wallets";
 import { fetchPanelJson, panelRequestFailure, type PanelRequestFailure } from "../lib/panelCostHeaders";
 import { PanelRequestNotice } from "./PanelRequestNotice";
+import type { LiveForensicStatusHandler } from "../lib/liveForensics";
 
 /**
  * HOW THE LAUNCH WAS BOUGHT, per GMGN.
@@ -73,23 +74,35 @@ function Stat({ label, value }: { label: string; value: string }) {
 const tagValue = (tag: TagCount | null): string | null =>
   tag === null ? null : tag.atCap ? `${tag.count.toLocaleString("en-US")}+` : tag.count.toLocaleString("en-US");
 
-export function GmgnBundlePanel({ chain, address, knownDeployer }: { chain?: string | null; address?: string | null; knownDeployer?: string | null }) {
+const SUPPORTED_CHAINS = new Set(["solana", "ethereum", "base", "bsc"]);
+
+export function GmgnBundlePanel({ chain, address, knownDeployer, onStatusChange }: { chain?: string | null; address?: string | null; knownDeployer?: string | null; onStatusChange?: LiveForensicStatusHandler }) {
   const [data, setData] = useState<GmgnBundlePayload | null>(null);
   const [failure, setFailure] = useState<PanelRequestFailure | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const supported = !!chain && SUPPORTED_CHAINS.has(chain.toLowerCase());
   useEffect(() => {
-    if (!chain || !address) return;
+    if (!supported || !chain || !address) return;
     let live = true;
     setLoading(true);
+    onStatusChange?.({ id: "gmgn-launch-pattern", label: "GMGN launch-pattern reading", state: "running" });
     fetchPanelJson<GmgnBundlePayload>(`/api/gmgn-bundle?chain=${encodeURIComponent(chain)}&address=${encodeURIComponent(address)}`)
-      .then((payload) => { if (live) setData(payload); })
-      .catch((error) => { if (live) setFailure(panelRequestFailure(error)); })
+      .then((payload) => {
+        if (!live) return;
+        setData(payload);
+        onStatusChange?.({ id: "gmgn-launch-pattern", label: "GMGN launch-pattern reading", state: payload.available ? "complete" : "unavailable" });
+      })
+      .catch((error) => {
+        if (!live) return;
+        setFailure(panelRequestFailure(error));
+        onStatusChange?.({ id: "gmgn-launch-pattern", label: "GMGN launch-pattern reading", state: "unavailable" });
+      })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [chain, address]);
+  }, [supported, chain, address, onStatusChange]);
 
-  if (!chain || !address) return null;
+  if (!supported || !chain || !address) return null;
   if (failure) return <PanelRequestNotice failure={failure} label="Launch pattern (GMGN)" />;
   if (loading && !data) {
     return (
@@ -137,8 +150,10 @@ export function GmgnBundlePanel({ chain, address, knownDeployer }: { chain?: str
 
   // Two unrelated providers naming the same launcher is worth a sentence of
   // ARGUS's own; a mismatch is worth one too. Compared only when both exist.
+  const creatorIdentity = (value: string): string =>
+    chain.toLowerCase() === "solana" ? value.trim() : value.trim().toLowerCase();
   const deployerMatch = data.creatorAddress && knownDeployer
-    ? data.creatorAddress === knownDeployer
+    ? creatorIdentity(data.creatorAddress) === creatorIdentity(knownDeployer)
     : null;
 
   return (

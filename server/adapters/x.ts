@@ -16,6 +16,7 @@ import type { NotableFollower } from "../../src/data/evidence";
 import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
 import { NOTABLE_ACCOUNTS } from "./notableAccounts";
 import { groundedSearch, groundedSearchProvisioned } from "./groundedSearch";
+import { captureTimestamp } from "../captureTime";
 
 const TWITTERAPI = "https://api.twitterapi.io";
 type JsonRecord = Record<string, unknown>;
@@ -234,13 +235,21 @@ export async function generalWebSearch(system: string, user: string, opts?: {
   if ((env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() !== "grok") {
     // Ultimate path: decoupled Serper search + page fetch + cheap-model extract
     // (near-free vs a frontier web_search reading every page in-context).
-    // Default policy: the first PROVISIONED provider owns the lane; an empty
-    // or failed result stays empty and visible rather than cascading the same
-    // question onto progressively pricier searchers. ARGUS_PROVIDER_FALLBACKS=on
-    // restores the old cascade.
+    // Default policy: the first PROVISIONED provider owns the lane when it
+    // answers, including a valid empty result. A total provider failure may use
+    // an already-provisioned recovery path; ARGUS_PROVIDER_FALLBACKS=on also
+    // permits optional cascading after non-failure empty results.
     if (groundedSearchProvisioned()) {
-      const viaGrounded = await groundedSearch(system, user, { cacheKey: opts?.cacheKey, bypassCache: opts?.bypassCache });
-      if (viaGrounded || !providerFallbacksEnabled()) return viaGrounded;
+      let groundedUnavailable = false;
+      const viaGrounded = await groundedSearch(system, user, {
+        cacheKey: opts?.cacheKey,
+        bypassCache: opts?.bypassCache,
+        onProviderUnavailable: () => { groundedUnavailable = true; },
+      });
+      // A valid empty answer stays on its lane. A provider that rejected every
+      // request did not answer, so an already-provisioned fallback may recover
+      // the report even when optional duplicate-provider cascading is off.
+      if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
     }
     if (env("ANTHROPIC_API_KEY")) {
       const viaClaude = await claudeWebSearch(system, user, {
@@ -358,7 +367,7 @@ export async function publicXAccountState(
     handle: `@${u}`,
     accountStatus,
     statusSourceUrl,
-    statusCapturedAt: new Date().toISOString(),
+    statusCapturedAt: captureTimestamp(),
   };
 }
 
@@ -403,7 +412,7 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
         handle: "@" + u,
         accountStatus: "active",
         statusSourceUrl: `https://x.com/${encodeURIComponent(u)}`,
-        statusCapturedAt: new Date().toISOString(),
+        statusCapturedAt: captureTimestamp(),
         name: p.name,
         bio: p.description,
         followers: p.followers ?? p.followers_count,
@@ -608,12 +617,18 @@ const stamp = (p: CorpusPost): string => {
   return (meta ? `[${meta}] ` : "") + p.text;
 };
 
-export interface Corpus { posts: string[]; newest: string[]; count: { originals: number; searched: number; ranked: number } }
+export interface Corpus {
+  posts: string[];
+  newest: string[];
+  /** Exact project-team search result text already purchased during intake. */
+  teamSignalPosts: string[];
+  count: { originals: number; searched: number; ranked: number };
+}
 
 export async function collectCorpus(handle: string): Promise<Corpus> {
   const key = env("TWITTERAPI_KEY");
   const u = handle.replace(/^@/, "");
-  if (!key) return { posts: [], newest: [], count: { originals: 0, searched: 0, ranked: 0 } };
+  if (!key) return { posts: [], newest: [], teamSignalPosts: [], count: { originals: 0, searched: 0, ranked: 0 } };
 
   // Layer 1: 2 pages of recent originals (drop replies/RTs).
   // Layer 2: 3 keyword searches over the whole history, in parallel.
@@ -658,6 +673,9 @@ export async function collectCorpus(handle: string): Promise<Corpus> {
   return {
     posts: ranked.map(stamp),
     newest: newest.map((p) => p.text),
+    teamSignalPosts: [...new Set(sId
+      .map((tweet) => String((tweet as { text?: unknown; full_text?: unknown })?.text ?? (tweet as { full_text?: unknown })?.full_text ?? "").trim())
+      .filter(Boolean))].slice(0, 30),
     count: { originals: originals.length, searched: searched.length, ranked: ranked.length },
   };
 }
@@ -1352,14 +1370,22 @@ export async function discoverAffiliations(handle: string, name?: string, oldHan
 // This mines that content for team members the site/bio never listed.
 export interface TeamMember { name: string; handle?: string; role: string; evidence?: string; kind: "team" | "advisor"; linkedin?: string; source?: string; sourceUrl?: string; projects?: { name: string; role?: string }[] }
 
-export async function findTeam(handle: string, name: string | undefined, posts: string[] = []): Promise<TeamMember[]> {
+export async function findTeam(
+  handle: string,
+  name: string | undefined,
+  posts: string[] = [],
+  purchasedTeamSignalPosts?: string[],
+): Promise<TeamMember[]> {
   const h = handle.replace(/^@/, "");
   const key = env("TWITTERAPI_KEY");
   // Gather the project's own team-signal posts from twitterapi (near-free,
   // ~$0.0002/call) rather than Grok x_search; Claude then extracts the roster
   // from them and web-searches each person's other ventures.
-  let corpus = posts.slice(0, 15);
-  if (key) {
+  let corpus = [...new Set([
+    ...posts.slice(0, 15),
+    ...(purchasedTeamSignalPosts ?? []),
+  ])].slice(0, 30);
+  if (key && purchasedTeamSignalPosts === undefined) {
     try {
       const teamPosts = await searchFrom(h, KW_IDENTITY, key);
       const extra = teamPosts.map((t) => String((t as any)?.text ?? (t as any)?.full_text ?? "")).filter(Boolean);
@@ -1371,12 +1397,13 @@ export async function findTeam(handle: string, name: string | undefined, posts: 
     : "";
   const system =
     "You are a forensic researcher with live web search, given a crypto/tech project's own X posts below. Identify the PEOPLE publicly tied to the project: founders, cofounders, core team, engineers, AND advisors/backers. " +
+    "Search the exact X handle together with founder, co-founder, builder, creator, and built by. Inspect the official site's homepage and footer plus attributable podcasts, interviews, and ecosystem press; crypto builders are often disclosed there instead of on a formal team page. " +
     "Read the provided posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') to see who is named, then web-search to confirm each person and their role here. " +
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if they are actually named as one; if they are a founder/cofounder, say so. Do NOT downgrade a founder to advisor. " +
     "For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that web search reveals. This exposes serial founders and cross-project ties. " +
     "Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"founder|cofounder|ceo|cto|engineer|advisor|backer\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If none, return {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await generalWebSearch(system, `Project X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects.${postContext}`, { cacheKey: `team-x:${h}` });
+  const text = await generalWebSearch(system, `Project X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, builders, team members, and advisors of this exact project? Search the exact handle and inspect official-site \"built by\" attribution, founder interviews, podcasts, and ecosystem press. Give each person's precise role here AND their other projects.${postContext}`, { cacheKey: `team-x-v2:${h}` });
   return parseTeamJSON(text, h, "X content");
 }
 
@@ -1390,13 +1417,13 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
   const anchor = clean ? `website ${clean}${projectName ? ` (${projectName})` : ""}` : `project "${projectName}"`;
   const system =
     "You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. " +
-    "DIG hard and be COMPLETE: Google the project + 'team'/'leadership'/'about', open the project's LinkedIn company page and read its 'People' tab (list the employees it shows), check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people. Do NOT stop at one or two; keep going until you have the full public roster you can verify. " +
+    "DIG hard and be COMPLETE: inspect the official homepage and footer for founder, builder, creator, and 'built by' attribution; Google the exact domain and X handle with 'team'/'leadership'/'about'/'founder'; open the project's LinkedIn company page and read its 'People' tab (list the employees it shows); and check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people. Do NOT stop at one or two; keep going until you have the full public roster you can verify. " +
     "Connect each name to their X handle and LinkedIn where possible. " +
     "Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. " +
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT. Do NOT downgrade a founder to advisor. " +
     "For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal. This exposes serial founders and cross-project ties. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean || projectName}` });
+  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for \"built by\", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site-v2:${clean || projectName}` });
   return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 
@@ -1807,7 +1834,7 @@ export const xAdapter: Adapter = {
     if (prof?.accountStatus === "active") {
       ctx.evidence.profile.profile_collection_state = "resolved";
       ctx.evidence.profile.profile_provider = "twitterapi";
-      ctx.evidence.profile.profile_captured_at = new Date().toISOString();
+      ctx.evidence.profile.profile_captured_at = prof.statusCapturedAt;
       ctx.evidence.profile.x_account_status = "active";
       ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
       ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;

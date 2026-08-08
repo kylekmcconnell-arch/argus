@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { SubjectClass } from "../src/engine";
 import { canonicalOfficialWebsite } from "../src/lib/fundScaleEvidence";
+import { isOrganizationAccount } from "../src/lib/investorSubject";
 import {
   canonicalBasicFactComparisonValue,
   type BasicFact,
@@ -76,6 +77,62 @@ function safePublicUrl(value: string | null | undefined): string | null {
   }
 }
 
+function canonicalProtocolIndexMatch(
+  evidence: Pick<CollectedEvidence, "projectToken">,
+  geckoId: string | null | undefined,
+): boolean {
+  const canonicalId = evidence.projectToken?.verified === true
+    ? evidence.projectToken.coingeckoId?.trim().toLowerCase()
+    : undefined;
+  const indexedId = geckoId?.trim().toLowerCase();
+  return Boolean(canonicalId && indexedId && canonicalId === indexedId);
+}
+
+function canonicalTokenAddressChainMatch(
+  evidence: Pick<CollectedEvidence, "projectToken">,
+  binding: { canonicalAddress: string; chain: string; method: string } | null | undefined,
+): boolean {
+  const token = evidence.projectToken?.verified === true ? evidence.projectToken : undefined;
+  if (!token || binding?.method !== "canonical_token_address_chain") return false;
+  const chainMatches = token.chain.trim().toLowerCase() === binding.chain.trim().toLowerCase();
+  const tokenAddress = token.address.trim();
+  const boundAddress = binding.canonicalAddress.trim();
+  const addressMatches = tokenAddress.startsWith("0x") && boundAddress.startsWith("0x")
+    ? tokenAddress.toLowerCase() === boundAddress.toLowerCase()
+    : tokenAddress === boundAddress;
+  return chainMatches && addressMatches;
+}
+
+function protocolFeesBindingMatches(evidence: CollectedEvidence): boolean {
+  const fees = evidence.protocolFees;
+  const binding = fees?.binding;
+  const canonicalId = evidence.projectToken?.verified === true
+    ? evidence.projectToken.coingeckoId?.trim().toLowerCase()
+    : undefined;
+  return Boolean(
+    fees
+    && binding?.method === "matched_protocol_gecko_id"
+    && canonicalId
+    && binding.canonicalGeckoId.trim().toLowerCase() === canonicalId
+    && binding.protocolSlug.trim().toLowerCase() === fees.slug.trim().toLowerCase(),
+  );
+}
+
+function auditAnchorMatchesSubject(
+  evidence: CollectedEvidence,
+  anchor: NonNullable<NonNullable<CollectedEvidence["securityAudits"]>["corroborated"][number]["matchedIdentityAnchor"]>,
+): boolean {
+  if (anchor.type === "canonical_contract") {
+    const address = evidence.projectToken?.verified === true ? evidence.projectToken.address.trim() : "";
+    if (!address) return false;
+    return address.startsWith("0x") && anchor.value.trim().startsWith("0x")
+      ? address.toLowerCase() === anchor.value.trim().toLowerCase()
+      : address === anchor.value.trim();
+  }
+  const scope = canonicalOfficialWebsite(evidence.projectToken?.homepage ?? evidence.profile.website);
+  return Boolean(scope && scope.domain === anchor.value.trim().toLowerCase().replace(/^www\./, ""));
+}
+
 function containsPhrase(text: string, phrase: string): boolean {
   const phraseValue = (value: string) => normalizeValue(value).replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
   const haystack = ` ${phraseValue(text)} `;
@@ -138,7 +195,7 @@ const MATERIAL_AUTHORITY_ROLES: Array<{ claimed: RegExp; supportedPattern: strin
   { claimed: /\bpresident\b/i, supportedPattern: "president" },
   { claimed: /\bowner\b/i, supportedPattern: "owner" },
   { claimed: /\bmanaging\s+partner\b/i, supportedPattern: "managing\\s+partner" },
-  { claimed: /\bgeneral\s+partner\b/i, supportedPattern: "general\\s+partner" },
+  { claimed: /\bgeneral\s+partner\b/i, supportedPattern: "(?:founding\\s+)?general\\s+partner" },
   { claimed: /\bdirector\b/i, supportedPattern: "director" },
   { claimed: /\bhead\b/i, supportedPattern: "head" },
   { claimed: /\blead\b/i, supportedPattern: "lead" },
@@ -219,7 +276,7 @@ function passageBindsSubjectRole(
         "i",
       ).test(passage);
     }
-    const authorityRole = "(?:co[- ]?founder|founder|chief\\s+executive\\s+officer|ceo|chair(?:man|woman|person)?|president|owner|managing\\s+partner|general\\s+partner|director|head|lead)";
+    const authorityRole = "(?:co[- ]?founder|founder|chief\\s+executive\\s+officer|ceo|chair(?:man|woman|person)?|president|owner|managing\\s+partner|(?:founding\\s+)?general\\s+partner|director|head|lead)";
     return new RegExp(
       `(?:\\b${aliasPattern}\\b\\s*(?:,\\s*)?(?:(?:is|was|remains|became|serves?|served|serving|has\\s+served|currently\\s+serves?)\\s+(?:as\\s+)?(?:(?:the|a|an|our)\\s+)?)?(?:${venturePattern}\\s+)?${authorityRole}\\b)`
       + `|(?:\\b${authorityRole}\\s+(?:of|at)\\s+${venturePattern}\\s*,?\\s*${aliasPattern}\\b)`,
@@ -327,6 +384,39 @@ function githubIdentitySource(evidence: CollectedEvidence, capturedAt: string): 
   });
 }
 
+/**
+ * The licensed identity record is already frozen into identity_note by the PDL
+ * adapter. Reuse it only when it retains a checkable person-profile URL. This
+ * is stronger than reconstructing employment from a company URL: the bounded
+ * provider sentence itself names the person, current title, and company.
+ */
+function pdlIdentitySource(evidence: CollectedEvidence, capturedAt: string): BasicFactSource | null {
+  const note = evidence.profile.identity_note?.trim() ?? "";
+  if (!/^Resolved to\s+/i.test(note) || !/\broles? on record\b/i.test(note)) return null;
+  const linkedIn = note.match(/https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/in\/[A-Za-z0-9_%./?=&-]+/i)?.[0];
+  const url = normalizedPublicProfileUrl(linkedIn);
+  if (!url) return null;
+  return source({
+    url,
+    title: "Licensed professional identity record",
+    excerpt: note,
+    capturedAt,
+    provider: "peopledatalabs",
+    sourceClass: "other_public",
+  });
+}
+
+function pdlSourceSupportsCurrentVenture(
+  candidate: BasicFactSource | null,
+  venture: CollectedEvidence["ventures"][number],
+  aliases: readonly string[],
+): candidate is BasicFactSource {
+  if (!candidate || candidate.provider !== "peopledatalabs") return false;
+  return aliases.some((alias) => containsPhrase(candidate.excerpt, alias))
+    && containsPhrase(candidate.excerpt, venture.project_name)
+    && containsPhrase(candidate.excerpt, venture.role);
+}
+
 function profileSupportsVenture(
   evidence: CollectedEvidence,
   venture: CollectedEvidence["ventures"][number],
@@ -383,9 +473,16 @@ function projectProductFromProfileBio(bio: string): string | null {
 
 function reconcileQuestionLedger(evidence: CollectedEvidence, facts: readonly BasicFact[]): void {
   const singletonPredicates = new Set<BasicFactPredicate>(["official_identity"]);
+  const atomicResolutionPredicates = new Set<BasicFactPredicate>([
+    "official_identity",
+    "founded",
+    "launched",
+    "official_token",
+  ]);
   const projectedByPredicate = new Map<BasicFactPredicate, BasicFact[]>();
   for (const fact of facts) {
     if (fact.status !== "verified" && fact.status !== "corroborated") continue;
+    if (fact.attributionScope !== undefined && fact.attributionScope !== "direct_subject") continue;
     const rows = projectedByPredicate.get(fact.predicate) ?? [];
     rows.push(fact);
     projectedByPredicate.set(fact.predicate, rows);
@@ -394,14 +491,19 @@ function reconcileQuestionLedger(evidence: CollectedEvidence, facts: readonly Ba
     const answers = projectedByPredicate.get(entry.predicate) ?? [];
     if (!answers.length) continue;
     if (singletonPredicates.has(entry.predicate)) {
-      const allPredicateFacts = (evidence.basicFacts ?? []).filter((fact) => fact.predicate === entry.predicate);
+      const allPredicateFacts = (evidence.basicFacts ?? []).filter((fact) =>
+        fact.predicate === entry.predicate
+        && (fact.attributionScope === undefined || fact.attributionScope === "direct_subject"),
+      );
       const acceptedValues = new Set(allPredicateFacts
         .filter((fact) => fact.status === "verified" || fact.status === "corroborated")
         .map((fact) => fact.normalizedValue));
       if (allPredicateFacts.some((fact) => fact.status === "conflicted") || acceptedValues.size !== 1) continue;
     }
     entry.answerRefs = [...new Set([...entry.answerRefs, ...answers.map((fact) => fact.factId)])];
-    entry.status = "answered";
+    if (entry.audience !== "project" || atomicResolutionPredicates.has(entry.predicate)) {
+      entry.status = "answered";
+    }
   }
 }
 
@@ -440,6 +542,47 @@ export function corroborateVenturesAgainstFirstPartySources(evidence: CollectedE
   }
 }
 
+/**
+ * Make verified leadership research available to the rest of the project
+ * dossier. The basic-facts lane can find a founder in an interview or an
+ * official "built by" footer even when the bounded X/team-page lanes miss
+ * them; keeping that answer trapped in one panel made the final report still
+ * claim that no team was known.
+ */
+export function hydrateProjectTeamFromVerifiedFacts(evidence: CollectedEvidence): void {
+  if (!evidence.roles.includes(SubjectClass.PROJECT)) return;
+  const team = evidence.webTeam ?? (evidence.webTeam = []);
+  const existing = new Set(team.flatMap((member) => [
+    normalizeValue(member.name),
+    member.handle ? normalizeValue(member.handle.replace(/^@/, "")) : "",
+  ]).filter(Boolean));
+
+  for (const fact of evidence.basicFacts ?? []) {
+    if (fact.predicate !== "founder" && fact.predicate !== "executive") continue;
+    if (fact.artifact_verified !== true || (fact.status !== "verified" && fact.status !== "corroborated")) continue;
+    const name = fact.value.trim();
+    const identity = normalizeValue(name.replace(/^@/, ""));
+    if (!identity || existing.has(identity)) continue;
+    const supportingSource = fact.sources.find((candidate) =>
+      candidate.relation === "supports" && candidate.artifactVerified === true);
+    if (!supportingSource?.url) continue;
+    const role = fact.qualifier?.trim()
+      || (fact.predicate === "founder" ? "Founder" : "Executive");
+    team.push({
+      name,
+      ...(name.startsWith("@") ? { handle: name } : {}),
+      role,
+      source: supportingSource.title || "Verified project leadership source",
+      sourceUrl: supportingSource.url,
+      evidence: supportingSource.excerpt,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "basic-facts",
+    });
+    existing.add(identity);
+  }
+}
+
 // Same 3-significant-digit contract as the report canvas (src/lib/format.ts)
 // so newly frozen fact text matches the UI. Forward-only: already-frozen
 // values are never rewritten client-side.
@@ -472,16 +615,24 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     && evidence.profile.profile_provider === "twitterapi"
     && evidence.profile.display_name.trim();
   const officialProfileSource = resolvedProviderProfile ? profileSource(evidence, capturedAt) : null;
+  const organizationAccount = isOrganizationAccount(evidence);
 
-  if (officialProfileSource && evidence.roles.includes(SubjectClass.PROJECT)) {
-    projected.push(makeFact(
+  if (officialProfileSource && organizationAccount) {
+    const identityFact = makeFact(
       evidence,
       "official_identity",
       evidence.profile.display_name.trim(),
       [officialProfileSource],
       evidence.profile.handle,
-    ));
-    const profileProduct = projectProductFromProfileBio(evidence.profile.bio);
+    );
+    // An official organization account proves its public brand identity, not
+    // its legal entity, operators, or fund legitimacy. Keep it visible without
+    // letting self-description lift the investor score floor.
+    if (!evidence.roles.includes(SubjectClass.PROJECT)) identityFact.floorEligible = false;
+    projected.push(identityFact);
+    const profileProduct = evidence.roles.includes(SubjectClass.PROJECT)
+      ? projectProductFromProfileBio(evidence.profile.bio)
+      : null;
     if (profileProduct) {
       const productFact = makeFact(
         evidence,
@@ -528,7 +679,9 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
 
   if (
     officialProfileSource
-    && evidence.roles.includes(SubjectClass.FOUNDER)
+    && !evidence.roles.includes(SubjectClass.PROJECT)
+    && !organizationAccount
+    && Boolean(evidence.profile.identity_binding)
     && evidence.profile.identity_confidence !== "SuspectedImpersonation"
   ) {
     const existingVerifiedSources = (evidence.basicFacts ?? [])
@@ -542,9 +695,10 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       evidence.profile.display_name.trim(),
       evidence.profile.resolved_name?.trim() ?? "",
     ].filter(Boolean))];
+    const pdlSource = pdlIdentitySource(evidence, capturedAt);
     const namedFrozenSource = existingVerifiedSources.find((candidate) => sourceMentionsSubject(candidate, aliases));
     const githubSource = githubIdentitySource(evidence, capturedAt);
-    const identityAnchor = namedFrozenSource ?? githubSource;
+    const identityAnchor = namedFrozenSource ?? githubSource ?? pdlSource;
     if (identityAnchor) {
       projected.push(makeFact(
         evidence,
@@ -576,6 +730,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
 
       const currentSources = existingVerifiedSources.filter((candidate) =>
         sourceSupportsRelationship(candidate, venture, aliases, "current_role"));
+      if (pdlSourceSupportsCurrentVenture(pdlSource, venture, aliases)) currentSources.push(pdlSource);
       if (
         CURRENT_AUTHORITY_ROLE.test(venture.role)
         && currentSources.length
@@ -659,76 +814,49 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     // network is a singleton predicate: extend the ONE fact's value with the
     // id-joined DeFiLlama chain footprint instead of minting a second fact,
     // which the singleton reconciliation would mark conflicted.
-    const chainFootprint = token.deployedChains?.length
-      ? `${token.deployedChains.length} chains incl. ${token.deployedChains.slice(0, 4).join(", ")}`
+    const protocolFootprint = token.deployedChains?.length
+      && evidence.protocolTvl?.sourceUrl
+      && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId)
+      ? evidence.protocolTvl
+      : undefined;
+    const chainFootprint = protocolFootprint
+      ? `${protocolFootprint.chains.length} chains incl. ${protocolFootprint.chains.slice(0, 4).join(", ")}`
       : token.chain;
-    projected.push(makeFact(evidence, "network", chainFootprint, [tokenSource],
-      token.deployedChains?.length ? "protocol footprint per DeFiLlama TVL" : undefined));
-
-    // Market/on-chain liveness. A verified canonical token that is ranked,
-    // capitalized, and liquid across multiple market providers is hard evidence
-    // of a live, actively-used product — evidence that CANNOT be hallucinated
-    // and does not depend on fetching the homepage. This is what lets a real
-    // protocol (Aave, Uniswap, …) whose site sits behind Cloudflare bot
-    // management still complete its traction and product-substance questions,
-    // instead of returning INCOMPLETE because a Node fetch was challenged.
-    const rank = typeof token.rank === "number" && token.rank > 0 ? token.rank : null;
-    const marketCap = typeof token.marketCapUsd === "number" && token.marketCapUsd > 0 ? token.marketCapUsd : null;
-    const liquidity = typeof token.liquidityUsd === "number" && token.liquidityUsd > 0 ? token.liquidityUsd : null;
-    const volume = typeof token.volume24hUsd === "number" && token.volume24hUsd > 0 ? token.volume24hUsd : null;
-    const marketDescriptor = [
-      rank !== null ? `CoinGecko rank #${rank}` : null,
-      marketCap !== null ? `${formatUsd(marketCap)} market cap` : null,
-      liquidity !== null ? `${formatUsd(liquidity)} on-chain liquidity` : null,
-      volume !== null ? `${formatUsd(volume)} 24h volume` : null,
-    ].filter((part): part is string => Boolean(part)).join(" · ");
-
-    // Traction: any real market footprint proves the token trades and is used.
-    const hasLiveMarket = rank !== null || marketCap !== null || liquidity !== null || volume !== null;
-    if (hasLiveMarket) {
-      projected.push(makeFact(
-        evidence,
-        "traction",
-        marketDescriptor,
-        [tokenSource],
-        `captured ${token.capturedAt.slice(0, 10)}`,
-      ));
-    }
-
-    // Product substance: an established, canonical protocol token (ranked or
-    // materially capitalized) is a live operating product, even when the
-    // marketing site cannot be fetched. Reserved for the established tier so a
-    // thin new token does not inherit product substance for free.
-    const establishedProtocol = (rank !== null && rank <= 3000) || (marketCap !== null && marketCap >= 10_000_000);
-    if (establishedProtocol) {
-      const providerLabel = tokenProviders.join(" + ");
-      projected.push(makeFact(
-        evidence,
-        "product",
-        `${token.name} operates a live on-chain protocol; its canonical token ${token.symbol.toUpperCase()} is established and actively traded (${marketDescriptor})`,
-        [source({
-          url: token.sourceUrl,
-          title: "On-chain market liveness",
-          excerpt: `${token.name} (${token.symbol}) is a verified canonical token corroborated across ${providerLabel} with ${marketDescriptor}. An established, liquid, market-listed protocol token is direct evidence of a live operating product.`,
-          capturedAt: token.capturedAt,
-          provider: providerLabel,
+    const networkSources = protocolFootprint
+      ? [source({
+          url: protocolFootprint.sourceUrl,
+          title: "DeFiLlama protocol chain footprint",
+          excerpt: `${protocolFootprint.name} is listed across ${protocolFootprint.chains.length} chains: ${protocolFootprint.chains.slice(0, 8).join(", ")}.`,
+          capturedAt: protocolFootprint.capturedAt,
+          provider: "defillama",
           sourceClass: "regulatory_or_onchain",
-        })],
-      ));
-    }
+        })]
+      : [tokenSource];
+    projected.push(makeFact(evidence, "network", chainFootprint, networkSources,
+      protocolFootprint ? "protocol footprint per DeFiLlama TVL" : undefined));
+
+    // Rank, market capitalization, token liquidity, and token volume establish
+    // a market footprint only. They do not prove that the subject operates a
+    // protocol, that its product is live, or that people use that product.
+    // Those fields stay in the canonical-token market snapshot and never mint
+    // product or traction facts for the scoring packet.
 
     // Supply ratio -> tokenomics disclosure. The checkable ratio only, never a
     // vesting claim: CoinGecko supply is partly project-self-reported, and a
     // schedule is a different artifact this fact deliberately does not imply.
+    const supplyDenominator = typeof token.maxSupply === "number" && token.maxSupply > 0
+      ? token.maxSupply
+      : typeof token.totalSupply === "number" && token.totalSupply > 0
+        ? token.totalSupply
+        : null;
     if (
-      typeof token.circulatingSupply === "number" && token.circulatingSupply > 0
-      && ((typeof token.maxSupply === "number" && token.maxSupply > 0)
-        || (typeof token.totalSupply === "number" && token.totalSupply > 0))
+      typeof token.circulatingSupply === "number"
+      && token.circulatingSupply > 0
+      && supplyDenominator !== null
+      && token.circulatingSupply <= supplyDenominator
     ) {
-      const denominator = typeof token.maxSupply === "number" && token.maxSupply > 0
-        ? token.maxSupply
-        : token.totalSupply as number;
-      const pct = Math.min(100, Math.round((token.circulatingSupply / denominator) * 100));
+      const denominator = supplyDenominator;
+      const pct = Math.round((token.circulatingSupply / denominator) * 100);
       const compact = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : Math.round(value).toLocaleString();
       // Supply overhang, stated the way a buyer asks it: how much supply has
       // not hit the market yet, and what is the fully-diluted value relative to
@@ -750,7 +878,14 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         evidence,
         "tokenomics",
         `${compact(token.circulatingSupply)} of ${compact(denominator)} supply circulating (${pct}%)${overhangPhrase}`,
-        [tokenSource],
+        [source({
+          url: token.sourceUrl,
+          title: `${primaryTokenProvider} supply snapshot`,
+          excerpt: `${token.name} (${token.symbol}) reported ${compact(token.circulatingSupply)} circulating supply and ${compact(denominator)} ${typeof token.maxSupply === "number" && token.maxSupply > 0 ? "maximum" : "total"} supply at capture time.`,
+          capturedAt: token.capturedAt,
+          provider: tokenProviders.includes("coingecko") ? "coingecko" : "dexscreener",
+          sourceClass: "regulatory_or_onchain",
+        })],
         `captured ${token.capturedAt.slice(0, 10)}`,
       ));
     }
@@ -783,9 +918,15 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // value-scoped to the venture name, so a person is never presented as having
   // raised the money themselves.
   const isFounderSubject = evidence.roles.includes(SubjectClass.FOUNDER);
+  const verifiedFounderVentureDomain = evidence.ventures.find((venture) =>
+    venture.artifact_verified === true
+    && venture.evidence_origin !== "model_lead"
+    && Boolean(canonicalOfficialWebsite(venture.domain)?.canonicalUrl))?.domain;
   const enrichmentOfficialWebsite = isProject
     ? evidence.projectToken?.homepage ?? evidence.profile.website
-    : evidence.companyEnrichment?.requestedDomain;
+    : isFounderSubject
+      ? verifiedFounderVentureDomain
+      : undefined;
   const domainBoundEnrichment = evidence.companyEnrichment
     && companyEnrichmentMatchesOfficialDomain(evidence.companyEnrichment, enrichmentOfficialWebsite)
     ? evidence.companyEnrichment
@@ -828,7 +969,10 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       && candidate.provider !== "monid"
       && candidate.relation === "supports"));
   const fundingFact = !hasStrongerFundingFact
-    && isProject && evidence.protocolFunding && evidence.protocolFunding.rounds.length
+    && isProject
+    && evidence.protocolFunding
+    && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId)
+    && evidence.protocolFunding.rounds.length
     ? {
         rounds: evidence.protocolFunding.rounds.length,
         totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
@@ -886,7 +1030,11 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // row it came from. DeFiLlama keeps leadInvestors and otherInvestors apart:
   // a name is published at the role the aggregator gave it and is never
   // promoted to lead.
-  const indexedFunding = isProject ? evidence.protocolFunding : undefined;
+  const indexedFunding = isProject
+    && evidence.protocolFunding
+    && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId)
+    ? evidence.protocolFunding
+    : undefined;
   if (indexedFunding?.rounds.length) {
     const backers = new Map<string, {
       name: string;
@@ -949,7 +1097,11 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // On-chain TVL → traction (P5). Security incidents from the same document
   // become standalone negative facts below. A $295M exploit must never be
   // buried inside the source excerpt for an otherwise positive TVL metric.
-  const tvlSnapshot = isProject ? evidence.protocolTvl : undefined;
+  const tvlSnapshot = isProject
+    && evidence.protocolTvl
+    && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId)
+    ? evidence.protocolTvl
+    : undefined;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
     const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
     // Same trend contract as fees: growth-or-bleed, "steady" under 1% noise.
@@ -1033,11 +1185,15 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
 
   // Independent audits → P2/P3/P6. ONLY auditor-domain-corroborated entries
   // mint verified facts (the auditor's own site names the subject; a scam
-  // cannot fake that). Self-attested names from the subject's own security
-  // page stay research leads: visible for transparency, excluded from every
-  // scoring gate and question completion.
+  // cannot fake that). Unverified names from subject disclosures or curated
+  // audit-link URLs stay research leads: visible for transparency, excluded
+  // from every scoring gate and question completion.
   const auditsSnapshot = isProject ? evidence.securityAudits : undefined;
   if (auditsSnapshot) {
+    const auditAttestations = auditsSnapshot.attestations ?? [];
+    const identityAnchoredAudits = auditsSnapshot.corroborated.filter((entry) =>
+      entry.matchedIdentityAnchor !== undefined
+      && auditAnchorMatchesSubject(evidence, entry.matchedIdentityAnchor));
     // Multi-firm attestation as a CITABLE fact. The exceptional-band ceiling
     // already arms on >=2 registry auditors, but every analyst score must cite
     // evidence; without a citable artifact the permission is unusable and the
@@ -1045,27 +1201,40 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     // corroborated-tier and floorEligible:false, so it can be CITED but can
     // never mint a score floor (H2) and never counts as a strictly verified
     // auditFact for band floors.
-    if (!auditsSnapshot.corroborated.length && auditsSnapshot.selfAttested.length >= 2) {
+    if (!identityAnchoredAudits.length && auditsSnapshot.selfAttested.length >= 2) {
       const names = auditsSnapshot.selfAttested.slice(0, 5);
-      const attested = makeFact(
-        evidence,
-        "audit",
-        `Security engagements attested: ${names.join(", ")}`,
-        [source({
-          url: auditsSnapshot.securityPageUrl ?? "https://defillama.com/",
-          title: "Curated audit links naming reputable auditors",
-          excerpt: `${names.length} reputable security firms (${names.join(", ")}) are named by the project's curated audit links and security disclosures. Attestation only; no auditor-site confirmation succeeded this run.`,
-          capturedAt: auditsSnapshot.capturedAt,
-          provider: "security-audits",
-          sourceClass: "other_public",
-        })],
-        "attested via curated audit links; not confirmed on auditor sites",
+      const exactAttestations = names.map((name) =>
+        auditAttestations.find((attestation) => attestation.auditor === name),
       );
-      attested.status = "corroborated";
-      attested.floorEligible = false;
-      projected.push(attested);
+      // An aggregate claim is citable only when each named firm retains its
+      // own exact source. One source that names A cannot support a sentence
+      // that also names B, even when both names exist elsewhere in the bag.
+      if (exactAttestations.every((attestation) => attestation !== undefined)) {
+        const attested = makeFact(
+          evidence,
+          "audit",
+          `Security engagements attested: ${names.join(", ")}`,
+          exactAttestations.map((attestation) => source({
+            url: attestation!.sourceUrl,
+            title: attestation!.origin === "subject_page"
+              ? `Subject disclosure naming ${attestation!.auditor}`
+              : `Curated audit link naming ${attestation!.auditor}`,
+            excerpt: `${attestation!.auditor} is named as an auditor lead by this bounded ${attestation!.origin === "subject_page" ? "subject disclosure" : "curated audit link"}. No auditor-site confirmation succeeded this run.`,
+            capturedAt: auditsSnapshot.capturedAt,
+            provider: "security-audits",
+            sourceClass: attestation!.origin === "subject_page" ? "official_subject" : "other_public",
+          })),
+          "attested via bounded discovery sources; not confirmed on auditor sites",
+        );
+        attested.status = "corroborated";
+        attested.floorEligible = false;
+        projected.push(attested);
+      }
     }
-    for (const entry of auditsSnapshot.corroborated.slice(0, 4)) {
+    for (const entry of identityAnchoredAudits.slice(0, 4)) {
+      const subjectAttestation = auditAttestations.find((attestation) =>
+        attestation.auditor === entry.auditor && attestation.origin === "subject_page",
+      );
       projected.push(makeFact(
         evidence,
         "audit",
@@ -1079,8 +1248,8 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
             provider: "security-audits",
             sourceClass: "official_counterparty",
           }),
-          ...(auditsSnapshot.securityPageUrl ? [source({
-            url: auditsSnapshot.securityPageUrl,
+          ...(subjectAttestation ? [source({
+            url: subjectAttestation.sourceUrl,
             title: "Project security page naming the auditor",
             excerpt: `The project's security page names ${entry.auditor}.`,
             capturedAt: auditsSnapshot.capturedAt,
@@ -1091,28 +1260,38 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         "confirmed on the auditor's own site",
       ));
     }
-    const corroboratedNames = new Set(auditsSnapshot.corroborated.map((entry) => entry.auditor));
+    const corroboratedNames = new Set(identityAnchoredAudits.map((entry) => entry.auditor));
     const unconfirmed = auditsSnapshot.selfAttested.filter((name) => !corroboratedNames.has(name));
-    if (unconfirmed.length && auditsSnapshot.securityPageUrl) {
+    if (unconfirmed.length) {
       const leads = evidence.basicFactLeads ?? (evidence.basicFactLeads = []);
-      leads.push({
-        subject: evidence.profile.display_name || evidence.profile.handle,
-        predicate: "audit",
-        value: `Security page names ${unconfirmed.slice(0, 6).join(", ")}${unconfirmed.length > 6 ? ` and ${unconfirmed.length - 6} more` : ""}`,
-        questionId: "project.audit",
-        excerpt: "Named on the project's own security page; not yet confirmed on the auditor's own site.",
-        sourceUrl: auditsSnapshot.securityPageUrl,
-        sourceTitle: "Project security page (self-attested)",
-        evidence_origin: "deterministic_bootstrap",
-        artifact_verified: false,
-        provider: "security-audits",
-      });
+      for (const name of unconfirmed.slice(0, 6)) {
+        const attestation = auditAttestations.find((candidate) => candidate.auditor === name);
+        if (!attestation) continue;
+        leads.push({
+          subject: evidence.profile.display_name || evidence.profile.handle,
+          predicate: "audit",
+          value: `Audit discovery source names ${name}`,
+          questionId: "project.audit",
+          excerpt: `${name} is named by one bounded ${attestation.origin === "subject_page" ? "subject disclosure" : "curated audit link"}; the engagement was not confirmed on the auditor's own site.`,
+          sourceUrl: attestation.sourceUrl,
+          sourceTitle: attestation.origin === "subject_page"
+            ? "Project security page (self-attested)"
+            : "Curated audit link (unconfirmed lead)",
+          evidence_origin: "deterministic_bootstrap",
+          artifact_verified: false,
+          provider: "security-audits",
+        });
+      }
     }
   }
 
   // Protocol fees → a second dated usage metric (P5). Fees are on-chain
   // derived and self-limiting to fake: generating fee volume costs the fees.
-  const feesSnapshot = isProject ? evidence.protocolFees : undefined;
+  const protocolIndexIdentityMatched = canonicalProtocolIndexMatch(evidence, evidence.protocolTvl?.geckoId)
+    || canonicalProtocolIndexMatch(evidence, evidence.protocolFunding?.geckoId);
+  const feesSnapshot = isProject && protocolIndexIdentityMatched && protocolFeesBindingMatches(evidence)
+    ? evidence.protocolFees
+    : undefined;
   if (feesSnapshot && typeof feesSnapshot.total30dUsd === "number" && feesSnapshot.total30dUsd > 0) {
     // Trend answers what the raw total cannot: is real usage growing or
     // bleeding? Small moves (<1%) read as noise and are reported as steady.
@@ -1143,37 +1322,78 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // purpose -- on established tokens the largest holders are typically
   // exchanges, custodians, or protocol contracts, so concentration is stated
   // as a fact to check, never as an insider accusation.
-  const holderSnapshot = isProject ? evidence.holderProfile : undefined;
+  const holderSnapshot = isProject
+    && evidence.holderProfile
+    && canonicalTokenAddressChainMatch(evidence, evidence.holderProfile.binding)
+    ? evidence.holderProfile
+    : undefined;
   if (holderSnapshot && (holderSnapshot.topHolderPct !== null || holderSnapshot.lpLockedOrBurnedPct !== null || holderSnapshot.holdersAssessed === false)) {
     const fmtPct = (value: number) => `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10}%`;
     // A distribution the collector SUPPRESSED has to say so. Letting the clause
     // vanish would leave a report that never mentions concentration, which a
     // reader takes for "concentration was fine" rather than "not measured".
     const suppressed = holderSnapshot.holdersAssessed === false;
-    const parts = [
+    const assessedWalletCount = Number.isInteger(holderSnapshot.assessedWalletCount)
+      && (holderSnapshot.assessedWalletCount ?? 0) >= 1
+      && (holderSnapshot.assessedWalletCount ?? 0) <= 10
+      ? holderSnapshot.assessedWalletCount as number
+      : null;
+    const floorAggregate = holderSnapshot.top10PctIsFloor === true
+      && assessedWalletCount !== null
+      && assessedWalletCount < 10;
+    const completeTop10 = holderSnapshot.top10PctIsFloor === false
+      && assessedWalletCount === 10;
+    const distributionParts = [
       ...(holderSnapshot.topHolderPct !== null ? [`largest single wallet ~${fmtPct(holderSnapshot.topHolderPct)} of supply`] : []),
-      ...(holderSnapshot.top10Pct !== null && holderSnapshot.topHolderPct !== null ? [`top 10 wallets hold ~${fmtPct(holderSnapshot.top10Pct)}`] : []),
+      ...(holderSnapshot.top10Pct !== null && floorAggregate
+        ? [`at least ${fmtPct(holderSnapshot.top10Pct)} of supply across ${assessedWalletCount} assessed wallet${assessedWalletCount === 1 ? "" : "s"}`]
+        : []),
+      ...(holderSnapshot.top10Pct !== null && completeTop10
+        ? [`top 10 wallets hold ~${fmtPct(holderSnapshot.top10Pct)}`]
+        : []),
       ...(suppressed ? ["largest holder not measured"] : []),
+    ];
+    const profileParts = [
       ...(holderSnapshot.holderCount !== null ? [`${holderSnapshot.holderCount.toLocaleString("en-US")} holders`] : []),
       ...(holderSnapshot.lpLockedOrBurnedPct !== null ? [`${fmtPct(holderSnapshot.lpLockedOrBurnedPct)} of DEX liquidity locked or burned`] : []),
+    ];
+    const parts = [
+      ...distributionParts,
+      ...profileParts,
     ];
     // The concentration numbers are not always GoPlus's. On a chain where GoPlus
     // does not order its register they come from the chain explorer, and the
     // note carries that sentence ready to state, so the excerpt cannot cite
     // GoPlus for a figure GoPlus did not produce.
     const provenance = holderSnapshot.distributionNote ? ` ${holderSnapshot.distributionNote}` : "";
+    const profileSource = source({
+      url: holderSnapshot.sourceUrl,
+      title: "GoPlus holder and liquidity record",
+      excerpt: `GoPlus holder context: ${(holderSnapshot.distributionSource === "explorer" ? profileParts : parts).join("; ")}.${holderSnapshot.distributionSource === "explorer" ? "" : provenance} Large holders on established tokens are commonly exchanges, custodians, or protocol contracts; verify before reading concentration as insider control.`,
+      capturedAt: holderSnapshot.sourceCapturedAt ?? holderSnapshot.capturedAt,
+      provider: "goplus",
+      sourceClass: "regulatory_or_onchain",
+    });
+    const factSources = holderSnapshot.distributionSource === "explorer"
+      && holderSnapshot.distributionSourceUrl
+      && distributionParts.length > 0
+      ? [
+          source({
+            url: holderSnapshot.distributionSourceUrl,
+            title: "Ordered chain-explorer holder register",
+            excerpt: `Ordered explorer wallet register: ${distributionParts.join("; ")}.${provenance} This bounded register does not identify wallet owners.`,
+            capturedAt: holderSnapshot.distributionCapturedAt ?? holderSnapshot.capturedAt,
+            provider: "blockscout",
+            sourceClass: "regulatory_or_onchain",
+          }),
+          ...(profileParts.length > 0 ? [profileSource] : []),
+        ]
+      : [profileSource];
     projected.push(makeFact(
       evidence,
       "tokenomics",
       parts.join(" · "),
-      [source({
-        url: holderSnapshot.sourceUrl,
-        title: "GoPlus holder register",
-        excerpt: `On-chain holder register: ${parts.join("; ")}.${provenance} Large holders on established tokens are commonly exchanges, custodians, or protocol contracts; verify before reading concentration as insider control.`,
-        capturedAt: holderSnapshot.capturedAt,
-        provider: "goplus",
-        sourceClass: "regulatory_or_onchain",
-      })],
+      factSources,
       `captured ${holderSnapshot.capturedAt.slice(0, 10)}`,
     ));
   }
@@ -1207,32 +1427,59 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
 
   // Upcoming unlocks → the vesting disclosure a buyer actually needs: when is
   // the next scheduled unlock, how big, and how much is coming inside 90 days.
-  const unlocksSnapshot = isProject ? evidence.tokenUnlocks : undefined;
+  const candidateUnlocks = isProject ? evidence.tokenUnlocks : undefined;
+  const canonicalToken = evidence.projectToken?.verified === true ? evidence.projectToken : undefined;
+  const unlockAddressMatches = Boolean(candidateUnlocks?.canonicalAddress && canonicalToken?.address)
+    && (canonicalToken!.address.startsWith("0x") && candidateUnlocks!.canonicalAddress!.startsWith("0x")
+      ? canonicalToken!.address.toLowerCase() === candidateUnlocks!.canonicalAddress!.toLowerCase()
+      : canonicalToken!.address === candidateUnlocks!.canonicalAddress);
+  const unlocksSnapshot = candidateUnlocks
+    && canonicalToken
+    && unlockAddressMatches
+    && candidateUnlocks.chain?.trim().toLowerCase() === canonicalToken.chain.trim().toLowerCase()
+    && Number.isInteger(candidateUnlocks.currencyId)
+    && Boolean(candidateUnlocks.contractSourceUrl && candidateUnlocks.eventsSourceUrl)
+    ? candidateUnlocks
+    : undefined;
   if (unlocksSnapshot) {
     const pctText = (value: number) => `${value >= 10 ? Math.round(value) : Math.round(value * 100) / 100}%`;
+    const validSupplyPct = (value: number | null): value is number =>
+      typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;
     const nextParts = [
       `next unlock ${unlocksSnapshot.nextUnlockDate}`,
       ...(unlocksSnapshot.allocationName ? [unlocksSnapshot.allocationName] : []),
-      ...(unlocksSnapshot.percentOfSupply !== null ? [`~${pctText(unlocksSnapshot.percentOfSupply)} of supply`] : []),
+      ...(validSupplyPct(unlocksSnapshot.percentOfSupply) ? [`~${pctText(unlocksSnapshot.percentOfSupply)} of supply`] : []),
       ...(unlocksSnapshot.unlockValueUsd !== null ? [`~${formatUsd(unlocksSnapshot.unlockValueUsd)}`] : []),
       ...(unlocksSnapshot.percentOfMcap !== null ? [`${pctText(unlocksSnapshot.percentOfMcap)} of market cap`] : []),
     ];
     const tailParts = [
-      ...(unlocksSnapshot.next90dPercentOfSupply !== null ? [`~${pctText(unlocksSnapshot.next90dPercentOfSupply)} of supply unlocking within 90 days`] : []),
-      ...(unlocksSnapshot.cumulativeUnlockedPercent !== null ? [`${pctText(unlocksSnapshot.cumulativeUnlockedPercent)} already unlocked`] : []),
+      ...(validSupplyPct(unlocksSnapshot.next90dPercentOfSupply) ? [`~${pctText(unlocksSnapshot.next90dPercentOfSupply)} of supply unlocking within 90 days`] : []),
+      ...(validSupplyPct(unlocksSnapshot.cumulativeUnlockedPercent) ? [`${pctText(unlocksSnapshot.cumulativeUnlockedPercent)} already unlocked`] : []),
     ];
+    const scheduleExcerpt = `Tracked vesting schedule: ${nextParts.join(", ")}${tailParts.length ? `; ${tailParts.join("; ")}` : ""}. Scheduled unlocks expand tradable float on known dates; verify allocation recipients before relying on the calendar.`;
+    const unlockSources = [
+          source({
+            url: unlocksSnapshot.contractSourceUrl!,
+            title: "CryptoRank canonical contract map",
+            excerpt: `CryptoRank currency ${unlocksSnapshot.currencyId} mapped the exact canonical ${unlocksSnapshot.chain} contract ${unlocksSnapshot.canonicalAddress} before ARGUS accepted its vesting schedule.`,
+            capturedAt: unlocksSnapshot.capturedAt,
+            provider: "cryptorank",
+            sourceClass: "regulatory_or_onchain",
+          }),
+          source({
+            url: unlocksSnapshot.eventsSourceUrl!,
+            title: "CryptoRank contract-bound unlock schedule",
+            excerpt: scheduleExcerpt,
+            capturedAt: unlocksSnapshot.capturedAt,
+            provider: "cryptorank",
+            sourceClass: "regulatory_or_onchain",
+          }),
+        ];
     projected.push(makeFact(
       evidence,
       "vesting",
       [nextParts.join(" · "), ...tailParts].join(" · "),
-      [source({
-        url: unlocksSnapshot.sourceUrl,
-        title: "CryptoRank unlock schedule",
-        excerpt: `Tracked vesting schedule: ${nextParts.join(", ")}${tailParts.length ? `; ${tailParts.join("; ")}` : ""}. Scheduled unlocks expand tradable float on known dates; verify allocation recipients before relying on the calendar.`,
-        capturedAt: unlocksSnapshot.capturedAt,
-        provider: "cryptorank",
-        sourceClass: "regulatory_or_onchain",
-      })],
+      unlockSources,
       `captured ${unlocksSnapshot.capturedAt.slice(0, 10)}`,
     ));
   }

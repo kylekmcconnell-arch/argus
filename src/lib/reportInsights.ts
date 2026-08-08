@@ -50,6 +50,10 @@ export interface NoticedInputs {
   lpLockedPct?: number | null;
   largestHolderPct?: number | null;
   top10HolderPct?: number | null;
+  /** Number of wallet rows included in top10HolderPct. */
+  assessedWalletCount?: number | null;
+  /** Whether top10HolderPct is a lower bound from fewer than ten rows. */
+  top10HolderPctIsFloor?: boolean;
   holderCount?: number | null;
   circulatingPct?: number | null;
   fdvUsd?: number | null;
@@ -67,6 +71,8 @@ export interface NoticedInputs {
   daysSinceLastPost?: number | null;
   verifiedTeamCount?: number | null;
   namedTeamCount?: number | null;
+  /** First-party role attributions published by the project itself. */
+  projectAttributedTeam?: Array<{ name: string; role?: string }>;
   anchors?: {
     market?: string;
     team?: string;
@@ -86,6 +92,27 @@ const pct = (value: number): string => `${Math.round(value)}%`;
 export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
   const signals: NoticedSignal[] = [];
   const anchors = input.anchors ?? {};
+  const assessedWalletCount = Number.isInteger(input.assessedWalletCount)
+    && (input.assessedWalletCount ?? 0) >= 1
+    && (input.assessedWalletCount ?? 0) <= 10
+    ? input.assessedWalletCount as number
+    : null;
+  const holderAggregate = isNum(input.top10HolderPct)
+    && (
+      (input.top10HolderPctIsFloor === true && assessedWalletCount !== null && assessedWalletCount < 10)
+      || (input.top10HolderPctIsFloor === false && assessedWalletCount === 10)
+    )
+    ? {
+        sharePct: input.top10HolderPct,
+        assessedWalletCount: assessedWalletCount as number,
+        isFloor: input.top10HolderPctIsFloor === true,
+      }
+    : null;
+  const holderAggregateSentence = holderAggregate
+    ? holderAggregate.isFloor
+      ? ` At least ${pct(holderAggregate.sharePct)} of supply sits across ${holderAggregate.assessedWalletCount} assessed wallet${holderAggregate.assessedWalletCount === 1 ? "" : "s"}.`
+      : ` The top 10 wallets hold ${pct(holderAggregate.sharePct)}.`
+    : "";
 
   if (isNum(input.lpLockedPct) && input.lpLockedPct <= 5) {
     signals.push({
@@ -100,19 +127,20 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
   }
 
   if (isNum(input.largestHolderPct) && input.largestHolderPct >= 20) {
-    const top10 = isNum(input.top10HolderPct) ? ` The top 10 wallets hold ${pct(input.top10HolderPct)}.` : "";
     signals.push({
       id: "holder-concentration",
       severity: "alert",
       headline: `One wallet holds ${pct(input.largestHolderPct)} of the supply`,
-      detail: `A single holder can move the price on its own.${top10}`,
+      detail: `A single holder can move the price on its own.${holderAggregateSentence}`,
       anchor: anchors.market,
     });
-  } else if (isNum(input.top10HolderPct) && input.top10HolderPct >= 60) {
+  } else if (holderAggregate && holderAggregate.sharePct >= 60) {
     signals.push({
       id: "holder-concentration",
       severity: "watch",
-      headline: `The top 10 wallets hold ${pct(input.top10HolderPct)} of the supply`,
+      headline: holderAggregate.isFloor
+        ? `At least ${pct(holderAggregate.sharePct)} sits across ${holderAggregate.assessedWalletCount} assessed wallet${holderAggregate.assessedWalletCount === 1 ? "" : "s"}`
+        : `The top 10 wallets hold ${pct(holderAggregate.sharePct)} of the supply`,
       detail: "Ownership is concentrated enough for a small group to move the market.",
       anchor: anchors.market,
     });
@@ -197,13 +225,22 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
     isNum(input.verifiedTeamCount) && input.verifiedTeamCount === 0
     && isNum(input.marketCapUsd) && input.marketCapUsd >= 10_000_000
   ) {
-    const named = isNum(input.namedTeamCount) && input.namedTeamCount > 0
-      ? `${input.namedTeamCount} named ${input.namedTeamCount === 1 ? "person" : "people"}, none independently verified.`
-      : "No team member has been independently verified.";
+    const attributed = (input.projectAttributedTeam ?? [])
+      .filter((person) => person.name.trim())
+      .slice(0, 4);
+    const attributedLabel = attributed.map((person) =>
+      `${person.name}${person.role ? ` as ${person.role}` : ""}`).join(", ");
+    const named = attributed.length > 0
+      ? `The project identifies ${attributedLabel}. That establishes its published role attribution, not independent proof of the person's identity, ownership, or control.`
+      : isNum(input.namedTeamCount) && input.namedTeamCount > 0
+        ? `${input.namedTeamCount} named ${input.namedTeamCount === 1 ? "person" : "people"}, none independently corroborated.`
+        : "No team member has been independently corroborated.";
     signals.push({
       id: "team-unverified",
       severity: "alert",
-      headline: `No verified team behind a ${usdCompact(input.marketCapUsd)} token`,
+      headline: attributed.length > 0
+        ? `${attributed.length === 1 && /founder|creator/i.test(attributed[0]?.role ?? "") ? "Project-attributed founder" : "Project-attributed team"} behind a ${usdCompact(input.marketCapUsd)} token`
+        : `No independently corroborated team behind a ${usdCompact(input.marketCapUsd)} token`,
       detail: named,
       anchor: anchors.team,
     });

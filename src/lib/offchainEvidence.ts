@@ -72,6 +72,11 @@ export interface OfacCollection extends OffchainCollection<OfacPayload> {
   indexHash?: string;
 }
 
+export interface OfacEntityCollection extends OffchainCollection<OfacPayload> {
+  /** SHA-256 of the sorted normalized legal-entity index used for this screen. */
+  indexHash?: string;
+}
+
 export interface OfacNameCache {
   read(): Promise<string | null>;
   write(names: string): Promise<void>;
@@ -416,6 +421,7 @@ export async function collectLegalCases(
 
 const OFAC_SOURCE = "https://data.opensanctions.org/datasets/latest/us_ofac_sdn/targets.simple.csv";
 const OFAC_MIN_PERSON_NAMES = 5_000;
+const OFAC_MIN_ENTITY_NAMES = 500;
 
 export const OFAC_SOURCE_URL = OFAC_SOURCE;
 
@@ -473,6 +479,30 @@ export function parseOfacPersonNames(csv: string): Set<string> {
     for (const raw of [name, ...(aliases ? aliases.split(";") : [])]) {
       const normalized = normalizeSanctionsName(raw || "");
       if (normalized && normalized.includes(" ")) names.add(normalized);
+    }
+  }
+  return names;
+}
+
+const OFAC_ENTITY_SCHEMAS = new Set([
+  "Company",
+  "Organization",
+  "LegalEntity",
+  "PublicBody",
+]);
+
+/** Exact names and aliases for non-person legal entities in the OFAC mirror. */
+export function parseOfacEntityNames(csv: string): Set<string> {
+  const names = new Set<string>();
+  const lines = csv.split("\n");
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) continue;
+    const [, schema, name, aliases] = firstCsvFields(line, 4);
+    if (!OFAC_ENTITY_SCHEMAS.has(schema)) continue;
+    for (const raw of [name, ...(aliases ? aliases.split(";") : [])]) {
+      const normalized = normalizeSanctionsName(raw || "");
+      if (normalized) names.add(normalized);
     }
   }
   return names;
@@ -545,6 +575,79 @@ async function loadOfacNames(
   };
 }
 
+async function loadOfacEntityNames(
+  fetcher: Fetcher,
+  cache?: OfacNameCache,
+): Promise<{ names: Set<string>; attempts: OffchainAttempt[]; indexHash?: string }> {
+  try {
+    const cached = await cache?.read();
+    if (cached) {
+      const names = new Set(cached.split("\n").filter(Boolean));
+      if (names.size >= OFAC_MIN_ENTITY_NAMES) {
+        return {
+          names,
+          attempts: [],
+          indexHash: await sha256([...names].sort().join("\n")),
+        };
+      }
+    }
+  } catch {
+    // Cache availability cannot change the provider result.
+  }
+
+  let response: Response;
+  try {
+    response = await fetcher(OFAC_SOURCE, { signal: AbortSignal.timeout(20000) });
+  } catch {
+    return {
+      names: new Set(),
+      attempts: [{ provider: "opensanctions", operation: "ofac-entity-index", status: "failed", detail: "transport_error" }],
+    };
+  }
+  if (!response.ok) {
+    return {
+      names: new Set(),
+      attempts: [{ provider: "opensanctions", operation: "ofac-entity-index", status: "failed", detail: `http_${response.status}` }],
+    };
+  }
+
+  let csv: string;
+  try {
+    csv = await response.text();
+  } catch {
+    return {
+      names: new Set(),
+      attempts: [{ provider: "opensanctions", operation: "ofac-entity-index", status: "failed", detail: "response_text_error" }],
+    };
+  }
+  const personNames = parseOfacPersonNames(csv);
+  const entityNames = parseOfacEntityNames(csv);
+  // Validate both families. A response containing only a hand-sized entity
+  // fragment is not allowed to produce a clean organization screen.
+  const validIndex = personNames.size >= OFAC_MIN_PERSON_NAMES
+    && entityNames.size >= OFAC_MIN_ENTITY_NAMES;
+  const attempt: OffchainAttempt = {
+    provider: "opensanctions",
+    operation: "ofac-entity-index",
+    status: validIndex ? "succeeded" : "partial",
+    detail: validIndex
+      ? `${entityNames.size}_entities`
+      : `undersized_entity_index_${entityNames.size}_person_index_${personNames.size}`,
+  };
+  if (validIndex) {
+    try {
+      await cache?.write([...entityNames].sort().join("\n"));
+    } catch {
+      // Cache writes are best-effort; the observed provider result is still valid.
+    }
+  }
+  return {
+    names: validIndex ? entityNames : new Set(),
+    attempts: [attempt],
+    ...(validIndex ? { indexHash: await sha256([...entityNames].sort().join("\n")) } : {}),
+  };
+}
+
 export async function collectOfacName(
   rawName: string,
   options: { fetcher?: Fetcher; cache?: OfacNameCache } = {},
@@ -575,6 +678,48 @@ export async function collectOfacName(
       name,
       listSize: loaded.names.size,
       sanctioned: loaded.names.has(query) || loaded.names.has(reversed),
+      list: "US Treasury OFAC SDN",
+    },
+    attempts: loaded.attempts,
+    status: aggregateStatus(loaded.attempts),
+    indexHash: loaded.indexHash,
+  };
+}
+
+/**
+ * Screen one already bound legal entity against the organization families in
+ * the US Treasury OFAC SDN mirror. Unlike the person path, entity names are
+ * never reversed and a brand/display name is not accepted by this function's
+ * caller as a substitute for a frozen legal_entity fact.
+ */
+export async function collectOfacEntityName(
+  rawName: string,
+  options: { fetcher?: Fetcher; cache?: OfacNameCache } = {},
+): Promise<OfacEntityCollection> {
+  const name = rawName.trim().replace(/^@/, "").replace(/\s+/g, " ").slice(0, 200);
+  const query = normalizeSanctionsName(name);
+  if (!query) {
+    return {
+      value: { available: false, note: "Entity sanctions screen needs an exact legal-entity name." },
+      attempts: [],
+      status: "succeeded",
+    };
+  }
+
+  const loaded = await loadOfacEntityNames(options.fetcher ?? fetch, options.cache);
+  if (!loaded.names.size) {
+    return {
+      value: { available: false, note: "OFAC SDN legal-entity list unavailable." },
+      attempts: loaded.attempts,
+      status: aggregateStatus(loaded.attempts),
+    };
+  }
+  return {
+    value: {
+      available: true,
+      name,
+      listSize: loaded.names.size,
+      sanctioned: loaded.names.has(query),
       list: "US Treasury OFAC SDN",
     },
     attempts: loaded.attempts,

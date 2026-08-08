@@ -150,6 +150,7 @@ describe("People Data Labs provider attempt accounting", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
       data: {
         full_name: "Ada Lovelace",
+        twitter_url: "twitter.com/analytical_engine",
         linkedin_url: "linkedin.com/in/ada-lovelace",
         experience: [],
       },
@@ -174,6 +175,7 @@ describe("People Data Labs provider attempt accounting", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
       data: {
         full_name: "Ada Lovelace",
+        twitter_url: "twitter.com/ada",
         experience: [
           { company: { name: "Existing Co", website: "existing.example" }, title: { name: "Founder" } },
           { company: { name: "New Co", website: "new.example" }, title: { name: "Engineer" } },
@@ -209,6 +211,7 @@ describe("People Data Labs provider attempt accounting", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
       data: {
         full_name: "Ada Lovelace",
+        twitter_url: "twitter.com/ada",
         experience: [
           { company: { name: "Acme" }, title: { name: "Software Engineer" } },
         ],
@@ -246,6 +249,7 @@ describe("People Data Labs provider attempt accounting", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
       data: {
         full_name: "Ada Lovelace",
+        twitter_url: "twitter.com/ada",
         experience: [
           { company: { name: "Acme" }, title: { name: "Engineer" } },
         ],
@@ -281,5 +285,70 @@ describe("People Data Labs provider attempt accounting", () => {
         notes: expect.stringContaining("corroborated: PDL employment record"),
       }),
     ]);
+  });
+
+  it("rejects a name and company collision when the returned person is not bound to the audited X handle", async () => {
+    vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    const fetchMock = vi.fn().mockResolvedValue(json({
+      data: {
+        full_name: "Sam Altman",
+        twitter_url: "twitter.com/sama",
+        experience: [
+          { company: { name: "OpenAI" }, title: { name: "CEO" } },
+        ],
+      },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const evidence = emptyEvidence("@unrelated_handle");
+    evidence.profile.display_name = "Sam Altman";
+    evidence.ventures.push({
+      project_name: "OpenAI",
+      role: "Founder",
+      period: "",
+      outcome: VentureOutcome.UNKNOWN,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    });
+    const recordCheck = vi.fn();
+
+    await withCostLedger(() => peopledatalabsAdapter.run({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: vi.fn(),
+      recordCheck,
+    }));
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain("profile=https%3A%2F%2Ftwitter.com%2Funrelated_handle");
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain("company=OpenAI");
+    expect(evidence.profile.resolved_name).toBeUndefined();
+    expect(evidence.ventures).toEqual([
+      expect.objectContaining({ project_name: "OpenAI", evidence_origin: "model_lead", artifact_verified: false }),
+    ]);
+    expect(recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "identity-resolution",
+      status: "checked-empty",
+      note: expect.stringContaining("exact audited X handle"),
+    }));
+  });
+
+  it("does not let a person record replace an institutional fund account", async () => {
+    vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const evidence = emptyEvidence("@theformsvc");
+    evidence.profile.display_name = "TheForms - Your Partner";
+    evidence.profile.bio = "We back founders building infrastructure.";
+    evidence.roles = [SubjectClass.INVESTOR];
+
+    const result = await withCostLedger(() => peopledatalabsAdapter.run({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: vi.fn(),
+      recordCheck: vi.fn(),
+    }));
+
+    expect(result).toEqual(expect.objectContaining({ state: "skipped" }));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(evidence.profile.resolved_name).toBeUndefined();
   });
 });

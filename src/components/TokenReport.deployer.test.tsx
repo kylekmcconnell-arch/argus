@@ -118,6 +118,7 @@ function rowText(label: string): string {
 }
 
 beforeEach(() => {
+  vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "true");
   harness.livePanel.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -127,6 +128,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllEnvs();
 });
 
 describe("solana deployer surfacing", () => {

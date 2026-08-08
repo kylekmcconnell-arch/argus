@@ -45,6 +45,12 @@ function capturedTime(value: string): string {
   return parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+function capturedDate(value: string): string {
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return value;
+  return parsed.toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
 // Snapshots captured before this deploy predate the web-corroboration recall
 // and the trend/float/unlock disclosures, so they typically verify a fraction
 // of what a fresh run does (observed: a pre-recall founder snapshot held 4
@@ -74,22 +80,28 @@ export function SnapshotEvidenceControl({
   return (
     <section
       aria-label={`Saved report v${snapshotVersion}`}
-      className="panel px-3.5 py-2.5"
+      className="panel px-3.5 py-2.5 max-sm:px-3 max-sm:py-2"
     >
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2">
-        <span className="chip tint-signal">
+      <div className="flex items-center gap-2.5">
+        <span className="chip tint-signal shrink-0">
           SAVED REPORT v{snapshotVersion}
         </span>
-        <time dateTime={capturedAt} className="mono text-[11px] text-ink-faint">
+        <time dateTime={capturedAt} className="mono ml-auto text-right text-[11px] text-ink-faint sm:hidden">
+          saved {capturedDate(capturedAt)}
+        </time>
+        <time dateTime={capturedAt} className="mono ml-auto hidden text-right text-[11px] text-ink-faint sm:block">
           saved {capturedTime(capturedAt)}
         </time>
+      </div>
+
+      <div className="mt-2 hidden items-center gap-2.5 sm:flex">
         {enabled ? (
-          <p role="status" className="w-full text-[11.5px] leading-relaxed text-caution sm:ml-auto sm:w-auto">
+          <p role="status" className="ml-auto text-[11.5px] leading-relaxed text-caution">
             Current data is shown separately and does not change the saved score.
           </p>
         ) : (
           <>
-            <p className="w-full text-[11.5px] leading-relaxed text-ink-faint sm:ml-1 sm:min-w-52 sm:flex-1">
+            <p className="ml-1 min-w-52 flex-1 text-[11.5px] leading-relaxed text-ink-faint">
               This report uses data saved on {capturedTime(capturedAt)}.
             </p>
             <button
@@ -103,10 +115,43 @@ export function SnapshotEvidenceControl({
         )}
       </div>
 
+      <details className="mt-1.5 border-t border-line/60 pt-1.5 text-[11.5px] sm:hidden">
+        <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 text-ink-dim [&::-webkit-details-marker]:hidden">
+          <span>{enabled ? "Current data is separate" : "Saved-data options"}</span>
+          <span className="mono text-[10px] uppercase tracking-wide text-signal-lift">Details</span>
+        </summary>
+        <div className="pb-1 pt-1">
+          {enabled ? (
+            <p role="status" className="leading-relaxed text-caution">
+              Current data is shown separately and does not change the saved score.
+            </p>
+          ) : (
+            <>
+              <p className="leading-relaxed text-ink-faint">
+                This report uses data saved on {capturedTime(capturedAt)}.
+              </p>
+              <button
+                type="button"
+                onClick={loadCurrentIntelligence}
+                className="btn-chip tint-signal mt-2 min-h-11"
+              >
+                Check current data
+              </button>
+            </>
+          )}
+          {predatesEngineUpgrades(capturedAt) ? (
+            <p role="note" className="mt-2 border-t border-line/60 pt-2 leading-relaxed text-caution">
+              ARGUS now checks more sources than when this report was saved.
+              {" "}Run a new scan for a fuller report. The saved result will not change.
+            </p>
+          ) : null}
+        </div>
+      </details>
+
       {predatesEngineUpgrades(capturedAt) ? (
         <p
           role="note"
-          className="mt-2 border-t border-line/60 pt-2 text-[11.5px] leading-relaxed text-caution"
+          className="mt-2 hidden border-t border-line/60 pt-2 text-[11.5px] leading-relaxed text-caution sm:block"
         >
           ARGUS now checks more sources than when this report was saved.
           {" "}Run a new scan for a fuller report. The saved result will not change.

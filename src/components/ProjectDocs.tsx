@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { FileText, MagnifyingGlass } from "@phosphor-icons/react";
 
 // Project documents & resources: the whitepaper, security audits, and the pages a
 // real operation publishes about itself — API / developer docs, About, a named
@@ -9,10 +10,15 @@ type Audit = { auditor: string; url: string; date: string | null };
 type Resource = { category: string; title: string; url: string };
 type Data = {
   available: boolean;
+  completed?: boolean;
+  partial?: boolean;
+  truncated?: boolean;
+  providerFailed?: boolean;
   whitepaper?: { url: string; kind: string } | null;
   resources?: Resource[];
   audits?: Audit[];
-  hasTeamPage?: boolean;
+  hasTeamPage?: boolean | null;
+  hasAbout?: boolean | null;
   note?: string;
 };
 
@@ -71,6 +77,7 @@ export function ProjectDocs({
   const audits = data.audits ?? [];
   const resources = data.resources ?? [];
   const nothing = !wp && !resources.length && !audits.length;
+  const absenceEstablished = data.completed === true;
 
   // Group resources by category, preserving the canonical section order.
   const groups = CAT_ORDER
@@ -78,23 +85,28 @@ export function ProjectDocs({
     .filter((g) => g.items.length > 0);
 
   return (
-    <div className={`panel p-4 ${nothing ? "tint-caution" : ""}`}>
+    <div className={`panel p-4 ${nothing && absenceEstablished ? "tint-caution" : ""}`}>
       <div className="flex items-center gap-2">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-faint)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></svg>
+        <FileText aria-hidden="true" size={15} weight="regular" className="text-ink-faint" />
         <span className="eyebrow">Documents &amp; resources</span>
         {data.hasTeamPage && (
-          <span className="chip tint-pass ml-auto">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>named team page
+          <span className="chip tint-signal ml-auto">
+            <MagnifyingGlass aria-hidden="true" size={10} weight="bold" />team link surfaced
           </span>
         )}
       </div>
 
       {nothing ? (
-        <p className="mt-2 text-[12.5px] leading-relaxed text-caution">
-          {data.note ?? "No whitepaper, documentation, or security audit found. For a project raising money, that absence is itself a flag."}
+        <p className={`mt-2 text-[12.5px] leading-relaxed ${absenceEstablished ? "text-caution" : "text-ink-dim"}`}>
+          {data.note ?? (absenceEstablished
+            ? "The completed bounded discovery read surfaced no whitepaper, documentation, or security audit."
+            : "Document discovery did not complete, so missing resources were not ruled out.")}
         </p>
       ) : (
         <div className="mt-2.5 space-y-2.5">
+          {data.note && (
+            <p className="text-[11px] leading-snug text-ink-dim">{data.note}</p>
+          )}
           {wp && (
             <div>
               <div className="eyebrow">{wp.kind === "docs" || wp.kind === "gitbook" ? "Docs" : wp.kind === "litepaper" ? "Litepaper" : "Whitepaper"}</div>
@@ -131,7 +143,7 @@ export function ProjectDocs({
               </div>
             </div>
           )}
-          {wp && !audits.length && (
+          {wp && !audits.length && absenceEstablished && (
             <p className="text-[11px] leading-snug text-caution">Whitepaper found, but no security audit surfaced. Confirm this before trusting the contract.</p>
           )}
         </div>

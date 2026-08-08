@@ -55,16 +55,40 @@ function apex(host: string): string {
 const SOCIAL = /^(twitter\.com|x\.com|t\.me|discord|github\.com|youtube\.com|youtu\.be|linkedin\.com|reddit\.com|instagram\.com|facebook\.com|tiktok\.com|t\.co)/;
 
 type Resource = { category: string; title: string; url: string };
+type DiscoveryRead = {
+  attempted: boolean;
+  completed: boolean;
+  partial: boolean;
+  truncated: boolean;
+  providerFailed: boolean;
+  meta?: string;
+};
+type CrawlResult = { resources: Resource[]; state: DiscoveryRead };
+
+const notAttempted = (): DiscoveryRead => ({
+  attempted: false,
+  completed: false,
+  partial: false,
+  truncated: false,
+  providerFailed: false,
+});
 
 // Deterministic: read the homepage and categorize its own nav links. On-site
 // (same registrable domain, incl. docs./api./blog. subdomains) only — Grok
 // handles off-site. This is what reliably surfaces About / Team / Press.
-async function crawlNav(domain: string): Promise<Resource[]> {
+async function crawlNav(domain: string): Promise<CrawlResult> {
   const origin = `https://${domain}`;
   try {
     const r = await fetch(`${origin}/`, { headers: { "user-agent": "Mozilla/5.0 (ARGUS due-diligence)" }, redirect: "follow", signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return [];
-    const html = (await r.text()).slice(0, 700_000);
+    if (!r.ok) {
+      return {
+        resources: [],
+        state: { attempted: true, completed: false, partial: false, truncated: false, providerFailed: true, meta: `http_${r.status}` },
+      };
+    }
+    const rawHtml = await r.text();
+    const truncated = rawHtml.length > 700_000;
+    const html = rawHtml.slice(0, 700_000);
     const targetApex = apex(domain);
     const out: Resource[] = [];
     const seen = new Set<string>();
@@ -87,8 +111,16 @@ async function crawlNav(domain: string): Promise<Resource[]> {
       seen.add(key);
       out.push({ category: cat, title: text || CATS[cat], url });
     }
-    return out;
-  } catch { return []; }
+    return {
+      resources: out,
+      state: { attempted: true, completed: !truncated, partial: truncated, truncated, providerFailed: false },
+    };
+  } catch {
+    return {
+      resources: [],
+      state: { attempted: true, completed: false, partial: false, truncated: false, providerFailed: true, meta: "transport_error" },
+    };
+  }
 }
 
 // Grok: whitepaper, audits, and any resource not linked from the homepage.
@@ -147,7 +179,18 @@ async function findViaGrok(name: string, domain: string, symbol: string, key: st
   };
 }
 
-function assembleResult(nav: Resource[], raw: any | null, searchedWithGrok: boolean) {
+function assembleResult(nav: CrawlResult, grok: GrokResult | null) {
+  const raw = grok?.parsed ?? null;
+  const searchState: DiscoveryRead = grok
+    ? {
+        attempted: true,
+        completed: grok.status === "succeeded",
+        partial: grok.status === "partial",
+        truncated: false,
+        providerFailed: grok.status === "failed",
+        ...(grok.meta ? { meta: grok.meta } : {}),
+      }
+    : notAttempted();
   const wp = raw?.whitepaper && isUrl(raw.whitepaper.url)
     ? { url: raw.whitepaper.url, kind: ["whitepaper", "litepaper", "docs", "gitbook"].includes(raw.whitepaper.kind) ? raw.whitepaper.kind : "whitepaper" }
     : null;
@@ -170,7 +213,7 @@ function assembleResult(nav: Resource[], raw: any | null, searchedWithGrok: bool
   const urlSeen = new Set<string>([wp ? norm(wp.url) : ""]);
   const perCat: Record<string, number> = {};
   const resources: Resource[] = [];
-  for (const rsc of [...nav, ...grokRes]) {
+  for (const rsc of [...nav.resources, ...grokRes]) {
     const u = norm(rsc.url);
     if (urlSeen.has(u)) continue;
     if ((perCat[rsc.category] ?? 0) >= 3) continue;
@@ -180,19 +223,41 @@ function assembleResult(nav: Resource[], raw: any | null, searchedWithGrok: bool
   }
   resources.sort((a, b) => CAT_ORDER.indexOf(a.category) - CAT_ORDER.indexOf(b.category));
 
+  // False means we completed both independent discovery lanes and neither one
+  // surfaced the page. When either lane failed, was truncated, or never ran,
+  // absence remains unknown. Positive links remain valid under partial coverage.
+  const completed = nav.state.attempted && nav.state.completed && searchState.completed;
+  const teamFound = resources.some((r) => r.category === "team");
+  const aboutFound = resources.some((r) => r.category === "about");
+  const nothingFound = !wp && !resources.length && !audits.length;
+  let note: string | undefined;
+  if (nothingFound && completed) {
+    note = "A completed homepage-navigation read and web/X search surfaced no whitepaper, documentation, or security audit within those sources.";
+  } else if (nothingFound && nav.state.completed && !searchState.attempted) {
+    note = "The homepage navigation was read, but live web/X search did not run. Documents outside that navigation remain unchecked.";
+  } else if (nothingFound) {
+    note = "Document discovery did not complete. No conclusion about missing documents, audits, team pages, or About pages was drawn.";
+  } else if (!completed) {
+    note = "Document discovery was partial. The links shown were found, but missing resource categories were not ruled out.";
+  } else {
+    note = "Homepage navigation and live web/X search surfaced these links. Search-surfaced labels are discovery context, not independent verification of the linked claims.";
+  }
+
   return {
     available: true,
+    completed,
+    partial: nav.state.partial || searchState.partial || (!completed && (nav.state.attempted || searchState.attempted)),
+    truncated: nav.state.truncated || searchState.truncated,
+    providerFailed: nav.state.providerFailed || searchState.providerFailed,
+    coverage: { homepage: nav.state, search: searchState },
     whitepaper: wp,
     resources: resources.slice(0, 18),
     audits,
-    // Transparency read: a named team/about page is a mild positive signal we surface.
-    hasTeamPage: resources.some((r) => r.category === "team"),
-    hasAbout: resources.some((r) => r.category === "about"),
-    note: !wp && !resources.length && !audits.length
-      ? (searchedWithGrok
-          ? "No whitepaper, documentation, or security audit could be found for this project via its site or web/X search."
-          : "No on-site documents were found. Live web search is available after the report is persisted.")
-      : undefined,
+    // A positive page survives partial coverage. A false absence flag requires
+    // both the homepage read and the independent search to have completed.
+    hasTeamPage: teamFound ? true : completed ? false : null,
+    hasAbout: aboutFound ? true : completed ? false : null,
+    note,
   };
 }
 
@@ -213,7 +278,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const domain = q(req.query.domain).replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase();
   if (!name && !symbol && !domain) { res.status(400).json({ error: "name, symbol, or domain required" }); return; }
 
-  const subjectCacheKey = `${(name || symbol || domain).toLowerCase()}:${domain}:v4`;
+  // v6 adds explicit attribution for positive search-surfaced links on top of
+  // v5's coverage contract. Never serve an older positive result without its
+  // discovery-context caveat, or a legacy empty array as a completed read.
+  const subjectCacheKey = `${(name || symbol || domain).toLowerCase()}:${domain}:v6`;
   const enhancedCacheKey = `docs:${subjectCacheKey}:grok`;
   const crawlCacheKey = `docs:${subjectCacheKey}:crawl`;
 
@@ -226,15 +294,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!panelCostVersionId || !key) {
     const crawlCached = await cacheGetJson<any>(crawlCacheKey);
     if (crawlCached) { res.status(200).json({ ...crawlCached, _cached: true }); return; }
-    const nav = domain ? await crawlNav(domain) : [];
-    const out = assembleResult(nav, null, false);
-    await cacheSetJson(crawlCacheKey, out);
+    const nav = domain ? await crawlNav(domain) : { resources: [], state: notAttempted() };
+    const out = assembleResult(nav, null);
+    // A provider failure must not become a durable empty cache entry.
+    if (!domain || nav.state.completed) await cacheSetJson(crawlCacheKey, out);
     res.status(200).json(out);
     return;
   }
 
   const [nav, grok] = await Promise.all([
-    domain ? crawlNav(domain) : Promise.resolve([] as Resource[]),
+    domain ? crawlNav(domain) : Promise.resolve({ resources: [], state: notAttempted() } as CrawlResult),
     findViaGrok(name || symbol, domain, symbol, key),
   ]);
   await attachPanelCost(auth.organizationId, panelCostVersionId, {
@@ -246,7 +315,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     status: grok.status,
     ...(grok.meta ? { meta: grok.meta } : {}),
   });
-  const out = assembleResult(nav, grok.parsed, true);
-  if (grok.status === "succeeded") await cacheSetJson(enhancedCacheKey, out);
+  const out = assembleResult(nav, grok);
+  if (grok.status === "succeeded" && (!domain || nav.state.completed)) await cacheSetJson(enhancedCacheKey, out);
   res.status(200).json(out);
 }

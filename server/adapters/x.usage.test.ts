@@ -4,6 +4,8 @@ import {
   checkFollow,
   clearLastTweetsMemo,
   collectCorpus,
+  findTeam,
+  generalWebSearch,
   getLastPostAt,
   getProfile,
   getRecentPosts,
@@ -96,6 +98,32 @@ describe("X provider attempt accounting", () => {
       status: "partial",
       meta: expect.stringContaining("http_400"),
     }));
+  });
+
+  it("falls through to Claude when every grounded search request is rejected", async () => {
+    vi.stubEnv("SERPER_API_KEY", "rejected-key");
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("ARGUS_EXTRACT_MODEL", "claude-haiku-4-5");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
+    delete process.env.OPENROUTER_API_KEY;
+    let anthropicHits = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("serper")) return json({ message: "Unauthorized" }, 403);
+      anthropicHits += 1;
+      return json({
+        content: [{ type: "text", text: anthropicHits === 1 ? '["one exact query"]' : "CLAUDE FALLBACK" }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+        stop_reason: "end_turn",
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const result = await generalWebSearch("system", "user");
+
+    expect(result).toBe("CLAUDE FALLBACK");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("bypasses both cache reads and writes for live Grok canaries", async () => {
@@ -461,6 +489,27 @@ describe("X provider attempt accounting", () => {
     // The RAW payload is shared: the reply the corpus drops still counts for dormancy.
     expect(lastPostAt).toBe("2026-07-16T00:00:00.000Z");
     expect(meta).toHaveLength(2);
+  });
+
+  it("reuses the intake team search instead of buying the same identity query twice", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/user/last_tweets")) return json({ data: { tweets: [] } });
+      if (decodeURIComponent(url).includes("from:uniswap (founder OR co-founder")) {
+        return json({ tweets: [{ text: "Our founder @haydenzadams launched Uniswap." }] });
+      }
+      return json({ tweets: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const corpus = await collectCorpus("@uniswap");
+    await findTeam("@uniswap", "Uniswap", corpus.posts, corpus.teamSignalPosts);
+
+    const identityCalls = fetchMock.mock.calls.filter(([input]) =>
+      decodeURIComponent(String(input)).includes("from:uniswap (founder OR co-founder"));
+    expect(identityCalls).toHaveLength(1);
+    expect(corpus.teamSignalPosts).toEqual(["Our founder @haydenzadams launched Uniswap."]);
   });
 
   it("does not memoize a last_tweets failure envelope, so the next pass refetches", async () => {

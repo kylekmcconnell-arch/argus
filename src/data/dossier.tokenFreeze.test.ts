@@ -49,6 +49,8 @@ function evidenceWithToken(): CollectedEvidence {
   ev.holderProfile = {
     topHolderPct: 4,
     top10Pct: 7,
+    assessedWalletCount: 2,
+    top10PctIsFloor: true,
     holderCount: 100,
     lpLockedOrBurnedPct: 85,
     holdersAssessed: true,
@@ -93,5 +95,15 @@ describe("the frozen token snapshot shares nothing with live evidence", () => {
     expect(flags[0]).not.toBe(ev.holderProfile!.contractFlags![0]);
     ev.holderProfile!.contractFlags![0].claim = "rewritten after the freeze";
     expect(flags[0].claim).toBe("Mint authority is live.");
+  });
+
+  it("freezes the structural holder-floor basis with the aggregate", () => {
+    const frozen = assembleDossier(evidenceWithToken(), false).holderProfile;
+
+    expect(frozen).toMatchObject({
+      top10Pct: 7,
+      assessedWalletCount: 2,
+      top10PctIsFloor: true,
+    });
   });
 });

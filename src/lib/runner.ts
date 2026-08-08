@@ -11,6 +11,7 @@
 import { streamAudit } from "./live";
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
+import type { ResearchIntent } from "./researchDirector";
 
 export interface BgRun {
   handle: string;   // display handle, with leading @
@@ -22,6 +23,7 @@ export interface BgRun {
   dossier?: Dossier;
   startedAt: number;
   priv?: boolean;   // private/incognito: never persisted, logged, graphed, or shown in the sidebar
+  intent?: ResearchIntent;
 }
 
 type Listener = () => void;
@@ -55,7 +57,11 @@ export function activeRuns(): BgRun[] {
 
 // Start (or re-attach to) a background person audit. Idempotent per handle: if one
 // is already streaming, the existing run is returned so we never double-stream.
-export function startPersonAudit(handle: string, priv = false): BgRun {
+export function startPersonAudit(
+  handle: string,
+  priv = false,
+  intent: ResearchIntent = "investment_due_diligence",
+): BgRun {
   const key = norm(handle);
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
@@ -68,6 +74,7 @@ export function startPersonAudit(handle: string, priv = false): BgRun {
     status: "running",
     startedAt: Date.now(),
     priv,
+    intent,
   };
   runs.set(key, run);
   emit();
@@ -93,7 +100,7 @@ export function startPersonAudit(handle: string, priv = false): BgRun {
       aborts.delete(key);
       emit();
     },
-  });
+  }, intent);
   aborts.set(key, abort);
   return run;
 }

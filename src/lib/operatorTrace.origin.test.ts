@@ -96,7 +96,7 @@ describe("operator trace launch origin", () => {
         match: `deployer?wallet=${root}`,
         body: { ...rootTrace, chain: [{ from: root, to: anonFunder, label: null, kind: "wallet" }], origin: { address: anonFunder, label: null, kind: "wallet" } },
       },
-      { match: `funder?wallet=${anonFunder}`, body: { available: true, seededCount: 0, seededDeployers: [] } },
+      { match: `funder?wallet=${anonFunder}`, body: { available: true, completed: true, truncated: false, providerFailed: false, seededCount: 0, seededDeployers: [] } },
       { match: `deployer?wallet=${anonFunder}`, body: { available: true } },
     ]);
 

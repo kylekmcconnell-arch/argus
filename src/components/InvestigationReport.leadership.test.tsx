@@ -76,9 +76,15 @@ const webTeam = [
     role: "Co-Founder",
     linkedin: "linkedin.com/in/ada-okafor",
     provider: "teampage",
+    evidence: "Ada is named on the saved official team page.",
     evidence_origin: "deterministic",
     artifact_verified: true,
-    source_url: "https://orbit.example/team",
+    sourceUrl: "https://orbit.example/team",
+    developerProfiles: [{
+      provider: "github" as const,
+      url: "https://github.com/ada-okafor",
+      sourceUrl: "https://x.com/ada-okafor",
+    }],
   },
   {
     name: "Bram Vos",
@@ -87,7 +93,7 @@ const webTeam = [
     provider: "teampage",
     evidence_origin: "deterministic",
     artifact_verified: true,
-    source_url: "https://orbit.example/team",
+    sourceUrl: "https://orbit.example/team",
   },
   {
     name: "Cleo Nash",
@@ -95,7 +101,7 @@ const webTeam = [
     provider: "teampage",
     evidence_origin: "deterministic",
     artifact_verified: true,
-    source_url: "https://orbit.example/team",
+    sourceUrl: "https://orbit.example/team",
   },
 ];
 
@@ -134,6 +140,7 @@ function projectAccount(
     followers: "0",
     joined: "",
     identity_note: "",
+    profile_captured_at: "2026-08-01T00:00:00.000Z",
     headline: "Project account",
     live: true,
     notableFollowers: [],
@@ -208,6 +215,151 @@ afterEach(async () => {
 });
 
 describe("leadership currency on the team card", () => {
+  it("promotes saved intelligence support, pressure, and attempted open questions into the short answer", () => {
+    const account = projectAccount({
+      intelligence: {
+        schemaVersion: 1,
+        rulesetVersion: "argus-point-in-time-v1",
+        mode: "point_in_time",
+        scoringImpact: "none",
+        subject: {
+          key: "project:orbit",
+          label: "Orbit",
+          entityKind: "project",
+          forms: [{ form: "protocol", evidenceState: "verified", sourceRefs: ["source:orbit"] }],
+          archetypes: { state: "generic", primary: "generic_protocol", matches: [] },
+        },
+        captureWindow: { earliest: "2026-08-01T00:00:00.000Z", latest: "2026-08-01T00:00:00.000Z" },
+        sources: [{
+          id: "source:orbit",
+          inputPath: "basicFacts.0.sources.0",
+          provider: "official-web",
+          title: "Orbit operating evidence",
+          sourceClass: "official_subject",
+          evidenceState: "verified",
+        }],
+        measurements: [],
+        coverage: [],
+        signals: [{
+          id: "support-product",
+          ruleId: "product",
+          ruleVersion: 1,
+          kind: "observation",
+          domain: "product",
+          severity: "medium",
+          polarity: "support",
+          headline: "The product is live and source verified",
+          finding: "The saved official product surface was available.",
+          whyItMatters: "The project has more than a narrative and token.",
+          changeCondition: "The product surface becomes unavailable.",
+          evidenceState: "verified",
+          measurementRefs: [],
+          sourceRefs: ["source:orbit"],
+          lenses: ["investment"],
+        }, {
+          id: "pressure-control",
+          ruleId: "control",
+          ruleVersion: 1,
+          kind: "observation",
+          domain: "control",
+          severity: "high",
+          polarity: "risk",
+          headline: "Operational control remains concentrated",
+          finding: "The saved control evidence identifies one active authority.",
+          whyItMatters: "A single authority can change material system settings.",
+          changeCondition: "A current multisig receipt replaces it.",
+          evidenceState: "measured",
+          measurementRefs: [],
+          sourceRefs: ["source:orbit"],
+          lenses: ["investment"],
+        }, {
+          id: "context-leadership",
+          ruleId: "leadership-change",
+          ruleVersion: 1,
+          kind: "observation",
+          domain: "team",
+          severity: "context",
+          polarity: "neutral",
+          headline: "A dated leadership transition is recorded",
+          finding: "The licensed record dates one named leader's departure.",
+          whyItMatters: "The current operating roster should be confirmed directly.",
+          changeCondition: "A current official roster confirms the transition.",
+          evidenceState: "reported_context",
+          measurementRefs: [],
+          sourceRefs: ["source:orbit"],
+          lenses: ["investment"],
+        }],
+        questions: [{
+          id: "question:treasury",
+          domain: "treasury",
+          prompt: "Who can move the project treasury?",
+          materiality: "critical",
+          state: "unavailable",
+          basis: "The treasury-control read failed, so authority was not established.",
+          answerRefs: [],
+          sourceRefs: [],
+        }],
+        lenses: [{
+          id: "investment",
+          label: "Investment",
+          question: "What matters for investment?",
+          domainPriority: ["control", "product", "treasury"],
+          signalIds: ["pressure-control", "support-product"],
+          unresolvedQuestionIds: ["question:treasury"],
+          changeConditions: [],
+        }],
+      },
+    });
+
+    render(investigation({ projectAccount: account }));
+
+    const shortAnswer = container.querySelector("#report-summary")?.textContent ?? "";
+    expect(shortAnswer).toContain("The product is live and source verified");
+    expect(shortAnswer).toContain("Operational control remains concentrated");
+    expect(shortAnswer).toContain("Who can move the project treasury?");
+    expect(shortAnswer).toContain("authority was not established");
+    expect(shortAnswer).toContain("Important context");
+    expect(shortAnswer).toContain("Source-reported context: a dated leadership transition is recorded");
+  });
+
+  it("states a project-attributed founder role without claiming the identity or control is verified", () => {
+    const attributedProject = projectAccount({
+      webTeam: [],
+      leaderDepartures: [],
+      evidence: {
+        ventures: [],
+        testimonials: [],
+        advised: [],
+        associates: [{
+          associate_key: "@0xSimpleFarmer",
+          relation: "team:Founder",
+          notes: "The official project account identifies @0xSimpleFarmer as founder.",
+          evidence_url: "https://x.com/ClutchMarkets/status/1",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          provider: "official-x",
+        }],
+        wallets: [],
+        promotions: [],
+      },
+    });
+    attributedProject.display_name = "Clutch Markets";
+    attributedProject.handle = "@ClutchMarkets";
+    render(investigation({
+      projectX: "@ClutchMarkets",
+      projectAccount: attributedProject,
+      founders: [],
+      webTeam: [],
+    }));
+
+    expect(container.textContent).toContain("Clutch Markets identifies @0xSimpleFarmer as Founder");
+    expect(container.textContent).toContain("Project-attributed team (1)");
+    expect(container.textContent).toContain("project-attributed role");
+    expect(container.textContent).toContain("independent corroboration of identity, ownership, and control remains open");
+    expect(container.textContent).not.toContain("Published names to verify");
+    expect(container.querySelector('a[href="https://x.com/ClutchMarkets/status/1"]')?.textContent).toContain("attribution source");
+  });
+
   it("renders the paid departure answer instead of dropping it", () => {
     render(investigation());
     const text = teamText();
@@ -239,14 +391,24 @@ describe("leadership currency on the team card", () => {
     expect((link as HTMLAnchorElement).href).toBe("https://linkedin.com/in/ada-okafor");
   });
 
-  it("says how old the record is so a lagging copy never reads as fresh", () => {
+  it("exposes the exact role page and developer-profile source chain", () => {
+    render(investigation());
+    const team = container.querySelector("#investigation-team");
+    expect(team?.querySelector('a[href="https://orbit.example/team"]')?.textContent).toContain("role proof");
+    expect(team?.querySelector('a[href="https://github.com/ada-okafor"]')?.textContent).toContain("GitHub");
+    expect(team?.querySelector('a[href="https://x.com/ada-okafor"]')?.textContent).toContain("profile link proof");
+    expect(team?.textContent).toContain("Ada is named on the saved official team page");
+  });
+
+  it("anchors record age to the frozen scan rather than the viewer clock", () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-08-01T00:00:00.000Z"));
+    vi.setSystemTime(new Date("2036-08-01T00:00:00.000Z"));
     try {
       render(investigation());
       const currency = container.querySelector('[aria-label="Leadership currency"]')?.textContent ?? "";
-      // March 2024 to August 2026 is over two years of record age.
+      // The viewer is in 2036, but the saved scan was captured in August 2026.
       expect(currency).toContain("2 years old");
+      expect(currency).not.toContain("12 years old");
       expect(currency.toLowerCase()).toContain("can lag");
     } finally {
       vi.useRealTimers();

@@ -155,8 +155,11 @@ describe("groundedSearch OpenRouter routing", () => {
       });
     }));
 
+    let unavailable = false;
     const captured = await withCostLedger(async () => {
-      const result = await groundedSearch("system", "user");
+      const result = await groundedSearch("system", "user", {
+        onProviderUnavailable: () => { unavailable = true; },
+      });
       return { result, cost: getCost() };
     });
 
@@ -167,8 +170,36 @@ describe("groundedSearch OpenRouter routing", () => {
       failed: 1,
       succeeded: 0,
       status: "failed",
-      meta: expect.stringContaining("http_401"),
+      meta: expect.stringContaining("http_401:unauthorized"),
     }));
+    expect(unavailable).toBe(true);
     expect(anthropicHits).toBe(1);
+  });
+
+  it("classifies provider credit rejection without copying the response body into the ledger", async () => {
+    process.env.SERPER_API_KEY = "configured-but-rejected";
+    process.env.ANTHROPIC_API_KEY = "sk-ant";
+    delete process.env.OPENROUTER_API_KEY;
+    process.env.ARGUS_EXTRACT_MODEL = "claude-haiku-4-5";
+
+    let anthropicHits = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"Not enough credits for customer secret-account-42"}', { status: 400 });
+      }
+      anthropicHits += 1;
+      return ok({
+        content: [{ type: "text", text: anthropicHits === 1 ? '["query one"]' : "must-not-extract" }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      });
+    }));
+
+    const cost = await withCostLedger(async () => {
+      await groundedSearch("system", "user");
+      return getCost();
+    });
+    const line = cost.calls.find((entry) => entry.provider === "serper");
+    expect(line?.meta).toContain("http_400:credits_or_quota");
+    expect(line?.meta).not.toContain("secret-account-42");
   });
 });

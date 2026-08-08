@@ -122,6 +122,12 @@ export interface GraphContribution {
   provenanceState?: "server_collected" | "client_submitted" | "legacy";
 }
 
+export function isAuthoritativeGraphContribution(contribution: GraphContribution): boolean {
+  return contribution.provenanceState === "server_collected"
+    && typeof contribution.reportVersionId === "string"
+    && contribution.reportVersionId.length > 0;
+}
+
 // Generic labels that older audits recorded as literal node keys ("site",
 // "twitter", …). They collapse to one node via canonical() and fake-bridge
 // EVERY audit into one blob cabal. Filtered on ingest so even old stored
@@ -133,7 +139,13 @@ const GENERIC_KEYS = new Set([
   "coingecko", "dexscreener", "linkedin", "blog", "other", "unknown",
 ]);
 const isGenericKey = (raw: string) => GENERIC_KEYS.has(canonical(raw));
-const CONTEXT_ONLY_EDGE_TYPES = new Set(["INVESTED_IN", "AFFILIATED_WITH"]);
+const CONTEXT_ONLY_EDGE_TYPES = new Set([
+  "INVESTED_IN",
+  "AFFILIATED_WITH",
+  "ARKHAM_ENTITY",
+  "ARKHAM_RISK_CONTEXT",
+  "ARKHAM_TRANSACTION_CONTEXT",
+]);
 
 function contextOnlyNodeKeys(contribution: GraphContribution, resolve: AliasResolver): Set<string> {
   const byNode = new Map<string, string[]>();
@@ -387,8 +399,10 @@ export function tieStrength(rawKey: string): "hard" | "medium" | "weak" {
   // unrelated project can't legitimately carry your GA/GTM/AdSense/Pixel ID.
   if (/^(ga:|gtm:|adsense:|fbpixel:)/.test(k)) return "hard";
   // Shared hosting IP / favicon: real but circumstantial (CDNs, reused templates).
-  // On-chain exposure to an Arkham-flagged hacker / mixer / sanctioned entity.
-  if (/^risk:/.test(k)) return "hard";
+  // A risk namespace is not enough to prove the underlying classification.
+  // Authoritative risk overrides are handled separately with provenance and
+  // verification checks; as a shared graph tie this remains weak context.
+  if (/^risk:/.test(k)) return "weak";
   if (/^(holder|amm|dex|pool|lp|market|ip:|favicon:)/.test(k)) return "weak";
   return "medium"; // shared @handle / domain / company
 }
@@ -407,8 +421,9 @@ export function riskExposure(handle: string, contributions: GraphContribution[])
       const k = String(n.key);
       if (!k.startsWith("risk:")) continue;
       const node = n as { label?: string; subtype?: string };
+      if (node.subtype !== "verified-risk-avoid" && node.subtype !== "verified-risk-caution") continue;
       const label = node.label ? String(node.label) : k.slice(5);
-      const avoid = String(node.subtype ?? "") === "risk-avoid";
+      const avoid = node.subtype === "verified-risk-avoid";
       const ex = found.get(k);
       found.set(k, { label, avoid: ex ? ex.avoid || avoid : avoid });
     }
@@ -430,7 +445,12 @@ export interface Reconciliation {
 // hard infra tie to a rug means AVOID regardless of how the contract scans.
 const BAD_VERDICTS = new Set(["FAIL", "AVOID"]);
 export function reconcileVerdict(handle: string, contributions: GraphContribution[]): Reconciliation | null {
-  const bad = subjectConnections(handle, contributions, 24).filter((c) => c.otherVerdict && BAD_VERDICTS.has(c.otherVerdict));
+  // Only an immutable, server-collected report version may influence another
+  // report's verdict. Browser submissions, legacy rows, and local graph context
+  // remain visible for research but have no verdict authority.
+  const authoritative = contributions.filter(isAuthoritativeGraphContribution);
+  const bad = subjectConnections(handle, authoritative, 24)
+    .filter((connection) => connection.otherVerdict && BAD_VERDICTS.has(connection.otherVerdict));
   const strongestOf = (c: SubjectConnection): "hard" | "medium" | "weak" => {
     if (c.direct) return "hard"; // the flagged subject IS an entity this audit surfaced
     let best: "hard" | "medium" | "weak" = "weak";
@@ -439,7 +459,7 @@ export function reconcileVerdict(handle: string, contributions: GraphContributio
   };
   const hard = bad.filter((c) => strongestOf(c) === "hard");
   const medium = bad.filter((c) => strongestOf(c) === "medium");
-  const risk = riskExposure(handle, contributions);
+  const risk = riskExposure(handle, authoritative);
 
   // Candidate overrides, in descending severity: a hard connection to a failed
   // subject and a hacker/mixer/sanctioned exposure are both AVOID; a shared
@@ -448,9 +468,9 @@ export function reconcileVerdict(handle: string, contributions: GraphContributio
     ? (() => { const c = hard[0]; const how = c.direct ? "was surfaced directly in this audit" : `shares ${c.ties.map((t) => tieLabel(t.key)).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(" + ")}`; return { severity: "avoid", line: `Byte/infra-identical link to ${c.other} (${c.otherVerdict}): it ${how}. A shared deployer, funder, contract fingerprint, or dev email with a failed subject is the same operation.`, via: hard }; })()
     : null;
   const names = risk ? risk.entities.map((e) => e.label.split(" · ")[0]).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(", ") : "";
-  const riskAvoid: Reconciliation | null = risk?.severity === "avoid" ? { severity: "avoid", line: `On-chain exposure to a flagged bad actor: ${names}. Arkham ties this subject's wallets to a hacker, mixer, or sanctioned entity. This is a hard AVOID regardless of how the contract itself scans.`, via: [], riskEntities: risk.entities } : null;
+  const riskAvoid: Reconciliation | null = risk?.severity === "avoid" ? { severity: "avoid", line: `Independently verified on-chain exposure to a flagged bad actor: ${names}. This authoritative risk screen changes the result to AVOID.`, via: [], riskEntities: risk.entities } : null;
   const connMedium: Reconciliation | null = medium.length ? { severity: "caution", line: `Shares a team member or domain with ${medium[0].other} (${medium[0].otherVerdict}). Not proof of the same operation, but the overlap warrants caution.`, via: medium } : null;
-  const riskCaution: Reconciliation | null = risk?.severity === "caution" ? { severity: "caution", line: `On-chain exposure to a risk-flagged wallet: ${names}. Verify the nature of the flow before trusting the subject.`, via: [], riskEntities: risk.entities } : null;
+  const riskCaution: Reconciliation | null = risk?.severity === "caution" ? { severity: "caution", line: `An authoritative screen recorded on-chain exposure to a risk-flagged wallet: ${names}. Verify the nature of the flow before trusting the subject.`, via: [], riskEntities: risk.entities } : null;
 
   return connHard ?? riskAvoid ?? connMedium ?? riskCaution ?? null;
 }

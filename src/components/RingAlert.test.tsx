@@ -22,6 +22,7 @@ vi.mock("../graph/store", () => ({
 }));
 
 vi.mock("../graph/network", () => ({
+  isAuthoritativeGraphContribution: () => true,
   subjectConnections: () => harness.connections,
   reconcileVerdict: () => harness.reconciliation,
 }));

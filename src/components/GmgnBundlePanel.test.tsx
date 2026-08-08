@@ -51,9 +51,9 @@ function stub(body: unknown) {
   })));
 }
 
-async function render(knownDeployer?: string | null) {
+async function render(knownDeployer?: string | null, chain = "solana") {
   await act(async () => {
-    root.render(<GmgnBundlePanel chain="solana" address="MINT" knownDeployer={knownDeployer} />);
+    root.render(<GmgnBundlePanel chain={chain} address="MINT" knownDeployer={knownDeployer} />);
   });
 }
 
@@ -103,6 +103,15 @@ describe("how the launch was bought", () => {
     await render("7NsngNMtXJNdHgeK4znQDZ5PJ19ykVvQvEF7BT5KFjMv");
 
     expect(container.textContent).toContain("differs from the deployer ARGUS resolved");
+  });
+
+  it("normalizes EVM address casing before claiming two providers disagree", async () => {
+    const creator = "0xAbCd000000000000000000000000000000001234";
+    stub(payload({ creatorAddress: creator }));
+    await render(creator.toLowerCase(), "ethereum");
+
+    expect(container.textContent).toContain("two unrelated providers agree");
+    expect(container.textContent).not.toContain("differs from the deployer ARGUS resolved");
   });
 
   it("reports the creator exit as GMGN's account", async () => {

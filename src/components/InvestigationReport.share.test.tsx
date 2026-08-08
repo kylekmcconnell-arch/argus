@@ -106,7 +106,7 @@ function investigation(overrides: Partial<Investigation> = {}): Investigation {
 let container: HTMLDivElement;
 let root: Root;
 
-function render(inv: Investigation, onReAudit?: () => void) {
+function render(inv: Investigation, onReAudit?: () => void, onOpenBrief?: () => void) {
   act(() => {
     root.render(
       <InvestigationReport
@@ -116,12 +116,14 @@ function render(inv: Investigation, onReAudit?: () => void) {
         onOpenToken={() => {}}
         onOpenProjectAccount={() => {}}
         onReAudit={onReAudit}
+        onOpenBrief={onOpenBrief}
       />,
     );
   });
 }
 
 beforeEach(() => {
+  vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "true");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -140,6 +142,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("investigation exact sharing", () => {
@@ -184,10 +187,11 @@ describe("investigation exact sharing", () => {
         createdAt: "2026-07-23T22:50:55.000Z",
         checks: [...recorded, ...open],
       },
-    }));
+    }), () => undefined, () => undefined);
 
-    expect(container.textContent).toContain("Risk score");
-    expect(container.textContent).toContain("PASS 84");
+    expect(container.textContent).toContain("Preliminary risk score");
+    expect(container.textContent).toContain("EARLY SCORE 84");
+    expect(container.textContent).not.toContain("PASS 84");
     expect(container.textContent).toContain("NOT READY");
     expect(container.textContent).toContain("Score only · not financial advice");
     expect(container.textContent).toContain("Before you use this report");
@@ -197,6 +201,23 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).not.toContain("INCOMPLETE");
     expect(container.textContent).not.toContain("Investigation incomplete");
+
+    const statusCard = container.querySelector<HTMLElement>('[aria-label="Report status"]');
+    const scoreCard = container.querySelector<HTMLElement>('[aria-label="Preliminary risk score"]');
+    const marketCard = container.querySelector<HTMLElement>('[aria-label="Market size"]');
+    expect(statusCard?.className).toContain("order-1");
+    expect(scoreCard?.className).toContain("order-2");
+    expect(marketCard?.className).toContain("order-3");
+    expect(scoreCard?.querySelector(".verdict-pill-lg")).toBeNull();
+
+    const toolbar = container.querySelector<HTMLElement>(".report-toolbar");
+    const caseBrief = [...(toolbar?.querySelectorAll("button") ?? [])]
+      .find((button) => button.textContent?.includes("Case brief"));
+    expect(caseBrief?.className).toContain("btn-primary");
+    expect(caseBrief?.className).not.toContain("hidden");
+    const mobileActions = toolbar?.querySelector("details");
+    expect(mobileActions?.textContent).toContain("Challenge report");
+    expect(mobileActions?.textContent).toContain("Rescan current evidence");
   });
 
   it("separates a company's equity round from its token market value", () => {
@@ -443,14 +464,18 @@ describe("investigation exact sharing", () => {
     }));
 
     const facts = container.querySelector("#investigation-basic-facts");
-    const keyAnswers = facts?.querySelector('[aria-label="Key verified answers"]');
+    const reportedAnswers = facts?.querySelector('[aria-label="Context-only basic facts"]');
     const leads = facts?.querySelector('[aria-label="Unverified basic fact leads"]');
-    expect(keyAnswers?.textContent).toContain("Venice");
-    expect(keyAnswers?.textContent).toContain("Erik Voorhees");
-    expect(keyAnswers?.textContent).toContain("Jesse Proudman");
-    const leadershipCard = [...(keyAnswers?.querySelectorAll("li") ?? [])]
-      .find((card) => card.textContent?.includes("Who operates it today?"));
-    expect(leadershipCard?.textContent?.match(/Teana Baker-Taylor/g)).toHaveLength(1);
+    expect(reportedAnswers?.textContent).toContain("Venice");
+    expect(reportedAnswers?.textContent).toContain("Erik Voorhees");
+    expect(reportedAnswers?.textContent).toContain("Jesse Proudman");
+    expect(reportedAnswers?.textContent).toContain("Not independently verified");
+    const leadershipCards = [...(reportedAnswers?.querySelectorAll("li") ?? [])]
+      .filter((card) => [...card.querySelectorAll("p")]
+        .some((paragraph) => paragraph.textContent === "Who operates it today?"));
+    expect(leadershipCards).toHaveLength(1);
+    const leadershipAnswer = leadershipCards[0]?.querySelector(".font-semibold > p");
+    expect(leadershipAnswer?.textContent).toContain("Teana Baker-Taylor");
     expect(leads?.textContent).toContain("Private AI");
     expect(leads?.textContent).not.toContain("Erik Voorhees");
     expect(leads?.textContent).toContain("Jesse Proudman");
@@ -532,7 +557,7 @@ describe("investigation exact sharing", () => {
     }));
 
     expect(container.textContent).toContain("Built by Erik Voorhees, Teana Baker-Taylor");
-    expect(container.textContent).toContain("Named team and founders");
+    expect(container.textContent).toContain("Team evidence");
     expect(container.textContent).toContain("Founders (2)");
     // The handle-only "@twistartups · CEO" row (a media account bound to a
     // project-owned role by the post scan) must not render as team at all.
@@ -785,6 +810,99 @@ describe("investigation exact sharing", () => {
     expect(lines[0]).toContain("ARGUS · $ARG investigation · risk score PASS 88/100 · safety checks READY TO REVIEW");
     expect(lines).toContain("Investigation share test");
     expect(lines[lines.length - 1]).toBe("http://localhost:3000/api/card?share=opaque");
+  });
+
+  it("separates project-attributed roles from independent team support and unrelated people leads", () => {
+    render(investigation({
+      token: { ...token(), mcap: 20_000_000 },
+      recon: {
+        retrieval: {
+          url: "https://argus.test",
+          status: "rendered",
+          content: "Ada Claim, founder",
+          title: "Argus",
+          stages: [],
+          coverageNote: "Page read.",
+        },
+        title: "Argus",
+        team: { state: "named", names: ["Ada Claim"], note: "The site names Ada Claim." },
+        socials: [],
+        funding: [],
+        tokenSignals: [],
+        findings: [],
+        identityLine: "Named on the project site: Ada Claim.",
+      },
+      founders: [{ name: "Ada Claim", handle: null, source: "site" }],
+      projectAccount: {
+        handle: "@argus",
+        display_name: "Argus",
+        avatar: "",
+        bio: "Argus project",
+        followers: "0",
+        joined: "",
+        identity_note: "",
+        headline: "Project account",
+        live: true,
+        notableFollowers: [],
+        contradictions: [],
+        webTeam: [],
+        report: { composite_verdict: "PASS", governing_score: 80, identity_confidence: "Confirmed", roles: [] },
+        evidence: { ventures: [], testimonials: [], advised: [], associates: [], wallets: [], promotions: [] },
+        graph: { nodes: [], edges: [] },
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+      webTeam: [
+        {
+          name: "Mira Model",
+          handle: "@miramodel",
+          role: "Founder",
+          provider: "grok",
+          evidence_origin: "model_lead",
+          artifact_verified: false,
+          evidenceKind: "model_candidate",
+        },
+        {
+          name: "Tess Tagged",
+          handle: "@tesstagged",
+          role: "follows + tags",
+          provider: "twitterapi",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          evidenceKind: "project_association",
+        },
+        {
+          name: "Gina Contributor",
+          handle: "@ginacodes",
+          role: "github contributor",
+          provider: "github",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          evidenceKind: "code_contribution",
+        },
+      ],
+      webTeamDiscovery: {
+        available: true,
+        attempted: true,
+        completed: true,
+        partial: false,
+        providerFailed: false,
+        people: [],
+      },
+    }));
+
+    const team = container.querySelector("#investigation-team");
+    expect(team?.textContent).toContain("No independently corroborated team member was found");
+    expect(team?.textContent).toContain("project-published role attribution is shown below");
+    expect(team?.textContent).not.toContain("Named on the project site: Ada Claim.");
+    expect(team?.textContent).toContain("Project-attributed team");
+    expect(team?.textContent).toContain("Ada Claim");
+    expect(team?.textContent).toContain("Possible people to verify");
+    expect(team?.textContent).toContain("Mira Model");
+    expect(team?.textContent).toContain("X association only");
+    expect(team?.textContent).toContain("GitHub contribution");
+    expect(team?.textContent).toContain("not counted as team or verdict support");
+    expect(container.querySelector("#report-summary")?.textContent).not.toMatch(/Mira Model|Tess Tagged|Gina Contributor/);
+    expect(container.textContent).toContain("Argus identifies Ada Claim as Founder");
+    expect(container.textContent).toContain("Project-attributed founder behind");
   });
 
   it("does not offer a share from a private investigation", () => {

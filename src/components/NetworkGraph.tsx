@@ -58,6 +58,12 @@ function nodeColor(n: NetNode): { fill: string; ring: string } {
   if (n.wasRug || n.deception || n.outcome === "Rug") return { fill: "var(--color-avoid)", ring: "var(--color-avoid)" };
   if (n.outcome === "Acquisition" || n.outcome === "IPO") return { fill: "var(--color-pass)", ring: "var(--color-pass)" };
   if (n.flags.includes("bridge")) return { fill: "var(--color-panel-2)", ring: "var(--color-unverifiable)" };
+  const type = n.type.toLowerCase();
+  if (/person|team|founder|advisor/.test(type)) return { fill: "color-mix(in srgb, var(--color-unverifiable) 15%, var(--color-panel))", ring: "var(--color-unverifiable)" };
+  if (/wallet|holder|funder/.test(type)) return { fill: "color-mix(in srgb, var(--color-pass) 14%, var(--color-panel))", ring: "var(--color-pass)" };
+  if (/company|entity|contract/.test(type)) return { fill: "color-mix(in srgb, var(--color-signal) 12%, var(--color-panel))", ring: "var(--color-signal)" };
+  if (/token|product/.test(type)) return { fill: "color-mix(in srgb, var(--color-caution) 16%, var(--color-panel))", ring: "var(--color-caution)" };
+  if (/source/.test(type)) return { fill: "color-mix(in srgb, var(--color-signal) 9%, var(--color-panel))", ring: "var(--color-signal)" };
   return { fill: "var(--color-panel-2)", ring: "var(--color-line-2)" };
 }
 
@@ -66,20 +72,31 @@ const trunc = (s: string, n = 16) => (s.length > n ? s.slice(0, n - 1) + "…" :
 export function NetworkGraph({
   net,
   onOpenSubject,
+  onSelectNode,
   height = 520,
   highlight = null,
+  surface = "panel",
+  initialScale = 1,
 }: {
   net: Network;
   onOpenSubject?: (handle: string) => void;
+  onSelectNode?: (node: NetNode) => void;
   height?: number;
   // Node ids to spotlight (e.g. one role category); everything else fades.
   // A live hover-focus takes precedence while active.
   highlight?: Set<string> | null;
+  surface?: "panel" | "bare";
+  initialScale?: number;
 }) {
   const W = 900, H = 560;
+  const initialView = useMemo(() => ({
+    x: (W / 2) * (1 - initialScale),
+    y: (H / 2) * (1 - initialScale),
+    k: initialScale,
+  }), [initialScale]);
   const base = useMemo(() => settle(net, W, H), [net]);
   const [override, setOverride] = useState<Map<string, XY>>(new Map());
-  const [view, setView] = useState({ x: 0, y: 0, k: 1 });
+  const [view, setView] = useState(initialView);
   const [hover, setHover] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const drag = useRef<{ id: string | null; moved: boolean; sx: number; sy: number; ox: number; oy: number } | null>(null);
@@ -137,7 +154,10 @@ export function NetworkGraph({
     }
   };
   const onPointerUp = (e: React.PointerEvent, n?: NetNode) => {
-    if (n && drag.current && !drag.current.moved && n.subject) onOpenSubject?.(n.key);
+    if (n && drag.current && !drag.current.moved) {
+      onSelectNode?.(n);
+      if (n.subject) onOpenSubject?.(n.key);
+    }
     drag.current = null; panning.current = null;
     void e;
   };
@@ -145,12 +165,12 @@ export function NetworkGraph({
   const dim = (id: string) => (focusSet ? !focusSet.has(id) : highlight ? !highlight.has(id) : false);
 
   return (
-    <div className="panel relative overflow-hidden" style={{ height }}>
+    <div className={`${surface === "panel" ? "panel" : ""} relative overflow-hidden`} style={{ height }}>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         className="h-full w-full touch-none select-none"
-        style={{ cursor: panning.current ? "grabbing" : "grab" }}
+        style={{ cursor: "grab" }}
         onWheel={onWheel}
         onPointerDown={onPointerDownBg}
         onPointerMove={onPointerMove}
@@ -253,9 +273,9 @@ export function NetworkGraph({
       <div className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-ink-faint">
         scroll to zoom · drag to pan · drag a node to pull it
       </div>
-      {(view.k !== 1 || view.x !== 0 || view.y !== 0 || override.size > 0) && (
+      {(view.k !== initialView.k || view.x !== initialView.x || view.y !== initialView.y || override.size > 0) && (
         <button
-          onClick={() => { setView({ x: 0, y: 0, k: 1 }); setOverride(new Map()); }}
+          onClick={() => { setView(initialView); setOverride(new Map()); }}
           className="btn-chip absolute bottom-2 right-3 bg-panel/80 backdrop-blur"
         >
           reset view

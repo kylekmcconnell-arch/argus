@@ -40,7 +40,7 @@ interface Proposal {
   top1Pct: number | null;
   top2Pct: number | null;
   contested: boolean;
-  topVoterCouldHaveFlipped: boolean | null;
+  topVoterExceedsMargin: boolean | null;
   endedAt: string | null;
 }
 
@@ -61,10 +61,10 @@ export interface GovernancePayload {
 }
 
 const BINDING_COPY: Record<string, string> = {
-  token_contract: "matched by its voting strategy reading this token's contract",
+  token_contract: "legacy token-strategy match; this alone does not bind the space to the project",
   official_x: "matched by the project's official X account",
   official_domain: "matched by the project's official domain",
-  supplied: "matched by a space the project itself links to",
+  supplied: "legacy caller-supplied space; independent project binding was not recorded",
 };
 
 const pct = (value: number): string => `${value >= 10 ? value.toFixed(0) : value.toFixed(1)}%`;
@@ -157,7 +157,7 @@ export function GovernancePanel({
                 {proposal.quorumMet === false && (
                   <span style={{ color: "var(--color-caution)" }}>closed below quorum</span>
                 )}
-                {proposal.topVoterCouldHaveFlipped === true && (
+                {proposal.topVoterExceedsMargin === true && (
                   <span style={{ color: "var(--color-caution)" }}>largest voter exceeded the margin</span>
                 )}
               </div>

@@ -7,6 +7,8 @@ describe("deriveNoticedSignals", () => {
       lpLockedPct: 0,
       largestHolderPct: 30,
       top10HolderPct: 92,
+      assessedWalletCount: 10,
+      top10HolderPctIsFloor: false,
       marketCapUsd: 557_000_000,
       anchors: { market: "#investigation-visuals" },
     });
@@ -19,6 +21,20 @@ describe("deriveNoticedSignals", () => {
     });
     expect(signals[1].headline).toBe("One wallet holds 30% of the supply");
     expect(signals[1].detail).toContain("top 10 wallets hold 92%");
+  });
+
+  it("describes a short holder register as a floor across the assessed wallets", () => {
+    const [signal] = deriveNoticedSignals({
+      top10HolderPct: 70,
+      assessedWalletCount: 4,
+      top10HolderPctIsFloor: true,
+    });
+
+    expect(signal).toMatchObject({
+      id: "holder-concentration",
+      headline: "At least 70% sits across 4 assessed wallets",
+    });
+    expect(signal.headline).not.toMatch(/top 10/i);
   });
 
   it("prices the next unlock in days of typical trading", () => {
@@ -93,13 +109,26 @@ describe("deriveNoticedSignals", () => {
       marketCapUsd: 25_000_000,
     })[0]).toMatchObject({
       id: "team-unverified",
-      headline: "No verified team behind a $25.0M token",
-      detail: "2 named people, none independently verified.",
+      headline: "No independently corroborated team behind a $25.0M token",
+      detail: "2 named people, none independently corroborated.",
     });
     expect(deriveNoticedSignals({
       verifiedTeamCount: 0,
       marketCapUsd: 2_000_000,
     })).toEqual([]);
+  });
+
+  it("states a project-published founder role without promoting identity or control", () => {
+    expect(deriveNoticedSignals({
+      verifiedTeamCount: 0,
+      namedTeamCount: 1,
+      projectAttributedTeam: [{ name: "@0xSimpleFarmer", role: "Founder" }],
+      marketCapUsd: 32_600_000,
+    })[0]).toMatchObject({
+      id: "team-unverified",
+      headline: "Project-attributed founder behind a $32.6M token",
+      detail: "The project identifies @0xSimpleFarmer as Founder. That establishes its published role attribution, not independent proof of the person's identity, ownership, or control.",
+    });
   });
 });
 

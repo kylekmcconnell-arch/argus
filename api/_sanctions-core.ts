@@ -44,24 +44,37 @@ export async function sanctionedSet(family: SanctionsFamily): Promise<Set<string
   // real ones almost always carry uppercase), so the Solana set must be stored
   // case-preserved or every hit is missed. The cache key is versioned so a
   // previously-lowercased Solana list does not survive this fix.
-  const ck = `ofac:${family}:v2`;
+  // v3 records only complete family loads. The former v2 cache could contain
+  // a union assembled while one or more constituent lists were unreachable,
+  // so it must never be reused for a clean sanctions result.
+  const ck = `ofac:${family}:v3`;
   const cached = await cacheGetJson<string[]>(ck);
   if (cached && cached.length) return new Set(cached);
-  const set = new Set<string>();
-  await Promise.all(
+  const loaded = await Promise.all(
     LISTS[family].map(async (asset) => {
       try {
         const r = await fetch(`${RAW}${asset}.txt`, { signal: AbortSignal.timeout(9000) });
-        if (!r.ok) return;
+        if (!r.ok) return null;
         const t = await r.text();
+        const addresses: string[] = [];
         for (const line of t.split("\n")) {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith("#")) continue;
-          set.add(family === "solana" ? trimmed : trimmed.toLowerCase());
+          addresses.push(family === "solana" ? trimmed : trimmed.toLowerCase());
         }
-      } catch { /* one list failing shouldn't sink the screen */ }
+        return addresses;
+      } catch {
+        return null;
+      }
     }),
   );
+
+  // A partial family is not a sanctions answer. In particular, absence from a
+  // successfully downloaded ETH list says nothing about an address present in
+  // an unavailable USDC, USDT, BSC, or ARB constituent list.
+  if (loaded.some((addresses) => addresses === null)) return new Set();
+
+  const set = new Set(loaded.flatMap((addresses) => addresses ?? []));
   if (set.size) await cacheSetJson(ck, [...set]);
   return set;
 }

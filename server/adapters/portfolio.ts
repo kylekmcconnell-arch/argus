@@ -12,6 +12,7 @@ import { fetchPublicText, type PublicTextDocument, type PublicTextResult } from 
 import {
   discoverFocusedPortfolioEvidenceText,
   discoverInvestorEvidenceText,
+  shouldSupplementThinInvestorDiscovery,
 } from "./investorDiscovery";
 import { getProfile } from "./x";
 import type { AdapterRunResult, CollectContext } from "./types";
@@ -230,9 +231,19 @@ export async function discoverPortfolioCandidates(ctx: CollectContext): Promise<
   const shared = parsePortfolioCandidates(text);
   if (!shared) return null;
   const sourceLinked = shared.filter((lead) => lead.sources.length > 0);
-  if (sourceLinked.length > 0) return shared;
+  // One weak URL used to suppress the exact-manager retry even when the row
+  // later failed deterministic relationship verification. Require enough
+  // coverage to plausibly survive that boundary; otherwise supplement the
+  // shared pass with the focused pass while preserving every shared lead.
+  if (sourceLinked.length > 0 && !shouldSupplementThinInvestorDiscovery(ctx)) return shared;
+  if (sourceLinked.length >= 6) return shared;
   const focusedText = await discoverFocusedPortfolioEvidenceText(ctx);
-  return focusedText ? parsePortfolioCandidates(focusedText) : null;
+  const focused = focusedText ? parsePortfolioCandidates(focusedText) : null;
+  if (!focused) return sourceLinked.length ? sourceLinked : null;
+  return [...new Map([...sourceLinked, ...focused].map((lead) => [
+    `${lead.investorEntityName?.toLowerCase() ?? ""}::${lead.attribution ?? ""}::${lead.projectName.toLowerCase()}`,
+    lead,
+  ])).values()];
 }
 
 const defaultProjectDomainResolver = async (lead: PortfolioLead, lookupProfile = getProfile): Promise<string | undefined> => {
@@ -864,16 +875,10 @@ export async function collectPortfolioRelationships(
         ? entity.handle.replace(/^@/, "")
         : undefined,
     ].filter((value): value is string => Boolean(value?.trim()));
-    const candidateHosts = lead.sources.flatMap((source) => {
-      try { return [new URL(source.url).hostname.replace(/^www\./i, "").toLowerCase()]; }
-      catch { return []; }
-    });
-    const needsProjectDomain = candidateHosts.some((host) =>
-      !(officialInvestorDomain && hostMatches(host, officialInvestorDomain))
-      && !listedHost(host, PRIMARY_HOSTS)
-      && !listedHost(host, PRESS_HOSTS),
-    );
-    const officialProjectDomain = needsProjectDomain ? await resolveProjectDomain(lead).catch(() => undefined) : undefined;
+    // A project name is the collision, not an identity key. Resolve the
+    // counterparty for every candidate, including rows listed on the fund's own
+    // portfolio page, before any source can become a confirmed relationship.
+    const officialProjectDomain = await resolveProjectDomain(lead).catch(() => undefined);
     return Promise.all(lead.sources.slice(0, MAX_SOURCES_PER_CANDIDATE).map(async (source): Promise<InspectedSource> => {
       const result = await fetchSourceOnce(source.url);
       if (result.status !== "ok") {
@@ -914,13 +919,14 @@ export async function collectPortfolioRelationships(
   const confirmedProjects = new Set<string>();
   const confirmationByProject = new Map<string, { confirmed: boolean; pressConfirmed: boolean }>();
   for (const [project, rows] of byProject) {
-    const authoritative = rows.some((row) => row.sourceClass === "first_party_subject"
+    const projectBoundRows = rows.filter((row) => Boolean(row.officialProjectDomain));
+    const authoritative = projectBoundRows.some((row) => row.sourceClass === "first_party_subject"
       || row.sourceClass === "first_party_investor"
       || row.sourceClass === "public_primary");
-    const pressDomains = new Set(rows
+    const pressDomains = new Set(projectBoundRows
       .filter((row) => row.sourceClass === "independent_press")
       .map((row) => registrableApprox(row.document.host)));
-    const pressFingerprints = new Set(rows
+    const pressFingerprints = new Set(projectBoundRows
       .filter((row) => row.sourceClass === "independent_press")
       .map((row) => createHash("sha256").update(normalized(row.match.excerpt ?? "")).digest("hex")));
     const pressConfirmed = pressDomains.size >= 2 && pressFingerprints.size >= 2;
@@ -932,7 +938,7 @@ export async function collectPortfolioRelationships(
   for (const row of supported) {
     const projectKey = `${row.entity.name.toLowerCase()}::${row.lead.projectName.toLowerCase()}`;
     const confirmation = confirmationByProject.get(projectKey);
-    const sourceConfirmed = Boolean(confirmation?.confirmed && (
+    const sourceConfirmed = Boolean(row.officialProjectDomain && confirmation?.confirmed && (
       row.sourceClass === "first_party_subject"
       || row.sourceClass === "first_party_investor"
       || row.sourceClass === "public_primary"

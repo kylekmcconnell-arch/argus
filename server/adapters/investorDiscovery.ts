@@ -1,4 +1,5 @@
 import { env } from "../config";
+import { isInstitutionalInvestorAccount } from "../../src/lib/investorSubject";
 import { generalWebSearch } from "./x";
 import type { CollectContext } from "./types";
 
@@ -9,17 +10,44 @@ const focusedFundScaleByEvidence = new WeakMap<object, Promise<string | null>>()
 const subjectName = (ctx: CollectContext): string =>
   ctx.evidence.profile.resolved_name || ctx.evidence.profile.display_name || ctx.handle;
 
+const INVESTMENT_ROLE = /\b(?:general partner|managing partner|investment partner|venture partner|partner|principal|investor|venture capital|\bgp\b)\b/i;
+
+const verifiedInvestmentAffiliations = (ctx: CollectContext) => ctx.evidence.ventures
+  .filter((venture) =>
+    venture.artifact_verified === true
+    && venture.evidence_origin !== "model_lead"
+    && INVESTMENT_ROLE.test(venture.role))
+  .sort((left, right) => {
+    const identityNote = ctx.evidence.profile.identity_note ?? "";
+    const leftCurrent = identityNote.toLowerCase().includes(left.project_name.toLowerCase()) ? 1 : 0;
+    const rightCurrent = identityNote.toLowerCase().includes(right.project_name.toLowerCase()) ? 1 : 0;
+    return rightCurrent - leftCurrent;
+  })
+  .slice(0, 3);
+
+export const shouldSupplementThinInvestorDiscovery = (ctx: CollectContext): boolean =>
+  isInstitutionalInvestorAccount(ctx.evidence)
+  || (Boolean(ctx.evidence.profile.resolved_name?.trim())
+    && verifiedInvestmentAffiliations(ctx).length > 0);
+
 const affiliationHints = (ctx: CollectContext): string => ctx.evidence.ventures
-  .slice(0, 12)
-  .map((venture) => `${venture.project_name} (${venture.role})`)
+  .filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead")
+  .slice(0, 8)
+  .map((venture) => `${venture.project_name} (${venture.role}${venture.period ? `, ${venture.period}` : ""})`)
   .join(", ");
 
 const subjectContext = (ctx: CollectContext): string => {
   const hints = affiliationHints(ctx);
+  const investmentAffiliations = verifiedInvestmentAffiliations(ctx);
+  const primary = investmentAffiliations[0];
+  const institutional = isInstitutionalInvestorAccount(ctx.evidence);
   return `Audited subject: ${subjectName(ctx)} (X ${ctx.handle})` +
     `${ctx.evidence.profile.website ? `, official website ${ctx.evidence.profile.website}` : ""}. ` +
     `Official X bio: ${ctx.evidence.profile.bio || "not available"}.` +
-    `${hints ? ` Affiliation leads to investigate without assuming: ${hints}.` : ""}`;
+    `${institutional ? ` This is the audited fund or organization account itself. Use ${subjectName(ctx)} as the direct-subject investor entity only when a fetched source explicitly names it; never leave investor_entity blank for a claimed relationship.` : ""}` +
+    `${primary ? ` Primary verified investment affiliation: ${primary.project_name} (${primary.role})${primary.evidence_url ? `, provider-linked source ${primary.evidence_url}` : ""}. Search this exact manager name and its first-party domain before generic person queries.` : ""}` +
+    `${investmentAffiliations.length > 1 ? ` Other verified investment affiliations: ${investmentAffiliations.slice(1).map((venture) => `${venture.project_name} (${venture.role})`).join(", ")}.` : ""}` +
+    `${hints ? ` Other source-backed career context: ${hints}.` : ""}`;
 };
 
 const normalizedHandle = (ctx: CollectContext): string =>
@@ -53,7 +81,7 @@ export function discoverInvestorEvidenceText(ctx: CollectContext): Promise<strin
 
   const pending = generalWebSearch(system, user, {
     maxToolCalls: 4,
-    cacheKey: `investor-core:v3:${normalizedHandle(ctx)}`,
+    cacheKey: `investor-core:v4:${normalizedHandle(ctx)}`,
   });
   discoveryByEvidence.set(ctx.evidence, pending);
   return pending;
@@ -82,7 +110,7 @@ export function discoverFocusedPortfolioEvidenceText(ctx: CollectContext): Promi
     " Find source-linked direct investments and, separately, investments made by a fund this subject is currently and publicly affiliated with. Keep every attribution separate.";
   const pending = generalWebSearch(system, user, {
     maxToolCalls: 4,
-    cacheKey: `investor-portfolio-focused:v1:${normalizedHandle(ctx)}`,
+    cacheKey: `investor-portfolio-focused:v2:${normalizedHandle(ctx)}`,
   });
   focusedPortfolioByEvidence.set(ctx.evidence, pending);
   return pending;
@@ -106,7 +134,7 @@ export function discoverFocusedFundScaleEvidenceText(ctx: CollectContext): Promi
     " Find source-linked scale claims for the exact subject and, separately, any fund the subject is currently and publicly affiliated with. Keep every attribution separate.";
   const pending = generalWebSearch(system, user, {
     maxToolCalls: 4,
-    cacheKey: `investor-fund-scale-focused:v1:${normalizedHandle(ctx)}`,
+    cacheKey: `investor-fund-scale-focused:v2:${normalizedHandle(ctx)}`,
   });
   focusedFundScaleByEvidence.set(ctx.evidence, pending);
   return pending;

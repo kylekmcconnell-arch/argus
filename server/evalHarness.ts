@@ -14,6 +14,7 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { evalNativeRequest } from "./evalTransport";
 
 export type EvalMode = "record" | "replay";
 
@@ -42,6 +43,17 @@ export interface ReplayFidelity {
   liveForced: number;
   misses: Array<{ method: string; url: string }>;
 }
+
+// These outputs directly govern the published decision. Replaying one against
+// a changed request is unsafe even when the requested tool name is unchanged:
+// the evidence catalog and its positional citation aliases may now describe
+// different facts. Exact matching already scrubs clocks, UUIDs, and auth
+// nonces, so any remaining request drift is material and requires a refreshed
+// recording (or an explicitly forced live tool lane).
+const EXACT_MATCH_ONLY_TOOLS = new Set([
+  "record_contradictions",
+  "record_verdict",
+]);
 
 // Locally-generated volatile values that differ between the recording run and
 // a replay run (clocks, run ids) but flow into request bodies. Scrubbed from
@@ -101,7 +113,37 @@ export function loadRecording(dir: string): RecordedCall[] {
   return readFileSync(path, "utf8")
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as RecordedCall);
+    .map((line) => {
+      const parsed = JSON.parse(line) as RecordedCall;
+      // Recordings made before request-tool metadata existed have no `tool`
+      // property at all. A provider response with exactly one structured
+      // `tool_use` block can safely recover that missing routing key: the block
+      // names the response class itself. Do not infer over an explicit null
+      // from a modern recording, from ordinary text, or from an ambiguous
+      // multi-tool response.
+      if (!Object.prototype.hasOwnProperty.call(parsed, "tool")) {
+        parsed.tool = inferLegacyResponseTool(parsed);
+      }
+      return parsed;
+    });
+}
+
+function inferLegacyResponseTool(call: RecordedCall): string | null {
+  if (!/json/i.test(call.contentType)) return null;
+  try {
+    const payload = JSON.parse(call.body) as { content?: unknown };
+    if (!Array.isArray(payload.content)) return null;
+    const names = payload.content.flatMap((block) => {
+      if (!block || typeof block !== "object") return [];
+      const candidate = block as { type?: unknown; name?: unknown };
+      if (candidate.type !== "tool_use" || typeof candidate.name !== "string") return [];
+      const name = candidate.name.trim();
+      return name ? [name] : [];
+    });
+    return names.length === 1 ? names[0] : null;
+  } catch {
+    return null;
+  }
 }
 
 async function materializeRequest(input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<{ method: string; url: string; body: string }> {
@@ -141,6 +183,8 @@ export async function withRecordedFetch<T>(
     allowLiveHosts?: string[];
     forceLiveHosts?: string[];
     forceLiveTools?: string[];
+    /** Recording boundary used by provider timestamp helpers during replay. */
+    replayCapturedAt?: string;
   } = {},
 ): Promise<{ result: T; fidelity: ReplayFidelity; recordedCalls: number }> {
   mkdirSync(dir, { recursive: true });
@@ -171,6 +215,16 @@ export async function withRecordedFetch<T>(
   }
 
   const originalFetch = globalThis.fetch;
+  const priorEvalMode = process.env.ARGUS_EVAL_MODE;
+  const priorEvalCapturedAt = process.env.ARGUS_EVAL_CAPTURED_AT;
+  process.env.ARGUS_EVAL_MODE = mode;
+  if (mode === "replay") {
+    if (options.replayCapturedAt && Number.isFinite(Date.parse(options.replayCapturedAt))) {
+      process.env.ARGUS_EVAL_CAPTURED_AT = new Date(options.replayCapturedAt).toISOString();
+    } else {
+      delete process.env.ARGUS_EVAL_CAPTURED_AT;
+    }
+  }
   const hostAllowed = (host: string, allowedHosts: readonly string[] | undefined): boolean =>
     allowedHosts?.some((allowed) =>
       allowed === "*" || host === allowed || host.endsWith(`.${allowed}`)) ?? false;
@@ -231,8 +285,12 @@ export async function withRecordedFetch<T>(
 
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> => {
     const { method, url, body } = await materializeRequest(input, init);
+    const bridgedNativeRequest = evalNativeRequest(init);
+    const liveRequest = (): Promise<Response> => bridgedNativeRequest
+      ? bridgedNativeRequest()
+      : originalFetch(input, init);
     if (mode === "record") {
-      const live = await originalFetch(input, init);
+      const live = await liveRequest();
       return record(method, url, body, live);
     }
     const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
@@ -243,7 +301,7 @@ export async function withRecordedFetch<T>(
     const toolForced = tool !== null && options.forceLiveTools?.includes(tool);
     if (hostAllowed(host, options.forceLiveHosts) || toolForced) {
       fidelity.liveForced += 1;
-      const live = await originalFetch(input, init);
+      const live = await liveRequest();
       return record(method, url, body, live, join(dir, "live-lane.jsonl"));
     }
     const exact = byExact.get(matchKey(method, url, body));
@@ -253,24 +311,26 @@ export async function withRecordedFetch<T>(
       removeRecordedCall(call);
       return toResponse(call);
     }
-    // A CHANGED request to a live-allowed host goes live BEFORE the url-tier
-    // fallback: serving a recorded response for a different request body would
-    // poison an A/B variant (e.g. the baseline's verdict answered for a packet
-    // it never scored). "*" allows every miss (the variant lane). Identical
-    // requests still replay via the exact tier above.
+    if (tool && EXACT_MATCH_ONLY_TOOLS.has(tool)) {
+      fidelity.misses.push({ method, url: scrubUrl(url) });
+      throw new Error(
+        `eval replay miss: ${method} ${scrubUrl(url)} has no exact recording for decision tool ${tool} in ${dir}`,
+      );
+    }
+    // A changed non-decision request to a live-allowed host goes live before
+    // the URL tier. Decision variants use forceLiveTools and were handled above;
+    // they never fall through implicitly. "*" allows every other miss in a
+    // variant lane, while identical requests still replay through the exact tier.
     const liveAllowed = hostAllowed(host, options.allowLiveHosts);
     if (liveAllowed) {
       fidelity.liveAllowed += 1;
-      const live = await originalFetch(input, init);
+      const live = await liveRequest();
       return record(method, url, body, live, join(dir, "live-lane.jsonl"));
     }
-    // The analyst's own calls are the ones an exact match cannot survive: their
-    // request is the assembled evidence packet, so any change upstream rewrites
-    // it. Answering record_verdict with an extraction response fails schema
-    // validation, the agent retries, and one mismatch cascades into exhausting
-    // the recording. Matching on the tool the request asked for keeps a
-    // singleton analyst call bound to its own answer, and the fidelity line
-    // reports the tier so this never reads as an exact replay.
+    // Non-decision structured calls may survive harmless request drift by
+    // matching the tool they asked for. Decision tools already failed closed
+    // above because their evidence and citation semantics require an exact
+    // request match.
     const toolKey = toolTierKey(urlOnlyKey(method, url), tool);
     const toolTier = toolKey ? byTool.get(toolKey) : undefined;
     if (toolTier?.length) {
@@ -282,21 +342,20 @@ export async function withRecordedFetch<T>(
     const urlTier = byUrl.get(urlOnlyKey(method, url));
     if (urlTier?.length) {
       fidelity.urlFallbackHits += 1;
-      // Oldest-first, but never step on a response another call has a stronger
-      // claim to. A recording tagged with a tool is the only answer that call
-      // can use, while an untagged request can be served by anything; taking
-      // the tagged row first is how a retrying extraction call used to eat the
-      // analyst's verdict before the analyst had even run.
-      const call = urlTier.find((candidate) => (candidate.tool ?? null) === tool)
-        ?? urlTier.find((candidate) => !candidate.tool);
+      // A structured request may only consume a response recorded for that
+      // same structured tool. An untagged response can end with ordinary text
+      // and no tool call, which turns an honest fixture miss into a misleading
+      // analyst failure. Untagged requests remain eligible only for untagged
+      // rows.
+      const call = tool
+        ? urlTier.find((candidate) => candidate.tool === tool)
+        : urlTier.find((candidate) => !candidate.tool);
       if (call) {
         removeRecordedCall(call);
         return toResponse(call);
       }
-      // Only tool-tagged rows are left and this request asked for none of them.
-      // Serving one anyway answers a structured call with someone else's answer,
-      // which fails validation, retries, and takes the rest of the recording
-      // down with it. A miss here is the honest outcome and is reported as one.
+      // The remaining rows belong to another request class. Serving one anyway
+      // answers a call with someone else's response; a miss is the honest result.
       fidelity.urlFallbackHits -= 1;
     }
     fidelity.misses.push({ method, url: scrubUrl(url) });
@@ -308,6 +367,10 @@ export async function withRecordedFetch<T>(
     return { result, fidelity, recordedCalls };
   } finally {
     globalThis.fetch = originalFetch;
+    if (priorEvalMode === undefined) delete process.env.ARGUS_EVAL_MODE;
+    else process.env.ARGUS_EVAL_MODE = priorEvalMode;
+    if (priorEvalCapturedAt === undefined) delete process.env.ARGUS_EVAL_CAPTURED_AT;
+    else process.env.ARGUS_EVAL_CAPTURED_AT = priorEvalCapturedAt;
   }
 }
 

@@ -23,13 +23,14 @@ import {
   UserFocus,
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
-import { claimedTicker, deriveNoticedSignals } from "../lib/reportInsights";
-import { NoticedRail } from "./InvestigatorBrief";
+import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
+import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
+import type { DecisionLensId } from "../intelligence/types";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
 import type { Dossier } from "../data/dossier";
 import type { SourceArtifact } from "../data/evidence";
-import { SubjectClass, type RoleReport } from "../engine";
+import { getProfile, SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import { CopyTldrButton, OutcomeDeltaStrip, ProviderFailureNotice, ScoreContextStrip } from "./ScoreContext";
@@ -56,7 +57,6 @@ import { VcReport } from "./VcReport";
 import { ProjectIntel } from "./ProjectIntel";
 import { ProjectTokenCard } from "./ProjectTokenCard";
 import { changeReportLifecycle } from "../lib/reports";
-import { ServiceAlert } from "./ServiceAlert";
 import { LegalScreen } from "./LegalScreen";
 import { SanctionsNameScreen } from "./SanctionsNameScreen";
 import { RingAlert } from "./RingAlert";
@@ -64,6 +64,7 @@ import { useArgusAuth } from "../auth-context";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
 import { DecisionBasis } from "./DecisionBasis";
 import { isStrictFundScaleArtifact } from "../lib/fundScaleEvidence";
+import { portfolioRelationshipBinding, type PortfolioBindingSubject } from "../lib/portfolioRelationshipBinding";
 import { buildDecisionBasis } from "../lib/decisionBasis";
 import {
   ReportCanvasNarrativeSection,
@@ -80,15 +81,20 @@ import {
 } from "./BasicFactsPanel";
 import {
   basicFactQuestionOutcome,
-  basicFactQuestionFor,
-  basicFactQuestionsFor,
   canonicalBasicFactPredicate,
+  reportBasicFactQuestionsFor,
   supportsExplicitEmptyBasicFact,
 } from "../lib/basicFactQuestions";
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
+import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
+import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
+import { ResearchPlanPanel } from "./ResearchPlanPanel";
+import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
+import { isOrganizationAccount } from "../lib/investorSubject";
+import { deriveIntelligenceBrief } from "../lib/intelligenceBrief";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -236,10 +242,7 @@ function frozenDateLabel(value?: string | null): string {
   });
 }
 
-/**
- * Material operational risks belong beside the subject identity and verdict,
- * not buried in a TVL excerpt or rendered as "N/A followers."
- */
+/** Provider-recorded operational events belong beside the subject identity. */
 function CriticalSubjectAlerts({ dossier }: { dossier: Dossier }) {
   const incidents = [...(dossier.protocolTvl?.hacks ?? [])]
     .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")));
@@ -251,37 +254,38 @@ function CriticalSubjectAlerts({ dossier }: { dossier: Dossier }) {
 
   const incidentSource = safeSourceLink(dossier.protocolTvl?.sourceUrl);
   const xSource = safeSourceLink(dossier.x_account_status_source_url);
-  const incidentRecovery = incident?.returnedFunds
+  const incidentRecovery = incident?.returnedFunds === true
     ? incident.returnedAmountUsd
-      ? `${usdCompact(incident.returnedAmountUsd)} recorded returned`
-      : "Funds recorded returned"
-    : "Return status not recorded";
+      ? `Provider records ${usdCompact(incident.returnedAmountUsd)} returned`
+      : "Provider returned-funds field: yes; amount not recorded"
+    : incident?.returnedFunds === false
+      ? "Provider returned-funds field: no"
+      : "Provider returned-funds field not recorded";
 
   return (
     <div
-      className="order-2 border-t border-avoid/30 bg-avoid/[0.035] px-5 py-4 lg:order-none"
-      role="alert"
-      aria-label="Material subject risk alerts"
+      className="order-3 border-t border-line/70 bg-panel/30 px-5 py-4 lg:order-none"
+      aria-label="Material subject alerts"
     >
       <div className={`grid gap-3 ${incident && xStatus ? "md:grid-cols-2" : ""}`}>
         {incident && (
-          <article className="rounded-xl border border-avoid/35 bg-panel/70 p-3.5">
+          <article className="rounded-xl border border-caution/30 bg-panel/70 p-3.5">
             <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-avoid/35 bg-avoid/10 text-avoid">
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-caution/30 bg-caution/[0.06] text-caution">
                 <WarningCircle aria-hidden="true" size={17} weight="fill" />
               </span>
               <div className="min-w-0">
-                <div className="eyebrow text-avoid">Major protocol security incident</div>
+                <div className="eyebrow text-caution">Provider-recorded protocol event</div>
                 <p className="mt-1 text-[14px] font-semibold leading-snug text-ink">
-                  {incident.amountUsd ? usdCompact(incident.amountUsd) : "Unquantified loss"} · {frozenDateLabel(incident.date)}
+                  {incident.amountUsd ? usdCompact(incident.amountUsd) : "Amount not recorded"} · {frozenDateLabel(incident.date)}
                 </p>
                 <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
                   {[incident.classification, incident.technique].filter(Boolean).join(" · ") || "Protocol security incident"}
                   <span className="text-ink-faint"> · {incidentRecovery}</span>
                 </p>
                 {dossier.report.cap_applied === "recent_critical_protocol_loss_without_recorded_recovery" && (
-                  <p className="mt-2 rounded-md border border-avoid/25 bg-avoid/[0.06] px-2.5 py-2 text-[11.5px] font-medium leading-relaxed text-avoid">
-                    This loss limits the report to 39/100 until a full recovery is recorded.
+                  <p className="mt-2 rounded-md border border-caution/25 bg-caution/[0.05] px-2.5 py-2 text-[11.5px] font-medium leading-relaxed text-caution">
+                    This saved event record activates the report's 39/100 scoring cap under the frozen rubric.
                   </p>
                 )}
                 <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
@@ -326,6 +330,70 @@ function CriticalSubjectAlerts({ dossier }: { dossier: Dossier }) {
         )}
       </div>
     </div>
+  );
+}
+
+function SubjectProfileContext({
+  dossier,
+  roles,
+  hasTerminalXState,
+}: {
+  dossier: Dossier;
+  roles: SubjectClass[];
+  hasTerminalXState: boolean;
+}) {
+  return (
+    <>
+      <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">{dossier.bio}</p>
+      <ReportDisclaimer className="mt-2 max-w-2xl" />
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {roles.map((role) => (
+          <span key={role} className="chip">
+            <RoleIcon role={role} size={13} /> {ROLE_META[role].label}
+          </span>
+        ))}
+        {hasTerminalXState ? (
+          <span className="text-[12.5px] font-medium text-avoid">X profile metrics unavailable</span>
+        ) : (
+          <>
+            <span className="text-[12.5px] text-ink-faint"><span className="text-ink-dim">{dossier.followers}</span> followers</span>
+            <span className="text-[12.5px] text-ink-faint">joined {dossier.joined}</span>
+          </>
+        )}
+        {typeof dossier.days_since_post === "number" && (
+          <span className={`text-[12.5px] ${dossier.days_since_post >= 21 ? "font-medium text-avoid" : "text-ink-faint"}`}>
+            {hasTerminalXState
+              ? `last observed post ${dossier.days_since_post}d ago`
+              : dossier.days_since_post === 0
+                ? "posted today"
+                : dossier.days_since_post === 1
+                  ? "posted yesterday"
+                  : `last posted ${dossier.days_since_post}d ago`}
+          </span>
+        )}
+      </div>
+      {dossier.notableFollowers.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-ink-faint">Notable followers</span>
+          {dossier.notableFollowers.slice(0, 6).map((notable) => {
+            const big = (notable.count ?? 0) >= 1e6;
+            return (
+              <a
+                key={notable.handle}
+                href={`https://x.com/${notable.handle}`}
+                target="_blank"
+                rel="noreferrer"
+                className={`chip normal-case tracking-normal transition hover:text-ink ${big ? "tint-pass" : ""}`}
+                title={`${notable.label} · ${notable.size} followers`}
+              >
+                @{notable.handle} <span className="opacity-70">{notable.size}</span>
+              </a>
+            );
+          })}
+          {dossier.notableFollowers.length > 6 && <span className="mono text-[11px] text-ink-faint">+{dossier.notableFollowers.length - 6}</span>}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1306,10 +1374,12 @@ function FrozenSourceLedger({
   artifacts,
   subjectHandle,
   profile,
+  roles,
 }: {
   artifacts: FrozenSourceArtifact[];
   subjectHandle: string;
-  profile: unknown;
+  profile: PortfolioBindingSubject["profile"];
+  roles: readonly unknown[];
 }) {
   if (!artifacts.length) return null;
   const fundScalePeers = artifacts.filter((artifact) => artifact.kind === "fund_scale");
@@ -1335,12 +1405,16 @@ function FrozenSourceLedger({
                 : "Source content";
           const strictFundScaleMatch = artifact.kind === "fund_scale"
             && isStrictFundScaleArtifact(artifact, fundScalePeers, { subjectHandle, profile });
+          const strictPortfolioMatch = artifact.kind === "portfolio_relationship"
+            && Boolean(portfolioRelationshipBinding(artifact, { roles, profile }));
           const matchLabel = artifact.kind === "fund_scale" && artifact.match === "fund_scale_confirmed"
             ? strictFundScaleMatch ? "fund size verified" : "reported · strict verification incomplete"
-            : SOURCE_MATCH_LABEL[artifact.match];
+            : artifact.kind === "portfolio_relationship" && artifact.match === "relationship_confirmed"
+              ? strictPortfolioMatch ? "relationship verified" : "reported · strict verification incomplete"
+              : SOURCE_MATCH_LABEL[artifact.match];
           const matchColor = artifact.match === "risk_signal"
             ? "var(--color-caution)"
-            : artifact.match === "relationship_confirmed" || strictFundScaleMatch
+            : strictPortfolioMatch || strictFundScaleMatch
               ? "var(--color-pass)"
             : artifact.match === "candidate"
               ? "var(--color-caution)"
@@ -1619,6 +1693,7 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
 }
 
 export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void }) {
+  const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
   const { role } = useArgusAuth();
   const f = dossier;
   const hasTerminalXState = f.x_account_status === "suspended" || f.x_account_status === "unavailable";
@@ -1632,6 +1707,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     profile_collection_state: f.profile_collection_state,
     profile_provider: f.profile_provider,
     profile_captured_at: f.profile_captured_at,
+    identity_binding: f.identity_binding,
+  };
+  const portfolioBindingSubject = {
+    roles: report.roles,
+    profile: {
+      handle: f.handle,
+      display_name: f.display_name,
+      resolved_name: f.resolved_name,
+      bio: f.bio,
+      website: f.website,
+      profile_collection_state: f.profile_collection_state,
+      profile_provider: f.profile_provider,
+      identity_binding: f.identity_binding,
+    },
   };
   const webTeam = (dossier.webTeam ?? []).filter(groundedTeamMember).map(sanitizedGroundedTeamMember);
   const webTeamLeads = reportTeamLeads(dossier);
@@ -1661,12 +1750,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       return groups;
     }, new Map<string, { key: string; project: string; investor: string; subject: string; attribution?: SourceArtifact["attribution"]; sources: SourceArtifact[] }>())
     .values()]
-    .map((group) => ({
-      ...group,
-      confirmed: group.sources.some((source) => source.match === "relationship_confirmed"),
-      confirmedSourceCount: group.sources.filter((source) => source.match === "relationship_confirmed").length,
-      reportedSourceCount: group.sources.filter((source) => source.match !== "relationship_confirmed").length,
-    }))
+    .map((group) => {
+      const confirmedSources = group.sources.filter((source) =>
+        Boolean(portfolioRelationshipBinding(source, portfolioBindingSubject)));
+      return {
+        ...group,
+        confirmed: confirmedSources.length > 0,
+        confirmedSourceCount: confirmedSources.length,
+        reportedSourceCount: group.sources.length - confirmedSources.length,
+      };
+    })
     .sort((left, right) => Number(right.confirmed) - Number(left.confirmed) || left.project.localeCompare(right.project));
   const verifiedPortfolioProjects = portfolioArtifactGroups.filter((group) => group.confirmed).map((group) => group.project);
   const reportedPortfolioProjects = portfolioArtifactGroups.filter((group) => !group.confirmed).map((group) => group.project);
@@ -1741,6 +1834,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const unmatchedPortfolioLeadCount = portfolioLeads.filter((lead) =>
     !verifiedPortfolioProjectKeys.has(lead.projectName.trim().toLowerCase())).length;
   const roles = report.roles as SubjectClass[];
+  const organizationAccount = isOrganizationAccount({
+    roles,
+    profile: {
+      handle: f.handle,
+      display_name: f.display_name,
+      resolved_name: f.resolved_name,
+      bio: f.bio,
+    },
+  });
   const ledgerAudience = f.basicFactQuestionLedger?.[0]?.audience;
   const basicFactsAudience = ledgerAudience === "project"
     ? "project" as const
@@ -1801,6 +1903,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
     ?? report.role_reports[0];
   const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
+  const governingSubjectClass = report.governing_role
+    && Object.values(SubjectClass).includes(report.governing_role as SubjectClass)
+    ? report.governing_role as SubjectClass
+    : null;
+  const expectedGoverningAxes = governingSubjectClass
+    ? Object.keys(getProfile(governingSubjectClass).axes)
+    : [];
+  const scoredGoverningAxisIds = new Set(governingAxes.map(([axis]) => axis));
+  const unmeasuredGoverningAxes = expectedGoverningAxes
+    .filter((axis) => !scoredGoverningAxisIds.has(axis));
+  const partialAxisAssessment = governingAxes.length > 0 && unmeasuredGoverningAxes.length > 0;
   // The compact founder summary is derived only from structured venture
   // outcomes/backer arrays. When those arrays contain active ventures but no
   // completed outcomes, the engine returns "Unproven" / "none" even if the
@@ -1894,6 +2007,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const presentedVerdict = presentation.displayVerdict === "UNVERIFIABLE"
     ? "UNVERIFIABLE_IDENTITY"
     : presentation.displayVerdict;
+  const prioritizeDecisionIntelligence = Boolean(f.intelligence && (
+    f.intelligence.rulesetVersion === "argus-entity-point-in-time-v1"
+    || (
+      f.intelligence.subject.forms.some((form) => form.form === "company")
+      && !f.intelligence.subject.forms.some((form) => form.form === "token" || form.form === "protocol")
+    )
+  ));
   const roleScoreState: RoleScoreState = presentation.final
     ? "final"
     : presentation.displayVerdict === "PROVISIONAL"
@@ -2137,6 +2257,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const unresolvedChecks = decisionCriticalChecks(diligenceChecks).filter((check) =>
     check.status === "unknown" || check.status === "unavailable" || check.status === "stale",
   );
+  const unresolvedCheckNames = unresolvedChecks.slice(0, 3).map((check) => check.label);
+  const unresolvedCheckRemainder = Math.max(0, unresolvedChecks.length - unresolvedCheckNames.length);
+  const noCleanScreenCopy = unresolvedChecks.length > 0
+    ? `${unresolvedChecks.length} decision-critical ${unresolvedChecks.length === 1 ? "check remains" : "checks remain"} open or unrecorded: ${unresolvedCheckNames.join(", ")}${unresolvedCheckRemainder > 0 ? `, and ${unresolvedCheckRemainder} more` : ""}. No completed clean screen is recorded, so this report does not support an all-clear.`
+    : "No completed clean screen is recorded, so this report does not support an all-clear.";
   const investorOpenChecks = unresolvedChecks.filter((check) => {
     const diagnostic = [check.label, check.note, check.provider].filter(Boolean).join(" ").toLowerCase();
     const optionalSource = /\b(?:crunchbase|reddit|people data labs|pdl|grok|twitterapi(?:\.io)?|x provider)\b/.test(diagnostic);
@@ -2148,8 +2273,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   );
   const axisHref = (axis: string): `#${string}` =>
     `#decision-basis-${axis.replace(/[^a-z0-9_-]/gi, "-")}`;
+  const intelligenceBrief = f.intelligence
+    ? deriveIntelligenceBrief(f.intelligence, decisionLensId)
+    : { supports: [], pressures: [], context: [], questions: [] };
 
-  const supportNarrative: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
+  const axisSupportNarrative: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
     .filter((axis) => Boolean(axis.rationale) && axis.support.length > 0)
     .sort((left, right) => (right.weight ? right.score / right.weight : 0) - (left.weight ? left.score / left.weight : 0))
     .slice(0, 5)
@@ -2175,6 +2303,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         href: axisHref(axis.axis),
       };
     });
+  const intelligenceSupportNarrative: ReportCanvasNarrativeItem[] = intelligenceBrief.supports.map((item) => ({
+    id: item.id,
+    title: plainLanguageSummary(item.title),
+    detail: plainLanguageSummary(item.detail),
+    provenance: item.provenance,
+    href: "#decision-intelligence" as `#${string}`,
+  }));
+  const supportNarrative: ReportCanvasNarrativeItem[] = [
+    ...axisSupportNarrative,
+    ...intelligenceSupportNarrative,
+  ].filter((item, index, items) => items.findIndex((candidate) =>
+    candidate.title.toLowerCase().replace(/[^a-z0-9]+/g, " ")
+      === item.title.toLowerCase().replace(/[^a-z0-9]+/g, " ")) === index).slice(0, 6);
+  const intelligenceContextNarrative: ReportCanvasNarrativeItem[] = intelligenceBrief.context.map((item) => ({
+    id: item.id,
+    title: plainLanguageSummary(item.title),
+    detail: plainLanguageSummary(item.detail),
+    provenance: item.provenance,
+    href: "#decision-intelligence" as `#${string}`,
+  }));
 
   // Real countervailing signals only: hard caps, coverage shortfalls,
   // contradictions, and mixed evidence. Collection gaps are NOT thesis risks;
@@ -2199,6 +2347,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       detail: plainLanguageSummary(contradiction.conflict),
       provenance: `${contradiction.severity} importance · ${contradiction.confidence} confidence`,
       href: "#contradictions" as `#${string}`,
+    })),
+    ...intelligenceBrief.pressures.map((item) => ({
+      id: item.id,
+      title: plainLanguageSummary(item.title),
+      detail: plainLanguageSummary(item.detail),
+      provenance: item.provenance,
+      href: "#decision-intelligence" as `#${string}`,
     })),
     ...decisionBasisSummary.rows
       .filter((axis) => axis.counter.length > 0)
@@ -2270,21 +2425,29 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       provenance: "Not yet confirmed",
       href: axisHref(axis.axis),
     })));
+  const decisionBasicFactQuestions = reportBasicFactQuestionsFor(
+    basicFactsAudience,
+    f.basicFactQuestionLedger ?? [],
+  );
   const resolvedBasicFactPredicates = new Set([
     ...basicFacts
       .filter((fact) => fact.status === "verified" || fact.status === "corroborated" || fact.status === "not_applicable")
       .map((fact) => canonicalBasicFactPredicate(fact.predicate)),
     ...(f.basicFactQuestionLedger ?? [])
-      .filter((entry) => supportsExplicitEmptyBasicFact(entry.predicate)
-        && basicFactQuestionOutcome(entry) === "checked_empty")
+      .filter((entry) => basicFactQuestionOutcome(entry) === "answered"
+        || (supportsExplicitEmptyBasicFact(entry.predicate)
+          && basicFactQuestionOutcome(entry) === "checked_empty"))
       .map((entry) => canonicalBasicFactPredicate(entry.predicate)),
   ]);
   const conflictedBasicFactPredicates = new Set(basicFacts
     .filter((fact) => fact.status === "conflicted" || fact.status === "unresolved")
     .map((fact) => canonicalBasicFactPredicate(fact.predicate)));
-  const buildBasicFactQuestion = (predicate: string, conflicted: boolean): ReportCanvasNarrativeItem => ({
+  const buildBasicFactQuestion = (
+    [predicate, question]: readonly [predicate: string, question: string],
+    conflicted: boolean,
+  ): ReportCanvasNarrativeItem => ({
     id: `verify-basic-${predicate}`,
-    title: basicFactQuestionFor(predicate, basicFactsAudience),
+    title: question,
     detail: conflicted
       ? "Sources disagree on the answer. Read both before relying on either."
       : "Not answered by any source we checked.",
@@ -2292,14 +2455,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     href: "#basic-facts" as `#${string}`,
   });
   const conflictedBasicFactQuestions: ReportCanvasNarrativeItem[] = fillDecisionFacts
-    ? basicFactQuestionsFor(basicFactsAudience)
+    ? decisionBasicFactQuestions
       .filter(([predicate]) => conflictedBasicFactPredicates.has(predicate))
-      .map(([predicate]) => buildBasicFactQuestion(predicate, true))
+      .map((definition) => buildBasicFactQuestion(definition, true))
     : [];
   const openBasicFactQuestions: ReportCanvasNarrativeItem[] = fillDecisionFacts
-    ? basicFactQuestionsFor(basicFactsAudience)
+    ? decisionBasicFactQuestions
       .filter(([predicate]) => !resolvedBasicFactPredicates.has(predicate) && !conflictedBasicFactPredicates.has(predicate))
-      .map(([predicate]) => buildBasicFactQuestion(predicate, false))
+      .map((definition) => buildBasicFactQuestion(definition, false))
     : [];
   const checkVerificationQuestions: ReportCanvasNarrativeItem[] = investorOpenChecks.map((check, index) => ({
     id: `verify-${check.checkId ?? index}`,
@@ -2342,6 +2505,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       href: "#report-overview" as `#${string}`,
     }] : []),
     ...conflictedBasicFactQuestions,
+    ...intelligenceBrief.questions.map((item) => ({
+      id: item.id,
+      title: plainLanguageSummary(item.title),
+      detail: plainLanguageSummary(item.detail),
+      provenance: item.provenance,
+      href: "#decision-intelligence" as `#${string}`,
+    })),
     ...checkVerificationQuestions,
     ...openBasicFactQuestions,
     ...axisGapArtifactQuestions,
@@ -2391,6 +2561,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     lpLockedPct: f.holderProfile?.lpLockedOrBurnedPct,
     largestHolderPct: f.holderProfile?.topHolderPct,
     top10HolderPct: f.holderProfile?.top10Pct,
+    assessedWalletCount: f.holderProfile?.assessedWalletCount,
+    top10HolderPctIsFloor: f.holderProfile?.top10PctIsFloor,
     circulatingPct: (() => {
       const circulating = f.projectToken?.circulatingSupply;
       const denominator = f.projectToken?.maxSupply ?? f.projectToken?.totalSupply;
@@ -2453,6 +2625,21 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const countervailingNarrative = favorableVerdict
     ? [...confidenceLimits, ...subjectLeadNarrative]
     : supportNarrative;
+  const caseArgument = deriveVerdictArgument({
+    verdict: presentedVerdict,
+    supports: [
+      ...intelligenceBrief.supports.map((item) => item.title),
+      ...axisSupportNarrative.map((item) => item.title),
+    ],
+    concerns: [
+      ...confidenceLimitsBase,
+      ...lowAxisDrivers,
+    ].map((item) => item.title),
+    capReason: report.cap_applied
+      ? `The score is limited because of: ${capLabel(report.cap_applied)}`
+      : null,
+    nextChecks: verificationNext.map((item) => item.title),
+  });
 
   const unscoredIntelNarrative: ReportCanvasNarrativeItem[] = [
     ...(f.projectToken ? [{
@@ -2550,7 +2737,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           ? { key: "identity", label: "Identity verified", tone: "pass", href: "#identity-evidence", title: findCheck("identity-resolution")?.note ?? "Official identity resolved and confirmed." }
           : ic === "Probable"
             ? { key: "identity", label: "Identity probable", tone: "caution", href: "#identity-evidence", title: "Identity resolution is probable, not confirmed." }
-            : { key: "identity", label: "Identity unresolved", tone: "caution", href: "#identity-evidence", title: "No confirmed identity resolution is recorded." },
+            : organizationAccount
+              ? { key: "identity", label: "Organization unverified", tone: "caution", href: "#identity-evidence", title: "The public brand account was identified, but its legal entity and operators were not confirmed." }
+              : { key: "identity", label: "Identity unresolved", tone: "caution", href: "#identity-evidence", title: "No confirmed identity resolution is recorded." },
     );
   }
   if (!legacyCoverageNotCaptured) {
@@ -2562,7 +2751,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         : sanctionsCheck?.status === "finding"
           ? { key: "sanctions", label: "Sanctions match", tone: "avoid", href: "#identity-evidence", title: sanctionsCheck.note ?? "An exact-name sanctions match requires identity review." }
           : sanctionsCheck?.status === "not-applicable"
-            ? { key: "sanctions", label: "Sanctions n/a", tone: "neutral", href: "#identity-evidence", title: sanctionsCheck.note ?? "The sanctions screen needs a resolved real name." }
+            ? organizationAccount
+              ? { key: "sanctions", label: "Person sanctions n/a", tone: "neutral", href: "#identity-evidence", title: "This is an organization account. Person-name screening requires verified operator names; entity screening requires a verified legal entity." }
+              : { key: "sanctions", label: "Sanctions n/a", tone: "neutral", href: "#identity-evidence", title: sanctionsCheck.note ?? "The sanctions screen needs a resolved real name." }
             : { key: "sanctions", label: "Sanctions not screened", tone: "caution", href: "#scan-methodology", title: sanctionsCheck?.note ?? "No sanctions-screen outcome is recorded in this snapshot." },
     );
   }
@@ -2593,9 +2784,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       f.projectToken
       || basicFacts.some((fact) => canonicalBasicFactPredicate(fact.predicate) === "official_token"),
     );
+    const tokenAbsenceIsMaterial = tokenClaimObserved || roles.some((role) =>
+      role === SubjectClass.PROJECT
+      || role === SubjectClass.FOUNDER
+      || role === SubjectClass.KOL);
     if (f.projectToken) {
       heroProofChips.push({ key: "token", label: "Token verified", value: `$${f.projectToken.symbol}`, tone: "pass", href: "#project-token", title: `Confirmed through ${f.projectToken.verification === "official_x" ? "the official X account" : "the official website"}, not just the token name.` });
-    } else if (tokenQuestion && basicFactQuestionOutcome(tokenQuestion) === "checked_empty") {
+    } else if (tokenQuestion && tokenAbsenceIsMaterial && basicFactQuestionOutcome(tokenQuestion) === "checked_empty") {
       heroProofChips.push({ key: "token", label: "No official token", tone: "neutral", href: "#basic-facts", title: "A completed search found no verified official token." });
     } else if (tokenQuestion && tokenClaimObserved) {
       const claimedSymbol = claimedTicker(f.bio);
@@ -2695,10 +2890,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
       {/* top bar */}
       <header className="sticky top-0 z-30 border-b border-line bg-void/85 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3 px-5 py-3">
-          <button type="button" onClick={onReset} className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
+        <div className="mx-auto flex max-w-5xl flex-nowrap items-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3">
+          <button type="button" onClick={onReset} className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-[13.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink sm:min-w-0 sm:justify-start">
             <ArrowLeft aria-hidden="true" size={15} weight="bold" />
-            New investigation
+            <span className="max-sm:sr-only">New investigation</span>
           </button>
           <span className="mono hidden text-[11px] text-ink-faint md:inline">/ {report.audit_id}</span>
           {immutableReviewHref ? (
@@ -2719,22 +2914,23 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               {versionContext ? `VERSION ${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
             </span>
           )}
-          <div className="scrollbar-none order-3 flex w-full items-center gap-2 overflow-x-auto pb-1 sm:order-none sm:ml-auto sm:w-auto sm:justify-end sm:overflow-visible sm:pb-0">
-            {onRescan && (
-              <button type="button" onClick={onRescan} title="Run this audit again, fresh" className="btn-chip tint-signal min-h-11 gap-1.5 px-3">
-                <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
-                Rescan
-              </button>
-            )}
+          <div className="ml-auto flex min-w-0 items-center gap-2">
             {onOpenBrief && (
               <button
                 type="button"
                 onClick={onOpenBrief}
                 title="Open the analyst decision brief anchored to this exact person case"
-                className="btn-primary min-h-11 gap-1.5 px-3 text-[12.5px] font-medium"
+                className="btn-primary min-h-11 shrink-0 gap-1.5 px-3 text-[12.5px] font-medium"
               >
                 <Briefcase aria-hidden="true" size={14} weight="bold" />
                 Case brief
+              </button>
+            )}
+            <div className="hidden items-center gap-2 sm:flex">
+            {onRescan && (
+              <button type="button" onClick={onRescan} title="Run this audit again, fresh" className="btn-chip tint-signal min-h-11 gap-1.5 px-3">
+                <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
+                Rescan
               </button>
             )}
             {canShare && (
@@ -2764,8 +2960,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <MagnifyingGlassPlus aria-hidden="true" size={14} weight="bold" />
               New audit
             </button>
+            </div>
             {canArchive && (
-              <details className="relative">
+              <details className="relative hidden sm:block">
                 <summary aria-label="More report actions" className="btn-secondary min-h-11 list-none cursor-pointer gap-1.5 px-3 text-[12.5px] [&::-webkit-details-marker]:hidden">
                   <DotsThree aria-hidden="true" size={17} weight="bold" />
                   More
@@ -2783,12 +2980,57 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 </div>
               </details>
             )}
+            <details className="relative sm:hidden">
+              <summary aria-label="More report actions" className="btn-secondary min-h-11 min-w-11 list-none cursor-pointer justify-center px-2.5 [&::-webkit-details-marker]:hidden">
+                <DotsThree aria-hidden="true" size={17} weight="bold" />
+                <span className="sr-only">More report actions</span>
+              </summary>
+              <div className="panel absolute right-0 top-full z-30 mt-1.5 w-56 p-1.5 shadow-xl">
+                {onRescan && (
+                  <button type="button" onClick={onRescan} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
+                    <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
+                    Rescan current evidence
+                  </button>
+                )}
+                {canShare && (
+                  <button
+                    type="button"
+                    onClick={() => void share()}
+                    disabled={shareState === "creating"}
+                    aria-live="polite"
+                    className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <ShareNetwork aria-hidden="true" size={14} weight="bold" />
+                    {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share report"}
+                  </button>
+                )}
+                {canMutateWorkspace && (
+                  <button type="button" onClick={watch} aria-pressed={watched} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
+                    <Star aria-hidden="true" size={14} weight={watched ? "fill" : "regular"} />
+                    {watched ? "Watching report" : "Add to watchlist"}
+                  </button>
+                )}
+                <button type="button" onClick={onReset} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
+                  <MagnifyingGlassPlus aria-hidden="true" size={14} weight="bold" />
+                  New audit
+                </button>
+                {canArchive && (
+                  <button
+                    type="button"
+                    onClick={() => void archive()}
+                    disabled={archiveState === "archiving"}
+                    className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-signal/10 hover:text-signal-lift disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {archiveState === "archiving" ? "Archiving case…" : archiveState === "error" ? "Archive failed · retry" : "Archive case"}
+                  </button>
+                )}
+              </div>
+            </details>
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-5xl px-5">
-        {!versionContext && <div className="mt-4"><ServiceAlert /></div>}
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -2824,62 +3066,29 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             evidence is complete enough to act on. */}
         <section id="report-overview" className="panel mt-6 flex scroll-mt-28 flex-col overflow-hidden" aria-labelledby="report-subject-title">
           <div className="contents lg:grid lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-5 lg:p-5">
-            <div className="order-1 flex min-w-0 items-start gap-4 p-5 lg:order-none lg:p-0">
+            <div className="order-1 flex min-w-0 items-start gap-4 p-4 sm:p-5 lg:order-none lg:p-0">
               <Avatar src={f.avatar_url || xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
                   <h1 id="report-subject-title" className="display text-[32px] leading-none text-ink max-sm:text-[24px]">{f.display_name}</h1>
                   <span className="mono text-[13.5px] text-ink-faint">{f.handle}</span>
                 </div>
-                <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">{f.bio}</p>
-                <ReportDisclaimer className="mt-2 max-w-2xl" />
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {roles.map((r) => (
-                    <span key={r} className="chip">
-                      <RoleIcon role={r} size={13} /> {ROLE_META[r].label}
-                    </span>
-                  ))}
-                  {hasTerminalXState ? (
-                    <span className="text-[12.5px] font-medium text-avoid">X profile metrics unavailable</span>
-                  ) : (
-                    <>
-                      <span className="text-[12.5px] text-ink-faint"><span className="text-ink-dim">{f.followers}</span> followers</span>
-                      <span className="text-[12.5px] text-ink-faint">joined {f.joined}</span>
-                    </>
-                  )}
-                  {typeof f.days_since_post === "number" && (
-                    <span className={`text-[12.5px] ${f.days_since_post >= 21 ? "font-medium text-avoid" : "text-ink-faint"}`}>
-                      {hasTerminalXState
-                        ? `last observed post ${f.days_since_post}d ago`
-                        : f.days_since_post === 0 ? "posted today" : f.days_since_post === 1 ? "posted yesterday" : `last posted ${f.days_since_post}d ago`}
-                    </span>
-                  )}
+                <div className="hidden sm:block">
+                  <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} />
                 </div>
-                {f.notableFollowers.length > 0 && (
-                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] text-ink-faint">Notable followers</span>
-                    {f.notableFollowers.slice(0, 6).map((n) => {
-                      const big = (n.count ?? 0) >= 1e6;
-                      return (
-                        <a
-                          key={n.handle}
-                          href={`https://x.com/${n.handle}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`chip normal-case tracking-normal transition hover:text-ink ${big ? "tint-pass" : ""}`}
-                          title={`${n.label} · ${n.size} followers`}
-                        >
-                          @{n.handle} <span className="opacity-70">{n.size}</span>
-                        </a>
-                      );
-                    })}
-                    {f.notableFollowers.length > 6 && <span className="mono text-[11px] text-ink-faint">+{f.notableFollowers.length - 6}</span>}
+                <details className="mt-3 border-t border-line/60 pt-1 sm:hidden">
+                  <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 text-[11.5px] text-ink-dim [&::-webkit-details-marker]:hidden">
+                    <span>{roles.map((role) => ROLE_META[role].label).join(" · ") || "Subject"}</span>
+                    <span className="mono text-[10px] uppercase tracking-wide text-signal-lift">Profile context</span>
+                  </summary>
+                  <div className="pb-1">
+                    <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} />
                   </div>
-                )}
+                </details>
               </div>
             </div>
 
-            <details className="order-4 mx-5 mb-5 border-t border-line/60 pt-4 text-[11px] lg:order-none lg:m-0 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+            <details className="order-6 mx-5 mb-5 border-t border-line/60 pt-4 text-[11px] lg:order-none lg:m-0 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
               <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-dim">Report details</summary>
               <dl className="mt-3 grid content-start gap-3" aria-label="Saved report details">
               <div>
@@ -2911,10 +3120,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <CriticalSubjectAlerts dossier={f} />
 
           <div
-            className="order-3 flex flex-wrap items-center gap-5 border-t border-line/60 px-5 py-5 max-sm:grid max-sm:items-start max-sm:gap-4 lg:order-none"
+            className="order-2 flex flex-wrap items-center gap-5 border-t border-line/60 px-5 py-5 max-sm:grid max-sm:items-start max-sm:gap-4 lg:order-none"
             aria-label="Report result and check status"
           >
-            <div className="shrink-0 text-center max-sm:flex max-sm:items-center max-sm:gap-3 max-sm:text-left">
+            <div className="shrink-0 text-center max-sm:order-2 max-sm:flex max-sm:items-center max-sm:gap-3 max-sm:text-left">
               <ScoreRing
                 score={presentation.primaryScore ? report.governing_score : null}
                 verdict={presentedVerdict}
@@ -2935,7 +3144,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               />
               <CopyTldrButton base={tldrBase} mint={mintShareUrl} />
             </div>
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 max-sm:order-1">
               <div className="eyebrow mb-1.5">{plainReportStatusLabel(presentation.resultLabel)}</div>
               <div className="flex flex-wrap items-center gap-2.5">
                 <span className={`display text-[44px] uppercase leading-none max-sm:text-[32px] ${verdictTextClass}`}>
@@ -2963,6 +3172,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   >
                     {ROLE_META[report.governing_role as SubjectClass].label.toLowerCase()} role set the final score
                   </span>
+                )}
+                {!presentation.final && f.intelligence && (
+                  <a
+                    href="#decision-intelligence"
+                    className="chip tint-signal min-h-8 font-medium text-signal-lift underline-offset-2 hover:underline"
+                  >
+                    Deep dive ready · {f.intelligence.measurements.length} evidence points
+                  </a>
                 )}
               </div>
               <ExpandableText
@@ -3014,6 +3231,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   <span className="text-ink-dim">This score uses the facts ARGUS saved. It is not an approval or recommendation.</span> {f.headline}
                 </p>
               )}
+              {!presentation.final && f.intelligence && (
+                <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
+                  The score remains withheld, but the saved report still contains a role-specific decision map with exact evidence states, source lineage, critical unknowns, and four diligence lenses.
+                </p>
+              )}
               {report.cap_applied && (
                 <div className="chip tint-avoid mt-3 font-medium">
                   Score limited · {capLabel(report.cap_applied)}
@@ -3027,7 +3249,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               ever an empty grey box. */}
           {fundamentalTiles.length >= 2 && (
             <dl
-              className="order-3 grid grid-cols-2 gap-px border-t border-line/60 bg-line max-sm:[&>div:last-child:nth-child(odd)]:col-span-2 sm:[grid-template-columns:repeat(var(--tile-count),minmax(0,1fr))]"
+              className="order-4 grid grid-cols-2 gap-px border-t border-line/60 bg-line max-sm:[&>div:last-child:nth-child(odd)]:col-span-2 sm:[grid-template-columns:repeat(var(--tile-count),minmax(0,1fr))]"
               style={{ "--tile-count": Math.min(fundamentalTiles.length, 5) } as React.CSSProperties}
               aria-label="Verified fundamentals"
             >
@@ -3041,7 +3263,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </dl>
           )}
 
-          <div className={`finding relative order-4 px-5 py-4 ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`} aria-label="Safety check status">
+          <div className={`finding relative order-5 px-5 py-4 ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`} aria-label="Safety check status">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">{readinessTitle}</span>
               <span className="text-[11px] text-ink-faint">
@@ -3108,6 +3330,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             sticky={false}
             items={[
               { href: "#decision-summary", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
+              ...(f.intelligence ? [{ href: "#decision-intelligence" as const, label: "Deep dive", icon: <MagnifyingGlassPlus aria-hidden="true" size={15} weight="bold" />, count: f.intelligence.signals.length }] : []),
+              ...(f.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> }] : []),
               ...(showBasicFacts ? [{
                 href: "#basic-facts" as const,
                 label: "Key facts",
@@ -3126,6 +3350,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           />
         </div>
 
+        {prioritizeDecisionIntelligence && f.intelligence && (
+          <PointInTimeIntelligencePanel
+            snapshot={f.intelligence}
+            thesisEligible={presentation.final && !decisionFrameworkUnavailable}
+            governingVerdict={presentedVerdict}
+            selectedLensId={decisionLensId}
+            onSelectedLensChange={setDecisionLensId}
+          />
+        )}
+
+        {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
+
         {showBasicFacts && (
           <div className="mt-5">
             <BasicFactsPanel
@@ -3135,6 +3371,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               audience={basicFactsAudience}
               questionLedger={f.basicFactQuestionLedger}
               fundingRounds={fundingEvidence.rounds}
+              supportingAffiliationCount={evidence.ventures.filter((venture) =>
+                venture.evidence_origin !== "model_lead" && venture.artifact_verified === true).length}
             />
           </div>
         )}
@@ -3155,6 +3393,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
 
+        <DiligenceEvidenceLedgers
+          className="mt-3"
+          company={f.companyEnrichment}
+          officialWebsite={f.website}
+          protocolFunding={f.protocolFunding}
+          protocolTvl={f.protocolTvl}
+          canonicalGeckoId={f.projectToken?.coingeckoId}
+        />
+
         {f.projectToken && (
           <div className="py-5">
             <ProjectTokenCard
@@ -3171,6 +3418,31 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         )}
 
         <div id="decision-summary" className="grid scroll-mt-28 gap-4 py-5">
+          {partialAxisAssessment && (
+            <section className="finding tint-caution px-5 py-4" aria-label="Partial decision assessment">
+              <div className="flex flex-wrap items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="eyebrow text-caution">Partial decision assessment</div>
+                  <h2 className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
+                    {governingAxes.length} of {expectedGoverningAxes.length} decision areas were assessed
+                  </h2>
+                  <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">
+                    ARGUS preserved the areas supported by substantive evidence. {unmeasuredGoverningAxes.map(axisLabel).join(" and ")} remain unmeasured, so no overall score was produced and missing evidence was not treated as zero.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className="chip tint-signal">{governingAxes.length} assessed</span>
+                    <span className="chip tint-caution">{unmeasuredGoverningAxes.length} unmeasured</span>
+                  </div>
+                </div>
+                {onRescan && (
+                  <button type="button" onClick={onRescan} className="btn-chip tint-signal min-h-11 shrink-0 gap-1.5 font-medium">
+                    <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
+                    Retry missing checks
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
           {decisionFrameworkUnavailable && (
             <section
               className="finding tint-caution px-5 py-4"
@@ -3208,6 +3480,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </section>
           )}
           <div className="panel px-5">
+            <div className="border-b border-line/70 py-4" aria-label="Case synthesis">
+              {f.intelligence && (
+                <DecisionLensSelector value={decisionLensId} onChange={setDecisionLensId} />
+              )}
+              <VerdictArgumentBlock argument={caseArgument} />
+            </div>
             <ReportCanvasNarrativeSection
               id="verdict-rationale"
               title={decisionFrameworkUnavailable ? "What ARGUS found before the score failed" : favorableVerdict ? "Why it scored well" : "Main concerns"}
@@ -3253,10 +3531,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   ? subjectLeadSummary
                     ? subjectLeadSummary
                     : cleanScreens.length
-                      ? `No adverse findings in the collected evidence. ${cleanScreens.length} ${cleanScreens.length === 1 ? "screen" : "screens"} ran clean, including ${cleanScreens.slice(0, 3).map((check) => check.label.toLowerCase()).join(", ")}.`
-                      : "No adverse findings in the collected evidence."
+                      ? `No adverse findings in ${cleanScreens.length} completed clean ${cleanScreens.length === 1 ? "screen" : "screens"}: ${cleanScreens.slice(0, 3).map((check) => check.label.toLowerCase()).join(", ")}${cleanScreens.length > 3 ? `, and ${cleanScreens.length - 3} more` : ""}.`
+                      : noCleanScreenCopy
                   : "No confirmed positive finding is recorded in this report."}
             />
+            {intelligenceContextNarrative.length > 0 && (
+              <ReportCanvasNarrativeSection
+                id="important-context"
+                title="Important context"
+                description="Relevant saved observations that are neither support nor an adverse finding."
+                tone="neutral"
+                items={intelligenceContextNarrative}
+                emptyCopy=""
+              />
+            )}
             {!decisionFrameworkUnavailable && decisionQuestionCount > 0 && (
               <p className="border-t border-line/60 py-3 text-[11.5px] text-ink-faint">
                 Follow up on: <a href="#verification-next" className="text-caution underline-offset-2 hover:underline">{decisionQuestionCount} important {decisionQuestionCount === 1 ? "question" : "questions"}</a>.
@@ -3264,6 +3552,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             )}
           </div>
         </div>
+
+        {f.intelligence && !prioritizeDecisionIntelligence && (
+          <PointInTimeIntelligencePanel
+            snapshot={f.intelligence}
+            thesisEligible={presentation.final && !decisionFrameworkUnavailable}
+            governingVerdict={presentedVerdict}
+            selectedLensId={decisionLensId}
+            onSelectedLensChange={setDecisionLensId}
+          />
+        )}
+
+        {f.evmControlReality && (
+          <EvmControlSurfacePanel snapshot={f.evmControlReality} />
+        )}
 
         <div id="decision-basis" className="scroll-mt-28">
           <DecisionBasis
@@ -3341,7 +3643,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <span className="text-[11px] text-ink-faint">identity resolved through the named team · click a handle to audit them</span>
             </div>
             <Card className="divide-y divide-line/60">
-              {webTeam.map((p, i) => (
+              {webTeam.map((p, i) => {
+                const roleProof = safeSourceLink(p.sourceUrl ?? p.source);
+                return (
                 <div key={i} className="px-4 py-2.5 text-[12.5px]">
                   <div className="flex items-start justify-between gap-3">
                     <span className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -3352,6 +3656,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       {p.linkedin && (
                         <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                       )}
+                      {roleProof && (
+                        <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">role proof</a>
+                      )}
+                      {p.developerProfiles?.map((profile) => {
+                        const profileLink = safeSourceLink(profile.url);
+                        const profileProof = safeSourceLink(profile.sourceUrl);
+                        if (!profileLink) return null;
+                        return (
+                          <span key={`${profile.provider}:${profile.url}`} className="inline-flex items-center gap-1">
+                            <a href={profileLink.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">
+                              {profile.provider === "github" ? "GitHub" : "Hugging Face"}
+                            </a>
+                            {profileProof && (
+                              <a href={profileProof.href} target="_blank" rel="noreferrer" className="text-[10px] text-ink-faint underline-offset-2 hover:underline">
+                                profile link proof
+                              </a>
+                            )}
+                          </span>
+                        );
+                      })}
                       {p.evidence && <span className="text-[11px] text-ink-faint">· {p.evidence}</span>}
                       <span className="text-[11px] text-ink-faint">({p.source})</span>
                     </span>
@@ -3376,7 +3700,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </Card>
             {f.prior_handles && f.prior_handles.length > 0 && (
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-caution">
@@ -3398,6 +3723,54 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               )}
             </div>
           </div>
+        )}
+
+        {(f.leaderDepartures?.length ?? 0) > 0 && report.governing_role === "PROJECT" && (
+          <section className="panel mt-3 overflow-hidden" aria-label="Frozen leadership continuity ledger">
+            <div className="border-b border-line/60 px-4 py-3">
+              <p className="eyebrow">Frozen leadership continuity</p>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+                Licensed employment-record responses for the named leaders checked in this scan. A current row means the saved provider record listed the project. It is not a claim about the viewer's current date.
+                {capturedLabel ? ` Report saved ${capturedLabel}.` : " The report save time was not available in this view."}
+              </p>
+            </div>
+            <ol className="divide-y divide-line/60">
+              {f.leaderDepartures!.map((row, index) => {
+                const profile = safeSourceLink(row.linkedin
+                  ? /^https?:\/\//i.test(row.linkedin) ? row.linkedin : `https://${row.linkedin}`
+                  : undefined);
+                const stateLabel = row.state === "current"
+                  ? "provider record lists project"
+                  : row.state === "departed"
+                    ? row.ended
+                      ? `provider record ends ${frozenDateLabel(row.ended)}`
+                      : "provider record marks role ended; date not recorded"
+                    : "provider record did not answer for this project";
+                const stateTone = row.state === "current"
+                  ? "tint-pass"
+                  : row.state === "departed"
+                    ? "tint-caution"
+                    : "";
+                return (
+                  <li key={`${row.name}:${row.role}:${index}`} className="flex flex-wrap items-center gap-1.5 px-4 py-3 text-[12px]">
+                    <span className="font-medium text-ink">{row.name}</span>
+                    <span className="text-ink-faint">{row.role}</span>
+                    <span className={`chip ${stateTone}`}>{stateLabel}</span>
+                    {profile && (
+                      <a href={profile.href} target="_blank" rel="noreferrer" className="link-ext ml-auto text-[11px]">
+                        confirm on LinkedIn
+                      </a>
+                    )}
+                    {row.state === "absent" && (
+                      <span className="min-w-full text-[10.5px] leading-relaxed text-ink-faint">
+                        No matching row is an unanswered provider read, not evidence that this person was never involved.
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
         )}
 
         {webTeamLeads.length > 0 && (
@@ -3503,7 +3876,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           />
         )}
 
-        <FrozenSourceLedger artifacts={f.sourceArtifacts ?? []} subjectHandle={report.handle} profile={fundScaleProfile} />
+        <FrozenSourceLedger artifacts={f.sourceArtifacts ?? []} subjectHandle={report.handle} profile={fundScaleProfile} roles={roles} />
 
         <div id="relationships" className="scroll-mt-28" />
         {/* connections — the compounding web: other audited subjects tied to this one */}
@@ -3750,7 +4123,39 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   ))}
                   {portfolioArtifactGroups.length === 0 && portfolioLeads.length > 0 && (
                     <div className="px-4 py-3 text-[12px] leading-relaxed text-ink-dim">
-                      {portfolioLeads.length} source-linked candidate{portfolioLeads.length === 1 ? " was" : "s were"} discovered, but none passed deterministic relationship verification. Candidates remain outside the score and graph.
+                      <p>
+                        {portfolioLeads.length} candidate{portfolioLeads.length === 1 ? " was" : "s were"} discovered, but none passed deterministic relationship verification. They remain outside the score and graph.
+                      </p>
+                      <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Unverified portfolio candidates">
+                        {portfolioLeads.slice(0, 10).map((lead, index) => {
+                          const links = lead.sources.map((source) => ({ source, link: safeSourceLink(source.url) }))
+                            .filter((row): row is { source: (typeof lead.sources)[number]; link: NonNullable<ReturnType<typeof safeSourceLink>> } => Boolean(row.link));
+                          return (
+                            <li key={`${lead.investorEntityName ?? "unknown"}:${lead.projectName}:${index}`} className="panel-inset px-3 py-2.5">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-medium text-ink">{lead.projectName}</span>
+                                <span className="chip tint-caution">not verified</span>
+                              </div>
+                              <p className="mt-1 text-[11px] text-ink-faint">
+                                {lead.investorEntityName
+                                  ? `Claimed investor: ${lead.investorEntityName}${lead.attribution === "affiliated_fund" ? " · affiliated fund" : ""}`
+                                  : "Investor attribution missing from discovery output"}
+                              </p>
+                              {links.length > 0 ? (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {links.slice(0, 3).map(({ source, link }) => (
+                                    <a key={link.href} href={link.href} target="_blank" rel="noopener noreferrer" className="btn-chip min-h-8 normal-case tracking-normal" title={source.title ?? link.label}>
+                                      {source.title ?? link.label}
+                                    </a>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="mt-2 text-[11px] text-avoid">No inspectable source URL survived.</p>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </div>
                   )}
                 </Card>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { shortAddr } from "../lib/wallets";
 import { fetchPanelJson, panelRequestFailure, type PanelRequestFailure } from "../lib/panelCostHeaders";
 import { PanelRequestNotice } from "./PanelRequestNotice";
+import type { LiveForensicStatusHandler } from "../lib/liveForensics";
 
 /**
  * WHO FUNDED THE FIRST BUYERS.
@@ -61,7 +62,7 @@ const amount = (value: number): string =>
       : value >= 1e3 ? `${(value / 1e3).toFixed(1)}K`
         : value.toFixed(value < 10 ? 2 : 0);
 
-export function EarlyBuyerFunding({ chain, mint }: { chain?: string | null; mint?: string | null }) {
+export function EarlyBuyerFunding({ chain, mint, onStatusChange }: { chain?: string | null; mint?: string | null; onStatusChange?: LiveForensicStatusHandler }) {
   const [data, setData] = useState<EarlyBuyerPayload | null>(null);
   const [failure, setFailure] = useState<PanelRequestFailure | null>(null);
   const [loading, setLoading] = useState(false);
@@ -71,12 +72,21 @@ export function EarlyBuyerFunding({ chain, mint }: { chain?: string | null; mint
     if (!solana || !mint) return;
     let live = true;
     setLoading(true);
+    onStatusChange?.({ id: "early-buyer-funding", label: "Early-buyer funding trace", state: "running" });
     fetchPanelJson<EarlyBuyerPayload>(`/api/early-buyers?mint=${encodeURIComponent(mint)}`)
-      .then((payload) => { if (live) setData(payload); })
-      .catch((error) => { if (live) setFailure(panelRequestFailure(error)); })
+      .then((payload) => {
+        if (!live) return;
+        setData(payload);
+        onStatusChange?.({ id: "early-buyer-funding", label: "Early-buyer funding trace", state: payload.available && payload.reachedLaunch !== false ? "complete" : "unavailable" });
+      })
+      .catch((error) => {
+        if (!live) return;
+        setFailure(panelRequestFailure(error));
+        onStatusChange?.({ id: "early-buyer-funding", label: "Early-buyer funding trace", state: "unavailable" });
+      })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [solana, mint]);
+  }, [solana, mint, onStatusChange]);
 
   if (!solana || !mint) return null;
   if (failure) return <PanelRequestNotice failure={failure} label="Early-buyer funding trace" />;

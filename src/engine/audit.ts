@@ -136,6 +136,31 @@ export interface Finding extends EvidenceProvenance {
   // human-verified) artifact is eligible to govern a hard cap.
 }
 
+/**
+ * True only when a scoped finding names the exact audited X identity. Legacy
+ * deterministic findings without a scope remain direct for compatibility.
+ */
+export function findingTargetsAuditedSubject(finding: Finding, auditedHandle: string): boolean {
+  const scope = finding.finding_scope;
+  if (!scope) return true;
+  if (scope.scope !== "direct_subject" || scope.relationship_to_subject !== "self") return false;
+  try {
+    return normalizeHandle(scope.target_entity_key) === normalizeHandle(auditedHandle);
+  } catch {
+    return false;
+  }
+}
+
+/** A verified finding needs a checkable external artifact or a frozen content hash. */
+export function findingHasEligibleArtifact(finding: Finding): boolean {
+  if (finding.evidence_origin === "model_lead" || finding.artifact_verified === false) return false;
+  const hasExternalArtifact = /^https?:\/\/[^\s]+$/i.test(finding.source_url ?? "");
+  const hasFrozenArtifact = finding.artifact_verified === true
+    && finding.evidence_origin !== undefined
+    && /^[a-f0-9]{64}$/i.test(finding.content_hash ?? "");
+  return hasExternalArtifact || hasFrozenArtifact;
+}
+
 export interface Venture extends EvidenceProvenance {
   project_name: string;
   x_handle?: string;   // the venture's own X account (canonical bridge key)
@@ -490,34 +515,12 @@ export class Audit {
     return keys;
   }
 
-  private artifactIsEligible(
-    url: string | undefined,
-    origin: EvidenceOrigin | undefined,
-    artifactVerified: boolean | undefined,
-  ): boolean {
-    if (origin === "model_lead" || artifactVerified === false) return false;
-    // Existing deterministic fixtures predate the provenance fields, so a real
-    // source URL remains the backwards-compatible artifact requirement. New
-    // model-derived rows are tagged model_lead and fail closed above.
-    return !!url && /^https?:\/\/[^\s]+$/i.test(url);
-  }
-
   private findingHasVerifiedArtifact(f: Finding): boolean {
-    return this.artifactIsEligible(f.source_url, f.evidence_origin, f.artifact_verified);
+    return findingHasEligibleArtifact(f);
   }
 
   private findingTargetsSubject(f: Finding): boolean {
-    const scope = f.finding_scope;
-    // Curated and deterministic records created before entity scoping were
-    // direct subject findings. Preserve those fixtures while requiring every
-    // newly scoped row to prove both its relationship and exact target.
-    if (!scope) return true;
-    if (scope.scope !== "direct_subject" || scope.relationship_to_subject !== "self") return false;
-    try {
-      return normalizeHandle(scope.target_entity_key) === this.handle;
-    } catch {
-      return false;
-    }
+    return findingTargetsAuditedSubject(f, this.handle);
   }
 
   private roleCapsTriggered(role: SubjectClass): string[] {
@@ -611,7 +614,10 @@ export class Audit {
       ))
         keys.push("advised_rug_with_allocation");
     } else if (role === SubjectClass.AGENCY) {
-      if (this.clientEngagements.some((c) => c.manipulation_service_flag && this.artifactIsEligible(c.evidence_url, c.evidence_origin, c.artifact_verified)))
+      if (this.clientEngagements.some((c) => c.manipulation_service_flag
+        && c.evidence_origin !== "model_lead"
+        && c.artifact_verified !== false
+        && /^https?:\/\/[^\s]+$/i.test(c.evidence_url ?? "")))
         keys.push("market_manipulation_services");
     }
     return keys;

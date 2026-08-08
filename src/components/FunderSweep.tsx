@@ -28,8 +28,23 @@ function RadarIcon({ live }: { live?: boolean }) {
   );
 }
 
+type SweepData = {
+  available?: boolean;
+  completed?: boolean;
+  countsAreLowerBounds?: boolean;
+  ownLaunches?: number | null;
+  ownTokens?: Array<{ mint: string; name?: string }>;
+  seededCount?: number | null;
+  seededDeployers?: Array<{
+    wallet: string;
+    tokensCreated: number;
+    sampleTokens: Array<{ mint: string; name?: string }>;
+  }>;
+  note?: string;
+};
+
 export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q: string) => void }) {
-  const [data, setData] = useState<any | null>(null);
+  const [data, setData] = useState<SweepData | null>(null);
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -101,14 +116,19 @@ export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q:
   const own: { mint: string; name?: string }[] = data.ownTokens ?? [];
   const seeded: { wallet: string; tokensCreated: number; sampleTokens: { mint: string; name?: string }[] }[] = data.seededDeployers ?? [];
   const serial = (data.ownLaunches ?? 0) > 1 || seeded.length > 0;
+  const complete = data.completed === true;
+  const countPrefix = complete ? "" : "At least ";
 
   return (
     <div className="mt-2 border-t border-line pt-2 text-[11.5px] text-ink-dim">
-      {data.note && <div className={`leading-relaxed ${serial ? "text-avoid" : ""}`}>{data.note}</div>}
+      {data.note && <div className={`leading-relaxed ${serial ? "text-avoid" : complete ? "" : "text-caution"}`}>{data.note}</div>}
+      {!complete && data.available !== false && (
+        <div className="chip tint-caution mt-1.5 normal-case">Partial sweep · observed counts are lower bounds</div>
+      )}
 
       {(data.ownLaunches ?? 0) > 0 && (
         <div className="mt-1.5">
-          <div className="eyebrow">Launched by this wallet ({data.ownLaunches})</div>
+          <div className="eyebrow">Launched by this wallet ({countPrefix}{data.ownLaunches})</div>
           <div className="mt-1 flex flex-wrap gap-1">
             {own.map((t) => (
               <button key={t.mint} onClick={() => onAudit?.(t.mint)} title={t.mint} className="btn-chip">
@@ -121,7 +141,7 @@ export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q:
 
       {seeded.length > 0 && (
         <div className="mt-2">
-          <div className="eyebrow">Other deployers it seeded ({data.seededCount})</div>
+          <div className="eyebrow">Other deployers observed ({countPrefix}{data.seededCount ?? seeded.length})</div>
           <div className="mt-1 space-y-1">
             {seeded.map((s) => (
               <div key={s.wallet} className="flex flex-wrap items-center gap-1.5">

@@ -10,9 +10,9 @@ import { canonicalBasicFactComparisonValue } from "../data/evidence";
 import {
   basicFactQuestionOutcome,
   basicFactQuestionFor,
-  basicFactQuestionsFor,
   canonicalBasicFactPredicate,
   explicitEmptyBasicFactAnswer,
+  reportBasicFactQuestionsFor,
   supportsExplicitEmptyBasicFact,
   type BasicFactQuestionOutcomeInput,
   type BasicFactsAudience,
@@ -37,11 +37,16 @@ export interface BasicFactSourceView {
   relation?: "supports" | "contradicts";
   excerpt?: string;
   provider?: string;
+  capturedAt?: string;
+  artifactVerified?: boolean;
+  contentHash?: string;
 }
 
 export interface BasicFactView {
   factId?: string;
   predicate: string;
+  /** Frozen research question used for this report, when available. */
+  question?: string;
   value?: unknown;
   normalizedValue?: unknown;
   qualifier?: string;
@@ -53,17 +58,31 @@ export interface BasicFactView {
   providerProjection?: boolean;
   floorEligible?: boolean;
   sources?: BasicFactSourceView[];
+  evidence_origin?: string;
+  artifact_verified?: boolean;
+  provider?: string;
+  discoveryProvider?: string;
 }
 
 export interface BasicFactLeadView {
   predicate: string;
   value?: unknown;
   qualifier?: string;
+  eventStatus?: string;
+  attributedEntity?: string;
+  attributionScope?: "direct_subject" | "related_entity" | "identity_unresolved";
   excerpt?: string;
   sourceUrl?: string;
   sourceTitle?: string;
   candidateUrls?: string[];
   provider?: string;
+  sourceClass?: string;
+  relation?: "supports" | "contradicts";
+  capturedAt?: string;
+  artifactVerified?: boolean;
+  evidence_origin?: string;
+  artifact_verified?: boolean;
+  sources?: BasicFactSourceView[];
 }
 
 // Most project facts are naturally atomic and repeatable (one founder per row,
@@ -463,7 +482,58 @@ function LegalEventMetadata({
   );
 }
 
+function artifactVerificationLabel(value?: boolean): string {
+  if (value === true) return "Verified artifact";
+  if (value === false) return "Not artifact verified";
+  return "Not recorded";
+}
+
+function recordedStatusLabel(status: BasicFactStatus): string {
+  if (status === "checked_empty") return "Checked empty";
+  if (status === "not_applicable") return "Not applicable";
+  return compactMetadataValue(status);
+}
+
+function evidenceTreatmentLabel({
+  status,
+  providerProjection,
+  floorEligible,
+  attributionScope,
+}: {
+  status: BasicFactStatus;
+  providerProjection?: boolean;
+  floorEligible?: boolean;
+  attributionScope?: BasicFactView["attributionScope"];
+}): string {
+  if (status === "lead") return "Candidate only. This item is not confirmed and is not used in the score.";
+  if (status === "conflicted") return "Conflicted evidence. ARGUS has not selected a clean governing answer.";
+  if (attributionScope === "identity_unresolved") return "Identity unresolved. The record is excluded from the verdict until the source binds it to the exact subject.";
+  if (providerProjection === true) return "Provider projection. This remains source-reported context and cannot set a score floor.";
+  if (floorEligible === false) return "Supporting context. This record is kept outside the score floor under ARGUS evidence rules.";
+  return "Saved fact record. The source receipts below show the proof context available to this report.";
+}
+
 function dedupeSources(sources: readonly BasicFactSourceView[]): BasicFactSourceView[] {
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    const key = JSON.stringify([
+      source.url?.trim() ?? "",
+      source.title?.trim() ?? "",
+      source.sourceClass ?? "",
+      source.relation ?? "",
+      source.excerpt ?? "",
+      source.provider ?? "",
+      source.capturedAt ?? "",
+      source.artifactVerified,
+      source.contentHash ?? "",
+    ]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function linkableSources(sources: readonly BasicFactSourceView[]): BasicFactSourceView[] {
   const seen = new Set<string>();
   return sources.filter((source) => {
     const url = safeHttpUrl(source.url);
@@ -473,6 +543,163 @@ function dedupeSources(sources: readonly BasicFactSourceView[]): BasicFactSource
     seen.add(key);
     return true;
   });
+}
+
+function EvidenceAuditDisclosure({
+  label,
+  status,
+  sources,
+  provider,
+  discoveryProvider,
+  evidenceOrigin,
+  artifactVerified,
+  providerProjection,
+  floorEligible,
+  attributedEntity,
+  attributionScope,
+}: {
+  label: string;
+  status: BasicFactStatus;
+  sources: readonly BasicFactSourceView[];
+  provider?: string;
+  discoveryProvider?: string;
+  evidenceOrigin?: string;
+  artifactVerified?: boolean;
+  providerProjection?: boolean;
+  floorEligible?: boolean;
+  attributedEntity?: string;
+  attributionScope?: BasicFactView["attributionScope"];
+}) {
+  const receipts = dedupeSources(sources);
+  const statusLabel = recordedStatusLabel(status);
+  const treatment = evidenceTreatmentLabel({ status, providerProjection, floorEligible, attributionScope });
+  const compactTreatment = status === "lead"
+    ? "Lead"
+    : providerProjection === true
+      ? `Source reported, recorded ${statusLabel}`
+      : floorEligible === false
+        ? `Supporting context, recorded ${statusLabel}`
+        : attributionScope === "identity_unresolved"
+          ? `Identity unresolved, recorded ${statusLabel}`
+          : statusLabel;
+
+  return (
+    <details className="group mt-2 border-t border-line/50 pt-2" aria-label={`Evidence status and source proof for ${label}`}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[10.5px] text-ink-faint marker:content-none">
+        <span className="font-medium text-ink-dim">Evidence record</span>
+        <span className="text-right">
+          {compactTreatment} · {receipts.length} {receipts.length === 1 ? "receipt" : "receipts"}
+        </span>
+      </summary>
+      <div className="mt-2 rounded-lg border border-line/60 bg-panel-2/35 p-2.5">
+        <dl className="grid gap-x-4 gap-y-1.5 text-[10.5px] sm:grid-cols-2">
+          <div className="min-w-0">
+            <dt className="text-ink-faint">Recorded status</dt>
+            <dd className="font-medium text-ink-dim">{statusLabel}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-ink-faint">Fact artifact verification</dt>
+            <dd className="font-medium text-ink-dim">{artifactVerificationLabel(artifactVerified)}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-ink-faint">Fact provider</dt>
+            <dd className="break-words font-medium text-ink-dim">{provider?.trim() || "Not recorded"}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-ink-faint">Evidence origin</dt>
+            <dd className="break-words font-medium text-ink-dim">{evidenceOrigin?.trim() || "Not recorded"}</dd>
+          </div>
+          {discoveryProvider?.trim() && (
+            <div className="min-w-0">
+              <dt className="text-ink-faint">Discovery provider</dt>
+              <dd className="break-words font-medium text-ink-dim">{discoveryProvider.trim()}</dd>
+            </div>
+          )}
+          {attributedEntity?.trim() && (
+            <div className="min-w-0">
+              <dt className="text-ink-faint">Attributed entity</dt>
+              <dd className="break-words font-medium text-ink-dim">{attributedEntity.trim()}</dd>
+            </div>
+          )}
+          {attributionScope && (
+            <div className="min-w-0">
+              <dt className="text-ink-faint">Attribution scope</dt>
+              <dd className="break-words font-medium text-ink-dim">{attributionScope}</dd>
+            </div>
+          )}
+        </dl>
+        <p className="mt-2 text-[10.5px] leading-relaxed text-ink-faint">{treatment}</p>
+
+        {receipts.length > 0 ? (
+          <div className="mt-2 space-y-2" role="list" aria-label={`Source proof receipts for ${label}`}>
+            {receipts.map((source, index) => {
+              const safeUrl = safeHttpUrl(source.url);
+              const rawUrl = source.url?.trim();
+              const relation = source.relation ? compactMetadataValue(source.relation) : "Not recorded";
+              const contradicts = source.relation === "contradicts";
+              return (
+                <article key={`${rawUrl ?? "source"}:${source.relation ?? "none"}:${index}`} className="rounded-md border border-line/50 bg-panel/45 p-2" role="listitem">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <p className="min-w-0 break-words text-[11px] font-medium text-ink">
+                      Source {index + 1}{source.title?.trim() ? `: ${source.title.trim()}` : ""}
+                    </p>
+                    <span className={`chip shrink-0 normal-case tracking-normal ${contradicts ? "tint-avoid text-avoid" : "tint-neutral text-ink-dim"}`}>
+                      Relation: {relation}
+                    </span>
+                  </div>
+                  <dl className="mt-1.5 grid gap-x-4 gap-y-1 text-[10px] sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <dt className="text-ink-faint">Provider</dt>
+                      <dd className="break-words text-ink-dim">{source.provider?.trim() || "Not recorded"}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-ink-faint">Source class</dt>
+                      <dd className="break-words text-ink-dim">{source.sourceClass?.trim() || "Not recorded"}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-ink-faint">Captured at</dt>
+                      <dd className="break-words text-ink-dim">{source.capturedAt?.trim() || "Not recorded"}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-ink-faint">Artifact verification</dt>
+                      <dd className="text-ink-dim">{artifactVerificationLabel(source.artifactVerified)}</dd>
+                    </div>
+                    {source.contentHash?.trim() && (
+                      <div className="min-w-0 sm:col-span-2">
+                        <dt className="text-ink-faint">Content hash</dt>
+                        <dd className="break-all font-mono text-ink-dim">{source.contentHash.trim()}</dd>
+                      </div>
+                    )}
+                  </dl>
+                  {source.excerpt?.trim() ? (
+                    <blockquote className="mt-1.5 border-l-2 border-line pl-2 text-[10.5px] leading-relaxed text-ink-dim">
+                      {source.excerpt.trim()}
+                    </blockquote>
+                  ) : (
+                    <p className="mt-1.5 text-[10px] text-ink-faint">No excerpt recorded.</p>
+                  )}
+                  {safeUrl && rawUrl ? (
+                    <p className="mt-1.5 text-[10px] text-signal-lift">
+                      <span className="text-ink-faint">URL: </span>
+                      <span className="break-all">{rawUrl}</span>
+                    </p>
+                  ) : rawUrl ? (
+                    <p className="mt-1.5 text-[10px] text-caution">Source URL withheld by link safety rules.</p>
+                  ) : (
+                    <p className="mt-1.5 text-[10px] text-ink-faint">No source URL recorded.</p>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-2 rounded-md border border-caution/30 bg-caution/[0.04] p-2 text-[10.5px] leading-relaxed text-caution">
+            No source proof receipt was included with this item.
+          </p>
+        )}
+      </div>
+    </details>
+  );
 }
 
 function factRowKey(fact: BasicFactView, predicate: string): string {
@@ -491,6 +718,8 @@ function factRows(
   audience: BasicFactsAudience,
   questionLedger: readonly BasicFactQuestionOutcomeInput[],
 ): BasicFactView[] {
+  const requiredQuestions = reportBasicFactQuestionsFor(audience, questionLedger);
+  const questionByPredicate = new Map(requiredQuestions);
   const rows = new Map<string, BasicFactView>();
   for (const fact of facts) {
     if (!fact?.predicate || fact.status === "lead") continue;
@@ -556,19 +785,28 @@ function factRows(
       ...(values.length ? { value: values.length === 1 ? values[0] : values, normalizedValue: undefined, qualifier: undefined } : {}),
       status: combinedStatus,
       critical: existing.critical || fact.critical,
+      // A merged answer is only as strong as its weakest included value. If
+      // any contributor is a provider projection or ceiling-only context, the
+      // whole rendered answer stays outside the green confirmed treatment.
+      providerProjection: existing.providerProjection === true || fact.providerProjection === true,
+      floorEligible: existing.floorEligible === false || fact.floorEligible === false
+        ? false
+        : existing.floorEligible ?? fact.floorEligible,
       sources: sourceRows,
     });
   }
 
   if (fillRequired) {
-    for (const [predicate] of basicFactQuestionsFor(audience)) {
+    for (const [predicate, question] of requiredQuestions) {
       if (![...rows.values()].some((fact) => fact.predicate === predicate)) {
         const ledgerEntry = questionLedger.find((entry) =>
           canonicalBasicFactPredicate(entry.predicate) === predicate);
+        if (basicFactQuestionOutcome(ledgerEntry) === "answered") continue;
         const completedEmpty = supportsExplicitEmptyBasicFact(predicate)
           && basicFactQuestionOutcome(ledgerEntry) === "checked_empty";
         rows.set(predicate, {
           predicate,
+          question,
           status: completedEmpty ? "checked_empty" : "unresolved",
           ...(completedEmpty ? { value: explicitEmptyBasicFactAnswer(predicate) } : {}),
           critical: true,
@@ -578,38 +816,79 @@ function factRows(
     }
   }
 
-  const requiredOrder = new Map<string, number>(basicFactQuestionsFor(audience).map(([predicate], index) => [predicate, index]));
-  return [...rows.values()].sort((left, right) => {
+  const requiredOrder = new Map<string, number>(requiredQuestions.map(([predicate], index) => [predicate, index]));
+  return [...rows.values()].map((fact) => ({
+    ...fact,
+    question: fact.question
+      ?? questionByPredicate.get(canonicalBasicFactPredicate(fact.predicate))
+      ?? basicFactQuestionFor(fact.predicate, audience),
+  })).sort((left, right) => {
     const leftOrder = requiredOrder.get(left.predicate) ?? Number.MAX_SAFE_INTEGER;
     const rightOrder = requiredOrder.get(right.predicate) ?? Number.MAX_SAFE_INTEGER;
-    return leftOrder - rightOrder || basicFactQuestionFor(left.predicate, audience).localeCompare(basicFactQuestionFor(right.predicate, audience));
+    return leftOrder - rightOrder || left.question!.localeCompare(right.question!);
   });
 }
 
+function isStrictlyVerifiedFact(fact: BasicFactView): boolean {
+  return (fact.status === "verified" || fact.status === "corroborated")
+    && fact.providerProjection !== true
+    && fact.floorEligible !== false
+    && fact.attributionScope !== "identity_unresolved";
+}
+
+function isSourceReportedFact(fact: BasicFactView): boolean {
+  return (fact.status === "verified" || fact.status === "corroborated")
+    && fact.providerProjection === true
+    && fact.attributionScope !== "identity_unresolved";
+}
+
+function isSupportingContextFact(fact: BasicFactView): boolean {
+  return (fact.status === "verified" || fact.status === "corroborated")
+    && fact.providerProjection !== true
+    && fact.floorEligible === false
+    && fact.attributionScope !== "identity_unresolved";
+}
+
 function leadRows(facts: readonly BasicFactView[], leads: readonly BasicFactLeadView[]): BasicFactLeadView[] {
-  const confirmedPredicates = new Set<string>();
-  const confirmedValues = new Map<string, Set<string>>();
+  const confirmedSingletonPredicates = new Set<string>();
+  const presentedValues = new Map<string, Set<string>>();
   for (const fact of facts) {
-    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
+    if (
+      (fact.status !== "verified" && fact.status !== "corroborated")
+      || fact.attributionScope === "identity_unresolved"
+    ) continue;
     const predicate = canonicalBasicFactPredicate(fact.predicate);
-    confirmedPredicates.add(predicate);
+    if (isStrictlyVerifiedFact(fact)) confirmedSingletonPredicates.add(predicate);
     const values = Array.isArray(fact.value)
       ? fact.value
       : [fact.value ?? fact.normalizedValue];
-    const normalized = confirmedValues.get(predicate) ?? new Set<string>();
+    const normalized = presentedValues.get(predicate) ?? new Set<string>();
     for (const value of values) {
       const comparable = canonicalBasicFactComparisonValue(predicate, displayValue(value));
       if (comparable) normalized.add(comparable);
     }
-    confirmedValues.set(predicate, normalized);
+    presentedValues.set(predicate, normalized);
   }
   const rows: BasicFactLeadView[] = [
     ...facts.filter((fact) => fact.status === "lead").map((fact) => ({
       predicate: fact.predicate,
       value: fact.value ?? fact.normalizedValue,
       qualifier: fact.qualifier,
+      eventStatus: fact.eventStatus,
+      attributedEntity: fact.attributedEntity,
+      attributionScope: fact.attributionScope,
+      excerpt: fact.sources?.[0]?.excerpt,
+      sourceUrl: fact.sources?.[0]?.url,
+      sourceTitle: fact.sources?.[0]?.title,
       candidateUrls: (fact.sources ?? []).flatMap((source) => safeHttpUrl(source.url) ? [source.url!] : []),
-      provider: fact.sources?.[0]?.provider,
+      provider: fact.sources?.[0]?.provider ?? fact.provider,
+      sourceClass: fact.sources?.[0]?.sourceClass,
+      relation: fact.sources?.[0]?.relation,
+      capturedAt: fact.sources?.[0]?.capturedAt,
+      artifactVerified: fact.sources?.[0]?.artifactVerified,
+      evidence_origin: fact.evidence_origin,
+      artifact_verified: fact.artifact_verified ?? false,
+      sources: fact.sources,
     })),
     ...leads,
   ];
@@ -620,8 +899,11 @@ function leadRows(facts: readonly BasicFactView[], leads: readonly BasicFactLead
     const comparable = canonicalBasicFactComparisonValue(predicate, displayValue(lead.value));
     // A confirmed singleton answer makes alternate discovery copies noise.
     // Repeatable people stay visible until that exact person is confirmed.
-    if (SINGLE_VALUE_PREDICATES.has(predicate) && confirmedPredicates.has(predicate)) return false;
-    if (comparable && confirmedValues.get(predicate)?.has(comparable)) return false;
+    if (SINGLE_VALUE_PREDICATES.has(predicate) && confirmedSingletonPredicates.has(predicate)) return false;
+    // A source-reported answer can remove an exact duplicate card without
+    // suppressing an alternate candidate. That keeps provider context from
+    // silently becoming the governing singleton identity.
+    if (comparable && presentedValues.get(predicate)?.has(comparable)) return false;
     const key = `${predicate}:${comparable || displayValue(lead.value).toLowerCase()}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -629,15 +911,39 @@ function leadRows(facts: readonly BasicFactView[], leads: readonly BasicFactLead
   });
 }
 
+function leadEvidenceSources(lead: BasicFactLeadView): BasicFactSourceView[] {
+  const explicit = dedupeSources(lead.sources ?? []);
+  const explicitUrls = new Set(explicit.flatMap((source) => source.url?.trim() ? [source.url.trim()] : []));
+  const legacy = [lead.sourceUrl, ...(lead.candidateUrls ?? [])]
+    .flatMap((url, index): BasicFactSourceView[] => {
+      const normalized = url?.trim();
+      if (!normalized || explicitUrls.has(normalized)) return [];
+      return [{
+        url: normalized,
+        title: index === 0 ? lead.sourceTitle : undefined,
+        sourceClass: index === 0 ? lead.sourceClass : undefined,
+        relation: index === 0 ? lead.relation : undefined,
+        excerpt: index === 0 ? lead.excerpt : undefined,
+        provider: index === 0 ? lead.provider : undefined,
+        capturedAt: index === 0 ? lead.capturedAt : undefined,
+        artifactVerified: index === 0 ? lead.artifactVerified : undefined,
+      }];
+    });
+  return dedupeSources([...explicit, ...legacy]);
+}
+
 function AnsweredFactCard({ fact, audience, prominent, extra }: {
   fact: BasicFactView; audience: BasicFactsAudience; prominent: boolean; extra?: React.ReactNode;
 }) {
+  const strictlyVerified = isStrictlyVerifiedFact(fact);
+  const sourceReported = isSourceReportedFact(fact);
   const meta = STATUS_META[fact.status as "verified" | "corroborated"];
   // Contradicting sources are ordered first so the visible slice can never
   // hide a contradiction behind supporting links.
   const sources = dedupeSources(fact.sources ?? []).sort((a, b) =>
     Number(b.relation === "contradicts") - Number(a.relation === "contradicts"));
-  const hard = hardVerificationLine(sources, fact.predicate);
+  const sourceLinks = linkableSources(sources);
+  const hard = strictlyVerified ? hardVerificationLine(sources, fact.predicate) : null;
   // When the shield line carries the provenance, the qualifier stops reading
   // as prose inside the answer (audit facts qualify their value with the
   // same sentence).
@@ -647,7 +953,7 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
     ? parseFactMetrics(displayFact)
     : null;
   return (
-    <li className={`panel-inset min-w-0 ${prominent ? "border-l-2 border-pass/40 px-3.5 py-3" : "px-3 py-2.5"}`}>
+    <li className={`panel-inset min-w-0 ${prominent ? `border-l-2 ${strictlyVerified ? "border-pass/40" : "border-signal/35"} px-3.5 py-3` : "px-3 py-2.5"}`}>
       <div className="flex items-start justify-between gap-2.5">
         <div className="min-w-0 flex-1">
           {statGrid ? (
@@ -660,19 +966,30 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
             />
           )}
           <p className="mt-1 text-[10px] uppercase tracking-[0.09em] text-ink-faint">
-            {basicFactQuestionFor(fact.predicate, audience)}
+            {fact.question ?? basicFactQuestionFor(fact.predicate, audience)}
           </p>
           {extra}
         </div>
-        {fact.status === "corroborated" ? (
+        {!strictlyVerified ? (
+          <span className="chip tint-signal shrink-0 normal-case tracking-normal text-signal-lift">
+            {sourceReported ? "Source reported" : "Supporting context"}
+          </span>
+        ) : fact.status === "corroborated" ? (
           <span className={`chip shrink-0 normal-case tracking-normal ${meta.className}`}>{meta.label}</span>
         ) : (
-          <>
-            <CheckCircle aria-hidden="true" size={14} weight="fill" className="mt-0.5 shrink-0 text-pass" />
-            <span className="sr-only">Verified</span>
-          </>
+          <span className={`chip shrink-0 gap-1 normal-case tracking-normal ${meta.className}`}>
+            <CheckCircle aria-hidden="true" size={12} weight="fill" />
+            {meta.label}
+          </span>
         )}
       </div>
+      {!strictlyVerified && (
+        <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-faint">
+          {sourceReported
+            ? "Source-attributed context. Not independently verified and not used to set a score floor."
+            : "Corroborated context. Kept outside the score floor under ARGUS's evidence rules."}
+        </p>
+      )}
       {hard && (
         <p className="mono mt-1.5 flex items-center gap-1.5 text-[10.5px] text-pass" title={hard.excerpt}>
           <ShieldCheck aria-hidden="true" size={12} weight="fill" className="shrink-0" />
@@ -680,9 +997,9 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
         </p>
       )}
       <LegalEventMetadata fact={fact} audience={audience} />
-      {sources.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${basicFactQuestionFor(fact.predicate, audience)}`}>
-          {sources.slice(0, prominent ? 4 : 2).map((source, sourceIndex) => {
+      {sourceLinks.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${fact.question ?? basicFactQuestionFor(fact.predicate, audience)}`}>
+          {sourceLinks.slice(0, prominent ? 4 : 2).map((source, sourceIndex) => {
             const url = safeHttpUrl(source.url)!;
             const contradicts = source.relation === "contradicts";
             return (
@@ -701,6 +1018,19 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
           })}
         </div>
       )}
+      <EvidenceAuditDisclosure
+        label={fact.question ?? basicFactQuestionFor(fact.predicate, audience)}
+        status={fact.status}
+        sources={sources}
+        provider={fact.provider}
+        discoveryProvider={fact.discoveryProvider}
+        evidenceOrigin={fact.evidence_origin}
+        artifactVerified={fact.artifact_verified}
+        providerProjection={fact.providerProjection}
+        floorEligible={fact.floorEligible}
+        attributedEntity={fact.attributedEntity}
+        attributionScope={fact.attributionScope}
+      />
     </li>
   );
 }
@@ -713,6 +1043,7 @@ export function BasicFactsPanel({
   audience = "project",
   questionLedger = [],
   fundingRounds = [],
+  supportingAffiliationCount = 0,
 }: {
   id?: string;
   facts?: readonly BasicFactView[];
@@ -722,22 +1053,26 @@ export function BasicFactsPanel({
   questionLedger?: readonly BasicFactQuestionOutcomeInput[];
   /** Disclosed rounds from the frozen funding snapshot, listed under the funding answer. */
   fundingRounds?: readonly FundingRoundView[];
+  /** Source-backed career rows saved elsewhere in the same frozen report. */
+  supportingAffiliationCount?: number;
 }) {
   const rows = factRows(facts, fillRequired, audience, questionLedger);
+  const questionByPredicate = new Map(reportBasicFactQuestionsFor(audience, questionLedger));
+  const questionFor = (predicate: string) => questionByPredicate.get(canonicalBasicFactPredicate(predicate))
+    ?? basicFactQuestionFor(predicate, audience);
   const discoveryLeads = leadRows(facts, leads);
   if (!rows.length && !discoveryLeads.length) return null;
 
   const identityReviewRows = rows.filter((fact) => fact.attributionScope === "identity_unresolved");
-  const answered = rows.filter((fact) =>
-    (fact.status === "verified" || fact.status === "corroborated")
-    && fact.attributionScope !== "identity_unresolved").length;
+  const answered = rows.filter(isStrictlyVerifiedFact).length;
+  const reported = rows.filter(isSourceReportedFact).length;
+  const supporting = rows.filter(isSupportingContextFact).length;
   const checkedEmpty = rows.filter((fact) => fact.status === "checked_empty").length;
   const conflicted = rows.filter((fact) => fact.status === "conflicted").length;
   const unresolved = rows.filter((fact) => fact.status === "unresolved").length + identityReviewRows.length;
   const applicable = rows.filter((fact) => fact.status !== "not_applicable").length;
-  const answeredRows = rows.filter((fact) =>
-    (fact.status === "verified" || fact.status === "corroborated")
-    && fact.attributionScope !== "identity_unresolved");
+  const answeredRows = rows.filter(isStrictlyVerifiedFact);
+  const contextRows = rows.filter((fact) => isSourceReportedFact(fact) || isSupportingContextFact(fact));
   const keyRows = answeredRows.filter((fact) => KEY_PREDICATES.has(fact.predicate));
   const supportingRows = answeredRows.filter((fact) => !KEY_PREDICATES.has(fact.predicate));
   const checkedEmptyRows = rows.filter((fact) => fact.status === "checked_empty");
@@ -752,14 +1087,21 @@ export function BasicFactsPanel({
             <p className="eyebrow text-signal-lift">Key facts</p>
             <h2 id={`${id}-title`} className="mt-1 text-[19px] font-semibold tracking-tight text-ink">What you need to know</h2>
             <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-              Confirmed facts are shown first. Open a source to check any answer.
+              Confirmed facts are shown first, followed by context kept outside the score floor. Open a source to check any answer.
             </p>
           </div>
           <div className="panel-inset flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-[11px]" aria-label="Basic facts found">
             <span className="inline-flex items-center gap-1.5 font-medium text-pass">
               <CheckCircle aria-hidden="true" size={14} weight="fill" />
-              {answered} confirmed
+              {answered} confirmed key-fact {answered === 1 ? "answer" : "answers"}
             </span>
+            {supportingAffiliationCount > 0 && (
+              <span className="text-signal-lift">
+                {supportingAffiliationCount} source-backed {supportingAffiliationCount === 1 ? "affiliation" : "affiliations"} elsewhere
+              </span>
+            )}
+            {reported > 0 && <span className="text-signal-lift">{reported} source reported</span>}
+            {supporting > 0 && <span className="text-signal-lift">{supporting} supporting context</span>}
             {checkedEmpty > 0 && <span className="text-ink-dim">{checkedEmpty} with no result</span>}
             {conflicted > 0 && <span className="text-avoid">{conflicted} where sources disagree</span>}
             {unresolved > 0 && <span className="text-ink-faint">{unresolved} still to verify</span>}
@@ -795,7 +1137,7 @@ export function BasicFactsPanel({
             </ul>
           )}
         </>
-      ) : checkedEmptyRows.length === 0 && identityReviewRows.length === 0 ? (
+      ) : contextRows.length === 0 && checkedEmptyRows.length === 0 && identityReviewRows.length === 0 ? (
         <div className="px-4 py-5 sm:px-5">
           <div className="panel-inset flex items-start gap-3 px-3.5 py-3.5">
             <MagnifyingGlass aria-hidden="true" size={18} weight="bold" className="mt-0.5 shrink-0 text-caution" />
@@ -808,6 +1150,30 @@ export function BasicFactsPanel({
           </div>
         </div>
       ) : null}
+
+      {contextRows.length > 0 && (
+        <div className="border-t border-signal/20 bg-signal/[0.025] px-4 py-4 sm:px-5" aria-label="Context-only basic facts">
+          <div>
+            <h3 className="text-[13px] font-semibold text-ink">Context outside the score</h3>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
+              Useful provider or corroborated context, kept separate from facts that qualify to set a score floor.
+            </p>
+          </div>
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {contextRows.map((fact, index) => (
+              <AnsweredFactCard
+                key={fact.factId || `${fact.predicate}:${index}`}
+                fact={fact}
+                audience={audience}
+                prominent={KEY_PREDICATES.has(fact.predicate)}
+                extra={fact.predicate === "funding" && fundingRounds.length > 0
+                  ? <FundingRoundsList rounds={fundingRounds} />
+                  : undefined}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
 
       {checkedEmptyRows.length > 0 && (
         <div className="border-t border-line/60 bg-panel-2/30 px-4 py-4 sm:px-5" aria-label="Completed empty basic-fact searches">
@@ -825,7 +1191,7 @@ export function BasicFactsPanel({
               <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset min-w-0 px-3.5 py-3.5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[10.5px] leading-relaxed text-ink-faint">{basicFactQuestionFor(fact.predicate, audience)}</p>
+                    <p className="text-[10.5px] leading-relaxed text-ink-faint">{fact.question ?? basicFactQuestionFor(fact.predicate, audience)}</p>
                     <p className="mt-1 text-[13px] font-medium leading-snug text-ink-dim">{answerFor(fact)}</p>
                   </div>
                   <span className={`chip shrink-0 normal-case tracking-normal ${STATUS_META.checked_empty.className}`}>
@@ -850,14 +1216,20 @@ export function BasicFactsPanel({
           <ul className="mt-3 grid gap-2 sm:grid-cols-2">
             {conflictedRows.map((fact, index) => {
               const sources = dedupeSources(fact.sources ?? []);
+              const sourceLinks = linkableSources(sources);
               return (
                 <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset px-3 py-2.5">
-                  <p className="text-[10.5px] text-ink-faint">{basicFactQuestionFor(fact.predicate, audience)}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-[10.5px] text-ink-faint">{fact.question ?? basicFactQuestionFor(fact.predicate, audience)}</p>
+                    <span className={`chip shrink-0 normal-case tracking-normal ${STATUS_META.conflicted.className}`}>
+                      {STATUS_META.conflicted.label}
+                    </span>
+                  </div>
                   <p className="mt-1 text-[12.5px] leading-relaxed text-avoid">{answerFor(fact)}</p>
                   <LegalEventMetadata fact={fact} audience={audience} />
-                  {sources.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${basicFactQuestionFor(fact.predicate, audience)}`}>
-                      {sources.slice(0, 4).map((source, sourceIndex) => {
+                  {sourceLinks.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${fact.question ?? basicFactQuestionFor(fact.predicate, audience)}`}>
+                      {sourceLinks.slice(0, 4).map((source, sourceIndex) => {
                         const url = safeHttpUrl(source.url)!;
                         const contradicts = source.relation === "contradicts";
                         return (
@@ -876,6 +1248,19 @@ export function BasicFactsPanel({
                       })}
                     </div>
                   )}
+                  <EvidenceAuditDisclosure
+                    label={fact.question ?? basicFactQuestionFor(fact.predicate, audience)}
+                    status={fact.status}
+                    sources={sources}
+                    provider={fact.provider}
+                    discoveryProvider={fact.discoveryProvider}
+                    evidenceOrigin={fact.evidence_origin}
+                    artifactVerified={fact.artifact_verified}
+                    providerProjection={fact.providerProjection}
+                    floorEligible={fact.floorEligible}
+                    attributedEntity={fact.attributedEntity}
+                    attributionScope={fact.attributionScope}
+                  />
                 </li>
               );
             })}
@@ -895,20 +1280,39 @@ export function BasicFactsPanel({
           <ul className="mt-3 grid gap-2 sm:grid-cols-2">
             {identityReviewRows.map((fact, index) => {
               const sources = dedupeSources(fact.sources ?? []);
+              const sourceLinks = linkableSources(sources);
               return (
                 <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset min-w-0 px-3.5 py-3.5">
-                  <p className="text-[10.5px] leading-relaxed text-ink-faint">{basicFactQuestionFor(fact.predicate, audience)}</p>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-[10.5px] leading-relaxed text-ink-faint">{fact.question ?? basicFactQuestionFor(fact.predicate, audience)}</p>
+                    <span className="chip tint-caution shrink-0 normal-case tracking-normal text-caution">
+                      Recorded {recordedStatusLabel(fact.status)}
+                    </span>
+                  </div>
                   <p className="mt-1 text-[13px] font-medium leading-snug text-ink-dim">{answerFor(fact)}</p>
                   <LegalEventMetadata fact={fact} audience={audience} />
-                  {sources[0] && (() => {
-                    const url = safeHttpUrl(sources[0].url)!;
+                  {sourceLinks[0] && (() => {
+                    const url = safeHttpUrl(sourceLinks[0].url)!;
                     return (
                       <a href={url} target="_blank" rel="noopener noreferrer" className="btn-chip mt-2 min-h-8 max-w-full tint-caution normal-case tracking-normal">
                         <ArrowSquareOut aria-hidden="true" size={12} weight="bold" />
-                        <span className="max-w-52 truncate">{sourceLabel(sources[0], url)}</span>
+                        <span className="max-w-52 truncate">{sourceLabel(sourceLinks[0], url)}</span>
                       </a>
                     );
                   })()}
+                  <EvidenceAuditDisclosure
+                    label={fact.question ?? basicFactQuestionFor(fact.predicate, audience)}
+                    status={fact.status}
+                    sources={sources}
+                    provider={fact.provider}
+                    discoveryProvider={fact.discoveryProvider}
+                    evidenceOrigin={fact.evidence_origin}
+                    artifactVerified={fact.artifact_verified}
+                    providerProjection={fact.providerProjection}
+                    floorEligible={fact.floorEligible}
+                    attributedEntity={fact.attributedEntity}
+                    attributionScope={fact.attributionScope}
+                  />
                 </li>
               );
             })}
@@ -926,7 +1330,7 @@ export function BasicFactsPanel({
             {unresolvedRows.map((fact, index) => (
               <li key={fact.factId || `${fact.predicate}:${index}`} className="flex items-start gap-2 text-[11.5px] leading-relaxed text-ink-dim">
                 <MagnifyingGlass aria-hidden="true" size={13} weight="bold" className="mt-0.5 shrink-0 text-caution" />
-                {basicFactQuestionFor(fact.predicate, audience)}
+                {fact.question ?? basicFactQuestionFor(fact.predicate, audience)}
               </li>
             ))}
           </ul>
@@ -950,6 +1354,7 @@ export function BasicFactsPanel({
           <ul className="mt-3 grid gap-2 border-t border-caution/20 pt-3 sm:grid-cols-2">
             {discoveryLeads.map((lead, index) => {
               const urls = [...new Set([lead.sourceUrl, ...(lead.candidateUrls ?? [])].flatMap((url) => safeHttpUrl(url) ? [safeHttpUrl(url)!] : []))];
+              const evidenceSources = leadEvidenceSources(lead);
               const leadValue = displayValue(lead.value);
               const leadQualifier = canonicalBasicFactPredicate(lead.predicate) === "official_token"
                 ? undefined
@@ -961,7 +1366,7 @@ export function BasicFactsPanel({
                 <li key={`${lead.predicate}:${displayValue(lead.value)}:${index}`} className="panel-inset min-w-0 overflow-hidden px-3 py-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="text-[10px] uppercase tracking-[0.11em] text-ink-faint">{basicFactQuestionFor(lead.predicate, audience)}</p>
+                      <p className="text-[10px] uppercase tracking-[0.11em] text-ink-faint">{questionFor(lead.predicate)}</p>
                       <p className="mt-1 break-words text-[12.5px] leading-relaxed text-ink-dim">{leadAnswer || "Candidate answer not recorded"}</p>
                     </div>
                     <span className="chip tint-caution shrink-0 normal-case tracking-normal">Possible lead</span>
@@ -986,6 +1391,16 @@ export function BasicFactsPanel({
                       })}
                     </div>
                   )}
+                  <EvidenceAuditDisclosure
+                    label={questionFor(lead.predicate)}
+                    status="lead"
+                    sources={evidenceSources}
+                    provider={lead.provider}
+                    evidenceOrigin={lead.evidence_origin}
+                    artifactVerified={lead.artifact_verified ?? false}
+                    attributedEntity={lead.attributedEntity}
+                    attributionScope={lead.attributionScope}
+                  />
                 </li>
               );
             })}

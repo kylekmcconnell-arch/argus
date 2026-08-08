@@ -7,12 +7,17 @@ import type { PanoptesNode, PanoptesEdge } from "../engine";
 // that a KNOWN-AVOID token ($RUG) also links to → reconciliation must override.
 const N = (type: string, key: string, extra: object = {}): PanoptesNode => ({ type, key, ...extra } as PanoptesNode);
 const E = (src: string, dst: string, type: string): PanoptesEdge => ({ src, dst, type });
+const authoritative = (values: GraphContribution[]): GraphContribution[] => values.map((value, index) => ({
+  ...value,
+  reportVersionId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+  provenanceState: "server_collected",
+}));
 
 function graph(sharedKey: string): GraphContribution[] {
-  return [
+  return authoritative([
     { handle: "$GOOD", verdict: "PASS", nodes: [N("Company", "$GOOD", { subject: true }), N("Identity", sharedKey)], edges: [E("$GOOD", sharedKey, "DEPLOYED_BY")] },
     { handle: "$RUG", verdict: "AVOID", nodes: [N("Company", "$RUG", { subject: true }), N("Identity", sharedKey)], edges: [E("$RUG", sharedKey, "DEPLOYED_BY")] },
-  ];
+  ]);
 }
 
 describe("tieStrength", () => {
@@ -22,6 +27,7 @@ describe("tieStrength", () => {
     expect(tieStrength("code:deadbeef")).toBe("hard");
     expect(tieStrength("email:dev@x.com")).toBe("hard");
     expect(tieStrength("holder:1234abcd")).toBe("weak");
+    expect(tieStrength("risk:provider-label")).toBe("weak");
     expect(tieStrength("@somefounder")).toBe("medium");
   });
 });
@@ -45,7 +51,7 @@ describe("reconcileVerdict", () => {
       { handle: "$GOOD", verdict: "PASS", nodes: [N("Company", "$GOOD", { subject: true }), N("Person", "@promoter")], edges: [E("$GOOD", "@promoter", "ASSOCIATE")] },
       { handle: "$RUG", verdict: "AVOID", nodes: [N("Company", "$RUG", { subject: true }), N("Person", "@promoter")], edges: [E("$RUG", "@promoter", "ASSOCIATE")] },
     ];
-    expect(reconcileVerdict("$GOOD", g)?.severity).toBe("caution");
+    expect(reconcileVerdict("$GOOD", authoritative(g))?.severity).toBe("caution");
   });
 
   it("does NOT override when there is no connection to a bad subject", () => {
@@ -53,7 +59,7 @@ describe("reconcileVerdict", () => {
       { handle: "$GOOD", verdict: "PASS", nodes: [N("Company", "$GOOD", { subject: true }), N("Identity", "wallet:1234abcd")], edges: [E("$GOOD", "wallet:1234abcd", "DEPLOYED_BY")] },
       { handle: "$ALSOGOOD", verdict: "PASS", nodes: [N("Company", "$ALSOGOOD", { subject: true }), N("Identity", "wallet:1234abcd")], edges: [E("$ALSOGOOD", "wallet:1234abcd", "DEPLOYED_BY")] },
     ];
-    expect(reconcileVerdict("$GOOD", g)).toBeNull();
+    expect(reconcileVerdict("$GOOD", authoritative(g))).toBeNull();
   });
 
   it("does not treat two investors in the same company as an adverse operator link", () => {
@@ -61,7 +67,7 @@ describe("reconcileVerdict", () => {
       { handle: "@fund_a", verdict: "PASS", nodes: [N("Person", "@fund_a", { subject: true }), N("Company", "popularco.com")], edges: [E("@fund_a", "popularco.com", "INVESTED_IN")] },
       { handle: "@fund_b", verdict: "AVOID", nodes: [N("Person", "@fund_b", { subject: true }), N("Company", "popularco.com")], edges: [E("@fund_b", "popularco.com", "INVESTED_IN")] },
     ];
-    expect(reconcileVerdict("@fund_a", g)).toBeNull();
+    expect(reconcileVerdict("@fund_a", authoritative(g))).toBeNull();
     const network = buildNetwork([], g);
     expect(network.bridges).toContainEqual(expect.objectContaining({ id: "popularco.com" }));
     expect(network.cabals).toEqual([]);
@@ -73,23 +79,39 @@ describe("reconcileVerdict", () => {
       { handle: "@operator_a", verdict: "PASS", nodes: [N("Person", "@operator_a", { subject: true }), N("Company", "sharedco.com")], edges: [E("@operator_a", "sharedco.com", "WORKED_ON")] },
       { handle: "@operator_b", verdict: "AVOID", nodes: [N("Person", "@operator_b", { subject: true }), N("Company", "sharedco.com")], edges: [E("@operator_b", "sharedco.com", "FOUNDED")] },
     ];
-    expect(reconcileVerdict("@operator_a", g)?.severity).toBe("caution");
+    expect(reconcileVerdict("@operator_a", authoritative(g))?.severity).toBe("caution");
   });
 
-  it("overrides to AVOID on Arkham exposure to a flagged bad actor (risk: node)", () => {
-    // No connection to any failed SUBJECT — the override fires off the risk label alone.
+  it("does not let a provider risk label override the verdict", () => {
     const g: GraphContribution[] = [
       { handle: "$GOOD", verdict: "PASS", nodes: [N("Company", "$GOOD", { subject: true }), N("Identity", "risk:lazarus-group", { subtype: "risk-avoid", label: "Lazarus Group · hacker source" })], edges: [E("$GOOD", "risk:lazarus-group", "TRANSACTS_WITH")] },
     ];
-    const r = reconcileVerdict("$GOOD", g);
-    expect(r?.severity).toBe("avoid");
-    expect(r?.riskEntities?.[0].label).toContain("Lazarus");
+    expect(reconcileVerdict("$GOOD", authoritative(g))).toBeNull();
   });
 
-  it("downgrades to CAUTION for a lower-tier risk flag", () => {
+  it("accepts an explicitly verified risk screen only from an authoritative report", () => {
     const g: GraphContribution[] = [
-      { handle: "$GOOD", verdict: "PASS", nodes: [N("Company", "$GOOD", { subject: true }), N("Identity", "risk:some-mixer", { subtype: "risk-caution", label: "Some Mixer · privacy" })], edges: [E("$GOOD", "risk:some-mixer", "TRANSACTS_WITH")] },
+      { handle: "$GOOD", verdict: "PASS", nodes: [N("Company", "$GOOD", { subject: true }), N("Identity", "risk:ofac-entity", { subtype: "verified-risk-avoid", label: "OFAC-listed entity" })], edges: [E("$GOOD", "risk:ofac-entity", "SANCTIONS_EXPOSURE")] },
     ];
-    expect(reconcileVerdict("$GOOD", g)?.severity).toBe("caution");
+    expect(reconcileVerdict("$GOOD", authoritative(g))?.severity).toBe("avoid");
+    expect(reconcileVerdict("$GOOD", g)).toBeNull();
+  });
+
+  it("ignores a client-submitted failed peer even when it shares a hard wallet", () => {
+    const [good, bad] = graph("wallet:1234abcd");
+    expect(reconcileVerdict("$GOOD", [good, {
+      ...bad,
+      reportVersionId: undefined,
+      provenanceState: "client_submitted",
+    }])).toBeNull();
+  });
+
+  it("does not let a fresh client-side subject graph change the verdict", () => {
+    const [good, bad] = graph("wallet:1234abcd");
+    expect(reconcileVerdict("$GOOD", [{
+      ...good,
+      reportVersionId: undefined,
+      provenanceState: "client_submitted",
+    }, bad])).toBeNull();
   });
 });

@@ -21,13 +21,13 @@ import { Counterparties } from "./Counterparties";
 import { RiskPaths } from "./RiskPaths";
 import { Holdings } from "./Holdings";
 import { MoneyFlowStory } from "./MoneyFlowStory";
+import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
 import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
-import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
 import {
@@ -160,6 +160,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 }
 
 export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void }) {
+  const arkhamEnabled = arkhamProviderEnabled();
   const versionContext = d.versionContext ?? d.viewVersionContext;
   const embeddedFacet = Boolean(d.viewVersionContext || d.viewPersistence);
   const livePersistence = d.viewPersistence ?? d.persistence;
@@ -281,7 +282,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       }),
     );
   };
-  const recordedChecks = checks.filter((check) => ["confirmed", "finding", "checked-empty"].includes(check.status));
+  const recordedChecks = checks.filter((check) => ["confirmed", "reported", "finding", "checked-empty"].includes(check.status));
   const gapChecks = checks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
   const supportingFindings = d.findings.filter((finding) => finding.tone === "good");
   const limitingFindings = d.findings.filter((finding) => finding.tone !== "good");
@@ -363,7 +364,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       </header>
 
       <div className="mx-auto max-w-6xl px-4 sm:px-5">
-        {!versionContext && <div className="mt-4"><ServiceAlert /></div>}
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -535,10 +535,10 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-4">
             <OnChainForensics token={d} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
-            {d.deployer && <div className="mt-3"><MoneyFlowStory address={d.deployer} chain={d.chain} panelCostToken={panelCostToken} roleLabel={deployerLabel} /></div>}
-            {d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} /></div>}
-            {d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} panelCostToken={panelCostToken} /></div>}
-            {d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} panelCostToken={panelCostToken} /></div>}
+            {arkhamEnabled && d.deployer && <div className="mt-3"><MoneyFlowStory address={d.deployer} chain={d.chain} panelCostToken={panelCostToken} roleLabel={deployerLabel} /></div>}
+            {arkhamEnabled && d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} /></div>}
+            {arkhamEnabled && d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} panelCostToken={panelCostToken} /></div>}
+            {arkhamEnabled && d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} panelCostToken={panelCostToken} /></div>}
           </div>
         )}
 

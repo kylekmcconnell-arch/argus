@@ -213,6 +213,7 @@ describe("orchestrator provider execution truth", () => {
             job_title: "Managing Partner",
             job_company_name: "Nova Capital",
             linkedin_url: "https://linkedin.com/in/nova-managing-partner",
+            twitter_url: "https://x.com/nova_capital",
             experience: [{
               company: { name: "Nova Capital", website: "https://novacap.example" },
               title: { name: "Partner" },
@@ -222,9 +223,30 @@ describe("orchestrator provider execution truth", () => {
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
       if (url.includes("api.anthropic.com")) {
-        const request = JSON.parse(String(init?.body)) as { tool_choice?: { name?: string } };
+        const request = JSON.parse(String(init?.body)) as { tool_choice?: { name?: string }; messages?: unknown };
         const name = request.tool_choice?.name ?? "unknown";
-        const toolInput = name === "record_contradictions" ? { contradictions: [] } : {};
+        const prompt = JSON.stringify(request.messages ?? []);
+        const partialAxis = prompt.match(/Axes to score[\s\S]*?-\s+([A-Z]{1,3}\d+_[a-z0-9_]+)/)?.[1] ?? "I1_identity_legitimacy";
+        const primaryEvidenceRef = prompt.match(new RegExp(`${partialAxis} \\| substantive aliases[\\s\\S]*?:\\s*(e\\d+)`))?.[1] ?? "e001";
+        const score = Number(prompt.match(new RegExp(`${partialAxis}: [^.;]+ required (\\d+)-(\\d+)`))?.[2] ?? 1);
+        const toolInput = name === "record_contradictions"
+          ? { contradictions: [] }
+          : name === "record_verdict"
+            ? {
+                axes: [{
+                  axis: partialAxis,
+                  score,
+                  rationale: "The supported identity evidence was assessed without inferring missing portfolio or fund-scale facts.",
+                  primaryEvidenceRef,
+                  additionalEvidenceRefs: [],
+                  counterEvidenceRefs: [],
+                  coverageRefs: [],
+                  gaps: [],
+                }],
+                headline: "A partial evidence-backed assessment is available.",
+                identity_note: "The collected identity evidence was assessed within its verified scope.",
+              }
+            : {};
         return new Response(JSON.stringify({
           content: [{ type: "tool_use", name, input: toolInput }],
           stop_reason: "tool_use",
@@ -251,19 +273,23 @@ describe("orchestrator provider execution truth", () => {
     expect(anthropicBodies.some((body) =>
       body.includes("Which investments are explicitly attributed to this person"),
     )).toBe(true);
+    expect(anthropicBodies.some((body) =>
+      body.includes("Which portfolio companies are explicitly claimed by this exact organization"),
+    )).toBe(false);
     expect(anthropicTools).toContain("record_contradictions");
-    expect(anthropicTools).not.toContain("record_verdict");
+    expect(anthropicTools).toContain("record_verdict");
     expect(dossier?.report.composite_verdict).toBe("INCOMPLETE");
-    expect(dossier?.headline).toContain("substantive evidence is missing");
+    expect(dossier?.headline).toContain("Partial assessment: ARGUS scored 1 of 5 decision areas");
+    expect(Object.keys(dossier?.report.role_reports[0]?.axes ?? {})).toEqual(["I1_identity_legitimacy"]);
     expect(emitted).toContainEqual(expect.objectContaining({
       phase: "Analyst",
-      label: "Coverage abstention",
-      detail: expect.stringContaining("lack substantive eligible evidence"),
+      label: "Partially scored",
+      detail: expect.stringContaining("remain unmeasured"),
     }));
     expect(analystRun).toMatchObject({
       label: "AI analyst",
-      state: "skipped",
-      detail: expect.stringContaining("coverage preflight abstained"),
+      state: "partial",
+      detail: expect.stringContaining("scored 1 supported decision area"),
     });
     expect(analystRun?.detail).not.toContain("axis result incomplete");
   });

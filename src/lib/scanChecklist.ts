@@ -1,10 +1,12 @@
 import type { TokenDossier } from "../token/audit";
+import { arkhamProviderEnabled } from "./providerCapabilities.js";
 
 // The checklist is an evidence-coverage view, not a promise about work that may
 // have happened in a lazily mounted report panel. A status is only successful
 // when the finished dossier contains an observable outcome for that check.
 export type CheckStatus =
   | "confirmed"       // completed with a confirmed, non-empty result
+  | "reported"        // completed with source-attributed context that is not strict verification
   | "finding"         // completed and surfaced a concern
   | "checked-empty"   // completed with an explicit empty / not-found response
   | "not-applicable"  // the check does not apply to this subject
@@ -61,6 +63,7 @@ export function decisionCriticalChecks(checks: readonly ScanCheck[]): readonly S
   return hasExplicitCriticality
     ? checks.filter((check) =>
       check.decisionCritical === true
+      && (check.checkId !== "operator-funding-trace" || arkhamProviderEnabled())
       && (!check.checkId || !POST_SCAN_ENRICHMENT_CHECK_IDS.has(check.checkId)))
     : checks;
 }
@@ -69,6 +72,7 @@ export interface CoverageSummary {
   total: number;
   inScope: number;
   successful: number;
+  reported: number;
   unknownOrFailed: number;
   findings: number;
   checkedEmpty: number;
@@ -78,8 +82,28 @@ export interface CoverageSummary {
   unknown: number;
 }
 
-const SUCCESSFUL = new Set<CheckStatus>(["confirmed", "finding", "checked-empty"]);
+const SUCCESSFUL = new Set<CheckStatus>(["confirmed", "reported", "finding", "checked-empty"]);
+// A provider-attributed report is useful completed coverage, but it cannot
+// satisfy a safety screen whose absence must withhold clearance. Never-waive
+// rows require ARGUS-verified evidence, a verified finding, or a completed
+// explicit empty screen.
+const NEVER_WAIVE_RECORDED = new Set<string>(["confirmed", "finding", "checked-empty", "complete"]);
 const UNKNOWN_OR_FAILED = new Set<CheckStatus>(["unknown", "unavailable", "stale"]);
+
+/**
+ * Whether one frozen status actually closes a never-waive safety question.
+ *
+ * An exact organization registration/legal-identity gate is intentionally
+ * stricter than a search receipt: a bounded registry miss does not establish
+ * which legal entity operates a brand. Entity sanctions may be checked-empty
+ * after a completed exact-entity screen, but organization-registration closes
+ * only when the legal-entity binding itself is confirmed.
+ */
+export function neverWaiveCheckRecorded(checkId: string, status: string): boolean {
+  return checkId === "organization-registration"
+    ? status === "confirmed"
+    : NEVER_WAIVE_RECORDED.has(status);
+}
 
 /** Summarize execution coverage separately from what the checks found. */
 // Some checks use "finding" to mean a completed review lead rather than verified
@@ -117,6 +141,7 @@ export function summarizeChecks(checks: readonly ScanCheck[]): CoverageSummary {
     total: checks.length,
     inScope: checks.length - notApplicable,
     successful: checks.filter((check) => SUCCESSFUL.has(check.status)).length,
+    reported: count("reported"),
     unknownOrFailed: checks.filter((check) => UNKNOWN_OR_FAILED.has(check.status)).length,
     findings: checks.filter(isAdverseFinding).length,
     checkedEmpty: count("checked-empty"),
@@ -143,6 +168,10 @@ export function summarizeChecks(checks: readonly ScanCheck[]): CoverageSummary {
 export const NEVER_WAIVE_CHECK_IDS: ReadonlySet<string> = new Set([
   "identity-resolution",
   "ofac-sanctions-name",
+  // Person-name checks are not substitutes for the audited company's own
+  // legal-entity and sanctions questions.
+  "organization-registration",
+  "organization-sanctions",
   // A sanctioned deployer or holder wallet is a legal-exposure flag no market
   // signal can offset; the address screen is never waivable on token subjects.
   "ofac-sanctions-address",
@@ -176,7 +205,7 @@ export function clearanceCoverage(checks: readonly ScanCheck[]): ClearanceCovera
     ? applicableRows
       .filter((check) => check.checkId
         && NEVER_WAIVE_CHECK_IDS.has(check.checkId)
-        && !SUCCESSFUL.has(check.status))
+        && !neverWaiveCheckRecorded(check.checkId, check.status))
       .map((check) => check.checkId as string)
     : [];
   const applicable = applicableRows.length;
@@ -350,15 +379,23 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
             provider: "arkham",
             completedAt: deployerRisk.completedAt,
           }
-      : {
-          checkId: "operator-funding-trace",
-          decisionCritical: true,
-          label: "Operator / funding trace",
-          status: "unknown",
-          note: dossier.deployer
-            ? `deployer ${shortAddr(dossier.deployer)} resolved; trace ${outcomeNotRecorded}`
-            : `deployer unresolved; trace ${outcomeNotRecorded}`,
-        },
+      : arkhamProviderEnabled()
+        ? {
+            checkId: "operator-funding-trace",
+            decisionCritical: true,
+            label: "Operator / funding trace",
+            status: "unknown",
+            note: dossier.deployer
+              ? `deployer ${shortAddr(dossier.deployer)} resolved; trace ${outcomeNotRecorded}`
+              : `deployer unresolved; trace ${outcomeNotRecorded}`,
+          }
+        : {
+            checkId: "operator-funding-trace",
+            decisionCritical: false,
+            label: "Operator / funding trace",
+            status: "not-applicable",
+            note: "Supplemental provider trace is currently disabled and does not affect report readiness",
+          },
   );
 
   // These checks execute in report-page panels after the saved score. Their

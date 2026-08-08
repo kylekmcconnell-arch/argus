@@ -91,6 +91,237 @@ describe("BasicFactsPanel", () => {
     expect(sourceLinks.every((link) => link.rel === "noopener noreferrer")).toBe(true);
   });
 
+  it("uses frozen investment-firm questions instead of inventing individual-investor gaps", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          audience="investor"
+          fillRequired
+          questionLedger={[
+            {
+              questionId: "investor_org.official_identity",
+              audience: "investor",
+              predicate: "official_identity",
+              question: "What exact fund, investment firm, or organization does this account represent?",
+              critical: true,
+              status: "answered",
+              providerRuns: [{ state: "succeeded" }],
+            },
+            {
+              questionId: "investor_org.founder",
+              audience: "investor",
+              predicate: "founder",
+              question: "Who founded the investment organization? Return one person per answer.",
+              critical: false,
+              status: "unanswered",
+              providerRuns: [{ state: "partial" }],
+            },
+            {
+              questionId: "investor_org.executive",
+              audience: "investor",
+              predicate: "executive",
+              question: "Who currently leads, manages, or makes investment decisions for the organization?",
+              critical: true,
+              status: "unanswered",
+              providerRuns: [{ state: "failed" }],
+            },
+            {
+              questionId: "investor_org.governance",
+              audience: "investor",
+              predicate: "governance",
+              question: "What formal management, investment-committee, or governance structure is documented?",
+              critical: false,
+              status: "unanswered",
+              providerRuns: [{ state: "completed_empty" }],
+            },
+          ]}
+        />,
+      );
+    });
+
+    const unresolved = container.querySelector('[aria-label="Unresolved basic facts"]');
+    expect(unresolved?.children).toHaveLength(3);
+    expect(unresolved?.textContent).toContain("Who founded the investment organization?");
+    expect(unresolved?.textContent).toContain("Who currently leads, manages, or makes investment decisions for the organization?");
+    expect(unresolved?.textContent).toContain("What formal management, investment-committee, or governance structure is documented?");
+    expect(unresolved?.textContent).not.toContain("Which firm and fund do they represent today?");
+    expect(unresolved?.textContent).not.toContain("public security");
+    expect(unresolved?.textContent).not.toContain("crypto token");
+  });
+
+  it("exposes the complete verified source receipt through a compact native disclosure", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          audience="person"
+          facts={[{
+            factId: "verified-legal-receipt",
+            predicate: "legal_regulatory_event",
+            value: "A final order names Example Person.",
+            eventStatus: "final",
+            attributedEntity: "Example Person",
+            attributionScope: "direct_subject",
+            status: "verified",
+            critical: true,
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+            provider: "public-web",
+            discoveryProvider: "grounded",
+            sources: [{
+              url: "https://regulator.example.test/orders/42?version=7",
+              title: "Final order 42",
+              sourceClass: "regulatory_or_onchain",
+              relation: "supports",
+              excerpt: "The final order names Example Person as the respondent.",
+              provider: "regulator-fetch",
+              capturedAt: "2026-08-05T12:34:56.000Z",
+              artifactVerified: true,
+              contentHash: "sha256:receipt-42",
+            }],
+          }]}
+        />,
+      );
+    });
+
+    const disclosure = container.querySelector<HTMLDetailsElement>('details[aria-label^="Evidence status and source proof"]');
+    expect(disclosure).not.toBeNull();
+    expect(disclosure?.open).toBe(false);
+    expect(disclosure?.querySelector("summary")?.textContent).toContain("Verified · 1 receipt");
+    expect(container.querySelector('[aria-label="Confirmed basic facts"]')?.textContent).toContain("Verified");
+
+    act(() => disclosure?.querySelector("summary")?.click());
+    expect(disclosure?.open).toBe(true);
+    expect(disclosure?.textContent).toContain("Recorded statusVerified");
+    expect(disclosure?.textContent).toContain("Fact artifact verificationVerified artifact");
+    expect(disclosure?.textContent).toContain("Fact providerpublic-web");
+    expect(disclosure?.textContent).toContain("Evidence origindeterministic");
+    expect(disclosure?.textContent).toContain("Discovery providergrounded");
+    expect(disclosure?.textContent).toContain("Attributed entityExample Person");
+    expect(disclosure?.textContent).toContain("Attribution scopedirect_subject");
+    expect(disclosure?.textContent).toContain("Relation: Supports");
+    expect(disclosure?.textContent).toContain("Providerregulator-fetch");
+    expect(disclosure?.textContent).toContain("Source classregulatory_or_onchain");
+    expect(disclosure?.textContent).toContain("Captured at2026-08-05T12:34:56.000Z");
+    expect(disclosure?.textContent).toContain("Artifact verificationVerified artifact");
+    expect(disclosure?.textContent).toContain("sha256:receipt-42");
+    expect(disclosure?.textContent).toContain("The final order names Example Person as the respondent.");
+    expect(disclosure?.textContent).toContain("URL: https://regulator.example.test/orders/42?version=7");
+  });
+
+  it("shows both sides of a conflict with exact proof metadata and a visible conflicted status", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[{
+            factId: "conflicted-launch-receipts",
+            predicate: "launched",
+            value: "2021 or 2022",
+            status: "conflicted",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+            provider: "public-web",
+            sources: [
+              {
+                url: "https://docs.example.test/history",
+                title: "Official history",
+                sourceClass: "official_subject",
+                relation: "supports",
+                excerpt: "The product launched in 2021.",
+                provider: "official-fetch",
+                capturedAt: "2026-08-05T10:00:00.000Z",
+                artifactVerified: true,
+              },
+              {
+                url: "https://press.example.test/profile",
+                title: "Independent profile",
+                sourceClass: "independent_press",
+                relation: "contradicts",
+                excerpt: "The product first became available in 2022.",
+                provider: "press-fetch",
+                capturedAt: "2026-08-05T10:05:00.000Z",
+                artifactVerified: true,
+              },
+            ],
+          }]}
+        />,
+      );
+    });
+
+    const conflicted = container.querySelector('[aria-label="Conflicted basic facts"]');
+    const disclosure = conflicted?.querySelector<HTMLDetailsElement>('details[aria-label^="Evidence status and source proof"]');
+    expect(conflicted?.querySelector("li > div span.chip")?.textContent).toContain("Conflicted");
+    expect(disclosure?.querySelector("summary")?.textContent).toContain("Conflicted · 2 receipts");
+    expect(disclosure?.querySelectorAll('[role="listitem"]')).toHaveLength(2);
+    expect(disclosure?.textContent).toContain("Relation: Supports");
+    expect(disclosure?.textContent).toContain("Relation: Contradicts");
+    expect(disclosure?.textContent).toContain("The product launched in 2021.");
+    expect(disclosure?.textContent).toContain("The product first became available in 2022.");
+    expect(disclosure?.textContent).toContain("URL: https://docs.example.test/history");
+    expect(disclosure?.textContent).toContain("URL: https://press.example.test/profile");
+  });
+
+  it("keeps provider projections and model leads outside confirmation while auditing their saved proof", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[{
+            factId: "provider-projection-receipt",
+            predicate: "traction",
+            value: "$50M reported volume",
+            status: "verified",
+            providerProjection: true,
+            floorEligible: false,
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+            provider: "public-web",
+            sources: [{
+              url: "https://metrics.example.test/token",
+              title: "Metrics record",
+              sourceClass: "other_public",
+              relation: "supports",
+              excerpt: "The provider reports $50M of volume.",
+              provider: "metrics-provider",
+              capturedAt: "2026-08-05T11:00:00.000Z",
+              artifactVerified: true,
+            }],
+          }]}
+          leads={[{
+            predicate: "founder",
+            value: "Candidate Founder",
+            excerpt: "A search result may associate Candidate Founder with the project.",
+            sourceUrl: "https://search.example.test/candidate-founder",
+            sourceTitle: "Candidate biography",
+            sourceClass: "other_public",
+            relation: "supports",
+            provider: "grounded",
+            capturedAt: "2026-08-05T11:05:00.000Z",
+            artifactVerified: false,
+            evidence_origin: "model_lead",
+            artifact_verified: false,
+          }]}
+        />,
+      );
+    });
+
+    const context = container.querySelector('[aria-label="Context-only basic facts"]');
+    const projectionDisclosure = context?.querySelector<HTMLDetailsElement>('details[aria-label^="Evidence status and source proof"]');
+    const leadArea = container.querySelector('[aria-label="Unverified basic fact leads"]');
+    const leadDisclosure = leadArea?.querySelector<HTMLDetailsElement>('li details[aria-label^="Evidence status and source proof"]');
+
+    expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("0 confirmed");
+    expect(context?.textContent).toContain("Source reported");
+    expect(projectionDisclosure?.querySelector("summary")?.textContent).toContain("Source reported, recorded Verified · 1 receipt");
+    expect(projectionDisclosure?.textContent).toContain("Provider projection. This remains source-reported context and cannot set a score floor.");
+    expect(leadArea?.textContent).toContain("Not confirmed and not used in the score");
+    expect(leadDisclosure?.querySelector("summary")?.textContent).toContain("Lead · 1 receipt");
+    expect(leadDisclosure?.textContent).toContain("Recorded statusLead");
+    expect(leadDisclosure?.textContent).toContain("Fact artifact verificationNot artifact verified");
+    expect(leadDisclosure?.textContent).toContain("Evidence originmodel_lead");
+    expect(leadDisclosure?.textContent).toContain("Relation: Supports");
+    expect(leadDisclosure?.textContent).toContain("A search result may associate Candidate Founder with the project.");
+    expect(leadDisclosure?.textContent).toContain("URL: https://search.example.test/candidate-founder");
+  });
+
   it("keeps AI answers in a visibly separate, unscored lead area and rejects unsafe links", () => {
     act(() => {
       root.render(
@@ -128,6 +359,90 @@ describe("BasicFactsPanel", () => {
       "https://example.com/funding",
     ]);
     expect(container.textContent).toContain("Funding announcement");
+  });
+
+  it("does not make an empty key-fact ledger read like an empty investigation", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          fillRequired
+          supportingAffiliationCount={8}
+          questionLedger={[{
+            predicate: "current_role",
+            status: "unanswered",
+            providerRuns: [],
+          }]}
+        />,
+      );
+    });
+
+    const summary = container.querySelector('[aria-label="Basic facts found"]')?.textContent;
+    expect(summary).toContain("0 confirmed key-fact answers");
+    expect(summary).toContain("8 source-backed affiliations elsewhere");
+  });
+
+  it("renders provider projections as source-reported context, never as confirmed facts", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[{
+            predicate: "traction",
+            value: "$2.36B market cap · captured 2026-07-23",
+            status: "verified",
+            providerProjection: true,
+            floorEligible: false,
+            sources: [{
+              url: "https://www.coingecko.com/en/coins/uniswap",
+              title: "CoinGecko token record",
+              relation: "supports",
+              provider: "coingecko",
+            }],
+          }]}
+          leads={[{
+            predicate: "traction",
+            value: "$2.36B market cap · captured 2026-07-23",
+            sourceUrl: "https://example.com/candidate-traction",
+          }]}
+        />,
+      );
+    });
+
+    expect(container.querySelector('[aria-label="Context-only basic facts"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Key verified answers"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Confirmed basic facts"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("0 confirmed");
+    expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("1 source reported");
+    expect(container.querySelector('[aria-label="Context-only basic facts"]')?.textContent).toContain("Source reported");
+    expect(container.querySelector('[aria-label="Context-only basic facts"]')?.textContent)
+      .toContain("Not independently verified and not used to set a score floor");
+    expect(container.querySelector('[aria-label="Context-only basic facts"] .sr-only')).toBeNull();
+    expect(container.querySelector('[aria-label="Unverified basic fact leads"]')).toBeNull();
+  });
+
+  it("keeps floor-ineligible corroboration neutral without calling it unverified provider reporting", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[{
+            predicate: "partnership",
+            value: "Integration with Example Network",
+            status: "corroborated",
+            floorEligible: false,
+            sources: [
+              { url: "https://news-one.example/integration", relation: "supports", sourceClass: "independent_press" },
+              { url: "https://news-two.example/integration", relation: "supports", sourceClass: "independent_press" },
+            ],
+          }]}
+        />,
+      );
+    });
+
+    const context = container.querySelector('[aria-label="Context-only basic facts"]');
+    expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("0 confirmed");
+    expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("1 supporting context");
+    expect(context?.textContent).toContain("Supporting context");
+    expect(context?.textContent).toContain("Kept outside the score floor under ARGUS's evidence rules");
+    expect(context?.textContent).not.toContain("Not independently verified");
   });
 
   it("removes leads already answered by confirmed facts while keeping unmatched people visible", () => {
@@ -581,7 +896,9 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).toContain("Who funded it?");
     expect(container.textContent).toContain("Meow");
     expect(container.textContent).not.toContain("meowVerified");
-    expect(container.textContent).not.toMatch(/official_identity|official_token|legal_entity/);
+    // Raw predicate-shaped URL paths are intentionally visible inside the
+    // evidence disclosure; the published question labels remain plain.
+    expect(container.textContent).not.toContain("official_identityWhat");
   });
 
   it("rejects local, credential-bearing, and secret-bearing source URLs", () => {
@@ -607,6 +924,9 @@ describe("BasicFactsPanel", () => {
 
     const links = [...container.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')];
     expect(links.map((link) => link.href)).toEqual(["https://example.com/public-source"]);
+    expect(container.textContent).toContain("Source URL withheld by link safety rules");
+    expect(container.textContent).not.toContain("token=secret");
+    expect(container.textContent).not.toContain("user:pass");
   });
 
   it("renders a supply disclosure as its own answer, never a conflict with the token symbol", () => {

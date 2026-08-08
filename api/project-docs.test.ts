@@ -98,6 +98,29 @@ describe("project document paid-search capability", () => {
     expect(cacheSetJson).toHaveBeenCalledWith(expect.stringContaining(":crawl"), expect.any(Object));
   });
 
+  it("does not publish absence flags when the homepage provider fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })));
+    const { res, captured } = response();
+
+    await handler(request() as never, res as never);
+
+    expect(captured.status).toBe(200);
+    expect(captured.body).toMatchObject({
+      available: true,
+      completed: false,
+      providerFailed: true,
+      hasTeamPage: null,
+      hasAbout: null,
+      coverage: {
+        homepage: { attempted: true, completed: false, providerFailed: true, meta: "http_503" },
+        search: { attempted: false, completed: false },
+      },
+      note: expect.stringContaining("No conclusion"),
+    });
+    expect(captured.body?.note).not.toMatch(/no whitepaper|no on-site documents/i);
+    expect(cacheSetJson).not.toHaveBeenCalled();
+  });
+
   it("uses Grok only with a valid report capability and attributes its exact version", async () => {
     resolvePanelCostVersion.mockReturnValue(REPORT_VERSION_ID);
     const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
@@ -124,6 +147,7 @@ describe("project document paid-search capability", () => {
     expect(captured.status).toBe(200);
     expect(captured.body).toMatchObject({
       whitepaper: { url: "https://docs.argus.example/whitepaper" },
+      note: expect.stringContaining("not independent verification"),
     });
     expect(resolvePanelCostVersion).toHaveBeenCalledWith(ORGANIZATION_ID, "signed-panel-token");
     expect(fetchMock).toHaveBeenCalledWith("https://api.x.ai/v1/responses", expect.any(Object));
@@ -137,6 +161,96 @@ describe("project document paid-search capability", () => {
       status: "succeeded",
     });
     expect(cacheSetJson).toHaveBeenCalledWith(expect.stringContaining(":grok"), expect.any(Object));
+  });
+
+  it("keeps empty results unknown when the model output contract is partial", async () => {
+    resolvePanelCostVersion.mockReturnValue(REPORT_VERSION_ID);
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://argus.example/") return Promise.resolve(new Response("<html><body>Project</body></html>", { status: 200 }));
+      if (url === "https://api.x.ai/v1/responses") {
+        return Promise.resolve(new Response(JSON.stringify({
+          output_text: JSON.stringify({ whitepaper: null }),
+          output: [{ type: "web_search_call" }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }), { status: 200 }));
+      }
+      throw new Error(`unexpected provider call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("signed-panel-token") as never, res as never);
+
+    expect(captured.body).toMatchObject({
+      completed: false,
+      partial: true,
+      providerFailed: false,
+      hasTeamPage: null,
+      hasAbout: null,
+      coverage: { search: { attempted: true, completed: false, partial: true, meta: "output_contract_error" } },
+      note: expect.stringContaining("did not complete"),
+    });
+    expect(captured.body?.note).not.toMatch(/no whitepaper|could be found/i);
+    expect(cacheSetJson).not.toHaveBeenCalledWith(expect.stringContaining(":grok"), expect.anything());
+  });
+
+  it("does not assert absence when a capped homepage read accompanies a completed search", async () => {
+    resolvePanelCostVersion.mockReturnValue(REPORT_VERSION_ID);
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://argus.example/") return Promise.resolve(new Response("x".repeat(700_001), { status: 200 }));
+      if (url === "https://api.x.ai/v1/responses") {
+        return Promise.resolve(new Response(JSON.stringify({
+          output_text: JSON.stringify({ whitepaper: null, resources: [], audits: [] }),
+          output: [{ type: "web_search_call" }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }), { status: 200 }));
+      }
+      throw new Error(`unexpected provider call: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("signed-panel-token") as never, res as never);
+
+    expect(captured.body).toMatchObject({
+      completed: false,
+      partial: true,
+      truncated: true,
+      hasTeamPage: null,
+      hasAbout: null,
+      coverage: { homepage: { attempted: true, completed: false, partial: true, truncated: true } },
+    });
+    expect(cacheSetJson).not.toHaveBeenCalledWith(expect.stringContaining(":grok"), expect.anything());
+  });
+
+  it("publishes bounded false flags only after both discovery lanes complete", async () => {
+    resolvePanelCostVersion.mockReturnValue(REPORT_VERSION_ID);
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://argus.example/") return Promise.resolve(new Response("<html><body>Project</body></html>", { status: 200 }));
+      if (url === "https://api.x.ai/v1/responses") {
+        return Promise.resolve(new Response(JSON.stringify({
+          output_text: JSON.stringify({ whitepaper: null, resources: [], audits: [] }),
+          output: [{ type: "web_search_call" }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }), { status: 200 }));
+      }
+      throw new Error(`unexpected provider call: ${url}`);
+    }));
+    const { res, captured } = response();
+
+    await handler(request("signed-panel-token") as never, res as never);
+
+    expect(captured.body).toMatchObject({
+      completed: true,
+      partial: false,
+      providerFailed: false,
+      hasTeamPage: false,
+      hasAbout: false,
+      note: expect.stringContaining("completed homepage-navigation read"),
+    });
   });
 
   it("serves cached enrichment without initiating paid work", async () => {

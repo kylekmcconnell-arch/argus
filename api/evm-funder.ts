@@ -37,45 +37,83 @@ const CEX = new Set<string>([
 
 const ES = "https://api.etherscan.io/v2/api";
 interface CallCounter { calls: number; succeeded: number }
+interface ExplorerRead { rows: any[]; completed: boolean; truncated: boolean; providerFailed: boolean }
+interface DeploymentScan {
+  contracts: string[];
+  completed: boolean;
+  truncated: boolean;
+  providerFailed: boolean;
+}
 const isAddr = (s: string) => /^0x[a-fA-F0-9]{40}$/.test(s);
 const lc = (s: string) => s.toLowerCase();
 
-async function txlist(chainid: number, address: string, key: string, offset: number, usage: CallCounter): Promise<any[]> {
+function noTransactions(body: any): boolean {
+  return body?.status === "0"
+    && typeof body?.result === "string"
+    && /no transactions found/i.test(body.result);
+}
+
+async function txlist(chainid: number, address: string, key: string, offset: number, usage: CallCounter): Promise<ExplorerRead> {
   usage.calls += 1;
   const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "txlist", address, startblock: "0", endblock: "99999999", page: "1", offset: String(offset), sort: "asc", apikey: key });
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
-  if (!r || !r.ok) return [];
+  if (!r || !r.ok) return { rows: [], completed: false, truncated: false, providerFailed: true };
   const d = (await r.json().catch(() => null)) as any;
-  if (d != null) usage.succeeded += 1;
-  return Array.isArray(d?.result) ? d.result : [];
+  if (Array.isArray(d?.result)) {
+    usage.succeeded += 1;
+    return { rows: d.result, completed: true, truncated: d.result.length >= offset, providerFailed: false };
+  }
+  if (noTransactions(d)) {
+    usage.succeeded += 1;
+    return { rows: [], completed: true, truncated: false, providerFailed: false };
+  }
+  return { rows: [], completed: false, truncated: false, providerFailed: true };
 }
 
 // Distinct contract addresses this wallet has deployed (creation txs: empty `to`,
 // populated contractAddress, sent BY the wallet).
-async function deployments(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<string[]> {
-  const txs = await txlist(chainid, wallet, key, 10000, usage);
+async function deployments(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<DeploymentScan> {
+  const read = await txlist(chainid, wallet, key, 10000, usage);
   const created = new Set<string>();
-  for (const t of txs) {
+  for (const t of read.rows) {
     if ((!t.to || t.to === "") && t.contractAddress && isAddr(t.contractAddress) && lc(t.from) === lc(wallet)) created.add(lc(t.contractAddress));
   }
-  return [...created];
+  return {
+    contracts: [...created],
+    completed: read.completed && !read.truncated,
+    truncated: read.truncated,
+    providerFailed: read.providerFailed,
+  };
 }
 
 // Wallets this funder sent ETH to, in the gas-seeding band, excluding exchanges
 // and itself — the candidate deployers it may have seeded.
-async function seedRecipients(chainid: number, funder: string, key: string, usage: CallCounter): Promise<string[]> {
-  const txs = await txlist(chainid, funder, key, 4000, usage);
+async function seedRecipients(
+  chainid: number,
+  funder: string,
+  key: string,
+  usage: CallCounter,
+): Promise<{ recipients: string[]; completed: boolean; truncated: boolean; providerFailed: boolean }> {
+  const read = await txlist(chainid, funder, key, 4000, usage);
   const recipients = new Set<string>();
-  for (const t of txs) {
+  let candidateCapHit = false;
+  for (const t of read.rows) {
     if (lc(t.from) !== lc(funder)) continue;
     const to = t.to ? lc(t.to) : "";
     if (!to || !isAddr(to) || to === lc(funder) || CEX.has(to)) continue;
     const v = Number(t.value);
     if (v < MIN_SEED || v > MAX_SEED) continue;
+    if (recipients.has(to)) continue;
+    if (recipients.size >= MAX_CANDIDATES) { candidateCapHit = true; continue; }
     recipients.add(to);
-    if (recipients.size >= MAX_CANDIDATES) break;
   }
-  return [...recipients];
+  const truncated = read.truncated || candidateCapHit;
+  return {
+    recipients: [...recipients],
+    completed: read.completed && !truncated,
+    truncated,
+    providerFailed: read.providerFailed,
+  };
 }
 
 async function inChunks<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): Promise<R[]> {
@@ -100,41 +138,110 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const chain = (typeof req.query.chain === "string" ? req.query.chain : "").toLowerCase();
   const chainid = CHAINID[chain];
   if (!isAddr(wallet)) { res.status(400).json({ error: "valid EVM wallet required" }); return; }
-  if (!chainid) { res.status(200).json({ wallet, available: false, note: `No Etherscan chain id for '${chain}'.` }); return; }
-  if (!key) { res.status(200).json({ wallet, available: false, note: "Etherscan not configured; funder sweep unavailable." }); return; }
+  if (!chainid) {
+    res.status(200).json({
+      wallet,
+      available: false,
+      completed: false,
+      truncated: false,
+      providerFailed: false,
+      note: `No Etherscan chain id for '${chain}'.`,
+    });
+    return;
+  }
+  if (!key) {
+    res.status(200).json({
+      wallet,
+      available: false,
+      completed: false,
+      truncated: false,
+      providerFailed: false,
+      note: "Etherscan not configured; funder sweep unavailable.",
+    });
+    return;
+  }
 
   const deadline = Date.now() + 50000;
   const usage: CallCounter = { calls: 0, succeeded: 0 };
   try {
-    const [own, recipients] = await Promise.all([
+    const [own, seed] = await Promise.all([
       deployments(chainid, wallet, key, usage),
       seedRecipients(chainid, wallet, key, usage),
     ]);
+    const { recipients } = seed;
     const checked = await inChunks(recipients, CHECK_CHUNK, async (w) => {
-      if (Date.now() > deadline) return null;
-      const created = await deployments(chainid, w, key, usage);
-      return created.length ? { wallet: w, tokensCreated: created.length, sampleTokens: created.slice(0, 6).map((mint) => ({ mint })) } : null;
+      if (Date.now() > deadline) {
+        return { wallet: w, scan: { contracts: [], completed: false, truncated: true, providerFailed: false } as DeploymentScan };
+      }
+      return { wallet: w, scan: await deployments(chainid, w, key, usage) };
     });
-    const seededDeployers = (checked.filter(Boolean) as { wallet: string; tokensCreated: number; sampleTokens: { mint: string }[] }[]).sort((a, b) => b.tokensCreated - a.tokensCreated);
+    const seededDeployers = checked
+      .filter(({ scan }) => scan.contracts.length > 0)
+      .map(({ wallet: seededWallet, scan }) => ({
+        wallet: seededWallet,
+        tokensCreated: scan.contracts.length,
+        sampleTokens: scan.contracts.slice(0, 6).map((mint) => ({ mint })),
+      }))
+      .sort((a, b) => b.tokensCreated - a.tokensCreated);
     const totalTokens = seededDeployers.reduce((s, d) => s + d.tokensCreated, 0);
+    const candidateCompleted = checked.filter(({ scan }) => scan.completed).length;
+    const candidateTruncated = checked.some(({ scan }) => scan.truncated);
+    const candidateProviderFailed = checked.some(({ scan }) => scan.providerFailed);
+    const providerFailed = own.providerFailed || seed.providerFailed || candidateProviderFailed;
+    const truncated = own.truncated || seed.truncated || candidateTruncated;
+    const completed = own.completed && seed.completed && checked.every(({ scan }) => scan.completed);
 
     const parts: string[] = [];
-    if (own.length > 1) parts.push(`This wallet itself deployed ${own.length} contracts, indicating a serial launcher.`);
-    if (seededDeployers.length) parts.push(`It seeded ${seededDeployers.length} other deployer${seededDeployers.length === 1 ? "" : "s"} that launched ${totalTokens} contract${totalTokens === 1 ? "" : "s"}. A shared funder across launches is the signature of a serial operator.`);
-    if (!parts.length) parts.push(recipients.length ? `Sent ETH to ${recipients.length} wallet${recipients.length === 1 ? "" : "s"}, none of which deployed contracts. No serial-launch pattern.` : "No launches or ETH-seeding found for this wallet.");
+    if (completed) {
+      if (own.contracts.length > 1) parts.push(`This wallet itself deployed ${own.contracts.length} contracts, indicating a serial launcher.`);
+      if (seededDeployers.length) parts.push(`It seeded ${seededDeployers.length} other deployer${seededDeployers.length === 1 ? "" : "s"} that launched ${totalTokens} contract${totalTokens === 1 ? "" : "s"}. A shared funder across launches is the signature of a serial operator.`);
+      if (!parts.length) parts.push(recipients.length ? `Sent ETH to ${recipients.length} wallet${recipients.length === 1 ? "" : "s"}, none of which deployed contracts. No serial-launch pattern.` : "No launches or ETH-seeding found for this wallet.");
+    } else {
+      if (own.contracts.length > 0) parts.push(`The partial sweep observed at least ${own.contracts.length} contract${own.contracts.length === 1 ? "" : "s"} deployed by this wallet.`);
+      if (seededDeployers.length) parts.push(`It also observed at least ${seededDeployers.length} seeded deployer${seededDeployers.length === 1 ? "" : "s"} behind ${totalTokens} contract${totalTokens === 1 ? "" : "s"}.`);
+      const reason = providerFailed && truncated ? "provider reads failed and bounded history was cut short" : providerFailed ? "one or more provider reads failed" : "bounded history was cut short";
+      parts.push(`The funder sweep did not complete because ${reason}. Counts are lower bounds, and the sweep cannot rule out a serial-launch pattern.`);
+    }
 
     res.status(200).json({
       wallet, available: true,
-      ownLaunches: own.length,
-      ownTokens: own.slice(0, 8).map((mint) => ({ mint })),
+      completed,
+      truncated,
+      providerFailed,
+      countsAreLowerBounds: !completed,
+      ownLaunches: completed || own.contracts.length > 0 ? own.contracts.length : null,
+      ownTokens: own.contracts.slice(0, 8).map((mint) => ({ mint })),
       seededDeployers,
-      seededCount: seededDeployers.length,
-      totalTokens,
-      candidatesScanned: recipients.length,
+      seededCount: completed || seededDeployers.length > 0 ? seededDeployers.length : null,
+      totalTokens: completed || totalTokens > 0 ? totalTokens : null,
+      candidatesConsidered: recipients.length,
+      candidatesScanned: candidateCompleted,
+      coverage: {
+        ownHistory: { completed: own.completed, truncated: own.truncated, providerFailed: own.providerFailed },
+        funderHistory: { completed: seed.completed, truncated: seed.truncated, providerFailed: seed.providerFailed },
+        candidateHistories: {
+          requested: recipients.length,
+          completed: candidateCompleted,
+          truncated: candidateTruncated,
+          providerFailed: candidateProviderFailed,
+        },
+      },
       note: parts.join(" "),
     });
   } catch (e) {
-    res.status(200).json({ wallet, available: true, seededDeployers: [], error: String(e), note: "Funder sweep failed." });
+    res.status(200).json({
+      wallet,
+      available: false,
+      completed: false,
+      truncated: false,
+      providerFailed: true,
+      seededDeployers: [],
+      ownLaunches: null,
+      seededCount: null,
+      totalTokens: null,
+      error: String(e),
+      note: "Funder sweep failed. No serial-launch conclusion can be drawn.",
+    });
   } finally {
     if (usage.calls > 0) {
       await attachPanelCost(auth.organizationId, panelCostVersionId, {

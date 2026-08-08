@@ -6,9 +6,10 @@ import {
   type BasicFact,
   type BasicFactQuestionLedgerEntry,
   type BasicFactPredicate,
+  type CollectedEvidence,
 } from "../src/data/evidence";
 import type { CheckObservation, CollectContext } from "./adapters/types";
-import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
+import { hydrateProjectTeamFromVerifiedFacts, projectProviderBackedBasicFacts } from "./basicFactsProjection";
 import { collectFounderDecisionQuestionOutcomes } from "./orchestrate";
 
 const ledgerEntry = (
@@ -50,6 +51,27 @@ const acceptedFact = (predicate: BasicFactPredicate, value: string, excerpt: str
   artifact_verified: true,
   provider: "public-web",
 });
+
+function bindCanonicalProjectToken(
+  evidence: CollectedEvidence,
+  geckoId: string,
+  name: string,
+  symbol: string,
+): void {
+  evidence.projectToken = {
+    verified: true,
+    verification: "official_x",
+    name,
+    symbol,
+    coingeckoId: geckoId,
+    rank: null,
+    address: "0x0000000000000000000000000000000000000001",
+    chain: "ethereum",
+    sourceUrl: `https://www.coingecko.com/en/coins/${geckoId}`,
+    capturedAt: "2026-07-22T00:00:00.000Z",
+    providers: ["coingecko"],
+  };
+}
 
 describe("projectProviderBackedBasicFacts", () => {
   it("mints a ceiling-only product fact from a live official site when nothing else can", () => {
@@ -183,8 +205,6 @@ describe("projectProviderBackedBasicFacts", () => {
       ["founder", "Meow"],
       ["official_token", "$JUP"],
       ["network", "Solana"],
-      ["traction", "CoinGecko rank #90 · $17.9M 24h volume"],
-      ["product", "Jupiter operates a live on-chain protocol; its canonical token JUP is established and actively traded (CoinGecko rank #90 · $17.9M 24h volume)"],
       ["repository", "github.com/jup-ag"],
     ]);
     expect(evidence.basicFacts?.every((fact) =>
@@ -223,8 +243,8 @@ describe("projectProviderBackedBasicFacts", () => {
       provider: "dexscreener + geckoterminal",
     });
     expect(tokenFact?.sources[0].title).not.toContain("CoinGecko");
-    expect(evidence.basicFacts?.find((fact) => fact.predicate === "traction")?.value)
-      .toContain("$32.1M market cap");
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "traction")).toBe(false);
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "product")).toBe(false);
   });
 
   it("uses the resolved project profile for identity and product without retaining namesake citations", () => {
@@ -338,6 +358,7 @@ describe("projectProviderBackedBasicFacts", () => {
       ...evidence.profile,
       display_name: "Brian Armstrong",
       resolved_name: "Brian Armstrong",
+      identity_binding: "independent_exact_handle",
       profile_collection_state: "resolved",
       profile_provider: "twitterapi",
       profile_captured_at: "2026-07-13T18:09:00.000Z",
@@ -402,6 +423,7 @@ describe("projectProviderBackedBasicFacts", () => {
       ...evidence.profile,
       display_name: "Brian Armstrong",
       resolved_name: "Brian Armstrong",
+      identity_binding: "independent_exact_handle",
       profile_collection_state: "resolved",
       profile_provider: "twitterapi",
       profile_captured_at: "2026-07-13T18:09:00.000Z",
@@ -437,6 +459,7 @@ describe("projectProviderBackedBasicFacts", () => {
       ...evidence.profile,
       display_name: "Brian Armstrong",
       resolved_name: "Brian Armstrong",
+      identity_binding: "independent_exact_handle",
       bio: "Co-founder & CEO at @Coinbase. Co-founder @researchhub @newlimit",
       profile_collection_state: "resolved",
       profile_provider: "twitterapi",
@@ -551,6 +574,118 @@ describe("projectProviderBackedBasicFacts", () => {
     ]));
   });
 
+  it("projects an investor's exact current firm role from the frozen licensed identity record", () => {
+    const evidence = emptyEvidence("@1scottrupp");
+    evidence.roles = [SubjectClass.INVESTOR, SubjectClass.FOUNDER, SubjectClass.ADVISOR];
+    evidence.profile = {
+      ...evidence.profile,
+      display_name: "Scott Rupp",
+      resolved_name: "Scott Rupp",
+      identity_binding: "licensed_exact_social",
+      bio: "Founding General Partner, BITKRAFT Ventures.",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-08-06T21:58:00.000Z",
+      identity_note: "Resolved to Scott Rupp, Founding General Partner @ BITKRAFT Ventures. 11 roles on record (https://www.linkedin.com/in/scott-rupp/).",
+    };
+    evidence.ventures = [{
+      project_name: "BITKRAFT Ventures",
+      role: "Founding General Partner",
+      period: "2020-08",
+      outcome: VentureOutcome.UNKNOWN,
+      evidence_url: "https://www.bitkraft.vc/people/scott-rupp",
+      notes: "People Data Labs employment record",
+      provider: "peopledatalabs",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    }];
+    evidence.basicFactQuestionLedger = [
+      ledgerEntry("official_identity", "unanswered"),
+      ledgerEntry("current_role", "unanswered"),
+    ];
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const identity = evidence.basicFacts?.find((fact) => fact.predicate === "official_identity");
+    const role = evidence.basicFacts?.find((fact) => fact.predicate === "current_role");
+    expect(identity).toMatchObject({ value: "Scott Rupp", status: "verified" });
+    expect(role).toMatchObject({
+      value: "Founding General Partner at BITKRAFT Ventures",
+      status: "verified",
+    });
+    expect(role?.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        url: "https://www.linkedin.com/in/scott-rupp/",
+        provider: "peopledatalabs",
+      }),
+      expect.objectContaining({ url: "https://x.com/1scottrupp", provider: "twitterapi" }),
+    ]));
+    expect(evidence.basicFactQuestionLedger).toEqual(expect.arrayContaining([
+      expect.objectContaining({ predicate: "official_identity", status: "answered" }),
+      expect.objectContaining({ predicate: "current_role", status: "answered" }),
+    ]));
+  });
+
+  it("does not project a legacy person record without an exact handle binding", () => {
+    const evidence = emptyEvidence("@unrelated_handle");
+    evidence.roles = [SubjectClass.INVESTOR];
+    evidence.profile = {
+      ...evidence.profile,
+      display_name: "Scott Rupp",
+      resolved_name: "Scott Rupp",
+      bio: "Founding General Partner, BITKRAFT Ventures.",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-08-06T21:58:00.000Z",
+      identity_note: "Resolved to Scott Rupp, Founding General Partner @ BITKRAFT Ventures. 11 roles on record (https://www.linkedin.com/in/scott-rupp/).",
+    };
+    evidence.ventures = [{
+      project_name: "BITKRAFT Ventures",
+      role: "Founding General Partner",
+      period: "2020-08",
+      outcome: VentureOutcome.UNKNOWN,
+      evidence_url: "https://www.bitkraft.vc/people/scott-rupp",
+      provider: "peopledatalabs",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    }];
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts).toEqual([]);
+  });
+
+  it("publishes a fund account's official brand identity without treating self-description as verified legitimacy", () => {
+    const evidence = emptyEvidence("@theformsvc");
+    evidence.roles = [SubjectClass.INVESTOR];
+    evidence.profile = {
+      ...evidence.profile,
+      display_name: "TheForms - Your Partner",
+      bio: "Capital follows understanding. We back founders building infrastructure for what comes next.",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-08-06T22:10:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts).toEqual([
+      expect.objectContaining({
+        predicate: "official_identity",
+        value: "TheForms - Your Partner",
+        status: "verified",
+        floorEligible: false,
+        providerProjection: true,
+        sources: [expect.objectContaining({
+          url: "https://x.com/theformsvc",
+          provider: "twitterapi",
+          sourceClass: "official_subject",
+        })],
+      }),
+    ]);
+    expect(evidence.profile.resolved_name).toBeUndefined();
+  });
+
   it("merges the provider source into an existing identical fact", () => {
     const evidence = emptyEvidence("@project");
     evidence.roles = [SubjectClass.PROJECT];
@@ -635,16 +770,16 @@ describe("projectProviderBackedBasicFacts", () => {
 
     projectProviderBackedBasicFacts(evidence);
 
-    // official_token (merged) + network + market-backed traction + product: an
-    // established top-ranked canonical token contributes liveness facts too.
-    expect(evidence.basicFacts).toHaveLength(4);
+    // The exact official-token fact merges and network remains. Token market
+    // footprint does not manufacture product or usage facts.
+    expect(evidence.basicFacts).toHaveLength(2);
     const tokenFacts = evidence.basicFacts?.filter((fact) => fact.predicate === "official_token") ?? [];
     expect(tokenFacts).toHaveLength(1);
     expect(tokenFacts[0]).toMatchObject({ value: "JUP", normalizedValue: "jup", status: "verified" });
     expect(tokenFacts[0].sources).toHaveLength(2);
   });
 
-  it("completes product and traction from an established token even when no volume is present (Cloudflare-blocked site)", () => {
+  it("does not manufacture product or traction from an established token market footprint", () => {
     const evidence = emptyEvidence("@aave");
     evidence.roles = [SubjectClass.PROJECT];
     evidence.projectToken = {
@@ -667,12 +802,9 @@ describe("projectProviderBackedBasicFacts", () => {
     projectProviderBackedBasicFacts(evidence);
 
     const byPredicate = new Map((evidence.basicFacts ?? []).map((fact) => [fact.predicate, fact]));
-    // Market/on-chain evidence completes traction-liveness and product-substance
-    // without any homepage fetch — the fix for "AAVE can never complete".
-    expect(byPredicate.get("traction")?.value).toBe("CoinGecko rank #52 · $1.45B market cap · $13.2M on-chain liquidity");
-    expect(byPredicate.get("product")?.value).toContain("Aave operates a live on-chain protocol");
-    expect(byPredicate.get("product")?.artifact_verified).toBe(true);
-    expect(byPredicate.get("product")?.sources[0].sourceClass).toBe("regulatory_or_onchain");
+    expect(byPredicate.get("traction")).toBeUndefined();
+    expect(byPredicate.get("product")).toBeUndefined();
+    expect(byPredicate.get("official_token")?.value).toBe("$AAVE");
   });
 
   it("states supply overhang and the fully-diluted multiple the way a buyer asks it", () => {
@@ -701,6 +833,50 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(tokenomics?.value).toBe(
       "630.0M of 1000.0M supply circulating (63%) · 37% of supply not yet circulating · fully-diluted value 1.6x market cap",
     );
+    expect(tokenomics?.sources[0]).toMatchObject({
+      title: "CoinGecko supply snapshot",
+      excerpt: expect.stringContaining("630.0M circulating supply and 1000.0M maximum supply"),
+    });
+  });
+
+  it("cites DeFiLlama, not token identity, for the multi-chain protocol footprint", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Uniswap",
+      symbol: "UNI",
+      coingeckoId: "uniswap",
+      rank: 39,
+      address: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+      chain: "Ethereum",
+      deployedChains: ["Ethereum", "Base", "Arbitrum"],
+      sourceUrl: "https://www.coingecko.com/en/coins/uniswap",
+      capturedAt: "2026-08-02T00:00:00.000Z",
+      providers: ["coingecko"],
+    };
+    evidence.protocolTvl = {
+      slug: "uniswap",
+      name: "Uniswap",
+      symbol: "UNI",
+      tvlUsd: 1,
+      chains: ["Ethereum", "Base", "Arbitrum"],
+      chainBreakdown: [],
+      geckoId: "uniswap",
+      sourceUrl: "https://defillama.com/protocol/uniswap",
+      capturedAt: "2026-08-02T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const network = evidence.basicFacts?.find((fact) => fact.predicate === "network");
+    expect(network?.value).toBe("3 chains incl. Ethereum, Base, Arbitrum");
+    expect(network?.sources).toEqual([expect.objectContaining({
+      url: "https://defillama.com/protocol/uniswap",
+      provider: "defillama",
+      excerpt: expect.stringContaining("listed across 3 chains"),
+    })]);
   });
 
   it("reports an effectively fully diluted token instead of a meaningless overhang", () => {
@@ -730,12 +906,32 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(tokenomics?.value).not.toContain("not yet circulating");
   });
 
+  it("withholds a supply ratio when circulating supply exceeds its denominator", () => {
+    const evidence = emptyEvidence("@inconsistent");
+    evidence.roles = [SubjectClass.PROJECT];
+    bindCanonicalProjectToken(evidence, "inconsistent", "Inconsistent", "BAD");
+    evidence.projectToken!.circulatingSupply = 120;
+    evidence.projectToken!.totalSupply = 100;
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts?.find((fact) => fact.predicate === "tokenomics")).toBeUndefined();
+  });
+
   it("discloses float control: holder concentration and locked liquidity, neutrally phrased", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];
+    bindCanonicalProjectToken(evidence, "uniswap", "Uniswap", "UNI");
     evidence.holderProfile = {
+      binding: {
+        canonicalAddress: evidence.projectToken!.address,
+        chain: evidence.projectToken!.chain,
+        method: "canonical_token_address_chain",
+      },
       topHolderPct: 5.6,
       top10Pct: 31.2,
+      assessedWalletCount: 10,
+      top10PctIsFloor: false,
       holderCount: 370_041,
       lpLockedOrBurnedPct: 85,
       sourceUrl: "https://gopluslabs.io/token-security/1/0x1f98",
@@ -759,6 +955,8 @@ describe("projectProviderBackedBasicFacts", () => {
   it("discloses the next unlock and the 90-day unlock load as a vesting fact", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];
+    bindCanonicalProjectToken(evidence, "uniswap", "Uniswap", "UNI");
+    evidence.projectToken!.address = "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984";
     evidence.tokenUnlocks = {
       nextUnlockDate: "2026-08-01",
       allocationName: "Team",
@@ -767,6 +965,11 @@ describe("projectProviderBackedBasicFacts", () => {
       percentOfMcap: 1.8,
       cumulativeUnlockedPercent: 63,
       next90dPercentOfSupply: 2,
+      canonicalAddress: "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
+      chain: "ethereum",
+      currencyId: 11,
+      contractSourceUrl: "https://api.cryptorank.io/v3/currencies/11/contracts",
+      eventsSourceUrl: "https://api.cryptorank.io/v3/currencies/11/vesting/events?filter=upcoming&sortBy=time&sortOrder=asc",
       sourceUrl: "https://cryptorank.io/price/uniswap/vesting",
       capturedAt: "2026-07-22T00:00:00.000Z",
     };
@@ -778,11 +981,42 @@ describe("projectProviderBackedBasicFacts", () => {
       "next unlock 2026-08-01 · Team · ~1.2% of supply · ~$27.0M · 1.8% of market cap · ~2% of supply unlocking within 90 days · 63% already unlocked",
     );
     expect(vesting?.sources[0].provider).toBe("cryptorank");
+    expect(vesting?.sources).toHaveLength(2);
+    expect(vesting?.sources[0].url).toBe("https://api.cryptorank.io/v3/currencies/11/contracts");
+    expect(vesting?.sources[0].excerpt).toContain("exact canonical ethereum contract 0x1f9840a85d5af5bf1d1762f925bdaddc4201f984");
+    expect(vesting?.sources[1].url).toContain("/currencies/11/vesting/events?");
+  });
+
+  it("does not project a legacy or wrong-contract unlock schedule", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    bindCanonicalProjectToken(evidence, "uniswap", "Uniswap", "UNI");
+    evidence.tokenUnlocks = {
+      nextUnlockDate: "2026-08-01",
+      allocationName: "Team",
+      percentOfSupply: 1.2,
+      unlockValueUsd: 27_000_000,
+      percentOfMcap: 1.8,
+      cumulativeUnlockedPercent: 63,
+      next90dPercentOfSupply: 2,
+      canonicalAddress: "0x0000000000000000000000000000000000000002",
+      chain: "ethereum",
+      currencyId: 11,
+      contractSourceUrl: "https://api.cryptorank.io/v3/currencies/11/contracts",
+      eventsSourceUrl: "https://api.cryptorank.io/v3/currencies/11/vesting/events",
+      sourceUrl: "https://cryptorank.io/price/uniswap/vesting",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts?.find((fact) => fact.predicate === "vesting")).toBeUndefined();
   });
 
   it("appends the TVL trend so capital commitment reads as growth or bleed", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];
+    bindCanonicalProjectToken(evidence, "uniswap", "Uniswap", "UNI");
     evidence.protocolTvl = {
       slug: "uniswap",
       name: "Uniswap",
@@ -806,6 +1040,7 @@ describe("projectProviderBackedBasicFacts", () => {
   it("projects protocol hacks as standalone critical facts instead of burying them in TVL prose", () => {
     const evidence = emptyEvidence("@driftprotocol");
     evidence.roles = [SubjectClass.PROJECT];
+    bindCanonicalProjectToken(evidence, "drift-protocol", "Drift", "DRIFT");
     evidence.protocolTvl = {
       slug: "drift",
       name: "Drift",
@@ -846,6 +1081,19 @@ describe("projectProviderBackedBasicFacts", () => {
     evidence.securityAudits = {
       securityPageUrl: "https://www.certora.com/reports/uniswap-v4.pdf",
       selfAttested: ["Certora", "ABDK", "OpenZeppelin"],
+      attestations: [{
+        auditor: "Certora",
+        origin: "curated_audit_link",
+        sourceUrl: "https://www.certora.com/reports/uniswap-v4.pdf",
+      }, {
+        auditor: "ABDK",
+        origin: "curated_audit_link",
+        sourceUrl: "https://abdk.consulting/reports/uniswap-v4.pdf",
+      }, {
+        auditor: "OpenZeppelin",
+        origin: "subject_page",
+        sourceUrl: "https://uniswap.org/security",
+      }],
       corroborated: [],
       capturedAt: "2026-07-22T00:00:00.000Z",
     };
@@ -858,11 +1106,96 @@ describe("projectProviderBackedBasicFacts", () => {
     // Citable for the analyst, but can never mint a score floor (H2) and never
     // counts as a strictly verified auditFact for band floors.
     expect(attested?.floorEligible).toBe(false);
+    expect(attested?.sources).toHaveLength(3);
+    expect(attested?.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        url: "https://www.certora.com/reports/uniswap-v4.pdf",
+        title: "Curated audit link naming Certora",
+        sourceClass: "other_public",
+      }),
+      expect.objectContaining({
+        url: "https://abdk.consulting/reports/uniswap-v4.pdf",
+        title: "Curated audit link naming ABDK",
+        sourceClass: "other_public",
+      }),
+      expect.objectContaining({
+        url: "https://uniswap.org/security",
+        title: "Subject disclosure naming OpenZeppelin",
+        sourceClass: "official_subject",
+      }),
+    ]));
+    expect(attested?.sources.some((candidate) =>
+      String(candidate.title ?? "").toLowerCase().includes("project security page"))).toBe(false);
+  });
+
+  it("keeps a legacy no-anchor auditor row as a lead instead of a verified engagement", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.securityAudits = {
+      securityPageUrl: "https://www.certora.com/reports/uniswap-v4",
+      selfAttested: ["Certora"],
+      attestations: [{
+        auditor: "Certora",
+        origin: "curated_audit_link",
+        sourceUrl: "https://www.certora.com/reports/uniswap-v4",
+      }],
+      corroborated: [{
+        auditor: "Certora",
+        auditorUrl: "https://www.certora.com/reports/uniswap-v4",
+        excerpt: "Certora formal verification report for the Uniswap v4 core contracts.",
+      }],
+      capturedAt: "2026-07-22T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts?.find((fact) => fact.predicate === "audit")).toBeUndefined();
+    expect(evidence.basicFactLeads).toContainEqual(expect.objectContaining({
+      predicate: "audit",
+      value: "Audit discovery source names Certora",
+      artifact_verified: false,
+    }));
+  });
+
+  it("projects an auditor engagement only when its frozen anchor matches the canonical subject", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile.website = "https://uniswap.org/";
+    bindCanonicalProjectToken(evidence, "uniswap", "Uniswap", "UNI");
+    evidence.securityAudits = {
+      securityPageUrl: "https://uniswap.org/security",
+      selfAttested: ["Certora"],
+      attestations: [{ auditor: "Certora", origin: "subject_page", sourceUrl: "https://uniswap.org/security" }],
+      corroborated: [{
+        auditor: "Certora",
+        auditorUrl: "https://www.certora.com/reports/uniswap-v4",
+        excerpt: "Certora audited the contracts published at uniswap.org.",
+        matchedIdentityAnchor: { type: "official_domain", value: "uniswap.org" },
+      }],
+      capturedAt: "2026-07-22T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts?.find((fact) => fact.predicate === "audit"))
+      .toMatchObject({ value: "Security engagement with Certora", status: "verified" });
   });
 
   it("appends the fee trend so a reader sees growth or bleed, not just a total", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];
+    bindCanonicalProjectToken(evidence, "uniswap", "Uniswap", "UNI");
+    evidence.protocolTvl = {
+      slug: "uniswap",
+      name: "Uniswap",
+      symbol: "UNI",
+      tvlUsd: 1,
+      chains: ["Ethereum"],
+      chainBreakdown: [{ chain: "Ethereum", tvlUsd: 1 }],
+      geckoId: "uniswap",
+      sourceUrl: "https://defillama.com/protocol/uniswap",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+    };
     evidence.protocolFees = {
       slug: "uniswap",
       total24hUsd: 3_840_000,
@@ -870,6 +1203,11 @@ describe("projectProviderBackedBasicFacts", () => {
       change30dOver30dPct: -12.3,
       sourceUrl: "https://defillama.com/protocol/uniswap",
       capturedAt: "2026-07-22T00:00:00.000Z",
+      binding: {
+        canonicalGeckoId: "uniswap",
+        protocolSlug: "uniswap",
+        method: "matched_protocol_gecko_id",
+      },
     };
 
     projectProviderBackedBasicFacts(evidence);
@@ -900,10 +1238,50 @@ describe("projectProviderBackedBasicFacts", () => {
     projectProviderBackedBasicFacts(evidence);
 
     const predicates = new Set((evidence.basicFacts ?? []).map((fact) => fact.predicate));
-    // Thin liquidity still shows traction (it does trade), but an unranked,
-    // sub-$10M token must NOT inherit product substance for free.
-    expect(predicates.has("traction")).toBe(true);
+    // Market data remains market context. It cannot manufacture either
+    // product substance or traction for a project subject.
+    expect(predicates.has("traction")).toBe(false);
     expect(predicates.has("product")).toBe(false);
+  });
+
+  it("hydrates a verified project founder into the shared team evidence", () => {
+    const evidence = emptyEvidence("@ClutchMarkets");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.basicFacts = [{
+      factId: "clutch-founder",
+      subjectKey: "@ClutchMarkets",
+      predicate: "founder",
+      value: "OxSimpleFarmer",
+      normalizedValue: "oxsimplefarmer",
+      qualifier: "Founder",
+      status: "corroborated",
+      critical: true,
+      sources: [{
+        url: "https://podcasts.apple.com/example/clutch-markets-founder",
+        title: "Clutch Markets founder interview",
+        excerpt: "OxSimpleFarmer, founder of Clutch Markets, discusses DeFi markets.",
+        capturedAt: "2026-08-07T12:00:00.000Z",
+        provider: "public-web",
+        sourceClass: "independent_press",
+        relation: "supports",
+        contentHash: "c".repeat(64),
+        artifactVerified: true,
+      }],
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    }];
+
+    hydrateProjectTeamFromVerifiedFacts(evidence);
+    hydrateProjectTeamFromVerifiedFacts(evidence);
+
+    expect(evidence.webTeam).toEqual([expect.objectContaining({
+      name: "OxSimpleFarmer",
+      role: "Founder",
+      provider: "basic-facts",
+      artifact_verified: true,
+      evidence_origin: "deterministic",
+    })]);
   });
 });
 

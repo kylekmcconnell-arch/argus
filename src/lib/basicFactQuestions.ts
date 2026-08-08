@@ -8,7 +8,12 @@ export type BasicFactQuestionDefinition = readonly [predicate: string, question:
  * on the collector implementation.
  */
 export interface BasicFactQuestionOutcomeInput {
+  questionId?: string;
+  audience?: "person" | "project" | "investor";
   predicate: string;
+  /** Exact question persisted with the frozen collection run. */
+  question?: string;
+  critical?: boolean;
   status: "answered" | "unanswered";
   providerRuns: ReadonlyArray<{
     state: "succeeded" | "partial" | "completed_empty" | "failed" | "skipped";
@@ -187,4 +192,27 @@ export function basicFactQuestionFor(predicate: string, audience: BasicFactsAudi
 
 export function basicFactQuestionsFor(audience: BasicFactsAudience): readonly BasicFactQuestionDefinition[] {
   return QUESTION_SETS[audience];
+}
+
+/**
+ * Prefer the exact questions frozen with this report when they belong to the
+ * same audience the report is rendering. This preserves the collector's
+ * organization-specific wording while still falling back safely for legacy
+ * packets and for packets whose early routing audience was later corrected.
+ */
+export function reportBasicFactQuestionsFor(
+  audience: BasicFactsAudience,
+  ledger: readonly BasicFactQuestionOutcomeInput[] = [],
+): readonly BasicFactQuestionDefinition[] {
+  if (audience === "founder") return basicFactQuestionsFor(audience);
+  const seen = new Set<string>();
+  const persisted = ledger.flatMap((entry): BasicFactQuestionDefinition[] => {
+    if (entry.audience !== audience) return [];
+    const predicate = canonicalBasicFactPredicate(entry.predicate);
+    const question = entry.question?.trim();
+    if (!predicate || !question || seen.has(predicate)) return [];
+    seen.add(predicate);
+    return [[predicate, question]];
+  });
+  return persisted.length ? persisted : basicFactQuestionsFor(audience);
 }

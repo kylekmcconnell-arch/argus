@@ -18,7 +18,11 @@ import {
 } from "./network";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import type { Dossier } from "../data/dossier";
-import type { Investigation, WebPerson } from "../lib/investigation";
+import {
+  isConfirmedWebTeamPerson,
+  type Investigation,
+  type WebPerson,
+} from "../lib/investigation";
 
 const KEY = "argus:graphstore";
 const CAP = 150; // working-cache size (the shared backend holds the full community set)
@@ -224,13 +228,13 @@ export function personContribution(d: Dossier): GraphContribution {
   };
 }
 
-// A project-centric discovery contributes the project node + everyone found to
-// have worked on it. This is how clicking a project compounds the web: the people
-// become nodes that bridge to any other audit they appear in.
+// A project-centric discovery contributes only directly attributed team rows.
+// Search candidates, associations, and code contributors remain outside the
+// graph because none of those relationships proves employment.
 export function projectPeopleContribution(projectName: string, people: WebPerson[]): GraphContribution {
   const nodes: PanoptesNode[] = [{ type: "Company", key: projectName, subject: true }];
   const edges: PanoptesEdge[] = [];
-  for (const p of people) {
+  for (const p of people.filter(isConfirmedWebTeamPerson)) {
     const key = p.handle ?? p.name;
     if (!key) continue;
     nodes.push({ type: "Person", key, role: p.role });

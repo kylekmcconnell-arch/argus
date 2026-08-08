@@ -3,14 +3,33 @@ import { SubjectClass } from "../src/engine";
 import { emptyEvidence, type BasicFactQuestionLedgerEntry } from "../src/data/evidence";
 import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 
-// "Who funded it?" is its own project question. The funding fact answers "how
-// much?" and inlines the backers into prose, so before this projection the
-// investor question resolved to nothing and an allocator got no named names.
-describe("projectProviderBackedBasicFacts: named backers answer the investor question", () => {
-  const projectEvidence = (handle: string) => {
+// "Who funded it?" is its own project question. Indexed backers belong in the
+// evidence register, but an aggregator attribution does not close the broader
+// project question as independently answered.
+describe("projectProviderBackedBasicFacts: named backer evidence", () => {
+  const projectEvidence = (
+    handle: string,
+    geckoId = "uniswap",
+    name = "Uniswap",
+    symbol = "UNI",
+    website = "https://uniswap.org",
+  ) => {
     const evidence = emptyEvidence(handle);
     evidence.roles = [SubjectClass.PROJECT];
-    evidence.profile = { ...evidence.profile, display_name: "Uniswap", website: "https://uniswap.org" };
+    evidence.profile = { ...evidence.profile, display_name: name, website };
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name,
+      symbol,
+      coingeckoId: geckoId,
+      rank: null,
+      address: "0x0000000000000000000000000000000000000001",
+      chain: "ethereum",
+      sourceUrl: `https://www.coingecko.com/en/coins/${geckoId}`,
+      capturedAt: "2026-07-30T00:00:00.000Z",
+      providers: ["coingecko"],
+    };
     return evidence;
   };
 
@@ -99,7 +118,7 @@ describe("projectProviderBackedBasicFacts: named backers answer the investor que
     expect(a16z?.qualifier).toBeUndefined();
   });
 
-  it("answers the investor ledger question that the funding fact left unanswered", () => {
+  it("retains investor evidence refs without closing the broad project question", () => {
     const evidence = projectEvidence("@uniswap");
     evidence.protocolFunding = uniswapFunding();
     evidence.basicFactQuestionLedger = [investorLedgerEntry()];
@@ -107,16 +126,16 @@ describe("projectProviderBackedBasicFacts: named backers answer the investor que
     projectProviderBackedBasicFacts(evidence);
 
     const entry = evidence.basicFactQuestionLedger[0];
-    expect(entry.status).toBe("answered");
+    expect(entry.status).toBe("unanswered");
     expect(entry.answerRefs.length).toBe(8);
   });
 
   it("publishes a lead at lead strength and reports an unpriced round as unrecorded, never zero", () => {
-    const evidence = projectEvidence("@aavetest");
+    const evidence = projectEvidence("@aavetest", "aave", "Aave", "AAVE", "https://aave.com");
     evidence.protocolFunding = {
       slug: "aave",
       name: "Aave",
-      geckoId: null,
+      geckoId: "aave",
       rounds: [
         {
           date: "2020-10-12",
@@ -159,12 +178,12 @@ describe("projectProviderBackedBasicFacts: named backers answer the investor que
   });
 
   it("declares the cap when the index names more backers than ARGUS publishes", () => {
-    const evidence = projectEvidence("@crowded");
+    const evidence = projectEvidence("@crowded", "crowded", "Crowded", "CRWD", "https://crowded.example");
     const many = Array.from({ length: 17 }, (_, index) => `Fund ${index + 1}`);
     evidence.protocolFunding = {
       slug: "crowded",
       name: "Crowded",
-      geckoId: null,
+      geckoId: "crowded",
       rounds: [{
         date: "2021-01-01",
         round: "Seed",

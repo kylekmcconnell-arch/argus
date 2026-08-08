@@ -162,6 +162,44 @@ describe("archived affiliation across the capture history", () => {
     expect(cdxUrl).toContain("collapse=timestamp:4");
   });
 
+  it("uses Arquivo.pt when Wayback is unavailable and does not publish a recovered outage", async () => {
+    const timestamp = "20200301120000";
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.startsWith(CDX)) throw new TypeError("network unavailable");
+      if (url.startsWith("https://arquivo.pt/wayback/cdx")) {
+        return new Response(`${JSON.stringify({ timestamp, url: "https://example.org/team", status: "200" })}\n`, {
+          status: 200,
+          headers: { "content-type": "application/x-ndjson" },
+        });
+      }
+      if (url.startsWith("https://arquivo.pt/wayback/")) return html(roster);
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captured = await withCostLedger(async () => ({
+      result: await archivedAffiliation("example.org", "Kyle McConnell", "Example"),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toMatchObject({ provider: "arquivo", year: "2020", where: "team" });
+    expect(captured.result?.url).toContain("arquivo.pt/wayback/20200301120000/");
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "wayback",
+      op: "cdx-search",
+      status: "partial",
+      failed: 0,
+      meta: "recovered_by_arquivo_after_transport_error",
+    }));
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "arquivo",
+      op: "snapshot-fetch",
+      status: "succeeded",
+      meta: "subject_and_venture_match",
+    }));
+  });
+
   it("falls back to /about and still reads its older captures", async () => {
     const fetchMock = archive(
       {

@@ -5,11 +5,11 @@ import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // Who the deployer actually transacts with, on-chain, named by Arkham — the real
 // relationships behind an operator. Named non-exchange counterparties are wired
-// into the trust graph as verified TRANSACTS_WITH edges (ground truth, not
-// inference), so two tokens whose operators both move money through the same fund
-// or mixer connect. Exchanges are shown but not bridged (everyone cashes out
+// into the trust graph as Arkham-attributed context. They remain useful leads,
+// but provider naming or risk taxonomy never becomes ARGUS identity proof or a
+// verdict override. Exchanges are shown but not bridged (everyone cashes out
 // somewhere). Self-hides when there's nothing named to show.
-type CP = { name: string; type?: string; address: string; twitter?: string; usd: number; txCount: number; flow: "in" | "out" | "both"; isCex: boolean; isContract: boolean };
+type CP = { name: string; entityId?: string; type?: string; address: string; twitter?: string; usd: number; txCount: number; flow: "in" | "out" | "both"; isCex: boolean; isContract: boolean };
 
 const usd = (n: number) => (n >= 1e9 ? `$${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : `$${Math.round(n)}`);
 const RISKY = new Set(["privacy", "hacker", "sanctioned", "mixer"]);
@@ -39,16 +39,17 @@ export function Counterparties({ address, subject, panelCostToken, record = true
           const ents = cps
             .filter((c) => !c.isCex && (RISKY.has((c.type ?? "").toLowerCase()) || c.usd >= 10000))
             .map((c) => {
-              const slug = c.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+              const identity = c.entityId?.trim().toLowerCase() || c.address.trim();
               const t = (c.type ?? "").toLowerCase();
               const risky = RISKY.has(t);
-              // Transacting with a hacker / mixer / sanctioned entity keys on `risk:`
-              // so it overrides the verdict; a normal named counterparty just bridges.
+              // Arkham's label and taxonomy remain attributed context. The
+              // transaction may be useful to investigate, but it cannot change
+              // an ARGUS verdict without an independent authoritative screen.
               return risky
-                ? { key: `risk:${slug}`, type: "Identity", subtype: ["hacker", "sanctioned"].includes(t) ? "risk-avoid" : "risk-caution", edgeType: "TRANSACTS_WITH", label: `${c.name} · ${c.type}` }
-                : { key: `arkham:${slug}`, type: "Identity", edgeType: "TRANSACTS_WITH", label: c.name };
+                ? { key: `arkham-risk:${identity}`, type: "Identity", subtype: "arkham-provider-risk", edgeType: "ARKHAM_RISK_CONTEXT", label: `Arkham reports ${c.name} as ${c.type}` }
+                : { key: `arkham-entity:${identity}`, type: "Identity", edgeType: "ARKHAM_TRANSACTION_CONTEXT", label: c.name };
             })
-            .filter((e) => e.key !== "arkham:" && e.key !== "risk:" && !seen.has(e.key) && seen.add(e.key));
+            .filter((e) => e.key !== "arkham-entity:" && e.key !== "arkham-risk:" && !seen.has(e.key) && seen.add(e.key));
           if (ents.length) recordForensicEntities(subject, ents);
         }
       } catch (error) {
@@ -86,7 +87,7 @@ export function Counterparties({ address, subject, panelCostToken, record = true
           );
         })}
       </div>
-      <p className="mt-2 text-[11px] leading-snug text-ink-faint">ARGUS saves confirmed links to these wallets. If another report uses the same fund or mixer, it will appear under Connections.</p>
+      <p className="mt-2 text-[11px] leading-snug text-ink-faint">ARGUS saves these Arkham-attributed transaction links as investigation context. A provider label alone does not prove identity, control, sanctions status, or misconduct.</p>
     </div>
   );
 }

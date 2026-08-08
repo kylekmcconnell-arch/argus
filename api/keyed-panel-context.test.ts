@@ -45,7 +45,7 @@ const VERSION_ID = "00000000-0000-4000-8000-000000000222";
 const ADDRESS = `0x${"1".repeat(40)}`;
 const SOL_ADDRESS = "GJRs4FwHtemZ5ZE9x3FNvJ8TMwitKTh21yxdRPqn7npE";
 
-type CostLine = { provider: string; op: string; calls: number; usd: number; meta: string };
+type CostLine = { provider: string; op: string; calls: number; usd: number; meta: string; status?: "succeeded" | "failed" };
 type Handler = (req: never, res: never) => Promise<void>;
 type Route = {
   name: string;
@@ -64,12 +64,12 @@ const routes: Route[] = [
   { name: "arkham risk paths", handler: arkhamRiskPathsHandler, query: { address: ADDRESS }, costs: [{ provider: "arkham", op: "panel:arkham-risk-paths", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "EVM deployer", handler: evmDeployerHandler, query: { address: ADDRESS, chain: "ethereum" }, costs: [{ provider: "etherscan", op: "panel:evm-deployer", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "EVM cluster", handler: evmClusterHandler, query: { address: ADDRESS, chain: "ethereum" }, costs: [{ provider: "goplus", op: "panel:evm-cluster", calls: 1, usd: 0, meta: "keyless" }] },
-  { name: "EVM funder", handler: evmFunderHandler, query: { wallet: ADDRESS, chain: "ethereum" }, costs: [{ provider: "etherscan", op: "panel:evm-funder", calls: 2, usd: 0, meta: "subscription/keyed" }] },
+  { name: "EVM funder", handler: evmFunderHandler, query: { wallet: ADDRESS, chain: "ethereum" }, costs: [{ provider: "etherscan", op: "panel:evm-funder", calls: 2, usd: 0, meta: "subscription/keyed", status: "failed" }] },
   { name: "Solana deployer", handler: deployerHandler, query: { wallet: SOL_ADDRESS }, costs: [{ provider: "helius", op: "panel:solana-deployer", calls: 3, usd: 0, meta: "subscription/keyed" }] },
-  { name: "Solana funder", handler: funderHandler, query: { wallet: SOL_ADDRESS }, costs: [{ provider: "helius", op: "panel:solana-funder", calls: 2, usd: 0, meta: "subscription/keyed" }] },
+  { name: "Solana funder", handler: funderHandler, query: { wallet: SOL_ADDRESS }, costs: [{ provider: "helius", op: "panel:solana-funder", calls: 2, usd: 0, meta: "subscription/keyed", status: "failed" }] },
   { name: "Solana cluster", handler: clusterHandler, query: { mint: SOL_ADDRESS, chain: "solana" }, costs: [{ provider: "rugcheck", op: "panel:solana-cluster", calls: 1, usd: 0, meta: "keyless" }] },
   { name: "GitHub resolver", handler: resolveGithubHandler, query: { handle: "alice", name: "Alice" }, costs: [{ provider: "github", op: "panel:resolve-github", calls: 2, usd: 0, meta: "subscription/keyed" }] },
-  { name: "GitHub forensics", handler: githubForensicsHandler, query: { login: "alice" }, costs: [{ provider: "github", op: "panel:github-forensics", calls: 1, usd: 0, meta: "subscription/keyed" }] },
+  { name: "GitHub forensics", handler: githubForensicsHandler, query: { login: "alice" }, costs: [{ provider: "github", op: "panel:github-forensics", calls: 1, usd: 0, meta: "subscription/keyed", status: "failed" }] },
   {
     name: "identity sweep",
     handler: identitySweepHandler,
@@ -158,10 +158,11 @@ describe("keyed supplemental route report capabilities", () => {
     expect(providerFetch).toHaveBeenCalled();
     expect(attachPanelCost).toHaveBeenCalledTimes(route.costs.length);
     for (const line of route.costs) {
+      const { status = "succeeded", ...cost } = line;
       expect(attachPanelCost).toHaveBeenCalledWith(ORGANIZATION_ID, VERSION_ID, {
-        ...line,
+        ...cost,
         initiatedBy: USER_ID,
-        status: "succeeded",
+        status,
       });
     }
   });

@@ -49,6 +49,9 @@ describe("collectHolderProfile", () => {
     // holder and does not set concentration: 4% and 3% are the wallet rows.
     expect(out.value.topHolderPct).toBeCloseTo(4, 5);
     expect(out.value.top10Pct).toBeCloseTo(7, 5);
+    expect(out.value.assessedWalletCount).toBe(2);
+    expect(out.value.top10PctIsFloor).toBe(true);
+    expect(out.value.distributionNote).toContain("floor across those assessed wallets");
     expect(out.value.holderCount).toBe(370_041);
     // 60% burned (dead address) + 25% locked; the 15% unlocked wallet does not count.
     expect(out.value.lpLockedOrBurnedPct).toBeCloseTo(85, 5);
@@ -85,6 +88,22 @@ describe("collectHolderProfile", () => {
     expect(out.value.distributionSource).toBe("goplus");
   });
 
+  it("marks a complete ten-wallet aggregate as a top-10 total rather than a floor", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(goplusBody({
+      holders: Array.from({ length: 12 }, (_, index) => ({
+        address: `0x${index + 1}`,
+        percent: "0.01",
+      })),
+    }))));
+
+    const out = await collectHolderProfile("ethereum", "0xabc");
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.top10Pct).toBeCloseTo(10, 5);
+    expect(out.value.assessedWalletCount).toBe(10);
+    expect(out.value.top10PctIsFloor).toBe(false);
+    expect(out.value.distributionNote).toBeNull();
+  });
+
   it("suppresses a self-inconsistent register whose shares sum past supply", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(goplusBody({
       holders: [
@@ -97,6 +116,8 @@ describe("collectHolderProfile", () => {
     expect(out.value.topHolderPct).toBeNull();
     expect(out.value.top10Pct).toBeNull();
     expect(out.value.holdersAssessed).toBe(false);
+    expect(out.value.assessedWalletCount).toBeNull();
+    expect(out.value.top10PctIsFloor).toBe(false);
     expect(out.value.distributionSource).toBeNull();
     expect(out.value.distributionNote).toMatch(/sum past/i);
     // Only the ordering is unusable: the count and the LP register still stand.
@@ -117,6 +138,7 @@ describe("collectHolderProfile", () => {
 
   it("takes the distribution from the chain explorer where GoPlus order is untrusted", async () => {
     vi.stubGlobal("fetch", routedFetch({
+      goplus: goplusBody({ is_mintable: "1" }),
       explorerMeta: { total_supply: "1000000" },
       explorerHolders: {
         items: [
@@ -131,6 +153,16 @@ describe("collectHolderProfile", () => {
     expect(out.value.top10Pct).toBeCloseTo(5.17, 5);
     expect(out.value.holdersAssessed).toBe(true);
     expect(out.value.distributionSource).toBe("explorer");
+    expect(out.value.distributionSourceUrl).toBe("https://robinhoodchain.blockscout.com/api/v2/tokens/0xabc/holders");
+    expect(Date.parse(out.value.distributionCapturedAt ?? "")).not.toBeNaN();
+    // Count and flags remain tied to GoPlus even though concentration does not.
+    expect(out.value.holderCount).toBe(370_041);
+    expect(out.value.contractFlags).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: "mint_authority_active", source: "goplus" }),
+    ]));
+    expect(out.value.sourceUrl).toBe("https://gopluslabs.io/token-security/4663/0xabc");
+    expect(Date.parse(out.value.sourceCapturedAt)).not.toBeNaN();
+    expect(out.value.distributionSourceUrl).not.toBe(out.value.sourceUrl);
     // The figure is no longer GoPlus's, and the note says so.
     expect(out.value.distributionNote).toMatch(/chain explorer/i);
   });

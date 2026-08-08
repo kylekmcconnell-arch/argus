@@ -138,6 +138,27 @@ describe("person audit input guard", () => {
     );
   });
 
+  it("passes only an allowlisted research intent to the director", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(runAudit).mockResolvedValue(null);
+    const first = response();
+    await handler(request("argus", { intent: "identity_and_control" }), first.res);
+    expect(runAudit).toHaveBeenLastCalledWith(
+      "argus",
+      expect.any(Function),
+      expect.objectContaining({ intent: "identity_and_control" }),
+    );
+
+    vi.mocked(runAudit).mockClear();
+    const second = response();
+    await handler(request("argus", { intent: "invented_provider_route" }), second.res);
+    expect(runAudit).toHaveBeenLastCalledWith(
+      "argus",
+      expect.any(Function),
+      expect.objectContaining({ intent: "investment_due_diligence" }),
+    );
+  });
+
   it("hands the collector an absolute analyst deadline of request start plus the ceiling minus the finalization reserve", async () => {
     vi.useFakeTimers();
     const requestStartedAt = new Date("2026-07-18T12:00:00.000Z").getTime();

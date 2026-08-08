@@ -64,19 +64,50 @@ export interface DeployerTrail {
   note: string;
 }
 
-// A person found by the web-deep team search (Google/LinkedIn/Crunchbase/X), with
-// their real name connected to handle + LinkedIn where possible.
+export type WebPersonProvider = "grok" | "twitterapi" | "github";
+export type WebPersonEvidenceKind =
+  | "team_attribution"
+  | "project_association"
+  | "code_contribution"
+  | "model_candidate";
+
+// A person surfaced by supplemental team discovery. Identity and relationship
+// provenance travel with every row so an observed association or code
+// contribution can never silently become proof of employment.
 export interface WebPerson {
   name: string;
   handle?: string;
   linkedin?: string;
   role: string;
   evidence?: string;
+  provider?: WebPersonProvider;
+  evidence_origin?: "deterministic" | "model_lead";
+  artifact_verified?: boolean;
+  evidenceKind?: WebPersonEvidenceKind;
   developerProfiles?: Array<{
     provider: "github" | "huggingface";
     url: string;
     sourceUrl: string;
   }>;
+}
+
+export interface WebTeamDiscoveryResult {
+  available: boolean;
+  attempted: boolean;
+  completed: boolean;
+  partial: boolean;
+  providerFailed: boolean;
+  people: WebPerson[];
+  providers?: Array<{
+    provider: WebPersonProvider;
+    status: "succeeded" | "partial" | "failed";
+  }>;
+}
+
+export function isConfirmedWebTeamPerson(person: WebPerson): boolean {
+  return person.evidence_origin === "deterministic"
+    && person.artifact_verified === true
+    && person.evidenceKind === "team_attribution";
 }
 
 export interface ProjectAccountAuditOutcome {
@@ -102,6 +133,8 @@ export interface Investigation {
   founderNote: string;            // honest founder-identity summary
   deployerTrail: DeployerTrail | null; // who funded the deployer (Solana)
   webTeam: WebPerson[];           // team found by the web/LinkedIn deep search
+  /** Coverage and provenance state for the paid supplemental people search. */
+  webTeamDiscovery?: WebTeamDiscoveryResult;
   /** Frozen server-side evidence/check context for a persisted report version. */
   versionContext?: ReportVersionContext;
   /** Transient persistence/cost capability for a scan completed in this tab. */
@@ -230,7 +263,7 @@ async function fetchTokenIdentity(symbol: string, name: string, contract: string
 export function streamInvestigation(
   input: RunnableTokenInput,
   h: InvestigationHandlers,
-  opts?: { forceTokenAudit?: boolean },
+  opts?: { forceTokenAudit?: boolean; intent?: import("./researchDirector").ResearchIntent },
 ): () => void {
   let aborted = false;
   let abortLive: (() => void) | null = null;
@@ -330,7 +363,7 @@ export function streamInvestigation(
               onStep: (s) => { if (!aborted) h.onStep(s); },
               onDone: (d) => resolve({ dossier: d, error: null }),
               onError: (error) => resolve({ dossier: null, error }),
-            });
+            }, opts?.intent);
           });
           projectAccount = projectAuditResult.dossier;
           projectAccountAudit = projectAccount

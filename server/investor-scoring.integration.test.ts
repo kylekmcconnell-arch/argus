@@ -4,6 +4,7 @@ import { getProfile, SubjectClass } from "../src/engine";
 import {
   analyzeSubject,
   buildScoringEvidencePacket,
+  deriveInvestorStrengthBands,
   extractScoringEvidenceCatalog,
   type AnalystAxis,
 } from "./agent";
@@ -58,7 +59,7 @@ async function collectedInvestorPacket(includeFundScale = true): Promise<string>
       "<h1>Our portfolio</h1><article>Acme Protocol</article>",
       "a",
     ),
-    resolveProjectDomain: async () => undefined,
+    resolveProjectDomain: async () => "acmeprotocol.com",
   });
 
   if (includeFundScale) {
@@ -83,10 +84,22 @@ async function collectedInvestorPacket(includeFundScale = true): Promise<string>
 
   return buildScoringEvidencePacket({
     profile: evidence.profile,
-    sourceArtifacts: evidence.sourceArtifacts,
+    sourceArtifacts: [...evidence.sourceArtifacts, {
+      kind: "press",
+      provider: "google-news",
+      title: "Independent ethics and reputation profile examines Paradigm",
+      excerpt: "The report discusses Paradigm's public conduct and governance standards.",
+      sourceUrl: "https://example.com/paradigm-investor-profile",
+      capturedAt: NOW,
+      contentHash: "e".repeat(64),
+      match: "exact_handle",
+    }],
     testimonials: [{
       claimed_endorser_handle: "@verified_founder",
       claimed_relationship: "public founder acknowledgment",
+      public_acknowledgment: "endorsement",
+      relationship_corroborated: true,
+      corroboration_verdict: "Corroborated",
       provider: "twitterapi",
       evidence_origin: "deterministic",
       artifact_verified: true,
@@ -109,6 +122,7 @@ describe("investor scoring integration", () => {
   it("carries real collector output through I2, I3, and a complete investor verdict", async () => {
     const packet = await collectedInvestorPacket();
     const catalog = extractScoringEvidenceCatalog(packet);
+    const investorBands = deriveInvestorStrengthBands(packet, investorAxes);
     const scale = catalog.find((artifact) => artifact.operation === "sourceArtifacts:fund_scale");
     const portfolio = catalog.find((artifact) => artifact.operation === "sourceArtifacts:portfolio_relationship");
     expect(portfolio).toMatchObject({ verification: "verified", eligibleAxes: ["I2_portfolio_quality"] });
@@ -131,7 +145,7 @@ describe("investor scoring integration", () => {
         input: {
           axes: investorAxes.map((spec) => ({
             axis: spec.axis,
-            score: Math.max(0, spec.weight - 2),
+            score: investorBands[spec.axis].maxScore,
             rationale: `Verified support for ${spec.axis}`,
             primaryEvidenceRef: aliasFor(spec.axis),
             additionalEvidenceRefs: [],

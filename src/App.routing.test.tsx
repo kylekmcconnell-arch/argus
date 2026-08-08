@@ -52,13 +52,24 @@ vi.mock("./components/AppShell", () => ({
 }));
 
 vi.mock("./components/Landing", () => ({
-  Landing: ({ onAudit }: { onAudit: (input: string, priv?: boolean) => void | Promise<void> }) => (
-    <button
-      data-testid="landing-run"
-      onClick={() => { void onAudit(harness.landingInput, harness.landingPrivate); }}
-    >
-      Run investigation
-    </button>
+  Landing: ({
+    onAudit,
+    onOpenSavedReport,
+  }: {
+    onAudit: (input: string, priv?: boolean) => void | Promise<void>;
+    onOpenSavedReport?: (ref: string, kind: "person") => void | Promise<void>;
+  }) => (
+    <>
+      <button
+        data-testid="landing-run"
+        onClick={() => { void onAudit(harness.landingInput, harness.landingPrivate); }}
+      >
+        Run investigation
+      </button>
+      <button data-testid="landing-example" onClick={() => { void onOpenSavedReport?.("uniswap", "person"); }}>
+        Open saved Uniswap report
+      </button>
+    </>
   ),
 }));
 
@@ -392,7 +403,7 @@ describe("App routing safety", () => {
     expect(harness.resolveStoredCases).not.toHaveBeenCalled();
     expect(harness.fetchReportState).not.toHaveBeenCalled();
     expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
-    expect(harness.startPersonAudit).toHaveBeenCalledWith("existingfounder", false);
+    expect(harness.startPersonAudit).toHaveBeenCalledWith("existingfounder", false, "investment_due_diligence");
   });
 
   it("keeps a failed person save session-only and out of shared audit surfaces", async () => {
@@ -541,7 +552,7 @@ describe("App routing safety", () => {
 
     expect(harness.resolveStoredCases).not.toHaveBeenCalled();
     expect(harness.fetchReportState).not.toHaveBeenCalled();
-    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true });
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true, intent: "investment_due_diligence" });
     expect(harness.startTokenScan).not.toHaveBeenCalled();
   });
 
@@ -611,7 +622,7 @@ describe("App routing safety", () => {
     await settle();
 
     expect(harness.resolveStoredCases).not.toHaveBeenCalled();
-    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true });
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true, intent: "investment_due_diligence" });
   });
 
   it("preserves fresh-run intent through an ambiguous ticker choice", async () => {
@@ -638,7 +649,7 @@ describe("App routing safety", () => {
 
     expect(harness.resolveStoredCases).not.toHaveBeenCalled();
     expect(harness.fetchReportState).not.toHaveBeenCalled();
-    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true });
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true, intent: "investment_due_diligence" });
   });
 
   it("never reinterprets an invalid cashtag as a person audit", async () => {
@@ -719,6 +730,38 @@ describe("App routing safety", () => {
     await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
 
     expect(harness.fetchReportState).toHaveBeenCalledWith("typedfounder", "person");
+    expectNoRunnerStarted();
+  });
+
+  it("opens the Landing Uniswap example through stored-only report resolution", async () => {
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "person",
+        ref: "uniswap",
+        payload: {
+          handle: "@uniswap",
+          display_name: "Uniswap",
+          headline: "Saved Uniswap example",
+          report: {
+            composite_verdict: "PASS",
+            governing_score: 77,
+            identity_confidence: "Confirmed",
+            roles: ["PROJECT"],
+          },
+          evidence: { associates: [] },
+          checkRuns: [{ checkId: "identity-resolution", status: "confirmed" }],
+        },
+        versionContext: { caseId: "case-uniswap", reportVersionId: "version-uniswap" },
+      },
+    });
+
+    const view = await renderApp();
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='landing-example']")?.click());
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+
+    expect(harness.fetchReportState).toHaveBeenCalledWith("uniswap", "person");
+    expect(harness.resolveStoredCases).not.toHaveBeenCalled();
     expectNoRunnerStarted();
   });
 
@@ -1238,7 +1281,7 @@ describe("App routing safety", () => {
 
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-pivot']")?.click());
     await settle();
-    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("person_pivot", true);
+    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("person_pivot", true, "investment_due_diligence");
 
     // Return to the source report, then follow its project exploration path.
     await act(async () => {
@@ -1250,7 +1293,7 @@ describe("App routing safety", () => {
 
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='project-person-pivot']")?.click());
     await settle();
-    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("project_pivot", true);
+    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("project_pivot", true, "investment_due_diligence");
   });
 
   it("keeps token and investigation founder pivots private", async () => {
@@ -1278,7 +1321,7 @@ describe("App routing safety", () => {
     expect(harness.tokenReports.at(-1)?.persistence).toEqual({ state: "private", scanId: "private-token-scan" });
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='token-pivot']")?.click());
     await settle();
-    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("token_pivot", true);
+    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("token_pivot", true, "investment_due_diligence");
 
     // Start a separate private investigation and verify its founder callback.
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='nav-home']")?.click());
@@ -1289,7 +1332,7 @@ describe("App routing safety", () => {
     await settle();
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='investigation-pivot']")?.click());
     await settle();
-    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("investigation_pivot", true);
+    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("investigation_pivot", true, "investment_due_diligence");
   });
 
   it("canonicalizes a private ticker without reopening its existing public case", async () => {
@@ -1323,7 +1366,7 @@ describe("App routing safety", () => {
     expect(harness.resolveTokenSubject).toHaveBeenCalled();
     expect(harness.resolveStoredCases).not.toHaveBeenCalled();
     expect(harness.fetchReportState).not.toHaveBeenCalled();
-    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, true, { force: true });
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, true, { force: true, intent: "investment_due_diligence" });
   });
 
   it("does not navigate away when an unsaved case brief close is declined", async () => {

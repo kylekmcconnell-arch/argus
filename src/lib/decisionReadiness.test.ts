@@ -280,7 +280,7 @@ describe("investigation token readiness end to end", () => {
     const rows = reconcileInvestigationChecks(tokenChecks(dossier as any), "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf", projectAccount);
     const readiness = deriveDecisionReadiness(rows);
 
-    expect(readiness.applicable).toBe(11);
+    expect(readiness.applicable).toBe(10);
     expect(readiness.successful).toBe(10);
     expect(readiness.status).toBe("ready");
 

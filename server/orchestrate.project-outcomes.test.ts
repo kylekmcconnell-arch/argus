@@ -118,7 +118,7 @@ describe("project core evidence outcomes", () => {
 
     expect(collectProjectCoreEvidenceOutcomes(ctx)).toMatchObject({
       state: "partial",
-      detail: expect.stringContaining("1 verified backing record"),
+      detail: expect.stringContaining("1 strictly verified backing record"),
     });
     expect(outcomes).toContainEqual(expect.objectContaining({
       id: "project-backing-partners",
@@ -209,6 +209,53 @@ describe("project core evidence outcomes", () => {
     });
   });
 
+  it("keeps provider-projected backing as source-reported context, not ARGUS verification", () => {
+    const { ctx, evidence, outcomes } = context();
+    evidence.basicFacts = [{
+      ...verifiedFact("investor"),
+      providerProjection: true,
+      floorEligible: false,
+      qualifier: "DeFiLlama attribution; not a verified investment",
+    }];
+
+    const result = collectProjectCoreEvidenceOutcomes(ctx);
+
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      id: "project-backing-partners",
+      status: "reported",
+      provider: "basic-facts-web",
+      note: expect.stringContaining("not independently verified enough to establish the relationship or set a score floor"),
+    }));
+    expect(outcomes).not.toContainEqual(expect.objectContaining({
+      id: "project-backing-partners",
+      status: "confirmed",
+    }));
+    expect(result.detail).toContain("0 strictly verified backing records");
+    expect(result.detail).toContain("1 source-reported context record");
+  });
+
+  it("keeps a floor-ineligible audit attestation as source-reported context", () => {
+    const { ctx, evidence, outcomes } = context();
+    evidence.basicFacts = [{
+      ...verifiedFact("audit"),
+      status: "corroborated",
+      floorEligible: false,
+      qualifier: "Official security page names an auditor; no auditor-site confirmation succeeded",
+    }];
+
+    collectProjectCoreEvidenceOutcomes(ctx);
+
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      id: "project-transparency",
+      status: "reported",
+      note: expect.stringContaining("did not pass independent verification and did not set a score floor"),
+    }));
+    expect(outcomes).not.toContainEqual(expect.objectContaining({
+      id: "project-transparency",
+      status: "confirmed",
+    }));
+  });
+
   it.each([
     "legal_entity",
     "governance",
@@ -294,6 +341,7 @@ describe("project core evidence outcomes", () => {
         providerRuns: [{ phase: "repair", provider: "test", state: "succeeded" }],
       },
     ];
+    evidence.projectToken = { verified: true } as typeof evidence.projectToken;
 
     projectVerifiedBasicFacts(ctx);
 
@@ -307,6 +355,32 @@ describe("project core evidence outcomes", () => {
       id: "project-team-identity",
       status: "finding",
       note: expect.stringContaining("no named operator passed source verification"),
+    }));
+  });
+
+  it("does not rewrite a provider-projected product description as verified", () => {
+    const { ctx, evidence, outcomes } = context();
+    evidence.basicFacts = [
+      verifiedFact("official_identity"),
+      {
+        ...verifiedFact("product"),
+        providerProjection: true,
+        floorEligible: false,
+        qualifier: "Official X bio description",
+      },
+    ];
+    evidence.projectToken = { verified: true } as typeof evidence.projectToken;
+
+    projectVerifiedBasicFacts(ctx);
+
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      id: "project-product-substance",
+      status: "reported",
+      note: expect.stringContaining("not independently verified enough to set a score floor"),
+    }));
+    expect(outcomes).not.toContainEqual(expect.objectContaining({
+      id: "project-product-substance",
+      status: "confirmed",
     }));
   });
 

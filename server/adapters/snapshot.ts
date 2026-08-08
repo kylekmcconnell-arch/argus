@@ -66,15 +66,16 @@ export interface GovernanceProposal {
   /** True when some choice other than the winner drew voting power. */
   contested: boolean;
   /**
-   * On a CONTESTED vote only: the top voter cast more than the winning margin,
-   * so that one address could have changed the outcome by voting differently.
-   * Null on an uncontested vote, where the question is meaningless.
+   * On a CONTESTED vote only: the top voter's power exceeded the gap between
+   * the two leading options. This is a magnitude comparison, not a claim that
+   * the voter could flip the result: Snapshot's choice was not collected here.
+   * Null on an uncontested vote, where the comparison is meaningless.
    */
-  topVoterCouldHaveFlipped: boolean | null;
+  topVoterExceedsMargin: boolean | null;
   endedAt: string | null;
 }
 
-export type SpaceBinding = "token_contract" | "official_x" | "official_domain" | "supplied";
+export type SpaceBinding = "official_x" | "official_domain";
 
 export interface GovernanceSpace {
   id: string;
@@ -132,9 +133,6 @@ function num(value: unknown): number | null {
 
 const normalizeHandle = (value: string | null | undefined): string =>
   String(value ?? "").trim().replace(/^@/, "").toLowerCase();
-
-const normalizeAddress = (value: string | null | undefined): string =>
-  String(value ?? "").trim().toLowerCase();
 
 function hostOf(value: string | null | undefined): string | null {
   const raw = String(value ?? "").trim();
@@ -222,13 +220,8 @@ export function spaceBinding(
   space: Omit<GovernanceSpace, "binding">,
   subject: GovernanceSubject,
 ): SpaceBinding | null {
-  if (subject.spaceId && space.id.toLowerCase() === subject.spaceId.trim().toLowerCase()) return "supplied";
   if (!space.verifiedBySnapshot) return null;
 
-  const token = normalizeAddress(subject.tokenAddress);
-  if (token && space.strategyAddresses.some((address) => normalizeAddress(address) === token)) {
-    return "token_contract";
-  }
   const handle = normalizeHandle(subject.handle);
   if (handle && normalizeHandle(space.twitter) === handle) return "official_x";
   if (relatedHosts(hostOf(space.website), hostOf(subject.website))) return "official_domain";
@@ -303,7 +296,7 @@ export function summarizeProposal(
     top1Pct: share(1),
     top2Pct: share(2),
     contested,
-    topVoterCouldHaveFlipped: contested && topVoters.length > 0
+    topVoterExceedsMargin: contested && topVoters.length > 0
       ? topVoters[0].votingPower > winner - runnerUp
       : null,
     endedAt: endRaw ? new Date(endRaw * 1000).toISOString() : null,
@@ -439,8 +432,11 @@ export function describeGovernance(reading: GovernanceReading): string[] {
   const highest = Math.max(...top2);
   const lowest = Math.min(...top2);
   const worst = measured.find((proposal) => proposal.top2Pct === highest);
+  const measuredWindow = measured.length === reading.proposals.length
+    ? `the last ${measured.length} closed proposals`
+    : `${measured.length} of the last ${reading.proposals.length} closed proposals with readable voter-level data`;
   claims.push(
-    `Across the last ${measured.length} closed proposals in ${reading.space.id}, the two largest voters cast `
+    `Across ${measuredWindow} in ${reading.space.id}, the two largest voters cast `
     + (measured.length === 1 || Math.abs(highest - lowest) < 0.5
       ? `${pct(highest)} of the voting power.`
       : `between ${pct(lowest)} and ${pct(highest)} of the voting power.`)
@@ -457,10 +453,11 @@ export function describeGovernance(reading: GovernanceReading): string[] {
     + "decision-making power rather than evidence of a large holding.",
   );
 
-  const flippable = measured.filter((proposal) => proposal.topVoterCouldHaveFlipped === true);
-  if (flippable.length) {
+  const marginExceeded = measured.filter((proposal) => proposal.topVoterExceedsMargin === true);
+  if (marginExceeded.length) {
     claims.push(
-      `On ${flippable.length} of them the largest voter cast more than the winning margin, so that single address could have changed the outcome by voting the other way.`,
+      `On ${marginExceeded.length} of them the largest reported voter cast more voting power than the gap between the top two options. `
+      + "This compares voting-power magnitude only. The read does not contain that voter's choice, so it supports no outcome-changing counterfactual.",
     );
   }
 

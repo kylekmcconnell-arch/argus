@@ -25,7 +25,7 @@
 
 import { randomUUID } from "node:crypto";
 
-import { env } from "../config";
+import { env } from "../config.js";
 
 const HOST = "https://openapi.gmgn.ai";
 

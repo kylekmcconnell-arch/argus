@@ -67,28 +67,48 @@ function CopyAddress({ address }: { address: string }) {
 export function ProjectLinks({
   links,
   website,
+  websites,
   xHandle,
   contractAddress,
   className,
 }: {
   links?: RawLink[];
   website?: string | null;
+  /** Distinct official web surfaces whose roles must not be collapsed. */
+  websites?: Array<{ label: string; url: string }>;
   xHandle?: string | null;
   /** Token contract, rendered as a one-click copy chip. */
   contractAddress?: string | null;
   className?: string;
 }) {
-  const urls: string[] = [];
-  const push = (u?: string | null) => { if (u) { const full = /^https?:\/\//i.test(u) ? u : `https://${u}`; if (/^https?:\/\/\S+$/.test(full)) urls.push(full); } };
+  const urls: Array<{ url: string; explicitLabel?: string }> = [];
+  const push = (u?: string | null, explicitLabel?: string) => {
+    if (!u) return;
+    const full = /^https?:\/\//i.test(u) ? u : `https://${u}`;
+    if (/^https?:\/\/\S+$/.test(full)) urls.push({ url: full, explicitLabel });
+  };
   push(website);
+  for (const item of websites ?? []) push(item.url, item.label);
   if (xHandle) push(`https://x.com/${xHandle.replace(/^@/, "")}`);
   for (const l of links ?? []) push(l.url);
 
   // Dedupe by label: one chip per platform (and one per distinct website host).
   const seen = new Set<string>();
   const items = urls
-    .map((url) => ({ url, ...classify(url) }))
-    .filter((it) => { const k = it.label.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
+    .map(({ url, explicitLabel }) => {
+      const classified = classify(url);
+      return { url, ...classified, label: explicitLabel?.trim() || classified.label };
+    })
+    .filter((it) => {
+      // Social products dedupe by platform. Websites dedupe by hostname so a
+      // token landing page and the protocol/company site can coexist.
+      const k = it.pri === 0
+        ? `site:${new URL(it.url).hostname.replace(/^www\./, "").toLowerCase()}`
+        : `platform:${classify(it.url).label.toLowerCase()}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
     .sort((a, b) => a.pri - b.pri);
 
   const address = contractAddress?.trim();

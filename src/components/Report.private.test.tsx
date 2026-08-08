@@ -55,6 +55,140 @@ function decisionBasisText(): string {
 }
 
 describe("private person report evidence boundary", () => {
+  it("promotes entity intelligence pressure into the report summary without changing the score", () => {
+    const base = buildReport(SUBJECTS[1]);
+    expect(base.intelligence).toBeDefined();
+    const dossier: Dossier = {
+      ...base,
+      intelligence: {
+        ...base.intelligence!,
+        signals: [
+          {
+            id: "entity-support-investment-record",
+            ruleId: "investment-record",
+            ruleVersion: 1,
+            kind: "observation",
+            domain: "track_record",
+            severity: "medium",
+            polarity: "support",
+            headline: "A verified operating record supports the base case",
+            finding: "The saved record confirms prior operating work.",
+            whyItMatters: "Execution history is relevant to the investment case.",
+            changeCondition: "Direct records contradict the attributed work.",
+            evidenceState: "verified",
+            measurementRefs: [],
+            sourceRefs: [],
+            lenses: ["investment"],
+          },
+          {
+            id: "entity-pressure-related-party",
+            ruleId: "related-party",
+            ruleVersion: 1,
+            kind: "observation",
+            domain: "relationships",
+            severity: "high",
+            polarity: "risk",
+            headline: "A related-party relationship needs review",
+            finding: "The saved relationship record connects the subject to a controlled counterparty.",
+            whyItMatters: "The relationship may affect independence and incentives.",
+            changeCondition: "Independent governance records resolve the relationship.",
+            evidenceState: "verified",
+            measurementRefs: [],
+            sourceRefs: [],
+            lenses: ["investment", "alpha_research"],
+          },
+          {
+            id: "entity-support-alpha-change",
+            ruleId: "alpha-change",
+            ruleVersion: 1,
+            kind: "observation",
+            domain: "chronology",
+            severity: "medium",
+            polarity: "support",
+            headline: "A newly verified operating milestone changes the setup",
+            finding: "The saved chronology records a recent product milestone.",
+            whyItMatters: "The timing may matter more to an alpha read than to the base investment case.",
+            changeCondition: "Later operating evidence reverses the milestone.",
+            evidenceState: "verified",
+            measurementRefs: [],
+            sourceRefs: [],
+            lenses: ["alpha_research"],
+          },
+        ],
+        questions: [],
+        lenses: base.intelligence!.lenses.map((lens) => lens.id === "investment"
+          ? { ...lens, signalIds: ["entity-support-investment-record", "entity-pressure-related-party"], unresolvedQuestionIds: [] }
+          : lens.id === "alpha_research"
+            ? { ...lens, signalIds: ["entity-support-alpha-change", "entity-pressure-related-party"], unresolvedQuestionIds: [] }
+            : { ...lens, signalIds: [], unresolvedQuestionIds: [] }),
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const summary = container.querySelector("#decision-summary")?.textContent ?? "";
+    expect(summary).toContain("Strongest evidence");
+    expect(summary).toContain("A verified operating record supports the base case");
+    expect(summary).toContain("Sharpest concern");
+    expect(summary).toContain("What would change it");
+    expect(summary).toContain("A related-party relationship needs review");
+    expect(summary).toContain("score-neutral derivation");
+    expect(dossier.report.governing_score).toBe(base.report.governing_score);
+
+    const synthesis = container.querySelector('[aria-label="Case synthesis"]')!;
+    const alphaButton = [...synthesis.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Alpha")!;
+    act(() => alphaButton.click());
+
+    expect(synthesis.textContent).toContain("Strongest evidence");
+    expect(synthesis.textContent).toContain("A newly verified operating milestone changes the setup");
+    expect(synthesis.textContent).toContain("A related-party relationship needs review");
+    expect(alphaButton.getAttribute("aria-pressed")).toBe("true");
+    const alphaAtlasTab = [...container.querySelectorAll('button[role="tab"]')]
+      .find((button) => button.textContent?.trim() === "Alpha research");
+    expect(alphaAtlasTab?.getAttribute("aria-selected")).toBe("true");
+    expect(dossier.report.governing_score).toBe(base.report.governing_score);
+  });
+
+  it("puts the mobile verdict ahead of profile detail and collapses secondary actions", () => {
+    const dossier = buildReport(SUBJECTS[1]);
+
+    act(() => {
+      root.render(
+        <Report
+          dossier={dossier}
+          onReset={() => {}}
+          onAudit={() => {}}
+          onRescan={() => {}}
+          onOpenBrief={() => {}}
+        />,
+      );
+    });
+
+    const overview = container.querySelector("#report-overview");
+    const profileDisclosure = [...(overview?.querySelectorAll("details") ?? [])]
+      .find((details) => details.textContent?.includes("Profile context"));
+    expect(profileDisclosure).toBeDefined();
+    expect(profileDisclosure?.hasAttribute("open")).toBe(false);
+
+    const result = overview?.querySelector<HTMLElement>('[aria-label="Report result and check status"]');
+    expect(result?.className).toContain("order-2");
+    expect(result?.children[0]?.className).toContain("max-sm:order-2");
+    expect(result?.children[1]?.className).toContain("max-sm:order-1");
+
+    const toolbar = container.querySelector("header.sticky");
+    const caseBrief = [...(toolbar?.querySelectorAll("button") ?? [])]
+      .find((button) => button.textContent?.includes("Case brief"));
+    expect(caseBrief?.className).toContain("btn-primary");
+    const mobileActions = [...(toolbar?.querySelectorAll("details") ?? [])]
+      .find((details) => details.className.includes("sm:hidden"));
+    expect(mobileActions?.textContent).toContain("Rescan current evidence");
+    expect(mobileActions?.textContent).toContain("Add to watchlist");
+    expect(mobileActions?.textContent).toContain("New audit");
+  });
+
   it("surfaces a material protocol incident and suspended official X account beside the verdict", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier: Dossier = {
@@ -99,15 +233,90 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    const alert = container.querySelector('[aria-label="Material subject risk alerts"]');
-    expect(alert?.textContent).toContain("Major protocol security incident");
+    const alert = container.querySelector('[aria-label="Material subject alerts"]');
+    expect(alert?.textContent).toContain("Provider-recorded protocol event");
     expect(alert?.textContent).toContain("$295M");
     expect(alert?.textContent).toContain("Apr 1, 2026");
-    expect(alert?.textContent).toContain("limits the report to 39/100");
+    expect(alert?.textContent).toContain("activates the report's 39/100 scoring cap");
     expect(alert?.textContent).toContain("Official X account suspended");
     expect(container.textContent).toContain("X profile metrics unavailable");
     expect(alert?.querySelector('a[href="https://x.com/driftprotocol"]')).not.toBeNull();
     expect(alert?.querySelector('a[href="https://defillama.com/protocol/drift"]')).not.toBeNull();
+    const synthesis = container.querySelector('[aria-label="Case synthesis"]')?.textContent ?? "";
+    expect(synthesis).toContain("Sharpest concern");
+    expect(synthesis).toContain("The score is limited because of:");
+    expect(synthesis).toContain("Critical protocol loss");
+  });
+
+  it("mounts the complete provider ledgers in a standalone report", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier: Dossier = {
+      ...base,
+      website: "https://app.fixture.xyz",
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Fixture",
+        symbol: "FIX",
+        coingeckoId: "fixture-token",
+        rank: 200,
+        address: "0x5555555555555555555555555555555555555555",
+        chain: "ethereum",
+        sourceUrl: "https://www.coingecko.com/en/coins/fixture-token",
+        capturedAt: "2026-08-06T12:00:00.000Z",
+      },
+      companyEnrichment: {
+        name: "Fixture Labs",
+        uuid: "company-fixture",
+        identityMatch: "official_domain",
+        requestedDomain: "app.fixture.xyz",
+        matchedDomain: "fixture.xyz",
+        matchMethod: "parent_or_subdomain",
+        funding: {
+          totalRaisedUsd: 5_000_000,
+          leadInvestors: ["Lead Capital"],
+          rounds: [{
+            date: "2025-03-04",
+            round: "Seed",
+            amountUsd: 5_000_000,
+            leadInvestors: ["Lead Capital"],
+            otherInvestors: ["Other Ventures"],
+          }],
+        },
+        management: [],
+        sourceUrl: "https://fixture.xyz",
+        capturedAt: "2026-08-06T12:00:00.000Z",
+      },
+      protocolTvl: {
+        slug: "fixture",
+        name: "Fixture",
+        symbol: "FIX",
+        tvlUsd: 10_000_000,
+        chains: ["Ethereum"],
+        chainBreakdown: [{ chain: "Ethereum", tvlUsd: 10_000_000 }],
+        geckoId: "fixture-token",
+        hacks: [{
+          date: "2025-06-02",
+          amountUsd: 2_000_000,
+          returnedFunds: false,
+          returnedAmountUsd: null,
+          classification: "Protocol Logic",
+          technique: "Oracle manipulation",
+        }],
+        sourceUrl: "https://defillama.com/protocol/fixture",
+        capturedAt: "2026-08-06T12:00:00.000Z",
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const ledgers = container.querySelector('[aria-label="Provider evidence ledgers"]');
+    expect(ledgers?.textContent).toContain("Fixture Labs");
+    expect(ledgers?.textContent).toContain("Lead Capital");
+    expect(ledgers?.textContent).toContain("Protocol incident ledger");
+    expect(ledgers?.textContent).toContain("Oracle manipulation");
   });
 
   it("renders model-only team identities as leads and excludes them from grounded report chat", () => {
@@ -145,6 +354,65 @@ describe("private person report evidence boundary", () => {
     const context = String(harness.askReport.mock.calls.at(-1)?.[0]?.context ?? "");
     expect(context).not.toContain("Model Team Lead");
     expect(context).not.toContain("Model Venture");
+  });
+
+  it("shows exact team-role proof, developer-profile lineage, and every leadership-currency state", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier: Dossier = {
+      ...base,
+      webTeam: [{
+        name: "Ada Example",
+        handle: "@ada_example",
+        role: "Chief Technology Officer",
+        linkedin: "linkedin.com/in/ada-example",
+        evidence: "Named on the saved official team page.",
+        source: "official team page",
+        sourceUrl: "https://fixture.example/team",
+        developerProfiles: [{
+          provider: "github",
+          url: "https://github.com/ada-example",
+          sourceUrl: "https://x.com/ada_example",
+        }],
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+      leaderDepartures: [{
+        name: "Ada Example",
+        role: "Chief Technology Officer",
+        linkedin: "linkedin.com/in/ada-example",
+        state: "current",
+        summary: "Saved provider record lists the role.",
+      }, {
+        name: "Bea Example",
+        role: "Co-Founder",
+        state: "departed",
+        ended: "2024-03",
+        summary: "Saved provider record ends the role in March 2024.",
+      }, {
+        name: "Cy Example",
+        role: "Chief Financial Officer",
+        state: "absent",
+        summary: "Saved provider record held no matching role.",
+      }],
+      report: {
+        ...base.report,
+        roles: ["PROJECT"],
+        governing_role: "PROJECT",
+      },
+    } as Dossier;
+
+    act(() => root.render(<Report dossier={dossier} onReset={() => {}} />));
+
+    expect(container.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("role proof");
+    expect(container.querySelector('a[href="https://github.com/ada-example"]')?.textContent).toContain("GitHub");
+    expect(container.querySelector('a[href="https://x.com/ada_example"]')?.textContent).toContain("profile link proof");
+    const continuity = container.querySelector('[aria-label="Frozen leadership continuity ledger"]');
+    expect(continuity?.textContent).toContain("provider record lists project");
+    expect(continuity?.textContent).toContain("provider record ends Mar 1, 2024");
+    expect(continuity?.textContent).toContain("provider record did not answer for this project");
+    expect(continuity?.textContent).toContain("not evidence that this person was never involved");
+    expect(continuity?.querySelector('a[href="https://linkedin.com/in/ada-example"]')).not.toBeNull();
   });
 
   it("renders a server-derived model-enriched lead once, not re-derived from the sanitized team copy", () => {
@@ -1075,6 +1343,42 @@ describe("decision-safe person report presentation", () => {
     expect(decisionBasisText()).not.toContain("No evidence-backed role selected a scoring methodology");
   });
 
+  it("shows supported investor axes while leaving unsupported areas unmeasured", () => {
+    const base = buildReport(SUBJECTS[2]);
+    const investorReport = base.report.role_reports.find((role) => role.role === "INVESTOR")!;
+    const partialAxes = Object.fromEntries(Object.entries(investorReport.axes)
+      .filter(([axis]) => !["I2_portfolio_quality", "I3_fund_scale_tier"].includes(axis)));
+    const dossier = {
+      ...base,
+      completeness_state: "partial" as const,
+      report: {
+        ...base.report,
+        role_reports: [{
+          ...investorReport,
+          verdict: "INCOMPLETE",
+          raw_total: null,
+          score_total: null,
+          axes: partialAxes,
+        }],
+        governing_role: "INVESTOR",
+        governing_score: null,
+        composite_verdict: "INCOMPLETE" as const,
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onRescan={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Partial decision assessment");
+    expect(container.textContent).toContain("3 of 5 decision areas were assessed");
+    expect(container.textContent).toContain("Portfolio quality and Fund scale & tier remain unmeasured");
+    expect(container.textContent).toContain("missing evidence was not treated as zero");
+    expect(container.textContent).not.toContain("No decision areas scored");
+    expect(container.textContent).not.toContain("the scoring pass did not complete");
+    expect(container.textContent).not.toContain("No official token");
+  });
+
   it("explains an adverse verdict with adverse drivers and labels positive evidence as counterweight", () => {
     const dossier = buildReport(SUBJECTS[0]);
 
@@ -1324,6 +1628,9 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("This score uses the facts collected so far");
     expect(container.textContent).toContain("Current score 71");
     expect(container.textContent).not.toContain("score withheld");
+    const synthesis = container.querySelector('[aria-label="Case synthesis"]')?.textContent ?? "";
+    expect(synthesis).toContain("What would change it");
+    expect(synthesis).not.toContain("No checks remain open");
   });
 
   it("binds report chat to the exact frozen version without sending client-authored evidence", () => {
@@ -1411,6 +1718,78 @@ describe("decision-safe person report presentation", () => {
     expect(container.querySelector('a[href*="user:secret"]')).toBeNull();
   });
 
+  it("publishes frozen investment-firm questions in both key facts and the follow-up plan", () => {
+    const base = buildReport(SUBJECTS[2]);
+    const dossier = {
+      ...base,
+      handle: "@theforms",
+      display_name: "The Forms Capital",
+      bio: "We back seed-stage founders.",
+      basicFacts: [],
+      basicFactQuestionLedger: [
+        {
+          questionId: "investor_org.official_identity",
+          audience: "investor",
+          batch: "identity",
+          predicate: "official_identity",
+          question: "What exact fund, investment firm, or organization does this account represent?",
+          critical: true,
+          status: "unanswered",
+          answerRefs: [],
+          providerRuns: [{ phase: "primary", provider: "test", state: "partial" }],
+        },
+        {
+          questionId: "investor_org.founder",
+          audience: "investor",
+          batch: "identity",
+          predicate: "founder",
+          question: "Who founded the investment organization? Return one person per answer.",
+          critical: false,
+          status: "unanswered",
+          answerRefs: [],
+          providerRuns: [{ phase: "primary", provider: "test", state: "completed_empty" }],
+        },
+        {
+          questionId: "investor_org.executive",
+          audience: "investor",
+          batch: "identity",
+          predicate: "executive",
+          question: "Who currently leads, manages, or makes investment decisions for the organization?",
+          critical: true,
+          status: "unanswered",
+          answerRefs: [],
+          providerRuns: [{ phase: "primary", provider: "test", state: "failed" }],
+        },
+        {
+          questionId: "investor_org.governance",
+          audience: "investor",
+          batch: "structure_risk",
+          predicate: "governance",
+          question: "What formal management, investment-committee, or governance structure is documented?",
+          critical: false,
+          status: "unanswered",
+          answerRefs: [],
+          providerRuns: [{ phase: "primary", provider: "test", state: "skipped" }],
+        },
+      ],
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const keyFacts = container.querySelector("#basic-facts");
+    const followUpPlan = container.querySelector("#verification-next")?.parentElement;
+    for (const section of [keyFacts, followUpPlan]) {
+      expect(section?.textContent).toContain("Who founded the investment organization?");
+      expect(section?.textContent).toContain("Who currently leads, manages, or makes investment decisions for the organization?");
+      expect(section?.textContent).toContain("What formal management, investment-committee, or governance structure is documented?");
+      expect(section?.textContent).not.toContain("Which firm and fund do they represent today?");
+      expect(section?.textContent).not.toContain("Is a related asset a public security?");
+      expect(section?.textContent).not.toContain("Is a crypto token directly tied to a venture they control?");
+    }
+  });
+
   it("renders verified fund scale beside portfolio attribution without inflating personal capital", () => {
     const base = buildReport(SUBJECTS[2]);
     const dossier = {
@@ -1458,9 +1837,12 @@ describe("decision-safe person report presentation", () => {
         match: "relationship_confirmed" as const,
         relationship: "invested_in" as const,
         subjectName: "Nova Capital",
+        subjectHandle: "@nova_capital",
         investorEntityName: "Nova Capital",
+        investorEntityDomain: "novacap.io",
         attribution: "direct_subject" as const,
         projectName: "Acme Protocol",
+        projectDomain: "acme.example",
         sourceClass: "first_party_subject" as const,
       }],
     };
@@ -1502,6 +1884,7 @@ describe("decision-safe person report presentation", () => {
       profile_collection_state: "resolved" as const,
       profile_provider: "twitterapi",
       profile_captured_at: "2026-07-10T14:00:00.000Z",
+      identity_binding: "licensed_exact_social" as const,
       sourceArtifacts: [{
         kind: "fund_scale" as const,
         provider: "fund-scale-web" as const,
@@ -1597,6 +1980,7 @@ describe("decision-safe person report presentation", () => {
         investorDomainProfileName: "Paradigm",
         investorDomainProfileWebsite: "https://paradigm.xyz",
         projectName: "Acme Protocol",
+        projectDomain: "acme.example",
         sourceClass: "first_party_investor" as const,
       }],
     };

@@ -8,12 +8,11 @@ import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
 import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "../lib/panelCostHeaders";
 import { PanelRequestNotice } from "./PanelRequestNotice";
 
-// Wallet identity clustering (/api/cluster). "Top 10 hold 40%" is only alarming
-// once you know how many of those ten are the same hand — a team that splits its
-// float across fresh wallets looks decentralised and isn't. This proves the
-// linkage: wallets tied by a shared funder or a direct transfer are unioned into
-// one operator, and the combined supply each group controls is the concentration
-// a holder chart hides. Expensive (per-wallet on-chain trace), so click-to-run.
+// Wallet relationship tracing (/api/cluster). A shared seed funder or a direct
+// transfer is a checkable on-chain link. It is not proof of shared identity,
+// ownership, intent, or control, so this panel reports linked groups and their
+// summed holder share without collapsing them into one operator. Expensive
+// (per-wallet on-chain trace), so click-to-run.
 const STAGES = [
   "Pulling the top holders…",
   "Tracing who funded each wallet…",
@@ -21,15 +20,23 @@ const STAGES = [
   "Unioning the linked wallets…",
   "Almost there…",
 ];
-const TONE = { bad: "var(--color-avoid)", warn: "var(--color-caution)", good: "var(--color-pass)" };
+const TONE = { bad: "var(--color-avoid)", warn: "var(--color-caution)" };
 
 type ClusterWallet = { address: string; pct: number; insider: boolean; isCreator: boolean };
 type Cluster = { wallets: ClusterWallet[]; size: number; combinedPct: number; sharedFunders: string[]; includesCreator: boolean; links: { a: string; b: string; type: string; via?: string }[] };
 type ClusterData = {
   available?: boolean;
   note?: string;
+  outcome?: "links_observed" | "no_links_observed" | "insufficient_coverage";
   clusters?: Cluster[];
   walletsAnalyzed?: number;
+  coverage?: {
+    sampled: number;
+    fullyTraced: number;
+    historyTruncated: number;
+    deadlineSkipped: number;
+    providerFailed: number;
+  };
   allWallets?: BubbleWallet[];
   edges?: BubbleEdge[];
 };
@@ -136,8 +143,8 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
           <span className="flex items-center gap-2.5">
             <LinkIcon />
             <span>
-              <span className="block text-[13px] font-semibold text-signal-lift">Cluster the holders</span>
-              <span className="block text-[11px] text-ink-dim">how many of the top wallets are secretly one hand?</span>
+              <span className="block text-[13px] font-semibold text-signal-lift">Trace links between holders</span>
+              <span className="block text-[11px] text-ink-dim">which sampled wallets share a seed funder or direct transfer?</span>
             </span>
           </span>
           <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal-lift transition group-hover:bg-signal group-hover:text-white">cluster →</span>
@@ -152,19 +159,24 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
   // ── result ──
   const clusters: Cluster[] = data.clusters ?? [];
   const top = clusters[0];
-  const tone = !clusters.length ? "good" : top.combinedPct >= 25 || top.size >= 4 ? "bad" : "warn";
-  const color = TONE[tone as keyof typeof TONE];
+  const tone: "neutral" | "bad" | "warn" = !clusters.length
+    ? "neutral"
+    : top.combinedPct >= 25 || top.size >= 4 ? "bad" : "warn";
+  const color = tone === "neutral" ? "var(--color-ink-dim)" : TONE[tone];
 
   return (
-    <div className={`panel p-4 ${tone === "good" ? "" : "tint-var"}`} style={tone === "good" ? undefined : ({ "--tint": color } as React.CSSProperties)}>
+    <div className={`panel p-4 ${tone === "neutral" ? "" : "tint-var"}`} style={tone === "neutral" ? undefined : ({ "--tint": color } as React.CSSProperties)}>
       <div className="flex items-center gap-2">
         <LinkIcon />
         <span className="eyebrow">Wallet clustering</span>
-        {data.walletsAnalyzed != null && <span className="mono text-[11px] text-ink-faint">{data.walletsAnalyzed} wallets analyzed</span>}
+        {data.walletsAnalyzed != null && <span className="mono text-[11px] text-ink-faint">{data.walletsAnalyzed} wallets sampled</span>}
+        {data.coverage && data.coverage.fullyTraced < data.coverage.sampled && (
+          <span className="mono text-[11px] text-ink-faint">{data.coverage.fullyTraced} full traces</span>
+        )}
         <span className="ml-auto">{bubbleLink}</span>
       </div>
 
-      {data.note && <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: tone === "good" ? "var(--color-ink-dim)" : color }}>{data.note}</p>}
+      {data.note && <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: tone === "neutral" ? "var(--color-ink-dim)" : color }}>{data.note}</p>}
 
       {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
         <PanelRequestNotice failure={arkhamState} label="Wallet identity labels" className="mt-3" />
@@ -181,8 +193,8 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
           {clusters.map((c, i) => (
             <div key={i} className="tint-var rounded-md border px-2.5 py-2" style={{ "--tint": color } as React.CSSProperties}>
               <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
-                <span className="mono font-semibold" style={{ color }}>{c.size} wallets = 1 operator</span>
-                <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}><span>{c.combinedPct.toFixed(1)}% of supply combined</span></span>
+                <span className="mono font-semibold" style={{ color }}>{c.size} linked wallets</span>
+                <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}><span>{c.combinedPct.toFixed(1)}% summed holder share</span></span>
                 {c.includesCreator && <span className="chip tint-avoid">incl. creator</span>}
                 {c.sharedFunders.length > 0 && (
                   <span className="inline-flex items-center gap-1 text-[11px] text-ink-faint">seeded by <ArkhamName address={c.sharedFunders[0]} chain={chain} labels={arkham} fallback={shortAddr(c.sharedFunders[0])} className="text-[11px]" /></span>
@@ -197,7 +209,7 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
               </div>
             </div>
           ))}
-          <p className="text-[11px] text-ink-faint">Linked by a shared funder or a direct SOL transfer. These two signals indicate one hand controls wallets a holder chart shows as separate.</p>
+          <p className="text-[11px] text-ink-faint">Linked by a shared seed funder or direct transfer. These signals establish a relationship, not common ownership or intent.</p>
         </div>
       )}
     </div>

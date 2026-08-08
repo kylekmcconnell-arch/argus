@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NormalizedSafety, TokenDossier } from "../token/audit";
 import {
   clearanceCoverage,
+  decisionCriticalChecks,
   personChecks,
   reconcileInvestigationChecks,
   summarizeChecks,
@@ -9,6 +10,10 @@ import {
   type CheckStatus,
   type ScanCheck,
 } from "./scanChecklist";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 const safety = (overrides: Partial<NormalizedSafety> = {}): NormalizedSafety => ({
   available: true,
@@ -84,6 +89,7 @@ describe("summarizeChecks", () => {
   it("separates successful execution from unknown, unavailable, and stale coverage", () => {
     const statuses: CheckStatus[] = [
       "confirmed",
+      "reported",
       "finding",
       "checked-empty",
       "not-applicable",
@@ -94,9 +100,10 @@ describe("summarizeChecks", () => {
     const summary = summarizeChecks(statuses.map((status) => ({ label: status, status })));
 
     expect(summary).toEqual({
-      total: 7,
-      inScope: 6,
-      successful: 3,
+      total: 8,
+      inScope: 7,
+      successful: 4,
+      reported: 1,
       unknownOrFailed: 3,
       findings: 1,
       checkedEmpty: 1,
@@ -148,8 +155,11 @@ describe("tokenChecks", () => {
   it("does not claim a funding trace or lazy panel ran just because a deployer exists", () => {
     const checks = tokenChecks(dossier());
 
-    expect(byLabel(checks, "Operator / funding trace")).toMatchObject({ status: "unknown" });
-    expect(byLabel(checks, "Operator / funding trace").note).toContain("deployer 0x123…cdef resolved");
+    expect(byLabel(checks, "Operator / funding trace")).toMatchObject({
+      status: "not-applicable",
+      decisionCritical: false,
+    });
+    expect(byLabel(checks, "Operator / funding trace").note).toContain("currently disabled");
     expect(byLabel(checks, "Creator wallet details")).toMatchObject({ status: "unknown", decisionCritical: false });
     expect(byLabel(checks, "Known scam code comparison")).toMatchObject({ status: "unknown", decisionCritical: false });
     expect(byLabel(checks, "OFAC sanctions screen")).toMatchObject({ status: "unknown" });
@@ -292,6 +302,20 @@ describe("clearanceCoverage (full-clearance coverage policy)", () => {
     expect(coverage.sufficient).toBe(false);
   });
 
+  it("does not let source-reported context satisfy a never-waive safety screen", () => {
+    const checks = [
+      row("identity-resolution", "reported"),
+      row("ofac-sanctions-name", "checked-empty"),
+      row("trust-graph-connections", "checked-empty"),
+      ...Array.from({ length: 9 }, (_, index) => row(`enrichment-${index}`, "confirmed" as CheckStatus)),
+    ];
+
+    const coverage = clearanceCoverage(checks);
+    expect(coverage.recordedPercent).toBe(100);
+    expect(coverage.openNeverWaive).toEqual(["identity-resolution"]);
+    expect(coverage.sufficient).toBe(false);
+  });
+
   it("never waives an unresolved founder asset distinction", () => {
     const checks = [
       row("identity-resolution", "confirmed"),
@@ -427,7 +451,7 @@ describe("reconcileInvestigationChecks", () => {
     expect(byLabel(rows, "Documents & audits").status).toBe("confirmed");
     expect(byLabel(rows, "Trust-graph reconciliation").status).toBe("checked-empty");
     // never credited: no recorded source exists for these
-    expect(byLabel(rows, "Operator / funding trace").status).toBe("unknown");
+    expect(byLabel(rows, "Operator / funding trace").status).toBe("not-applicable");
     expect(byLabel(rows, "Creator wallet details").status).toBe("unknown");
   });
 
@@ -538,10 +562,35 @@ describe("token operator/funding trace (Arkham deployer risk)", () => {
     expect(byLabel(checks, "Operator / funding trace").status).toBe("confirmed");
   });
 
-  it("stays unknown (not recorded) when the trace was unavailable or a legacy dossier never ran it", () => {
+  it("does not make a disabled provider trace part of report readiness", () => {
+    vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "false");
     const unavailable = tokenChecks(dossier({ deployerRisk: { available: false, paths: [], completedAt: at } }));
     const legacy = tokenChecks(dossier());
-    expect(byLabel(unavailable, "Operator / funding trace").status).toBe("unknown");
-    expect(byLabel(legacy, "Operator / funding trace").status).toBe("unknown");
+    expect(byLabel(unavailable, "Operator / funding trace")).toMatchObject({
+      status: "not-applicable",
+      decisionCritical: false,
+    });
+    expect(byLabel(legacy, "Operator / funding trace")).toMatchObject({
+      status: "not-applicable",
+      decisionCritical: false,
+    });
+  });
+
+  it("restores the missing-trace readiness requirement only when Arkham is explicitly enabled", () => {
+    vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "true");
+    expect(byLabel(tokenChecks(dossier()), "Operator / funding trace")).toMatchObject({
+      status: "unknown",
+      decisionCritical: true,
+    });
+  });
+
+  it("excludes the old critical marker from frozen reports while Arkham is disabled", () => {
+    vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "false");
+    const governing = decisionCriticalChecks([
+      { checkId: "operator-funding-trace", label: "Operator / funding trace", status: "unknown", decisionCritical: true },
+      { checkId: "ofac-sanctions-address", label: "OFAC sanctions screen", status: "checked-empty", decisionCritical: true },
+    ]);
+
+    expect(governing.map((check) => check.checkId)).toEqual(["ofac-sanctions-address"]);
   });
 });

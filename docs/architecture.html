@@ -97,8 +97,8 @@
   <h1>Anatomy of an <em>investigation</em>.</h1>
   <p class="sub">Watch a due-diligence request travel the system, step by step. <strong>Click any box for a plain-English explanation</strong> of what it is and what it talks to; search anything; pick a journey to replay it. Small print is the code name for engineers; jargon is translated at the bottom.</p>
   <div class="statrow" id="stats">
-    <div class="stat"><b data-n="70">0</b><span>systems</span></div>
-    <div class="stat"><b data-n="92">0</b><span>connections</span></div>
+    <div class="stat"><b data-n="73">0</b><span>systems</span></div>
+    <div class="stat"><b data-n="96">0</b><span>connections</span></div>
     <div class="stat"><b data-n="14">0</b><span>evidence collectors</span></div>
     <div class="stat"><b data-n="600">0</b><span>second ceiling</span></div>
     <div class="stat"><b data-cash="1">$0</b><span>typical audit</span></div>
@@ -120,11 +120,36 @@
   <h2>Rules a change must never break</h2>
   <ul class="rules">
     <li><strong>No score without proof.</strong> Minimum scores come only from strictly verified facts; corroboration, press, and self-claims can raise the ceiling but never guarantee points.</li>
-    <li><strong>Safety screens are mandatory.</strong> Identity, sanctions (name and wallet), bad-actor graph, and founder-asset checks must all run before a report is called complete.</li>
-    <li><strong>Names are never guessed.</strong> Legal and sanctions screening only runs on a provider-verified real person.</li>
+    <li><strong>Safety screens are mandatory.</strong> Identity, applicable person or institutional-entity sanctions, institutional legal-entity binding, wallet sanctions, bad-actor graph, and founder-asset checks must all reach their evidence threshold before a report is called complete.</li>
+    <li><strong>Names are never guessed.</strong> Person legal and sanctions screens require a provider-verified real person. An institutional organization never borrows that clearance: a strict frozen legal-entity fact must bind the exact entity before its separate OFAC entity screen runs. Generic project accounts show these as follow-ups, not unsatisfiable gates, until their route has equivalent entity collection.</li>
     <li><strong>Sanctions run fresh every time.</strong> Never served from memory, because someone can be sanctioned tomorrow.</li>
     <li><strong>AI suggestions are leads, not evidence.</strong> They never pick the methodology, cap a score, or set a floor.</li>
+    <li><strong>Provider labels stay attributed.</strong> A provider or first party can supply useful context, but ARGUS does not silently adopt that description as a verified finding. The facts panel separates source-reported and floor-ineligible supporting context from confirmed facts.</li>
+    <li><strong>Person facts wait for an exact identity bridge.</strong> A copied display name, biography, website, or model-discovered employer cannot attach a real person's career, portfolio, legal, or scoring evidence to the audited handle.</li>
+    <li><strong>Portfolio membership is not portfolio quality.</strong> Only a canonically bound investor-to-company relationship can enter the graph. Repeated pages support one relationship, and one relationship without outcomes cannot establish a top-tier cohort.</li>
+    <li><strong>Fund size keeps its meaning.</strong> AUM, first close, final close, vehicle size, current deployable capital, and personal wealth are separate claims. A bounded empty search proves none of them.</li>
+    <li><strong>Failure is not a clean answer.</strong> Empty findings publish only after every required source answered; failed, malformed, capped, and partial reads publish their limits.</li>
+    <li><strong>A person-shaped result is not employment.</strong> Web and X candidates, project-account associations, and GitHub contributors stay context until a direct team relationship is grounded.</li>
+    <li><strong>Only immutable graph evidence changes a verdict.</strong> Browser submissions and provider risk labels remain research context until a server-collected report version verifies them.</li>
     <li><strong>Reports are immutable.</strong> Once saved they cannot change; every run carries its own cost ledger and cannot save without one.</li>
+    <li><strong>Decision lenses share one truth set.</strong> Investment, alpha, counterparty, and general diligence may reorder emphasis, but they never hide a saved risk, revise the score, or buy new data.</li>
+    <li><strong>The parent verdict governs.</strong> Direct findings, completeness, score, and verdict stay outside the derived layer. An incomplete parent or an AVOID or FAIL verdict withholds a competing Decision Intelligence thesis.</li>
+    <li><strong>Lineage follows each artifact.</strong> Contradicting sources stay beside supporting sources. Token identity, market, liquidity, history, holder-security, and holder-distribution values keep the exact producer that supplied each one.</li>
+    <li><strong>Cross-provider facts rebind before use.</strong> TVL and funding need the canonical CoinGecko id; fees need a complete same-slug protocol receipt; holder, unlock, and control rows need the canonical address and chain. An unbound row stays visible but cannot produce a measurement.</li>
+    <li><strong>Company and chronology labels do not bind themselves.</strong> Company enrichment requires an independently resolved non-shared official host, coherent requested and matched hosts, the declared method, matched company website, and valid capture time. It cannot authenticate itself from its own request. RDAP age and launch chronology are recomputed from the exact official hostname, registrable domain, endpoint, and account-creation receipt.</li>
+    <li><strong>Impossible numbers stay receipts.</strong> Percentages outside zero to one hundred, a ninety-day unlock total above one hundred, and circulating supply above total supply are withheld and surfaced as reconciliation gaps.</li>
+    <li><strong>Existing evidence keeps its ceiling.</strong> Legal and sanctions name matches are identity-resolution gaps, image classifications are provider opinions, and checked-empty evidence never becomes support. Graph risk needs an exact qualified tie to a complete server-collected adverse report.</li>
+    <li><strong>Missing is never zero.</strong> Decision Intelligence keeps absent measurements and failed checks unresolved. It never turns them into clean, safe, unfunded, unaudited, or exonerated claims.</li>
+    <li><strong>One missing axis does not erase the others.</strong> The analyst scores every decision area with substantive evidence, preserves unsupported areas as unmeasured, and withholds the overall score until the full role profile is assessed.</li>
+    <li><strong>Cross-source arithmetic is time-bound.</strong> Every input needs a valid frozen as-of time within the 72-hour skew policy. A stale or undated comparison is withheld and published as an alignment gap.</li>
+    <li><strong>Lineage fails closed.</strong> The final intelligence graph rejects duplicate IDs and dangling source, answer, denominator, signal, arithmetic, temporal, and classification references. Affected questions reopen and the report exposes the integrity gap.</li>
+    <li><strong>Integrity filtering cannot improve an answer.</strong> Losing lineage may preserve or weaken unresolved, unavailable, or not-collected states, never upgrade them. Evidence-bearing signals must retain their complete measurement and source graph.</li>
+    <li><strong>Provider omission stays unanswered.</strong> Incident recovery has three states: yes, no, and not recorded. A missing field cannot become No or an unrecovered-loss claim.</li>
+    <li><strong>Unrequested sections are not empty sections.</strong> Missing company funding or management enrichment renders not collected, never zero rounds or no managers.</li>
+    <li><strong>Saved chronology cannot drift.</strong> Leadership age and every persisted point-in-time label use a frozen report or source timestamp, never the viewer's clock.</li>
+    <li><strong>EVM evidence is chain-bound.</strong> The public RPC must return the expected chain ID before any block or contract read. No bytecode never means one key, and a Safe-compatible interface never authenticates an official Safe.</li>
+    <li><strong>An audit name is only a lead.</strong> Corroboration requires an auditor-owned page with explicit audit context, the subject name, and a canonical domain or contract anchor in the same saved proof window.</li>
+    <li><strong>Challenge evidence comes from storage.</strong> The browser sends the analyst's question only; the server reloads the exact authenticated report before asking for a second opinion.</li>
     <li><strong>Time is budgeted.</strong> Evidence gathering stops early enough that scoring and the bad-actor screen always get their full window.</li>
     <li><strong>One build path.</strong> Server code ships inside one bundle; deploys happen only by pushing main.</li>
   </ul>
@@ -164,7 +189,7 @@ const N = [
   ["ui-canvas","client","Search + live run screen","InvestigationRun",null,null,
    "The screen where you type a handle and watch the investigation happen live, evidence appearing as it is found."],
   ["ui-report","client","The report","Report.tsx",null,null,
-   "The finished product: verdict, score, verified facts, open questions, sources. What you would forward to a partner."],
+   "The finished product: identity, governing verdict or readiness, direct findings, open questions, sources, and a frozen point-in-time decision map. Four lenses reorder one complete derived signal set without hiding a saved risk, changing the score, or buying more data. On mobile the decision comes first and supporting profile detail collapses."],
   ["ui-token","client","Token report","TokenReport",null,null,
    "The same idea for a token contract: safety flags, holder concentration, market data, sanctions."],
   ["ui-graph","client","Connections map","TrustGraph",null,null,
@@ -183,9 +208,9 @@ const N = [
   ["rt-report","routes","Open a saved report","report + provenance",null,null,
    "Fetches a saved report from storage when you open one, along with its full evidence lineage."],
   ["rt-panels","routes","Ask-the-report panels","ask / challenge / brief",null,null,
-   "Powers the follow-up buttons on a report: ask it a question, challenge the verdict, generate a case brief."],
+   "Powers the follow-up buttons on a report: ask it a question, challenge the verdict, generate a case brief. Challenge reloads the exact signed, organization-scoped report on the server and ignores browser-authored verdict evidence."],
   ["rt-forensics","routes","Forensic lookups","wallets, sanctions, evm",null,null,
-   "One-off lookup doors used by panels inside reports: trace a wallet, screen a sanctions list, inspect a contract."],
+   "One-off lookup doors used by panels inside reports: trace a wallet, screen a sanctions list, inspect a contract. Failed or partial source reads return unavailable, never a clean-looking zero."],
   ["rt-graph","routes","Graph reads","api/graph",null,null,
    "Serves the connection web to the graph screen."],
   ["rt-health","routes","Config health check","api/health, zero spend",null,null,
@@ -200,19 +225,21 @@ const N = [
   ["en-lanes","engine","Gather evidence","3 parallel lanes",null,null,
    "Three crews work at once so the job fits the window: one on identity, one on the token, one on wallets."],
   ["en-basics","engine","Deep fact research","the expensive step",null,null,
-   "The expensive step: an AI researches foundational facts (founders, funding, products), then ARGUS independently fetches every cited page and verifies each claim against the source."],
+   "The expensive step: an AI researches foundational facts. Strict facts are independently fetched and checked against their cited page; provider and first-party descriptions remain attributed context."],
   ["en-signals","engine","Extra signals","skipped if out of time",null,null,
    "Nice-to-have extras: posting cadence, token lifecycle, adverse chatter. The first thing skipped if time runs short."],
   ["en-tg","engine","Bad-actor screen","reserved time slot",null,null,
-   "Checks the subject against every past investigation for ties to known bad actors. Holds a protected time slot so a slow run can never squeeze it out."],
+   "Checks the subject against immutable server-collected reports for ties to known bad actors. Browser contributions and provider labels cannot change a verdict. Holds a protected time slot so a slow run can never squeeze it out."],
   ["en-analyst","engine","AI analyst scores","writes the verdict",null,null,
    "The AI analyst reads all verified evidence and scores every axis, writing the reasoning behind the verdict."],
   ["en-score","engine","Verdict math","caps, bands, composite",null,null,
    "Pure math, no AI: disqualifiers act as hard caps (a prior rug pull caps the score at 10 no matter what), scores stay inside evidence bands, and the weakest role governs the final number."],
   ["en-clear","engine","Complete enough?","safety screens + 75%",null,null,
-   "Decides whether the report has earned a full verdict: all five safety screens recorded plus 75% coverage. If not, it says PROVISIONAL, it never pretends."],
+   "Decides whether the report has earned a full verdict: every applicable person or organization safety screen reaches its required evidence state plus 75% coverage. If not, it says PROVISIONAL, it never pretends."],
   ["en-present","engine","Final presentation","decision-ready or not",null,null,
    "Formats the outcome honestly: decision-ready, provisional, or incomplete, with the gaps listed."],
+  ["en-intelligence","engine","Decision Intelligence","one frozen truth set",null,null,
+   "Builds per-artifact source lineage, typed measurements, explicit unanswered questions, four decision lenses, a prioritized evidence atlas, dated-event chronology, and complete measurement and source registers from the exact collected evidence. Projects receive product-archetype questions. People, individual investors, investment firms, and operating companies receive separate identity, career, portfolio, fund-scale, operating, relationship, governance, and legal contracts. One shared exact-binding rule governs portfolio collection, scoring, graph edges, and both intelligence builders. A final graph-integrity gate withholds duplicate or dangling records and reopens affected questions. Existing legal, sanctions, graph, portfolio, fund-scale, contradiction, and scorer records keep their original evidence ceiling. The layer is deterministic, score-neutral, costs nothing to derive, and stays subordinate to the governing report."],
   ["en-token","engine","Token scanner","separate fast path",null,null,
    "A separate, faster pipeline just for token contracts. About a minute, about a cent."],
 
@@ -223,7 +250,7 @@ const N = [
   ["ad-grounded","adapters","Cheap web reader","groundedSearch","key",null,
    "The budget researcher: Google results from Serper for a tenth of a cent, pages fetched by us, and a cheap AI extracts the answer instead of an expensive one browsing."],
   ["ad-audits","adapters","Audit checker","securityAudits",null,null,
-   "Finds who audited the code. Reads auditor names from official pages, and from the audit-link URLs themselves when the reports are locked PDFs."],
+   "Keeps subject-page and curated-link audit leads separate. An engagement is corroborated only when an auditor-owned page contains explicit audit context plus the project's official domain or canonical contract in the same saved proof window."],
   ["ad-llama","adapters","DeFi metrics","defiLlama",null,null,
    "Pulls usage numbers that cannot be faked cheaply: value locked, fees users actually paid, funding rounds."],
   ["ad-unlocks","adapters","Unlock schedule","tokenUnlocks","key",null,
@@ -245,7 +272,9 @@ const N = [
   ["ad-monid","adapters","Private-market data","monid","key",null,
    "Private-company records: funding rounds, leadership, firmographics. The PitchBook-style layer."],
   ["ad-ptoken","adapters","Official-token binder","projectToken",null,null,
-   "Binds the OFFICIAL token through the project's own account and domain, so a copycat token with the same name cannot sneak into the report."],
+   "Binds the OFFICIAL token through the project's own account and domain, so a copycat token with the same name cannot sneak into the report. Identity, market, liquidity, and history each retain their exact producer URL and capture time."],
+  ["ad-evmcontrol","adapters","EVM control reality","fixed block, score-neutral","free",null,
+   "After canonical token binding is final, verifies the public RPC's chain ID, freezes one block hash, and records bounded standard proxy, implementation, owner, bytecode, and Safe-compatible interface receipts. No-code is not EOA, interface compatibility is not authenticated custody, and this evidence never enters scoring."],
   ["ad-investor","adapters","Investor verifier","portfolio + fundScale",null,null,
    "For VC subjects: verifies the claimed portfolio and fund size from primary sources instead of taking the website's word."],
   ["ad-kb","adapters","Fact memory","entityStore","flag",null,
@@ -281,15 +310,17 @@ const N = [
    "Repos, org membership, code footprint, identity links back to X."],
   ["pv-monid","providers","Monid / Akta","private-market data","key",
    "PitchBook-grade funding rounds and leadership records. Metered."],
-  ["pv-chain","providers","Helius + Arkham + Etherscan","chain apis","key",
-   "Wallet forensics: deployer funding traces, cluster analysis, on-chain history."],
+  ["pv-chain","providers","Helius + Etherscan + Arkham (dormant)","chain apis","key",
+   "Wallet forensics and on-chain history. Arkham client calls are off by default and cannot affect readiness unless VITE_ARKHAM_PROVIDER_ENABLED=true."],
+  ["pv-publicrpc","providers","Public EVM RPC","direct fixed-block reads","free",
+   "Free public endpoints for supported EVM networks. Every endpoint must prove the expected eth_chainId before ARGUS reads a block or contract. The collector makes no model call and records zero marginal dollars."],
 
   ["db-versions","data","Saved reports","immutable versions",null,null,
    "Every finished report, frozen forever. A re-run creates a NEW version; old ones cannot be edited. That is the audit trail investors can rely on."],
   ["db-cases","data","Case files","lifecycle + events",null,null,
    "One folder per subject holding all its report versions and activity over time."],
   ["db-graph","data","Trust-graph store","cross-report links",null,null,
-   "The stored web of connections between everything ever investigated, used by the bad-actor screen."],
+   "The stored web of connections between investigated subjects. Only rows tied to immutable server-collected report versions can affect another report's result; the rest stay visible context."],
   ["db-kb","data","Fact memory store","entity_facts",null,null,
    "The table behind fact memory: what has been verified about each entity, and across how many audits."],
   ["db-cache","data","Response cache","provider_cache",null,null,
@@ -310,8 +341,8 @@ const E = [
   ["rt-report","db-versions"],["rt-report","db-cases"],["rt-graph","db-graph"],["rt-panels","pv-claude"],["rt-panels","db-versions"],
   ["rt-forensics","pv-chain"],["rt-forensics","pv-osint"],["rt-audit","db-members"],
   ["en-orch","en-intake"],["en-intake","en-lanes"],["en-lanes","en-basics"],["en-basics","en-signals"],["en-signals","en-tg"],["en-tg","en-analyst"],
-  ["en-analyst","en-score"],["en-score","en-clear"],["en-clear","en-present"],
-  ["en-orch","db-versions"],["en-orch","db-usage"],["en-orch","ad-prior"],["en-orch","ad-investor"],
+  ["en-analyst","en-score"],["en-score","en-clear"],["en-clear","en-intelligence"],["en-intelligence","en-present"],
+  ["en-orch","db-versions"],["en-orch","db-usage"],["en-orch","ad-prior"],["en-orch","ad-investor"],["en-orch","ad-evmcontrol"],
   ["en-token","pv-mkts"],["en-token","pv-goplus"],["en-token","pv-osint"],["en-token","db-versions"],
   ["en-intake","ad-ptoken"],["en-intake","ad-x"],["en-intake","ad-llama"],["en-intake","ad-unlocks"],["en-intake","ad-holders"],["en-intake","ad-audits"],["en-intake","ad-monid"],
   ["en-lanes","ad-x"],["en-lanes","ad-github"],["en-lanes","ad-pdl"],["en-lanes","ad-offchain"],["en-lanes","ad-pfp"],
@@ -321,13 +352,13 @@ const E = [
   ["ad-x","pv-tw"],["ad-x","pv-grok"],["ad-x","pv-claude"],["ad-x","ad-grounded"],
   ["ad-grounded","pv-serper"],["ad-grounded","pv-or"],["ad-grounded","ad-web"],
   ["ad-audits","ad-llama"],["ad-audits","ad-web"],
-  ["ad-llama","pv-llama"],["ad-unlocks","pv-cr"],["ad-holders","pv-goplus"],["ad-ptoken","pv-mkts"],
+  ["ad-llama","pv-llama"],["ad-unlocks","pv-cr"],["ad-holders","pv-goplus"],["ad-ptoken","pv-mkts"],["ad-evmcontrol","pv-publicrpc"],["ad-evmcontrol","en-intelligence"],
   ["ad-offchain","pv-osint"],["ad-pfp","pv-claude"],["ad-pdl","pv-pdl"],["ad-github","pv-gh"],["ad-monid","pv-monid"],["ad-investor","pv-claude"],
   ["ad-kb","db-kb"],["ad-cache","db-cache"],["ad-tgraph","db-graph"],["ad-prior","db-versions"],["ad-web","ad-cache"],
 ];
 const FLOWS = [
   ["Customer searches a founder or project",
-   ["u-analyst","ui-canvas","rt-audit","en-orch","en-intake","en-lanes","en-basics","en-signals","en-tg","en-analyst","en-score","en-clear","en-present","db-versions"],
+   ["u-analyst","ui-canvas","rt-audit","en-orch","en-intake","en-lanes","en-basics","en-signals","en-tg","en-analyst","en-score","en-clear","en-intelligence","en-present","db-versions"],
    "The main journey, replayed above in numbered steps. Bright boxes are the path; soft-lit boxes are the tools each step calls.",
    ["A member decides to vet someone before capital moves.",
     "Types @handle, hits Start. A live evidence stream opens.",
@@ -335,12 +366,13 @@ const FLOWS = [
     "The run controller carves the budget: collect, screen, score.",
     "Who is this? Profile resolved; official token bound, never by name.",
     "Three parallel lanes fan out: identity, token, wallets.",
-    "Deep research: every claim independently fetched and verified.",
+    "Deep research: strict facts fetched and checked; attributed context stays labeled.",
     "Cadence, lifecycle, and adverse sweeps, if time allows.",
     "The bad-actor screen runs in its reserved slot. Never skipped.",
     "The AI analyst scores every axis and writes the verdict.",
     "Deterministic math: hard caps override, the weakest role governs.",
-    "Complete enough? Five safety screens plus 75% coverage decide.",
+    "Complete enough? Applicable person or organization safety screens plus 75% coverage decide.",
+    "Decision Intelligence freezes per-artifact lineage, measurements, arithmetic, gaps, four lenses, a dated evidence atlas, and role-aware project, person, investor, fund, or company questions without changing or overriding the governing result.",
     "Decision-ready or provisional. Never silently cleared.",
     "Saved immutably with its full cost ledger. About a dollar, six minutes."]],
   ["Customer scans a token",
@@ -367,11 +399,20 @@ const FLOWS = [
     "Next audit of the same entity starts from everything already proven."]],
   ["How audits get verified",
    ["pv-llama","ad-llama","ad-audits","ad-web"],
-   "DeFiLlama lists a protocol's audit links; the audit checker reads auditor names from the URLs themselves - works even when reports are PDFs - then tries to confirm on the auditor's own site.",
+   "DeFiLlama supplies bounded audit-link leads. The audit checker keeps each lead's origin, then corroborates only an auditor-owned page whose saved proof window contains explicit audit context and a canonical project identity anchor.",
    ["DeFiLlama curates the protocol's audit links.",
     "The DeFi metrics adapter hands them over.",
-    "Auditor names are read from the URLs - PDF-proof, bot-wall-proof.",
-    "Where a page fetches, the auditor's own site confirms the engagement."]],
+    "Subject pages and curated links remain attributed leads, never proof by name.",
+    "The auditor-owned page must carry explicit audit work plus the official domain or canonical contract in the same bounded proof window."]],
+  ["How EVM control is frozen",
+   ["en-orch","ad-ptoken","ad-evmcontrol","pv-publicrpc","en-intelligence","db-versions"],
+   "After the canonical token address is final, a free direct-RPC lane verifies the network, freezes one block, and records a bounded standard control surface. The evidence stays score-neutral and costs zero marginal dollars.",
+   ["The run controller waits for the canonical token binding to become final.",
+    "The official-token binder supplies the verified chain and full address, never a name match.",
+    "The control collector checks eth_chainId first. A mismatch yields unavailable before any contract read; a matching endpoint then fixes one block and records standard proxy, owner, bytecode, and Safe-compatible receipts.",
+    "The public RPC supplies direct chain data with no model call and no paid provider charge.",
+    "Decision Intelligence turns the bounded receipts and unresolved limits into score-neutral context.",
+    "The exact snapshot is saved with the immutable report version."]],
 ];
 
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;

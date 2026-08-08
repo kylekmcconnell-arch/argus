@@ -7,7 +7,7 @@
 // insider concentration), CONNECTED insider clusters (wallets funded from a common
 // source, collapsed into one operator), creator holdings, and LP-lock. Keyless.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { creatorSupplyPercent } from "../src/token/sources";
+import { creatorSupplyPercent } from "../src/token/sources.js";
 
 export const config = { maxDuration: 20 };
 

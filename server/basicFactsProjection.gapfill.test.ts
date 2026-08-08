@@ -10,6 +10,19 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     const evidence = emptyEvidence("@aavetest");
     evidence.roles = [SubjectClass.PROJECT];
     evidence.profile = { ...evidence.profile, display_name: "Aave", website: "https://aave.com" };
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Aave",
+      symbol: "AAVE",
+      coingeckoId: "aave",
+      rank: null,
+      address: "0x0000000000000000000000000000000000000001",
+      chain: "ethereum",
+      sourceUrl: "https://www.coingecko.com/en/coins/aave",
+      capturedAt: "2026-07-14T00:00:00.000Z",
+      providers: ["coingecko"],
+    };
     return evidence;
   };
 
@@ -18,6 +31,7 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     evidence.protocolFunding = {
       slug: "aave",
       name: "Aave",
+      geckoId: "aave",
       rounds: [
         { date: "2020-10-12", round: "Strategic", amountUsd: 25_000_000, leadInvestors: ["Blockchain Capital", "Standard Crypto"], otherInvestors: [], valuationUsd: null },
         { date: "2017-11-30", round: "ICO", amountUsd: 16_200_000, leadInvestors: [], otherInvestors: [], valuationUsd: null },
@@ -100,6 +114,16 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     const evidence = emptyEvidence("@stanitest");
     evidence.roles = [SubjectClass.FOUNDER];
     evidence.profile = { ...evidence.profile, display_name: "Stani" };
+    evidence.ventures = [{
+      project_name: "Aave",
+      domain: "aave.com",
+      role: "Founder",
+      period: "2017-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    }];
     evidence.companyEnrichment = {
       name: "Aave",
       uuid: "00005d7",
@@ -175,6 +199,7 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     evidence.protocolFunding = {
       slug: "aave",
       name: "Aave",
+      geckoId: "aave",
       rounds: [{ date: null, round: "Seed", amountUsd: 1_000_000, leadInvestors: [], otherInvestors: [], valuationUsd: null }],
       totalRaisedUsd: 1_000_000,
       leadInvestors: [],
@@ -204,7 +229,7 @@ describe("projectProviderBackedBasicFacts: independent audits (corroboration hop
   const projectEvidence = () => {
     const evidence = emptyEvidence("@aavetest");
     evidence.roles = [SubjectClass.PROJECT];
-    evidence.profile = { ...evidence.profile, display_name: "Aave" };
+    evidence.profile = { ...evidence.profile, display_name: "Aave", website: "https://aave.com" };
     return evidence;
   };
 
@@ -213,8 +238,18 @@ describe("projectProviderBackedBasicFacts: independent audits (corroboration hop
     evidence.securityAudits = {
       securityPageUrl: "https://aave.com/security",
       selfAttested: ["Trail of Bits", "OpenZeppelin", "CertiK"],
+      attestations: [
+        { auditor: "Trail of Bits", origin: "subject_page", sourceUrl: "https://aave.com/security" },
+        { auditor: "OpenZeppelin", origin: "subject_page", sourceUrl: "https://aave.com/security" },
+        { auditor: "CertiK", origin: "subject_page", sourceUrl: "https://aave.com/security" },
+      ],
       corroborated: [
-        { auditor: "Trail of Bits", auditorUrl: "https://www.trailofbits.com/publications/aave-v3", excerpt: "Our security review of the Aave protocol v3." },
+        {
+          auditor: "Trail of Bits",
+          auditorUrl: "https://www.trailofbits.com/publications/aave-v3",
+          excerpt: "Our security review of the Aave protocol v3.",
+          matchedIdentityAnchor: { type: "official_domain", value: "aave.com" },
+        },
       ],
       capturedAt: "2026-07-14T00:00:00.000Z",
     };
@@ -234,9 +269,11 @@ describe("projectProviderBackedBasicFacts: independent audits (corroboration hop
 
   it("a purely self-attested security page mints NO audit fact, only a lead", () => {
     const evidence = projectEvidence();
+    evidence.profile = { ...evidence.profile, display_name: "Rug Coin", website: "https://rugcoin.example" };
     evidence.securityAudits = {
       securityPageUrl: "https://rugcoin.example/security",
       selfAttested: ["Trail of Bits"],
+      attestations: [{ auditor: "Trail of Bits", origin: "subject_page", sourceUrl: "https://rugcoin.example/security" }],
       corroborated: [],
       capturedAt: "2026-07-14T00:00:00.000Z",
     };

@@ -14,6 +14,7 @@ import { recordCall } from "../cost";
 import { htmlToText } from "./teampage";
 
 const CDX = "https://web.archive.org/cdx/search/cdx";
+const ARQUIVO_CDX = "https://arquivo.pt/wayback/cdx";
 // The detail this module hunts is the one that was LATER SCRUBBED, so the newest
 // capture is the single capture guaranteed not to hold it. We sample the range
 // instead, bounded hard: a domain archived for a decade must still cost a fixed
@@ -21,11 +22,13 @@ const CDX = "https://web.archive.org/cdx/search/cdx";
 // a floor on the archive, never a total.
 const MAX_CAPTURES_PER_PATH = 4;
 
-interface Snapshot { timestamp: string; original: string }
+type ArchiveProvider = "wayback" | "arquivo";
+interface Snapshot { timestamp: string; original: string; provider: ArchiveProvider }
 /** One sampled capture and its stripped text, or null when we could not read it. */
 interface CaptureRead { snap: Snapshot; text: string | null }
 
 export interface ArchivedAffiliation {
+  provider: ArchiveProvider;
   url: string;
   year: string;
   where: string;
@@ -60,7 +63,9 @@ export function archiveCorroborationLabels(arch: ArchivedAffiliation): string[] 
   return labels;
 }
 
-async function sampledSnapshots(urlPath: string): Promise<Snapshot[]> {
+type SnapshotIndexOutcome = { snapshots: Snapshot[]; state: "succeeded" | "failed"; detail?: string };
+
+async function waybackSnapshots(urlPath: string): Promise<SnapshotIndexOutcome> {
   let response: Response;
   try {
     // collapse=timestamp:4 asks the index for one capture per year, so the range
@@ -71,28 +76,23 @@ async function sampledSnapshots(urlPath: string): Promise<Snapshot[]> {
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=timestamp:4`;
     response = await fetch(CDX + qs, { signal: AbortSignal.timeout(4000) });
   } catch {
-    recordCall("wayback", "cdx-search", 0, "transport_error", "failed");
-    return [];
+    return { snapshots: [], state: "failed", detail: "transport_error" };
   }
   if (!response.ok) {
-    recordCall("wayback", "cdx-search", 0, `http_${response.status}`, "failed");
-    return [];
+    return { snapshots: [], state: "failed", detail: `http_${response.status}` };
   }
   let parsed: unknown;
   try {
     parsed = await response.json();
   } catch {
-    recordCall("wayback", "cdx-search", 0, "response_json_error", "failed");
-    return [];
+    return { snapshots: [], state: "failed", detail: "response_json_error" };
   }
   if (!Array.isArray(parsed) || !parsed.every(Array.isArray)) {
-    recordCall("wayback", "cdx-search", 0, "invalid_result_shape", "partial");
-    return [];
+    return { snapshots: [], state: "failed", detail: "invalid_result_shape" };
   }
   const rows = parsed as unknown[][];
   if (rows.length < 2) {
-    recordCall("wayback", "cdx-search", 0, "no_snapshot", "succeeded");
-    return [];
+    return { snapshots: [], state: "succeeded", detail: "no_snapshot" };
   }
   // rows[0] is the header: [urlkey, timestamp, original, mimetype, statuscode, digest, length]
   const header = rows[0];
@@ -102,19 +102,77 @@ async function sampledSnapshots(urlPath: string): Promise<Snapshot[]> {
   if (ti >= 0 && oi >= 0) {
     for (const row of rows.slice(1)) {
       if (typeof row[ti] === "string" && typeof row[oi] === "string") {
-        all.push({ timestamp: row[ti], original: row[oi] });
+        all.push({ timestamp: row[ti], original: row[oi], provider: "wayback" });
       }
     }
   }
   if (!all.length) {
-    recordCall("wayback", "cdx-search", 0, "invalid_result_shape", "partial");
-    return [];
+    return { snapshots: [], state: "failed", detail: "invalid_result_shape" };
   }
   // The index is served oldest-first, but "newest" carries an evidentiary claim
   // here, so sort rather than trust the order we were handed.
   all.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  recordCall("wayback", "cdx-search", 0, undefined, "succeeded");
-  return spreadSample(all, MAX_CAPTURES_PER_PATH);
+  return { snapshots: spreadSample(all, MAX_CAPTURES_PER_PATH), state: "succeeded" };
+}
+
+async function arquivoSnapshots(urlPath: string): Promise<SnapshotIndexOutcome> {
+  let response: Response;
+  try {
+    // Arquivo's CDX endpoint is a separate public archive and returns JSONL.
+    // limit=100 is a hard response bound; ARGUS still samples at most four.
+    const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&limit=100`;
+    response = await fetch(ARQUIVO_CDX + qs, { signal: AbortSignal.timeout(8000) });
+  } catch {
+    return { snapshots: [], state: "failed", detail: "transport_error" };
+  }
+  if (!response.ok) return { snapshots: [], state: "failed", detail: `http_${response.status}` };
+  let raw: string;
+  try {
+    raw = (await response.text()).slice(0, 250_000);
+  } catch {
+    return { snapshots: [], state: "failed", detail: "response_text_error" };
+  }
+  const all: Snapshot[] = [];
+  for (const line of raw.split(/\r?\n/).filter(Boolean)) {
+    try {
+      const row = asArchiveRecord(JSON.parse(line));
+      const timestamp = typeof row.timestamp === "string" ? row.timestamp : "";
+      const original = typeof row.url === "string" ? row.url : "";
+      if (/^\d{14}$/.test(timestamp) && /^https?:\/\//i.test(original)) {
+        all.push({ timestamp, original, provider: "arquivo" });
+      }
+    } catch { /* one malformed line does not erase valid archive rows */ }
+  }
+  if (!raw.trim()) return { snapshots: [], state: "succeeded", detail: "no_snapshot" };
+  if (!all.length) return { snapshots: [], state: "failed", detail: "invalid_result_shape" };
+  all.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  return { snapshots: spreadSample(all, MAX_CAPTURES_PER_PATH), state: "succeeded" };
+}
+
+function asArchiveRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+async function sampledSnapshots(urlPath: string): Promise<Snapshot[]> {
+  const primary = await waybackSnapshots(urlPath);
+  if (primary.state === "succeeded") {
+    recordCall("wayback", "cdx-search", 0, primary.detail, "succeeded");
+    return primary.snapshots;
+  }
+
+  const fallback = await arquivoSnapshots(urlPath);
+  if (fallback.state === "succeeded") {
+    // The failed Wayback attempt was recovered inside this evidence lane. Keep
+    // it visible in the ledger without publishing it as an unanswered source.
+    recordCall("wayback", "cdx-search", 0, `recovered_by_arquivo_after_${primary.detail ?? "failure"}`, "partial");
+    recordCall("arquivo", "cdx-search", 0, fallback.detail, "succeeded");
+    return fallback.snapshots;
+  }
+  recordCall("wayback", "cdx-search", 0, primary.detail, "failed");
+  recordCall("arquivo", "cdx-search", 0, fallback.detail, "failed");
+  return [];
 }
 
 // Oldest and newest always (they are the two the comparison rests on), plus an
@@ -128,10 +186,12 @@ function spreadSample(all: Snapshot[], max: number): Snapshot[] {
 
 async function readCapture(snap: Snapshot): Promise<CaptureRead> {
   try {
-    const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
+    const archiveUrl = snap.provider === "arquivo"
+      ? `https://arquivo.pt/wayback/${snap.timestamp}id_/${snap.original}`
+      : `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
     const response = await fetch(archiveUrl, { signal: AbortSignal.timeout(5000) });
     if (!response.ok) {
-      recordCall("wayback", "snapshot-fetch", 0, `http_${response.status}`, "failed");
+      recordCall(snap.provider, "snapshot-fetch", 0, `http_${response.status}`, "failed");
       return { snap, text: null };
     }
     let text: string;
@@ -141,16 +201,16 @@ async function readCapture(snap: Snapshot): Promise<CaptureRead> {
       // substring inside a script, comment, or longer word must not.
       text = htmlToText(await response.text());
     } catch {
-      recordCall("wayback", "snapshot-fetch", 0, "response_text_error", "failed");
+      recordCall(snap.provider, "snapshot-fetch", 0, "response_text_error", "failed");
       return { snap, text: null };
     }
     if (!text.trim()) {
-      recordCall("wayback", "snapshot-fetch", 0, "empty_snapshot", "partial");
+      recordCall(snap.provider, "snapshot-fetch", 0, "empty_snapshot", "partial");
       return { snap, text: null };
     }
     return { snap, text };
   } catch {
-    recordCall("wayback", "snapshot-fetch", 0, "transport_error", "failed");
+    recordCall(snap.provider, "snapshot-fetch", 0, "transport_error", "failed");
     return { snap, text: null };
   }
 }
@@ -190,11 +250,14 @@ export async function archivedAffiliation(
     const text = read.text;
     if (text === null) return false;
     const hit = subjectNeedles.some((n) => n.test(text)) && ventureNeedles.some((n) => n.test(text));
-    recordCall("wayback", "snapshot-fetch", 0, hit ? "subject_and_venture_match" : "no_match", "succeeded");
+    recordCall(read.snap.provider, "snapshot-fetch", 0, hit ? "subject_and_venture_match" : "no_match", "succeeded");
     return hit;
   };
   const cite = (read: CaptureRead, where: string): ArchivedAffiliation => ({
-    url: `https://web.archive.org/web/${read.snap.timestamp}/${read.snap.original}`,
+    provider: read.snap.provider,
+    url: read.snap.provider === "arquivo"
+      ? `https://arquivo.pt/wayback/${read.snap.timestamp}/${read.snap.original}`
+      : `https://web.archive.org/web/${read.snap.timestamp}/${read.snap.original}`,
     year: read.snap.timestamp.slice(0, 4),
     where,
   });
@@ -232,7 +295,7 @@ export async function archivedAffiliation(
         lastSeen,
         newestChecked,
         capturesChecked,
-        note: `Both names appear on the archived ${where} page in the ${lastSeen} capture and do not appear in the ${newestChecked} capture, the most recent one read. ${capturesChecked} captures were sampled across the archived range, so that is a floor on what the archive holds, not a total. Archived pages get restructured and re-pathed, so the later absence is not by itself evidence that the affiliation ended.`,
+        note: `Both names appear on the archived ${where} page in the ${lastSeen} capture and do not appear in the ${newestChecked} capture, the most recent one read. ${capturesChecked} captures were sampled from the bounded archive-index response, so that is a count of captures checked, not a total for what the archive holds. Archived pages get restructured and re-pathed, so the later absence is not by itself evidence that the affiliation ended.`,
       };
     }
     return out;

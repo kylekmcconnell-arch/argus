@@ -23,6 +23,20 @@ const HANDLE = /^@?[A-Za-z0-9_]{2,30}$/;
 const TW = "https://api.twitterapi.io";
 const GH = "https://api.github.com";
 
+function personLinkedInUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || !/^https?:\/\//i.test(value.trim())) return undefined;
+  try {
+    const parsed = new URL(value.trim());
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return undefined;
+    if (host !== "linkedin.com" && !host.endsWith(".linkedin.com")) return undefined;
+    if (!/^\/in\/[^/?#]+\/?$/i.test(parsed.pathname)) return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 interface TeamAngle {
   people: any[];
   provider: "grok" | "twitterapi" | "github";
@@ -34,6 +48,20 @@ interface CallCounter { calls: number; succeeded: number }
 const counterStatus = (counter: CallCounter): TeamAngle["status"] => (
   counter.succeeded === counter.calls ? "succeeded" : counter.succeeded > 0 ? "partial" : "failed"
 );
+
+const providerStatus = (statuses: TeamAngle["status"][]): TeamAngle["status"] => (
+  statuses.length > 0 && statuses.every((status) => status === "succeeded")
+    ? "succeeded"
+    : statuses.some((status) => status === "succeeded" || status === "partial")
+      ? "partial"
+      : "failed"
+);
+
+const personProvenance = (provider: TeamAngle["provider"]) => provider === "grok"
+  ? { evidence_origin: "model_lead" as const, artifact_verified: false, evidenceKind: "model_candidate" as const }
+  : provider === "twitterapi"
+    ? { evidence_origin: "deterministic" as const, artifact_verified: true, evidenceKind: "project_association" as const }
+    : { evidence_origin: "deterministic" as const, artifact_verified: true, evidenceKind: "code_contribution" as const };
 
 // ── Grok angles ──────────────────────────────────────────────────────────
 async function grokPeople(key: string, system: string, user: string): Promise<TeamAngle> {
@@ -211,12 +239,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     "You are a forensic OSINT researcher with live web and X search. Find EVERY person behind a crypto/tech project: founders, cofounders, core team, engineers, AND advisors/backers. " +
     "DIG hard: Google, the project's LinkedIn company page and its listed employees, Crunchbase, the GitHub org and its contributors, press/interviews, podcasts, and X. Connect any names already found on the site to their X handle and LinkedIn. " +
     "Be EXHAUSTIVE: list everyone you can attribute with public evidence, not just the top one or two. ONLY real people tied to THIS specific project (match domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts. " +
-    "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"evidence\":\"\"}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
+    "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"https://www.linkedin.com/in/...\",\"role\":\"\",\"evidence\":\"\"}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
   const webUser = `Project: ${proj}${domain ? ` (website ${domain})` : ""}.${title ? ` Site title: "${title}".` : ""}${x ? ` Official X account: @${x}.` : ""}${siteNames.length ? ` Names already on the site: ${siteNames.join(", ")}.` : ""} Find every founder, team member, and advisor; connect each to their X handle and LinkedIn.`;
   const xSystem =
     "You are a forensic researcher with live X search. Mine the given project's OWN X account and posts mentioning it for EVERY team member and advisor it names. " +
     "Read its own posts (team intros, role announcements like 'welcome @y as our CTO', 'our founder @z', cofounder mentions, 'advised by @w'), pinned and OLDER posts, and posts that tag the team. Be EXHAUSTIVE. EXCLUDE the project account and hype repliers. " +
-    "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"evidence\":\"\"}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
+    "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"https://www.linkedin.com/in/...\",\"role\":\"\",\"evidence\":\"\"}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
   const xUser = `Project X account: @${x}${name ? ` (${name})` : ""}. List every founder, team member, and advisor named in its posts or in posts tagging it. Search older posts too.`;
 
   const angles: Promise<TeamAngle>[] = [];
@@ -236,7 +264,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .then((people): TeamAngle => ({ people, provider: "github", calls: counter.calls, usd: 0, status: counterStatus(counter) }))
       .catch((): TeamAngle => ({ people: [], provider: "github", calls: counter.calls, usd: 0, status: counter.succeeded > 0 ? "partial" : "failed" })));
   }
-  if (!angles.length) { res.status(200).json({ available: false, people: [] }); return; }
+  if (!angles.length) {
+    res.status(200).json({
+      available: false,
+      attempted: false,
+      completed: false,
+      partial: false,
+      providerFailed: false,
+      people: [],
+      providers: [],
+    });
+    return;
+  }
 
   try {
     const results = await Promise.all(angles);
@@ -265,18 +304,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
     )));
 
+    const providerCoverage = [...providerTotals].map(([provider, total]) => ({
+      provider,
+      status: providerStatus(total.statuses),
+    }));
+    const completed = results.length > 0 && results.every((result) => result.status === "succeeded");
+    const providerFailed = results.some((result) => result.status === "failed");
+    const partial = !completed && results.some((result) => result.status === "succeeded" || result.status === "partial");
+
     const self = new Set([domain.toLowerCase(), x.toLowerCase()].filter(Boolean));
     const byKey = new Map<string, any>();
-    for (const { people: arr } of results) {
+    for (const { people: arr, provider } of results) {
       for (const p of arr) {
         if (!p || typeof p.name !== "string" || !p.name.trim()) continue;
         const handle = p.handle && HANDLE.test(p.handle) ? "@" + p.handle.replace(/^@/, "") : undefined;
-        const linkedin = typeof p.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(p.linkedin) ? p.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : undefined;
-        const cleaned = { name: p.name.trim(), handle, linkedin, role: (p.role || "team").toString(), evidence: typeof p.evidence === "string" ? p.evidence : undefined };
+        const linkedin = personLinkedInUrl(p.linkedin);
+        const cleaned = {
+          name: p.name.trim(),
+          handle,
+          linkedin,
+          role: (p.role || "team").toString(),
+          evidence: typeof p.evidence === "string" ? p.evidence : undefined,
+          provider,
+          ...personProvenance(provider),
+        };
         if (!cleaned.handle && !cleaned.linkedin && !cleaned.evidence) continue;
         const hk = handle ? handle.replace(/^@/, "").toLowerCase() : "";
         if (hk && self.has(hk)) continue;
-        const k = hk || cleaned.name.toLowerCase();
+        // Dedupe repeated angles from the same provider, but never collapse a
+        // model candidate into an observed association or code contribution.
+        // Cross-provider merging is where unverified roles used to inherit a
+        // deterministic provider's authority.
+        const k = `${provider}:${cleaned.evidenceKind}:${hk || cleaned.name.toLowerCase()}`;
         const ex = byKey.get(k);
         if (ex) {
           ex.handle = ex.handle ?? cleaned.handle;
@@ -310,8 +369,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
     }
-    res.status(200).json({ available: true, people: [...byKey.values()].slice(0, 20) });
+    res.status(200).json({
+      available: true,
+      attempted: true,
+      completed,
+      partial,
+      providerFailed,
+      people: [...byKey.values()].slice(0, 20),
+      providers: providerCoverage,
+    });
   } catch (e) {
-    res.status(200).json({ available: true, people: [], error: String(e) });
+    res.status(200).json({
+      available: true,
+      attempted: true,
+      completed: false,
+      partial: false,
+      providerFailed: true,
+      people: [],
+      providers: [],
+      error: String(e),
+    });
   }
 }

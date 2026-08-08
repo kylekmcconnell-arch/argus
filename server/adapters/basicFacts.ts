@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { captureTimestamp } from "../captureTime";
 import { isIP } from "node:net";
 import {
   canonicalBasicFactComparisonValue,
@@ -10,6 +11,8 @@ import {
 } from "../../src/data/evidence";
 import { supportsExplicitEmptyBasicFact } from "../../src/lib/basicFactQuestions";
 import { canonicalOfficialWebsite } from "../../src/lib/fundScaleEvidence";
+import { isInstitutionalInvestorAccount, isOrganizationAccount } from "../../src/lib/investorSubject";
+import { projectLeadIsRelevant } from "../../src/lib/projectLeadRelevance";
 import { DISCOVERY_MODEL, env, providerFallbacksEnabled } from "../config";
 import { cacheGet, cacheSet } from "../cache";
 import { addClaudeUsage, recordCall } from "../cost";
@@ -35,7 +38,7 @@ const MAX_REPAIR_PROVIDER_CALLS = 8;
 // tight enough that slow calls timed out and fell back to Grok (erasing the cost
 // win). Discovery batches run in parallel, well inside the ~390s budget.
 const DISCOVERY_TIMEOUT_MS = 90_000;
-const RESEARCH_CACHE_VERSION = "v10";
+const RESEARCH_CACHE_VERSION = "v12";
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 const PREDICATES = new Set<BasicFactPredicate>([
@@ -241,6 +244,39 @@ const INVESTOR_QUESTIONS: readonly QuestionTemplate[] = [
   { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" },
 ];
 
+const INVESTOR_ORGANIZATION_QUESTIONS: readonly QuestionTemplate[] = [
+  { batch: "identity", predicate: "official_identity", question: "What exact fund, investment firm, or organization does this account represent?", critical: true },
+  { batch: "identity", predicate: "founder", question: "Who founded the investment organization? Return one person per answer." },
+  { batch: "identity", predicate: "executive", question: "Who currently leads, manages, or makes investment decisions for the organization? Return one person and role per answer.", critical: true },
+  { batch: "identity", predicate: "founded", question: "When was the investment organization founded?" },
+  { batch: "track_record", predicate: "product", question: "What investment stages, sectors, geographies, or founder services does the organization explicitly say it provides?" },
+  { batch: "track_record", predicate: "investor", question: "Which portfolio companies are explicitly claimed by this exact organization? Return one company per answer.", critical: true },
+  { batch: "track_record", predicate: "funding", question: "Which named fund vehicles, closes, or capital commitments has this organization publicly disclosed?", critical: true },
+  { batch: "track_record", predicate: "exit", question: "Which portfolio exits or realized outcomes are source-backed and explicitly attributed to this organization?" },
+  { batch: "track_record", predicate: "track_record", question: "What concrete and dated portfolio outcomes establish this organization's investment track record?", critical: true },
+  { batch: "structure_risk", predicate: "legal_entity", question: "Which legal entity operates or manages this investment organization?", critical: true },
+  { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events explicitly name this organization, with exact attribution and current stated status?" },
+  { batch: "structure_risk", predicate: "governance", question: "What formal management, investment-committee, or governance structure is documented?" },
+  { batch: "structure_risk", predicate: "control", question: "Who has ownership, management, voting, or investment-committee control?" },
+  { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" },
+];
+
+const BUSINESS_ORGANIZATION_QUESTIONS: readonly QuestionTemplate[] = [
+  { batch: "identity", predicate: "official_identity", question: "What exact company, agency, studio, or organization does this account represent?", critical: true },
+  { batch: "identity", predicate: "founder", question: "Who founded the organization? Return one person per answer." },
+  { batch: "identity", predicate: "executive", question: "Who currently leads or controls the organization? Return one person and role per answer.", critical: true },
+  { batch: "identity", predicate: "founded", question: "When was the organization founded?" },
+  { batch: "track_record", predicate: "product", question: "What products or services does the organization explicitly provide?", critical: true },
+  { batch: "track_record", predicate: "partnership", question: "Which named clients, customers, or operating partners publicly confirm a relationship with this organization? Return one per answer.", critical: true },
+  { batch: "track_record", predicate: "track_record", question: "What concrete, dated client or operating outcomes establish the organization's track record?", critical: true },
+  { batch: "track_record", predicate: "funding", question: "What source-backed company funding rounds or capital raises are disclosed?" },
+  { batch: "structure_risk", predicate: "legal_entity", question: "Which legal entity operates the organization?", critical: true },
+  { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events explicitly name this organization, with exact attribution and current stated status?" },
+  { batch: "structure_risk", predicate: "governance", question: "What formal ownership, board, or governance structure is documented?" },
+  { batch: "structure_risk", predicate: "control", question: "Who has practical ownership or management control?" },
+  { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" },
+];
+
 const FOUNDER_REPAIR_PREDICATES = new Set<BasicFactPredicate>(
   PERSON_QUESTIONS.map((question) => question.predicate),
 );
@@ -325,14 +361,17 @@ function researchAudience(ctx: CollectContext): BasicFactsResearchAudience {
 /** Stable, role-aware questions asked of search models. Models only discover leads. */
 export function basicFactsResearchQuestions(ctx: CollectContext): BasicFactsResearchQuestion[] {
   const audience = researchAudience(ctx);
+  const institutionalInvestor = audience === "investor" && isInstitutionalInvestorAccount(ctx.evidence);
+  const businessOrganization = audience === "person" && isOrganizationAccount(ctx.evidence);
   const templates = audience === "project"
     ? PROJECT_QUESTIONS
     : audience === "investor"
-      ? INVESTOR_QUESTIONS
-      : PERSON_QUESTIONS;
+      ? institutionalInvestor ? INVESTOR_ORGANIZATION_QUESTIONS : INVESTOR_QUESTIONS
+      : businessOrganization ? BUSINESS_ORGANIZATION_QUESTIONS : PERSON_QUESTIONS;
+  const questionPrefix = institutionalInvestor ? "investor_org" : businessOrganization ? "organization" : audience;
   const founderSubject = ctx.evidence.roles.some((role) => String(role) === "FOUNDER");
   return templates.map((template) => ({
-    id: `${audience}.${template.predicate}`,
+    id: `${questionPrefix}.${template.predicate}`,
     audience,
     batch: template.batch,
     predicate: template.predicate,
@@ -990,6 +1029,14 @@ function officialIdentityBootstrapLeads(
 }
 
 function subjectAliases(ctx: CollectContext): string[] {
+  const personSubject = researchAudience(ctx) !== "project" && !isOrganizationAccount(ctx.evidence);
+  if (personSubject) {
+    const aliases = [ctx.handle, ctx.handle.replace(/^@/, "")];
+    if (ctx.evidence.profile.identity_binding) {
+      aliases.push(ctx.evidence.profile.resolved_name?.trim() ?? "");
+    }
+    return [...new Set(aliases.filter(Boolean))];
+  }
   const aliases = [
     subjectName(ctx),
     ctx.evidence.profile.display_name,
@@ -1076,6 +1123,8 @@ function discoveryPrompt(
 ): string {
   const profile = ctx.evidence.profile;
   const audience = questions[0]?.audience ?? researchAudience(ctx);
+  const institutionalInvestor = audience === "investor" && isInstitutionalInvestorAccount(ctx.evidence);
+  const organizationSubject = institutionalInvestor || (audience === "person" && isOrganizationAccount(ctx.evidence));
   const questionLedger = questions.map((question, index) =>
     `${index + 1}. [${question.id}] (${question.predicate}${question.critical ? ", decision-critical" : ""}) ${question.question}`,
   ).join("\n");
@@ -1095,27 +1144,57 @@ function discoveryPrompt(
             "Prefer the company's own dated announcement, then add reputable independent reporting as candidate URLs when it states the same round.",
           ].join(" ")
       : "";
-  const identitySearchHint = handleDerivedPersonName(ctx);
+  const identitySearchHint = organizationSubject ? null : handleDerivedPersonName(ctx);
   const targetedIdentityInstruction = questions.length === 1
     && questions[0]?.predicate === "official_identity"
     && audience !== "project"
     ? [
-        "This is an identity-bootstrap search. The profile display name may be incomplete.",
-        identitySearchHint
-          ? `Handle-derived full-name candidate: "${identitySearchHint}". Use it only as a search query and verify it from the cited page.`
-          : "Search for the person's exact full public name using the handle, bio, and official website.",
+        organizationSubject
+          ? "This is an organization-identity search. Resolve the exact company, fund, or firm represented by the account; do not return a person's name as the account identity."
+          : "This is an identity-bootstrap search. The profile display name may be incomplete.",
+        organizationSubject
+          ? "Prefer a first-party firm page, registry, or organization profile that binds the exact brand and account."
+          : identitySearchHint
+            ? `Handle-derived full-name candidate: "${identitySearchHint}". Use it only as a search query and verify it from the cited page.`
+            : "Search for the person's exact full public name using the handle, bio, and official website.",
         officialSearchHost && identitySearchHint
           ? `Start with a query equivalent to site:${officialSearchHost} "${identitySearchHint}", then check independent primary or reputable sources.`
           : "",
-        "The value must contain only the person's full public name. Do not append a title, role, organization, biography, or second person.",
+        organizationSubject
+          ? "The value must contain only the organization's exact public name. Do not append a person, slogan, description, or legal conclusion."
+          : "The value must contain only the person's full public name. Do not append a title, role, organization, biography, or second person.",
       ].filter(Boolean).join(" ")
+    : "";
+  const projectLeadershipInstruction = audience === "project"
+    && questions.some((question) => question.predicate === "founder" || question.predicate === "executive")
+    ? [
+        "For founder and executive questions, bind every result to the exact project, not merely its display name.",
+        `Search the exact account ${ctx.handle}, the official domain, and any verified contract or token context together with founder, co-founder, CEO, team, builder, creator, and \"built by\".`,
+        "Check first-party homepages and footers plus attributable founder interviews, podcasts, and reputable ecosystem publications; many crypto projects disclose an operator there instead of on a formal team page.",
+        "A same-named company or person in another industry is not evidence for this subject, even when its page literally repeats the project display name.",
+      ].join(" ")
     : "";
   const verifiedVentureContext = verifiedVentureAssetRelationships(ctx)
     .map((relationship) => `${relationship.name} (${relationship.officialScopes.join(", ")})`)
     .join("; ");
+  const projectToken = audience === "project" && ctx.evidence.projectToken?.verified === true
+    ? ctx.evidence.projectToken
+    : null;
+  const projectIdentityFingerprint = audience === "project"
+    ? [
+        `Canonical project identity fingerprint: exact X account ${ctx.handle}`,
+        profile.website ? `official profile website ${profile.website}` : "",
+        projectToken
+          ? `verified token ${projectToken.name} ($${projectToken.symbol}) on ${projectToken.chain}, canonical contract ${projectToken.address}`
+          : "",
+        projectToken?.homepage ? `verified token homepage ${projectToken.homepage}` : "",
+        "Use these anchors together to disambiguate every result. The display name by itself is never sufficient identity evidence because another company can have exactly the same name.",
+      ].filter(Boolean).join("; ")
+    : "";
   return [
     `${phase === "repair" ? "Repair the remaining verified-evidence gaps" : "Research foundational due-diligence facts"} for ${subjectName(ctx)} (${ctx.handle}).`,
     `Research audience: ${audience}. Answer only the targeted questions below; do not pad the response with adjacent facts.`,
+    organizationSubject ? "Subject entity type: organization account, not an individual person." : "",
     profile.website ? `Known official website: ${profile.website}` : "",
     profile.bio ? `Profile bio: ${profile.bio.slice(0, 800)}` : "",
     identitySearchHint
@@ -1124,10 +1203,12 @@ function discoveryPrompt(
     verifiedVentureContext
       ? `Verified current venture relationships (relationship evidence only, not proof of any stock or token): ${verifiedVentureContext}`
       : "",
+    projectIdentityFingerprint,
     "Targeted question ledger:",
     questionLedger,
     targetedAssetInstruction,
     targetedIdentityInstruction,
+    projectLeadershipInstruction,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, partners, integrations, tokens, networks, or products in one value.",
@@ -1688,13 +1769,13 @@ export async function discoverPrimary(
   // on the cheaper searcher, with Claude still available for repair, so the
   // cost/recall trade can be measured rather than assumed.
   // ARGUS_BASIC_FACTS_PRIMARY=grounded routes the same questions through the
-  // decoupled Serper + fetch + cheap-extract pipeline (no per-search provider
-  // fee, no Sonnet-priced search contexts). An unprovisioned grounded lane
-  // falls through only when provider failover is explicitly enabled; the
-  // default owner policy leaves the skipped lane visible without moving spend.
+  // decoupled Serper + fetch + cheap-extract pipeline (low-cost SERP queries,
+  // no Sonnet-priced search contexts). A completed empty result still owns
+  // the lane. A skipped or failed provider did not answer and falls through to
+  // an already-provisioned researcher so a stale credential cannot zero a scan.
   if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grounded") {
     const grounded = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
-    if (grounded.state !== "skipped" || !providerFallbacksEnabled()) return grounded;
+    if (grounded.state !== "skipped" && grounded.state !== "failed") return grounded;
   }
   if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grok" && env("XAI_API_KEY")) {
     return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
@@ -3243,6 +3324,30 @@ export function verifyBasicFactLead(
   const claimClause = officialAssetPageEvidence
     ?? governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
   if (!claimClause) return null;
+  // Project display names are weak identifiers. A fetched passage about a
+  // real same-named company can satisfy literal subject/value/predicate checks
+  // perfectly while still belonging to the wrong entity. Apply the shared
+  // project-binding rule at the promotion boundary, not only in the UI, so a
+  // namesake can never become a frozen or score-bearing fact.
+  const projectCollisionPredicate = new Set<BasicFactPredicate>([
+    "founder", "executive", "funding", "investor", "product", "public_security",
+  ]).has(lead.predicate);
+  if (/^project\./.test(lead.questionId ?? "") && projectCollisionPredicate) {
+    const displayName = aliases.find((alias) => alias.trim() && !alias.trim().startsWith("@"))
+      ?? lead.subject;
+    if (!projectLeadIsRelevant({
+      handle: subjectKey,
+      display_name: displayName,
+      website: officialHosts[0] ?? null,
+    }, {
+      predicate: lead.predicate,
+      value: lead.value,
+      qualifier: lead.qualifier,
+      sourceUrl: document.url,
+      sourceTitle: lead.sourceTitle,
+      excerpt: claimClause,
+    })) return null;
+  }
   if (lead.predicate === "partnership" && PARTNERSHIP_UNCERTAINTY.test(claimClause)) return null;
   // A related venture's first-party page may stand in for the person's name,
   // but only explicit crypto-token language may do so. A stock ticker or
@@ -3691,7 +3796,7 @@ async function fetchSecExchangeRegistry(): Promise<PublicTextResult> {
     contentType: response.headers.get("content-type") ?? "application/json",
     text,
     contentHash: createHash("sha256").update(text).digest("hex"),
-    capturedAt: new Date().toISOString(),
+    capturedAt: captureTimestamp(),
   };
 }
 
@@ -3844,7 +3949,7 @@ function sourceBackedFounderRelationshipLeads(
   facts: readonly BasicFact[],
 ): BasicFactLead[] {
   const audience = researchAudience(ctx);
-  if (audience === "project") return [];
+  if (audience === "project" || isOrganizationAccount(ctx.evidence)) return [];
   const identities = facts.filter((fact) =>
     fact.predicate === "official_identity"
     && fact.artifact_verified === true
@@ -4157,11 +4262,42 @@ function plausiblePersonIdentity(value: string): boolean {
     && tokens.every((token) => !NON_NAME_IDENTITY_TOKENS.has(token));
 }
 
+function textBindsExactAuditedHandle(value: string, handle: string): boolean {
+  const bare = handle.trim().replace(/^@/, "");
+  if (!/^[A-Za-z0-9_]{1,30}$/.test(bare)) return false;
+  return new RegExp(
+    `(?:@|(?:https?:\\/\\/)?(?:www\\.)?(?:x|twitter)\\.com\\/)${escapedPattern(bare)}(?=$|[^A-Za-z0-9_])`,
+    "i",
+  ).test(value);
+}
+
+function identityFactBindsExactAuditedHandle(
+  ctx: CollectContext,
+  fact: BasicFact,
+): boolean {
+  if (fact.predicate !== "official_identity" || !plausiblePersonIdentity(fact.value)) return false;
+  return fact.sources.some((source) => {
+    const externalBridge = source.provider === "peopledatalabs"
+      || source.provider === "github"
+      || source.sourceClass === "official_counterparty"
+      || source.sourceClass === "regulatory_or_onchain"
+      || source.sourceClass === "independent_press";
+    if (!externalBridge) return false;
+    const receipt = `${source.title ?? ""} ${source.excerpt} ${source.url}`;
+    return looseContainsPhrase(receipt, fact.value)
+      && textBindsExactAuditedHandle(receipt, ctx.handle);
+  });
+}
+
 function profileIdentityIsSufficient(ctx: CollectContext, audience: BasicFactsResearchAudience): boolean {
+  if (audience !== "project" && !isOrganizationAccount(ctx.evidence)) {
+    return Boolean(ctx.evidence.profile.identity_binding && ctx.evidence.profile.resolved_name?.trim());
+  }
   const name = ctx.evidence.profile.resolved_name?.trim()
     || ctx.evidence.profile.display_name.trim();
   if (!name) return false;
   if (audience === "project") return true;
+  if (isOrganizationAccount(ctx.evidence)) return false;
   const tokens = looseTokens(name);
   if (tokens.length >= 2) return true;
   if (tokens.length !== 1) return false;
@@ -4251,7 +4387,7 @@ function approximateFollowerCount(value: string): number {
  * founders is the account those sources are written about.
  */
 function notabilityBoundNameAlias(ctx: CollectContext): string | null {
-  if (researchAudience(ctx) === "project") return null;
+  if (researchAudience(ctx) === "project" || isOrganizationAccount(ctx.evidence)) return null;
   const profile = ctx.evidence.profile;
   if (profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi") return null;
   const candidate = handleDerivedNameCandidate(ctx.handle);
@@ -4270,22 +4406,24 @@ function notabilityBoundNameAlias(ctx: CollectContext): string | null {
 }
 
 function applyVerifiedPersonIdentity(ctx: CollectContext, facts: readonly BasicFact[]): boolean {
-  if (researchAudience(ctx) === "project") return false;
+  if (researchAudience(ctx) === "project" || isOrganizationAccount(ctx.evidence)) return false;
   const candidate = facts
     .filter((fact) =>
       fact.predicate === "official_identity"
       && fact.artifact_verified === true
       && (fact.status === "verified" || fact.status === "corroborated")
+      && identityFactBindsExactAuditedHandle(ctx, fact)
       && verifiedIdentityExtendsProfile(ctx, fact.value))
     .sort((left, right) => looseTokens(right.value).length - looseTokens(left.value).length)[0];
   if (!candidate) return false;
   const current = ctx.evidence.profile.resolved_name?.trim() ?? "";
   if (personKey(current) === personKey(candidate.value)) return false;
   ctx.evidence.profile.resolved_name = candidate.value;
+  ctx.evidence.profile.identity_binding = "independent_exact_handle";
   if (ctx.evidence.profile.identity_confidence !== "Confirmed") {
     ctx.evidence.profile.identity_confidence = "Probable";
   }
-  ctx.evidence.profile.identity_note = `${candidate.value} was resolved from fetched, source-backed identity evidence.`;
+  ctx.evidence.profile.identity_note = `${candidate.value} was resolved from a fetched external source that explicitly binds the exact audited X handle ${ctx.handle}.`;
   return true;
 }
 
@@ -4294,10 +4432,14 @@ function deterministicQuestionAnswerRefs(
   question: BasicFactsResearchQuestion,
   facts: readonly BasicFact[],
 ): string[] {
+  const personSubject = (question.audience === "person" || question.audience === "investor")
+    && !isOrganizationAccount(ctx.evidence);
   const refs = facts
     .filter((fact) =>
       (fact.status === "verified" || fact.status === "corroborated")
       && (fact.questionId === question.id || fact.predicate === question.predicate)
+      && (!personSubject || fact.predicate !== "official_identity" || identityFactBindsExactAuditedHandle(ctx, fact))
+      && (!personSubject || fact.predicate === "official_identity" || Boolean(ctx.evidence.profile.identity_binding))
       && !(
         (question.audience === "person" || question.audience === "investor")
         && fact.predicate === "legal_regulatory_event"
@@ -4504,7 +4646,16 @@ async function loadReusableBasicFacts(ctx: CollectContext): Promise<BasicFact[]>
     && (fact as { artifact_verified?: unknown }).artifact_verified === true
     && (fact as { predicate?: unknown }).predicate !== "legal_regulatory_event"
     && !projectionLike(fact as { providerProjection?: unknown; qualifier?: unknown; value?: unknown })
-    && reusableFactIsFresh(fact as BasicFact));
+    && reusableFactIsFresh(fact as BasicFact)
+    && (
+      researchAudience(ctx) === "project"
+      || isOrganizationAccount(ctx.evidence)
+      || Boolean(ctx.evidence.profile.identity_binding)
+      || (
+        (fact as BasicFact).predicate === "official_identity"
+        && identityFactBindsExactAuditedHandle(ctx, fact as BasicFact)
+      )
+    ));
 }
 
 export async function collectBasicFacts(
@@ -4520,6 +4671,7 @@ export async function collectBasicFacts(
   // the person question set, skips incident/token diligence, and later becomes
   // decisionless even though its first-party identity was already verified.
   hydrateOfficialProjectIdentityFromFacts(ctx.evidence, reusedFacts);
+  applyVerifiedPersonIdentity(ctx, reusedFacts);
   const questions = basicFactsResearchQuestions(ctx);
   const questionsToDiscover = reusedFacts.length
     ? questions.filter((question) => !cachedFactClosesDiscovery(ctx, question, reusedFacts))
@@ -4565,11 +4717,10 @@ export async function collectBasicFacts(
   ]);
   ctx.evidence.basicFacts = [];
 
-  // Seeded before the first pass: notable followers are already collected by the
-  // X lane, so a widely-recognized pseudonymous account can match source
-  // passages immediately instead of burning a verification pass finding nothing.
-  const seededNameAlias = notabilityBoundNameAlias(ctx);
-  let aliases = seededNameAlias ? [...subjectAliases(ctx), seededNameAlias] : subjectAliases(ctx);
+  // A public display name, follower count, or name-shaped handle is a search
+  // hypothesis only. External person facts may join only after an exact
+  // account-to-person bridge has been established.
+  let aliases = subjectAliases(ctx);
   let officialHosts = [ctx.evidence.profile.website]
     .filter((value): value is string => Boolean(value))
     .flatMap((value) => {
@@ -4737,11 +4888,6 @@ export async function collectBasicFacts(
       changed = true;
     }
     if (applyVerifiedPersonIdentity(ctx, facts)) changed = true;
-    const nameAlias = notabilityBoundNameAlias(ctx);
-    if (nameAlias && !aliases.some((alias) => personKey(alias) === personKey(nameAlias))) {
-      aliases = [...aliases, nameAlias];
-      changed = true;
-    }
     const nextAliases = [...new Set([...aliases, ...subjectAliases(ctx)])];
     if (nextAliases.length !== aliases.length) {
       aliases = nextAliases;

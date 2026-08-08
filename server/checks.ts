@@ -26,7 +26,7 @@ export interface ProviderSnapshot {
  * Check ids this checklist contract owns beyond the adapter-facing
  * `PersonCheckId` union in server/adapters/types.ts.
  *
- * That union is shared adapter surface; these two rows were added here first,
+ * That union is shared adapter surface; the two local-only rows were added here first,
  * so the widening lives with the contract that defines them. Observations for
  * them are recorded straight onto the tracker rather than through
  * `ctx.recordCheck`, whose parameter is still typed by the narrower union.
@@ -52,10 +52,19 @@ interface CheckDefinition {
   criticalFor?: readonly string[];
   requiresResolvedRealName?: boolean;
   requiresPersonRole?: boolean;
+  requiresPersonSubject?: boolean;
+  requiresOrganizationSubject?: boolean;
 }
 
 export interface PersonCheckScope {
   resolvedRealName?: boolean;
+  /**
+   * True when the frozen subject record identifies the audited account as an
+   * organization rather than a person. PROJECT is always organization-scoped;
+   * INVESTOR and AGENCY require this explicit evidence-derived flag because
+   * those methodologies can also describe individuals.
+   */
+  organizationSubject?: boolean;
 }
 
 const CHECKS: readonly CheckDefinition[] = [
@@ -134,6 +143,30 @@ const CHECKS: readonly CheckDefinition[] = [
     defaultNote: "server collector did not run an adverse, scam, or rug sweep",
     criticalFor: ["FOUNDER", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"],
   },
+  // Person-name legal and sanctions screens cannot clear an organization. An
+  // institutional investment firm or agency needs its own exact legal-entity
+  // binding and entity sanctions outcome. These rows are deliberately open by
+  // default: a website name, a person's clean screen, or provider silence is
+  // not registration evidence and is not an entity sanctions result. Generic
+  // PROJECT accounts retain the rows as visible follow-ups, but they are not
+  // gates until their recorded route has an entity-screen replacement.
+  {
+    id: "organization-registration",
+    label: "Organization legal-entity binding",
+    defaultNote: "no strict frozen legal_entity fact binds the audited organization to an exact legal entity",
+    // Generic protocol/project accounts do not yet have an entity sanctions
+    // producer in the recorded route, so this gate applies only to explicit
+    // institutional/company methodologies with the replacement pass wired.
+    criticalFor: ["INVESTOR", "AGENCY"],
+    requiresOrganizationSubject: true,
+  },
+  {
+    id: "organization-sanctions",
+    label: "Organization OFAC sanctions screen",
+    defaultNote: "no completed OFAC sanctions screen was frozen for the audited organization's exact legal entity",
+    criticalFor: ["INVESTOR", "AGENCY"],
+    requiresOrganizationSubject: true,
+  },
   // Sanctions, legal history, and flagged-subject graph reconciliation are
   // legal-grade decision gates, not provider diagnostics. A report must never
   // present as decision-ready clearance while they are unresolved.
@@ -152,6 +185,7 @@ const CHECKS: readonly CheckDefinition[] = [
     label: "US legal history",
     defaultNote: "server collector did not run a legal-history check",
     requiresResolvedRealName: true,
+    requiresPersonSubject: true,
     criticalFor: ["KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"],
   },
   {
@@ -159,6 +193,7 @@ const CHECKS: readonly CheckDefinition[] = [
     label: "OFAC sanctions (name)",
     defaultNote: "server collector did not run a name-sanctions check",
     requiresResolvedRealName: true,
+    requiresPersonSubject: true,
     criticalFor: ["FOUNDER", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"],
   },
   {
@@ -310,17 +345,30 @@ export const FUND_SCALE_ERA_PERSON_CHECK_IDS: readonly ChecklistCheckId[] = Obje
   "trust-graph-connections",
 ]);
 
+/**
+ * Exact checklist frozen after adverse-screen and project leadership currency
+ * shipped, and before organization-specific registration and sanctions gates.
+ * Trust-graph qualification is exact-set, so persisted 27-row reports need
+ * this immutable era after the current contract grows.
+ */
+export const PRE_ORGANIZATION_SAFETY_PERSON_CHECK_IDS: readonly ChecklistCheckId[] = Object.freeze([
+  ...FUND_SCALE_ERA_PERSON_CHECK_IDS,
+  "adverse-screen",
+  "project-leadership-currency",
+]);
+
 const STATUS_PRIORITY: Record<CheckStatus, number> = {
   "not-applicable": 0,
   unknown: 1,
   unavailable: 2,
   stale: 3,
   "checked-empty": 4,
-  confirmed: 5,
-  finding: 6,
+  reported: 5,
+  confirmed: 6,
+  finding: 7,
 };
 
-const SUCCESS = new Set<CheckStatus>(["confirmed", "finding", "checked-empty"]);
+const SUCCESS = new Set<CheckStatus>(["confirmed", "reported", "finding", "checked-empty"]);
 
 function iso(value?: string): string {
   const date = value ? new Date(value) : new Date();
@@ -375,6 +423,10 @@ export class PersonCheckTracker {
   snapshot(roles: readonly string[], scope: PersonCheckScope = {}): ScanCheck[] {
     const heldRoles = new Set(roles);
     const projectOnly = heldRoles.size === 1 && heldRoles.has("PROJECT");
+    // A PROJECT account is necessarily the project/operating organization.
+    // INVESTOR and AGENCY remain ambiguous methodologies, so their callers
+    // must pass the organization classification derived from frozen evidence.
+    const organizationSubject = heldRoles.has("PROJECT") || scope.organizationSubject === true;
     return CHECKS.map((definition) => {
       // Founder diligence already owns the stricter, attribution-verified
       // legal/regulatory question. A secondary MEMBER classification must not
@@ -396,6 +448,24 @@ export class PersonCheckTracker {
           label: definition.label,
           status: "not-applicable" as const,
           note: roleNote[definition.role],
+          decisionCritical: false,
+        });
+      }
+      if (definition.requiresOrganizationSubject && !organizationSubject) {
+        return Object.freeze({
+          checkId: definition.id,
+          label: definition.label,
+          status: "not-applicable" as const,
+          note: "not an organization subject",
+          decisionCritical: false,
+        });
+      }
+      if (definition.requiresPersonSubject && organizationSubject) {
+        return Object.freeze({
+          checkId: definition.id,
+          label: definition.label,
+          status: "not-applicable" as const,
+          note: "person-name screen does not clear an organization subject",
           decisionCritical: false,
         });
       }

@@ -8,6 +8,7 @@
 // endpoint is paid; the embedded `raises` array is not). Additive, standalone
 // collectors — the caller decides which evidence/check they feed.
 import { recordCall, type ProviderUsageStatus } from "../cost";
+import { captureTimestamp } from "../captureTime";
 
 const API_BASE = "https://api.llama.fi";
 
@@ -74,14 +75,14 @@ type ProtocolDocument = {
 const SCAN_MEMO_MS = 30_000;
 
 type JsonRead =
-  | { ok: true; data: unknown; fromMemo: boolean }
+  | { ok: true; data: unknown; fromMemo: boolean; capturedAt: string }
   | { ok: false; kind: "transport" | "http" | "unreadable"; status: number | null };
 
 interface MemoSlot {
   /** the one outstanding read; cleared the moment it settles */
   inFlight?: Promise<JsonRead>;
   /** a settled SUCCESS only, with the moment it landed */
-  settled?: { at: number; data: unknown };
+  settled?: { at: number; data: unknown; capturedAt: string };
 }
 
 const scanMemo = new Map<string, MemoSlot>();
@@ -105,7 +106,8 @@ async function readJson(url: string, fetcher: typeof fetch): Promise<JsonRead> {
   }
   if (!response.ok) return { ok: false, kind: "http", status: response.status };
   try {
-    return { ok: true, data: (await response.json()) ?? {}, fromMemo: false };
+    const data = (await response.json()) ?? {};
+    return { ok: true, data, fromMemo: false, capturedAt: captureTimestamp() };
   } catch {
     return { ok: false, kind: "unreadable", status: response.status };
   }
@@ -118,11 +120,20 @@ async function fetchJsonOnce(url: string, fetcher: typeof fetch): Promise<JsonRe
   }
 
   const existing = scanMemo.get(url);
-  if (existing?.settled) return { ok: true, data: existing.settled.data, fromMemo: true };
+  if (existing?.settled) {
+    return {
+      ok: true,
+      data: existing.settled.data,
+      fromMemo: true,
+      capturedAt: existing.settled.capturedAt,
+    };
+  }
   if (existing?.inFlight) {
     const shared = await existing.inFlight;
     // A joiner made no request of its own, whatever the shared read returned.
-    return shared.ok ? { ok: true, data: shared.data, fromMemo: true } : shared;
+    return shared.ok
+      ? { ok: true, data: shared.data, fromMemo: true, capturedAt: shared.capturedAt }
+      : shared;
   }
 
   // The stored promise is the already-guarded one: readJson does not reject, but
@@ -130,13 +141,15 @@ async function fetchJsonOnce(url: string, fetcher: typeof fetch): Promise<JsonRe
   const inFlight = readJson(url, fetcher).catch((): JsonRead => ({ ok: false, kind: "transport", status: null }));
   scanMemo.set(url, { inFlight });
   const read = await inFlight;
-  if (read.ok) scanMemo.set(url, { settled: { at: Date.now(), data: read.data } });
+  if (read.ok) {
+    scanMemo.set(url, { settled: { at: Date.now(), data: read.data, capturedAt: read.capturedAt } });
+  }
   else scanMemo.delete(url);
   return read;
 }
 
 type FetchResult =
-  | { ok: true; data: ProtocolDocument; fromMemo: boolean }
+  | { ok: true; data: ProtocolDocument; fromMemo: boolean; capturedAt: string }
   | { ok: false; notFound: boolean; note: string };
 
 /**
@@ -146,7 +159,14 @@ type FetchResult =
  */
 async function fetchProtocol(slug: string, fetcher: typeof fetch): Promise<FetchResult> {
   const read = await fetchJsonOnce(`${API_BASE}/protocol/${encodeURIComponent(slug)}`, fetcher);
-  if (read.ok) return { ok: true, data: (read.data ?? {}) as ProtocolDocument, fromMemo: read.fromMemo };
+  if (read.ok) {
+    return {
+      ok: true,
+      data: (read.data ?? {}) as ProtocolDocument,
+      fromMemo: read.fromMemo,
+      capturedAt: read.capturedAt,
+    };
+  }
   if (read.kind === "transport") return { ok: false, notFound: false, note: "DeFiLlama was unavailable." };
   if (read.kind === "unreadable") return { ok: false, notFound: false, note: "DeFiLlama response was unreadable." };
   const notFound = read.status === 400;
@@ -170,8 +190,8 @@ export interface ProtocolHackRecord {
   /** ISO date (YYYY-MM-DD) or null when the record has no date */
   date: string | null;
   amountUsd: number | null;
-  /** whether the record states the funds were returned */
-  returnedFunds: boolean;
+  /** whether the record explicitly states the funds were returned; null when omitted */
+  returnedFunds: boolean | null;
   /** absolute USD returned, when DeFiLlama records a numeric recovery */
   returnedAmountUsd: number | null;
   classification: string | null;
@@ -214,6 +234,8 @@ export interface ProtocolTvl {
   hacks: ProtocolHackRecord[];
   /** human-facing DeFiLlama page */
   sourceUrl: string;
+  /** Observation time of the exact DeFiLlama response. */
+  capturedAt: string;
 }
 
 export type TvlOutcome =
@@ -307,10 +329,15 @@ export async function collectProtocolTvl(
       const returnedAmountUsd = typeof entry.returnedFunds === "number" && entry.returnedFunds > 0
         ? Math.round(entry.returnedFunds)
         : null;
+      const returnedFunds = returnedAmountUsd !== null
+        ? true
+        : typeof entry.returnedFunds === "boolean"
+          ? entry.returnedFunds
+          : null;
       return {
         date: typeof entry.date === "number" ? new Date(entry.date * 1000).toISOString().slice(0, 10) : null,
         amountUsd: typeof entry.amount === "number" && entry.amount > 0 ? Math.round(entry.amount) : null,
-        returnedFunds: entry.returnedFunds === true || returnedAmountUsd !== null,
+        returnedFunds,
         returnedAmountUsd,
         classification: typeof entry.classification === "string" ? entry.classification : null,
         technique: typeof entry.technique === "string" ? entry.technique : null,
@@ -334,6 +361,7 @@ export async function collectProtocolTvl(
       governanceIds: strArray(data.governanceID),
       hacks,
       sourceUrl: `https://defillama.com/protocol/${slug}`,
+      capturedAt: result.capturedAt,
     },
   };
 }
@@ -420,6 +448,8 @@ export interface ProtocolFees {
    */
   change30dOver30dPct: number | null;
   sourceUrl: string;
+  /** Observation time of the exact DeFiLlama fees response. */
+  capturedAt: string;
 }
 
 export type FeesOutcome =
@@ -477,6 +507,7 @@ export async function collectProtocolFees(
       total30dUsd,
       change30dOver30dPct,
       sourceUrl: `https://defillama.com/protocol/${slug}`,
+      capturedAt: read.capturedAt,
     },
   };
 }
@@ -507,6 +538,8 @@ export interface ProtocolFunding {
   /** distinct lead investors across all rounds */
   leadInvestors: string[];
   sourceUrl: string;
+  /** Observation time shared with the exact protocol response. */
+  capturedAt: string;
 }
 
 export type FundingOutcome =
@@ -594,6 +627,7 @@ export async function collectProtocolFunding(
       totalRaisedUsd,
       leadInvestors,
       sourceUrl: `https://defillama.com/protocol/${slug}`,
+      capturedAt: result.capturedAt,
     },
   };
 }

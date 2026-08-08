@@ -77,8 +77,16 @@ export async function seedFundingSource(url: string, wallet: string, sigs: strin
     return null;
   };
   for (const sig of sigs) {
-    const tx = await heliusRpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage).catch(() => null);
-    if (!tx) continue;
+    let tx: any;
+    try {
+      tx = await heliusRpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
+    } catch {
+      // The signatures are oldest first. Once one transaction is unreadable,
+      // a funder found later could merely be a top-up rather than the seed.
+      // Fail closed instead of advancing past the missing evidence.
+      return null;
+    }
+    if (!tx) return null;
     const direct = scan(tx.transaction?.message?.instructions);
     if (direct) return direct;
     for (const inner of tx.meta?.innerInstructions ?? []) {
@@ -109,11 +117,20 @@ export async function seedFundingSource(url: string, wallet: string, sigs: strin
 export async function currentTokenBalance(url: string, owner: string, mint: string, usage: ProviderUsage): Promise<number | null> {
   try {
     const result = await heliusRpc(url, "getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }], usage);
-    const accounts: any[] = Array.isArray(result?.value) ? result.value : [];
+    if (!Array.isArray(result?.value)) return null;
+    const accounts: any[] = result.value;
     let sum = 0;
     for (const account of accounts) {
-      const ui = account?.account?.data?.parsed?.info?.tokenAmount?.uiAmount;
-      if (typeof ui === "number" && Number.isFinite(ui)) sum += ui;
+      const amount = account?.account?.data?.parsed?.info?.tokenAmount;
+      const ui = amount?.uiAmount;
+      if (typeof ui === "number" && Number.isFinite(ui) && ui >= 0) {
+        sum += ui;
+        continue;
+      }
+      const uiString = typeof amount?.uiAmountString === "string" ? amount.uiAmountString.trim() : "";
+      const parsed = uiString ? Number(uiString) : Number.NaN;
+      if (!Number.isFinite(parsed) || parsed < 0) return null;
+      sum += parsed;
     }
     return sum;
   } catch {

@@ -1,4 +1,4 @@
-import { clearanceCoverage, decisionCriticalChecks, summarizeChecks, type ScanCheck } from "./scanChecklist";
+import { clearanceCoverage, decisionCriticalChecks, summarizeChecks, type ScanCheck } from "./scanChecklist.js";
 
 /**
  * Coverage below this floor is too thin to describe an assessment as

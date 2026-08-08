@@ -8,6 +8,7 @@ import { env } from "../config";
 import { enrichPersonViaMonid } from "./monid";
 import { VentureOutcome } from "../../src/engine";
 import { employmentCurrency } from "../../src/lib/employmentCurrency";
+import { isOrganizationAccount } from "../../src/lib/investorSubject";
 
 const BASE = "https://api.peopledatalabs.com/v5";
 type JsonRecord = Record<string, unknown>;
@@ -188,12 +189,25 @@ function parsePdlPerson(p: JsonRecord) {
       ? p.emails.map((email) => typeof email === "string" ? email : asRecord(email)?.address)
       : []),
   ];
+  const profileRecords = (Array.isArray(p.profiles) ? p.profiles : [])
+    .flatMap((value) => {
+      const profile = asRecord(value);
+      if (!profile) return [];
+      return [{
+        network: optionalString(profile.network)?.toLowerCase(),
+        url: optionalString(profile.url),
+        username: optionalString(profile.username),
+      }];
+    });
   const person = {
     fullName,
     jobTitle: optionalString(p.job_title),
     jobCompany: optionalString(p.job_company_name),
     experience,
     linkedin: optionalString(p.linkedin_url),
+    twitterUrl: optionalString(p.twitter_url) ?? null,
+    twitterUsername: optionalString(p.twitter_username) ?? null,
+    profiles: profileRecords,
     // Emails are the strongest cross-source bridge key: a PDL-resolved email that
     // MATCHES a leaked GitHub commit email proves the anon dev is this named person.
     emails: [...new Set(emailCandidates
@@ -207,30 +221,57 @@ function parsePdlPerson(p: JsonRecord) {
 
 const httpify = (u?: string | null) => (u ? (/^https?:\/\//.test(u) ? u : "https://" + u) : null);
 
+function socialHandle(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  const raw = value.trim().replace(/^@/, "");
+  if (!raw.includes("/") && !raw.includes(".")) return raw.toLowerCase();
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (host !== "twitter.com" && host !== "x.com") return null;
+    const handle = decodeURIComponent(parsed.pathname.split("/").filter(Boolean)[0] ?? "").replace(/^@/, "");
+    return handle ? handle.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+function personMatchesAuditedHandle(
+  person: NonNullable<Awaited<ReturnType<typeof enrichPerson>>>,
+  handle: string,
+): boolean {
+  const expected = handle.replace(/^@/, "").toLowerCase();
+  const candidates = [
+    person.twitterUsername,
+    person.twitterUrl,
+    ...person.profiles
+      .filter((profile) => profile.network === "twitter" || profile.network === "x")
+      .flatMap((profile) => [profile.username, profile.url]),
+  ];
+  return candidates.some((candidate) => socialHandle(candidate) === expected);
+}
+
 export const peopledatalabsAdapter: Adapter = {
   id: "peopledatalabs",
   label: "People Data Labs",
   available: () => !!env("MONID_API_KEY") || !!env("PDL_API_KEY"),
   async run(ctx: CollectContext) {
     const handle = ctx.handle.replace(/^@/, "");
+    if (isOrganizationAccount(ctx.evidence)) {
+      ctx.emit({
+        phase: "P1 · Identity",
+        label: "Person enrichment not applicable",
+        detail: "The audited handle represents an organization. A person record cannot replace the organization's identity or stand in for its operators.",
+        source: "peopledatalabs",
+        tone: "neutral",
+      });
+      return { state: "skipped", detail: "organization account; person enrichment not applicable" };
+    }
     const name = ctx.evidence.profile.display_name;
     const realName = name && name !== handle ? name : undefined;
-    // A common display name alone is too ambiguous for PDL (it returns no match).
-    // We already discovered this person's companies upstream (Grok) — feed one
-    // back as a disambiguator, which is exactly what turns "Kyle McConnell" into
-    // a precise hit. This is the bridge between the two intelligence layers.
-    const companies = [...new Set(ctx.evidence.ventures.map((v) => v.project_name).filter(Boolean))];
-    ctx.emit({ phase: "P1 · Identity", label: "Identity resolution", detail: `Enriching ${realName ?? "@" + handle} via People Data Labs${companies.length ? ", disambiguating with discovered companies" : ""}…`, tone: "neutral" });
+    ctx.emit({ phase: "P1 · Identity", label: "Identity resolution", detail: `Enriching ${realName ?? "@" + handle} via the exact audited X profile…`, tone: "neutral" });
 
-    let person: Awaited<ReturnType<typeof enrichPerson>> = null;
-    if (realName) {
-      for (const company of companies.slice(0, 3)) {
-        person = await enrichPerson({ name: realName, company });
-        if (person) break;
-      }
-      if (!person) person = await enrichPerson({ name: realName }); // last resort, high-confidence only
-    }
-    if (!person) person = await enrichPerson({ profile: `twitter.com/${handle}` });
+    const person = await enrichPerson({ profile: `https://twitter.com/${handle}` });
     if (!person) {
       ctx.recordCheck?.({
         id: "identity-resolution",
@@ -241,13 +282,30 @@ export const peopledatalabsAdapter: Adapter = {
       ctx.emit({ phase: "P1 · Identity", label: "No match", detail: "No real-world identity record matched; scored as pseudonymous (no penalty).", source: "peopledatalabs", tone: "neutral" });
       return;
     }
+    if (!person.fullName || !personMatchesAuditedHandle(person, handle)) {
+      ctx.recordCheck?.({
+        id: "identity-resolution",
+        status: "checked-empty",
+        note: "licensed person record did not return both a full name and the exact audited X handle; identity was not adopted",
+        provider: "peopledatalabs",
+      });
+      ctx.emit({
+        phase: "P1 · Identity",
+        label: "Identity not bound",
+        detail: "The licensed result did not carry both a full name and the exact audited X handle. Its identity, employers, and contact fields were discarded.",
+        source: "peopledatalabs",
+        tone: "warn",
+      });
+      return;
+    }
     ctx.evidence.profile.identity_confidence = person.linkedin ? "Probable" : ctx.evidence.profile.identity_confidence;
     if (person.fullName) ctx.evidence.profile.resolved_name = person.fullName;
+    ctx.evidence.profile.identity_binding = "licensed_exact_social";
     // Carry the resolved emails so the graph can bridge them to leaked GitHub commit
     // emails (an email match is a near-courtroom-grade identity confirmation).
     if (person.emails.length) ctx.evidence.profile.identity_emails = person.emails;
     const emailNote = person.emails.length ? ` Email on record: ${person.emails[0]}.` : "";
-    ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.${emailNote}`;
+    ctx.evidence.profile.identity_note = `Resolved to ${person.fullName} from a licensed record that returned the exact audited X handle @${handle}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.${emailNote}`;
     ctx.recordCheck?.({
       id: "identity-resolution",
       status: "confirmed",

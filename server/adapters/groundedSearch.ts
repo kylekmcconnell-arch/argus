@@ -46,6 +46,25 @@ interface SerperSearchOutcome {
   detail?: string;
 }
 
+function safeSerperFailure(status: number, raw: string): string {
+  let message = "";
+  try {
+    const parsed = asRec(JSON.parse(raw.slice(0, 2_000)));
+    message = [parsed.message, parsed.error].find((value): value is string => typeof value === "string") ?? "";
+  } catch {
+    message = raw.slice(0, 500);
+  }
+  const normalized = message.toLowerCase();
+  const reason = /unauthor|api[ _-]?key|credential/.test(normalized)
+    ? "unauthorized"
+    : /credit|quota|rate limit|usage limit/.test(normalized)
+      ? "credits_or_quota"
+      : /query|parameter|request body|invalid request/.test(normalized)
+        ? "invalid_request"
+        : "rejected";
+  return `http_${status}:${reason}`;
+}
+
 function asRec(v: unknown): Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
 }
@@ -58,7 +77,14 @@ async function serperSearch(query: string, key: string): Promise<SerperSearchOut
       body: JSON.stringify({ q: query, num: 8 }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) return { results: [], status: "failed", detail: `http_${res.status}` };
+    if (!res.ok) {
+      const detail = safeSerperFailure(res.status, await res.text().catch(() => ""));
+      // Keep the provider's rejection observable without logging the search
+      // query, response body, or credential. The stable reason is sufficient
+      // to distinguish a retryable outage from configuration attention.
+      console.warn("[serper-search] request rejected", { status: res.status, reason: detail.split(":")[1], queryChars: query.length });
+      return { results: [], status: "failed", detail };
+    }
     const d = asRec(await res.json());
     const organic = Array.isArray(d.organic) ? d.organic.map(asRec) : [];
     return {
@@ -206,7 +232,13 @@ export function groundedSearchProvisioned(): boolean {
 export async function groundedSearch(
   system: string,
   user: string,
-  opts?: { cacheKey?: string; bypassCache?: boolean; queries?: readonly string[] },
+  opts?: {
+    cacheKey?: string;
+    bypassCache?: boolean;
+    queries?: readonly string[];
+    /** Called only when every physical search attempt failed, never for a valid empty result. */
+    onProviderUnavailable?: () => void;
+  },
 ): Promise<string | null> {
   const serperKey = env("SERPER_API_KEY");
   // Needs Serper for search plus SOME extractor: OpenRouter (when a slug model +
@@ -243,6 +275,7 @@ export async function groundedSearch(
       [...new Set(failed.flatMap((outcome) => outcome.detail ? [outcome.detail] : []))].join(","),
     );
   }
+  if (failed.length && succeeded.length === 0) opts?.onProviderUnavailable?.();
   const results = dedupeByUrl(searched.flatMap((outcome) => outcome.results)).slice(0, MAX_RESULTS);
   if (!results.length) return null;
 

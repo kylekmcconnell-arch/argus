@@ -1,39 +1,50 @@
-// Security-audit collector: verifies independent audits the rug-unfakeable way.
+// Security-audit collector: bounded counterparty corroboration.
 //
 // A project's own /security page listing "Trail of Bits, CertiK, ..." is
 // SELF-ATTESTATION: any scam can publish that list, so a first-party page can
-// never mint a verified audit fact by itself. What a scam cannot do is make
-// the auditor's own website name it. This collector therefore works in two
-// hops:
+// never mint a verified audit fact by itself. This collector therefore works
+// in two hops:
 //
 //   1. Fetch the subject's security/audits page (candidates: DeFiLlama
 //      audit_links plus the {officialSite}/security convention) and extract
 //      which KNOWN auditors it names, plus outbound links into each auditor's
 //      own domain.
-//   2. Fetch the auditor-domain page and require the subject's name in its
-//      text. Only that counterparty confirmation upgrades an auditor claim to
-//      CORROBORATED; everything else stays a self-attested research lead,
-//      visible for transparency and excluded from scoring gates.
+//   2. Fetch the auditor-domain page and require explicit audit context near
+//      the subject name plus an official-domain or canonical-contract anchor.
+//      Everything else stays an unverified lead, visible for transparency and
+//      excluded from scoring gates.
 //
 // All fetches are bounded direct requests (no article-recovery retry ladder)
 // and the collector never throws.
 
+import { captureTimestamp } from "../captureTime";
+
 export interface AuditorEvidence {
   auditor: string;
-  /** Page on the auditor's own domain that names the subject. */
+  /** Page on the auditor's own domain that carries the bounded evidence. */
   auditorUrl: string;
-  /** Bounded excerpt from the auditor page containing the subject's name. */
+  /** Bounded excerpt with explicit audit context around the subject name. */
   excerpt: string;
+  /** Non-name subject identity that the same local evidence window matched. */
+  matchedIdentityAnchor:
+    | { type: "official_domain"; value: string }
+    | { type: "canonical_contract"; value: string };
 }
 
 export interface SecurityAuditsResult {
   available: boolean;
   note: string;
-  /** First-party security page that was successfully fetched, when any. */
+  /** Primary audit-discovery page. It is not necessarily first-party. */
   securityPageUrl: string | null;
-  /** Auditor names the subject's own page claims (self-attestation only). */
+  /** Legacy union of unverified auditor leads from every bounded candidate. */
   selfAttested: string[];
-  /** Auditor claims confirmed on the auditor's own domain. */
+  /** Exact origin of each unverified auditor lead. */
+  attestations: Array<{
+    auditor: string;
+    origin: "subject_page" | "curated_audit_link";
+    sourceUrl: string;
+  }>;
+  /** Auditor claims confirmed by audit context plus canonical identity. */
   corroborated: AuditorEvidence[];
   capturedAt: string;
 }
@@ -70,6 +81,8 @@ const USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence
 
 export interface SecurityAuditsDependencies {
   fetcher?: typeof fetch;
+  /** Verified canonical token or protocol contract supplied by orchestration. */
+  canonicalContractAddress?: string;
 }
 
 /** Bounded direct text fetch. Returns null on any failure; never throws. */
@@ -115,35 +128,79 @@ function outboundLinksTo(html: string, domains: string[]): string[] {
   return [...new Set(links)];
 }
 
-/** Strip tags/scripts to searchable text. Crude on purpose: name presence, not semantics. */
+const urlIdentityText = (rawUrl: string): string => {
+  const addresses = rawUrl.match(/0x[a-fA-F0-9]{40}/g) ?? [];
+  const host = registrableHost(rawUrl.replace(/[),.;]+$/, ""));
+  return ` ${[host, ...addresses].filter(Boolean).join(" ")} `;
+};
+
+/** Strip tags/scripts while retaining only identity-bearing URL tokens. */
 function htmlToText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>/gi, (_tag, href: string) => urlIdentityText(href))
     .replace(/<[^>]+>/g, " ")
+    .replace(/https?:\/\/[^\s"'<>]+/gi, (url) => urlIdentityText(url))
     .replace(/&[a-z#0-9]+;/gi, " ")
     .replace(/\s+/g, " ");
 }
 
-// A subject-name mention on an auditor's site only corroborates an
-// engagement when the surrounding text reads like one. Auditors also write
-// ABOUT projects (incident analyses, exploit postmortems); those mentions
-// must never corroborate a security-engagement claim.
-const ENGAGEMENT_CONTEXT = /\b(?:audit(?:s|ed|ing)?|review(?:s|ed)?|assessment|formal verification|verification|engagement|client|bounty|bounties|competition|contest)\b/i;
+// Only explicit audit work qualifies. A client list, generic engagement,
+// bounty, competition, or contest does not establish that an audit happened.
+const EXPLICIT_AUDIT_CONTEXT = /\b(?:audit(?:s|ed|ing)?|security\s+(?:review|reviews|assessment|assessments)|formal\s+verification)\b/i;
 const ADVERSE_CONTEXT = /\b(?:exploit(?:s|ed)?|hack(?:s|ed)?|incident|post-?mortem|stolen|drained|rug(?:ged)?|scam)\b/i;
 
+type AuditorIdentityAnchor = AuditorEvidence["matchedIdentityAnchor"];
+
+const domainLiteralPattern = (host: string): RegExp => new RegExp(
+  `(?:^|[^a-z0-9.-])(?:[a-z0-9-]+\\.)*${escapeRegExp(host)}(?=$|[^a-z0-9.-]|\\.(?:\\s|$))`,
+  "i",
+);
+
+const contractLiteralPattern = (address: string): RegExp => new RegExp(
+  `(?:^|[^A-Za-z0-9])${escapeRegExp(address)}(?=$|[^A-Za-z0-9])`,
+  /^0x[a-fA-F0-9]+$/.test(address) ? "i" : "",
+);
+
+function matchedIdentityAnchor(
+  window: string,
+  officialHost: string | null,
+  canonicalContractAddress: string | undefined,
+): AuditorIdentityAnchor | null {
+  const contract = canonicalContractAddress?.trim();
+  if (contract && contract.length >= 8 && contractLiteralPattern(contract).test(window)) {
+    return { type: "canonical_contract", value: contract };
+  }
+  if (officialHost && domainLiteralPattern(officialHost).test(window)) {
+    return { type: "official_domain", value: officialHost };
+  }
+  return null;
+}
+
 /**
- * Bounded excerpt around the first subject-name occurrence whose surrounding
- * window reads as a security engagement and not an incident writeup. Returns
- * null when no qualifying occurrence exists.
+ * Bounded excerpt around the first subject-name occurrence whose local window
+ * states explicit audit work, avoids incident-only prose, and carries a
+ * canonical non-name identity anchor. Returns null otherwise.
  */
-function engagementExcerpt(text: string, needle: RegExp): string | null {
+function engagementEvidence(
+  text: string,
+  needle: RegExp,
+  officialHost: string | null,
+  canonicalContractAddress: string | undefined,
+): { excerpt: string; matchedIdentityAnchor: AuditorIdentityAnchor } | null {
   const global = new RegExp(needle.source, "gi");
   for (const match of text.matchAll(global)) {
     if (match.index === undefined) continue;
-    const start = Math.max(0, match.index - 240);
-    const window = text.slice(start, match.index + match[0].length + 280);
-    if (ENGAGEMENT_CONTEXT.test(window) && !ADVERSE_CONTEXT.test(window)) return window.trim();
+    const start = Math.max(0, match.index - 480);
+    const window = text.slice(start, match.index + match[0].length + 480);
+    if (!EXPLICIT_AUDIT_CONTEXT.test(window) || ADVERSE_CONTEXT.test(window)) continue;
+    const identityAnchor = matchedIdentityAnchor(window, officialHost, canonicalContractAddress);
+    if (!identityAnchor) continue;
+    // Persist the same bounded proof window that passed the rule. A shorter
+    // name-only excerpt can omit the audit phrase or identity anchor and make
+    // the corroboration impossible to replay from the frozen report.
+    return { excerpt: window.trim().slice(0, 1_200), matchedIdentityAnchor: identityAnchor };
   }
   return null;
 }
@@ -154,11 +211,9 @@ const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\
  * Collect independent-audit evidence for a project.
  *
  * @param subjectName the project's verified name ("Aave"); the auditor page
- *   must contain it (word-bounded) for corroboration.
+ *   must contain it in explicit audit context for corroboration.
  * @param officialSite the project's verified official site, used for the
- *   /security convention candidate. Candidate pages are only trusted as
- *   SELF-attestation regardless of host, so a wrong candidate cannot verify
- *   anything by itself.
+ *   /security convention candidate and as a non-name identity anchor.
  */
 export async function collectSecurityAudits(
   subjectName: string,
@@ -167,10 +222,11 @@ export async function collectSecurityAudits(
   deps: SecurityAuditsDependencies = {},
 ): Promise<SecurityAuditsResult> {
   const fetcher = deps.fetcher ?? fetch;
-  const capturedAt = new Date().toISOString();
+  const capturedAt = captureTimestamp();
   const name = subjectName.trim();
+  const officialHost = officialSite ? registrableHost(officialSite) : null;
   const empty = (note: string): SecurityAuditsResult => ({
-    available: false, note, securityPageUrl: null, selfAttested: [], corroborated: [], capturedAt,
+    available: false, note, securityPageUrl: null, selfAttested: [], attestations: [], corroborated: [], capturedAt,
   });
   if (name.length < 2) return empty("No subject name to corroborate against.");
 
@@ -184,15 +240,18 @@ export async function collectSecurityAudits(
   const candidates = [...new Set([...candidateUrls, ...conventionCandidates])].slice(0, 4);
   if (!candidates.length) return empty("No candidate security pages.");
 
-  // URL-level attestation (no fetch). Blue chips publish audits as PDFs or
+  // URL-level lead discovery (no fetch). Blue chips publish audits as PDFs or
   // behind bot walls, so page fetches often return nothing (observed live:
   // Uniswap -> "No named security auditor found"). But the curated audit-link
   // URLS themselves carry the evidence: a link hosted on the auditor's OWN
-  // domain, or naming a registry auditor in its path, attests the engagement
-  // regardless of whether the document body is fetchable. These links come
-  // from DeFiLlama's listing (candidateUrls), not the subject's prose, so the
-  // subject cannot mint them by writing auditor names into its own page.
-  const urlAttested = new Map<string, { auditor: (typeof AUDITOR_REGISTRY)[number]; auditorDomainLinks: string[] }>();
+  // domain, or naming a registry auditor in its path, identifies an auditor
+  // lead regardless of whether the document body is fetchable. URL shape never
+  // establishes an engagement and cannot enter corroborated evidence alone.
+  const urlLeads = new Map<string, {
+    auditor: (typeof AUDITOR_REGISTRY)[number];
+    sourceLinks: string[];
+    auditorDomainLinks: string[];
+  }>();
   for (const link of candidateUrls) {
     let parsed: URL;
     try { parsed = new URL(link); } catch { continue; }
@@ -203,11 +262,12 @@ export async function collectSecurityAudits(
       const domainHit = auditor.domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
       const pathHit = auditor.pattern.test(path);
       if (!domainHit && !pathHit) continue;
-      const current = urlAttested.get(auditor.name) ?? { auditor, auditorDomainLinks: [] };
+      const current = urlLeads.get(auditor.name) ?? { auditor, sourceLinks: [], auditorDomainLinks: [] };
+      if (!current.sourceLinks.includes(link)) current.sourceLinks.push(link);
       // Only auditor-domain-hosted links qualify as hop-2 corroboration
       // candidates; a path mention alone stays attestation-only.
       if (domainHit && !current.auditorDomainLinks.includes(link)) current.auditorDomainLinks.push(link);
-      urlAttested.set(auditor.name, current);
+      urlLeads.set(auditor.name, current);
     }
   }
 
@@ -225,22 +285,55 @@ export async function collectSecurityAudits(
     const named = AUDITOR_REGISTRY.filter((auditor) => auditor.pattern.test(html));
     if (named.length) matchedPages.push({ url: candidate, html, named });
   }
-  if (!matchedPages.length && !urlAttested.size) return empty("No fetchable security page or audit link named a known auditor.");
+  if (!matchedPages.length && !urlLeads.size) return empty("No fetchable security page or audit link named a known auditor.");
 
   const primary = matchedPages.length
     ? matchedPages.reduce((best, page) => (page.named.length > best.named.length ? page : best))
     : null;
   const securityPageUrl = primary?.url
-    ?? [...urlAttested.values()].flatMap((entry) => entry.auditorDomainLinks)[0]
+    ?? [...urlLeads.values()].flatMap((entry) => entry.auditorDomainLinks)[0]
     ?? candidateUrls.find((link) => /^https?:\/\//i.test(link))
     ?? candidates[0];
   const named = AUDITOR_REGISTRY.filter((auditor) =>
-    matchedPages.some((page) => page.named.includes(auditor)) || urlAttested.has(auditor.name));
+    matchedPages.some((page) => page.named.includes(auditor)) || urlLeads.has(auditor.name));
   const selfAttested = named.map((auditor) => auditor.name);
+  const isSubjectPage = (url: string): boolean => {
+    const host = registrableHost(url);
+    return Boolean(host && officialHost && (
+      host === officialHost
+      || host.endsWith(`.${officialHost}`)
+      || officialHost.endsWith(`.${host}`)
+    ));
+  };
+  const attestations: SecurityAuditsResult["attestations"] = [];
+  const seenAttestations = new Set<string>();
+  const addAttestation = (
+    auditor: string,
+    origin: SecurityAuditsResult["attestations"][number]["origin"],
+    sourceUrl: string,
+  ) => {
+    const key = `${auditor}\n${origin}\n${sourceUrl}`;
+    if (seenAttestations.has(key)) return;
+    seenAttestations.add(key);
+    attestations.push({ auditor, origin, sourceUrl });
+  };
+  for (const auditor of named) {
+    for (const page of matchedPages.filter((candidate) => candidate.named.includes(auditor))) {
+      addAttestation(auditor.name, isSubjectPage(page.url) ? "subject_page" : "curated_audit_link", page.url);
+    }
+    for (const link of urlLeads.get(auditor.name)?.sourceLinks ?? []) {
+      addAttestation(auditor.name, "curated_audit_link", link);
+    }
+  }
+  attestations.sort((left, right) =>
+    left.auditor.localeCompare(right.auditor)
+    || left.origin.localeCompare(right.origin)
+    || left.sourceUrl.localeCompare(right.sourceUrl),
+  );
 
-  // Hop 2: the auditor's own domain must name the subject. Prefer the exact
-  // outbound links from the security page; fall back to the auditor's site
-  // search-free landing pages is deliberately NOT attempted (too weak).
+  // Hop 2: the auditor's own page must carry explicit audit context, the
+  // subject name, and a canonical identity anchor in one bounded window.
+  // Search-free landing-page fallback is deliberately not attempted.
   const subjectNeedle = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");
   const corroborated: AuditorEvidence[] = [];
   const usedAuditorUrls = new Set<string>();
@@ -249,12 +342,12 @@ export async function collectSecurityAudits(
   for (const auditor of named) {
     // Outbound links come from the pages that actually named this auditor,
     // plus any curated audit link already hosted on the auditor's own domain
-    // (that URL may itself corroborate if it fetches and names the subject).
+    // (that URL can corroborate only if its body passes every content check).
     const outbound = [...new Set([
       ...matchedPages
         .filter((page) => page.named.includes(auditor))
         .flatMap((page) => outboundLinksTo(page.html, auditor.domains)),
-      ...(urlAttested.get(auditor.name)?.auditorDomainLinks ?? []),
+      ...(urlLeads.get(auditor.name)?.auditorDomainLinks ?? []),
     ])].slice(0, 2);
     for (const link of outbound) {
       // One auditor page corroborates ONE claim: sister brands sharing a
@@ -269,10 +362,20 @@ export async function collectSecurityAudits(
         fetchedPages.set(link, html);
       }
       if (!html) continue;
-      const excerpt = engagementExcerpt(htmlToText(html), subjectNeedle);
-      if (excerpt) {
+      const match = engagementEvidence(
+        htmlToText(html),
+        subjectNeedle,
+        officialHost,
+        deps.canonicalContractAddress,
+      );
+      if (match) {
         usedAuditorUrls.add(link);
-        corroborated.push({ auditor: auditor.name, auditorUrl: link, excerpt: excerpt.slice(0, 320) });
+        corroborated.push({
+          auditor: auditor.name,
+          auditorUrl: link,
+          excerpt: match.excerpt,
+          matchedIdentityAnchor: match.matchedIdentityAnchor,
+        });
         break;
       }
     }
@@ -281,10 +384,11 @@ export async function collectSecurityAudits(
   return {
     available: true,
     note: corroborated.length
-      ? `${corroborated.length} auditor${corroborated.length === 1 ? "" : "s"} confirmed on their own domains.`
-      : "Security page names auditors; no auditor-domain confirmation succeeded.",
+      ? `${corroborated.length} auditor${corroborated.length === 1 ? "" : "s"} confirmed with explicit audit context and a canonical identity anchor on their own domains.`
+      : "Audit discovery sources name auditors; no auditor-domain confirmation succeeded.",
     securityPageUrl,
     selfAttested,
+    attestations,
     corroborated,
     capturedAt,
   };

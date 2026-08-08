@@ -96,6 +96,34 @@ describe("market infrastructure is not a holder", () => {
     expect(dossier!.findings.some((f) => /does not appear locked or burned/i.test(f.claim))).toBe(false);
   });
 
+  it("caps a severe holder concentration without calling it a bundled launch", async () => {
+    stubNetwork({
+      goplusSol: {
+        code: 1,
+        result: {
+          [MINT]: {
+            ...goplusSolanaBody.result[MINT],
+            holder_count: "137301",
+            holders: [
+              { account: "LargeWalletXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", percent: "0.49", is_contract: 0 },
+              { account: "SecondWalletXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", percent: "0.14", is_contract: 0 },
+            ],
+          },
+        },
+      },
+    });
+
+    const dossier = await auditToken({ kind: "token", ref: MINT, via: "solana" }, undefined, { skipSim: true, force: true });
+    const concentration = dossier!.findings.find((finding) => /Concentrated supply/.test(finding.claim));
+
+    expect(dossier!.score).toBeLessThanOrEqual(69);
+    expect(dossier!.verdict).not.toBe("PASS");
+    expect(dossier!.capApplied).toBe("single_wallet_concentration");
+    expect(concentration?.claim).toContain("holder snapshot does not establish whether the wallets coordinated");
+    expect(concentration?.claim).not.toMatch(/bundled launch|coordinated snipe/i);
+    expect(dossier!.axes.find((axis) => axis.key === "T4")?.rationale).not.toContain("fresh wallets");
+  });
+
   it("discards an impossible LP share instead of publishing it", async () => {
     // The real WIF payload: GoPlus returned percent "255324.3541", which ARGUS
     // published as "1 wallet 25532435%" about a top-100 token.

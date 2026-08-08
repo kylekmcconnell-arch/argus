@@ -39,16 +39,16 @@ describe("candidate space ids are discovery and never evidence", () => {
 });
 
 describe("binding a space to the subject", () => {
-  it("binds on a strategy that reads the audited token contract", () => {
+  it("does not bind on a strategy address chosen by the space creator", () => {
     // Uniswap's space twitter is the Foundation account and its site is
     // uniswapfoundation.org, so neither matches @Uniswap or uniswap.org. The
-    // contract is what ties them.
+    // contract is not an independent identity tie.
     expect(spaceBinding(space(), {
       name: "Uniswap",
       tokenAddress: UNI.toLowerCase(),
       handle: "@Uniswap",
       website: "https://uniswap.org",
-    })).toBe("token_contract");
+    })).toBeNull();
   });
 
   it("binds on the official X account when no contract matches", () => {
@@ -91,8 +91,8 @@ describe("binding a space to the subject", () => {
     })).toBeNull();
   });
 
-  it("accepts a space the caller already established", () => {
-    expect(spaceBinding(space({ verifiedBySnapshot: false }), { spaceId: "uniswapgovernance.eth" })).toBe("supplied");
+  it("does not trust a caller-supplied space id as provenance", () => {
+    expect(spaceBinding(space({ verifiedBySnapshot: false }), { spaceId: "uniswapgovernance.eth" })).toBeNull();
   });
 });
 
@@ -145,21 +145,21 @@ describe("summarizing one proposal", () => {
     expect(summary.quorumMet).toBeNull();
   });
 
-  it("does not ask whether one voter could flip an uncontested vote", () => {
+  it("does not compare one voter's power with the margin on an uncontested vote", () => {
     const summary = summarizeProposal({ ...proposal, scores: [5349528, 0, 0] }, votes)!;
     expect(summary.contested).toBe(false);
-    expect(summary.topVoterCouldHaveFlipped).toBeNull();
+    expect(summary.topVoterExceedsMargin).toBeNull();
   });
 
-  it("flags a contested vote the largest voter could have decided", () => {
+  it("records only that the largest reported voter exceeded the option margin", () => {
     // Winner 600k, runner-up 500k: a margin of 100k, and the top voter cast
-    // 2.3M, so that address alone could have changed the result.
+    // 2.3M. Its choice is not in this read, so no counterfactual is claimed.
     const summary = summarizeProposal(
       { ...proposal, scores: [600000, 500000, 0], scores_total: 1100000 },
       votes,
     )!;
     expect(summary.contested).toBe(true);
-    expect(summary.topVoterCouldHaveFlipped).toBe(true);
+    expect(summary.topVoterExceedsMargin).toBe(true);
   });
 
   it("publishes no share when nothing was cast", () => {
@@ -173,7 +173,7 @@ describe("what the reading supports saying", () => {
   const reading = (overrides: Partial<GovernanceReading> = {}): GovernanceReading => ({
     available: true,
     note: null,
-    space: { ...space(), binding: "token_contract" } as GovernanceReading["space"],
+    space: { ...space({ twitter: "uniswap" }), binding: "official_x" } as GovernanceReading["space"],
     proposals: [
       summarizeProposal(
         { id: "0x1", title: "Four for V4", votes: 118, scores: [5347714, 0, 1814], scores_total: 5349528, quorum: 10000000, end: 1 },
@@ -199,6 +199,27 @@ describe("what the reading supports saying", () => {
 
   it("always says a Snapshot result is signalling rather than binding execution", () => {
     expect(describeGovernance(reading()).some((claim) => claim.includes("off-chain signalling"))).toBe(true);
+  });
+
+  it("does not infer a vote counterfactual without collecting the voter's choice", () => {
+    const claims = describeGovernance(reading({
+      proposals: [summarizeProposal(
+        { id: "0x2", title: "Contested", votes: 12, scores: [600000, 500000], scores_total: 1100000, end: 1 },
+        [{ voter: "0xA", vp: 200000 }, { voter: "0xB", vp: 100000 }],
+      )!],
+    }));
+    const marginClaim = claims.find((claim) => claim.includes("gap between the top two options"));
+    expect(marginClaim).toContain("supports no outcome-changing counterfactual");
+    expect(marginClaim).not.toMatch(/could have changed|could have flipped|voting the other way/i);
+  });
+
+  it("declares when only part of the five-proposal voter window was readable", () => {
+    const unreadable = summarizeProposal(
+      { id: "0x3", title: "Unreadable voters", votes: 20, scores: [10, 5], scores_total: 15, end: 1 },
+      [],
+    )!;
+    const claims = describeGovernance(reading({ proposals: [...reading().proposals, unreadable] }));
+    expect(claims[0]).toContain("1 of the last 2 closed proposals with readable voter-level data");
   });
 
   it("never concludes that the project is captured or centralised", () => {

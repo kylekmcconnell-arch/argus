@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "./panelCostHeaders";
 import { providerAddressKey } from "./providerAddress";
+import { arkhamProviderEnabled } from "./providerCapabilities";
 
 // Fetch Arkham entity labels for a set of addresses. Returns a map keyed by
 // canonical address → { name, type, twitter, … }. EVM keys are lowercase;
@@ -53,7 +54,10 @@ export type ArkhamLabelsState = "idle" | "loading" | "ready" | PanelRequestFailu
 export type ArkhamLabelsResult = { labels: Record<string, ArkhamLabel>; state: ArkhamLabelsState };
 
 export function useArkhamLabels(addresses: (string | undefined | null)[], panelCostToken?: string): ArkhamLabelsResult {
-  const clean = [...new Set(addresses.filter((a): a is string => !!a && a.length > 6).map(providerAddressKey))];
+  const providerEnabled = arkhamProviderEnabled();
+  const clean = providerEnabled
+    ? [...new Set(addresses.filter((a): a is string => !!a && a.length > 6).map(providerAddressKey))]
+    : [];
   // Preserve address case in the provider request: Solana base58 addresses are
   // case-sensitive even though EVM addresses are not.
   const key = clean.slice(0, 30).sort().join(",");
@@ -61,7 +65,7 @@ export function useArkhamLabels(addresses: (string | undefined | null)[], panelC
   const [result, setResult] = useState<{ key: string; labels: Record<string, ArkhamLabel>; state: Exclude<ArkhamLabelsState, "idle" | "loading"> } | null>(null);
 
   useEffect(() => {
-    if (!key || !panelCostToken) return;
+    if (!providerEnabled || !key || !panelCostToken) return;
     let live = true;
     fetchPanelJson<{ available?: boolean; labels?: Record<string, ArkhamLabel> }>(
       `/api/arkham?addresses=${encodeURIComponent(key)}`,
@@ -75,9 +79,9 @@ export function useArkhamLabels(addresses: (string | undefined | null)[], panelC
         if (live) setResult({ key: requestKey, labels: {}, state: panelRequestFailure(error) });
       });
     return () => { live = false; };
-  }, [key, panelCostToken, requestKey]);
+  }, [key, panelCostToken, providerEnabled, requestKey]);
 
-  if (!key || !panelCostToken) return { labels: {}, state: "idle" };
+  if (!providerEnabled || !key || !panelCostToken) return { labels: {}, state: "idle" };
   if (result?.key !== requestKey) return { labels: {}, state: "loading" };
   return { labels: result.labels, state: result.state };
 }

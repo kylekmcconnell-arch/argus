@@ -4,6 +4,7 @@ import { request as httpRequest, type RequestOptions } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { Readable } from "node:stream";
+import { attachEvalNativeRequest } from "./evalTransport";
 
 const MAX_TEXT_BYTES = 1_500_000;
 const MAX_REDIRECTS = 4;
@@ -167,6 +168,12 @@ export function isPublicIpAddress(address: string): boolean {
 
 const defaultLookup: LookupFn = async (hostname) => dnsLookup(hostname, { all: true, verbatim: true });
 
+// A replay resolves against frozen traffic, not today's DNS. The address is
+// used only to pass the same public-host validation before the patched fetch
+// harness answers; no socket is opened on a replay hit. Record and explicitly
+// live eval lanes retain the real resolver and pinned native request below.
+const replayLookup: LookupFn = async () => [{ address: "93.184.216.34", family: 4 }];
+
 interface ValidatedPublicTarget {
   url: URL;
   hostname: string;
@@ -317,6 +324,26 @@ const nativeRequest: RequestFn = (url, options) => new Promise<Response>((resolv
   outgoing.end();
 });
 
+const evalRequest: RequestFn = (url, options) => globalThis.fetch(
+  url,
+  attachEvalNativeRequest({
+    method: "GET",
+    headers: options.headers,
+    signal: options.signal,
+    redirect: "manual",
+  }, () => nativeRequest(url, options)),
+);
+
+function defaultRequestForMode(): RequestFn {
+  return process.env.ARGUS_EVAL_MODE === "record" || process.env.ARGUS_EVAL_MODE === "replay"
+    ? evalRequest
+    : nativeRequest;
+}
+
+function defaultLookupForMode(): LookupFn {
+  return process.env.ARGUS_EVAL_MODE === "replay" ? replayLookup : defaultLookup;
+}
+
 async function readBoundedText(response: Response): Promise<Buffer | null> {
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > MAX_TEXT_BYTES) return null;
@@ -343,8 +370,8 @@ async function fetchValidatedPublicText(
   dependencies: PublicWebDependencies = {},
   accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8",
 ): Promise<PublicTextResult> {
-  const request = dependencies.request ?? nativeRequest;
-  const lookup = dependencies.lookup ?? defaultLookup;
+  const request = dependencies.request ?? defaultRequestForMode();
+  const lookup = dependencies.lookup ?? defaultLookupForMode();
   let target: ValidatedPublicTarget | null = initialTarget;
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
@@ -412,7 +439,7 @@ export async function fetchPublicText(
   raw: string,
   dependencies: PublicWebDependencies = {},
 ): Promise<PublicTextResult> {
-  const lookup = dependencies.lookup ?? defaultLookup;
+  const lookup = dependencies.lookup ?? defaultLookupForMode();
   const target = await validatedPublicTarget(raw, undefined, lookup);
   if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
   return fetchValidatedPublicText(target, dependencies);
@@ -428,7 +455,7 @@ export async function fetchPublicTextWithRecovery(
   raw: string,
   dependencies: PublicWebDependencies = {},
 ): Promise<PublicTextWithRecoveryResult> {
-  const lookup = dependencies.lookup ?? defaultLookup;
+  const lookup = dependencies.lookup ?? defaultLookupForMode();
   const originalTarget = await validatedPublicTarget(raw, undefined, lookup);
   if (!originalTarget) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
 

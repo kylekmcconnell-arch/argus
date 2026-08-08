@@ -40,17 +40,20 @@ function headers(key: string) {
   return { authorization: `Bearer ${key}`, accept: "application/vnd.github+json", "user-agent": "argus-due-diligence" };
 }
 interface CallCounter { calls: number; succeeded: number }
-async function gh<T>(path: string, key: string, usage: CallCounter): Promise<T | null> {
+async function gh<T>(path: string, key: string, usage: CallCounter, emptyOnConflict = false): Promise<T> {
   usage.calls += 1;
-  try {
-    const r = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(9000) });
-    if (!r.ok) return null;
-    const data = (await r.json()) as T;
+  const r = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(9000) });
+  // GitHub uses 409 for the commit list of a repository with no commits. That
+  // is a measured empty result, not a provider failure.
+  if (emptyOnConflict && r.status === 409) {
     usage.succeeded += 1;
-    return data;
-  } catch {
-    return null;
+    return [] as T;
   }
+  if (!r.ok) throw new Error(`GitHub ${r.status}`);
+  const data: unknown = await r.json();
+  if (!Array.isArray(data)) throw new Error("GitHub returned an invalid list response");
+  usage.succeeded += 1;
+  return data as T;
 }
 
 const domainOf = (email: string) => (email.includes("@") ? email.split("@")[1].toLowerCase() : "");
@@ -82,7 +85,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const repoList = org
       ? await gh<any[]>(`/orgs/${encodeURIComponent(org)}/repos?sort=pushed&type=public&per_page=${MAX_REPOS * 2}`, key, usage)
       : await gh<any[]>(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=owner&per_page=${MAX_REPOS * 2}`, key, usage);
-    if (!Array.isArray(repoList)) { res.status(200).json({ target, available: true, note: "No public repos found for this account." }); return; }
+    if (!Array.isArray(repoList)) throw new Error("GitHub repository list had an invalid shape");
+    if (!repoList.length) {
+      res.status(200).json({ target, available: true, reposScanned: [], identities: [], emailLeaks: [], forks: [], note: "No public repos found for this account." });
+      return;
+    }
 
     const forks: { repo: string; parent: string }[] = [];
     const chosen: RepoRef[] = [];
@@ -96,8 +103,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     for (const repo of chosen) {
       const q = login ? `?author=${encodeURIComponent(login)}&per_page=${COMMITS_PER_REPO}` : `?per_page=${COMMITS_PER_REPO}`;
-      const commits = await gh<any[]>(`/repos/${repo.full}/commits${q}`, key, usage);
-      for (const c of commits ?? []) {
+      const commits = await gh<any[]>(`/repos/${repo.full}/commits${q}`, key, usage, true);
+      if (!Array.isArray(commits)) throw new Error(`GitHub commit list for ${repo.full} had an invalid shape`);
+      for (const c of commits) {
         const a = c.commit?.author ?? {};
         const name = String(a.name ?? "").trim();
         const email = String(a.email ?? "").trim().toLowerCase();
@@ -136,7 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       note,
     });
   } catch (e) {
-    res.status(200).json({ target, available: true, error: String(e), note: "GitHub forensics failed." });
+    res.status(200).json({ target, available: false, error: String(e), note: "GitHub forensics did not complete." });
   } finally {
     if (usage.calls > 0) {
       await attachPanelCost(auth.organizationId, panelCostVersionId, {

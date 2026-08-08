@@ -17,6 +17,7 @@ const enrichment = (management: Array<{ name: string; title: string; priorCompan
 describe("mergeManagementIntoWebTeam", () => {
   it("adds missing leadership profiles as verified roster members", () => {
     const evidence = emptyEvidence("@uniswap");
+    evidence.profile.website = "https://uniswap.org";
     evidence.companyEnrichment = enrichment([
       { name: "Mary-Catherine Lader", title: "COO", priorCompanies: ["BlackRock"], linkedin: "linkedin.com/in/mclader", startYear: "2021" },
     ]);
@@ -39,6 +40,7 @@ describe("mergeManagementIntoWebTeam", () => {
 
   it("corroborates an existing unverified member instead of duplicating them", () => {
     const evidence = emptyEvidence("@uniswap");
+    evidence.profile.website = "https://uniswap.org";
     evidence.webTeam = [{
       name: "Hayden Adams",
       role: "team",

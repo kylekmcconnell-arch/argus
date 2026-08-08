@@ -7,7 +7,7 @@ import type { TokenDossier } from "../token/audit";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const harness = vi.hoisted(() => ({ operatorNetwork: vi.fn() }));
+const harness = vi.hoisted(() => ({ operatorNetwork: vi.fn(), gmgnBundle: vi.fn() }));
 
 vi.mock("./MarketIntel", () => ({ MarketIntel: () => null }));
 vi.mock("./HolderForensics", () => ({ HolderForensics: () => null }));
@@ -17,6 +17,11 @@ vi.mock("./EvmDeployer", () => ({ EvmDeployer: () => null }));
 vi.mock("./BytecodeForensics", () => ({ BytecodeForensics: () => null }));
 vi.mock("./SanctionsScreen", () => ({ SanctionsScreen: () => null }));
 vi.mock("./OperatorNetwork", () => ({ OperatorNetwork: (props: Record<string, unknown>) => { harness.operatorNetwork(props); return null; } }));
+vi.mock("./GmgnBundlePanel", () => ({ GmgnBundlePanel: (props: Record<string, unknown>) => { harness.gmgnBundle(props); return null; } }));
+vi.mock("./GmgnHolderCosts", () => ({ GmgnHolderCosts: () => null }));
+vi.mock("./EarlyBuyerFunding", () => ({ EarlyBuyerFunding: () => null }));
+vi.mock("./EvmLaunchBuyers", () => ({ EvmLaunchBuyers: () => null }));
+vi.mock("./GovernancePanel", () => ({ GovernancePanel: () => null }));
 
 import { OnChainForensics } from "./OnChainForensics";
 
@@ -56,6 +61,7 @@ let reactRoot: Root;
 
 beforeEach(() => {
   harness.operatorNetwork.mockReset();
+  harness.gmgnBundle.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   reactRoot = createRoot(container);
@@ -96,5 +102,20 @@ describe("on-chain forensics launch instant", () => {
     });
 
     expect(harness.operatorNetwork).toHaveBeenCalledWith(expect.objectContaining({ mintedAt: null }));
+  });
+
+  it("surfaces failed live launch forensics instead of silently preserving a clean-looking report", async () => {
+    await act(async () => {
+      reactRoot.render(<OnChainForensics token={token()} onAudit={() => {}} panelCostToken="signed-panel" />);
+    });
+
+    const props = harness.gmgnBundle.mock.calls[0]?.[0] as { onStatusChange?: (update: unknown) => void };
+    await act(async () => {
+      props.onStatusChange?.({ id: "gmgn-launch-pattern", label: "GMGN launch-pattern reading", state: "unavailable" });
+    });
+
+    expect(container.textContent).toContain("Current forensic coverage incomplete");
+    expect(container.textContent).toContain("GMGN launch-pattern reading did not finish");
+    expect(container.textContent).toContain("must not be read as a clean launch");
   });
 });

@@ -31,11 +31,13 @@ function apex(host: string): string {
 const isCdn = (s: string) => /cloudflare|fastly|akamai|amazon|cloudfront|\bgoogle\b|vercel|netlify|incapsula|sucuri|azure|microsoft|gcore|bunny|stackpath|cachefly|edgecast/i.test(s || "");
 
 type Fingerprint = { kind: "ga" | "gtm" | "adsense" | "fbpixel" | "yandex" | "hotjar" | "favicon"; id: string; label: string };
+type FingerprintRead = { available: boolean; fingerprints: Fingerprint[] };
 
-async function fingerprints(host: string): Promise<Fingerprint[]> {
+async function fingerprints(host: string): Promise<FingerprintRead> {
   const out: Fingerprint[] = [];
   try {
     const r = await fetch(`https://${host}/`, { headers: { "user-agent": "Mozilla/5.0 (ARGUS due-diligence)" }, redirect: "follow", signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return { available: false, fingerprints: [] };
     const html = (await r.text()).slice(0, 900_000);
     const seen = new Set<string>();
     const add = (kind: Fingerprint["kind"], id: string, label: string) => { const k = kind + ":" + id; if (id && !seen.has(k)) { seen.add(k); out.push({ kind, id, label }); } };
@@ -46,7 +48,9 @@ async function fingerprints(host: string): Promise<Fingerprint[]> {
     for (const m of html.matchAll(/fbq\(\s*['"]init['"]\s*,\s*['"](\d{9,20})['"]/g)) add("fbpixel", m[1], "Meta Pixel");
     for (const m of html.matchAll(/ym\(\s*(\d{6,10})\s*,/g)) add("yandex", m[1], "Yandex Metrica");
     for (const m of html.matchAll(/hjid\s*[:=]\s*(\d{5,10})/g)) add("hotjar", m[1], "Hotjar");
-  } catch { /* page unreachable — the other signals still run */ }
+  } catch {
+    return { available: false, fingerprints: [] };
+  }
   // Favicon hash: a reused custom favicon is a soft operator print (templated rugs).
   try {
     const f = await fetch(`https://${host}/favicon.ico`, { signal: AbortSignal.timeout(6000) });
@@ -56,19 +60,23 @@ async function fingerprints(host: string): Promise<Fingerprint[]> {
       if (buf.length > 120) out.push({ kind: "favicon", id: createHash("sha1").update(buf).digest("hex").slice(0, 16), label: "favicon" });
     }
   } catch { /* optional */ }
-  return out;
+  return { available: true, fingerprints: out };
 }
 
 // Cert/CDN apexes that show up as co-tenants on SHARED certificates — never a
 // sign of shared operation, so they must not become graph bridges.
 const SHARED_CERT = /cloudflaressl|cloudflare|herokussl|herokuapp|herokudns|incapsula|edgekey|edgesuite|akamai|fastly|sni\.|amazonaws|azureedge|googleusercontent|sucuri|stackpath|gcorelabs|myshopify|wixsite|squarespace|pantheonsite|netlify|vercel\.app|github\.io|firebaseapp|web\.app|zendesk|statuspage|readthedocs|gitbook|framer\.website|webflow\.io/i;
 
-async function ctSiblings(host: string): Promise<{ siblings: string[]; subdomainCount: number }> {
+type CertificateRead = { available: boolean; siblings: string[]; subdomainCount: number };
+
+async function ctSiblings(host: string): Promise<CertificateRead> {
   const target = apex(host);
   try {
     const r = await fetch(`https://api.certspotter.com/v1/issuances?domain=${encodeURIComponent(target)}&include_subdomains=true&expand=dns_names`, { signal: AbortSignal.timeout(12000) });
-    if (!r.ok) return { siblings: [], subdomainCount: 0 };
-    const rows = (await r.json()) as { dns_names?: string[] }[];
+    if (!r.ok) return { available: false, siblings: [], subdomainCount: 0 };
+    const raw = await r.json();
+    if (!Array.isArray(raw)) return { available: false, siblings: [], subdomainCount: 0 };
+    const rows = raw as { dns_names?: string[] }[];
     const siblings = new Set<string>();
     const subdomains = new Set<string>();
     // Work PER CERTIFICATE. A cert the operator controls lists their own apexes;
@@ -85,31 +93,34 @@ async function ctSiblings(host: string): Promise<{ siblings: string[]; subdomain
       if (others.length === 0 || others.length > 4) continue; // 0 = own cert; >4 = shared cert
       for (const o of others) siblings.add(o);
     }
-    return { siblings: [...siblings].slice(0, 12), subdomainCount: subdomains.size };
-  } catch { return { siblings: [], subdomainCount: 0 }; }
+    return { available: true, siblings: [...siblings].slice(0, 12), subdomainCount: subdomains.size };
+  } catch { return { available: false, siblings: [], subdomainCount: 0 }; }
 }
 
-async function hosting(host: string): Promise<{ ip?: string; asn?: string; server?: string; cdn: boolean; neighbors: string[] }> {
+type HostingRead = { available: boolean; ip?: string; asn?: string; server?: string; cdn: boolean; neighbors: string[] };
+
+async function hosting(host: string): Promise<HostingRead> {
   try {
     const r = await fetch(`https://urlscan.io/api/v1/search/?q=page.domain:${encodeURIComponent(host)}&size=1`, { signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return { cdn: false, neighbors: [] };
+    if (!r.ok) return { available: false, cdn: false, neighbors: [] };
     const d = (await r.json()) as { results?: { page?: { ip?: string; asnname?: string; server?: string } }[] };
+    if (!Array.isArray(d?.results)) return { available: false, cdn: false, neighbors: [] };
     const page = d.results?.[0]?.page;
-    if (!page?.ip) return { cdn: false, neighbors: [] };
+    if (!page?.ip) return { available: true, cdn: false, neighbors: [] };
     const cdn = isCdn(page.asnname || "") || isCdn(page.server || "");
-    const base = { ip: page.ip, asn: page.asnname, server: page.server, cdn };
+    const base = { available: true, ip: page.ip, asn: page.asnname, server: page.server, cdn };
     // Neighbour pivot only makes sense on a dedicated IP — a shared CDN IP fronts
     // millions of unrelated sites, so we skip it there rather than fake-bridge.
     if (cdn) return { ...base, neighbors: [] };
     const targetApex = apex(host);
     const n = await fetch(`https://urlscan.io/api/v1/search/?q=page.ip:%22${encodeURIComponent(page.ip)}%22&size=40`, { signal: AbortSignal.timeout(10000) });
+    if (!n.ok) return { ...base, available: false, neighbors: [] };
+    const nd = (await n.json()) as { results?: { page?: { domain?: string } }[] };
+    if (!Array.isArray(nd?.results)) return { ...base, available: false, neighbors: [] };
     const neighbors = new Set<string>();
-    if (n.ok) {
-      const nd = (await n.json()) as { results?: { page?: { domain?: string } }[] };
-      for (const x of nd.results ?? []) { const dom = x.page?.domain; if (dom && apex(dom) !== targetApex) neighbors.add(apex(dom)); }
-    }
+    for (const x of nd.results) { const dom = x.page?.domain; if (dom && apex(dom) !== targetApex) neighbors.add(apex(dom)); }
     return { ...base, neighbors: [...neighbors].slice(0, 12) };
-  } catch { return { cdn: false, neighbors: [] }; }
+  } catch { return { available: false, cdn: false, neighbors: [] }; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -118,12 +129,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try { host = new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`).hostname.replace(/^www\./, ""); } catch { /* keep raw */ }
   if (!host || !host.includes(".")) { res.status(400).json({ error: "domain required" }); return; }
 
-  const ck = `siteinfra:${host}:v2`;
+  // v3 distinguishes a completed empty screen from upstream failure. Older
+  // cache entries could contain false-clean empties produced by failed calls.
+  const ck = `siteinfra:${host}:v3`;
   const cached = await cacheGetJson<any>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
   try {
-    const [fp, ct, host_] = await Promise.all([fingerprints(host), ctSiblings(host), hosting(host)]);
+    const [fpRead, ct, host_] = await Promise.all([fingerprints(host), ctSiblings(host), hosting(host)]);
+    const failedChecks = [
+      !fpRead.available ? "homepage" : "",
+      !ct.available ? "certificate transparency" : "",
+      !host_.available ? "hosting" : "",
+    ].filter(Boolean);
+    if (failedChecks.length) {
+      res.status(200).json({
+        available: false,
+        host,
+        failedChecks,
+        note: `Site-infrastructure screen did not complete (${failedChecks.join(", ")}).`,
+      });
+      return;
+    }
+    const fp = fpRead.fingerprints;
     const out = {
       available: true,
       host,

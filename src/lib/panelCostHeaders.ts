@@ -21,7 +21,7 @@ export class PanelRequestError extends Error {
   }
 }
 
-type ErrorPayload = { error?: unknown; message?: unknown };
+type ErrorPayload = { error?: unknown; message?: unknown; note?: unknown };
 
 function errorPayload(value: unknown): ErrorPayload {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -34,8 +34,8 @@ function errorPayload(value: unknown): ErrorPayload {
 // not an empty result that could be mistaken for a clean investigation.
 export async function readPanelResponse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => null) as unknown;
+  const payload = errorPayload(body);
   if (!response.ok) {
-    const payload = errorPayload(body);
     const code = typeof payload.error === "string" ? payload.error : "";
     const message = typeof payload.message === "string" ? payload.message : "";
     if (response.status === 409 && code === "invalid_panel_context") {
@@ -50,6 +50,21 @@ export async function readPanelResponse<T>(response: Response): Promise<T> {
       response.status,
       message || `Supplemental provider request failed (${response.status}).`,
     );
+  }
+
+  // Several older panel routes return HTTP 200 so an optional provider failure
+  // never takes down the report, but also include `error` beside an empty result.
+  // Treating that body as data turns "the check failed" into a clean-looking
+  // zero in every caller that defaults a missing array. The transport may stay
+  // non-fatal; the semantic result still has to be unavailable.
+  const semanticError = typeof payload.error === "string" ? payload.error.trim() : "";
+  if (semanticError) {
+    const message = typeof payload.message === "string" && payload.message.trim()
+      ? payload.message.trim()
+      : typeof payload.note === "string" && payload.note.trim()
+        ? payload.note.trim()
+        : semanticError;
+    throw new PanelRequestError("unavailable", response.status, message);
   }
   return body as T;
 }

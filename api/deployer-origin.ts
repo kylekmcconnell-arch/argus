@@ -23,7 +23,7 @@
 // both. Extracting the walk into a shared api/_deployer-core.ts is the right
 // end state and needs both routes to move at once.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses";
+import { SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import { providerAddressKey } from "../src/lib/providerAddress.js";
 import {

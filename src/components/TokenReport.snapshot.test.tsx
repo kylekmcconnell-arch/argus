@@ -148,6 +148,7 @@ function render(report: TokenDossier): void {
 }
 
 beforeEach(() => {
+  vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "true");
   harness.clipboard.mockReset().mockResolvedValue(undefined);
   harness.livePanel.mockReset();
   harness.askReport.mockReset();
@@ -165,6 +166,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllEnvs();
 });
 
 describe("token report supplemental evidence boundary", () => {

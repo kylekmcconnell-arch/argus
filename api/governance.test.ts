@@ -61,12 +61,12 @@ describe("the governance route", () => {
     }));
     const { api, sent } = res();
 
-    await handler({ method: "GET", query: { name: "Uniswap", address: UNI } } as never, api as never);
+    await handler({ method: "GET", query: { name: "Uniswap", address: UNI, handle: "@uniswapfnd" } } as never, api as never);
 
     expect(sent.status).toBe(200);
     const body = sent.body as { available: boolean; space: { binding: string }; proposals: Array<{ top2Pct: number }>; claims: string[] };
     expect(body.available).toBe(true);
-    expect(body.space.binding).toBe("token_contract");
+    expect(body.space.binding).toBe("official_x");
     expect(body.proposals[0].top2Pct).toBeCloseTo(80.5, 0);
     expect(body.claims.some((claim) => claim.includes("not of tokens held"))).toBe(true);
     expect(body.claims.some((claim) => claim.includes("off-chain signalling"))).toBe(true);

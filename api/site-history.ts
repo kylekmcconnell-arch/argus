@@ -50,48 +50,96 @@ async function getText(url: string, ms: number, ua?: string): Promise<string | n
 }
 
 interface Snap { timestamp: string; original: string }
+type ArchiveResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+async function getArchiveText(url: string, ms: number): Promise<ArchiveResult<string>> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(ms) });
+    if (!response.ok) return { ok: false, error: `HTTP ${response.status}` };
+    const text = await response.text();
+    if (!text.trim()) return { ok: false, error: "empty response" };
+    return { ok: true, value: text };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
 
 // Oldest distinct homepage versions (CDX positive limit is reliable; the negative
 // "newest N" form archive.org serves flakily, so we get the latest a different way).
-// One retry — archive.org CDX intermittently returns empty.
-async function oldestVersions(domain: string): Promise<Snap[]> {
+// Two retries cover transient transport and malformed-response failures.
+async function oldestVersions(domain: string): Promise<ArchiveResult<Snap[]>> {
   const qs = `?url=${encodeURIComponent(domain)}&output=json&filter=statuscode:200&collapse=digest&fl=timestamp,original&limit=8`;
-  // archive.org intermittently returns empty under load — retry with backoff so a
-  // domain that HAS history never falsely reads as "no archived history."
+  let lastError = "CDX lookup failed";
   for (let attempt = 0; attempt < 3; attempt++) {
-    const raw = await getText(CDX + qs, 8000);
-    if (raw) {
+    const response = await getArchiveText(CDX + qs, 8000);
+    if (!response.ok) {
+      lastError = response.error;
+    } else {
       try {
-        const rows = JSON.parse(raw) as string[][];
-        if (Array.isArray(rows) && rows.length >= 2) {
-          const ti = rows[0].indexOf("timestamp");
-          const oi = rows[0].indexOf("original");
-          return rows.slice(1).map((r) => ({ timestamp: r[ti], original: r[oi] })).filter((s) => s.timestamp && s.original);
+        const rows: unknown = JSON.parse(response.value);
+        // CDX returns [] for a successfully measured domain with no captures.
+        if (Array.isArray(rows) && rows.length === 0) return { ok: true, value: [] };
+        if (!Array.isArray(rows) || !Array.isArray(rows[0])) throw new Error("invalid response shape");
+
+        const header = rows[0];
+        const ti = header.indexOf("timestamp");
+        const oi = header.indexOf("original");
+        if (ti < 0 || oi < 0) throw new Error("missing response fields");
+
+        const snapshots: Snap[] = [];
+        for (const row of rows.slice(1)) {
+          if (!Array.isArray(row)) throw new Error("invalid capture row");
+          const timestamp = row[ti];
+          const original = row[oi];
+          if (typeof timestamp !== "string" || !timestamp || typeof original !== "string" || !original) {
+            throw new Error("invalid capture row");
+          }
+          snapshots.push({ timestamp, original });
         }
-      } catch { /* retry */ }
+        return { ok: true, value: snapshots };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "malformed JSON";
+      }
     }
     if (attempt < 2) await sleep(600 * (attempt + 1));
   }
-  return [];
+  return { ok: false, error: lastError };
 }
 
 // The single newest snapshot, via the Wayback availability API (one fast, reliable
 // call — unlike CDX negative limits). "closest to the far future" = latest capture.
-async function newestArchive(domain: string): Promise<Snap | null> {
+async function newestArchive(domain: string): Promise<ArchiveResult<Snap | null>> {
+  let lastError = "availability lookup failed";
   for (let attempt = 0; attempt < 3; attempt++) {
-    const raw = await getText(`https://archive.org/wayback/available?url=${encodeURIComponent(domain)}&timestamp=29991231`, 8000);
-    if (raw) {
+    const response = await getArchiveText(`https://archive.org/wayback/available?url=${encodeURIComponent(domain)}&timestamp=29991231`, 8000);
+    if (!response.ok) {
+      lastError = response.error;
+    } else {
       try {
-        const closest = JSON.parse(raw)?.archived_snapshots?.closest;
-        if (closest?.available && closest.timestamp) {
-          const original = String(closest.url ?? "").match(/\/web\/\d+(?:id_)?\/(.+)$/)?.[1] ?? `http://${domain}/`;
-          return { timestamp: String(closest.timestamp), original };
+        const payload: unknown = JSON.parse(response.value);
+        if (!isRecord(payload) || !isRecord(payload.archived_snapshots)) throw new Error("invalid response shape");
+
+        const closest = payload.archived_snapshots.closest;
+        // A valid empty archived_snapshots object is a completed, measured-empty lookup.
+        if (closest === undefined || closest === null) return { ok: true, value: null };
+        if (!isRecord(closest)) throw new Error("invalid closest snapshot");
+        if (closest.available === false) return { ok: true, value: null };
+        if (closest.available !== true || typeof closest.timestamp !== "string" || !closest.timestamp) {
+          throw new Error("invalid closest snapshot");
         }
-      } catch { /* retry */ }
+
+        const original = String(closest.url ?? "").match(/\/web\/\d+(?:id_)?\/(.+)$/)?.[1] ?? `http://${domain}/`;
+        return { ok: true, value: { timestamp: closest.timestamp, original } };
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "malformed JSON";
+      }
     }
     if (attempt < 2) await sleep(400 * (attempt + 1));
   }
-  return null;
+  return { ok: false, error: lastError };
 }
 
 const strip = (html: string) =>
@@ -129,7 +177,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) { res.status(400).json({ error: "a domain (url=) is required" }); return; }
 
   try {
-    const [oldest, newest] = await Promise.all([oldestVersions(domain), newestArchive(domain)]);
+    const [oldestResult, newestResult] = await Promise.all([oldestVersions(domain), newestArchive(domain)]);
+    if (!oldestResult.ok || !newestResult.ok) {
+      const errors = [
+        !oldestResult.ok ? `CDX: ${oldestResult.error}` : "",
+        !newestResult.ok ? `availability: ${newestResult.error}` : "",
+      ].filter(Boolean).join("; ");
+      res.status(200).json({
+        domain,
+        available: false,
+        error: errors,
+        note: "Archive.org site-history lookup did not complete; no archive-history conclusion was recorded.",
+      });
+      return;
+    }
+
+    const oldest = oldestResult.value;
+    const newest = newestResult.value;
     if (!oldest.length && !newest) {
       const seed = seedFor(domain);
       if (seed) { res.status(200).json(seed); return; }
@@ -197,6 +261,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       note,
     });
   } catch (e) {
-    res.status(200).json({ domain, available: true, error: String(e), note: "Site-history lookup failed." });
+    res.status(200).json({ domain, available: false, error: String(e), note: "Site-history lookup failed; no archive-history conclusion was recorded." });
   }
 }

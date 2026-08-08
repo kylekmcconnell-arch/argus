@@ -26,6 +26,21 @@ function safeParse(value: string): unknown {
   try { return JSON.parse(value); } catch { return {}; }
 }
 
+function graphNode(value: unknown): JsonRecord | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : null;
+}
+
+function reservedVerdictNode(value: unknown): boolean {
+  const node = graphNode(value);
+  const key = typeof node?.key === "string" ? node.key.trim().toLowerCase() : "";
+  const subtype = typeof node?.subtype === "string" ? node.subtype.trim().toLowerCase() : "";
+  return key.startsWith("risk:")
+    || subtype === "risk-avoid"
+    || subtype === "risk-caution"
+    || subtype === "verified-risk-avoid"
+    || subtype === "verified-risk-caution";
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const minimumRole = req.method === "DELETE" ? "owner" : req.method === "POST" ? "analyst" : "viewer";
   const auth = await requireArgusAuth(req, res, minimumRole);
@@ -66,8 +81,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       const handle = typeof raw.handle === "string" ? raw.handle.trim().slice(0, 500) : "";
-      const nodes = Array.isArray(raw.nodes) ? raw.nodes.slice(0, MAX_NODES) : [];
-      const edges = Array.isArray(raw.edges) ? raw.edges.slice(0, MAX_EDGES) : [];
+      const rawNodes = Array.isArray(raw.nodes) ? raw.nodes.slice(0, MAX_NODES) : [];
+      const removedKeys = new Set(rawNodes.filter(reservedVerdictNode).flatMap((value) => {
+        const node = graphNode(value);
+        return typeof node?.key === "string" ? [node.key] : [];
+      }));
+      const nodes = rawNodes.filter((value) => !reservedVerdictNode(value));
+      const edges = (Array.isArray(raw.edges) ? raw.edges.slice(0, MAX_EDGES) : []).filter((value) => {
+        const edge = graphNode(value);
+        return !removedKeys.has(String(edge?.src ?? "")) && !removedKeys.has(String(edge?.dst ?? ""));
+      });
       const aliases = Array.isArray(raw.aliases)
         ? raw.aliases.filter((item: unknown) => typeof item === "string").map((item: string) => item.slice(0, 300)).slice(0, 30)
         : [];
@@ -91,7 +114,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         canonical_key: canonicalKey,
         handle,
         aliases,
-        verdict: typeof raw.verdict === "string" ? raw.verdict.slice(0, 40) : null,
+        // Browser contributions are research context. Their caller-chosen
+        // verdict cannot become a failed peer that overrides another report.
+        verdict: null,
         nodes,
         edges,
         contributor: auth.displayName.slice(0, 80),

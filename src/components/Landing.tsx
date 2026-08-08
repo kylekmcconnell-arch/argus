@@ -13,6 +13,8 @@ import {
 } from "@phosphor-icons/react";
 import { HeroBackdrop } from "./ArgusMark";
 import { PrivateToggle } from "./PrivateToggle";
+import { recentReportHref } from "../lib/recentReportRoute";
+import type { ResearchIntent } from "../lib/researchDirector";
 
 const INVESTIGATION_OUTPUTS = [
   { icon: CheckCircleIcon, label: "What checks out", detail: "Facts we could confirm, with links to the sources." },
@@ -29,9 +31,18 @@ const INVESTIGATION_LENSES = [
 
 // The front door is a decision-oriented investigation canvas. Previous cases
 // remain in the persistent rail instead of competing with the primary task.
-export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?: boolean) => void | Promise<void>; onAbout: () => void }) {
+export function Landing({
+  onAudit,
+  onAbout,
+  onOpenSavedReport,
+}: {
+  onAudit: (handle: string, priv?: boolean, intent?: ResearchIntent) => void | Promise<void>;
+  onAbout: () => void;
+  onOpenSavedReport?: (ref: string, kind: "person") => void | Promise<void>;
+}) {
   const [value, setValue] = useState("");
   const [priv, setPriv] = useState(false);
+  const [intent, setIntent] = useState<ResearchIntent>("investment_due_diligence");
   const [launching, setLaunching] = useState(false);
   const launchingRef = useRef(false);
 
@@ -40,7 +51,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
     launchingRef.current = true;
     setLaunching(true);
     try {
-      await onAudit(subject, priv);
+      await onAudit(subject, priv, intent);
     } catch {
       // The app owns the explicit failure state; Home only releases its lock.
     } finally {
@@ -102,6 +113,22 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
                 We’ll work out whether it is a person, token, website, or project.
               </p>
 
+              <div className="mt-4">
+                <label htmlFor="investigation-intent" className="eyebrow">What are you trying to decide?</label>
+                <select
+                  id="investigation-intent"
+                  value={intent}
+                  onChange={(event) => setIntent(event.target.value as ResearchIntent)}
+                  className="field mt-2 min-h-11 w-full px-3 py-2.5 text-[12.5px]"
+                >
+                  <option value="investment_due_diligence">Should I invest or allocate capital?</option>
+                  <option value="alpha_discovery">Where is the differentiated upside or alpha?</option>
+                  <option value="counterparty_risk">Can I safely work with or back this counterparty?</option>
+                  <option value="identity_and_control">Who is really behind it and what do they control?</option>
+                </select>
+                <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-faint">ARGUS uses this to prioritize specialists and follow-up questions. Safety and identity gates are never waived.</p>
+              </div>
+
               <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line/70 pt-4">
                 <PrivateToggle on={priv} onToggle={setPriv} />
                 <button
@@ -118,6 +145,34 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
             <p id="fresh-audit-note" className="mt-2.5 text-[11px] leading-relaxed text-ink-faint">
               A new scan checks current sources and may use paid data. Open a recent case to reuse saved results.
             </p>
+
+            <div className="panel-inset mt-4 flex flex-wrap items-center gap-3 px-3.5 py-3" aria-label="Saved report example">
+              <div className="min-w-0 flex-1">
+                <div className="eyebrow">See a completed investigation</div>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+                  Frozen to its saved date · opens read-only with no new provider calls.
+                </p>
+              </div>
+              <a
+                href={recentReportHref("uniswap", "person")}
+                onClick={(event) => {
+                  if (
+                    !onOpenSavedReport
+                    || event.button !== 0
+                    || event.metaKey
+                    || event.ctrlKey
+                    || event.shiftKey
+                    || event.altKey
+                  ) return;
+                  event.preventDefault();
+                  void onOpenSavedReport("uniswap", "person");
+                }}
+                className="btn-secondary inline-flex min-h-11 shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium"
+              >
+                Open saved Uniswap report
+                <ArrowRightIcon size={14} weight="bold" aria-hidden />
+              </a>
+            </div>
 
           </section>
 

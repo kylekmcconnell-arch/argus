@@ -28,7 +28,7 @@
 // "still holds" figures are live balances, and a day-old copy would misstate
 // the one thing that moves.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { classifyMarketAddress } from "../src/lib/marketAddresses";
+import { classifyMarketAddress } from "../src/lib/marketAddresses.js";
 import {
   currentTokenBalance,
   heliusRpc,
@@ -232,6 +232,8 @@ export function earlyBuyerNote(input: {
   windowSigCount: number;
   windowTxCount: number;
   tracedCount: number;
+  /** Wallets with a readable, non-exchange seed funder. */
+  resolvedFunderCount: number;
   clusters: FunderCluster[];
   cexFundedCount: number;
   /** Wallets whose history was too deep to page back to their funding. */
@@ -254,18 +256,24 @@ export function earlyBuyerNote(input: {
         ? "; the group still holds its early take"
         : `; together the group still holds ${top.stillHeldPct.toFixed(0)}% of its early take, the rest sold or moved on`;
     parts.push(
-      `${top.size} of the ${input.tracedCount} traced received their first SOL from the same wallet`
+      `${top.size} of the ${input.resolvedFunderCount} wallets with a readable non-exchange seed funder received their first SOL from the same wallet`
       + `${top.funderIsCreator ? ", the token's own creator" : ` (${short(top.funder)})`}${held}.`,
     );
     if (input.clusters.length > 1) {
       parts.push(`${input.clusters.length - 1} further shared-funder group${input.clusters.length > 2 ? "s" : ""} appear among the rest.`);
     }
+  } else if (input.resolvedFunderCount >= 2) {
+    parts.push(
+      `No shared non-exchange seed funder was established among the ${input.resolvedFunderCount} wallets whose funding origin was readable.`,
+    );
   } else if (input.tracedCount > 0) {
-    parts.push(`No two of the ${input.tracedCount} traced wallets share a funding source.`);
+    parts.push(
+      `Only ${input.resolvedFunderCount} traced wallet${input.resolvedFunderCount === 1 ? " had a" : "s had"} readable non-exchange seed funder; that is too little coverage to test for a shared source.`,
+    );
   }
   const biggestBlock = [...input.sameBlock].sort((a, b) => b.count - a.count)[0];
   if (biggestBlock) {
-    parts.push(`${biggestBlock.count} of them took supply in a single block (slot ${biggestBlock.slot}).`);
+    parts.push(`${input.buyersCapped ? "At least " : ""}${biggestBlock.count} of the analyzed wallets took supply in a single block (slot ${biggestBlock.slot}).`);
   }
   if (input.busyWalletCount > 0) {
     parts.push(
@@ -439,6 +447,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // wallet whose oldest transactions simply showed no readable funding.
     const busyWallets = traced.filter((r) => r.historyTruncated).length;
     const unresolvedFunding = traced.filter((r) => !r.funder && !r.funderExchange && !r.historyTruncated).length;
+    const resolvedFunders = traced.filter((r) => r.funder && !r.funderExchange && !r.historyTruncated).length;
 
     res.status(200).json({
       mint,
@@ -464,6 +473,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         windowSigCount: sigs.length,
         windowTxCount: windowRead.windowTxCount,
         tracedCount: traced.length,
+        resolvedFunderCount: resolvedFunders,
         clusters,
         cexFundedCount: cexFunded.length,
         busyWalletCount: busyWallets,

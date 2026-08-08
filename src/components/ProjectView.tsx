@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { WebPerson } from "../lib/investigation";
+import { ArrowLeft } from "@phosphor-icons/react";
+import {
+  isConfirmedWebTeamPerson,
+  type WebPerson,
+  type WebTeamDiscoveryResult,
+} from "../lib/investigation";
+import { emptyWebTeamDiscovery, normalizeWebTeamDiscovery } from "../lib/reconSupplements";
 import { recordContribution, projectPeopleContribution, getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
@@ -9,7 +15,7 @@ const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
 // Dig everyone tied to a project by NAME (and domain if known), via the same
 // web/LinkedIn/X search the recon uses. Name-only is fine for a bare venture.
-async function fetchProjectPeople(name: string, panelCostToken: string, domain?: string): Promise<WebPerson[]> {
+async function fetchProjectPeople(name: string, panelCostToken: string, domain?: string): Promise<WebTeamDiscoveryResult> {
   try {
     const qs = new URLSearchParams({ name });
     if (domain) qs.set("domain", domain.replace(/^https?:\/\//, "").replace(/\/.*$/, ""));
@@ -19,20 +25,24 @@ async function fetchProjectPeople(name: string, panelCostToken: string, domain?:
         "x-argus-panel-token": panelCostToken,
       },
     });
-    if (!res.ok) return [];
-    const d = await res.json();
-    return Array.isArray(d.people) ? (d.people as WebPerson[]) : [];
+    if (!res.ok) return emptyWebTeamDiscovery(true, true);
+    return normalizeWebTeamDiscovery(await res.json());
   } catch {
-    return [];
+    return emptyWebTeamDiscovery(true, true);
   }
 }
 
-// Project-centric discovery: given a project (a venture/affiliation surfaced
-// anywhere in the app), dig the web/LinkedIn/X for EVERYONE who worked on it —
-// founders, team, contributors — even people never audited. Each is one click
-// from a full audit, and the project + its people are recorded into the trust
-// graph so the web compounds. This is what makes the forensics fluid: person ->
-// their projects -> who else was involved -> those people -> their projects.
+function personContextLabel(person: WebPerson): string {
+  if (person.evidenceKind === "project_association") return "X association only";
+  if (person.evidenceKind === "code_contribution") return "GitHub contribution";
+  if (person.evidenceKind === "team_attribution") return "team attribution";
+  return "web/X candidate";
+}
+
+// Project-centric discovery: given a project, surface people-shaped follow-up
+// context from web, LinkedIn, X, and GitHub. Only a direct, verified team
+// attribution may enter the graph; candidates, associations, and contributors
+// remain review rows.
 export function ProjectView({
   project,
   onAudit,
@@ -48,7 +58,8 @@ export function ProjectView({
   /** Exact persisted report capability required before paid team discovery. */
   panelCostToken?: string;
 }) {
-  const [people, setPeople] = useState<WebPerson[] | null>(null);
+  const [discovery, setDiscovery] = useState<WebTeamDiscoveryResult | null>(null);
+  const people = discovery?.people ?? null;
   const [loading, setLoading] = useState(true);
   const key = `${project.name}|${project.domain ?? ""}|${record ? "shared" : "private"}|${panelCostToken ?? "unbound"}`;
   const ran = useRef("");
@@ -59,14 +70,18 @@ export function ProjectView({
     ran.current = key;
     let cancelled = false;
     setLoading(true);
-    setPeople(null);
+    setDiscovery(null);
     fetchProjectPeople(project.name, panelCostToken, project.domain)
-      .then((ppl) => {
+      .then((result) => {
         if (cancelled) return;
-        setPeople(ppl);
-        if (record && ppl.length) recordContribution(projectPeopleContribution(project.name, ppl));
+        setDiscovery(result);
+        const confirmedTeam = result.people.filter(isConfirmedWebTeamPerson);
+        if (record && confirmedTeam.length) recordContribution(projectPeopleContribution(project.name, confirmedTeam));
       })
-      .catch(() => !cancelled && setPeople([]))
+      .catch(() => {
+        if (cancelled) return;
+        setDiscovery(emptyWebTeamDiscovery(true, true));
+      })
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
   }, [key, panelCostToken, project.domain, project.name, record]);
@@ -79,7 +94,7 @@ export function ProjectView({
       <header className="sticky top-0 z-20 border-b border-line bg-void/85 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-5 py-3">
           <button onClick={onReset} className="flex items-center gap-1.5 text-[13px] text-ink-dim transition hover:text-ink">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+            <ArrowLeft aria-hidden="true" size={15} weight="bold" />
             Home
           </button>
           <span className="mono text-[11px] text-ink-faint">/ project</span>
@@ -90,16 +105,17 @@ export function ProjectView({
         <div className="mt-6">
           <h1 className="display-sm text-[24px] text-ink">{project.name}</h1>
           <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">
-            Everyone who worked on this project, dug from the web, LinkedIn, Crunchbase and X. Open anyone to run a
-            full audit, then follow their other projects to keep pulling the thread.
+            People surfaced around this project from web, LinkedIn, GitHub, and X. Each row states whether it is a candidate,
+            association, contribution, or verified team attribution.
           </p>
           {project.domain && <p className="mono mt-1 text-[11px] text-ink-faint">{project.domain}</p>}
         </div>
 
-        {/* people who worked on it */}
+        {/* Candidate people stay out of WORKED_ON graph edges until a direct team
+            attribution is deterministic and artifact-verified. */}
         <div className="mt-5 panel p-4">
           <div className="eyebrow flex items-center gap-2">
-            People who worked on this {people && <span className="normal-case tracking-normal text-ink-faint">({people.length})</span>}
+            People to verify {people && <span className="normal-case tracking-normal text-ink-faint">({people.length})</span>}
             {panelCostToken && loading && <span className="normal-case tracking-normal text-ink-faint">· digging the web…</span>}
           </div>
           {!panelCostToken ? (
@@ -116,12 +132,13 @@ export function ProjectView({
                     {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
                     <span className="text-[11px] text-ink-faint">{p.role}</span>
                     {p.linkedin && (
-                      <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
+                      <a href={p.linkedin} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                     )}
+                    <span className="chip normal-case tracking-normal">{personContextLabel(p)}</span>
                     {p.evidence && <span className="text-[11px] text-ink-faint">· {p.evidence}</span>}
                   </span>
                   {p.handle ? (
-                    <button onClick={() => onAudit(p.handle!)} className="btn-chip tint-signal shrink-0">audit →</button>
+                    <button onClick={() => onAudit(p.handle!)} className="btn-chip tint-signal shrink-0">Review</button>
                   ) : (
                     <span className="mono shrink-0 text-[11px] text-ink-faint">no handle</span>
                   )}
@@ -129,7 +146,11 @@ export function ProjectView({
               ))}
             </div>
           ) : (
-            !loading && <p className="mt-2 text-[12.5px] text-ink-faint">No one could be tied to this project via web / LinkedIn / X search.</p>
+            !loading && <p className="mt-2 text-[12.5px] text-ink-faint">
+              {discovery?.completed
+                ? "The configured supplemental read completed and surfaced no people in that bounded search."
+                : "Supplemental people discovery did not complete, so people outside the saved project evidence remain unknown."}
+            </p>
           )}
         </div>
 
@@ -144,7 +165,7 @@ export function ProjectView({
                     <span className="mono text-[12.5px] text-ink">{c.other}</span>
                     {c.ties.length > 0 && <span className="ml-2 text-[11px] text-ink-faint">via {c.ties.map((t) => t.label).join(", ")}</span>}
                   </span>
-                  <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
+                  <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">Open</button>
                 </div>
               ))}
             </div>

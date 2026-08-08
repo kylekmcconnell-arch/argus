@@ -7,6 +7,7 @@ import type { SourceArtifact } from "../../src/data/evidence";
 import {
   collectLegalCases,
   collectNews,
+  collectOfacEntityName,
   collectOfacName,
   isPlausibleFullName,
   legalCaptionHasFullName,
@@ -39,6 +40,7 @@ const hashArtifact = (artifact: UnhashedArtifact): string => createHash("sha256"
     publishedAt: artifact.publishedAt ?? null,
     excerpt: artifact.excerpt ?? null,
     match: artifact.match,
+    ...(artifact.subjectName ? { subjectName: artifact.subjectName } : {}),
     sourceContentHash: artifact.sourceContentHash ?? null,
   }))
   .digest("hex");
@@ -48,7 +50,8 @@ const addArtifact = (ctx: CollectContext, input: UnhashedArtifact): void => {
   const exists = ctx.evidence.sourceArtifacts.some((candidate) =>
     candidate.provider === artifact.provider
     && candidate.kind === artifact.kind
-    && candidate.sourceUrl === artifact.sourceUrl,
+    && candidate.sourceUrl === artifact.sourceUrl
+    && candidate.subjectName === artifact.subjectName,
   );
   if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
 };
@@ -324,6 +327,84 @@ const ofacSearch = (name: string) => collectOfacName(name, {
     write: (names) => cacheSet("ofacname:v2", names),
   },
 });
+
+const ofacEntitySearch = (name: string) => collectOfacEntityName(name, {
+  cache: {
+    read: () => cacheGet("ofacentity:v1", {
+      operation: "ofac-entity-index-hit",
+      meta: "24h OFAC legal-entity index cache",
+    }),
+    write: (names) => cacheSet("ofacentity:v1", names),
+  },
+});
+
+/**
+ * Run the organization replacement for the person-only OFAC check. The caller
+ * must pass an exact legal_entity value already frozen by Basic Facts; brand,
+ * handle, and display-name fallbacks are deliberately outside this function.
+ */
+export async function screenOrganizationSanctions(
+  ctx: CollectContext,
+  legalEntity: string,
+): Promise<AdapterRunResult> {
+  const exactEntity = legalEntity.replace(/\s+/g, " ").trim();
+  if (!exactEntity) return { state: "skipped", detail: "no exact frozen legal entity" };
+  const capturedAt = new Date().toISOString();
+  const ofac = await ofacEntitySearch(exactEntity);
+  recordAttempts(ofac.attempts);
+
+  if (ofac.status !== "succeeded" || !ofac.value.available) {
+    ctx.recordCheck?.({
+      id: "organization-sanctions",
+      status: "unavailable",
+      note: failedCheckNote("OFAC legal-entity screen", ofac.status, ofac.attempts),
+      provider: "opensanctions",
+    });
+    return {
+      state: ofac.status === "failed" ? "failed" : "partial",
+      detail: `OFAC legal-entity screen unavailable for ${exactEntity}`,
+    };
+  }
+
+  ctx.recordCheck?.({
+    id: "organization-sanctions",
+    status: ofac.value.sanctioned ? "finding" : "checked-empty",
+    note: ofac.value.sanctioned
+      ? `the exact bound legal-entity name matches an organization name or alias in the US Treasury OFAC SDN mirror; the sanctions record requires review`
+      : `the exact bound legal entity ${exactEntity} was screened against ${ofac.value.listSize.toLocaleString()} OFAC SDN organization names and aliases with no exact match`,
+    provider: "opensanctions",
+    sourceCount: 1,
+  });
+  addArtifact(ctx, {
+    kind: "sanctions_screen",
+    provider: "opensanctions",
+    title: "US Treasury OFAC SDN exact legal-entity screen",
+    sourceUrl: OFAC_SOURCE_URL,
+    capturedAt,
+    excerpt: ofac.value.sanctioned
+      ? `Exact organization name or alias match for the bound legal entity ${exactEntity}; inspect the sanctions record before attributing it.`
+      : `No exact organization name or alias match for the bound legal entity ${exactEntity} across ${ofac.value.listSize} indexed entity names.`,
+    match: ofac.value.sanctioned ? "exact_name" : "no_match",
+    subjectName: exactEntity,
+    sourceClass: "public_primary",
+    ...(ofac.indexHash ? { sourceContentHash: ofac.indexHash } : {}),
+  });
+  if (ofac.value.sanctioned) {
+    addFinding(ctx, {
+      finding_type: "OrganizationSanctionsNameLead",
+      claim: `${exactEntity} exactly matches an organization name or alias in the US Treasury OFAC SDN mirror; inspect the sanctions record before attributing it to the audited entity.`,
+      source_url: OFAC_SOURCE_URL,
+      source_date: capturedAt.slice(0, 10),
+      source_author: "OpenSanctions mirror of US Treasury OFAC SDN",
+      verification_status: "Reported",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+  }
+  return { state: "executed", detail: `exact legal-entity OFAC screen completed for ${exactEntity}` };
+}
 
 export function resolvedOffchainName(ctx: CollectContext): string | null {
   return resolvedRealName(ctx);

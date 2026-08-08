@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 
-// Loud banner when a provider that this build actually uses is not configured.
+// Deployment configuration diagnostic. This component must not be mounted on
+// a report: configuration state cannot establish which providers applied to a
+// subject or which lanes actually ran. Report coverage comes from frozen check
+// outcomes and provider runs instead.
 // The public readiness endpoint is deliberately zero-spend; live credit/key
 // probes belong in an explicit authenticated admin action. Cache one readiness
 // read per session (plus a 5-minute refresh), shared across every report.
@@ -56,7 +59,7 @@ export function ServiceAlert() {
     <div className="finding tint-avoid mb-4 px-4 py-3">
       <div className="flex items-center gap-2 text-[13.5px] font-semibold text-avoid">
         <span className="text-[15px]">⚠</span>
-        {down.length === 1 ? `${down[0].label} is unavailable. This report has reduced coverage.` : `${down.length} providers are unavailable. This report has reduced coverage.`}
+        {down.length === 1 ? `${down[0].label} is not configured in this deployment.` : `${down.length} providers are not configured in this deployment.`}
       </div>
       <div className="mt-1.5 space-y-1">
         {down.map((s) => (
@@ -71,7 +74,7 @@ export function ServiceAlert() {
           check: it does not know which of them the missing key feeds. It says
           what is true of any of them instead. */}
       <p className="mt-1.5 text-[12.5px] text-ink-faint">
-        Whatever these providers answer is missing from this report. Rescan after configuration is restored.
+        This configuration view does not establish whether any report lost coverage. Use that report's recorded checks and provider runs.
       </p>
     </div>
   );

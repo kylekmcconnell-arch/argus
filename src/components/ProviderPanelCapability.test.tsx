@@ -78,6 +78,7 @@ let root: Root;
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "true");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -95,9 +96,20 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("provider panel capability boundary", () => {
+  it("does not request Arkham labels while the provider capability is disabled", async () => {
+    vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "false");
+    await act(async () => {
+      root.render(<ArkhamProbe address={address} panelCostToken={capability} />);
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("makes no keyed-provider request without a signed report capability", async () => {
     await act(async () => {
       root.render(<Panels />);

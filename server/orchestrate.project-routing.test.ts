@@ -254,6 +254,7 @@ describe("provider-backed project routing", () => {
     evidence.profile.profile_collection_state = "resolved";
     evidence.profile.profile_provider = "twitterapi";
     evidence.profile.profile_captured_at = "2026-07-19T14:00:00.000Z";
+    evidence.profile.identity_binding = "independent_exact_handle";
     evidence.basicFacts = [basicFact("founder", "Ethereum")];
     expect(providerBackedRoles(evidence)).toEqual([SubjectClass.FOUNDER]);
   });
@@ -422,8 +423,8 @@ describe("provider-backed project routing", () => {
       expect.objectContaining({ id: "project-transparency", status: "confirmed" }),
     ]));
     expect(evidence.profile.identity_confidence).toBe("Probable");
-    expect(outcome.detail).toContain("1 verified backing record");
-    expect(outcome.detail).toContain("2 verified disclosure records");
+    expect(outcome.detail).toContain("1 strictly verified backing record");
+    expect(outcome.detail).toContain("2 strictly verified disclosure records");
   });
 
   it("counts a verified operating partnership as backing evidence", () => {
@@ -587,7 +588,6 @@ describe("provider-backed employment title routing", () => {
     "Principal Engineer",
     "Partnerships Lead",
     "Principal Product Manager",
-    "Venture Lead",
   ])("routes the verified employment title %s to MEMBER, not the investor fund methodology", (role) => {
     expect(providerBackedRoles(withVerifiedRole(role))).toEqual([SubjectClass.MEMBER]);
   });
@@ -601,6 +601,9 @@ describe("provider-backed employment title routing", () => {
     "General Partner",
     "Principal",
     "Venture Capitalist",
+    "Venture Lead",
+    "Investment Director",
+    "Portfolio Manager",
   ])("keeps the professional capital-allocation title %s on INVESTOR", (role) => {
     expect(providerBackedRoles(withVerifiedRole(role))).toEqual([SubjectClass.INVESTOR]);
   });

@@ -141,14 +141,18 @@ export function ProviderFailureNotice({ failures }: {
       : "",
   ].filter(Boolean);
   const alarm = buckets.rejected.length > 0;
-  const retryable = buckets.unavailable.length > 0 || buckets.rejected.length > 0;
+  const explanation = buckets.rejected.length
+    ? buckets.unavailable.length
+      ? "This may leave part of the report unanswered. Rejected checks need configuration attention; retrying unchanged will not fix them. Temporarily unavailable sources may recover on a later scan."
+      : "This may leave part of the report unanswered. This source needs configuration attention; retrying the same scan unchanged is unlikely to fix it."
+    : buckets.unavailable.length
+      ? "This may leave part of the report unanswered. Run a new scan later to try the temporarily unavailable sources again."
+      : "A source with no record is an answered check, not a gap.";
   return (
     <div className={`finding ${alarm ? "tint-avoid" : "tint-caution"} mt-3 px-4 py-3`} role={alarm ? "alert" : "note"}>
       <p className="text-[12.5px] font-medium text-ink">{sentences.join(" ")}</p>
       <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
-        {retryable
-          ? "This may leave part of the report unanswered. Run a new scan later to try those sources again."
-          : "A source with no record is an answered check, not a gap."}
+        {explanation}
       </p>
       <details className="mt-2 text-[10.5px] text-ink-faint">
         <summary className="cursor-pointer select-none">Technical details</summary>

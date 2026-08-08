@@ -31,6 +31,8 @@ interface Expectation {
   neverIncomplete?: boolean;
   /** Expected governing role (product judgment, e.g. FOUNDER for Vitalik). */
   expectedRole?: string;
+  /** Expected provider-backed route even when an incomplete report has no governor. */
+  expectedRoutedRole?: string;
   /** Case-insensitive regex sources that MUST appear somewhere in the report. */
   mustSurface?: string[];
   /** Regex sources that must NOT appear (false attribution, wrong adverse finding). */
@@ -62,6 +64,7 @@ interface PipelineOutcome {
   snapshot: EvalSnapshot;
   reportText: string;
   governingRole: string | null;
+  routedRoles: string[];
   /**
    * Checks that could not run, with the reason each gave. Some of these are
    * facts about THIS ENVIRONMENT rather than about the subject: the trust graph
@@ -137,10 +140,17 @@ async function runPipeline(handle: string, dir: string, mode: "record" | "replay
     unavailableChecks,
     reportText: JSON.stringify(dossier),
     governingRole: dossier.report.governing_role ? String(dossier.report.governing_role) : null,
+    routedRoles: Array.isArray(dossier.report.roles) ? dossier.report.roles.map(String) : [],
   };
 }
 
-function checkExpectations(slug: string, snapshot: EvalSnapshot, reportText?: string, governingRole?: string | null): string[] {
+function checkExpectations(
+  slug: string,
+  snapshot: EvalSnapshot,
+  reportText?: string,
+  governingRole?: string | null,
+  routedRoles?: readonly string[],
+): string[] {
   if (!existsSync(EXPECTATIONS_PATH)) return [];
   const expectations = JSON.parse(readFileSync(EXPECTATIONS_PATH, "utf8")) as Record<string, Expectation>;
   const expected = expectations[slug];
@@ -148,6 +158,9 @@ function checkExpectations(slug: string, snapshot: EvalSnapshot, reportText?: st
   const failures: string[] = [];
   if (expected.expectedRole && governingRole !== undefined && governingRole !== expected.expectedRole) {
     failures.push(`governing role ${governingRole} != ${expected.expectedRole}`);
+  }
+  if (expected.expectedRoutedRole && routedRoles !== undefined && !routedRoles.includes(expected.expectedRoutedRole)) {
+    failures.push(`routed roles [${routedRoles.join(", ")}] do not include ${expected.expectedRoutedRole}`);
   }
   if (reportText !== undefined) {
     for (const pattern of expected.mustSurface ?? []) {
@@ -231,7 +244,7 @@ async function main(): Promise<void> {
       console.log("  ! this shell has no ARGUS_* cost flags set, so the figure above is the UNOPTIMISED path.");
       console.log("    Production's stack is whatever /api/health reports; do not quote this cost as production's.");
     }
-    const failures = checkExpectations(slug, snapshot, outcome.reportText, outcome.governingRole);
+    const failures = checkExpectations(slug, snapshot, outcome.reportText, outcome.governingRole, outcome.routedRoles);
     for (const failure of failures) console.log(`  ▲ ${failure}`);
     // Name what this environment could not run. A recording made offline has no
     // authenticated session, so an org-scoped check fails closed and drags
@@ -253,10 +266,15 @@ async function main(): Promise<void> {
         "replay",
         dir,
         () => runPipeline(`@${slug}`, dir, "replay"),
-        { allowLiveHosts, forceLiveHosts, forceLiveTools },
+        {
+          allowLiveHosts,
+          forceLiveHosts,
+          forceLiveTools,
+          replayCapturedAt: baseline?.recordedAt,
+        },
       );
       const snapshot = outcome.snapshot;
-      const failures = checkExpectations(slug, snapshot, outcome.reportText, outcome.governingRole);
+      const failures = checkExpectations(slug, snapshot, outcome.reportText, outcome.governingRole, outcome.routedRoles);
       const drift = baseline
         ? ` · drift vs recording: score ${baseline.score}→${snapshot.score}, facts ${baseline.verifiedFactCount}→${snapshot.verifiedFactCount}`
         : "";

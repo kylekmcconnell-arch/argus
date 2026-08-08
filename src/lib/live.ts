@@ -4,6 +4,7 @@
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
 import { AUDIT_STREAM_INACTIVITY_TIMEOUT_MS } from "./investigationRuntime";
+import type { ResearchIntent } from "./researchDirector";
 
 export interface ProviderStatus {
   id: string;
@@ -52,7 +53,12 @@ export interface LiveHandlers {
 // closes early, and use an inactivity watchdog that resets on every streamed
 // chunk. This catches a dead connection without imposing a second, shorter total
 // duration cap than the server route.
-export function streamAudit(handle: string, priv: boolean, h: LiveHandlers): () => void {
+export function streamAudit(
+  handle: string,
+  priv: boolean,
+  h: LiveHandlers,
+  intent: ResearchIntent = "investment_due_diligence",
+): () => void {
   const ctrl = new AbortController();
   let settled = false;
   let watchdog: ReturnType<typeof setTimeout> | undefined;
@@ -73,7 +79,7 @@ export function streamAudit(handle: string, priv: boolean, h: LiveHandlers): () 
 
   (async () => {
     try {
-      const res = await fetch(`/api/audit?handle=${encodeURIComponent(handle)}${priv ? "&private=1" : ""}`, {
+      const res = await fetch(`/api/audit?handle=${encodeURIComponent(handle)}&intent=${encodeURIComponent(intent)}${priv ? "&private=1" : ""}`, {
         signal: ctrl.signal,
         headers: { accept: "text/event-stream" },
       });

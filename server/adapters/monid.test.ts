@@ -353,8 +353,51 @@ describe("collectCompanyEnrichment", () => {
       identityMatch: "official_domain",
       requestedDomain: "drift.trade",
       matchedDomain: "drifthair.com",
+      matchMethod: "exact_host",
       sourceUrl: "https://drifthair.com",
+      capturedAt: "2026-08-06T12:00:00.000Z",
     }, "https://drift.trade")).toBe(false);
+  });
+
+  it("does not let a company receipt authenticate itself when the official website is missing", () => {
+    expect(companyEnrichmentMatchesOfficialDomain({
+      identityMatch: "official_domain",
+      requestedDomain: "drift.trade",
+      matchedDomain: "drift.trade",
+      matchMethod: "exact_host",
+      sourceUrl: "https://drift.trade",
+      capturedAt: "2026-08-06T12:00:00.000Z",
+    }, null)).toBe(false);
+  });
+
+  it("requires the declared method and matched company website to agree with the domain receipt", () => {
+    expect(companyEnrichmentMatchesOfficialDomain({
+      identityMatch: "official_domain",
+      requestedDomain: "app.drift.trade",
+      matchedDomain: "drift.trade",
+      matchMethod: "exact_host",
+      sourceUrl: "https://drift.trade",
+      capturedAt: "2026-08-06T12:00:00.000Z",
+    }, "https://app.drift.trade")).toBe(false);
+    expect(companyEnrichmentMatchesOfficialDomain({
+      identityMatch: "official_domain",
+      requestedDomain: "drift.trade",
+      matchedDomain: "drift.trade",
+      matchMethod: "exact_host",
+      sourceUrl: "https://unrelated.example",
+      capturedAt: "2026-08-06T12:00:00.000Z",
+    }, "https://drift.trade")).toBe(false);
+  });
+
+  it("rejects shared publication hosts as company identity anchors", () => {
+    expect(companyEnrichmentMatchesOfficialDomain({
+      identityMatch: "official_domain",
+      requestedDomain: "project.github.io",
+      matchedDomain: "github.io",
+      matchMethod: "parent_or_subdomain",
+      sourceUrl: "https://github.io",
+      capturedAt: "2026-08-06T12:00:00.000Z",
+    }, "https://project.github.io")).toBe(false);
   });
 
   it("reports reason:'no_match' when search returns no companies", async () => {

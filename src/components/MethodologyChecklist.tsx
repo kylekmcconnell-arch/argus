@@ -13,6 +13,7 @@ import { plainLanguageSummary } from "../lib/plainLanguage";
 // outcomes are separate. Collapsed by default so this reads as a trust footer.
 const META: Record<CheckStatus, { color: string; glyph: string; label: string }> = {
   confirmed: { color: "var(--color-pass)", glyph: "✓", label: "finished" },
+  reported: { color: "var(--color-signal)", glyph: "◇", label: "source reported" },
   finding: { color: "var(--color-caution)", glyph: "▲", label: "needs attention" },
   "checked-empty": { color: "var(--color-ink-faint)", glyph: "○", label: "nothing found" },
   "not-applicable": { color: "var(--color-ink-faint)", glyph: "⊘", label: "not needed" },
@@ -168,7 +169,7 @@ export function MethodologyChecklist({
             </section>
           ))}
           <p className="px-2 py-1.5 text-[11px] leading-snug text-ink-faint">
-            Finished means a data source answered, even when it found nothing. Still open means the check did not finish.
+            Finished means a data source answered, even when it found nothing. Source reported means the context was retained but did not pass strict verification. Still open means the check did not finish.
           </p>
         </div>
       )}

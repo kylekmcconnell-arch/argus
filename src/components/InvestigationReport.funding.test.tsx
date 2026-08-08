@@ -289,4 +289,80 @@ describe("capital structure: the full round schedule", () => {
     }));
     expect(capitalText()).toContain("Some Verified Fund");
   });
+
+  it("mounts the exact-bound provider ledgers in the investigation report", () => {
+    const account = projectAccount();
+    render(investigation({
+      siteUrl: "https://app.fixture.xyz",
+      projectAccount: {
+        ...account,
+        website: "https://app.fixture.xyz",
+        projectToken: {
+          verified: true,
+          verification: "official_domain",
+          name: "Fixture",
+          symbol: "FIX",
+          coingeckoId: "fixture-token",
+          rank: 200,
+          address: "0x5555555555555555555555555555555555555555",
+          chain: "ethereum",
+          sourceUrl: "https://www.coingecko.com/en/coins/fixture-token",
+          capturedAt: "2026-08-06T12:00:00.000Z",
+        },
+        companyEnrichment: {
+          name: "Fixture Labs",
+          uuid: "company-fixture",
+          identityMatch: "official_domain",
+          requestedDomain: "app.fixture.xyz",
+          matchedDomain: "fixture.xyz",
+          matchMethod: "parent_or_subdomain",
+          funding: {
+            totalRaisedUsd: 5_000_000,
+            leadInvestors: ["Lead Capital"],
+            rounds: [{
+              date: "2025-03-04",
+              round: "Seed",
+              amountUsd: 5_000_000,
+              leadInvestors: ["Lead Capital"],
+              otherInvestors: ["Other Ventures"],
+            }],
+          },
+          management: [{
+            name: "Ada Example",
+            title: "Chief Executive Officer",
+            priorCompanies: ["Prior Co"],
+            linkedin: null,
+            startYear: "2022",
+          }],
+          sourceUrl: "https://fixture.xyz",
+          capturedAt: "2026-08-06T12:00:00.000Z",
+        },
+        protocolTvl: {
+          slug: "fixture",
+          name: "Fixture",
+          symbol: "FIX",
+          tvlUsd: 10_000_000,
+          chains: ["Ethereum"],
+          chainBreakdown: [{ chain: "Ethereum", tvlUsd: 10_000_000 }],
+          geckoId: "fixture-token",
+          hacks: [{
+            date: "2025-06-02",
+            amountUsd: 2_000_000,
+            returnedFunds: false,
+            returnedAmountUsd: null,
+            classification: "Protocol Logic",
+            technique: "Oracle manipulation",
+          }],
+          sourceUrl: "https://defillama.com/protocol/fixture",
+          capturedAt: "2026-08-06T12:00:00.000Z",
+        },
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+    }));
+
+    const ledgers = container.querySelector('[aria-label="Provider evidence ledgers"]');
+    expect(ledgers?.textContent).toContain("Fixture Labs");
+    expect(ledgers?.textContent).toContain("Ada Example");
+    expect(ledgers?.textContent).toContain("Protocol incident ledger");
+    expect(ledgers?.textContent).toContain("Oracle manipulation");
+  });
 });

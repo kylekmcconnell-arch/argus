@@ -676,7 +676,7 @@ function collectCheckRuns(rawChecks: unknown, context: ProvenanceContext): JsonR
     if (used.has(checkId)) continue;
     used.add(checkId);
 
-    const state = status === "confirmed" || status === "finding" || status === "checked-empty"
+    const state = status === "confirmed" || status === "reported" || status === "finding" || status === "checked-empty"
       ? "complete"
       : status === "unavailable"
         ? "unavailable"

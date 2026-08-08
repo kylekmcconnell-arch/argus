@@ -27,6 +27,15 @@ import type {
 } from "./evidence";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
 import type { ScanCheck } from "../lib/scanChecklist";
+import type { ResearchPlan } from "../lib/researchDirector";
+import { portfolioRelationshipBinding } from "../lib/portfolioRelationshipBinding";
+import { buildPointInTimeIntelligence } from "../intelligence/buildPointInTimeIntelligence";
+import { buildEntityPointInTimeIntelligence } from "../intelligence/buildEntityPointInTimeIntelligence";
+import type { IntelligenceSpineSnapshot } from "../intelligence/types";
+import {
+  cloneEvmControlRealitySnapshot,
+  type EvmControlRealitySnapshot,
+} from "./evmControlReality";
 
 export type DossierBasicFactSource = BasicFactSource;
 export type DossierBasicFact = BasicFact;
@@ -114,11 +123,15 @@ export interface Dossier {
   profile_collection_state?: CollectedEvidence["profile"]["profile_collection_state"];
   profile_provider?: string;
   profile_captured_at?: string;
+  /** Exact account-to-person bridge retained for person-dependent report proofs. */
+  identity_binding?: CollectedEvidence["profile"]["identity_binding"];
   x_account_status?: CollectedEvidence["profile"]["x_account_status"];
   x_account_status_source_url?: string;
   x_account_status_captured_at?: string;
   followers: string;
   joined: string;
+  /** Exact provider timestamp for the latest observed post. */
+  last_post_at?: string;
   days_since_post?: number;
   identity_note: string;
   prior_handles?: string[];
@@ -203,6 +216,8 @@ export interface Dossier {
   trustGraphScreen?: TrustGraphScreen;
   /** Verified project-owned token plus frozen market/chart context. */
   projectToken?: ProjectTokenSnapshot;
+  /** Frozen fixed-block observations from the canonical token contract. */
+  evmControlReality?: EvmControlRealitySnapshot;
   /** Frozen protocol fundamentals (DeFiLlama), for the hero strip. */
   protocolTvl?: CollectedEvidence["protocolTvl"];
   protocolFunding?: CollectedEvidence["protocolFunding"];
@@ -212,12 +227,24 @@ export interface Dossier {
   holderProfile?: CollectedEvidence["holderProfile"];
   /** Frozen upcoming-unlock schedule (CryptoRank), for the noticed rail and unlock pressure math. */
   tokenUnlocks?: CollectedEvidence["tokenUnlocks"];
+  /** Exact official-domain-bound licensed company record. */
+  companyEnrichment?: CollectedEvidence["companyEnrichment"];
+  /** Frozen registration observation for the canonical official domain. */
+  domainRegistration?: CollectedEvidence["domainRegistration"];
+  /**
+   * Deterministic, score-neutral decision intelligence built from this exact
+   * evidence capture. Older reports omit it and must not reconstruct it from
+   * newer rules when reopened.
+   */
+  intelligence?: IntelligenceSpineSnapshot;
   /** Plain-language answers to the project's core diligence questions. */
   basicFacts?: DossierBasicFact[];
   /** Model-discovered candidates that remain unverified and unscored. */
   basicFactLeads?: DossierBasicFactLead[];
   /** Frozen role-aware research questions, verified answers, and explicit gaps. */
   basicFactQuestionLedger?: DossierBasicFactQuestion[];
+  /** What the investigation director asked, delegated, and could not finish. */
+  researchPlan?: ResearchPlan;
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -354,10 +381,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   // would incorrectly render every fund position as FOUNDED, which overstates the
   // subject's role and contaminates cross-report graph reasoning.
   for (const relationship of (ev.sourceArtifacts ?? []).filter((artifact) =>
-    artifact.kind === "portfolio_relationship"
-    && artifact.match === "relationship_confirmed"
-    && artifact.relationship === "invested_in"
-    && artifact.projectName,
+    Boolean(portfolioRelationshipBinding(artifact, ev)),
   )) {
     const investorKey = relationship.attribution === "affiliated_fund" && relationship.investorEntityName
       ? canonicalEntityKey({
@@ -425,6 +449,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
           claimedProjects: rawLaunches.claimedProjects.map((project) => ({ ...project })),
         }
       : null;
+  const intelligence = buildPointInTimeIntelligence(ev) ?? buildEntityPointInTimeIntelligence(ev);
 
   return {
     handle: ev.profile.handle,
@@ -437,11 +462,13 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,
+    identity_binding: ev.profile.identity_binding,
     x_account_status: ev.profile.x_account_status,
     x_account_status_source_url: ev.profile.x_account_status_source_url,
     x_account_status_captured_at: ev.profile.x_account_status_captured_at,
     followers: ev.profile.followers,
     joined: ev.profile.joined,
+    last_post_at: ev.profile.last_post_at,
     days_since_post: ev.profile.days_since_post,
     identity_note: ev.profile.identity_note,
     prior_handles: ev.profile.prior_handles,
@@ -474,8 +501,27 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     sourceArtifacts: ev.sourceArtifacts,
     profileAuthenticity: ev.profileAuthenticity,
     trustGraphScreen: ev.trustGraphScreen,
-    ...(ev.protocolTvl ? { protocolTvl: { ...ev.protocolTvl, chains: [...ev.protocolTvl.chains], chainBreakdown: ev.protocolTvl.chainBreakdown.map((entry) => ({ ...entry })) } } : {}),
-    ...(ev.protocolFunding ? { protocolFunding: { ...ev.protocolFunding, rounds: ev.protocolFunding.rounds.map((round) => ({ ...round })), leadInvestors: [...ev.protocolFunding.leadInvestors] } } : {}),
+    ...(ev.protocolTvl ? {
+      protocolTvl: {
+        ...ev.protocolTvl,
+        chains: [...ev.protocolTvl.chains],
+        chainBreakdown: ev.protocolTvl.chainBreakdown.map((entry) => ({ ...entry })),
+        ...(ev.protocolTvl.trend ? { trend: ev.protocolTvl.trend.map((point) => ({ ...point })) } : {}),
+        ...(ev.protocolTvl.governanceIds ? { governanceIds: [...ev.protocolTvl.governanceIds] } : {}),
+        ...(ev.protocolTvl.hacks ? { hacks: ev.protocolTvl.hacks.map((incident) => ({ ...incident })) } : {}),
+      },
+    } : {}),
+    ...(ev.protocolFunding ? {
+      protocolFunding: {
+        ...ev.protocolFunding,
+        rounds: ev.protocolFunding.rounds.map((round) => ({
+          ...round,
+          leadInvestors: [...round.leadInvestors],
+          otherInvestors: [...round.otherInvestors],
+        })),
+        leadInvestors: [...ev.protocolFunding.leadInvestors],
+      },
+    } : {}),
     ...(ev.protocolFees ? { protocolFees: { ...ev.protocolFees } } : {}),
     ...(ev.holderProfile ? {
       holderProfile: {
@@ -487,11 +533,82 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
           : {}),
       },
     } : {}),
-    ...(ev.tokenUnlocks ? { tokenUnlocks: { ...ev.tokenUnlocks } } : {}),
+    ...(ev.tokenUnlocks ? {
+      tokenUnlocks: {
+        ...ev.tokenUnlocks,
+        ...(ev.tokenUnlocks.percentageValidation ? {
+          percentageValidation: {
+            ...ev.tokenUnlocks.percentageValidation,
+            invalidFields: [...ev.tokenUnlocks.percentageValidation.invalidFields],
+          },
+        } : {}),
+      },
+    } : {}),
+    ...(ev.companyEnrichment ? {
+      companyEnrichment: {
+        ...ev.companyEnrichment,
+        ...(ev.companyEnrichment.funding ? {
+          funding: {
+            ...ev.companyEnrichment.funding,
+            rounds: ev.companyEnrichment.funding.rounds.map((round) => ({
+              ...round,
+              leadInvestors: [...round.leadInvestors],
+              otherInvestors: [...round.otherInvestors],
+            })),
+            leadInvestors: [...ev.companyEnrichment.funding.leadInvestors],
+          },
+        } : {}),
+        ...(ev.companyEnrichment.management ? {
+          management: ev.companyEnrichment.management.map((person) => ({
+            ...person,
+            priorCompanies: [...person.priorCompanies],
+          })),
+        } : {}),
+        ...(ev.companyEnrichment.firmographic ? {
+          firmographic: { ...ev.companyEnrichment.firmographic },
+        } : {}),
+      },
+    } : {}),
+    ...(ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {}),
+    ...(ev.evmControlReality
+      ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
+      : {}),
+    ...(intelligence ? { intelligence } : {}),
+    ...(ev.researchPlan ? {
+      researchPlan: {
+        ...ev.researchPlan,
+        roles: [...ev.researchPlan.roles],
+        tasks: ev.researchPlan.tasks.map((task) => ({
+          ...task,
+          delegates: [...task.delegates],
+          checkIds: [...task.checkIds],
+          triggeredBy: [...task.triggeredBy],
+          blockedBy: [...task.blockedBy],
+        })),
+        nextActions: ev.researchPlan.nextActions.map((action) => ({
+          ...action,
+          delegates: [...action.delegates],
+        })),
+      },
+    } : {}),
     ...(operatorLaunches ? { operatorLaunches } : {}),
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...(ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {}),
+      ...(ev.projectToken.producerSources ? {
+        producerSources: {
+          identity: { ...ev.projectToken.producerSources.identity },
+          ...(ev.projectToken.producerSources.market
+            ? { market: { ...ev.projectToken.producerSources.market } }
+            : {}),
+          ...(ev.projectToken.producerSources.liquidity
+            ? { liquidity: { ...ev.projectToken.producerSources.liquidity } }
+            : {}),
+          ...(ev.projectToken.producerSources.history
+            ? { history: { ...ev.projectToken.producerSources.history } }
+            : {}),
+        },
+      } : {}),
       ...(ev.projectToken.ath ? { ath: { ...ev.projectToken.ath } } : {}),
       // The candle summary is two levels deep now: the range carries per-candle
       // high and low arrays, and the volume trend carries a window object a

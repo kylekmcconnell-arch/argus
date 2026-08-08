@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import type { CheckObservation, CollectContext } from "./types";
-import { offchainAdapter, refreshResolvedNameOffchain, resolvedOffchainName } from "./offchain";
+import {
+  offchainAdapter,
+  refreshResolvedNameOffchain,
+  resolvedOffchainName,
+  screenOrganizationSanctions,
+} from "./offchain";
 
 const { collectProfilePhoto } = vi.hoisted(() => ({ collectProfilePhoto: vi.fn() }));
 vi.mock("./profilePhoto", () => ({ collectProfilePhoto }));
@@ -22,6 +27,12 @@ const rss = `<rss><channel><item>
 const validOfacCsv = () => [
   "id,schema,name,aliases",
   ...Array.from({ length: 5_000 }, (_, index) => `${index},"Person","Test Person ${index}",""`),
+].join("\n");
+
+const validOfacEntityCsv = (exactEntity?: string) => [
+  "id,schema,name,aliases",
+  ...Array.from({ length: 5_000 }, (_, index) => `${index},"Person","Test Person ${index}",""`),
+  ...Array.from({ length: 500 }, (_, index) => `${5_000 + index},"Organization","${index === 0 && exactEntity ? exactEntity : `Test Entity ${index} LLC`}",""`),
 ].join("\n");
 
 function context(): { ctx: CollectContext; checks: CheckObservation[] } {
@@ -91,6 +102,31 @@ describe("frozen off-chain diligence adapter", () => {
       finding_type: "LegalCaseNameLead",
       claim: expect.stringContaining("verify that the named party"),
       source_url: "https://www.courtlistener.com/docket/1/example/",
+    }));
+  });
+
+  it("freezes an exact legal-entity OFAC result without borrowing the person index", async () => {
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(validOfacEntityCsv(), { status: 200 }),
+    ));
+    const { ctx, checks } = context();
+    ctx.evidence.roles = ["INVESTOR" as never];
+
+    const result = await screenOrganizationSanctions(ctx, "TheForms Capital LLC");
+
+    expect(result).toMatchObject({ state: "executed" });
+    expect(checks).toContainEqual(expect.objectContaining({
+      id: "organization-sanctions",
+      status: "checked-empty",
+      note: expect.stringContaining("TheForms Capital LLC"),
+    }));
+    expect(ctx.evidence.sourceArtifacts).toContainEqual(expect.objectContaining({
+      kind: "sanctions_screen",
+      subjectName: "TheForms Capital LLC",
+      match: "no_match",
+      sourceContentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     }));
   });
 

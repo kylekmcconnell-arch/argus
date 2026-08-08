@@ -10,6 +10,7 @@ import type { TraceStep } from "../data/evidence";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { tokenEntityKey, walletEntityKey } from "../graph/network";
 import { fetchPriceHistory, type PriceHistory } from "../lib/priceHistory";
+import { arkhamProviderEnabled } from "../lib/providerCapabilities.js";
 import { detectScannerEvasion, scannerEvasionClaim } from "./scannerEvasion";
 import { classifyMarketAddress } from "../lib/marketAddresses";
 import { checkForClones, type CloneCheckResult } from "./cloneCheck";
@@ -240,6 +241,7 @@ export async function screenDeployerRisk(
   address: string | null | undefined,
   fetchImpl: typeof fetch = fetch,
 ): Promise<DeployerRiskOutcome | undefined> {
+  if (!arkhamProviderEnabled()) return undefined;
   if (!address || address.length < 8) return undefined;
   const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
   if (!origin) return undefined;
@@ -859,9 +861,11 @@ async function runTokenAudit(
     }
   }
 
-  // ---- insider / bundle-snipe concentration ----
-  // Non-contract, non-locked wallets holding a large combined share are the
-  // signature of a bundled launch or a coordinated early snipe.
+  // ---- holder concentration ----
+  // A holder snapshot can measure concentration. It cannot establish how the
+  // wallets acquired their supply, whether they coordinated, or whether one
+  // person controls them. Launch timing and funding evidence live in separate
+  // transaction-grounded checks and must never be inferred from this snapshot.
   // On a chain whose GoPlus holder order is untrusted, an explorer list is the
   // only acceptable input; with no explorer result the distribution stays empty
   // rather than falling back to a sample that would understate concentration.
@@ -919,10 +923,23 @@ async function runTokenAudit(
     !holdersReliable ? "low" : insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
   if (s.available && bundleRisk !== "low") {
     findings.push({
-      claim: `Concentrated supply: ${bundleCount} non-contract wallets hold ~${insiderPct}%. This may indicate a bundled launch or coordinated snipe.`,
+      claim: `Concentrated supply: ${bundleCount} non-market wallets each hold at least 1% and up to 15 of the largest non-market wallets hold ~${insiderPct}% combined. This holder snapshot does not establish whether the wallets coordinated.`,
       tone: bundleRisk === "high" ? "bad" : "warn",
       source: chain === "solana" ? "goplus-sol" : "goplus",
     });
+  }
+
+  // Market maturity and liquidity cannot neutralize a holder who can move the
+  // asset alone. These are concentration ceilings, not claims that the wallets
+  // share ownership. A majority holder prevents a positive or caution verdict;
+  // a holder above 25%, or at least 60% split across no more than three material
+  // wallets, prevents PASS while leaving intent unresolved.
+  if (holdersReliable && topWalletPct != null) {
+    if (topWalletPct >= 50) caps.push([39, "single_wallet_majority_supply"]);
+    else if (topWalletPct >= 25) caps.push([69, "single_wallet_concentration"]);
+  }
+  if (holdersReliable && bundleCount > 0 && bundleCount <= 3 && insiderPct >= 60) {
+    caps.push([69, "few_wallet_concentration"]);
   }
   // Name what was excluded and why. A reader comparing ARGUS to an explorer
   // must be able to see that the biggest line item was left out deliberately.
@@ -1007,7 +1024,7 @@ async function runTokenAudit(
     ? "Holder data not verifiable keyless."
     : !holdersReliable
       ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.`
-      : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% in ${bundleCount} fresh wallets` : ""}.`;
+      : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
 
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
@@ -1062,16 +1079,25 @@ async function runTokenAudit(
     isContract: h.is_contract === 1 || h.is_contract === "1",
   })).filter((h) => h.address);
 
-  // ---- Deployer forensics: OFAC screen + Arkham funding/risk trace, in parallel
-  // (both key off the deployer, so running them together adds no serial latency).
-  step({ phase: "Screen", label: "Deployer forensics", detail: "Screening deployer + top holders against OFAC, and tracing the deployer's funding provenance on Arkham…", tone: "neutral" });
+  // ---- Deployer forensics: OFAC is required; provider funding risk is optional.
   const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
   const deployerRiskFn = opts?.screenDeployerRisk ?? screenDeployerRisk;
+  const deployerRiskEnabled = Boolean(opts?.screenDeployerRisk) || arkhamProviderEnabled();
+  step({
+    phase: "Screen",
+    label: "Deployer forensics",
+    detail: deployerRiskEnabled
+      ? "Screening deployer and top holders against OFAC, and tracing funding provenance."
+      : "Screening deployer and top holders against OFAC.",
+    tone: "neutral",
+  });
   const [sanctionsScreen, deployerRisk, priceHistory] = await Promise.all([
     screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
-    deployer ? deployerRiskFn(deployer).catch(() => undefined) : Promise.resolve(undefined),
+    deployer && deployerRiskEnabled
+      ? deployerRiskFn(deployer).catch(() => undefined)
+      : Promise.resolve(undefined),
     fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null),
   ]);
   if (deployerRisk?.available && deployerRisk.paths.length) {

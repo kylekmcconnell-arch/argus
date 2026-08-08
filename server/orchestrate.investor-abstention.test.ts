@@ -11,7 +11,7 @@ import { SubjectClass, getProfile } from "../src/engine";
 // The empirically confirmed @a16zcrypto case: once routing correctly selected
 // INVESTOR, the fund still abstained INCOMPLETE because no source-backed AUM or
 // fund-close amount verified, leaving I3_fund_scale_tier with no substantive
-// artifact. A completed fund-scale assessment is itself I3 evidence.
+// artifact. A bounded search result is coverage, not evidence of low scale.
 const investorAxes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.INVESTOR).axes)
   .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.INVESTOR }));
 
@@ -41,13 +41,13 @@ function preflightWith(sections: Record<string, unknown>) {
   };
 }
 
-describe("investor abstention fix: assessed-null fund scale", () => {
+describe("investor abstention: fund scale requires a verified amount", () => {
   it("REGRESSION: a fund with no verified scale abstains on I3", () => {
     const { pf } = preflightWith(fundSections());
     expect(pf.missingSubstantiveAxes).toContain("I3_fund_scale_tier");
   });
 
-  it("FIX: a completed fund-scale assessment clears I3 with a substantive artifact", () => {
+  it("keeps a completed bounded search out of I3 substantive evidence", () => {
     const sections = fundSections();
     (sections.checkOutcomes as unknown[]).push({
       checkId: "investor-fund-scale",
@@ -56,19 +56,15 @@ describe("investor abstention fix: assessed-null fund scale", () => {
       provider: "fund-scale-web",
     });
     const { pf, catalog } = preflightWith(sections);
-    expect(pf.missingSubstantiveAxes).not.toContain("I3_fund_scale_tier");
+    expect(pf.missingSubstantiveAxes).toContain("I3_fund_scale_tier");
     const artifact = catalog.find((row) => row.operation === "checkOutcomes:investor-fund-scale");
-    expect(artifact).toBeDefined();
-    expect(artifact?.verification).toBe("verified");
-    // The assessment is scoped to fund scale only; it must never become
-    // evidence for portfolio quality or any other investor axis.
-    expect(artifact?.eligibleAxes).toEqual(["I3_fund_scale_tier"]);
+    expect(artifact).toBeUndefined();
   });
 
   // The frozen checklist is longer than the packet's checkOutcomes budget, so a
   // positional cut would drop whichever substantive assessment happens to sit
   // late in the list behind a block of not-applicable rows.
-  it("keeps a substantive assessment that sits past the packet cap, dropping not-applicable rows first", () => {
+  it("drops a bounded-absence summary even when it sits past the packet cap", () => {
     const tracker = new PersonCheckTracker();
     tracker.record({
       id: "investor-fund-scale",
@@ -95,10 +91,10 @@ describe("investor abstention fix: assessed-null fund scale", () => {
     const retained = (JSON.parse(packet).checkOutcomes ?? []) as { checkId: string; status: string }[];
     const retainedIds = retained.map((row) => row.checkId);
 
-    expect(retainedIds).toContain("investor-fund-scale");
+    expect(retainedIds).not.toContain("investor-fund-scale");
     expect(retainedIds).toContain("vc-portfolio-track-record");
     expect(retained.some((row) => row.status === "not-applicable")).toBe(false);
     expect(inspectAnalystScoringPreflight(investorAxes, packet).missingSubstantiveAxes)
-      .not.toContain("I3_fund_scale_tier");
+      .toContain("I3_fund_scale_tier");
   });
 });

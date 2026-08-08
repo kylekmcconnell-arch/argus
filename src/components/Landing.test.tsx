@@ -23,6 +23,34 @@ afterEach(async () => {
 });
 
 describe("Landing fresh audit launch", () => {
+  it("opens the saved Uniswap example without starting a fresh audit", async () => {
+    const onAudit = vi.fn();
+    const onOpenSavedReport = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <Landing
+          onAudit={onAudit}
+          onAbout={() => undefined}
+          onOpenSavedReport={onOpenSavedReport}
+        />,
+      );
+    });
+
+    const example = container.querySelector<HTMLAnchorElement>('a[href="?s=uniswap&kind=person"]');
+    expect(example).not.toBeNull();
+    expect(example?.textContent).toContain("Open saved Uniswap report");
+    expect(container.textContent).toContain("Frozen to its saved date");
+    expect(container.textContent).toContain("no new provider calls");
+
+    await act(async () => example?.click());
+
+    expect(onOpenSavedReport).toHaveBeenCalledWith("uniswap", "person");
+    expect(onAudit).not.toHaveBeenCalled();
+  });
+
   it("discloses provider cost and suppresses duplicate submissions", async () => {
     const neverSettles = new Promise<void>(() => undefined);
     const onAudit = vi.fn(() => neverSettles);
@@ -59,7 +87,7 @@ describe("Landing fresh audit launch", () => {
     });
 
     expect(onAudit).toHaveBeenCalledTimes(1);
-    expect(onAudit).toHaveBeenCalledWith("existingfounder", false);
+    expect(onAudit).toHaveBeenCalledWith("existingfounder", false, "investment_due_diligence");
     const button = container.querySelector<HTMLButtonElement>("button[type='submit']");
     expect(button?.disabled).toBe(true);
     expect(button?.textContent).toContain("Starting fresh audit");
@@ -97,5 +125,33 @@ describe("Landing fresh audit launch", () => {
       await Promise.resolve();
     });
     expect(onAudit).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes the user's decision to the investigation director", async () => {
+    const onAudit = vi.fn();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(<Landing onAudit={onAudit} onAbout={() => undefined} />);
+    });
+
+    const input = container.querySelector<HTMLInputElement>("#investigation-subject");
+    const select = container.querySelector<HTMLSelectElement>("#investigation-intent");
+    const form = container.querySelector<HTMLFormElement>("form");
+    await act(async () => {
+      const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      inputSetter?.call(input, "@clutchmarkets");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+      const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+      selectSetter?.call(select, "identity_and_control");
+      select?.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(onAudit).toHaveBeenCalledWith("@clutchmarkets", false, "identity_and_control");
   });
 });

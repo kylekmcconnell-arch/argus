@@ -36,6 +36,7 @@ import { normalizeSubjectRef } from "./lib/subjectRef";
 import { useArgusAuth } from "./auth-context";
 import type { CaseBriefTarget } from "./lib/caseBrief";
 import type { ReportPersistenceContext, ReportVersionContext } from "./lib/reportVersion";
+import type { ResearchIntent } from "./lib/researchDirector";
 import { fetchReconWebTeam } from "./lib/reconSupplements";
 import { recentReportKind } from "./lib/recentReportRoute";
 
@@ -313,6 +314,7 @@ export default function App() {
   const [tokenChoicePrivate, setTokenChoicePrivate] = useState(false);
   const [tokenChoiceMode, setTokenChoiceMode] = useState<TokenLaunchMode>("investigation");
   const [tokenChoiceReuseStored, setTokenChoiceReuseStored] = useState(true);
+  const [tokenChoiceIntent, setTokenChoiceIntent] = useState<ResearchIntent>("investment_due_diligence");
   const [resolutionUsesStoredCases, setResolutionUsesStoredCases] = useState(true);
   const [caseBriefTarget, setCaseBriefTarget] = useState<CaseBriefTarget | null>(null);
   const caseBriefDirtyRef = useRef(false);
@@ -382,7 +384,12 @@ export default function App() {
     setPhase("notfound");
   }, []);
 
-  const onAudit = useCallback(async (raw: string, priv = false, force = false) => {
+  const onAudit = useCallback(async (
+    raw: string,
+    priv = false,
+    force = false,
+    intent: ResearchIntent = "investment_due_diligence",
+  ) => {
     if (!closeCaseBriefForNavigation()) return;
     leaveEvidenceReview();
     const requestId = ++safeAuditRequestRef.current;
@@ -436,7 +443,7 @@ export default function App() {
     if (providers) {
       // Start the background run NOW (before the view mounts) so it survives an
       // immediate navigation away — the runner owns the stream, not the view.
-      const run = startPersonAudit(handle, priv);
+      const run = startPersonAudit(handle, priv, intent);
       if (!!run.priv !== priv) { showPrivacyConflict(handle); return; }
       setPhase("live");
     } else {
@@ -527,9 +534,14 @@ export default function App() {
         && inv.recon
       ) {
         void fetchReconWebTeam(inv.siteUrl, inv.token.name, inv.recon, persisted.panelCostToken)
-          .then((webTeam) => {
-            if (!webTeam.length) return;
-            const supplemented: Investigation = { ...settled, webTeam };
+          .then((webTeamDiscovery) => {
+            // Preserve an empty or failed discovery result too. Otherwise the
+            // report cannot distinguish a completed empty read from an outage.
+            const supplemented: Investigation = {
+              ...settled,
+              webTeam: webTeamDiscovery.people,
+              webTeamDiscovery,
+            };
             if (!settleCachedScan(
               resultCache.current,
               inv.token.address,
@@ -904,6 +916,7 @@ export default function App() {
     requestId?: number,
     allowLaunch = true,
     reuseStored = true,
+    intent: ResearchIntent = "investment_due_diligence",
   ) => {
     const activeRequestId = requestId ?? ++safeAuditRequestRef.current;
     try {
@@ -957,8 +970,8 @@ export default function App() {
       } else {
         setInvestigationInput(candidate.input);
         const run = reuseStored
-          ? startInvestigationScan(candidate.input, priv)
-          : startInvestigationScan(candidate.input, priv, { force: true });
+          ? startInvestigationScan(candidate.input, priv, { intent })
+          : startInvestigationScan(candidate.input, priv, { force: true, intent });
         if (run.priv !== priv) { showPrivacyConflict(candidate.canonicalRef); return; }
         setPhase("investigation");
       }
@@ -977,6 +990,7 @@ export default function App() {
     mode: TokenLaunchMode,
     allowLaunch = true,
     reuseStored = true,
+    intent: ResearchIntent = "investment_due_diligence",
   ) => {
     if (!closeCaseBriefForNavigation()) return;
     leaveEvidenceReview();
@@ -1029,7 +1043,7 @@ export default function App() {
           setPhase("notfound");
           return;
         }
-        await onAudit(raw, priv);
+        await onAudit(raw, priv, false, intent);
         return;
       }
 
@@ -1050,8 +1064,8 @@ export default function App() {
         } else {
           setInvestigationInput(parsed);
           const run = reuseStored
-            ? startInvestigationScan(parsed, true)
-            : startInvestigationScan(parsed, true, { force: true });
+            ? startInvestigationScan(parsed, true, { intent })
+            : startInvestigationScan(parsed, true, { force: true, intent });
           if (!run.priv) { showPrivacyConflict(parsed.ref); return; }
           setPhase("investigation");
         }
@@ -1099,11 +1113,12 @@ export default function App() {
         setTokenChoicePrivate(priv);
         setTokenChoiceMode(mode);
         setTokenChoiceReuseStored(reuseStored);
+        setTokenChoiceIntent(intent);
         setLiveError(null);
         setPhase("token-choice");
         return;
       }
-      await openOrLaunchTokenCandidate(resolution.candidate, priv, mode, requestId, allowLaunch, reuseStored);
+      await openOrLaunchTokenCandidate(resolution.candidate, priv, mode, requestId, allowLaunch, reuseStored, intent);
     } catch (error) {
       if (requestId !== safeAuditRequestRef.current) return;
       showAuditLaunchFailure(raw, mode, reuseStored, error);
@@ -1111,7 +1126,8 @@ export default function App() {
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, onOpenRecent, openOrLaunchTokenCandidate, showAuditLaunchFailure, showPrivacyConflict]);
 
   const onHomeAudit = useCallback(
-    (raw: string, priv = false) => onSafeAuditMode(raw, priv, "investigation", true, false),
+    (raw: string, priv = false, intent: ResearchIntent = "investment_due_diligence") =>
+      onSafeAuditMode(raw, priv, "investigation", true, false, intent),
     [onSafeAuditMode],
   );
 
@@ -1284,7 +1300,7 @@ export default function App() {
           <span>Opened in a separate tab so the Case Brief draft remains intact.</span>
         </div>
       )}
-      {phase === "idle" && <Landing onAudit={onHomeAudit} onAbout={() => setPhase("about")} />}
+      {phase === "idle" && <Landing onAudit={onHomeAudit} onAbout={() => setPhase("about")} onOpenSavedReport={onOpenRecent} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
 
@@ -1399,7 +1415,7 @@ export default function App() {
             {tokenChoices.map((candidate) => (
               <button
                 key={`${candidate.chain}:${candidate.canonicalRef}`}
-                onClick={() => { void openOrLaunchTokenCandidate(candidate, tokenChoicePrivate, tokenChoiceMode, undefined, true, tokenChoiceReuseStored); }}
+                onClick={() => { void openOrLaunchTokenCandidate(candidate, tokenChoicePrivate, tokenChoiceMode, undefined, true, tokenChoiceReuseStored, tokenChoiceIntent); }}
                 className="panel p-4 text-left transition hover:border-line-2"
                 aria-label={`${tokenChoiceReuseStored ? "Investigate" : "Start fresh audit of"} ${candidate.symbol || candidate.name || "token"} on ${candidate.chain} at ${candidate.canonicalRef}`}
               >

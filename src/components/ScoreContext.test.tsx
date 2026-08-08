@@ -80,6 +80,9 @@ describe("ProviderFailureNotice", () => {
     expect(container.textContent).not.toContain("no fallback provider");
     expect(container.textContent).toContain("claude · record_verdict · http_400 credit balance too low");
     expect(container.textContent).toContain("This may leave part of the report unanswered");
+    expect(container.textContent).toContain("needs configuration attention");
+    expect(container.textContent).toContain("retrying the same scan unchanged is unlikely to fix it");
+    expect(container.textContent).not.toContain("Run a new scan later");
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
   });
 
@@ -96,6 +99,7 @@ describe("ProviderFailureNotice", () => {
     expect(container.textContent).not.toContain("rejected");
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(container.querySelector('[role="note"]')).not.toBeNull();
+    expect(container.textContent).toContain("Run a new scan later");
   });
 
   it("treats a no-record-only notice as an answer, not a gap", () => {

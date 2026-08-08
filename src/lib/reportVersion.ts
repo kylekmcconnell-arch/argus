@@ -60,6 +60,7 @@ const text = (value: unknown): string | null =>
 const storedStatus = (value: unknown): CheckStatus | null => {
   switch (value) {
     case "confirmed":
+    case "reported":
     case "finding":
     case "checked-empty":
     case "not-applicable":
@@ -97,7 +98,7 @@ function statusForRun(run: StoredCheckRun, metadata: JsonRecord, nowMs: number):
 
   switch (state) {
     case "complete":
-      return detailed === "finding" || detailed === "checked-empty" || detailed === "confirmed"
+      return detailed === "finding" || detailed === "checked-empty" || detailed === "reported" || detailed === "confirmed"
         ? detailed
         : "confirmed";
     case "unavailable":

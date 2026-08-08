@@ -2,6 +2,7 @@ import type { ProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/
 import { canonicalOfficialWebsite } from "../../src/lib/fundScaleEvidence";
 import { readCandle, summarizeCandles, type Candle } from "../../src/lib/priceHistory";
 import { env } from "../config";
+import { captureTimestamp } from "../captureTime";
 import { recordCall } from "../cost";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
 
@@ -72,6 +73,7 @@ interface DexPair {
   quoteSymbol: string;
   priceUsd: number;
   liquidityUsd: number;
+  sourceUrl: string;
 }
 
 interface DexProjectCandidate {
@@ -533,6 +535,11 @@ async function collectDexProjectToken(
   }
   const historyResult = await tokenHistory(candidate.chain, candidate.pairAddress);
   const history = historyResult.history;
+  const capturedAt = captureTimestamp();
+  const hasMarketRead = candidate.priceUsd !== undefined
+    || candidate.marketCapUsd !== undefined
+    || candidate.fdvUsd !== undefined
+    || candidate.volume24hUsd !== undefined;
   return {
     state: "matched",
     attempts: 1 + historyResult.attempts,
@@ -548,7 +555,19 @@ async function collectDexProjectToken(
       ...(candidate.homepage ? { homepage: candidate.homepage } : {}),
       ...(candidate.officialX ? { officialX: candidate.officialX } : {}),
       sourceUrl: candidate.sourceUrl,
-      capturedAt: new Date().toISOString(),
+      capturedAt,
+      producerSources: {
+        identity: { provider: "dexscreener", sourceUrl: candidate.sourceUrl, capturedAt },
+        ...(hasMarketRead
+          ? { market: { provider: "dexscreener" as const, sourceUrl: candidate.sourceUrl, capturedAt } }
+          : {}),
+        ...(candidate.liquidityUsd !== undefined
+          ? { liquidity: { provider: "dexscreener" as const, sourceUrl: candidate.sourceUrl, capturedAt } }
+          : {}),
+        ...(history?.sourceUrl && history.capturedAt
+          ? { history: { provider: "geckoterminal" as const, sourceUrl: history.sourceUrl, capturedAt: history.capturedAt } }
+          : {}),
+      },
       providers: ["dexscreener", ...(history ? ["geckoterminal" as const] : [])],
       ...(candidate.priceUsd !== undefined ? { priceUsd: candidate.priceUsd } : {}),
       ...(candidate.marketCapUsd !== undefined ? { marketCapUsd: candidate.marketCapUsd } : {}),
@@ -578,6 +597,7 @@ async function collectSiteDeclaredToken(
   const scope = canonicalOfficialWebsite(ctx.evidence.profile.website);
   if (!scope) return null;
   let html: string;
+  let identityCapturedAt: string;
   try {
     const response = await fetchImpl(scope.canonicalUrl, {
       headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" },
@@ -589,6 +609,7 @@ async function collectSiteDeclaredToken(
       return null;
     }
     html = (await response.text()).slice(0, 400_000);
+    identityCapturedAt = captureTimestamp();
   } catch {
     recordCall("site-fetch", "token-declaration", 0, "transport_error", "failed");
     return null;
@@ -598,10 +619,10 @@ async function collectSiteDeclaredToken(
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
     return null;
   }
-  const resolved: Array<{ address: string; pairs: JsonRecord[] }> = [];
+  const resolved: Array<{ address: string; pairs: JsonRecord[]; capturedAt: string }> = [];
   for (const address of candidates.slice(0, 6)) {
     const pairs = await dexPairs(address);
-    if (pairs && pairs.length) resolved.push({ address, pairs });
+    if (pairs && pairs.length) resolved.push({ address, pairs, capturedAt: captureTimestamp() });
   }
   if (resolved.length !== 1) {
     recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
@@ -628,6 +649,11 @@ async function collectSiteDeclaredToken(
   const marketCapUsd = finiteNumber(best.marketCap);
   const fdvUsd = finiteNumber(best.fdv);
   const volume24hUsd = isRecord(best.volume) ? finiteNumber(best.volume.h24) : undefined;
+  const dexSourceUrl = cleanText(best.url) || `${DEXSCREENER}/${encodeURIComponent(only.address)}`;
+  const hasMarketRead = priceUsd !== undefined
+    || marketCapUsd !== undefined
+    || fdvUsd !== undefined
+    || volume24hUsd !== undefined;
   // Freeze the price series so the saved report renders its own chart rather
   // than depending on a live refresh, exactly as the other binding paths do.
   const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: undefined, attempts: 0 };
@@ -643,7 +669,25 @@ async function collectSiteDeclaredToken(
       chain,
       homepage: scope.canonicalUrl,
       sourceUrl: scope.canonicalUrl,
-      capturedAt: new Date().toISOString(),
+      capturedAt: identityCapturedAt,
+      producerSources: {
+        identity: { provider: "official_site", sourceUrl: scope.canonicalUrl, capturedAt: identityCapturedAt },
+        ...(hasMarketRead
+          ? { market: { provider: "dexscreener" as const, sourceUrl: dexSourceUrl, capturedAt: only.capturedAt } }
+          : {}),
+        ...(liquidityUsd !== undefined
+          ? { liquidity: { provider: "dexscreener" as const, sourceUrl: dexSourceUrl, capturedAt: only.capturedAt } }
+          : {}),
+        ...(historyResult.history?.sourceUrl && historyResult.history.capturedAt
+          ? {
+              history: {
+                provider: "geckoterminal" as const,
+                sourceUrl: historyResult.history.sourceUrl,
+                capturedAt: historyResult.history.capturedAt,
+              },
+            }
+          : {}),
+      },
       providers: ["dexscreener", ...(historyResult.history ? ["geckoterminal" as const] : [])],
       ...(priceUsd !== undefined ? { priceUsd } : {}),
       ...(liquidityUsd !== undefined ? { liquidityUsd } : {}),
@@ -729,6 +773,7 @@ function selectPriceCorroboratedPair(
       quoteSymbol: cleanText(quoteToken.symbol),
       priceUsd,
       liquidityUsd: liquidity,
+      sourceUrl: cleanText(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`,
     }];
   });
   return candidates.sort((left, right) =>
@@ -802,6 +847,7 @@ async function tokenHistory(
   const summary = summarizeCandles(candles, timeframe);
   if (!summary) return { attempts };
   const sourceUrl = geckoTerminalOhlcvUrl(chain, poolAddress, timeframe);
+  const capturedAt = captureTimestamp();
   return {
     attempts,
     history: {
@@ -809,6 +855,7 @@ async function tokenHistory(
       timeframe,
       poolAddress,
       ...(sourceUrl ? { sourceUrl } : {}),
+      capturedAt,
     },
   };
 }
@@ -976,12 +1023,31 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     return { state: "partial", detail: "verified CoinGecko identity had incomplete token metadata", attempts: 1 + detailAttempts };
   }
 
+  const collectedAt = captureTimestamp();
+  const providerUpdatedAt = cleanText(details.last_updated);
+  const providerUpdatedMs = Date.parse(providerUpdatedAt);
+  const normalizedProviderUpdatedAt = Number.isFinite(providerUpdatedMs)
+    ? new Date(providerUpdatedMs).toISOString()
+    : undefined;
   const pairs = await dexPairs(contract.address);
+  const liquidityCapturedAt = pairs ? captureTimestamp() : null;
   const pair = pairs ? selectPriceCorroboratedPair(pairs, contract, currentPrice) : null;
   const historyResult = pair
     ? await tokenHistory(contract.chain, pair.pairAddress)
     : { attempts: 0 };
   const history = historyResult.history;
+  // CoinGecko's update time belongs only to the CoinGecko record. The DEX and
+  // candle reads carry their own capture times below.
+  const coinSourceUrl = `https://www.coingecko.com/en/coins/${encodeURIComponent(id)}`;
+  const hasMarketRead = currentPrice !== undefined
+    || marketCap !== undefined
+    || fdv !== undefined
+    || volume !== undefined
+    || circulatingSupply !== undefined
+    || totalSupply !== undefined
+    || maxSupply !== undefined
+    || ath !== undefined
+    || Number.isFinite(details.market_cap_rank);
   const snapshot: ProjectTokenSnapshot = {
     verified: true,
     verification: identity.verification,
@@ -993,8 +1059,27 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     chain: contract.chain,
     ...identity.homepage ? { homepage: identity.homepage } : {},
     ...identity.officialX ? { officialX: identity.officialX } : {},
-    sourceUrl: `https://www.coingecko.com/en/coins/${encodeURIComponent(id)}`,
-    capturedAt: new Date().toISOString(),
+    sourceUrl: coinSourceUrl,
+    capturedAt: collectedAt,
+    producerSources: {
+      identity: { provider: "coingecko", sourceUrl: coinSourceUrl, capturedAt: collectedAt },
+      ...(hasMarketRead
+        ? {
+            market: {
+              provider: "coingecko" as const,
+              sourceUrl: coinSourceUrl,
+              capturedAt: collectedAt,
+              ...(normalizedProviderUpdatedAt ? { providerUpdatedAt: normalizedProviderUpdatedAt } : {}),
+            },
+          }
+        : {}),
+      ...(pair && liquidityCapturedAt
+        ? { liquidity: { provider: "dexscreener" as const, sourceUrl: pair.sourceUrl, capturedAt: liquidityCapturedAt } }
+        : {}),
+      ...(history?.sourceUrl && history.capturedAt
+        ? { history: { provider: "geckoterminal" as const, sourceUrl: history.sourceUrl, capturedAt: history.capturedAt } }
+        : {}),
+    },
     providers: ["coingecko", ...(pair ? ["dexscreener" as const] : []), ...(history ? ["geckoterminal" as const] : [])],
     ...currentPrice !== undefined ? { priceUsd: currentPrice } : {},
     ...marketCap !== undefined ? { marketCapUsd: marketCap } : {},
@@ -1091,6 +1176,13 @@ export async function collectVentureTokenIdentity(venture: {
     const market = isRecord(details.market_data) ? details.market_data : {};
     const currentPrice = isRecord(market.current_price) ? finiteNumber(market.current_price.usd) : undefined;
     const marketCap = isRecord(market.market_cap) ? finiteNumber(market.market_cap.usd) : undefined;
+    const capturedAt = captureTimestamp();
+    const providerUpdatedAt = cleanText(details.last_updated);
+    const providerUpdatedMs = Date.parse(providerUpdatedAt);
+    const normalizedProviderUpdatedAt = Number.isFinite(providerUpdatedMs)
+      ? new Date(providerUpdatedMs).toISOString()
+      : undefined;
+    const sourceUrl = `https://www.coingecko.com/en/coins/${encodeURIComponent(id)}`;
     return {
       verified: true,
       verification: exactX ? "official_x" : "official_domain",
@@ -1103,8 +1195,21 @@ export async function collectVentureTokenIdentity(venture: {
       chain: contract.chain,
       ...(homepages[0] ? { homepage: homepages[0] } : {}),
       ...(officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}),
-      sourceUrl: `https://www.coingecko.com/en/coins/${encodeURIComponent(id)}`,
-      capturedAt: new Date().toISOString(),
+      sourceUrl,
+      capturedAt,
+      producerSources: {
+        identity: { provider: "coingecko", sourceUrl, capturedAt },
+        ...(currentPrice !== undefined || marketCap !== undefined
+          ? {
+              market: {
+                provider: "coingecko" as const,
+                sourceUrl,
+                capturedAt,
+                ...(normalizedProviderUpdatedAt ? { providerUpdatedAt: normalizedProviderUpdatedAt } : {}),
+              },
+            }
+          : {}),
+      },
       providers: ["coingecko"],
       ...(currentPrice !== undefined ? { priceUsd: currentPrice } : {}),
       ...(marketCap !== undefined ? { marketCapUsd: marketCap } : {}),

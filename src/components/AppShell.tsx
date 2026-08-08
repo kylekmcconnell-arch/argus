@@ -5,8 +5,8 @@ import { ArgusMark } from "./ArgusMark";
 import type { ReportKind } from "../lib/reports";
 
 // Persistent shell: left rail + scrolling main. On mobile the rail becomes a
-// drawer. The old static announcement bar is gone — ServiceAlert (rendered by
-// pages that need it) is the only banner, so real alerts stand out.
+// drawer. Provider coverage belongs to each frozen report's recorded checks;
+// deployment-key diagnostics are kept off report surfaces.
 export function AppShell({
   children,
   onNav,

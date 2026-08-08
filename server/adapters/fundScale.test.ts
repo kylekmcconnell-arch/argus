@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
-import { SubjectClass } from "../../src/engine";
+import { SubjectClass, VentureOutcome } from "../../src/engine";
 import { isStrictFundScaleArtifact } from "../../src/lib/fundScaleEvidence";
 import { getCost, withCostLedger } from "../cost";
 import type { PublicTextDocument, PublicTextResult } from "../publicWeb";
@@ -147,6 +147,87 @@ describe("fund-scale discovery parsing", () => {
       expect.objectContaining({ fundName: "Uncited Fund", sources: [] }),
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("supplements a thin person search with the exact verified investment manager", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const response = (output: unknown) => new Response(JSON.stringify({
+      output_text: JSON.stringify(output),
+      output: [{ type: "web_search_call" }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({
+        investments: [{ project: "Acme", investor_entity: "BITKRAFT Ventures", attribution: "affiliated_fund", sources: [{ url: "https://acme.example/funding" }] }],
+        fund_scale: [],
+      }))
+      .mockResolvedValueOnce(response({
+        investments: [{ project: "Beta", investor_entity: "BITKRAFT Ventures", attribution: "affiliated_fund", sources: [{ url: "https://beta.example/funding" }] }],
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { ctx, evidence } = context("@1scottrupp", "Scott Rupp");
+    evidence.profile.resolved_name = "Scott Rupp";
+    evidence.profile.identity_note = "Resolved to Scott Rupp, Founding General Partner @ BITKRAFT Ventures. 11 roles on record.";
+    evidence.ventures.push({
+      project_name: "BITKRAFT Ventures",
+      role: "Founding General Partner",
+      period: "2020-08",
+      outcome: VentureOutcome.UNKNOWN,
+      evidence_url: "https://www.bitkraft.vc/people/scott-rupp",
+      provider: "peopledatalabs",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+
+    await expect(discoverPortfolioCandidates(ctx)).resolves.toEqual([
+      expect.objectContaining({ projectName: "Acme" }),
+      expect.objectContaining({ projectName: "Beta" }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as {
+      input: { content: string }[];
+    });
+    expect(requests[0].input[1].content).toContain("Primary verified investment affiliation: BITKRAFT Ventures (Founding General Partner)");
+    expect(requests[0].input[1].content).toContain("https://www.bitkraft.vc/people/scott-rupp");
+    expect(requests[1].input[0].content).toContain("public investment relationships");
+  });
+
+  it("runs exact-organization discovery for a fund account even when the shared pass returned several weak leads", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const response = (output: unknown) => new Response(JSON.stringify({
+      output_text: JSON.stringify(output),
+      output: [{ type: "web_search_call" }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const shared = ["Alpha", "Beta", "Gamma", "Delta"].map((project) => ({
+      project,
+      sources: [{ url: `https://${project.toLowerCase()}.example/funding` }],
+    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ investments: shared, fund_scale: [] }))
+      .mockResolvedValueOnce(response({
+        investments: [{
+          project: "Epsilon",
+          investor_entity: "TheForms",
+          attribution: "direct_subject",
+          sources: [{ url: "https://epsilon.example/funding" }],
+        }],
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { ctx, evidence } = context("@theformsvc", "TheForms - Your Partner");
+    evidence.profile.bio = "Capital follows understanding. We back founders building infrastructure for what comes next.";
+
+    await expect(discoverPortfolioCandidates(ctx)).resolves.toHaveLength(5);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { input: { content: string }[] };
+    expect(request.input[1].content).toContain("audited fund or organization account itself");
+    expect(request.input[1].content).toContain("never leave investor_entity blank");
   });
 
   it("runs only the focused portfolio fallback when shared investments are empty", async () => {
@@ -505,6 +586,7 @@ describe("source-backed fund-scale collection", () => {
   it("attributes an employer-page scale lead to the fund without treating its domain as proven", async () => {
     const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
     evidence.profile.resolved_name = "Georgios Konstantopoulos";
+    evidence.profile.identity_binding = "licensed_exact_social";
     evidence.profile.bio = "Research Partner at Paradigm";
     const result = await collectFundScale(ctx, {
       discover: async () => [lead({ attribution: "affiliated_fund" })],
@@ -568,6 +650,7 @@ describe("source-backed fund-scale collection", () => {
   it("reuses portfolio-frozen fund-domain proof when fund scale runs later in the same audit", async () => {
     const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
     evidence.profile.resolved_name = "Georgios Konstantopoulos";
+    evidence.profile.identity_binding = "licensed_exact_social";
     evidence.profile.bio = "General Partner @paradigm";
     const lookupProfile = vi.fn().mockResolvedValue({
       handle: "@paradigm",
@@ -588,6 +671,7 @@ describe("source-backed fund-scale collection", () => {
       }],
       fetchSource: async () => document({ text: "Our portfolio includes Acme Protocol." }),
       lookupProfile,
+      resolveProjectDomain: async () => "acme.example",
       now: () => NOW,
     });
     const callsAfterPortfolio = lookupProfile.mock.calls.length;

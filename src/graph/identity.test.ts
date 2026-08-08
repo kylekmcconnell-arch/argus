@@ -108,7 +108,11 @@ describe("address-backed token identities", () => {
     const contributions = [
       tokenContribution("GOOD", "PASS", good.nodes, good.edges),
       tokenContribution("RUG", "AVOID", bad.nodes, bad.edges),
-    ];
+    ].map((contribution, index) => ({
+      ...contribution,
+      reportVersionId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      provenanceState: "server_collected" as const,
+    }));
     expect(reconcileVerdict(tokenEntityKey("ethereum", EVM_A), contributions)?.severity).toBe("avoid");
   });
 });

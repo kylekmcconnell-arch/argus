@@ -1,6 +1,12 @@
 import { useEffect, useReducer } from "react";
 import { getContributions, subscribeGraph } from "../graph/store";
-import { subjectConnections, reconcileVerdict, type SubjectConnection, type Reconciliation } from "../graph/network";
+import {
+  isAuthoritativeGraphContribution,
+  subjectConnections,
+  reconcileVerdict,
+  type SubjectConnection,
+  type Reconciliation,
+} from "../graph/network";
 
 // The graph's payoff, made automatic: when a report renders, check its subject
 // against the ACCUMULATED community graph (every audit you and your co-analysts
@@ -11,8 +17,9 @@ const BAD = new Set(["FAIL", "AVOID"]);
 
 function compute(handle: string): { conns: SubjectConnection[]; recon: Reconciliation | null } {
   const contribs = getContributions();
-  const conns = subjectConnections(handle, contribs, 24).filter((c) => c.otherVerdict && BAD.has(c.otherVerdict));
-  return { conns, recon: reconcileVerdict(handle, contribs) };
+  const authoritative = contribs.filter(isAuthoritativeGraphContribution);
+  const conns = subjectConnections(handle, authoritative, 24).filter((c) => c.otherVerdict && BAD.has(c.otherVerdict));
+  return { conns, recon: reconcileVerdict(handle, authoritative) };
 }
 
 export interface RingAlertProps {

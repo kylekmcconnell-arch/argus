@@ -3,6 +3,8 @@ import { labelAddress } from "../lib/addressLabels";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { ArkhamName } from "./ArkhamName";
 import { PanelRequestNotice } from "./PanelRequestNotice";
+import { fetchPanelJson, panelRequestFailure, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import type { LiveForensicStatusHandler } from "../lib/liveForensics";
 
 // Holder / distribution forensics — is the ownership a healthy base or a rug
 // wearing a costume? Solana pulls the rich RugCheck view (total holders, top-10
@@ -33,16 +35,18 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
   );
 }
 
-export function HolderForensics({ address, chain, holderCount, evmTop, insiderPct, panelCostToken }: {
+export function HolderForensics({ address, chain, holderCount, evmTop, insiderPct, panelCostToken, onStatusChange }: {
   address: string;
   chain: string;
   holderCount: number;
   evmTop: { pct: number; tag?: string; address?: string; isContract?: boolean }[];
   insiderPct: number;
   panelCostToken?: string;
+  onStatusChange?: LiveForensicStatusHandler;
 }) {
   const [d, setD] = useState<Holders | null>(null);
   const [state, setState] = useState<"loading" | "sol" | "evm">(chain === "solana" ? "loading" : "evm");
+  const [liveFailure, setLiveFailure] = useState<PanelRequestFailure | null>(null);
   // Arkham entity labels for every holder wallet shown — names the anonymous ones.
   const { labels: arkham, state: arkhamState } = useArkhamLabels(
     [...evmTop.map((h) => h.address), ...(d?.top ?? []).map((h) => h.owner)],
@@ -52,12 +56,28 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
   useEffect(() => {
     if (chain !== "solana") return;
     let live = true;
-    fetch(`/api/holders?mint=${encodeURIComponent(address)}&chain=${chain}`)
-      .then((r) => r.json())
-      .then((j) => { if (!live) return; if (j?.available) { setD(j); setState("sol"); } else setState("evm"); })
-      .catch(() => { if (live) setState("evm"); });
+    onStatusChange?.({ id: "solana-holder-forensics", label: "Live Solana holder analysis", state: "running" });
+    fetchPanelJson<Holders>(`/api/holders?mint=${encodeURIComponent(address)}&chain=${chain}`)
+      .then((j) => {
+        if (!live) return;
+        if (j.available) {
+          setD(j);
+          setState("sol");
+          onStatusChange?.({ id: "solana-holder-forensics", label: "Live Solana holder analysis", state: "complete" });
+        } else {
+          setState("evm");
+          setLiveFailure("unavailable");
+          onStatusChange?.({ id: "solana-holder-forensics", label: "Live Solana holder analysis", state: "unavailable" });
+        }
+      })
+      .catch((error) => {
+        if (!live) return;
+        setState("evm");
+        setLiveFailure(panelRequestFailure(error));
+        onStatusChange?.({ id: "solana-holder-forensics", label: "Live Solana holder analysis", state: "unavailable" });
+      });
     return () => { live = false; };
-  }, [address, chain]);
+  }, [address, chain, onStatusChange]);
 
   if (state === "loading") {
     return <div className="panel p-4 text-[12.5px] text-ink-faint">reading the holder base + distribution…</div>;
@@ -132,8 +152,11 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
     <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">Holder analysis</span>
-        <span className="mono text-[11px] text-ink-faint">blockchain data</span>
+        <span className="mono text-[11px] text-ink-faint">{liveFailure && chain === "solana" ? "saved scan fallback" : "blockchain data"}</span>
       </div>
+      {liveFailure && chain === "solana" && (
+        <PanelRequestNotice failure={liveFailure} label="Live Solana holder analysis" className="mt-3" />
+      )}
       {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
         <PanelRequestNotice failure={arkhamState} label="Holder identity labels" className="mt-3" />
       )}

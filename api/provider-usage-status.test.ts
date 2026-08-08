@@ -6,19 +6,23 @@ const {
   cacheSetJson,
   claudeUsd,
   grokUsd,
+  loadExactVersionReport,
   requireArgusAuth,
   resolvePanelCostVersion,
+  serviceCredentials,
 } = vi.hoisted(() => ({
   attachPanelCost: vi.fn(),
   cacheGetJson: vi.fn(),
   cacheSetJson: vi.fn(),
   claudeUsd: vi.fn(() => 0.02),
   grokUsd: vi.fn(() => 0.03),
+  loadExactVersionReport: vi.fn(),
   requireArgusAuth: vi.fn(),
   resolvePanelCostVersion: vi.fn(),
+  serviceCredentials: vi.fn(),
 }));
 
-vi.mock("./_auth.js", () => ({ requireArgusAuth }));
+vi.mock("./_auth.js", () => ({ requireArgusAuth, serviceCredentials }));
 vi.mock("./_cache.js", () => ({
   attachPanelCost,
   cacheGetJson,
@@ -27,6 +31,7 @@ vi.mock("./_cache.js", () => ({
   grokUsd,
   resolvePanelCostVersion,
 }));
+vi.mock("./report.js", () => ({ loadExactVersionReport }));
 
 import challengeVerdictHandler from "./challenge-verdict";
 import kolSignalsHandler from "./kol-signals";
@@ -52,6 +57,31 @@ function response() {
 
 const panelHeaders = { "x-argus-panel-token": "signed-panel" };
 
+function challengeReportVersion() {
+  return {
+    caseStatus: "open",
+    report: {
+      kind: "token",
+      ref: "argus",
+      query: "$ARGUS",
+      payload: {
+        headline: "Stored ARGUS token report.",
+        findings: [],
+      },
+      verdict: "PASS",
+      score: 80,
+      versionContext: {
+        reportVersionId: VERSION_ID,
+        version: 1,
+        createdAt: "2026-07-12T12:00:00.000Z",
+        attestationState: "server_collected",
+        completenessState: "complete",
+        checks: [],
+      },
+    },
+  };
+}
+
 describe("provider usage status attribution", () => {
   beforeEach(() => {
     attachPanelCost.mockReset().mockResolvedValue(undefined);
@@ -59,8 +89,10 @@ describe("provider usage status attribution", () => {
     cacheSetJson.mockReset().mockResolvedValue(undefined);
     claudeUsd.mockClear();
     grokUsd.mockClear();
+    loadExactVersionReport.mockReset().mockResolvedValue(challengeReportVersion());
     requireArgusAuth.mockReset().mockResolvedValue({ organizationId: ORGANIZATION_ID, userId: USER_ID });
     resolvePanelCostVersion.mockReset().mockReturnValue(VERSION_ID);
+    serviceCredentials.mockReset().mockReturnValue({ url: "https://supabase.example", key: "service-key" });
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
     vi.stubEnv("XAI_API_KEY", "xai-key");
     vi.stubEnv("TWITTERAPI_KEY", "twitter-key");

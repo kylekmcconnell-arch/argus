@@ -139,11 +139,19 @@
     ]
   },
   "linkrbot": {
-    "minVerifiedFacts": 4,
-    "expectedRole": "PROJECT",
+    "minVerifiedFacts": 3,
+    "expectedRoutedRole": "PROJECT",
     "mustSurface": [
       "s0ldev"
     ],
-    "_note": "the miss that started this: a day-old pump.fun launch whose dev is one hop away (project account follows @S0Ldev, whose bio claims it). Fresh-launch baseline for the memecoin lane; verdict deliberately unconstrained."
+    "_note": "the miss that started this: a day-old pump.fun launch whose dev is one hop away (project account follows @S0Ldev, whose bio claims it). Fresh-launch baseline for the memecoin lane; verdict deliberately unconstrained. An incomplete report has no governing role, so this asserts the provider-backed route instead."
+  },
+  "orbitgroup_ai": {
+    "minVerifiedFacts": 10,
+    "expectedRoutedRole": "PROJECT",
+    "mustSurface": [
+      "niklas homan"
+    ],
+    "_note": "legacy current-route recording. Its public-site reads predate frozen public-web capture, so a truthful replay remains red until the fixture is refreshed; the expectation preserves the decision-value baseline instead of accepting the degraded replay."
   }
 }

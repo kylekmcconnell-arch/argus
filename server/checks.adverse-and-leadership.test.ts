@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { deriveDecisionReadiness } from "../src/lib/decisionReadiness";
 import {
   FUND_SCALE_ERA_PERSON_CHECK_IDS,
+  PRE_ORGANIZATION_SAFETY_PERSON_CHECK_IDS,
   PERSON_CHECK_IDS,
   PersonCheckTracker,
   type PersonCheckScope,
@@ -173,13 +174,20 @@ describe("project-leadership-currency check row", () => {
 describe("frozen checklist contracts", () => {
   it("keeps the pre-change contract available so already persisted reports still qualify", () => {
     const current = new Set<string>(PERSON_CHECK_IDS);
-    const frozen = new Set<string>(FUND_SCALE_ERA_PERSON_CHECK_IDS);
+    const fundScaleEra = new Set<string>(FUND_SCALE_ERA_PERSON_CHECK_IDS);
+    const preOrganizationSafety = new Set<string>(PRE_ORGANIZATION_SAFETY_PERSON_CHECK_IDS);
 
-    expect(current.size).toBe(frozen.size + 2);
-    for (const id of frozen) expect(current.has(id)).toBe(true);
-    expect(frozen.has("adverse-screen")).toBe(false);
-    expect(frozen.has("project-leadership-currency")).toBe(false);
+    expect(preOrganizationSafety.size).toBe(fundScaleEra.size + 2);
+    expect(current.size).toBe(preOrganizationSafety.size + 2);
+    for (const id of fundScaleEra) expect(preOrganizationSafety.has(id)).toBe(true);
+    for (const id of preOrganizationSafety) expect(current.has(id)).toBe(true);
+    expect(fundScaleEra.has("adverse-screen")).toBe(false);
+    expect(fundScaleEra.has("project-leadership-currency")).toBe(false);
     expect(current.has("adverse-screen")).toBe(true);
     expect(current.has("project-leadership-currency")).toBe(true);
+    expect(preOrganizationSafety.has("organization-registration")).toBe(false);
+    expect(preOrganizationSafety.has("organization-sanctions")).toBe(false);
+    expect(current.has("organization-registration")).toBe(true);
+    expect(current.has("organization-sanctions")).toBe(true);
   });
 });

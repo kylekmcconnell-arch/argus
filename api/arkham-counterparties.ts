@@ -4,8 +4,8 @@
 // Arkham hands them back already NAMED. For a token's deployer this answers "whose
 // money moves through this operator": named funds, individuals, mixers, and the
 // exchanges it cashes out to, each with total USD volume and direction. The named,
-// non-exchange counterparties become verified relationship edges in the trust
-// graph — ground truth, not inference. Deduped by entity, cached 24h.
+// non-exchange counterparties remain Arkham-attributed leads in the trust graph;
+// provider labels are not ARGUS verification. Deduped by entity, cached 24h.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { attachPanelCost, cacheGetJson, cacheSetJson, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
@@ -17,6 +17,7 @@ const CP = "https://api.arkm.com/counterparties/address/";
 
 export type Counterparty = {
   name: string;
+  entityId?: string;
   type?: string;
   address: string;
   twitter?: string;
@@ -77,6 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else {
         byEntity.set(idKey, {
           name,
+          entityId: typeof e?.id === "string" && e.id.trim() ? e.id.trim() : undefined,
           type: e?.type,
           address: a?.address ?? addr,
           twitter: typeof e?.twitter === "string" && e.twitter ? e.twitter : undefined,

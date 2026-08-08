@@ -59,6 +59,12 @@ const BLOCKSCOUT_API: Record<string, string> = {
   robinhood: "https://robinhoodchain.blockscout.com",
 };
 
+/** Exact public endpoint that produces the ordered holder register. */
+export function blockscoutHolderSourceUrl(chain: string, address: string): string | null {
+  const base = BLOCKSCOUT_API[chain.trim().toLowerCase()];
+  return base ? `${base}/api/v2/tokens/${encodeURIComponent(address)}/holders` : null;
+}
+
 export interface ExplorerHolder { address: string; percent: number; isContract?: boolean }
 
 export interface ExplorerContractSource {
@@ -105,12 +111,15 @@ export async function blockscoutHolders(
   address: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<ExplorerHolder[] | null> {
-  const base = BLOCKSCOUT_API[chain];
+  const chainKey = chain.trim().toLowerCase();
+  const base = BLOCKSCOUT_API[chainKey];
   if (!base) return null;
+  const holderSourceUrl = blockscoutHolderSourceUrl(chainKey, address);
+  if (!holderSourceUrl) return null;
   try {
     const [tokenRes, holderRes] = await Promise.all([
       fetchImpl(`${base}/api/v2/tokens/${address}`, { signal: AbortSignal.timeout(9000) }),
-      fetchImpl(`${base}/api/v2/tokens/${address}/holders`, { signal: AbortSignal.timeout(9000) }),
+      fetchImpl(holderSourceUrl, { signal: AbortSignal.timeout(9000) }),
     ]);
     if (!tokenRes.ok || !holderRes.ok) return null;
     const meta = await tokenRes.json() as { total_supply?: string };

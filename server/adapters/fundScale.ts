@@ -8,6 +8,7 @@ import { fetchPublicText, type PublicTextDocument, type PublicTextResult } from 
 import {
   discoverFocusedFundScaleEvidenceText,
   discoverInvestorEvidenceText,
+  shouldSupplementThinInvestorDiscovery,
 } from "./investorDiscovery";
 import {
   defaultInvestorDomainResolver,
@@ -241,9 +242,18 @@ export async function discoverFundScaleCandidates(ctx: CollectContext): Promise<
   const shared = parseFundScaleCandidates(text);
   if (!shared) return null;
   const sourceLinked = shared.filter((lead) => lead.sources.length > 0);
-  if (sourceLinked.length > 0) return shared;
+  // A single source-linked claim can still be a portfolio-company round,
+  // target raise, or other row that verification must reject. Supplement thin
+  // shared discovery with an exact-manager scale search.
+  if (sourceLinked.length > 0 && !shouldSupplementThinInvestorDiscovery(ctx)) return shared;
+  if (sourceLinked.length >= 2) return shared;
   const focusedText = await discoverFocusedFundScaleEvidenceText(ctx);
-  return focusedText ? parseFundScaleCandidates(focusedText) : null;
+  const focused = focusedText ? parseFundScaleCandidates(focusedText) : null;
+  if (!focused) return sourceLinked.length ? sourceLinked : null;
+  return [...new Map([...sourceLinked, ...focused].map((lead) => [
+    `${lead.fundName.toLowerCase()}::${lead.fundVehicleHint?.toLowerCase() ?? ""}::${lead.attribution ?? ""}`,
+    lead,
+  ])).values()];
 }
 
 const USD_AMOUNT = /(?<![A-Za-z])(?:US\s*\$|USD\s*|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)\s*(trillion|tn|billion|bn|million|mm|mn|thousand|[tbmk])?\b/gi;

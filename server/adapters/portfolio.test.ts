@@ -42,7 +42,10 @@ function context(handle = "@paradigm", displayName = "Paradigm") {
   evidence.profile.profile_collection_state = "resolved";
   evidence.profile.profile_provider = "twitterapi";
   evidence.profile.profile_captured_at = NOW.toISOString();
-  if (handle === "@paradigm") evidence.profile.website = "https://paradigm.xyz";
+  if (handle === "@paradigm") {
+    evidence.profile.website = "https://paradigm.xyz";
+    evidence.profile.bio = "Crypto investment firm";
+  }
   evidence.roles = [SubjectClass.INVESTOR];
   const checks: CheckObservation[] = [];
   const ctx: CollectContext = {
@@ -320,7 +323,7 @@ describe("source-backed portfolio collection", () => {
     const result = await collectPortfolioRelationships(ctx, {
       discover: async () => [lead()],
       fetchSource: async () => document(),
-      resolveProjectDomain: async () => undefined,
+      resolveProjectDomain: async () => "acme.example",
     });
 
     expect(result.state).toBe("executed");
@@ -338,16 +341,18 @@ describe("source-backed portfolio collection", () => {
       match: "relationship_confirmed",
       sourceClass: "first_party_subject",
       sourceContentHash: "a".repeat(64),
+      projectDomain: "acme.example",
     }));
 
     const graph = assembleDossier(evidence, true).graph;
-    expect(graph.edges).toContainEqual(expect.objectContaining({ type: "INVESTED_IN", dst: "acme protocol" }));
-    expect(graph.edges).not.toContainEqual(expect.objectContaining({ type: "FOUNDED", dst: "acme protocol" }));
+    expect(graph.edges).toContainEqual(expect.objectContaining({ type: "INVESTED_IN", dst: "acme.example" }));
+    expect(graph.edges).not.toContainEqual(expect.objectContaining({ type: "FOUNDED", dst: "acme.example" }));
   });
 
   it("attributes an affiliated fund's investment to the fund rather than the employee", async () => {
     const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
     evidence.profile.resolved_name = "Georgios Konstantopoulos";
+    evidence.profile.identity_binding = "licensed_exact_social";
     evidence.profile.bio = "Research Partner @paradigm";
     const affiliatedLead = lead({
       investorEntityName: "Paradigm",
@@ -363,6 +368,7 @@ describe("source-backed portfolio collection", () => {
         website: "https://paradigm.xyz",
       }),
       now: () => NOW,
+      resolveProjectDomain: async () => "acme.example",
     });
 
     expect(evidence.sourceArtifacts).toContainEqual(expect.objectContaining({
@@ -389,8 +395,8 @@ describe("source-backed portfolio collection", () => {
       type: "AFFILIATED_WITH",
       source_url: "https://x.com/gakonst",
     }));
-    expect(graph.edges).toContainEqual(expect.objectContaining({ src: "@paradigm", dst: "acme protocol", type: "INVESTED_IN" }));
-    expect(graph.edges).not.toContainEqual(expect.objectContaining({ src: "@gakonst", dst: "acme protocol", type: "INVESTED_IN" }));
+    expect(graph.edges).toContainEqual(expect.objectContaining({ src: "@paradigm", dst: "acme.example", type: "INVESTED_IN" }));
+    expect(graph.edges).not.toContainEqual(expect.objectContaining({ src: "@gakonst", dst: "acme.example", type: "INVESTED_IN" }));
   });
 
   it("does not treat an individual's employer website as a personal portfolio", async () => {
@@ -627,6 +633,7 @@ describe("source-backed portfolio collection", () => {
   it("emits the verified-venture affiliation attestation with the relationship", async () => {
     const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
     evidence.profile.bio = "Independent researcher";
+    evidence.profile.identity_binding = "licensed_exact_social";
     evidence.ventures.push({
       project_name: "Paradigm",
       x_handle: "@paradigm",
@@ -646,6 +653,16 @@ describe("source-backed portfolio collection", () => {
         attribution: "affiliated_fund",
       })],
       fetchSource: async () => document(),
+      resolveProjectDomain: async () => "acme.example",
+      resolveInvestorDomain: async () => ({
+        domain: "paradigm.xyz",
+        sourceUrl: "https://x.com/paradigm",
+        sourceContentHash: "e".repeat(64),
+        capturedAt: NOW.toISOString(),
+        sourceKind: "provider_profile",
+        profileName: "Paradigm",
+        profileWebsite: "https://paradigm.xyz/",
+      }),
       now: () => NOW,
     });
 
@@ -697,6 +714,7 @@ describe("source-backed portfolio collection", () => {
           ? "Acme Protocol closed a seed financing round with investment from Paradigm."
           : "Paradigm invested in Acme Protocol during its seed financing.",
       }),
+      resolveProjectDomain: async () => "acme.example",
     });
     expect(checks.at(-1)).toMatchObject({ status: "confirmed", sourceCount: 1 });
   });
@@ -760,6 +778,7 @@ describe("source-backed portfolio collection", () => {
       fetchSource: async (url): Promise<PublicTextResult> => url.includes("broken")
         ? { status: "failed", reason: "http_403" }
         : document(),
+      resolveProjectDomain: async (candidate) => `${candidate.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.example`,
     });
     expect(result.state).toBe("partial");
     expect(checks.at(-1)).toMatchObject({ status: "unavailable", sourceCount: 1 });
@@ -781,6 +800,7 @@ describe("source-backed portfolio collection", () => {
             text: `<h1>Our portfolio</h1><article>${projects[Number(url.at(-1)) - 1]}</article>`,
             contentHash: String(url.at(-1)).repeat(64),
           }),
+      resolveProjectDomain: async (candidate) => `${candidate.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.example`,
     });
 
     expect(result).toMatchObject({
@@ -816,6 +836,7 @@ describe("source-backed portfolio collection", () => {
             text: "<h1>Our portfolio</h1><article>Verified Project</article>",
           })
         : { status: "failed", reason: "http_403" },
+      resolveProjectDomain: async (candidate) => `${candidate.projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.example`,
     });
 
     expect(result).toMatchObject({

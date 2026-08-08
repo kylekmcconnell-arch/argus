@@ -76,7 +76,13 @@ var GENERIC_KEYS = /* @__PURE__ */ new Set([
   "unknown"
 ]);
 var isGenericKey = (raw) => GENERIC_KEYS.has(canonical(raw));
-var CONTEXT_ONLY_EDGE_TYPES = /* @__PURE__ */ new Set(["INVESTED_IN", "AFFILIATED_WITH"]);
+var CONTEXT_ONLY_EDGE_TYPES = /* @__PURE__ */ new Set([
+  "INVESTED_IN",
+  "AFFILIATED_WITH",
+  "ARKHAM_ENTITY",
+  "ARKHAM_RISK_CONTEXT",
+  "ARKHAM_TRANSACTION_CONTEXT"
+]);
 function contextOnlyNodeKeys(contribution, resolve) {
   const byNode = /* @__PURE__ */ new Map();
   for (const edge of contribution.edges) {
@@ -313,6 +319,12 @@ async function fetchPriceHistory(address, chain, pairAddress) {
     return { ...summary, timeframe, capturedAt: (/* @__PURE__ */ new Date()).toISOString() };
   }
   return null;
+}
+
+// src/lib/providerCapabilities.ts
+var ENABLED_VALUE = /^(?:1|true|on|enabled)$/i;
+function arkhamProviderEnabled() {
+  return ENABLED_VALUE.test(String(import.meta.env?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim());
 }
 
 // src/token/scannerEvasion.ts
@@ -743,6 +755,10 @@ var GOPLUS_UNSORTED_HOLDER_CHAINS = /* @__PURE__ */ new Set(["robinhood"]);
 var BLOCKSCOUT_API = {
   robinhood: "https://robinhoodchain.blockscout.com"
 };
+function blockscoutHolderSourceUrl(chain, address) {
+  const base = BLOCKSCOUT_API[chain.trim().toLowerCase()];
+  return base ? `${base}/api/v2/tokens/${encodeURIComponent(address)}/holders` : null;
+}
 async function blockscoutContractSource(chain, address, fetchImpl = fetch) {
   const base = BLOCKSCOUT_API[chain];
   if (!base) return null;
@@ -762,12 +778,15 @@ async function blockscoutContractSource(chain, address, fetchImpl = fetch) {
   }
 }
 async function blockscoutHolders(chain, address, fetchImpl = fetch) {
-  const base = BLOCKSCOUT_API[chain];
+  const chainKey = chain.trim().toLowerCase();
+  const base = BLOCKSCOUT_API[chainKey];
   if (!base) return null;
+  const holderSourceUrl = blockscoutHolderSourceUrl(chainKey, address);
+  if (!holderSourceUrl) return null;
   try {
     const [tokenRes, holderRes] = await Promise.all([
       fetchImpl(`${base}/api/v2/tokens/${address}`, { signal: AbortSignal.timeout(9e3) }),
-      fetchImpl(`${base}/api/v2/tokens/${address}/holders`, { signal: AbortSignal.timeout(9e3) })
+      fetchImpl(holderSourceUrl, { signal: AbortSignal.timeout(9e3) })
     ]);
     if (!tokenRes.ok || !holderRes.ok) return null;
     const meta = await tokenRes.json();
@@ -1027,6 +1046,7 @@ function deployerRoleLabel(attribution, form = "title") {
 }
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
 async function screenDeployerRisk(address, fetchImpl = fetch) {
+  if (!arkhamProviderEnabled()) return void 0;
   if (!address || address.length < 8) return void 0;
   const origin = globalThis.location?.origin;
   if (!origin) return void 0;
@@ -1553,10 +1573,17 @@ async function runTokenAudit(input, emit, opts) {
   const bundleRisk = !holdersReliable ? "low" : insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
   if (s.available && bundleRisk !== "low") {
     findings.push({
-      claim: `Concentrated supply: ${bundleCount} non-contract wallets hold ~${insiderPct}%. This may indicate a bundled launch or coordinated snipe.`,
+      claim: `Concentrated supply: ${bundleCount} non-market wallets each hold at least 1% and up to 15 of the largest non-market wallets hold ~${insiderPct}% combined. This holder snapshot does not establish whether the wallets coordinated.`,
       tone: bundleRisk === "high" ? "bad" : "warn",
       source: chain === "solana" ? "goplus-sol" : "goplus"
     });
+  }
+  if (holdersReliable && topWalletPct != null) {
+    if (topWalletPct >= 50) caps.push([39, "single_wallet_majority_supply"]);
+    else if (topWalletPct >= 25) caps.push([69, "single_wallet_concentration"]);
+  }
+  if (holdersReliable && bundleCount > 0 && bundleCount <= 3 && insiderPct >= 60) {
+    caps.push([69, "few_wallet_concentration"]);
   }
   if (marketRows.length) {
     const named = marketRows.slice(0, 3).map((row) => `${row.label} (${row.percent.toFixed(1)}%)`).join(", ");
@@ -1626,7 +1653,7 @@ async function runTokenAudit(input, emit, opts) {
   if (s.creatorPercent >= 15) aT4 = clamp(aT4 - 5, 0, 16);
   else if (s.creatorPercent >= 5) aT4 = clamp(aT4 - 2, 0, 16);
   aT4 = clamp(aT4, 0, 16);
-  const t4Note = !s.available ? "Holder data not verifiable keyless." : !holdersReliable ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.` : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% in ${bundleCount} fresh wallets` : ""}.`;
+  const t4Note = !s.available ? "Holder data not verifiable keyless." : !holdersReliable ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.` : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% across ${bundleCount} non-market wallets holding at least 1% each` : ""}.`;
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
@@ -1665,14 +1692,20 @@ async function runTokenAudit(input, emit, opts) {
     tag: h.tag || void 0,
     isContract: h.is_contract === 1 || h.is_contract === "1"
   })).filter((h) => h.address);
-  step({ phase: "Screen", label: "Deployer forensics", detail: "Screening deployer + top holders against OFAC, and tracing the deployer's funding provenance on Arkham\u2026", tone: "neutral" });
   const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
   const deployerRiskFn = opts?.screenDeployerRisk ?? screenDeployerRisk;
+  const deployerRiskEnabled = Boolean(opts?.screenDeployerRisk) || arkhamProviderEnabled();
+  step({
+    phase: "Screen",
+    label: "Deployer forensics",
+    detail: deployerRiskEnabled ? "Screening deployer and top holders against OFAC, and tracing funding provenance." : "Screening deployer and top holders against OFAC.",
+    tone: "neutral"
+  });
   const [sanctionsScreen, deployerRisk, priceHistory] = await Promise.all([
     screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
-    deployer ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0),
+    deployer && deployerRiskEnabled ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0),
     fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null)
   ]);
   if (deployerRisk?.available && deployerRisk.paths.length) {
@@ -1843,7 +1876,7 @@ function normalizeSubjectRef(value) {
 }
 
 // src/lib/scanChecklist.ts
-var SUCCESSFUL = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty"]);
+var SUCCESSFUL = /* @__PURE__ */ new Set(["confirmed", "reported", "finding", "checked-empty"]);
 var UNKNOWN_OR_FAILED = /* @__PURE__ */ new Set(["unknown", "unavailable", "stale"]);
 var shortAddr = (address) => address.length > 12 ? `${address.slice(0, 5)}\u2026${address.slice(-4)}` : address;
 function contractSafetyConcerns(dossier) {
@@ -1959,12 +1992,18 @@ function tokenChecks(dossier) {
       note: dossier.deployer ? `Deployer ${shortAddr(dossier.deployer)} funding traced on Arkham; no flagged-entity funding source surfaced` : "Deployer funding traced on Arkham; no flagged-entity funding source surfaced",
       provider: "arkham",
       completedAt: deployerRisk.completedAt
-    } : {
+    } : arkhamProviderEnabled() ? {
       checkId: "operator-funding-trace",
       decisionCritical: true,
       label: "Operator / funding trace",
       status: "unknown",
       note: dossier.deployer ? `deployer ${shortAddr(dossier.deployer)} resolved; trace ${outcomeNotRecorded}` : `deployer unresolved; trace ${outcomeNotRecorded}`
+    } : {
+      checkId: "operator-funding-trace",
+      decisionCritical: false,
+      label: "Operator / funding trace",
+      status: "not-applicable",
+      note: "Supplemental provider trace is currently disabled and does not affect report readiness"
     }
   );
   checks.push(evm ? { checkId: "deployer-trail-evm", decisionCritical: false, label: "Creator wallet details", status: "unknown", note: "Checked after the saved score; the latest wallet result is shown below" } : { checkId: "deployer-trail-evm", decisionCritical: false, label: "Creator wallet details", status: "not-applicable", note: "Solana" });
@@ -2118,7 +2157,7 @@ function reportCompleteness(kind, payload, checks = reportChecks(kind, payload))
   }
   const inScope = checks.filter((check) => check.status !== "not-applicable");
   return inScope.length > 0 && inScope.every(
-    (check) => check.status === "confirmed" || check.status === "finding" || check.status === "checked-empty"
+    (check) => check.status === "confirmed" || check.status === "reported" || check.status === "finding" || check.status === "checked-empty"
   ) ? "complete" : "partial";
 }
 

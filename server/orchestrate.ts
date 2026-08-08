@@ -15,6 +15,7 @@ import { env, providerFallbacksEnabled } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence, type BasicFact, type WebTeamMember } from "../src/data/evidence";
+import type { EvmControlRealitySnapshot } from "../src/data/evmControlReality";
 import type { AdapterRunResult, CheckObservation, CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import {
   ANALYST_EVIDENCE_MAX_CHARS,
@@ -27,7 +28,7 @@ import {
   inspectAnalystScoringPreflight,
   scanContradictions,
 } from "./agent";
-import { getCost, providerFailureLines, withCostLedger } from "./cost";
+import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cost";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
@@ -41,6 +42,14 @@ import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
 import { personChecks } from "../src/lib/scanChecklist";
 import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
+import { isOrganizationAccount } from "../src/lib/investorSubject";
+import { axisLabel } from "../src/lib/verdict";
+import {
+  buildResearchPlan,
+  finalizeResearchPlan,
+  researchPlanAllows,
+  type ResearchIntent,
+} from "../src/lib/researchDirector";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
   COLLECTION_ANALYST_RESERVE_MS,
@@ -59,6 +68,7 @@ import {
   offchainAdapter,
   refreshResolvedNameOffchain,
   resolvedOffchainName,
+  screenOrganizationSanctions,
 } from "./adapters/offchain";
 import { archiveCorroborationLabels, archivedAffiliation } from "./adapters/wayback";
 import { resolveForHandle } from "./adapters/wallet";
@@ -66,7 +76,8 @@ import { collectTrustGraph } from "./adapters/trustgraph";
 import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adapters/projectToken";
-import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
+import { hydrateProjectTeamFromVerifiedFacts, projectProviderBackedBasicFacts } from "./basicFactsProjection";
+import { enforceProjectFactCoherence } from "./projectFactCoherence";
 import {
   collectProtocolAuditLinks,
   collectProtocolFees,
@@ -79,6 +90,10 @@ import { collectHolderProfile } from "./adapters/tokenHolders";
 import { collectUpcomingUnlocks } from "./adapters/tokenUnlocks";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { collectSecurityAudits } from "./adapters/securityAudits";
+import {
+  collectEvmControlReality,
+  PUBLIC_EVM_RPC,
+} from "./adapters/evmControlReality";
 import {
   collectProjectCompanyEnrichment,
   companyEnrichmentMatchesOfficialDomain,
@@ -185,6 +200,10 @@ export function deriveFounderVentureCandidate(
 const MONID_ENRICHMENT_BUDGET_MS = 25_000;
 // Up to ~6 bounded page fetches (security page candidates + auditor hops).
 const SECURITY_AUDITS_BUDGET_MS = 45_000;
+// Each public RPC request is individually bounded. The collector keeps an exact
+// request count and tries the configured fallback only when a block-consistent
+// capture cannot be completed on the first endpoint.
+const EVM_CONTROL_RPC_TIMEOUT_MS = 2_500;
 const withWallClockBox = <T>(work: Promise<T>, budgetMs: number): Promise<T | null> =>
   Promise.race([
     work,
@@ -194,6 +213,59 @@ const withWallClockBox = <T>(work: Promise<T>, budgetMs: number): Promise<T | nu
       if (typeof timer === "object" && "unref" in timer) timer.unref();
     }),
   ]);
+
+const VERIFIED_EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
+
+export function verifiedEvmControlTarget(
+  evidence: CollectedEvidence,
+): { chain: string; address: string } | null {
+  const token = evidence.projectToken;
+  if (token?.verified !== true) return null;
+  const chain = token.chain.trim().toLowerCase();
+  const address = token.address.trim().toLowerCase();
+  if (!VERIFIED_EVM_ADDRESS.test(address) || !PUBLIC_EVM_RPC[chain]?.length) return null;
+  return { chain, address };
+}
+
+const unavailableEvmControlSnapshot = (
+  chain: string,
+  target: string,
+  note: string,
+): EvmControlRealitySnapshot => ({
+  schemaVersion: 1,
+  state: "unavailable",
+  chain,
+  target,
+  mode: "point_in_time",
+  scoringImpact: "none",
+  collection: {
+    sourceClass: "direct_chain_rpc",
+    rpcCalls: 0,
+    modelCalls: 0,
+    marginalUsd: 0,
+  },
+  ownerProbes: [],
+  authorities: [],
+  safeCompatibleMultisigs: [],
+  receipts: [],
+  limitations: [
+    "No direct-chain control claim was made because a block-consistent RPC capture was unavailable.",
+  ],
+  note,
+});
+
+/**
+ * Defensive packet boundary for score-neutral point-in-time context. Even if a
+ * future refactor starts from a wider evidence object, this field cannot reach
+ * the v1 scorer or contradiction model through this packet.
+ */
+export function excludeScoreNeutralControlReality<
+  T extends { evmControlReality?: unknown },
+>(input: T): Omit<T, "evmControlReality"> {
+  const { evmControlReality: _scoreNeutralContext, ...modelEvidence } = input;
+  void _scoreNeutralContext;
+  return modelEvidence;
+}
 
 export function protocolRecordMatchesCanonicalToken(
   recordGeckoId: string | null | undefined,
@@ -529,7 +601,7 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
   if (prof?.accountStatus === "active") {
     ctx.evidence.profile.profile_collection_state = "resolved";
     ctx.evidence.profile.profile_provider = "twitterapi";
-    ctx.evidence.profile.profile_captured_at = new Date().toISOString();
+    ctx.evidence.profile.profile_captured_at = prof.statusCapturedAt;
     ctx.evidence.profile.x_account_status = "active";
     ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
     ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
@@ -899,7 +971,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // only the newest originals for cadence and tone. Passing the latter here
     // silently discarded the historical founder/team posts we had already paid
     // twitterapi.io to retrieve.
-    findTeam(ctx.handle, ctx.evidence.profile.display_name, posts),
+    findTeam(ctx.handle, ctx.evidence.profile.display_name, posts, corpus.teamSignalPosts),
     // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
     // domain or a project name — a big public project's roster lives off-X, and
     // many project accounts put no plain domain in the bio.
@@ -1397,6 +1469,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         // domain scavenged from free post text is too weak to carry deterministic
         // weight (it could be a press/platform host, not the venture's own site).
         let archiveVerified = false;
+        let archiveProvider: "wayback" | "arquivo" | null = null;
         try {
           if (v.domain) {
             // The archived page must name BOTH the subject AND the venture on its
@@ -1408,7 +1481,12 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
             // corroborates. When the tie survives only in the older captures the
             // adapter also hands back that fact, dated, and it is recorded next
             // to the corroboration rather than quietly dropped.
-            if (arch) { corrob.push(...archiveCorroborationLabels(arch)); rec.evidence_url = arch.url; archiveVerified = true; }
+            if (arch) {
+              corrob.push(...archiveCorroborationLabels(arch));
+              rec.evidence_url = arch.url;
+              archiveVerified = true;
+              archiveProvider = arch.provider;
+            }
           }
           if (xHandle) {
             const follows = await followsSubject("@" + xHandle.replace(/^@/, ""), ctx.handle);
@@ -1426,7 +1504,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
             // tie alone never reaches here.
             rec.evidence_origin = "deterministic";
             rec.artifact_verified = true;
-            rec.provider = "wayback";
+            rec.provider = archiveProvider ?? "wayback";
           }
           ctx.emit({ phase: "P0 · Intake", label: `Affiliation corroborated · ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""}: ${corrob.join("; ")}${archiveVerified ? " (verified, scoreable)" : ""}.`, source: "argus", tone: "good" });
         }
@@ -1494,11 +1572,14 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     const role = (venture.role ?? "").toLowerCase();
     if (/founder|co-?founder|\bceo\b|\bcto\b|creator|owner/.test(role)) roles.add(SubjectClass.FOUNDER);
     else if (/advisor|adviser|board/.test(role)) roles.add(SubjectClass.ADVISOR);
-    // Employment words outrank the investor keywords: this gate reads raw job
-    // titles (PDL employment records), and "Principal Engineer" or
-    // "Partnerships Lead" is staff, not the professional capital allocation
-    // INVESTOR must mean. The investor terms are whole words for the same
-    // reason ("Partnerships" is not "Partner"; "Capital Markets" is not a fund).
+    // Specific capital-allocation titles are checked before generic employment
+    // words so Investment Director and Portfolio Manager do not collapse into
+    // MEMBER. The investor terms remain whole words: Principal Engineer and
+    // Partnerships Lead are staff, while Partnerships is not Partner.
+    else if (/\b(?:investment director|investment principal|investment partner|venture partner|venture lead|portfolio manager|fund manager|chief investment officer|angel investor|venture capitalist)\b/.test(role)) {
+      roles.add(SubjectClass.INVESTOR);
+      investorBeyondBio = true;
+    }
     else if (/contributor|engineer|developer|employee|manager|director|lead|role on record/.test(role)) roles.add(SubjectClass.MEMBER);
     else if (/\binvestor\b|\bpartner\b|\bprincipal\b|\bventure capital(?:ist)?\b|\bvc\b|\bgp\b/.test(role)) {
       roles.add(SubjectClass.INVESTOR);
@@ -1510,11 +1591,22 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // keyword (a cryptic or personal bio) but whom a fetched first-party or
   // independent source names as a company's founder or executive must still
   // route to FOUNDER, not publish INCOMPLETE for lack of a governing role.
+  const organizationSubject = isOrganizationAccount(evidence);
+  const personIdentityBound = Boolean(evidence.profile.identity_binding);
   for (const fact of evidence.basicFacts ?? []) {
     if (fact.artifact_verified !== true) continue;
     if (fact.status !== "verified" && fact.status !== "corroborated") continue;
-    if (fact.predicate === "founder" || fact.predicate === "founded" || fact.predicate === "executive") {
+    if (!organizationSubject && personIdentityBound && (fact.predicate === "founder" || fact.predicate === "founded" || fact.predicate === "executive")) {
       roles.add(SubjectClass.FOUNDER);
+    }
+    if (
+      !organizationSubject
+      && personIdentityBound
+      && fact.predicate === "current_role"
+      && /\b(?:angel investor|venture capitalist|investor|general partner|managing partner|investment partner|venture partner|portfolio manager|investment director|investment principal|fund manager|chief investment officer|gp)\b/i.test(fact.value)
+    ) {
+      roles.add(SubjectClass.INVESTOR);
+      investorBeyondBio = true;
     }
     // When an X account is suspended or missing from the profile provider, a
     // freshly fetched first-party site can still prove the brand identity by
@@ -1567,18 +1659,66 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   return [...roles];
 }
 
+const LEGAL_ENTITY_LANGUAGE = /\b(?:incorporated|corporation|company|limited|llc|l\.l\.c\.?|ltd\.?|inc\.?|plc|llp|l\.p\.?|gmbh|s\.a\.?|foundation|association|registered)\b/i;
+
+/**
+ * Select the exact frozen legal-entity fact that may arm an organization
+ * sanctions query. Display names, bios, model leads, related-company facts,
+ * and independent name-only mentions are all excluded.
+ */
+export function strictOrganizationLegalEntity(
+  evidence: CollectedEvidence,
+): { name: string; fact: BasicFact; sourceCount: number } | null {
+  if (!isOrganizationAccount(evidence)) return null;
+  if (!evidence.roles.some((role) => role === SubjectClass.INVESTOR || role === SubjectClass.AGENCY)) return null;
+  const normalized = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const candidates = (evidence.basicFacts ?? []).filter((fact) => {
+    if (
+      fact.predicate !== "legal_entity"
+      || fact.status !== "verified"
+      || fact.artifact_verified !== true
+      || fact.evidence_origin !== "deterministic"
+      || !/^(?:investor_org|organization)\.legal_entity$/.test(fact.questionId ?? "")
+    ) return false;
+    const name = fact.value.replace(/\s+/g, " ").trim();
+    if (name.length < 3 || name.length > 200 || /^unknown|not (?:found|available)$/i.test(name)) return false;
+    const normalizedName = normalized(name);
+    return fact.sources.some((source) =>
+      source.relation === "supports"
+      && source.artifactVerified === true
+      && (source.sourceClass === "official_subject" || source.sourceClass === "regulatory_or_onchain")
+      && normalized(source.excerpt).includes(normalizedName)
+      && LEGAL_ENTITY_LANGUAGE.test(`${name} ${source.excerpt}`));
+  });
+  if (candidates.length !== 1) return null;
+  const fact = candidates[0];
+  const supporting = fact.sources.filter((source) => source.relation === "supports");
+  return { name: fact.value.replace(/\s+/g, " ").trim(), fact, sourceCount: supporting.length };
+}
+
 /**
  * Reuse source-fetched founder and executive facts in the human-readable team
  * roster. The search model only suggests candidates; every row admitted here
  * already passed an independent page fetch plus exact excerpt verification.
  */
+const isRetainedSourceFact = (fact: BasicFact): boolean =>
+  fact.artifact_verified === true
+  && (fact.status === "verified" || fact.status === "corroborated");
+
+// A provider projection or ceiling-only record is useful investigator context,
+// but it is deliberately ineligible to become ARGUS verification. Keep this
+// predicate shared by every project check that publishes the word "verified".
+const isStrictlyVerifiedFact = (fact: BasicFact): boolean =>
+  isRetainedSourceFact(fact)
+  && fact.providerProjection !== true
+  && fact.floorEligible !== false;
+
 export function projectVerifiedBasicFacts(ctx: CollectContext): void {
   if (!providerBackedRoles(ctx.evidence).includes(SubjectClass.PROJECT)) return;
-  const facts = (ctx.evidence.basicFacts ?? []).filter((fact) =>
-    fact.artifact_verified === true
-    && (fact.status === "verified" || fact.status === "corroborated"),
-  );
-  if (!facts.length) return;
+  const retainedFacts = (ctx.evidence.basicFacts ?? []).filter(isRetainedSourceFact);
+  if (!retainedFacts.length) return;
+  const facts = retainedFacts.filter(isStrictlyVerifiedFact);
+  const reportedFacts = retainedFacts.filter((fact) => !isStrictlyVerifiedFact(fact));
 
   const brandIdentity = facts.find((fact) =>
     fact.predicate === "official_identity"
@@ -1709,6 +1849,8 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
       sourceCount: peopleSourceCount,
     });
   } else {
+    const reportedPeople = reportedFacts.filter((fact) =>
+      fact.predicate === "founder" || fact.predicate === "executive");
     const teamPredicates = ["founder", "executive"] as const;
     const teamSearchCompleted = teamPredicates.every((predicate) =>
       (ctx.evidence.basicFactQuestionLedger ?? []).some((entry) =>
@@ -1717,7 +1859,15 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
         && entry.status === "unanswered"
         && entry.providerRuns.some((run) =>
           run.state === "succeeded" || run.state === "completed_empty")));
-    if (teamSearchCompleted) {
+    if (reportedPeople.length) {
+      ctx.recordCheck?.({
+        id: "project-team-identity",
+        status: "reported",
+        note: `${reportedPeople.length} source-attributed founder or executive record${reportedPeople.length === 1 ? " was" : "s were"} retained as context, but did not pass strict verification and did not resolve operator identity`,
+        provider: "basic-facts-web",
+        sourceCount: reportedPeople.reduce((total, fact) => total + fact.sources.length, 0),
+      });
+    } else if (teamSearchCompleted) {
       ctx.recordCheck?.({
         id: "project-team-identity",
         status: "finding",
@@ -1736,6 +1886,17 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
       provider: "basic-facts-web",
       sourceCount: products.reduce((total, fact) => total + fact.sources.length, 0),
     });
+  } else {
+    const reportedProducts = reportedFacts.filter((fact) => fact.predicate === "product");
+    if (reportedProducts.length) {
+      ctx.recordCheck?.({
+        id: "project-product-substance",
+        status: "reported",
+        note: `${reportedProducts.length} provider-attributed or first-party product description${reportedProducts.length === 1 ? " was" : "s were"} retained as context; ${reportedProducts.length === 1 ? "it was" : "they were"} not independently verified enough to set a score floor`,
+        provider: "basic-facts-web",
+        sourceCount: reportedProducts.reduce((total, fact) => total + fact.sources.length, 0),
+      });
+    }
   }
 
   const traction = facts.filter((fact) => fact.predicate === "traction");
@@ -1747,6 +1908,17 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
       provider: "basic-facts-web",
       sourceCount: traction.reduce((total, fact) => total + fact.sources.length, 0),
     });
+  } else {
+    const reportedTraction = reportedFacts.filter((fact) => fact.predicate === "traction");
+    if (reportedTraction.length) {
+      ctx.recordCheck?.({
+        id: "project-traction-liveness",
+        status: "reported",
+        note: `${reportedTraction.length} provider-reported traction or usage metric${reportedTraction.length === 1 ? " was" : "s were"} retained as context; ${reportedTraction.length === 1 ? "it was" : "they were"} not independently verified enough to set a score floor`,
+        provider: "basic-facts-web",
+        sourceCount: reportedTraction.reduce((total, fact) => total + fact.sources.length, 0),
+      });
+    }
   }
 }
 
@@ -1989,11 +2161,11 @@ export function collectProjectCoreEvidenceOutcomes(
       && PROJECT_BACKING_ROLE.test(member.role),
     );
 
-  const verifiedBackingFacts = (ctx.evidence.basicFacts ?? []).filter((fact) =>
+  const backingFacts = (ctx.evidence.basicFacts ?? []).filter((fact) =>
     (fact.predicate === "funding" || fact.predicate === "investor" || fact.predicate === "partnership")
-    && fact.artifact_verified === true
-    && (fact.status === "verified" || fact.status === "corroborated"),
-  );
+    && isRetainedSourceFact(fact));
+  const verifiedBackingFacts = backingFacts.filter(isStrictlyVerifiedFact);
+  const reportedBackingFacts = backingFacts.filter((fact) => !isStrictlyVerifiedFact(fact));
   const backingCount = verifiedBackers.length + verifiedBackingFacts.length;
 
   if (backingCount) {
@@ -2007,6 +2179,14 @@ export function collectProjectCoreEvidenceOutcomes(
       note: `${backingCount} funding, investor, advisor, counterparty, or operating-partner record${backingCount === 1 ? " was" : "s were"} verified from fetched public evidence; relationship terms were not inferred beyond those sources`,
       provider: providers.join("/"),
       sourceCount: verifiedBackers.length + verifiedBackingFacts.reduce((total, fact) => total + fact.sources.length, 0),
+    });
+  } else if (reportedBackingFacts.length) {
+    ctx.recordCheck?.({
+      id: "project-backing-partners",
+      status: "reported",
+      note: `${reportedBackingFacts.length} provider-attributed funding, investor, or partnership record${reportedBackingFacts.length === 1 ? " was" : "s were"} retained as context; ${reportedBackingFacts.length === 1 ? "it was" : "they were"} not independently verified enough to establish the relationship or set a score floor`,
+      provider: "basic-facts-web",
+      sourceCount: reportedBackingFacts.reduce((total, fact) => total + fact.sources.length, 0),
     });
   } else {
     // When the scan actually ran over collected first-party material (a
@@ -2028,11 +2208,11 @@ export function collectProjectCoreEvidenceOutcomes(
     });
   }
 
-  const verifiedDisclosures = (ctx.evidence.basicFacts ?? []).filter((fact) =>
+  const disclosures = (ctx.evidence.basicFacts ?? []).filter((fact) =>
     PROJECT_TRANSPARENCY_FACT_PREDICATES.has(fact.predicate)
-    && fact.artifact_verified === true
-    && (fact.status === "verified" || fact.status === "corroborated"),
-  );
+    && isRetainedSourceFact(fact));
+  const verifiedDisclosures = disclosures.filter(isStrictlyVerifiedFact);
+  const reportedDisclosures = disclosures.filter((fact) => !isStrictlyVerifiedFact(fact));
   if (verifiedDisclosures.length) {
     ctx.recordCheck?.({
       id: "project-transparency",
@@ -2040,6 +2220,14 @@ export function collectProjectCoreEvidenceOutcomes(
       note: `${verifiedDisclosures.length} legal, governance, token-economic, repository, or security disclosure${verifiedDisclosures.length === 1 ? " was" : "s were"} verified against fetched, cited public sources`,
       provider: "basic-facts-web",
       sourceCount: verifiedDisclosures.reduce((total, fact) => total + fact.sources.length, 0),
+    });
+  } else if (reportedDisclosures.length) {
+    ctx.recordCheck?.({
+      id: "project-transparency",
+      status: "reported",
+      note: `${reportedDisclosures.length} provider-attributed or self-attested disclosure${reportedDisclosures.length === 1 ? " was" : "s were"} retained as context; ${reportedDisclosures.length === 1 ? "it did" : "they did"} not pass independent verification and did not set a score floor`,
+      provider: "basic-facts-web",
+      sourceCount: reportedDisclosures.reduce((total, fact) => total + fact.sources.length, 0),
     });
   } else if (options.transparencySearchExplicitlyEmpty) {
     ctx.recordCheck?.({
@@ -2072,7 +2260,7 @@ export function collectProjectCoreEvidenceOutcomes(
 
   return {
     state: "partial",
-    detail: `bounded frozen-evidence scan completed with ${backingCount} verified backing record${backingCount === 1 ? "" : "s"} and ${verifiedDisclosures.length} verified disclosure record${verifiedDisclosures.length === 1 ? "" : "s"}`,
+    detail: `bounded frozen-evidence scan completed with ${backingCount} strictly verified backing record${backingCount === 1 ? "" : "s"}, ${verifiedDisclosures.length} strictly verified disclosure record${verifiedDisclosures.length === 1 ? "" : "s"}, and ${reportedBackingFacts.length + reportedDisclosures.length} source-reported context record${reportedBackingFacts.length + reportedDisclosures.length === 1 ? "" : "s"}`,
   };
 }
 
@@ -2210,7 +2398,6 @@ async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Prom
   ) return;
   ctx.evidence.protocolTvl = {
     ...outcome.value,
-    capturedAt: token.capturedAt,
   };
   if (outcome.value.chains.length) {
     ctx.evidence.projectToken = {
@@ -2300,6 +2487,7 @@ export async function adverseSignalsAndTooling(
   // projects), each with a recoverable @handle so the search is grounded.
   const subjectKind = evidence.roles.includes(SubjectClass.PROJECT) ? "project" : "person";
   const projectTargets = evidence.ventures
+    .filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead")
     .map((v) => ({
       name: v.project_name,
       role: v.role,
@@ -2308,6 +2496,7 @@ export async function adverseSignalsAndTooling(
     .filter((v) => v.handle && v.handle.toLowerCase() !== self)
     .slice(0, 4);
   const associateTargets = evidence.associates
+    .filter((associate) => associate.artifact_verified === true && associate.evidence_origin !== "model_lead")
     .map((a) => ({ handle: a.associate_handle, relation: a.relation }))
     .filter((a) => a.handle && a.handle.replace(/^@/, "").toLowerCase() !== self)
     .slice(0, 4);
@@ -2777,6 +2966,7 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
     portfolioLeads: [],
     profileAuthenticity: undefined,
     trustGraphScreen: undefined,
+    evmControlReality: undefined,
     webTeam: [],
     ventureTeams: [],
     basicFacts: [],
@@ -2787,6 +2977,7 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
 interface RunAuditOptions {
   organizationId?: string;
   analystDeadlineAt?: number;
+  intent?: ResearchIntent;
 }
 
 /**
@@ -2798,8 +2989,7 @@ interface RunAuditOptions {
 export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Emit): void {
   const enrichment = evidence.companyEnrichment;
   const officialWebsite = evidence.projectToken?.homepage
-    ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl
-    ?? enrichment?.requestedDomain;
+    ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
   if (!enrichment || !companyEnrichmentMatchesOfficialDomain(enrichment, officialWebsite)) {
     if (evidence.companyEnrichment?.management?.length) {
       emit({
@@ -2951,6 +3141,88 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     recordCheck: (observation) => checkTracker.record(observation),
   };
 
+  const organizationSafetyPass = async (): Promise<void> => {
+    const institutionalOrganization = isOrganizationAccount(evidence)
+      && evidence.roles.some((role) => role === SubjectClass.INVESTOR || role === SubjectClass.AGENCY);
+    if (!institutionalOrganization) return;
+
+    const entity = strictOrganizationLegalEntity(evidence);
+    if (!entity) {
+      checkTracker.record({
+        id: "organization-registration",
+        status: "unavailable",
+        note: "no single strict direct-subject legal_entity fact bound the organization to an exact legal name, so organization registration remains unresolved",
+        provider: "basic-facts:legal-entity",
+      });
+      checkTracker.record({
+        id: "organization-sanctions",
+        status: "unavailable",
+        note: "an exact legal entity was not bound, so no organization OFAC query was allowed",
+        provider: "opensanctions",
+      });
+      checkTracker.provider(
+        "organization-entity-safety",
+        "Organization legal identity and OFAC",
+        "partial",
+        "no strict exact legal-entity fact; sanctions query withheld",
+      );
+      return;
+    }
+
+    checkTracker.record({
+      id: "organization-registration",
+      status: "confirmed",
+      note: `a strict fetched legal_entity passage binds the audited organization to ${entity.name}`,
+      provider: "basic-facts:legal-entity",
+      sourceCount: entity.sourceCount,
+    });
+    if (collectionOverBudget()) {
+      checkTracker.record({
+        id: "organization-sanctions",
+        status: "unavailable",
+        note: `the exact legal entity ${entity.name} was bound, but collection time expired before its OFAC entity screen could run`,
+        provider: "opensanctions",
+      });
+      checkTracker.provider(
+        "organization-entity-safety",
+        "Organization legal identity and OFAC",
+        "skipped",
+        `legal entity bound to ${entity.name}; OFAC screen skipped at collection deadline`,
+      );
+      return;
+    }
+
+    try {
+      const result = await screenOrganizationSanctions(ctx, entity.name);
+      checkTracker.provider(
+        "organization-entity-safety",
+        "Organization legal identity and OFAC",
+        result.state === "executed" ? "executed" : result.state,
+        result.detail,
+      );
+      emit({
+        phase: "Off-chain",
+        label: "Organization legal identity and OFAC",
+        detail: result.detail ?? `Exact legal-entity screen completed for ${entity.name}.`,
+        source: "basic-facts · opensanctions",
+        tone: result.state === "executed" ? "neutral" : "warn",
+      });
+    } catch (error) {
+      checkTracker.record({
+        id: "organization-sanctions",
+        status: "unavailable",
+        note: `the OFAC legal-entity screen failed before it returned a complete outcome: ${String(error)}`,
+        provider: "opensanctions",
+      });
+      checkTracker.provider(
+        "organization-entity-safety",
+        "Organization legal identity and OFAC",
+        "failed",
+        String(error),
+      );
+    }
+  };
+
   const projectTokenPass = async () => {
     const providers = ["coingecko", "dexscreener", "geckoterminal"] as const;
     const before = attemptTotals(providers);
@@ -2980,6 +3252,95 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     }
   };
 
+  const evmControlRealityPass = async (): Promise<void> => {
+    const target = verifiedEvmControlTarget(evidence);
+    if (!target) return;
+    const stageStartedAt = startRuntimeStage("evm-control-reality");
+    let snapshot: EvmControlRealitySnapshot;
+    if (collectionOverBudget()) {
+      snapshot = unavailableEvmControlSnapshot(
+        target.chain,
+        target.address,
+        "Collection time budget reached before the direct RPC capture could start.",
+      );
+    } else {
+      try {
+        snapshot = await collectEvmControlReality(target.chain, target.address, {
+          timeoutMs: EVM_CONTROL_RPC_TIMEOUT_MS,
+        });
+      } catch (error) {
+        snapshot = unavailableEvmControlSnapshot(
+          target.chain,
+          target.address,
+          `Direct RPC capture failed before a complete snapshot was returned: ${String(error)}`,
+        );
+      }
+    }
+    evidence.evmControlReality = snapshot;
+
+    const ledgerMeta = `${target.chain} · ${snapshot.state} · ${snapshot.collection.rpcCalls} RPC calls`;
+    if (snapshot.state === "unavailable") {
+      // A failed block-consistent capture can contain successful setup reads
+      // before the terminal RPC failure. The adapter retains the exact total,
+      // but not a truthful per-call split once every endpoint has failed.
+      for (let call = 0; call < snapshot.collection.rpcCalls; call += 1) {
+        recordCall("public-evm-rpc", "control-reality", 0, ledgerMeta, "partial");
+      }
+    } else {
+      // A returned snapshot proves the two block-capture calls and final block
+      // verification succeeded on the selected endpoint. Individual bounded
+      // reads preserve their own returned or rpc_error state. Any additional
+      // calls came from a failed fallback attempt and remain partial rather
+      // than being mislabeled as successful.
+      let recordedCalls = 0;
+      const envelopeCalls = Math.min(3, snapshot.collection.rpcCalls);
+      for (; recordedCalls < envelopeCalls; recordedCalls += 1) {
+        recordCall("public-evm-rpc", "control-reality", 0, ledgerMeta, "succeeded");
+      }
+      for (const receipt of snapshot.receipts) {
+        if (recordedCalls >= snapshot.collection.rpcCalls) break;
+        recordCall(
+          "public-evm-rpc",
+          "control-reality",
+          0,
+          ledgerMeta,
+          receipt.state === "returned" ? "succeeded" : "failed",
+        );
+        recordedCalls += 1;
+      }
+      for (; recordedCalls < snapshot.collection.rpcCalls; recordedCalls += 1) {
+        recordCall("public-evm-rpc", "control-reality", 0, ledgerMeta, "partial");
+      }
+    }
+
+    if (snapshot.state === "observed") {
+      emit({
+        phase: "Control",
+        label: `Contract control frozen at block ${snapshot.capture?.blockNumber ?? "unknown"}`,
+        detail: `${snapshot.proxy?.indicators.length ?? 0} standard proxy indicator${snapshot.proxy?.indicators.length === 1 ? "" : "s"}, ${snapshot.authorities.length} standard authority observation${snapshot.authorities.length === 1 ? "" : "s"}. Custom permission paths remain outside this bounded read.`,
+        source: "public-evm-rpc",
+        tone: snapshot.proxy?.state === "conflicting_implementation_candidates" ? "warn" : "neutral",
+      });
+    } else if (snapshot.state === "not_contract") {
+      emit({
+        phase: "Control",
+        label: "Canonical EVM address had no contract code",
+        detail: `The verified token address had no bytecode at captured block ${snapshot.capture?.blockNumber ?? "unknown"}; no contract-control claim was inferred.`,
+        source: "public-evm-rpc",
+        tone: "warn",
+      });
+    } else {
+      emit({
+        phase: "Control",
+        label: "Contract control capture unavailable",
+        detail: snapshot.note ?? "A block-consistent public RPC capture was not available, so no contract-control claim was made.",
+        source: "public-evm-rpc",
+        tone: "warn",
+      });
+    }
+    finishRuntimeStage("evm-control-reality", stageStartedAt);
+  };
+
   // Resolve the provider-backed profile, then bind an official token before the
   // rest of intake. This lets a slogan-only project account inherit an exact
   // identity-bound market-registry homepage before team, product, docs, and
@@ -2997,7 +3358,6 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     if (evidence.projectToken?.verified) {
       const projectName = evidence.projectToken.name;
       const protocolLookupName = defiLlamaLookupName(projectName);
-      const capturedAt = evidence.projectToken.capturedAt;
       try {
         const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome, unlocksOutcome] = await Promise.all([
           collectProtocolTvl(protocolLookupName),
@@ -3010,10 +3370,21 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
             : Promise.resolve({ available: false as const, note: "no canonical token address" }),
           // Upcoming unlocks (CryptoRank, dormant until keyed): the next-dump
           // schedule a buyer cannot easily assemble elsewhere.
-          collectUpcomingUnlocks(projectName, evidence.projectToken.symbol),
+          collectUpcomingUnlocks(
+            projectName,
+            evidence.projectToken.symbol,
+            {
+              address: evidence.projectToken.address,
+              chain: evidence.projectToken.chain,
+            },
+          ),
         ]);
-        if (holdersOutcome.available) evidence.holderProfile = { ...holdersOutcome.value, capturedAt };
-        if (unlocksOutcome.available) evidence.tokenUnlocks = { ...unlocksOutcome.value, capturedAt };
+        if (holdersOutcome.available) {
+          evidence.holderProfile = { ...holdersOutcome.value, capturedAt: holdersOutcome.value.sourceCapturedAt };
+        }
+        // CryptoRank owns this timestamp and exact source lineage. Reusing the
+        // canonical token's capture time would falsely date a later vesting read.
+        if (unlocksOutcome.available) evidence.tokenUnlocks = { ...unlocksOutcome.value };
         const canonicalGeckoId = evidence.projectToken.coingeckoId;
         const tvlIdentityMatched = canonicalGeckoId !== undefined
           && tvlOutcome.available
@@ -3025,10 +3396,17 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         // only lend TVL, fees, or funding to the audited project when its own
         // CoinGecko id joins the already verified canonical token.
         if (feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
-          evidence.protocolFees = { ...feesOutcome.value, capturedAt };
+          evidence.protocolFees = {
+            ...feesOutcome.value,
+            binding: {
+              canonicalGeckoId: canonicalGeckoId!,
+              protocolSlug: feesOutcome.value.slug,
+              method: "matched_protocol_gecko_id",
+            },
+          };
         }
         if (tvlIdentityMatched) {
-          evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
+          evidence.protocolTvl = { ...tvlOutcome.value };
           const incidentCount = recordProtocolSecurityIncidentFindings(evidence);
           if (incidentCount > 0) {
             const newest = evidence.protocolTvl.hacks?.[0];
@@ -3045,7 +3423,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           }
         }
         if (fundingIdentityMatched) {
-          evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
+          evidence.protocolFunding = { ...fundingOutcome.value };
         }
         const mismatchedProtocolSources = canonicalGeckoId ? [
           ...(tvlOutcome.available && !tvlIdentityMatched ? [`TVL (${tvlOutcome.value.geckoId ?? "no CoinGecko id"})`] : []),
@@ -3061,8 +3439,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
             tone: "warn",
           });
         }
-        // Independent audits: first-party security page plus the
-        // auditor-domain corroboration hop. Wall-clock boxed: up to ~6
+        // Independent audits: bounded discovery leads plus the auditor-domain
+        // corroboration hop. Wall-clock boxed: up to ~6
         // bounded fetches must degrade to a skipped enrichment, never a
         // stalled audit.
         {
@@ -3072,6 +3450,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
               projectName,
               evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
               auditLinks.available ? auditLinks.value.auditLinks : [],
+              { canonicalContractAddress: evidence.projectToken.address },
             ),
             SECURITY_AUDITS_BUDGET_MS,
           );
@@ -3079,17 +3458,21 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
             evidence.securityAudits = {
               securityPageUrl: auditsResult.securityPageUrl,
               selfAttested: auditsResult.selfAttested,
-              corroborated: auditsResult.corroborated,
+              attestations: auditsResult.attestations.map((attestation) => ({ ...attestation })),
+              corroborated: auditsResult.corroborated.map((entry) => ({
+                ...entry,
+                matchedIdentityAnchor: { ...entry.matchedIdentityAnchor },
+              })),
               capturedAt: auditsResult.capturedAt,
             };
             emit({
               phase: "Token",
               label: auditsResult.corroborated.length
                 ? `Independent audits confirmed · ${auditsResult.corroborated.map((entry) => entry.auditor).slice(0, 3).join(", ")}`
-                : "Security page found · auditor confirmation pending",
+                : "Audit leads found · confirmation pending",
               detail: auditsResult.corroborated.length
-                ? `${auditsResult.corroborated.length} auditor${auditsResult.corroborated.length === 1 ? "" : "s"} name ${projectName} on their own sites; ${auditsResult.selfAttested.length} named on the project's security page.`
-                : `${auditsResult.selfAttested.length} auditors are named on the project's own security page; none could be confirmed on an auditor's own site this run, so the claims stay research leads.`,
+                ? `${auditsResult.corroborated.length} auditor-domain page${auditsResult.corroborated.length === 1 ? "" : "s"} carried explicit audit context plus a canonical identity anchor for ${projectName}; ${auditsResult.selfAttested.length} unverified auditor lead${auditsResult.selfAttested.length === 1 ? " came" : "s came"} from bounded subject disclosures or curated audit-link sources.`
+                : `${auditsResult.selfAttested.length} unverified auditor lead${auditsResult.selfAttested.length === 1 ? " came" : "s came"} from bounded subject disclosures or curated audit-link sources; no auditor page met both the explicit audit-context and canonical identity-anchor requirements this run.`,
               source: "security-audits",
               tone: auditsResult.corroborated.length ? "good" : "neutral",
             });
@@ -3111,7 +3494,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
               MONID_ENRICHMENT_BUDGET_MS,
             );
             if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, companyLookup)) {
-              evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+              evidence.companyEnrichment = { ...enrichment.value };
               mergeManagementIntoWebTeam(evidence, emit);
             }
           }
@@ -3125,6 +3508,24 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
+
+  // The investigation director turns the resolved subject and decision intent
+  // into explicit evidence questions with allowlisted specialist delegates.
+  // It does not decide whether a provider succeeded and never creates facts;
+  // the frozen check ledger remains the authority for every outcome.
+  let researchPlan = buildResearchPlan(evidence, options?.intent ?? "investment_due_diligence");
+  evidence.researchPlan = researchPlan;
+  emit({
+    phase: "Director",
+    label: `Research plan · ${researchPlan.tasks.length} workstreams`,
+    detail: researchPlan.tasks
+      .filter((task) => task.priority === "critical" || task.priority === "high")
+      .slice(0, 6)
+      .map((task) => `${task.question} → ${task.delegates.slice(0, 3).join(", ")}`)
+      .join(" · "),
+    source: "argus-research-director",
+    tone: "neutral",
+  });
 
   // ── Dependency-staged adapter schedule ────────────────────────────────
   // Serial within a lane (arrows are read-after-write dependencies from the
@@ -3253,7 +3654,31 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   await runAdapter(basicFactsAdapter);
   flushLaneProviderRows();
   hydrateOfficialProjectIdentityFromFacts(evidence);
+  const initialProjectCoherence = enforceProjectFactCoherence(evidence);
+  if (initialProjectCoherence.rejected.length) {
+    emit({
+      phase: "Research",
+      label: `Entity-coherence firewall rejected ${initialProjectCoherence.rejected.length} fact${initialProjectCoherence.rejected.length === 1 ? "" : "s"}`,
+      detail: initialProjectCoherence.rejected
+        .map((entry) => `${entry.predicate}: ${entry.value}`)
+        .join("; "),
+      source: "entity coherence",
+      tone: "warn",
+    });
+  }
+  hydrateProjectTeamFromVerifiedFacts(evidence);
   const rolesAfterBasicFacts = providerBackedRoles(evidence);
+  evidence.roles = rolesAfterBasicFacts;
+  const revisedResearchPlan = buildResearchPlan(evidence, researchPlan.intent);
+  researchPlan = { ...revisedResearchPlan, createdAt: researchPlan.createdAt };
+  evidence.researchPlan = researchPlan;
+  emit({
+    phase: "Director",
+    label: `Plan revised for ${rolesAfterBasicFacts.length ? rolesAfterBasicFacts.join(", ") : "unresolved role"}`,
+    detail: `${researchPlan.tasks.length} applicable workstreams; ${researchPlan.tasks.filter((task) => task.triggeredBy.length > 0).length} were raised or reprioritized by open evidence questions; ${researchPlan.tasks.filter((task) => task.blockedBy.length > 0).length} relationship searches are identity-gated. Next: ${researchPlan.nextActions[0]?.action ?? "reconcile collected evidence"}`,
+    source: "argus-research-director",
+    tone: rolesAfterBasicFacts.length ? "neutral" : "warn",
+  });
   const officialWebsiteAfterBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
   const recoveredProjectSite = !officialWebsiteBeforeBasicFacts
     && officialWebsiteAfterBasicFacts !== null
@@ -3274,6 +3699,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   } else {
     evidence.roles = rolesAfterBasicFacts;
   }
+  await organizationSafetyPass();
   if (recoveredProjectSite && evidence.projectToken?.verified && !evidence.protocolTvl) {
     try {
       await recoverProjectProtocolIncidentEvidence(ctx);
@@ -3287,6 +3713,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       });
     }
   }
+  // The canonical token binding is final at this point, including the recovery
+  // path for sparse or suspended project profiles. Only that verified binding
+  // may select a chain and address for the fixed-block control read.
+  await evmControlRealityPass();
   // The official domain may only be recovered during the basic-facts pass
   // (common for suspended or sparse X profiles). Run company leadership only
   // after that exact domain is known. Never fall back to a company-name match.
@@ -3307,7 +3737,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         MONID_ENRICHMENT_BUDGET_MS,
       );
       if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
-        evidence.companyEnrichment = { ...enrichment.value, capturedAt: new Date().toISOString() };
+        evidence.companyEnrichment = { ...enrichment.value };
         mergeManagementIntoWebTeam(evidence, emit);
       }
     } catch (error) {
@@ -3344,7 +3774,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
             )
           : null;
         if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, primaryVenture.domain)) {
-          evidence.companyEnrichment = { ...enrichment.value, capturedAt: new Date().toISOString() };
+          evidence.companyEnrichment = { ...enrichment.value };
         }
       } catch (error) {
         emit({ phase: "Founder", label: "Venture financing enrichment error", detail: String(error), tone: "warn" });
@@ -3422,6 +3852,18 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     }
   }
   projectProviderBackedBasicFacts(evidence);
+  const finalProjectCoherence = enforceProjectFactCoherence(evidence);
+  if (finalProjectCoherence.rejected.length) {
+    emit({
+      phase: "Research",
+      label: `Final coherence pass rejected ${finalProjectCoherence.rejected.length} fact${finalProjectCoherence.rejected.length === 1 ? "" : "s"}`,
+      detail: finalProjectCoherence.rejected
+        .map((entry) => `${entry.predicate}: ${entry.value}`)
+        .join("; "),
+      source: "entity coherence",
+      tone: "warn",
+    });
+  }
   projectVerifiedBasicFacts(ctx);
 
   // Post-discovery signal passes, all before the analyst so their findings feed
@@ -3486,7 +3928,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     } else {
       checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
     }
-    if (analystAvailable() || env("XAI_API_KEY")) {
+    if (researchPlanAllows(researchPlan, "legal_and_adverse") && (analystAvailable() || env("XAI_API_KEY"))) {
       signalPasses.push(trackedPass(
         "adverse-sweep",
         "Adverse-signal sweep",
@@ -3500,6 +3942,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
         },
       ));
+    } else if (!researchPlanAllows(researchPlan, "legal_and_adverse")) {
+      checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "skipped", `research director did not select this workstream for ${researchPlan.intent}`);
+      recordAdverseUnavailable(`the research director did not select the adverse workstream for ${researchPlan.intent}; no adverse, scam, or rug search was attempted`);
     } else {
       checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
       recordAdverseUnavailable("no model search provider is configured, so no adverse, scam, or rug search was attempted");
@@ -3583,7 +4028,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // but company existence alone never proves that this investor backed it. Run
   // one bounded discovery + deterministic source-verification pass after the
   // provider-backed role set is known, then let that pass own the check outcome.
-  if (evidence.roles.includes(SubjectClass.INVESTOR)) {
+  if (evidence.roles.includes(SubjectClass.INVESTOR) && researchPlanAllows(researchPlan, "portfolio_and_outcomes")) {
     const portfolioStartedAt = startRuntimeStage("portfolio-verification");
     const before = attemptTotals(["grok", "cache", "portfolio-web", "twitterapi"]);
     try {
@@ -3623,10 +4068,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           ? result.state
           : observedRunState(attempts);
       checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", state, result.detail);
-      // A completed fund-scale assessment (the search ran, not skipped/failed)
-      // that confirmed no source-backed scale is substantive I3 evidence: it
-      // keeps I3_fund_scale_tier scoreable at the low end instead of abstaining
-      // the whole investor subject. Same idiom as project-token-identity.
+      // A bounded search that did not find a qualifying scale claim is coverage,
+      // not evidence that the fund is small or has no AUM. Keep I3 abstained
+      // unless an amount passes the strict identity, metric, source, and time
+      // gates in the collector.
       if (result.state !== "skipped" && result.state !== "failed") {
         const fundScaleConfirmed = ctx.evidence.sourceArtifacts.some(
           (artifact) => artifact.kind === "fund_scale" && artifact.match === "fund_scale_confirmed",
@@ -3634,8 +4079,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         if (!fundScaleConfirmed) {
           checkTracker.record({
             id: "investor-fund-scale",
-            status: "finding",
-            note: "assessed fund scale: a completed source-backed search verified no fund AUM or close amount for this fund. A null result on this axis, not adverse evidence.",
+            status: result.state === "partial" ? "unavailable" : "checked-empty",
+            note: "The bounded fund-scale search retained no qualifying AUM, fund close, or vehicle-size claim. This is not evidence that no amount exists and cannot support a low fund-scale score.",
             provider: "fund-scale-web",
           });
         }
@@ -3648,8 +4093,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       finishRuntimeStage("fund-scale-verification", fundScaleStartedAt);
     }
   } else {
-    checkTracker.provider("portfolio-verification", "Source-backed portfolio verification", "skipped", "not a provider-backed investor/fund role");
-    checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "skipped", "not a provider-backed investor/fund role");
+    const reason = evidence.roles.includes(SubjectClass.INVESTOR)
+      ? `research director did not select investor performance work for ${researchPlan.intent}`
+      : "not a provider-backed investor/fund role";
+    checkTracker.provider("portfolio-verification", "Source-backed portfolio verification", "skipped", reason);
+    checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "skipped", reason);
   }
 
   // Final deterministic pre-analyst pass: join the freshly collected graph to
@@ -3724,7 +4172,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const profileForLlm: Record<string, unknown> = { ...evidence.profile };
   delete profileForLlm.identity_confidence;
   delete profileForLlm.identity_note;
-  const baseEvidence = {
+  const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,
     testimonials: evidence.testimonials,
@@ -3760,9 +4208,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,
     basicFacts: evidence.basicFacts,
-    checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
+    checkOutcomes: checkTracker.snapshot(evidence.roles, {
+      resolvedRealName: hasResolvedRealName(ctx),
+      organizationSubject: isOrganizationAccount(evidence),
+    }),
     providerRuns: checkTracker.providers().runs,
-  };
+    // Keep the exclusion explicit at the packet boundary. The raw fixed-block
+    // receipts persist in the dossier but cannot affect v1 scoring or model
+    // contradiction analysis.
+    evmControlReality: evidence.evmControlReality,
+  });
 
   // ── Phase 4 contradiction scan + axis scoring, run CONCURRENTLY (both read the
   //    same evidence) so the extra analyst call doesn't extend the critical path. ──
@@ -3776,13 +4231,30 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson, requestedAxes);
     const projectStrengthBands = deriveProjectStrengthBands(evidenceJson, requestedAxes);
     const scoringPreflight = inspectAnalystScoringPreflight(requestedAxes, evidenceJson);
+    const missingSubstantiveAxisSet = new Set(scoringPreflight.missingSubstantiveAxes);
+    const scoringAxes = scoringPreflight.state === "insufficient_evidence"
+      ? requestedAxes.filter(({ axis }) => !missingSubstantiveAxisSet.has(axis))
+      : requestedAxes;
+    const partialAxisScoring = scoringPreflight.state === "insufficient_evidence"
+      && scoringAxes.length > 0;
+    const scorerCanRun = scoringPreflight.state === "ready" || partialAxisScoring;
+    const scoringEvidenceJson = partialAxisScoring
+      ? buildScoringEvidencePacket(baseEvidence, scoringAxes)
+      : evidenceJson;
     const decisionPacketUsable = scoringPreflight.state === "ready"
       || scoringPreflight.state === "insufficient_evidence";
     if (decisionPacketUsable) {
       emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions…", tone: "neutral" });
     }
-    if (scoringPreflight.state === "ready") {
-      emit({ phase: "Analyst", label: "Score axes", detail: "AI analyst scoring every axis from the collected evidence…", tone: "neutral" });
+    if (scorerCanRun) {
+      emit({
+        phase: "Analyst",
+        label: partialAxisScoring ? "Score supported axes" : "Score axes",
+        detail: partialAxisScoring
+          ? `AI analyst scoring ${scoringAxes.length} supported decision area${scoringAxes.length === 1 ? "" : "s"}; ${scoringPreflight.missingSubstantiveAxes.length} remain unmeasured.`
+          : "AI analyst scoring every axis from the collected evidence…",
+        tone: partialAxisScoring ? "warn" : "neutral",
+      });
     }
     if (frozenAxisEvidence.length > 0) {
       evidence.axisCitationVersion = 1;
@@ -3801,8 +4273,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       decisionPacketUsable
         ? scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt })
         : Promise.resolve(null),
-      scoringPreflight.state === "ready"
-        ? analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson, {
+      scorerCanRun
+        ? analyzeSubject(evidence.profile.handle, evidence.roles, scoringAxes, scoringEvidenceJson, {
             analystDeadlineAt,
           })
         : Promise.resolve(null),
@@ -3837,9 +4309,19 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     }
     if (scorerObserved && verdict) {
       evidence.axes = verdict.axes;
-      evidence.headline = verdict.headline || evidence.headline;
+      evidence.headline = partialAxisScoring
+        ? `Partial assessment: ARGUS scored ${verdict.axes.length} of ${requestedAxes.length} decision areas. ${scoringPreflight.missingSubstantiveAxes.map(axisLabel).join(" and ")} remain unmeasured, so ARGUS did not produce an overall score.`
+        : verdict.headline || evidence.headline;
       if (verdict.identity_note) evidence.profile.identity_note = verdict.identity_note;
-      emit({ phase: "Analyst", label: "Scored", detail: `${verdict.axes.length} axes scored.`, source: "AI analyst", tone: "good" });
+      emit({
+        phase: "Analyst",
+        label: partialAxisScoring ? "Partially scored" : "Scored",
+        detail: partialAxisScoring
+          ? `${verdict.axes.length} supported decision area${verdict.axes.length === 1 ? "" : "s"} scored; ${scoringPreflight.missingSubstantiveAxes.map(axisLabel).join(" and ")} remain unmeasured.`
+          : `${verdict.axes.length} axes scored.`,
+        source: "AI analyst",
+        tone: partialAxisScoring ? "warn" : "good",
+      });
     } else if (scoringPreflight.state === "packet_oversize") {
       evidence.headline = `Investigation incomplete: the analyst evidence packet could not preserve required coverage within ${ANALYST_EVIDENCE_MAX_CHARS.toLocaleString("en-US")} characters. No axis scores were inferred.`;
       emit({
@@ -3898,10 +4380,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       || scoringPreflight.state === "unsupported_axes"
       || scoringPreflight.state === "invalid_catalog"
       ? "failed"
-      : scoringPreflight.state !== "ready" || !scorerObserved
+      : !scorerCanRun || !scorerObserved
         ? "skipped"
         : verdict
-          ? "executed"
+          ? partialAxisScoring ? "partial" : "executed"
           : observedRunState(scorerAttempts) === "failed"
             ? "failed"
             : "partial";
@@ -3912,7 +4394,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         : scoringPreflight.state === "unsupported_axes"
           ? `unsupported methodology axes: ${scoringPreflight.unsupportedAxes.join(", ")}; no scorer call made`
           : scoringPreflight.state === "insufficient_evidence"
-            ? `coverage preflight abstained; missing substantive evidence for ${scoringPreflight.missingSubstantiveAxes.join(", ")}; no scorer call made`
+            ? verdict
+              ? `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; scored ${verdict.axes.length} supported decision area${verdict.axes.length === 1 ? "" : "s"} and left ${scoringPreflight.missingSubstantiveAxes.map(axisLabel).join(" and ")} unmeasured`
+              : `coverage preflight abstained; missing substantive evidence for ${scoringPreflight.missingSubstantiveAxes.join(", ")}; ${scoringAxes.length > 0 ? "supported-axis scorer did not return a valid result" : "no scorer call made"}`
             : scoringPreflight.state === "invalid_catalog"
               ? "scoring preflight rejected the frozen evidence or axis catalog; no scorer call made"
               : !scorerObserved
@@ -3940,9 +4424,23 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
   await delay(300);
   const cost = getCost();
+  const checkScope = {
+    resolvedRealName: hasResolvedRealName(ctx),
+    organizationSubject: isOrganizationAccount(evidence),
+  };
+  const finalChecks = checkTracker.snapshot(evidence.roles, checkScope);
+  const providerSnapshotAtDecision = checkTracker.providers();
+  researchPlan = finalizeResearchPlan(researchPlan, finalChecks, providerSnapshotAtDecision.runs);
+  evidence.researchPlan = researchPlan;
+  emit({
+    phase: "Director",
+    label: "Research delegation reconciled",
+    detail: `${researchPlan.tasks.filter((task) => task.state === "completed").length} completed · ${researchPlan.tasks.filter((task) => task.state === "partial").length} partial · ${researchPlan.tasks.filter((task) => task.state === "unavailable").length} unavailable · ${researchPlan.tasks.filter((task) => task.state === "planned").length} still planned. Next best action: ${researchPlan.nextActions[0]?.action ?? "none; the selected plan is reconciled"}.`,
+    source: "argus-research-director",
+    tone: researchPlan.tasks.some((task) => task.priority === "critical" && (task.state === "unavailable" || task.state === "planned")) ? "warn" : "neutral",
+  });
   const dossier = assembleDossier(evidence, cost.calls.some((line) => line.calls > 0));
-  const checkScope = { resolvedRealName: hasResolvedRealName(ctx) };
-  dossier.checkRuns = checkTracker.snapshot(evidence.roles, checkScope);
+  dossier.checkRuns = finalChecks;
   const checkCompleteness = checkTracker.completeness(evidence.roles, checkScope);
   // Coverage completeness and decision completeness are both required for an
   // authoritative graph contribution. A fully run collector with no valid

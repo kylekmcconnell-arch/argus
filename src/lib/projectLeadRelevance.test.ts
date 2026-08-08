@@ -138,4 +138,64 @@ describe("the rest of the lead rules are unchanged by the funding fix", () => {
       excerpt: "Read the Clutch protocol documentation.",
     })).toBe(false);
   });
+
+  it("requires repository language to bind to this subject", () => {
+    expect(projectLeadIsRelevant(CLUTCH, {
+      predicate: "repository",
+      value: "github.com/unrelated/project",
+      sourceUrl: "https://example.com/unrelated-repository",
+      excerpt: "The unrelated protocol publishes its source code on GitHub.",
+    })).toBe(false);
+  });
+
+  it("keeps a repository lead on the official project domain", () => {
+    expect(projectLeadIsRelevant(CLUTCH, {
+      predicate: "repository",
+      value: "github.com/clutch/project",
+      sourceUrl: "https://clutch.example/open-source",
+      excerpt: "Our source code repository is available on GitHub.",
+    })).toBe(true);
+  });
+
+  it("keeps a third-party repository lead that names the official handle", () => {
+    expect(projectLeadIsRelevant(CLUTCH, {
+      predicate: "repository",
+      value: "github.com/clutch/project",
+      sourceUrl: "https://example.com/open-source-projects",
+      excerpt: "The @stonkbroker team publishes its protocol source code on GitHub.",
+    })).toBe(true);
+  });
+});
+
+describe("handle identity uses token boundaries", () => {
+  const BASE: ProjectLeadSubject = {
+    handle: "@base",
+    display_name: "Base",
+    website: "https://base.org",
+  };
+
+  it("does not bind @base to the substring in Database Protocol", () => {
+    expect(projectLeadIsRelevant(BASE, {
+      predicate: "funding",
+      value: "$12,000,000 seed",
+      qualifier: "Database Protocol raised a $12 million seed round.",
+      sourceUrl: "https://example.com/database-seed",
+      excerpt: "Database Protocol is a crypto startup building on-chain data infrastructure.",
+    })).toBe(false);
+  });
+
+  it("still binds a standalone handle with or without its at-sign", () => {
+    const lead = {
+      predicate: "funding",
+      value: "$12,000,000 seed",
+      qualifier: "base raised a $12 million seed round.",
+      sourceUrl: "https://example.com/base-seed",
+      excerpt: "The base crypto protocol is building on-chain infrastructure.",
+    };
+    expect(projectLeadIsRelevant(BASE, lead)).toBe(true);
+    expect(projectLeadIsRelevant(BASE, {
+      ...lead,
+      qualifier: "@base raised a $12 million seed round.",
+    })).toBe(true);
+  });
 });

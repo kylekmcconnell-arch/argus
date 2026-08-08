@@ -11,8 +11,11 @@ import type {
   Contradiction,
   ProjectStrengthBandRecord,
   ProjectStrengthTier,
+  SourceArtifact,
 } from "../src/data/evidence";
-import { isStrictFundScaleArtifact } from "../src/lib/fundScaleEvidence";
+import { canonicalOfficialWebsite, isStrictFundScaleArtifact } from "../src/lib/fundScaleEvidence";
+import { isOrganizationAccount } from "../src/lib/investorSubject";
+import { portfolioRelationshipBinding } from "../src/lib/portfolioRelationshipBinding";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -595,10 +598,28 @@ export const FOUNDER_SCORING_POLICY = [
   "Preserve the entity named by each source. A person may be CEO of an operating company and founder of a related protocol; do not transfer the company title onto the protocol or DAO.",
 ].join("\n");
 
+/**
+ * Investor scores are evidence-quality assessments, not inventory counts. A
+ * portfolio logo proves inclusion, a fund-close announcement proves one scale
+ * claim, and an X follow proves only an observed connection. None of those
+ * facts alone establishes the stronger conclusion named by an investor axis.
+ */
+export const INVESTOR_SCORING_POLICY = [
+  "INVESTOR CALIBRATION POLICY:",
+  "Keep score and confidence separate. Score only the exact investor claim established by source-bound evidence. Missing, unavailable, checked-empty, or bounded search results remain coverage and never become positive support or exoneration.",
+  "Use the deterministic evidence-strength range supplied for every investor axis. Thin or merely present evidence cannot receive a maximum score, and no rationale or citation can authorize a score outside that range.",
+  "I1 identity and legitimacy: a resolved social profile identifies the audited account, not the real person behind it. Person-level career, role, portfolio, legal, and reputation facts require the frozen exact-handle identity binding. Institutional accounts may instead be bound through their exact official account and domain.",
+  "I2 portfolio quality: a source-bound portfolio relationship proves only that one investment relationship exists. It does not prove selection quality, returns, realized outcomes, loss rate, ownership, timing, or personal attribution. Higher bands require distinct portfolio outcomes, not more copies of the same portfolio list.",
+  "I3 fund scale: score only strict verified fund-scale artifacts. Keep current regulatory AUM distinct from historical vehicle closes and keep affiliated-fund capital distinct from a person's capital. A bounded search that found no verified amount is a coverage gap and cannot score this axis.",
+  "I4 testimonial corroboration: score explicit screened founder, LP, co-investor, customer, or counterparty acknowledgments. A notable follow, posting activity, trust-graph connection, employment record, or ordinary affiliation is not a testimonial.",
+  "I5 reputation and FUD: score direct-subject, source-backed conduct, legal, regulatory, conflict, or material reputation evidence. Posting activity, notable followers, and ordinary affiliations are not character evidence. A clear or unavailable screen is not affirmative reputation proof.",
+].join("\n");
+
 export function scoringPolicyForAxes(axisCatalog: readonly AnalystAxis[]): string {
   return [
     ...(axisCatalog.some(({ role }) => role === "PROJECT") ? [PROJECT_SCORING_POLICY] : []),
     ...(axisCatalog.some(({ role }) => role === "FOUNDER") ? [FOUNDER_SCORING_POLICY] : []),
+    ...(axisCatalog.some(({ role }) => role === "INVESTOR") ? [INVESTOR_SCORING_POLICY] : []),
   ].join("\n\n");
 }
 
@@ -1051,7 +1072,10 @@ export function validateAnalystVerdict(
   axisCatalog: AnalystAxis[],
   evidenceCatalog: AxisEvidenceRecord[] = [],
   onReject?: (reason: string) => void,
-  options: { projectScoreBands?: Readonly<Record<string, ProjectScoreBand>> } = {},
+  options: {
+    projectScoreBands?: Readonly<Record<string, ProjectScoreBand>>;
+    investorScoreBands?: Readonly<Record<string, InvestorScoreBand>>;
+  } = {},
 ): AnalystVerdict | null {
   const reject = (reason: string): null => {
     onReject?.(reason);
@@ -1236,6 +1260,7 @@ export function validateAnalystVerdict(
 
   const seen = new Map<string, AnalystVerdict["axes"][number]>();
   const outOfBandProjectScores: string[] = [];
+  const outOfBandInvestorScores: string[] = [];
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
       return reject("axis-row-shape");
@@ -1410,6 +1435,17 @@ export function validateAnalystVerdict(
         )
       )
     ) outOfBandProjectScores.push(row.axis);
+    const investorBand = options.investorScoreBands?.[row.axis];
+    if (
+      spec.role === "INVESTOR"
+      && options.investorScoreBands
+      && (
+        !investorBand
+        || investorBand.tier === "none"
+        || row.score < investorBand.minScore
+        || row.score > investorBand.maxScore
+      )
+    ) outOfBandInvestorScores.push(row.axis);
     seen.set(row.axis, {
       axis: row.axis,
       score: row.score,
@@ -1422,6 +1458,9 @@ export function validateAnalystVerdict(
   if (seen.size !== expected.size) return reject("incomplete-axis-set");
   if (outOfBandProjectScores.length > 0) {
     return reject(`project-scores-outside-evidence-strength-band:${outOfBandProjectScores.join(",")}`);
+  }
+  if (outOfBandInvestorScores.length > 0) {
+    return reject(`investor-scores-outside-evidence-strength-band:${outOfBandInvestorScores.join(",")}`);
   }
 
   return {
@@ -1475,7 +1514,7 @@ const compactObject = (value: unknown, depth = 0): unknown => {
 };
 
 const SCORING_PROFILE_FIELDS = [
-  "handle", "display_name", "resolved_name", "bio", "website",
+  "handle", "display_name", "resolved_name", "bio", "website", "identity_binding",
   "profile_collection_state", "profile_provider", "profile_captured_at",
   "x_account_status", "x_account_status_source_url", "x_account_status_captured_at",
   "last_post_at", "days_since_post",
@@ -1717,7 +1756,8 @@ export function deriveProjectStrengthBands(
     predicates.includes(String(fact.predicate ?? "").toLowerCase())
     && fact.artifact_verified === true
     && (fact.status === "verified" || fact.status === "corroborated")
-    && fact.floorEligible !== false);
+    && fact.floorEligible !== false
+    && fact.providerProjection !== true);
   // Ceiling-only sibling: verified facts whose floorEligible flag was cleared
   // (a self-description, ARGUS's own live-site fetch, recall corroboration).
   // Press headlines already open band ceilings, and these are strictly
@@ -1726,7 +1766,7 @@ export function deriveProjectStrengthBands(
     predicates.includes(String(fact.predicate ?? "").toLowerCase())
     && fact.artifact_verified === true
     && (fact.status === "verified" || fact.status === "corroborated")
-    && fact.floorEligible === false);
+    && (fact.floorEligible === false || fact.providerProjection === true));
   const factText = (facts: readonly Record<string, unknown>[]): string => facts
     .map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`)
     .join(" ");
@@ -1780,24 +1820,22 @@ export function deriveProjectStrengthBands(
   const productFacts = verifiedFacts("product", "launched", "launch_date");
   const ceilingProductFacts = ceilingOnlyFacts("product", "launched", "launch_date");
   const auditFacts = verifiedFacts("audit", "audits");
-  // Audit CEILING signal (never a floor). The security-audit collector only ever
-  // records selfAttested names that match its curated AUDITOR_REGISTRY (Trail of
-  // Bits, ConsenSys, OpenZeppelin, CertiK, ...) found on the subject's OWN fetched
-  // security page, so >=2 of them is "multiple reputable firms attest an
-  // engagement" -- it cannot be spoofed with arbitrary text. Established protocols
-  // (Uniswap) list several real auditors whose OWN sites the corroboration hop
-  // often can't scrape, so auditFacts stays empty and P3/P6 wrongly cap at solid.
-  // This lets the analyst REACH the exceptional ceiling on those axes; the
+  // Audit CEILING signal (never a floor). The security-audit collector records
+  // registry-matched auditor leads from bounded subject disclosures and curated
+  // audit links. Two leads permit the analyst to inspect a stronger audit story,
+  // but they do not prove either engagement. Established protocols often expose
+  // several real reports whose auditor pages cannot be fetched during the scan,
+  // so the ceiling stays reachable while uncertainty remains explicit. The
   // enforced FLOOR still requires a strictly corroborated auditFact (H2: soft
-  // evidence never mints a minimum), and the fraud/rug hard caps are independent
-  // of band tiers, so a scam that self-lists auditors still caps at 10.
+  // evidence never mints a minimum), and fraud or rug hard caps remain independent
+  // of band tiers.
   const securityAudits = packet.securityAudits && typeof packet.securityAudits === "object" && !Array.isArray(packet.securityAudits)
     ? packet.securityAudits as Record<string, unknown>
     : undefined;
-  const selfAttestedAuditorCount = Array.isArray(securityAudits?.selfAttested)
+  const auditLeadCount = Array.isArray(securityAudits?.selfAttested)
     ? securityAudits.selfAttested.filter((name) => typeof name === "string" && name.trim()).length
     : 0;
-  const auditExceptionalCeiling = auditFacts.length > 0 || selfAttestedAuditorCount >= 2;
+  const auditExceptionalCeiling = auditFacts.length > 0 || auditLeadCount >= 2;
   const governanceFacts = verifiedFacts("governance");
   const tokenDisclosureFacts = verifiedFacts("tokenomics", "vesting", "treasury");
   const legalFacts = verifiedFacts("legal_entity");
@@ -1860,7 +1898,7 @@ export function deriveProjectStrengthBands(
   // verified limiting evidence (limiting evidence still converts to adverse).
   const assessmentArtifactFor = (axis: string, checkId: string) => catalog.find((artifact) =>
     artifact.operation === `checkOutcomes:${checkId}`
-    && isSubstantiveArtifact(artifact)
+    && artifact.verification === "verified"
     && artifact.eligibleAxes.includes(axis)) ?? null;
   // A check that RAN and found nothing is an answer about the subject, not a
   // hole in coverage. "unavailable" (the check never completed) stays a hole.
@@ -1951,9 +1989,9 @@ export function deriveProjectStrengthBands(
   // verification still fails closed to "none".
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0]
     .filter(Boolean).length;
-  // Ceiling uses the audit CEILING signal (reputable self-attestation counts);
-  // floor uses the strict corroborated auditFact only, so a self-attested audit
-  // widens the allowed range without minting an enforced minimum (H2).
+  // Ceiling uses registry-matched audit discovery leads. Floor uses the strict
+  // corroborated auditFact only, so an unverified lead widens the allowed range
+  // without minting an enforced minimum (H2).
   const p3CeilingTier: ProjectStrengthTier = verifiedToken
     ? (scaleSignals >= 2
       && tokenDisclosures.length > 0
@@ -1986,7 +2024,7 @@ export function deriveProjectStrengthBands(
     ...(tokenDisclosures.length ? ["verified token economic disclosure"] : []),
     ...(auditFacts.length
       ? ["verified security review"]
-      : selfAttestedAuditorCount >= 2 ? [`${selfAttestedAuditorCount} reputable auditors attested on the official security page`] : []),
+      : auditLeadCount >= 2 ? [`${auditLeadCount} registry-matched auditor leads from bounded audit discovery sources`] : []),
     ...(severeUnrecoveredProtocolIncident ? ["material protocol security incident without a recorded full recovery caps token and control evidence at emerging"] : []),
   ], [
     ...artifactIds([...(token ? [token] : []), ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
@@ -2064,9 +2102,9 @@ export function deriveProjectStrengthBands(
   ]), p5FloorTier);
 
   const disclosureBase = [...legalFacts, ...officialFacts, ...repositoryFacts];
-  // Floor: strict corroborated auditFact. Ceiling: reputable multi-firm
-  // self-attestation also unlocks the exceptional ceiling (H2-safe: floor never
-  // rises on soft evidence).
+  // Floor: strict corroborated auditFact. Ceiling: multiple registry-matched
+  // audit discovery leads can also unlock the exceptional ceiling (H2-safe:
+  // floor never rises on soft evidence).
   let p6FloorTier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
   if (
     ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0)
@@ -2085,7 +2123,7 @@ export function deriveProjectStrengthBands(
     ...(governanceFacts.length ? ["verified governance disclosure"] : []),
     ...(auditFacts.length
       ? ["verified audit disclosure"]
-      : selfAttestedAuditorCount >= 2 ? [`${selfAttestedAuditorCount} reputable auditors named on the official security page`] : []),
+      : auditLeadCount >= 2 ? [`${auditLeadCount} registry-matched auditor leads from bounded audit discovery sources`] : []),
   ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]), p6FloorTier);
   return bands;
 }
@@ -2096,6 +2134,276 @@ export function projectScoreFloorsForPacket(
 ): Record<string, number> {
   return Object.fromEntries(Object.entries(deriveProjectStrengthBands(evidenceJson, axisCatalog))
     .map(([axis, band]) => [axis, band.minScore]));
+}
+
+export type InvestorScoreBand = ProjectStrengthBandRecord;
+
+const INVESTOR_POSITIVE_OUTCOME = /\b(?:exit(?:ed|s)?|ipo|acquir(?:ed|er|es|ing|quisition)|realized|return(?:ed|s)?|multiple|profitable|distribution)\b/i;
+const INVESTOR_NEGATIVE_OUTCOME = /\b(?:write[- ]?off|bankrupt|liquidat(?:ed|ion)|shutdown|shut down|failure|failed|rug|total loss|lost capital)\b/i;
+const INVESTOR_REPUTATION_RISK = /\b(?:fraud|decept(?:ion|ive)|misconduct|sanction(?:ed|s)?|convict(?:ed|ion)|guilty|settlement|enforcement|lawsuit|sued|predatory|conflict of interest|undisclosed|fabricat(?:ed|ion)|contradict(?:ed|ion)|denied the relationship)\b/i;
+const INVESTOR_REPUTATION_EXONERATING = /\b(?:dismissed|acquitted|cleared|no match|screened clear|not the subject|mistaken identity)\b/i;
+const INVESTOR_REPUTATION_MATERIAL = /\b(?:reputation|ethics?|conduct|misconduct|fraud|decept(?:ion|ive)|sanction(?:ed|s)?|regulat(?:or|ory|ion)|enforcement|lawsuit|litigation|convict(?:ed|ion)|guilty|settlement|predatory|conflict(?:s)? of interest|controversy|complaint|investigation|fabricat(?:ed|ion)|testimonial(?:s)?|endorsement(?:s)?)\b/i;
+
+/**
+ * Derive deterministic investor score ranges from the exact scorer packet.
+ * These bands deliberately distinguish existence from quality: one portfolio
+ * row, one fund amount, or one testimonial claim can make an axis assessable,
+ * but cannot authorize the axis maximum.
+ */
+export function deriveInvestorStrengthBands(
+  evidenceJson: string,
+  axisCatalog: readonly AnalystAxis[],
+): Record<string, InvestorScoreBand> {
+  const investorAxes = axisCatalog.filter(({ role }) => role === "INVESTOR");
+  if (investorAxes.length === 0) return {};
+  let packet: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(evidenceJson) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    packet = parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+  const catalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog);
+  if (catalog.length === 0) return {};
+  const records = (value: unknown): Record<string, unknown>[] => Array.isArray(value)
+    ? value.filter((row): row is Record<string, unknown> =>
+      Boolean(row && typeof row === "object" && !Array.isArray(row)))
+    : [];
+  const profile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile)
+    ? packet.profile as Record<string, unknown>
+    : undefined;
+  const artifactById = new Map(catalog.map((artifact) => [artifact.artifactId, artifact]));
+  const artifactFor = (row: Record<string, unknown>): AxisEvidenceRecord | undefined =>
+    typeof row.artifactId === "string" ? artifactById.get(row.artifactId) : undefined;
+  const substantiveForAxis = (axis: string): AxisEvidenceRecord[] => catalog.filter((artifact) =>
+    artifact.eligibleAxes.includes(axis) && isSubstantiveArtifact(artifact));
+  const rowsForAxis = (section: string, axis: string): Record<string, unknown>[] => records(packet[section])
+    .filter((row) => {
+      const artifact = artifactFor(row);
+      return artifact?.eligibleAxes.includes(axis) === true && isSubstantiveArtifact(artifact);
+    });
+  const artifactIds = (rows: readonly Record<string, unknown>[]): string[] => [...new Set(rows
+    .map((row) => typeof row.artifactId === "string" ? row.artifactId : "")
+    .filter(Boolean))];
+  const distinctSourceKey = (artifact: AxisEvidenceRecord): string => {
+    if (artifact.sourceUrl) {
+      try {
+        return new URL(artifact.sourceUrl).hostname.replace(/^www\./i, "").toLowerCase();
+      } catch {
+        // The frozen catalog already sanitizes URLs; provider is the fallback.
+      }
+    }
+    return artifact.provider.toLowerCase();
+  };
+  const bands: Record<string, InvestorScoreBand> = {};
+  const setBand = (
+    axis: string,
+    tier: ProjectStrengthTier,
+    reasons: string[],
+    anchors: string[],
+  ) => {
+    const spec = investorAxes.find((candidate) => candidate.axis === axis);
+    if (!spec) return;
+    const range = projectBandRange(spec.weight, tier);
+    const composedReasons = [...new Set(reasons.map((reason) => reason.slice(0, 240)).filter(Boolean))].slice(0, 12);
+    bands[axis] = {
+      tier,
+      ...range,
+      reasons: composedReasons.length || tier === "none"
+        ? composedReasons
+        : ["source-bound investor evidence reached this calibration tier"],
+      anchorArtifactIds: [...new Set(anchors)],
+    };
+  };
+
+  const identityAxis = "I1_identity_legitimacy";
+  if (investorAxes.some(({ axis }) => axis === identityAxis)) {
+    const identityArtifacts = substantiveForAxis(identityAxis);
+    const identityFacts = rowsForAxis("basicFacts", identityAxis).filter((row) =>
+      ["official_identity", "current_role", "executive", "legal_entity", "governance", "control"]
+        .includes(String(row.predicate ?? "").toLowerCase()));
+    const verifiedIdentityArtifacts = identityArtifacts.filter((artifact) => artifact.verification === "verified");
+    const personIdentityBound = hasExactPersonIdentityBinding(profile);
+    const organizationContext = investorOrganizationContext(investorAxes, profile);
+    const identityBound = personIdentityBound || (organizationContext && identityFacts.length > 0);
+    const verifiedIdentityProviders = new Set(verifiedIdentityArtifacts.map(distinctSourceKey));
+    const limitingIdentity = identityArtifacts.filter((artifact) => isVerifiedCounterArtifact(artifact, identityAxis));
+    const tier: ProjectStrengthTier = limitingIdentity.length > 0
+      ? "adverse"
+      : identityBound && identityFacts.length >= 2 && verifiedIdentityProviders.size >= 2
+        ? "exceptional"
+        : identityBound || identityFacts.length > 0
+          ? "solid"
+          : identityArtifacts.length > 0
+            ? "emerging"
+            : "none";
+    setBand(identityAxis, tier, [
+      ...(identityBound ? ["exact account-to-entity identity binding"] : []),
+      ...(identityFacts.length ? [`${identityFacts.length} verified identity or authority fact${identityFacts.length === 1 ? "" : "s"}`] : []),
+      ...(limitingIdentity.length ? ["verified identity-limiting evidence"] : []),
+      ...(!identityBound && identityArtifacts.length ? ["account-level evidence without an independently bound person or organization identity"] : []),
+    ], identityArtifacts.map(({ artifactId }) => artifactId));
+  }
+
+  const portfolioAxis = "I2_portfolio_quality";
+  if (investorAxes.some(({ axis }) => axis === portfolioAxis)) {
+    const portfolioArtifacts = substantiveForAxis(portfolioAxis);
+    const portfolioRows = rowsForAxis("sourceArtifacts", portfolioAxis)
+      .filter((row) => row.kind === "portfolio_relationship" && row.match === "relationship_confirmed");
+    const inclusionFacts = rowsForAxis("basicFacts", portfolioAxis)
+      .filter((row) => String(row.predicate ?? "").toLowerCase() === "investor");
+    const outcomeFacts = rowsForAxis("basicFacts", portfolioAxis)
+      .filter((row) => ["exit", "track_record", "traction"].includes(String(row.predicate ?? "").toLowerCase()));
+    const outcomeFindings = rowsForAxis("findings", portfolioAxis)
+      .filter((row) => ["Exit", "IPO", "MeridianExit"].includes(String(row.finding_type ?? "")));
+    const normalizeEntityText = (value: string): string => value
+      .toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+    const portfolioEntityLabels = [
+      ...portfolioRows.map((row) => String(row.projectName ?? row.title ?? "")),
+      ...inclusionFacts.map((row) => String(row.value ?? row.title ?? "")
+        .replace(/^(?:personally\s+)?(?:invest(?:ed|ment)\s+(?:in|into)|backed)\s+/i, "")),
+    ];
+    const investmentKeys = new Set(portfolioEntityLabels.map(normalizeEntityText).filter(Boolean));
+    const outcomeRows = [...outcomeFacts, ...outcomeFindings].filter((row) => {
+      const outcomeText = normalizeEntityText(
+        `${String(row.value ?? "")} ${String(row.claim ?? "")} ${String(row.title ?? "")}`,
+      );
+      return [...investmentKeys].some((entity) => entity.length >= 4 && outcomeText.includes(entity));
+    });
+    const positiveOutcomes = outcomeRows.filter((row) => INVESTOR_POSITIVE_OUTCOME.test(
+      `${String(row.value ?? "")} ${String(row.claim ?? "")} ${String(row.title ?? "")}`,
+    ));
+    const negativeOutcomes = outcomeRows.filter((row) =>
+      INVESTOR_NEGATIVE_OUTCOME.test(`${String(row.value ?? "")} ${String(row.claim ?? "")} ${String(row.title ?? "")}`));
+    const sourceCount = new Set(portfolioArtifacts.map(distinctSourceKey)).size;
+    const tier: ProjectStrengthTier = negativeOutcomes.length >= 2 && positiveOutcomes.length === 0
+      ? "adverse"
+      : investmentKeys.size >= 5 && positiveOutcomes.length >= 2 && sourceCount >= 2
+        ? "exceptional"
+        : (investmentKeys.size >= 3 && outcomeRows.length >= 1) || positiveOutcomes.length >= 2
+          ? "solid"
+          : investmentKeys.size > 0 || outcomeRows.length > 0
+            ? "emerging"
+            : "none";
+    setBand(portfolioAxis, tier, [
+      ...(investmentKeys.size ? [`${investmentKeys.size} distinct source-bound portfolio inclusion${investmentKeys.size === 1 ? "" : "s"}`] : []),
+      ...(positiveOutcomes.length ? [`${positiveOutcomes.length} source-bound positive portfolio outcome${positiveOutcomes.length === 1 ? "" : "s"}`] : []),
+      ...(negativeOutcomes.length ? [`${negativeOutcomes.length} source-bound negative portfolio outcome${negativeOutcomes.length === 1 ? "" : "s"}`] : []),
+      ...(portfolioArtifacts.length > 0 && outcomeRows.length === 0 ? ["portfolio inclusion is not portfolio quality"] : []),
+    ], portfolioArtifacts.map(({ artifactId }) => artifactId));
+  }
+
+  const scaleAxis = "I3_fund_scale_tier";
+  if (investorAxes.some(({ axis }) => axis === scaleAxis)) {
+    const scaleRows = rowsForAxis("sourceArtifacts", scaleAxis).filter((row) =>
+      row.kind === "fund_scale" && row.match === "fund_scale_confirmed");
+    const scaleArtifacts = scaleRows.map(artifactFor).filter((artifact): artifact is AxisEvidenceRecord => !!artifact);
+    const claimKeys = new Set(scaleRows.map((row) => String(
+      row.fundScaleClaimId ?? `${String(row.fundName ?? "")} ${String(row.fundVehicle ?? "")} ${String(row.fundSizeUsd ?? "")}`,
+    )).filter(Boolean));
+    const amounts = scaleRows.map((row) => typeof row.fundSizeUsd === "number" ? row.fundSizeUsd : 0)
+      .filter((amount) => Number.isFinite(amount) && amount > 0);
+    const maxAmount = amounts.length ? Math.max(...amounts) : 0;
+    const authoritativeOrCorroborated = scaleRows.some((row) =>
+      row.fundScaleBasis === "regulatory"
+      || (typeof row.fundScaleSourceCount === "number" && row.fundScaleSourceCount >= 2));
+    const currentRegulatoryAum = scaleRows.some((row) =>
+      row.fundScaleMetric === "regulatory_aum"
+      && row.fundScaleTemporalState === "current"
+      && row.fundScaleBasis === "regulatory");
+    const tier: ProjectStrengthTier = scaleRows.length === 0
+      ? "none"
+      : maxAmount >= 500_000_000 && (authoritativeOrCorroborated || claimKeys.size >= 2)
+        ? "exceptional"
+        : maxAmount >= 100_000_000 || currentRegulatoryAum || claimKeys.size >= 2
+          ? "solid"
+          : "emerging";
+    setBand(scaleAxis, tier, [
+      ...(claimKeys.size ? [`${claimKeys.size} distinct verified fund-scale claim${claimKeys.size === 1 ? "" : "s"}`] : []),
+      ...(maxAmount ? [`largest verified amount is $${Math.round(maxAmount).toLocaleString("en-US")}`] : []),
+      ...(currentRegulatoryAum ? ["current regulatory AUM"] : []),
+      ...(authoritativeOrCorroborated ? ["authoritative or multi-source scale verification"] : []),
+    ], scaleArtifacts.map(({ artifactId }) => artifactId));
+  }
+
+  const testimonialAxis = "I4_testimonial_corroboration";
+  if (investorAxes.some(({ axis }) => axis === testimonialAxis)) {
+    const testimonialArtifacts = substantiveForAxis(testimonialAxis);
+    const testimonialRows = rowsForAxis("testimonials", testimonialAxis);
+    const verdictFor = (row: Record<string, unknown>): string =>
+      String(row.corroboration_verdict ?? "").toLowerCase();
+    const corroborated = testimonialRows.filter((row) => verdictFor(row) === "corroborated");
+    const partial = testimonialRows.filter((row) => verdictFor(row) === "partiallycorroborated");
+    const unconfirmed = testimonialRows.filter((row) => verdictFor(row) === "unconfirmed");
+    const contradicted = testimonialRows.filter((row) => verdictFor(row) === "contradicted");
+    const distinctEndorsers = new Set(corroborated.map((row) => String(
+      row.claimed_endorser_handle ?? row.claimed_endorser_name ?? "",
+    ).toLowerCase()).filter(Boolean));
+    const verifiedLimiting = testimonialArtifacts.filter((artifact) =>
+      isVerifiedCounterArtifact(artifact, testimonialAxis));
+    const tier: ProjectStrengthTier = contradicted.length > 0 || verifiedLimiting.length > 0
+      ? "adverse"
+      : distinctEndorsers.size >= 3
+        ? "exceptional"
+        : distinctEndorsers.size >= 2
+          ? "solid"
+          : distinctEndorsers.size >= 1 || partial.length > 0
+            ? "emerging"
+            : unconfirmed.length > 0 || testimonialArtifacts.length > 0
+              ? "assessed_null"
+              : "none";
+    setBand(testimonialAxis, tier, [
+      ...(distinctEndorsers.size ? [`${distinctEndorsers.size} explicitly corroborated endorser${distinctEndorsers.size === 1 ? "" : "s"}`] : []),
+      ...(partial.length ? [`${partial.length} partially corroborated relationship${partial.length === 1 ? "" : "s"}`] : []),
+      ...(unconfirmed.length ? [`${unconfirmed.length} screened but unconfirmed relationship${unconfirmed.length === 1 ? "" : "s"}`] : []),
+      ...(contradicted.length || verifiedLimiting.length ? ["source-bound contradiction or deception evidence"] : []),
+    ], testimonialArtifacts.map(({ artifactId }) => artifactId));
+  }
+
+  const reputationAxis = "I5_reputation_fud";
+  if (investorAxes.some(({ axis }) => axis === reputationAxis)) {
+    const reputationArtifacts = substantiveForAxis(reputationAxis);
+    const reputationFacts = rowsForAxis("basicFacts", reputationAxis);
+    const reputationFindings = rowsForAxis("findings", reputationAxis);
+    const reputationText = (row: Record<string, unknown>): string => [
+      row.value, row.claim, row.title, row.excerpt, row.note,
+    ].map((value) => String(value ?? "")).join(" ");
+    const adverseRows = [...reputationFacts, ...reputationFindings].filter((row) => {
+      const text = reputationText(row);
+      return INVESTOR_REPUTATION_RISK.test(text) && !INVESTOR_REPUTATION_EXONERATING.test(text);
+    });
+    const verifiedLimiting = reputationArtifacts.filter((artifact) =>
+      isVerifiedCounterArtifact(artifact, reputationAxis));
+    const sourceCount = new Set(reputationArtifacts.map(distinctSourceKey)).size;
+    const verifiedDirectCount = reputationArtifacts.filter((artifact) =>
+      artifact.verification === "verified"
+      && (artifact.section === "findings" || artifact.section === "basicFacts")).length;
+    const tier: ProjectStrengthTier = adverseRows.length > 0 || verifiedLimiting.length > 0
+      ? "adverse"
+      : verifiedDirectCount >= 3 && sourceCount >= 3
+        ? "exceptional"
+        : sourceCount >= 3 || (verifiedDirectCount >= 1 && sourceCount >= 2)
+          ? "solid"
+          : reputationArtifacts.length > 0
+            ? "emerging"
+            : "none";
+    setBand(reputationAxis, tier, [
+      ...(sourceCount ? [`${sourceCount} distinct material reputation source${sourceCount === 1 ? "" : "s"}`] : []),
+      ...(verifiedDirectCount ? [`${verifiedDirectCount} verified direct-subject reputation fact${verifiedDirectCount === 1 ? "" : "s"}`] : []),
+      ...(adverseRows.length || verifiedLimiting.length ? ["verified direct-subject reputation risk"] : []),
+    ], reputationArtifacts.map(({ artifactId }) => artifactId));
+  }
+
+  // Future investor axes fail conservatively until a dedicated ladder ships.
+  for (const spec of investorAxes) {
+    if (bands[spec.axis]) continue;
+    const artifacts = substantiveForAxis(spec.axis);
+    setBand(spec.axis, artifacts.length > 0 ? "emerging" : "none", [
+      ...(artifacts.length ? ["source-bound evidence without an axis-specific investor ladder"] : []),
+    ], artifacts.map(({ artifactId }) => artifactId));
+  }
+  return bands;
 }
 
 const compactProfileAuthenticity = (value: unknown): Record<string, unknown> | undefined => {
@@ -2237,7 +2545,7 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   profileAuthenticity: [],
   trustGraphScreen: [
     "F5_reputation_integrity", "F6_network_quality", "P1_team_and_identity", "P4_backing_and_partners", "P6_transparency_integrity",
-    "K1_identity_roster", "K4_onchain_conduct", "K5_cabal_fud", "I1_identity_legitimacy", "I4_testimonial_corroboration", "I5_reputation_fud",
+    "K1_identity_roster", "K4_onchain_conduct", "K5_cabal_fud", "I1_identity_legitimacy",
     "AG1_identity_legitimacy", "AG3_service_integrity", "AG4_reputation_fud", "AD1_identity_verifiability", "AD3_relationship_corroboration",
     "AD4_advisory_conduct", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation",
   ],
@@ -2261,10 +2569,10 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
     "P1_team_and_identity", "P2_product_substance", "P4_backing_and_partners", "I1_identity_legitimacy",
     "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity", "ME2_role_authenticity",
   ],
-  notableFollowers: ["F6_network_quality", "P5_traction_and_liveness", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
+  notableFollowers: ["F6_network_quality", "P5_traction_and_liveness", "K5_cabal_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
   recentActivity: [
     "F4_build_substance", "F5_reputation_integrity", "P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity",
-    "K2_call_performance", "K3_disclosure_deletion", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud",
+    "K2_call_performance", "K3_disclosure_deletion", "K5_cabal_fud",
     "AG2_client_outcomes", "AG3_service_integrity", "AG4_reputation_fud", "AD2_advised_outcomes", "AD3_relationship_corroboration", "AD4_advisory_conduct", "AD5_reputation_fud",
     "ME2_role_authenticity", "ME3_conduct_reputation",
   ],
@@ -2273,7 +2581,7 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   // relationship to the axis.
   sourceArtifacts: [],
   clientEngagements: ["F5_reputation_integrity", "AG2_client_outcomes", "AG3_service_integrity", "AG4_reputation_fud"],
-  associates: ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I5_reputation_fud", "AG4_reputation_fud", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  associates: ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "AG4_reputation_fud", "AD5_reputation_fud", "ME3_conduct_reputation"],
   ventureTeams: ["F1_identity_verifiability", "F2_track_record", "F4_build_substance", "F6_network_quality", "P1_team_and_identity", "P2_product_substance", "P4_backing_and_partners", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability"],
 };
 
@@ -2326,7 +2634,7 @@ const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "profile-photo-authenticity": [],
   "code-footprint-github": ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
   "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
-  "affiliations-associates": ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
+  "affiliations-associates": ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
   "project-token-identity": ["P3_token_conduct"],
   "project-product-substance": ["P2_product_substance", "P5_traction_and_liveness"],
@@ -2342,8 +2650,11 @@ const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "founder-asset-distinction": ["F4_build_substance", "F5_reputation_integrity"],
   "founder-repeat-backing": ["F3_repeat_backing"],
   "vc-portfolio-track-record": ["I2_portfolio_quality"],
-  "investor-fund-scale": ["I3_fund_scale_tier"],
-  "news-press": ["F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  // The check outcome describes coverage. Only a strict fund_scale source
+  // artifact may support I3, so a bounded search with no verified amount can
+  // never be upgraded from absence into a substantive scale conclusion.
+  "investor-fund-scale": [],
+  "news-press": ["F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "ofac-sanctions-name": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation"],
   "trust-graph-connections": SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
@@ -2449,14 +2760,10 @@ const INVESTOR_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = 
   legal_entity: ["I1_identity_legitimacy"],
   governance: ["I1_identity_legitimacy"],
   control: ["I1_identity_legitimacy"],
-  prior_role: ["I2_portfolio_quality"],
-  founder: ["I2_portfolio_quality"],
-  founders: ["I2_portfolio_quality"],
-  founded: ["I2_portfolio_quality"],
-  product: ["I2_portfolio_quality"],
+  // Employment and operating history establish career context, not investment
+  // selection quality. Keep I2 tied to investments and realized outcomes.
   exit: ["I2_portfolio_quality"],
   track_record: ["I2_portfolio_quality"],
-  funding: ["I2_portfolio_quality"],
   investor: ["I2_portfolio_quality"],
   traction: ["I2_portfolio_quality"],
   conflict_of_interest: ["I5_reputation_fud"],
@@ -2495,6 +2802,61 @@ const PROJECT_BACKING_TEAM_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
 const PROJECT_NON_BACKING_TEAM_ROLE = /\binvestor relations?\b/i;
 const PROJECT_TOKEN_ACTIVITY = /\b(?:tokenomics|vesting|token unlock|unlock schedule|emission(?:s| schedule)?|token supply|circulating supply|total supply|max(?:imum)? supply|treasury|token burn|burn mechanism|liquidity|contract address|token contract|airdrop|staking)\b/i;
 const PROJECT_TRANSPARENCY_ACTIVITY = /\b(?:governance|proposal|vote|treasury|audit|security audit|security review|vulnerability|incident|disclosure|transparency|multisig|multi-sig)\b/i;
+const SCREENED_TESTIMONIAL_VERDICTS = new Set([
+  "corroborated",
+  "partiallycorroborated",
+  "unconfirmed",
+  "contradicted",
+]);
+
+const hasExactPersonIdentityBinding = (
+  profile: Record<string, unknown> | undefined,
+): boolean => Boolean(
+  profile
+  && (
+    profile.identity_binding === "licensed_exact_social"
+    || profile.identity_binding === "independent_exact_handle"
+  ),
+);
+
+const investorOrganizationContext = (
+  axisCatalog: readonly AnalystAxis[],
+  profile: Record<string, unknown> | undefined,
+): boolean => {
+  if (!profile) return false;
+  return isOrganizationAccount({
+    roles: axisCatalog.map(({ role }) => role),
+    profile: {
+      handle: recordText(profile, ["handle"], 80) ?? "",
+      display_name: recordText(profile, ["display_name"], 200) ?? "",
+      resolved_name: recordText(profile, ["resolved_name"], 200),
+      bio: recordText(profile, ["bio"], 1_000) ?? "",
+    },
+  });
+};
+
+const investorBasicFactIdentityBound = (
+  value: Record<string, unknown>,
+  axisCatalog: readonly AnalystAxis[],
+  profile: Record<string, unknown> | undefined,
+): boolean => {
+  if (hasExactPersonIdentityBinding(profile)) return true;
+  if (
+    !profile
+    || !investorOrganizationContext(axisCatalog, profile)
+    || profile.profile_collection_state !== "resolved"
+    || profile.profile_provider !== "twitterapi"
+  ) return false;
+  const official = canonicalOfficialWebsite(recordText(profile, ["website"], 1_000));
+  if (!official || !Array.isArray(value.sources)) return false;
+  return value.sources.some((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+    const source = candidate as Record<string, unknown>;
+    const sourceSite = canonicalOfficialWebsite(recordText(source, ["url", "sourceUrl"], 1_000));
+    return source.artifactVerified === true
+      && sourceSite?.domain === official.domain;
+  });
+};
 
 // A requested axis must be owned by at least one deterministic routing rule.
 // Synthesizing an unavailable gap for a misspelled or newly added-but-unwired
@@ -2524,6 +2886,7 @@ const sourceArtifactEligibleAxes = (
   sourceArtifactPeers: readonly Record<string, unknown>[] = [],
   subjectHandle?: string,
   profile?: Record<string, unknown>,
+  subjectRoles: readonly unknown[] = [],
 ): readonly string[] => {
   const kind = sourceArtifactKind(value);
   const match = recordText(value, ["match"], 40)?.toLowerCase();
@@ -2536,7 +2899,28 @@ const sourceArtifactEligibleAxes = (
   // reported lead, but only a deterministic confirmation threshold may move
   // portfolio quality. This keeps the scoring boundary aligned with the UI
   // and prevents a single press report from becoming investment proof.
-  if (kind === "portfolio_relationship" && value.match !== "relationship_confirmed") return [];
+  if (kind === "portfolio_relationship") {
+    if (value.match !== "relationship_confirmed" || !subjectHandle || !profile) return [];
+    const binding = portfolioRelationshipBinding(value as unknown as SourceArtifact, {
+      roles: subjectRoles,
+      profile: {
+        handle: subjectHandle,
+        display_name: recordText(profile, ["display_name"], 200) ?? subjectHandle,
+        resolved_name: recordText(profile, ["resolved_name"], 200),
+        bio: recordText(profile, ["bio"], 1_000) ?? "",
+        website: recordText(profile, ["website"], 1_000),
+        profile_collection_state: profile.profile_collection_state === "resolved" ? "resolved" : "unavailable",
+        profile_provider: recordText(profile, ["profile_provider"], 100),
+        identity_binding: profile.identity_binding === "licensed_exact_social" || profile.identity_binding === "independent_exact_handle"
+          ? profile.identity_binding
+          : undefined,
+      },
+    });
+    // This catalog entry owns investor portfolio quality only. A relationship
+    // where the audited subject is the project can inform the PROJECT report,
+    // but it is not evidence that the subject made an investment.
+    if (!binding || binding === "audited_project") return [];
+  }
   if (kind === "fund_scale" && !isStrictFundScaleArtifact(value, sourceArtifactPeers, { subjectHandle, profile })) return [];
   const eligible = SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind] ?? [];
   if (kind === "press") {
@@ -2546,6 +2930,9 @@ const sourceArtifactEligibleAxes = (
       && (MATERIAL_RELATIONSHIP_PRESS.test(relationshipText)
         || MULTI_PARTY_LAUNCH_PRESS.test(String(value.title ?? "")));
     return eligible.filter((axis) => {
+      if (axis === "I5_reputation_fud") {
+        return INVESTOR_REPUTATION_MATERIAL.test(relationshipText);
+      }
       if (!axis.startsWith("P")) return true;
       if (speculativeOrDenied) return false;
       if (axis === "P2_product_substance") return PROJECT_PRODUCT_PRESS.test(relationshipText);
@@ -2607,10 +2994,16 @@ const eligibleAxesFor = (
   const basicFactPredicate = section === "basicFacts"
     ? recordText(value, ["predicate"], 80)?.toLowerCase() ?? ""
     : "";
-  const basicFactAxes = basicFactPredicate === "legal_regulatory_event"
+  const ungatedBasicFactAxes = basicFactPredicate === "legal_regulatory_event"
     && value.attributionScope !== "direct_subject"
     ? []
     : BASIC_FACT_AXIS_ELIGIBILITY[basicFactPredicate] ?? [];
+  // Legacy frozen packets can predate the projection-time identity gate. Do
+  // not let a copied display name re-enter investor scoring through an old
+  // verified fact. Organization accounts use their exact account/domain lane;
+  // person accounts require the explicit exact-handle identity binding.
+  const basicFactAxes = ungatedBasicFactAxes.filter((axis) =>
+    !axis.startsWith("I") || investorBasicFactIdentityBound(value, axisCatalog, profile));
   const findingAxes = section === "findings"
     ? [
         ...(FINDING_AXIS_ELIGIBILITY[findingType] ?? []),
@@ -2663,6 +3056,13 @@ const eligibleAxesFor = (
         (axis !== "P3_token_conduct" || PROJECT_TOKEN_ACTIVITY.test(recentActivityText))
         && (axis !== "P6_transparency_integrity" || PROJECT_TRANSPARENCY_ACTIVITY.test(recentActivityText)))
     : [];
+  const testimonialAxes = section === "testimonials"
+    ? SECTION_AXIS_ELIGIBILITY.testimonials.filter((axis) =>
+        axis !== "I4_testimonial_corroboration"
+        || SCREENED_TESTIMONIAL_VERDICTS.has(
+          (recordText(value, ["corroboration_verdict"], 80) ?? "").toLowerCase(),
+        ))
+    : [];
   const eligible = section === "profile"
     ? profileAxes
     : section === "ventureToken"
@@ -2673,6 +3073,8 @@ const eligibleAxesFor = (
       ? teamAxes
     : section === "recentActivity"
       ? recentActivityAxes
+    : section === "testimonials"
+      ? testimonialAxes
     : section === "findings"
       ? findingAxes
     : section === "checkOutcomes" && checkId
@@ -2680,7 +3082,13 @@ const eligibleAxesFor = (
     : section === "basicFacts"
       ? basicFactAxes
     : section === "sourceArtifacts"
-      ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile)
+      ? sourceArtifactEligibleAxes(
+          value,
+          sourceArtifactPeers,
+          subjectHandle,
+          profile,
+          axisCatalog.map(({ role }) => role),
+        )
       : SECTION_AXIS_ELIGIBILITY[section] ?? [];
   const allowed = new Set(eligible);
   return [...new Set(axisCatalog.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
@@ -2753,11 +3161,13 @@ const verificationFor = (
   sourceArtifactPeers: readonly Record<string, unknown>[] = [],
   subjectHandle?: string,
   profile?: Record<string, unknown>,
+  subjectRoles: readonly unknown[] = [],
 ): AxisEvidenceRecord["verification"] => {
   if (section === "axisGaps") return "unavailable";
   if (section === "checkOutcomes") {
     const status = recordText(record, ["status"], 40)?.toLowerCase();
     if (status === "confirmed" || status === "finding") return "verified";
+    if (status === "reported") return "reported";
     if (status === "checked-empty") return "checked_empty";
     if (status === "unavailable" || status === "unknown" || status === "stale" || status === "not-applicable") return "unavailable";
   }
@@ -2770,7 +3180,24 @@ const verificationFor = (
     const match = recordText(record, ["match"], 40);
     const kind = recordText(record, ["kind"], 80);
     if (kind === "portfolio_relationship") {
-      if (match === "relationship_confirmed") return "verified";
+      if (match === "relationship_confirmed" && subjectHandle && profile) {
+        const binding = portfolioRelationshipBinding(record as unknown as SourceArtifact, {
+          roles: subjectRoles,
+          profile: {
+            handle: subjectHandle,
+            display_name: recordText(profile, ["display_name"], 200) ?? subjectHandle,
+            resolved_name: recordText(profile, ["resolved_name"], 200),
+            bio: recordText(profile, ["bio"], 1_000) ?? "",
+            website: recordText(profile, ["website"], 1_000),
+            profile_collection_state: profile.profile_collection_state === "resolved" ? "resolved" : "unavailable",
+            profile_provider: recordText(profile, ["profile_provider"], 100),
+            identity_binding: profile.identity_binding === "licensed_exact_social" || profile.identity_binding === "independent_exact_handle"
+              ? profile.identity_binding
+              : undefined,
+          },
+        });
+        return binding && binding !== "audited_project" ? "verified" : "unavailable";
+      }
       if (match === "candidate") return "reported";
       return "unavailable";
     }
@@ -2915,7 +3342,14 @@ const makeAxisArtifact = (
   ) ?? safeArtifactSourceUrl(basicFactSource ? recordText(basicFactSource, ["url", "sourceUrl"], 420) : undefined);
   const capturedAt = recordText(payload, ["capturedAt", "captured_at", "profile_captured_at", "completedAt", "source_date"], 40)
     ?? (basicFactSource ? recordText(basicFactSource, ["capturedAt", "captured_at"], 40) : undefined);
-  const verification = verificationFor(section, payload, sourceArtifactPeers, subjectHandle, profile);
+  const verification = verificationFor(
+    section,
+    payload,
+    sourceArtifactPeers,
+    subjectHandle,
+    profile,
+    axisCatalog.map(({ role }) => role),
+  );
   const counterEligibleAxes = counterEligibleAxesFor(section, payload, verification, eligibleAxes);
   return {
     decorated: { ...payload, artifactId },
@@ -2970,6 +3404,10 @@ function renderScoringPacket(packet: Record<string, unknown>, axisCatalog: Analy
     if (packet[section] == null) continue;
     const artifact = makeAxisArtifact(section, packet[section], axisCatalog);
     if (artifact.catalog.eligibleAxes.length === 0) {
+      // Portfolio and fund artifacts are identity-bound against the frozen
+      // profile. Keep that compact binding context even when I1 itself was not
+      // requested, but do not mint a profile citation for an unrelated axis.
+      if (section === "profile" && packetProfile?.profile_collection_state === "resolved") continue;
       delete rendered[section];
       continue;
     }
@@ -3084,7 +3522,16 @@ export function extractScoringEvidenceCatalog(
     const contentHash = createHash("sha256").update(stableJson({ section, payload })).digest("hex");
     const catalogRecord = byId.get(artifactId);
     if (artifactId !== `art_v1_${contentHash}` || catalogRecord?.section !== section || catalogRecord.contentHash !== contentHash) return;
-    const verification = verificationFor(section, payload, sourceArtifactPeers, subjectHandle, packetProfile);
+    const verificationRoles = requestedAxes?.map(({ role }) => role)
+      ?? (catalogRecord.eligibleAxes.some((axis) => axis.startsWith("I")) ? ["INVESTOR"] : []);
+    const verification = verificationFor(
+      section,
+      payload,
+      sourceArtifactPeers,
+      subjectHandle,
+      packetProfile,
+      verificationRoles,
+    );
     if (strictCatalog && catalogRecord.verification !== verification) return;
     const expectedEligibleAxes = requestedAxes
       ? section === "axisGaps"
@@ -3178,7 +3625,7 @@ function serializeAnalystEvidencePacket(
     if (!row || typeof row !== "object" || Array.isArray(row)) return 2;
     const status = String((row as Record<string, unknown>).status ?? "").toLowerCase();
     if (status === "confirmed" || status === "finding") return 0;
-    if (status === "checked-empty") return 1;
+    if (status === "reported" || status === "checked-empty") return 1;
     if (status === "not-applicable") return 3;
     return 2;
   };
@@ -3581,6 +4028,7 @@ export function inspectAnalystScoringPreflight(
     };
   }
   const projectBands = deriveProjectStrengthBands(evidenceJson, axisCatalog);
+  const investorBands = deriveInvestorStrengthBands(evidenceJson, axisCatalog);
   // Same rule as the bands above: an axis whose checks COMPLETED with no
   // record is assessed (and scores in the bottom band), while an axis whose
   // checks never ran still blocks scoring. Abstaining on a subject we did
@@ -3593,7 +4041,8 @@ export function inspectAnalystScoringPreflight(
       (!evidenceCatalog.some((artifact) =>
         isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis))
         && !assessedEmptyAxes.has(axis.axis))
-      || (axis.role === "PROJECT" && projectBands[axis.axis]?.tier === "none"))
+      || (axis.role === "PROJECT" && projectBands[axis.axis]?.tier === "none")
+      || (axis.role === "INVESTOR" && investorBands[axis.axis]?.tier === "none"))
     .map(({ axis }) => axis);
   return {
     state: missingSubstantiveAxes.length > 0 ? "insufficient_evidence" : "ready",
@@ -3673,6 +4122,7 @@ export async function analyzeSubject(
     "evidence. Never use em dashes.";
   const roleSpecificScoringPolicy = scoringPolicyForAxes(axisCatalog);
   const projectScoreBands = deriveProjectStrengthBands(evidenceJson, axisCatalog);
+  const investorScoreBands = deriveInvestorStrengthBands(evidenceJson, axisCatalog);
   const projectBandPolicy = axisCatalog
     .filter(({ role }) => role === "PROJECT")
     .map(({ axis }) => {
@@ -3685,6 +4135,15 @@ export async function analyzeSubject(
         : `${axis}: no affirmative strength band`;
     })
     .join("; ");
+  const investorBandPolicy = axisCatalog
+    .filter(({ role }) => role === "INVESTOR")
+    .map(({ axis }) => {
+      const band = investorScoreBands[axis];
+      return band
+        ? `${axis}: ${band.tier} evidence, required ${band.minScore}-${band.maxScore}`
+        : `${axis}: no assessable investor evidence`;
+    })
+    .join("; ");
   const user =
     `Subject: ${handle}\nHeld roles: ${roles.join(", ")}\n\n` +
     `Axes to score (axis | weight | role):\n` +
@@ -3692,6 +4151,9 @@ export async function analyzeSubject(
     (roleSpecificScoringPolicy ? `\n\n${roleSpecificScoringPolicy}` : "") +
     (projectBandPolicy
       ? `\n\nPROJECT EVIDENCE-STRENGTH BANDS FOR THIS FROZEN PACKET: ${projectBandPolicy}. Stay inside each range. Going below a positive axis's minimum requires a distinct severe verified score-limiting alias in counterEvidenceRefs; positive support alone never authorizes a lower score. A listed canonical-token drawdown alias must be cited in P5 counterEvidenceRefs, and its solid-band cap is already reflected in the frozen range, so it does not authorize scoring below that range. No evidence may justify exceeding the maximum. Never duplicate one alias on both sides. For an adverse band, the harmful fact supports the adverse assessment: cite it as primary evidence rather than duplicating it in counter-evidence.`
+      : "") +
+    (investorBandPolicy
+      ? `\n\nINVESTOR EVIDENCE-STRENGTH BANDS FOR THIS FROZEN PACKET: ${investorBandPolicy}. Stay inside every required range. The ranges already distinguish a portfolio inclusion from portfolio quality, a single scale claim from broad fund evidence, and a screened relationship from a corroborated testimonial. No citation can authorize a score outside its range.`
       : "") +
     `\n\nCollected evidence (JSON):\n${evidenceJson}\n\n` +
     `Citation aliases (return these short aliases in the tool call; ARGUS maps ` +
@@ -3754,10 +4216,8 @@ export async function analyzeSubject(
     `An affiliated fund's scale is context for that fund and is never the audited ` +
     `person's personal capital. Historical vehicle closes remain fixed facts, while ` +
     `historical or undated AUM must not be presented as current. When no verified ` +
-    `fund_scale artifact exists but the completed fund-scale assessment (the ` +
-    `investor-fund-scale check) recorded a null result, score I3 at the low end ` +
-    `for lack of a demonstrated source-backed scale; it is a null result on this ` +
-    `axis only, never adverse evidence or counter-evidence against any other axis.\n\n` +
+    `fund_scale artifact exists, I3 is unscored. A completed bounded search that ` +
+    `found no verified amount is coverage only and never proves low fund scale.\n\n` +
     `INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this ` +
     `scoring packet. Do not infer anything about the subject from their absence. ` +
     `Use all remaining collected evidence according to its provenance and ` +
@@ -3857,7 +4317,7 @@ export async function analyzeSubject(
     axisCatalog,
     evidenceCatalog,
     (reason) => { rejectionReason = reason; },
-    { projectScoreBands },
+    { projectScoreBands, investorScoreBands },
   );
   if (raw && !validated) {
     console.warn(`[agent] rejected incomplete or invalid analyst axis set (${rejectionReason})`);
@@ -3886,6 +4346,10 @@ export async function analyzeSubject(
       .match(/^project-scores-outside-evidence-strength-band:(.+)$/)?.[1]
       ?.split(",")
       .filter((axis) => axisNames.includes(axis)) ?? [];
+    const outOfBandInvestorAxes = rejectionReason
+      .match(/^investor-scores-outside-evidence-strength-band:(.+)$/)?.[1]
+      ?.split(",")
+      .filter((axis) => axisNames.includes(axis)) ?? [];
     const verifiedScoreLimitingRepairAliases = outOfBandProjectAxes
       .map((axis) => `${axis}: ${formatAliases(verifiedScoreLimitingAliasesForAxis(axis))}`)
       .join("; ");
@@ -3897,6 +4361,12 @@ export async function analyzeSubject(
       .join("; ");
     const projectBandRepair = outOfBandProjectAxes.length > 0
       ? ` The prior ${outOfBandProjectAxes.join(", ")} score${outOfBandProjectAxes.length === 1 ? " was" : "s were"} outside the evidence-strength band. Recheck every PROJECT axis against the calibration policy. Required bands by axis: ${calibratedRepairBands}. Stay inside the listed range unless a verified score-limiting alias justifies going below the minimum; never exceed the maximum. Verified score-limiting aliases by axis: ${verifiedScoreLimitingRepairAliases}. Missing coverage, unavailable providers, unanswered questions, and positive context belong in coverageRefs, gaps, or support and cannot justify a lower score.`
+      : "";
+    const investorBandRepair = outOfBandInvestorAxes.length > 0
+      ? ` The prior ${outOfBandInvestorAxes.join(", ")} score${outOfBandInvestorAxes.length === 1 ? " was" : "s were"} outside the deterministic investor range. Required bands by axis: ${outOfBandInvestorAxes.map((axis) => {
+          const band = investorScoreBands[axis];
+          return `${axis}: ${band?.minScore}-${band?.maxScore} (${band?.tier ?? "none"})`;
+        }).join("; ")}. Stay inside every listed range. More citations cannot turn portfolio inclusion into portfolio quality, a bounded absence into fund scale, or social proximity into a testimonial or reputation finding.`
       : "";
     let rejectedAxisHint = "";
     if (rejectionReason === "grounded-team-described-as-unresolved") {
@@ -3915,6 +4385,8 @@ export async function analyzeSubject(
       rejectedAxisHint = " The frozen packet contains observed notable-follower artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge those accounts. You may describe provider coverage as partial, but do not claim that no notable followers were found, listed, documented, present, included, or observed. Name representative observed accounts in the F6 network-quality rationale.";
     } else if (projectBandRepair) {
       rejectedAxisHint = projectBandRepair;
+    } else if (investorBandRepair) {
+      rejectedAxisHint = investorBandRepair;
     } else if (rejectedAxis && coverageLimitMatch) {
       rejectedAxisHint = ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; ` +
         `the maximum is 4. Return no more than these four preferred aliases: ` +
@@ -3958,7 +4430,7 @@ export async function analyzeSubject(
       axisCatalog,
       evidenceCatalog,
       (reason) => { rejectionReason = reason; },
-      { projectScoreBands },
+      { projectScoreBands, investorScoreBands },
     );
     if (raw && !validated) {
       console.warn(`[agent] rejected analyst repair axis set (${rejectionReason}) attempt=${repairAttempt}/${MAX_ANALYST_REPAIRS}`);

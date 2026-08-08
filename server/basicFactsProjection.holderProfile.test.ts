@@ -15,13 +15,34 @@ import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 function projectEvidence(holder: CollectedEvidence["holderProfile"]): CollectedEvidence {
   const evidence = emptyEvidence("@uniswap");
   evidence.roles = [SubjectClass.PROJECT];
-  evidence.holderProfile = holder;
+  evidence.projectToken = {
+    verified: true,
+    verification: "official_x",
+    name: "Uniswap",
+    symbol: "UNI",
+    coingeckoId: "uniswap",
+    rank: 25,
+    address: "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
+    chain: "ethereum",
+    sourceUrl: "https://www.coingecko.com/en/coins/uniswap",
+    capturedAt: "2026-07-22T00:00:00.000Z",
+  };
+  evidence.holderProfile = holder ? {
+    ...holder,
+    binding: holder.binding ?? {
+      canonicalAddress: evidence.projectToken.address,
+      chain: evidence.projectToken.chain,
+      method: "canonical_token_address_chain",
+    },
+  } : holder;
   return evidence;
 }
 
 const base = {
   holderCount: 370_041,
   lpLockedOrBurnedPct: 85,
+  assessedWalletCount: 10,
+  top10PctIsFloor: false,
   sourceUrl: "https://gopluslabs.io/token-security/1/0x1f98",
   capturedAt: "2026-07-22T00:00:00.000Z",
 };
@@ -35,6 +56,8 @@ describe("a suppressed holder distribution says so", () => {
       ...base,
       topHolderPct: null,
       top10Pct: null,
+      assessedWalletCount: null,
+      top10PctIsFloor: false,
       holdersAssessed: false,
       distributionSource: null,
       distributionNote: "GoPlus does not order its holder register on this chain and the chain explorer returned no distribution, so holder concentration is not reported.",
@@ -57,6 +80,8 @@ describe("a suppressed holder distribution says so", () => {
       holdersAssessed: true,
       distributionSource: "explorer",
       distributionNote: "Holder concentration is the chain explorer's ordered register, since GoPlus does not order its holder rows on this chain.",
+      distributionSourceUrl: "https://robinhoodchain.blockscout.com/api/v2/tokens/0xabc/holders",
+      distributionCapturedAt: "2026-07-22T00:00:00.000Z",
       contractFlags: [],
       creatorPct: null,
     });
@@ -65,6 +90,53 @@ describe("a suppressed holder distribution says so", () => {
 
     const fact = tokenomicsFact(evidence);
     expect(fact?.sources[0].excerpt).toContain("chain explorer");
+    expect(fact?.sources[0]).toMatchObject({
+      url: "https://robinhoodchain.blockscout.com/api/v2/tokens/0xabc/holders",
+      provider: "blockscout",
+    });
+  });
+
+  it("publishes a short register as a floor across its assessed wallets", () => {
+    const evidence = projectEvidence({
+      ...base,
+      topHolderPct: 4,
+      top10Pct: 7,
+      assessedWalletCount: 2,
+      top10PctIsFloor: true,
+      holdersAssessed: true,
+      distributionSource: "goplus",
+      distributionNote: "The register carried 2 usable wallet rows, so the combined share is a floor across those assessed wallets and not a top-10 total.",
+      contractFlags: [],
+      creatorPct: null,
+    });
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const fact = tokenomicsFact(evidence);
+    expect(fact?.value).toContain("at least 7% of supply across 2 assessed wallets");
+    expect(fact?.value).not.toMatch(/top 10 wallets hold/i);
+    expect(fact?.sources[0].excerpt).toContain("floor across those assessed wallets");
+  });
+
+  it("does not promote a legacy aggregate with no structural basis to top-10", () => {
+    const evidence = projectEvidence({
+      ...base,
+      topHolderPct: 40,
+      top10Pct: 70,
+      assessedWalletCount: undefined,
+      top10PctIsFloor: undefined,
+      holdersAssessed: true,
+      distributionSource: "goplus",
+      distributionNote: "Legacy snapshot with no frozen row count.",
+      contractFlags: [],
+      creatorPct: null,
+    });
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const fact = tokenomicsFact(evidence);
+    expect(fact?.value).toContain("largest single wallet");
+    expect(fact?.value).not.toMatch(/top 10|across \d+ assessed wallets/i);
   });
 });
 

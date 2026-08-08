@@ -36,6 +36,8 @@ function context(handles: string[] = []) {
     project_name: handle.replace(/^@/, ""),
     role: "advisor",
     x_handle: handle,
+    evidence_origin: "deterministic",
+    artifact_verified: true,
   })) as typeof evidence.ventures;
   const recorded: ChecklistObservation[] = [];
   const ctx: CollectContext = { handle: "@subject", evidence, emit: vi.fn() };

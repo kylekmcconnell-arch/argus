@@ -98,7 +98,7 @@ export function reportCompleteness(
   }
   const inScope = checks.filter((check) => check.status !== "not-applicable");
   return inScope.length > 0 && inScope.every((check) =>
-    check.status === "confirmed" || check.status === "finding" || check.status === "checked-empty"
+    check.status === "confirmed" || check.status === "reported" || check.status === "finding" || check.status === "checked-empty"
   ) ? "complete" : "partial";
 }
 

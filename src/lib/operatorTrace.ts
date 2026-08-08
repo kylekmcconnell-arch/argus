@@ -122,9 +122,12 @@ interface DeployerTraceResponse {
 
 interface FunderSweepResponse {
   available?: boolean;
-  seededCount?: number;
+  completed?: boolean;
+  truncated?: boolean;
+  providerFailed?: boolean;
+  seededCount?: number | null;
   ownTokens?: Array<{ mint: string; name?: string }>;
-  ownLaunches?: number;
+  ownLaunches?: number | null;
   seededDeployers?: Array<{
     wallet: string;
     tokensCreated: number;
@@ -207,6 +210,10 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   // the queue was abandoned/never filled (no evidence either way). Only the
   // first can rule siblings out, so the verdict has to tell them apart.
   let unsweptHubs = false;
+  // A request can return useful positive evidence while still failing to cover
+  // the whole bounded history. Preserve those discoveries, but never let that
+  // partial response authorize a negative serial-launch conclusion.
+  let incompleteSweeps = false;
   // A funding trail we stopped walking: a wallet we were asked to trace and did
   // not, or a server chain that came back truncated. The hub above that point is
   // never discovered, so it is never swept, so the siblings it may have seeded
@@ -310,12 +317,16 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     if (!d || d.available === false) {
       throw new PanelRequestError("unavailable", 200, "Funder sweep provider is unavailable.");
     }
-    const hub = addWallet(addr, "funder", depth, { seededCount: d.seededCount ?? 0 });
+    if (d.completed !== true || d.truncated === true || d.providerFailed === true) incompleteSweeps = true;
+    const hub = addWallet(addr, "funder", depth, {
+      ...(typeof d.seededCount === "number" ? { seededCount: d.seededCount } : {}),
+    });
     for (const t of (d.ownTokens ?? []) as { mint: string; name?: string }[]) {
       addToken(t.mint, t.name, addr);
       addEdge(addr, `mint:${t.mint}`, "LAUNCHED");
     }
-    if ((d.ownLaunches ?? 0) > 0) hub.tokensCreated = d.ownLaunches;
+    const ownLaunches = typeof d.ownLaunches === "number" ? d.ownLaunches : 0;
+    if (ownLaunches > 0) hub.tokensCreated = ownLaunches;
     const seeded: { wallet: string; tokensCreated: number; sampleTokens?: { mint: string; name?: string }[] }[] = d.seededDeployers ?? [];
     for (const s of seeded) {
       addWallet(s.wallet, "deployer", depth + 1, { tokensCreated: s.tokensCreated });
@@ -368,7 +379,7 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   // The forward sweep is the only thing that can rule siblings OUT, so a clean
   // verdict requires one that actually ran and finished, over a funding trail we
   // followed to its end. A trail we stopped walking hides the hub we never swept.
-  const sweepComplete = sweeps > 0 && !unsweptHubs && !unexploredFunders;
+  const sweepComplete = sweeps > 0 && !unsweptHubs && !unexploredFunders && !incompleteSweeps;
   const verdict = buildVerdict({ hub, hubSeeded, stats, origin, sweepComplete, trailIncomplete: unexploredFunders });
 
   const cluster: OperatorCluster = {

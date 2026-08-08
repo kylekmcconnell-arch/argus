@@ -115,9 +115,9 @@ function FeeStat({ fees }: { fees: ProtocolFeesSnapshot & { capturedAt?: string 
 }
 
 /**
- * Float control as one bar: the largest wallet, the rest of the top 10, and
- * everyone else. The judgment stays with the reader; the bar just makes the
- * split visible at a glance.
+ * Float control as one bar: the largest wallet, the rest of the assessed
+ * aggregate, and addresses outside those rows. A complete ten-row register can
+ * use top-10 language. A short register remains an explicit floor.
  *
  * When the collector SUPPRESSED the distribution there is no bar to draw, and
  * drawing nothing is not good enough: a reader takes a missing concentration
@@ -127,13 +127,26 @@ function FeeStat({ fees }: { fees: ProtocolFeesSnapshot & { capturedAt?: string 
 function HolderBar({ holders }: { holders: HolderProfileSnapshot }) {
   const top1 = holders.topHolderPct;
   const top10 = holders.top10Pct;
-  if (top1 == null || top10 == null || top10 <= 0 || top10 > 100 || top1 < 0 || top1 > top10) {
+  const assessedWalletCount = Number.isInteger(holders.assessedWalletCount)
+    && (holders.assessedWalletCount ?? 0) >= 1
+    && (holders.assessedWalletCount ?? 0) <= 10
+    ? holders.assessedWalletCount as number
+    : null;
+  const aggregateIsFloor = holders.top10PctIsFloor === true
+    && assessedWalletCount !== null
+    && assessedWalletCount < 10;
+  const aggregateIsTop10 = holders.top10PctIsFloor === false
+    && assessedWalletCount === 10;
+  if (
+    top1 == null || top10 == null || top10 <= 0 || top10 > 100 || top1 < 0 || top1 > top10
+    || (!aggregateIsFloor && !aggregateIsTop10)
+  ) {
     if (holders.holdersAssessed !== false) return null;
     return (
       <div>
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="text-[15.5px] font-semibold tracking-tight text-ink-dim">not measured</span>
-          <span className="text-[10px] uppercase tracking-[0.09em] text-ink-faint">supply held by the top 10</span>
+          <span className="text-[10px] uppercase tracking-[0.09em] text-ink-faint">wallet concentration</span>
           {holders.holderCount != null && holders.holderCount > 0 && (
             <span className="mono text-[11px] text-ink-faint">{holders.holderCount.toLocaleString()} holders</span>
           )}
@@ -147,18 +160,27 @@ function HolderBar({ holders }: { holders: HolderProfileSnapshot }) {
       </div>
     );
   }
-  const nextNine = Math.max(0, top10 - top1);
+  const remainingAssessed = Math.max(0, top10 - top1);
   const rest = Math.max(0, 100 - top10);
   const segments = [
     { label: "largest holder", pct: top1 },
-    { label: "next 9 holders", pct: nextNine },
-    { label: "everyone else", pct: rest },
+    {
+      label: aggregateIsFloor
+        ? `next ${Math.max(0, (assessedWalletCount ?? 1) - 1)} assessed wallet${(assessedWalletCount ?? 1) === 2 ? "" : "s"}`
+        : "next 9 holders",
+      pct: remainingAssessed,
+    },
+    { label: aggregateIsFloor ? "outside assessed rows" : "everyone else", pct: rest },
   ].filter((segment) => segment.pct > 0);
   return (
     <div>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="text-[15.5px] font-semibold tracking-tight text-ink tabular-nums">{Math.round(top10)}%</span>
-        <span className="text-[10px] uppercase tracking-[0.09em] text-ink-faint">of supply sits with the top 10</span>
+        <span className="text-[15.5px] font-semibold tracking-tight text-ink tabular-nums">{aggregateIsFloor ? "at least " : ""}{Math.round(top10)}%</span>
+        <span className="text-[10px] uppercase tracking-[0.09em] text-ink-faint">
+          {aggregateIsFloor
+            ? `of supply across ${assessedWalletCount} assessed wallet${assessedWalletCount === 1 ? "" : "s"}`
+            : "of supply sits with the top 10"}
+        </span>
         {holders.holderCount != null && holders.holderCount > 0 && (
           <span className="mono text-[11px] text-ink-faint">{holders.holderCount.toLocaleString()} holders</span>
         )}

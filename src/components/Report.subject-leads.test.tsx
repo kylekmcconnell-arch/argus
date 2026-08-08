@@ -114,6 +114,55 @@ function favorablePassDossier(leads: Lead[]): Dossier {
   };
 }
 
+/** A scored PASS whose public result is provisional because one never-waive,
+ *  decision-critical screen has no recorded completion outcome. The synthetic
+ *  axis artifact keeps this test focused on check coverage rather than the
+ *  separate score-lineage gate used by old curated fixtures. */
+function provisionalPassWithOpenCriticalCheck(): Dossier {
+  const dossier = favorablePassDossier([]);
+  const governing = dossier.report.role_reports.find((role) => role.role === dossier.report.governing_role)
+    ?? dossier.report.role_reports[0];
+  const eligibleAxes = Object.keys(governing?.axes ?? {});
+  const contentHash = "a".repeat(64);
+  const artifactId = `art_v1_${contentHash}`;
+
+  return {
+    ...dossier,
+    completeness_state: "partial",
+    axisCitationVersion: 1,
+    axisEvidenceCatalog: [{
+      artifactId,
+      kind: "axis_evidence",
+      provider: "test",
+      operation: "subject-leads regression fixture",
+      section: "decision basis",
+      title: "Frozen evidence supporting the provisional score",
+      contentHash,
+      eligibleAxes,
+      verification: "verified",
+      scope: "direct_subject",
+    }],
+    checkRuns: [
+      { checkId: "identity-resolution", decisionCritical: true, label: "Identity resolution", status: "confirmed", note: "Identity outcome recorded." },
+      { checkId: "legal-history", decisionCritical: true, label: "Legal history", status: "confirmed", note: "Legal-history outcome recorded." },
+      { checkId: "adverse-media", decisionCritical: true, label: "Adverse media", status: "confirmed", note: "Adverse-media outcome recorded." },
+      { checkId: "ofac-sanctions-name", decisionCritical: true, label: "OFAC sanctions screen", status: "unknown", note: "Completion outcome not recorded." },
+    ],
+    report: {
+      ...dossier.report,
+      role_reports: dossier.report.role_reports.map((role) => role.role === governing?.role
+        ? {
+            ...role,
+            axes: Object.fromEntries(Object.entries(role.axes).map(([axis, score]) => [
+              axis,
+              { ...score, evidenceRefs: [artifactId], gaps: [] },
+            ])),
+          }
+        : role),
+    },
+  };
+}
+
 function render(dossier: Dossier) {
   act(() => {
     root.render(<Report dossier={dossier} onReset={() => {}} />);
@@ -129,18 +178,32 @@ function supportLineText(): string {
 }
 
 describe("favorable person report with adverse leads about the subject", () => {
-  it("still prints the all-clear when nothing adverse names the subject", () => {
+  it("bounds the all-clear to named screens that completed clean", () => {
     render(favorablePassDossier([]));
 
-    expect(concernsText()).toContain("No adverse findings in the collected evidence");
+    expect(concernsText()).toContain("No adverse findings in 3 completed clean screens");
+    expect(concernsText()).toContain("sanctions screen");
+    expect(concernsText()).toContain("legal history");
+    expect(concernsText()).toContain("adverse media");
     expect(supportLineText()).toContain("0 warning signs");
     expect(container.querySelector("#subject-leads")).toBeNull();
+  });
+
+  it("never publishes absence as an all-clear when a provisional PASS has open critical coverage", () => {
+    render(provisionalPassWithOpenCriticalCheck());
+
+    expect(container.querySelector("span.display")?.textContent).toBe("PROVISIONAL");
+    expect(container.querySelector('[aria-label="Safety check status"]')?.textContent).toContain("Review with gaps");
+    expect(concernsText()).not.toContain("No adverse findings");
+    expect(concernsText()).toContain("1 decision-critical check remains open or unrecorded");
+    expect(concernsText()).toContain("OFAC sanctions screen");
+    expect(concernsText()).toContain("does not support an all-clear");
   });
 
   it("never claims an all-clear while an unverified adverse lead names the subject", () => {
     render(favorablePassDossier([subjectLead]));
 
-    expect(concernsText()).not.toContain("No adverse findings in the collected evidence");
+    expect(concernsText()).not.toContain("No adverse findings");
     expect(concernsText()).toContain("1 unverified adverse lead");
     expect(concernsText()).toContain("drained pool");
   });
@@ -205,7 +268,8 @@ describe("favorable person report with adverse leads about the subject", () => {
   it("leaves the all-clear intact when only a related entity is named", () => {
     render(favorablePassDossier([associateLead]));
 
-    expect(concernsText()).toContain("No adverse findings in the collected evidence");
+    expect(concernsText()).toContain("No adverse findings in 3 completed clean screens");
+    expect(concernsText()).toContain("sanctions screen");
     expect(supportLineText()).toContain("0 warning signs");
     expect(container.querySelector("#subject-leads")).toBeNull();
     expect(container.querySelector("#investigative-leads")).not.toBeNull();

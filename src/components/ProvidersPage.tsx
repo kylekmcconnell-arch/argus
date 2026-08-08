@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 
 // Peace-of-mind view for Kyle + Enigma: which API keys are plugged in, what each
 // powers, where to top up, and live usage where the provider exposes it. Keyed
 // and keyless sources render as identical rows so the whole stack reads uniformly.
-type Provider = { label: string; powers: string; source: string; tier: string; configured: boolean; usage?: string };
+type Provider = { label: string; powers: string; source: string; tier: string; configured: boolean; usage?: string; disabled?: boolean };
 type UsageEvent = {
   id: string;
   reportVersionId: string;
@@ -49,7 +50,7 @@ const PROVIDER_ALIASES: Record<string, string[]> = {
   DexScreener: ["dexscreener"],
   "GoPlus + honeypot.is": ["goplus", "honeypotis"],
   GeckoTerminal: ["geckoterminal"],
-  "Wayback Machine": ["wayback", "archiveorg"],
+  "Web archives": ["wayback", "archiveorg", "arquivo"],
   "Farcaster / Warpcast": ["farcaster", "warpcast"],
   "memory.lol": ["memorylol"],
   Telegram: ["telegram"],
@@ -59,7 +60,7 @@ const PROVIDER_ALIASES: Record<string, string[]> = {
 };
 
 type ProviderHealth = {
-  label: "Healthy" | "Degraded" | "Unavailable" | "Configured" | "No key required" | "Not configured";
+  label: "Healthy" | "Degraded" | "Unavailable" | "Configured" | "No key required" | "Not configured" | "Paused";
   tone: string;
   context: string;
 };
@@ -76,6 +77,13 @@ function latestProviderEvent(provider: Provider, events: UsageEvent[]): UsageEve
 }
 
 function providerHealth(provider: Provider, latest?: UsageEvent): ProviderHealth {
+  if (provider.disabled) {
+    return {
+      label: "Paused",
+      tone: "tint-neutral",
+      context: "This optional provider is disabled and does not affect report readiness.",
+    };
+  }
   if (provider.tier !== "keyless" && !provider.configured) {
     return {
       label: "Not configured",
@@ -162,6 +170,7 @@ function eventCost(event: UsageEvent): string {
 }
 
 export function ProvidersPage() {
+  const arkhamEnabled = arkhamProviderEnabled();
   const [data, setData] = useState<{ providers: Provider[]; keyless: Provider[]; note?: string } | null>(null);
   const [dataError, setDataError] = useState("");
   const [usage, setUsage] = useState<UsageFeed | null>(null);
@@ -207,13 +216,16 @@ export function ProvidersPage() {
     return () => controller.abort();
   }, []);
 
-  const providers = data?.providers ?? [];
+  const providers = (data?.providers ?? []).map((provider) =>
+    provider.label === "Arkham" && !arkhamEnabled
+      ? { ...provider, disabled: true }
+      : provider);
   const keyless = data?.keyless ?? [];
-  const missing = providers.filter((p) => !p.configured && p.tier !== "optional");
+  const missing = providers.filter((p) => !p.disabled && !p.configured && p.tier !== "optional");
   const allProviders = [...providers, ...keyless];
   const health = allProviders.map((provider) => providerHealth(provider, usage ? latestProviderEvent(provider, usage.events) : undefined));
   const healthy = health.filter((status) => status.label === "Healthy").length;
-  const configured = providers.filter((provider) => provider.configured).length;
+  const configured = providers.filter((provider) => !provider.disabled && provider.configured).length;
   const attention = allProviders.filter((provider, index) => {
     const status = health[index];
     return status?.label === "Degraded"

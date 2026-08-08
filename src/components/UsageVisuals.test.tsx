@@ -97,6 +97,8 @@ describe("UsageVisuals", () => {
           holders={{
             topHolderPct: 11,
             top10Pct: 38,
+            assessedWalletCount: 10,
+            top10PctIsFloor: false,
             holderCount: 140_972,
             lpLockedOrBurnedPct: 62,
             sourceUrl: "https://gopluslabs.io/",
@@ -124,6 +126,8 @@ describe("UsageVisuals", () => {
           holders={{
             topHolderPct: 44,
             top10Pct: 38,
+            assessedWalletCount: 10,
+            top10PctIsFloor: false,
             holderCount: 100,
             lpLockedOrBurnedPct: null,
             sourceUrl: "https://gopluslabs.io/",
@@ -133,6 +137,34 @@ describe("UsageVisuals", () => {
       );
     });
     expect(container.querySelector('[aria-label^="Supply split"]')).toBeNull();
+  });
+
+  it("labels a short holder register as a floor across the assessed wallet count", () => {
+    act(() => {
+      root.render(
+        <UsageVisuals
+          holders={{
+            topHolderPct: 20,
+            top10Pct: 38,
+            assessedWalletCount: 4,
+            top10PctIsFloor: true,
+            holderCount: 1_000,
+            lpLockedOrBurnedPct: null,
+            holdersAssessed: true,
+            distributionSource: "goplus",
+            distributionNote: "The combined share is a floor across four assessed wallets.",
+            sourceUrl: "https://gopluslabs.io/",
+            capturedAt: "2026-07-22T21:24:00.000Z",
+          }}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("38%");
+    expect(container.textContent).toContain("at least 38%of supply across 4 assessed wallets");
+    expect(container.textContent).not.toContain("of supply sits with the top 10");
+    expect(container.querySelector('[aria-label^="Supply split"]')?.getAttribute("aria-label"))
+      .toContain("outside assessed rows");
   });
 
   // The collector can suppress concentration (unordered register, a register
@@ -172,6 +204,8 @@ describe("UsageVisuals", () => {
           holders={{
             topHolderPct: 4.17,
             top10Pct: 22,
+            assessedWalletCount: 10,
+            top10PctIsFloor: false,
             holderCount: 900,
             lpLockedOrBurnedPct: null,
             holdersAssessed: true,

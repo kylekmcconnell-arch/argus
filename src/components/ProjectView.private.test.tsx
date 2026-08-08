@@ -62,7 +62,7 @@ describe("ProjectView graph privacy", () => {
     expect(harness.recordContribution).not.toHaveBeenCalled();
   });
 
-  it("binds public team discovery to the parent report capability", async () => {
+  it("binds public people discovery to the parent report capability without graphing candidates", async () => {
     await act(async () => {
       root.render(
         <ProjectView
@@ -86,6 +86,47 @@ describe("ProjectView graph privacy", () => {
         },
       }),
     );
-    expect(harness.recordContribution).toHaveBeenCalled();
+    expect(harness.projectPeopleContribution).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+  });
+
+  it("records only a direct artifact-verified team attribution", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      available: true,
+      attempted: true,
+      completed: true,
+      partial: false,
+      providerFailed: false,
+      people: [{
+        name: "Grounded Founder",
+        handle: "@grounded_founder",
+        role: "founder",
+        provider: "github",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        evidenceKind: "team_attribution",
+      }],
+      providers: [{ provider: "github", status: "succeeded" }],
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    await act(async () => {
+      root.render(
+        <ProjectView
+          project={{ name: "Grounded Project", domain: "grounded.example" }}
+          onAudit={() => {}}
+          onReset={() => {}}
+          panelCostToken="signed-parent-capability"
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Grounded Founder");
+    expect(harness.projectPeopleContribution).toHaveBeenCalledWith(
+      "Grounded Project",
+      [expect.objectContaining({ name: "Grounded Founder", evidenceKind: "team_attribution" })],
+    );
+    expect(harness.recordContribution).toHaveBeenCalledWith({ id: "project-contribution" });
   });
 });

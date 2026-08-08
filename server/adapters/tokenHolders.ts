@@ -11,11 +11,13 @@
 import {
   GOPLUS_CHAIN,
   GOPLUS_UNSORTED_HOLDER_CHAINS,
+  blockscoutHolderSourceUrl,
   blockscoutHolders,
   goplus,
   type GoPlusSecurity,
 } from "../../src/token/sources";
 import { recordCall } from "../cost";
+import { captureTimestamp } from "../captureTime";
 
 /**
  * One GoPlus contract-control or deployer-history flag, already worded. The
@@ -31,14 +33,20 @@ export interface ContractControlFlag {
 }
 
 export interface HolderProfile {
+  /** Exact canonical token identity passed into this collector. */
+  binding: {
+    canonicalAddress: string;
+    chain: string;
+    method: "canonical_token_address_chain";
+  };
   /** largest single WALLET, percent of supply; null when the distribution is unusable. Pools, contracts and locked addresses are excluded, so this is not the largest address on the register. */
   topHolderPct: number | null;
-  /**
-   * Top ten wallets combined, percent of supply (capped at 100); null when the
-   * distribution is unusable. A FLOOR whenever the register returned fewer than
-   * ten usable wallet rows, which the free tier routinely does.
-   */
+  /** Combined share for up to ten usable wallets, percent of supply. Read the count and floor fields before naming it a top-ten total. */
   top10Pct: number | null;
+  /** Number of usable wallet rows included in top10Pct. At most ten. */
+  assessedWalletCount: number | null;
+  /** True when top10Pct covers fewer than ten usable wallet rows. */
+  top10PctIsFloor: boolean;
   holderCount: number | null;
   /** DEX liquidity burned or verifiably locked, percent; null when GoPlus reports no usable LP register */
   lpLockedOrBurnedPct: number | null;
@@ -57,11 +65,17 @@ export interface HolderProfile {
    * is otherwise cited to. Null when GoPlus's own register answered it.
    */
   distributionNote: string | null;
+  /** Exact Blockscout holder endpoint when the distribution came from it. */
+  distributionSourceUrl?: string;
+  /** Capture time of the Blockscout holder response. */
+  distributionCapturedAt?: string;
   /** GoPlus contract-control and deployer-history flags that fired; empty means none fired, never "clean" */
   contractFlags: ContractControlFlag[];
   /** creator/deployer share of supply, percent; null when GoPlus did not report one (never 0) */
   creatorPct: number | null;
   sourceUrl: string;
+  /** Capture time of the GoPlus token-security response. */
+  sourceCapturedAt: string;
 }
 
 export type HolderProfileOutcome =
@@ -110,6 +124,7 @@ export async function collectHolderProfile(chain: string, address: string): Prom
     boxed<GoPlusSecurity>(goplus(chainId, address)),
     unordered ? boxed(blockscoutHolders(chainKey, address)) : Promise.resolve(null),
   ]);
+  const sourceCapturedAt = captureTimestamp();
   if (!gp) {
     recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} · no_data`, "partial");
     return { available: false, note: "GoPlus returned no token security record." };
@@ -200,14 +215,16 @@ export async function collectHolderProfile(chain: string, address: string): Prom
 
   const holdersAssessed = shares.length > 0;
   const topHolderPct = holdersAssessed ? shares[0] : null;
+  const assessedWalletCount = holdersAssessed ? Math.min(10, shares.length) : null;
+  const top10PctIsFloor = holdersAssessed && shares.length < 10;
   const top10Pct = holdersAssessed
     ? Math.min(100, shares.slice(0, 10).reduce((total, share) => total + share, 0))
     : null;
   // The free tier returns a short register, and the exclusions above shorten it
   // further. Summing 4 wallet rows and calling the result a top-ten share would
   // publish a floor as a total, so the shortfall is stated where the figure is.
-  if (holdersAssessed && shares.length < 10) {
-    const shortfall = `The register carried ${shares.length} usable wallet row${shares.length === 1 ? "" : "s"}, so the top-ten share is a floor and not a total.`;
+  if (top10PctIsFloor && assessedWalletCount !== null) {
+    const shortfall = `The register carried ${assessedWalletCount} usable wallet row${assessedWalletCount === 1 ? "" : "s"}, so the combined share is a floor across those assessed wallets and not a top-10 total.`;
     distributionNote = distributionNote ? `${distributionNote} ${shortfall}` : shortfall;
   }
   const holderCountRaw = Number(gp.holder_count);
@@ -252,20 +269,37 @@ export async function collectHolderProfile(chain: string, address: string): Prom
     return { available: false, note: "GoPlus reported no holder, liquidity, or contract-control record for this token." };
   }
   const meta = `${chain}:${address.slice(0, 10)} · top_${topHolderPct === null ? "na" : Math.round(topHolderPct)}pct · flags_${contractFlags.length}`;
+  const distributionSourceUrl = distributionSource === "explorer"
+    ? blockscoutHolderSourceUrl(chainKey, address)
+    : null;
   recordCall("goplus", "holder-profile", 0, meta, "succeeded");
   return {
     available: true,
     value: {
+      binding: {
+        canonicalAddress: address,
+        chain: chainKey,
+        method: "canonical_token_address_chain",
+      },
       topHolderPct,
       top10Pct,
+      assessedWalletCount,
+      top10PctIsFloor,
       holderCount,
       lpLockedOrBurnedPct,
       holdersAssessed,
       distributionSource,
       distributionNote,
+      ...(distributionSourceUrl
+        ? {
+            distributionSourceUrl,
+            distributionCapturedAt: sourceCapturedAt,
+          }
+        : {}),
       contractFlags,
       creatorPct: creatorShare,
       sourceUrl: `https://gopluslabs.io/token-security/${chainId}/${address}`,
+      sourceCapturedAt,
     },
   };
 }

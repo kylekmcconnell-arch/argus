@@ -3,6 +3,7 @@ import { usdCompact } from "../lib/format";
 import { shortAddr } from "../lib/wallets";
 import { fetchPanelJson, panelRequestFailure, type PanelRequestFailure } from "../lib/panelCostHeaders";
 import { PanelRequestNotice } from "./PanelRequestNotice";
+import type { LiveForensicStatusHandler } from "../lib/liveForensics";
 
 /**
  * WHAT THE TOP HOLDERS PAID.
@@ -55,7 +56,7 @@ function toneFor(pct: number | null): string {
   return "var(--color-ink-dim)";
 }
 
-export function GmgnHolderCosts({ chain, address }: { chain?: string | null; address?: string | null }) {
+export function GmgnHolderCosts({ chain, address, onStatusChange }: { chain?: string | null; address?: string | null; onStatusChange?: LiveForensicStatusHandler }) {
   const [data, setData] = useState<GmgnHolderPayload | null>(null);
   const [failure, setFailure] = useState<PanelRequestFailure | null>(null);
   const [loading, setLoading] = useState(false);
@@ -64,12 +65,21 @@ export function GmgnHolderCosts({ chain, address }: { chain?: string | null; add
     if (!chain || !address) return;
     let live = true;
     setLoading(true);
+    onStatusChange?.({ id: "gmgn-holder-costs", label: "GMGN holder cost basis", state: "running" });
     fetchPanelJson<GmgnHolderPayload>(`/api/gmgn-holders?chain=${encodeURIComponent(chain)}&address=${encodeURIComponent(address)}`)
-      .then((payload) => { if (live) setData(payload); })
-      .catch((error) => { if (live) setFailure(panelRequestFailure(error)); })
+      .then((payload) => {
+        if (!live) return;
+        setData(payload);
+        onStatusChange?.({ id: "gmgn-holder-costs", label: "GMGN holder cost basis", state: payload.available ? "complete" : "unavailable" });
+      })
+      .catch((error) => {
+        if (!live) return;
+        setFailure(panelRequestFailure(error));
+        onStatusChange?.({ id: "gmgn-holder-costs", label: "GMGN holder cost basis", state: "unavailable" });
+      })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [chain, address]);
+  }, [chain, address, onStatusChange]);
 
   if (!chain || !address) return null;
   if (failure) return <PanelRequestNotice failure={failure} label="Holder cost basis (GMGN)" />;

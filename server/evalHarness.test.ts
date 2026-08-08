@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -254,6 +254,167 @@ describe("a tool-tagged response belongs to the call that asked for it", () => {
     expect(tagged).toHaveLength(1);
     expect(loadRecording(dir).filter((call) => !call.tool).length).toBeGreaterThan(0);
   });
+
+  it("recovers one legacy response tool without letting it poison later calls", async () => {
+    const oldBody = JSON.stringify({
+      packet: "old evidence packet",
+      tool_choice: { type: "tool", name: "record_claims" },
+    });
+    globalThis.fetch = vi.fn(async () => new Response(
+      JSON.stringify({
+        content: [{ type: "tool_use", name: "record_claims", input: { claims: ["recorded"] } }],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+
+    await withRecordedFetch("record", dir, async () => {
+      await fetch(MODEL, { method: "POST", body: oldBody });
+      return null;
+    });
+
+    // Simulate a pre-tool-metadata fixture. Absence is intentionally distinct
+    // from a modern explicit null, which must never be inferred over.
+    const path = join(dir, "calls.jsonl");
+    const legacy = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    delete legacy.tool;
+    writeFileSync(path, `${JSON.stringify(legacy)}\n`);
+
+    const replay = await withRecordedFetch("replay", dir, async () => {
+      const response = await fetch(MODEL, {
+        method: "POST",
+        body: JSON.stringify({
+          packet: "new evidence packet wording",
+          tool_choice: { type: "tool", name: "record_claims" },
+        }),
+      });
+      return response.text();
+    });
+
+    expect(JSON.parse(replay.result).content[0].input.claims).toEqual(["recorded"]);
+    expect(replay.fidelity.toolFallbackHits).toBe(1);
+    expect(replay.fidelity.urlFallbackHits).toBe(0);
+    expect(replay.fidelity.misses).toHaveLength(0);
+  });
+
+  it("leaves ambiguous legacy tool responses untagged", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(
+      JSON.stringify({
+        content: [
+          { type: "tool_use", name: "record_claims", input: {} },
+          { type: "tool_use", name: "record_team", input: {} },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+
+    await withRecordedFetch("record", dir, async () => {
+      await fetch(MODEL, { method: "POST", body: JSON.stringify({ extract: "legacy" }) });
+      return null;
+    });
+    const path = join(dir, "calls.jsonl");
+    const legacy = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    delete legacy.tool;
+    writeFileSync(path, `${JSON.stringify(legacy)}\n`);
+
+    expect(loadRecording(dir)[0].tool).toBeNull();
+    const replay = await withRecordedFetch("replay", dir, async () => {
+      try {
+        await fetch(MODEL, {
+          method: "POST",
+          body: JSON.stringify({
+            packet: "changed",
+            tool_choice: { type: "tool", name: "record_claims" },
+          }),
+        });
+        return "unexpectedly served";
+      } catch (error) {
+        return String(error);
+      }
+    });
+    expect(replay.result).toContain("eval replay miss");
+    expect(replay.fidelity.toolFallbackHits).toBe(0);
+  });
+
+  it("never serves an untagged response to a structured-tool request", async () => {
+    globalThis.fetch = vi.fn(async () => new Response(
+      JSON.stringify({ content: [{ type: "text", text: "ordinary extraction response" }] }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+
+    await withRecordedFetch("record", dir, async () => {
+      await fetch(MODEL, {
+        method: "POST",
+        body: JSON.stringify({ extract: "project context" }),
+      });
+      return null;
+    });
+
+    const replay = await withRecordedFetch("replay", dir, async () => {
+      try {
+        const response = await fetch(MODEL, {
+          method: "POST",
+          body: JSON.stringify({
+            packet: "evidence",
+            tool_choice: { type: "tool", name: "record_claims" },
+          }),
+        });
+        return await response.text();
+      } catch (error) {
+        return String(error);
+      }
+    });
+
+    expect(replay.result).toMatch(/eval replay miss/);
+    expect(replay.result).not.toContain("ordinary extraction response");
+    expect(replay.fidelity.toolFallbackHits).toBe(0);
+    expect(replay.fidelity.urlFallbackHits).toBe(0);
+    expect(replay.fidelity.misses).toHaveLength(1);
+  });
+
+  it.each(["record_verdict", "record_contradictions"] as const)(
+    "requires an exact request match for decision tool %s",
+    async (decisionTool) => {
+      const recordedBody = JSON.stringify({
+        packet: "e009 = TVL",
+        tool_choice: { type: "tool", name: decisionTool },
+      });
+      globalThis.fetch = vi.fn(async () => new Response(
+        JSON.stringify({
+          content: [{ type: "tool_use", name: decisionTool, input: { marker: "recorded" } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+
+      await withRecordedFetch("record", dir, async () => {
+        await fetch(MODEL, { method: "POST", body: recordedBody });
+        return null;
+      });
+
+      const replay = await withRecordedFetch("replay", dir, async () => {
+        const exact = await fetch(MODEL, { method: "POST", body: recordedBody });
+        const exactText = await exact.text();
+        try {
+          await fetch(MODEL, {
+            method: "POST",
+            body: JSON.stringify({
+              packet: "e009 = official_identity",
+              tool_choice: { type: "tool", name: decisionTool },
+            }),
+          });
+          return { exactText, changedRequest: "unexpectedly served" };
+        } catch (error) {
+          return { exactText, changedRequest: String(error) };
+        }
+      });
+
+      expect(JSON.parse(replay.result.exactText).content[0].input.marker).toBe("recorded");
+      expect(replay.result.changedRequest).toContain(`no exact recording for decision tool ${decisionTool}`);
+      expect(replay.fidelity.exactHits).toBe(1);
+      expect(replay.fidelity.toolFallbackHits).toBe(0);
+      expect(replay.fidelity.urlFallbackHits).toBe(0);
+      expect(replay.fidelity.misses).toHaveLength(1);
+    },
+  );
 });
 
 // GMGN's read routes require a fresh unix timestamp and client_id on every

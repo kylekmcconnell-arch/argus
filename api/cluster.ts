@@ -15,7 +15,8 @@
 //
 // Solana only (Helius RPC + RugCheck). Gated on HELIUS_API_KEY. Bounded + graceful.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses";
+import { SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
+import { describeWalletClusterTrace, type WalletClusterCoverage } from "../src/lib/walletClusterTruth.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
@@ -50,24 +51,48 @@ async function rpc(url: string, method: string, params: unknown, usage: Provider
   return d.result;
 }
 
-// The oldest few signatures for a wallet — the funding sits in one of its first txs.
-async function oldestSigs(url: string, wallet: string, usage: ProviderUsage): Promise<string[]> {
+interface OldestSignatureRead {
+  sigs: string[];
+  reachedBeginning: boolean;
+  failed: boolean;
+}
+
+// The oldest few signatures for a wallet. A full final page proves that the
+// beginning was NOT reached; those signatures are the oldest reached, not the
+// wallet's first transactions, and can never establish its seed funder.
+async function oldestSigs(url: string, wallet: string, usage: ProviderUsage): Promise<OldestSignatureRead> {
   let before: string | undefined;
   let last: any[] = [];
   for (let page = 0; page < 4; page++) {
-    const batch: any[] = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage).catch(() => []);
-    if (!batch?.length) break;
+    let batch: any[];
+    try {
+      batch = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage);
+    } catch {
+      return { sigs: [], reachedBeginning: false, failed: true };
+    }
+    if (!batch?.length) return { sigs: [], reachedBeginning: true, failed: false };
     last = batch;
-    if (batch.length < 1000) break;
+    if (batch.length < 1000) {
+      return {
+        sigs: last.slice(-6).reverse().map((s) => s.signature),
+        reachedBeginning: true,
+        failed: false,
+      };
+    }
     before = batch[batch.length - 1].signature;
   }
-  return last.slice(-6).reverse().map((s) => s.signature);
+  return { sigs: [], reachedBeginning: false, failed: false };
 }
 
 // The account that first sent SOL into the wallet (the funder). Same shapes the
 // deployer trail recognises: plain transfer, account-create funding, or the
 // balance-delta fallback (the account that lost the most SOL in a funding tx).
-async function fundingSource(url: string, wallet: string, sigs: string[], usage: ProviderUsage): Promise<string | null> {
+async function fundingSource(
+  url: string,
+  wallet: string,
+  sigs: string[],
+  usage: ProviderUsage,
+): Promise<{ funder: string | null; completed: boolean }> {
   const scan = (instrs: any[]): string | null => {
     for (const ix of instrs ?? []) {
       const p = ix.parsed;
@@ -78,41 +103,58 @@ async function fundingSource(url: string, wallet: string, sigs: string[], usage:
     return null;
   };
   for (const sig of sigs) {
-    const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage).catch(() => null);
-    if (!tx) continue;
+    let tx: any;
+    try {
+      tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
+    } catch {
+      // A missed earlier transaction means a later sender cannot safely be
+      // called the seed funder.
+      return { funder: null, completed: false };
+    }
+    if (!tx) return { funder: null, completed: false };
     const direct = scan(tx.transaction?.message?.instructions);
-    if (direct) return direct;
-    for (const inner of tx.meta?.innerInstructions ?? []) { const s = scan(inner.instructions); if (s) return s; }
+    if (direct) return { funder: direct, completed: true };
+    for (const inner of tx.meta?.innerInstructions ?? []) {
+      const found = scan(inner.instructions);
+      if (found) return { funder: found, completed: true };
+    }
     const keys: string[] = (tx.transaction?.message?.accountKeys ?? []).map((k: any) => (typeof k === "string" ? k : k.pubkey));
     const pre: number[] = tx.meta?.preBalances ?? [], post: number[] = tx.meta?.postBalances ?? [];
     const wi = keys.indexOf(wallet);
     if (wi >= 0 && (post[wi] ?? 0) > (pre[wi] ?? 0)) {
       let best = -1, drop = 0;
       for (let i = 0; i < keys.length; i++) { if (i === wi) continue; const d = (pre[i] ?? 0) - (post[i] ?? 0); if (d > drop && d > 1_000_000) { drop = d; best = i; } }
-      if (best >= 0) return keys[best];
+      if (best >= 0) return { funder: keys[best], completed: true };
     }
   }
-  return null;
+  return { funder: null, completed: true };
 }
 
 // Native-SOL counterparties of a wallet (recent), to catch a DIRECT transfer
 // between two members of the holder set — a wallet paying another is a hard link.
-async function counterparties(key: string, wallet: string, usage: ProviderUsage): Promise<Set<string>> {
+async function counterparties(
+  key: string,
+  wallet: string,
+  usage: ProviderUsage,
+): Promise<{ addresses: Set<string>; completed: boolean }> {
   const out = new Set<string>();
   usage.helius += 1;
   try {
     const r = await fetch(`https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${key}&limit=100`, { signal: AbortSignal.timeout(12000) });
-    if (!r.ok) return out;
+    if (!r.ok) return { addresses: out, completed: false };
     const txs = await r.json();
+    if (!Array.isArray(txs)) return { addresses: out, completed: false };
     usage.heliusSucceeded += 1;
-    for (const t of Array.isArray(txs) ? txs : []) {
+    for (const t of txs) {
       for (const nt of t.nativeTransfers ?? []) {
         if (nt.fromUserAccount === wallet && nt.toUserAccount) out.add(nt.toUserAccount);
         if (nt.toUserAccount === wallet && nt.fromUserAccount) out.add(nt.fromUserAccount);
       }
     }
-  } catch { /* best-effort */ }
-  return out;
+    return { addresses: out, completed: true };
+  } catch {
+    return { addresses: out, completed: false };
+  }
 }
 
 // Union-find for grouping linked wallets into distinct operators.
@@ -166,17 +208,70 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const insiderOf = new Map<string, boolean>();
     for (const h of holders.slice(0, MAX_WALLETS)) { if (!pctOf.has(h.address)) { set.push(h.address); pctOf.set(h.address, h.pct); insiderOf.set(h.address, h.insider); } }
     if (creator && !pctOf.has(creator)) { set.push(creator); pctOf.set(creator, 0); }
-    if (set.length < 2) { res.status(200).json({ mint, available: true, clusters: [], walletsAnalyzed: set.length, note: "Not enough non-market holders to cluster." }); return; }
+    if (set.length < 2) {
+      const coverage: WalletClusterCoverage = {
+        sampled: set.length,
+        fullyTraced: 0,
+        historyTruncated: 0,
+        deadlineSkipped: 0,
+        providerFailed: 0,
+      };
+      const description = describeWalletClusterTrace({ clusters: [], coverage, directLinkLabel: "a direct SOL transfer" });
+      res.status(200).json({ mint, available: true, clusters: [], walletsAnalyzed: set.length, coverage, ...description });
+      return;
+    }
 
     // 2. For each wallet, resolve its funder + its recent SOL counterparties.
     const url = `https://mainnet.helius-rpc.com/?api-key=${key}`;
     const deadline = Date.now() + 50000;
     const profiles = await inChunks(set, CHUNK, async (w) => {
-      if (Date.now() > deadline) return { wallet: w, funder: null as string | null, cps: new Set<string>() };
-      const [sigs, cps] = await Promise.all([oldestSigs(url, w, usage), counterparties(key, w, usage)]);
-      const funder = sigs.length ? await fundingSource(url, w, sigs, usage) : null;
-      return { wallet: w, funder, cps };
+      if (Date.now() > deadline) {
+        return {
+          wallet: w,
+          funder: null as string | null,
+          cps: new Set<string>(),
+          fundingState: "deadline" as const,
+          counterpartiesCompleted: false,
+        };
+      }
+      const [history, cpRead] = await Promise.all([oldestSigs(url, w, usage), counterparties(key, w, usage)]);
+      if (history.failed) {
+        return {
+          wallet: w,
+          funder: null as string | null,
+          cps: cpRead.addresses,
+          fundingState: "failed" as const,
+          counterpartiesCompleted: cpRead.completed,
+        };
+      }
+      if (!history.reachedBeginning) {
+        return {
+          wallet: w,
+          funder: null as string | null,
+          cps: cpRead.addresses,
+          fundingState: "truncated" as const,
+          counterpartiesCompleted: cpRead.completed,
+        };
+      }
+      const funding = history.sigs.length
+        ? await fundingSource(url, w, history.sigs, usage)
+        : { funder: null, completed: true };
+      return {
+        wallet: w,
+        funder: funding.completed ? funding.funder : null,
+        cps: cpRead.addresses,
+        fundingState: funding.completed ? "complete" as const : "failed" as const,
+        counterpartiesCompleted: cpRead.completed,
+      };
     });
+
+    const coverage: WalletClusterCoverage = {
+      sampled: set.length,
+      fullyTraced: profiles.filter((p) => p.fundingState === "complete" && p.counterpartiesCompleted).length,
+      historyTruncated: profiles.filter((p) => p.fundingState === "truncated").length,
+      deadlineSkipped: profiles.filter((p) => p.fundingState === "deadline").length,
+      providerFailed: profiles.filter((p) => p.fundingState === "failed" || !p.counterpartiesCompleted).length,
+    };
 
     // 3. Build links + union-find. A shared non-CEX funder OR a direct transfer
     //    between two set members ties them into one operator.
@@ -224,10 +319,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
       .sort((a, b) => b.combinedPct - a.combinedPct || b.size - a.size);
 
-    const top = clusters[0];
-    const note = !clusters.length
-      ? `Analyzed ${set.length} top holders; found no on-chain links between them (independently funded, no direct transfers). No hidden common ownership detected.`
-      : `${clusters.length} coordinated wallet group${clusters.length === 1 ? "" : "s"} among the top holders. The largest is ${top.size} wallets controlling a combined ${top.combinedPct.toFixed(1)}% of supply${top.sharedFunders.length ? `, seeded by one funder (${top.sharedFunders[0].slice(0, 6)}…)` : " via direct transfers"}${top.includesCreator ? ", including the token's creator" : ""}. A holder chart shows these as separate wallets; on-chain they are one hand.`;
+    const description = describeWalletClusterTrace({
+      clusters,
+      coverage,
+      directLinkLabel: "a direct SOL transfer",
+    });
 
     // Full analyzed set + edges, so the client can draw a bubble map (each wallet a
     // bubble sized by supply, colored by its cluster, linked by co-funding/transfers).
@@ -236,9 +332,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const allWallets = set.map((w) => ({ address: w, pct: pctOf.get(w) ?? 0, cluster: walletCluster.has(w) ? walletCluster.get(w)! : null, isCreator: w === creator }));
     const edges = links.map((l) => ({ a: l.a, b: l.b, type: l.type }));
 
-    res.status(200).json({ mint, available: true, walletsAnalyzed: set.length, clusters, allWallets, edges, note });
+    res.status(200).json({
+      mint,
+      available: true,
+      walletsAnalyzed: set.length,
+      clusters,
+      allWallets,
+      edges,
+      coverage,
+      ...description,
+    });
   } catch (e) {
-    res.status(200).json({ mint, available: true, clusters: [], error: String(e), note: "Wallet clustering failed." });
+    res.status(200).json({ mint, available: false, clusters: [], error: String(e), note: "Wallet clustering failed." });
   } finally {
     if (usage.rugcheck > 0) {
       await attachPanelCost(auth.organizationId, panelCostVersionId, {

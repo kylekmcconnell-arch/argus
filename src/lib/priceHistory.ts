@@ -78,7 +78,7 @@ export interface VolumeTrend {
   prior: VolumeWindow;
   /** `recent` against `prior`, %. */
   changePct: number;
-  /** A candle in either window reported no volume, so both sums are floors and the change is approximate. */
+  /** A candle in either window reported no volume, so at least one sum is a floor and the change is approximate. */
   isFloor: boolean;
 }
 

@@ -11,7 +11,7 @@
 //
 // Solana only (Helius RPC). Gated on HELIUS_API_KEY. ~a few RPC calls per wallet.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses";
+import { SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 

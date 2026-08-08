@@ -1,38 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import type { TokenDossier } from "../token/audit";
 
-// On-demand adversarial review of the verdict. A second set of eyes tries to
-// break the result both ways, grounded only in the evidence the audit produced.
+// On-demand adversarial review of the verdict. The browser submits only the
+// analyst's question; the API reloads the exact frozen report selected by the
+// signed panel token and builds its own evidence packet.
 type Challenge = { direction: "too_harsh" | "too_lenient"; point: string };
-type Data = { available: boolean; recommendation?: string; confidence?: string; summary?: string; challenges?: Challenge[]; note?: string };
+type EvidenceReference = { id: string; label: string; path: string };
+type Recommendation = "uphold" | "soften" | "harden" | "withhold";
+type Data = {
+  available: boolean;
+  recommendation?: Recommendation;
+  confidence?: string;
+  summary?: string;
+  challenges?: Challenge[];
+  evidenceReferences?: EvidenceReference[];
+  grounding?: "validated_frozen_references";
+  note?: string;
+};
 
 const REC: Record<string, { label: string; color: string }> = {
   uphold: { label: "Verdict holds", color: "var(--color-pass)" },
   soften: { label: "May be too harsh", color: "var(--color-caution)" },
   harden: { label: "May be too lenient", color: "var(--color-avoid)" },
+  withhold: { label: "Evidence cannot resolve it", color: "var(--color-caution)" },
 };
 
-// Compact evidence summary the reviewer reasons over — the same facts the score used.
-function buildEvidence(d: TokenDossier): string {
-  const yn = (b: boolean) => (b ? "yes" : "no");
-  const money = (n?: number) => (n == null ? "?" : n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : `$${Math.round(n).toLocaleString()}`);
-  const s = d.safety;
-  const lines = [
-    `${d.symbol ? "$" + d.symbol : "token"} on ${d.chain}. Verdict ${d.verdict} ${d.score ?? "?"}/100${d.capApplied ? ` (capped by: ${d.capApplied})` : ""}.`,
-    `Headline: ${d.headline}`,
-    `Findings: ${d.findings.map((f) => `[${f.tone}] ${f.claim}`).join(" | ") || "none"}`,
-    s.available
-      ? `Safety: source-verified=${yn(s.openSource)}, mintable=${yn(s.mintable)}, honeypot=${yn(s.honeypot)}, owner-renounced=${yn(s.ownerRenounced)}, pausable=${yn(s.pausable)}, serial-scammer-creator=${yn(s.serialScammerCreator)}, buy/sell tax ${s.buyTax.toFixed(0)}/${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : " (static)"}.`
-      : "Safety: contract controls could not be checked on this blockchain.",
-    `Market: mcap ${money(d.mcap)}, liquidity ${money(d.liquidityUsd)}, age ${d.ageDays ?? "?"}d, ${d.cg ? `CoinGecko rank ${d.cg.rank ? "#" + d.cg.rank : "unranked"} (${d.cg.cexCount ?? 0} CEX)` : "NOT listed on CoinGecko"}.`,
-    `Holders: top holder ${(d.topHolders[0]?.percent ?? 0).toFixed(0)}%, insiders ${d.insiderPct.toFixed(0)}%, bundle risk ${d.bundleRisk}.`,
-    `Deployer: ${d.deployer ? "resolved" : "could not be resolved"}. Official X: ${d.projectX ?? "none found"}.`,
-  ];
-  return lines.join("\n");
-}
-
 export function SecondOpinion({
-  dossier,
   panelCostToken,
   id = "challenge-score",
   onRescan,
@@ -70,13 +63,7 @@ export function SecondOpinion({
             "content-type": "application/json",
             ...(panelCostToken ? { "x-argus-panel-token": panelCostToken } : {}),
           },
-          body: JSON.stringify({
-            subject: dossier.symbol ? `$${dossier.symbol}` : "token",
-            verdict: dossier.verdict,
-            score: dossier.score,
-            evidence: buildEvidence(dossier),
-            question: concern,
-          }),
+          body: JSON.stringify({ question: concern }),
         });
         setData(await r.json());
       } catch { /* non-fatal */ }
@@ -84,12 +71,19 @@ export function SecondOpinion({
     })();
   };
 
-  const usableResult = data?.available !== false && Boolean(data?.summary || (data?.challenges ?? []).length);
-  const rec = REC[data?.recommendation ?? "uphold"] ?? REC.uphold;
+  const groundedRecommendation = data?.grounding === "validated_frozen_references"
+    && data.recommendation
+    && REC[data.recommendation]
+    ? data.recommendation
+    : null;
+  const usableResult = data?.available !== false
+    && Boolean(groundedRecommendation)
+    && Boolean(data?.summary || (data?.challenges ?? []).length);
+  const rec = groundedRecommendation ? REC[groundedRecommendation] : REC.withhold;
   const challenges = data?.challenges ?? [];
   const harsh = challenges.filter((c) => c.direction === "too_harsh");
   const lenient = challenges.filter((c) => c.direction === "too_lenient");
-  const flagged = data?.recommendation !== "uphold";
+  const flagged = groundedRecommendation !== "uphold";
 
   return (
     <section
@@ -141,19 +135,28 @@ export function SecondOpinion({
 
       {state === "done" && !usableResult && (
         <p className="mt-3 border-t border-line/60 pt-3 text-[12.5px] text-ink-faint" aria-live="polite">
-          We couldn’t check that concern. Try again.
+          {data?.note ?? "We couldn’t check that concern. Try again."}
         </p>
       )}
 
       {state === "done" && usableResult && data && (
         <div className="mt-3 border-t border-line/60 pt-3" aria-live="polite">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="eyebrow">What the evidence says</span>
+            <span className="eyebrow">AI second opinion · frozen references validated</span>
             <span className="chip tint-var" style={{ "--tint": rec.color } as React.CSSProperties}>{rec.label}</span>
             {data.confidence && <span className="mono ml-auto text-[11px] text-ink-dim">{data.confidence} confidence</span>}
           </div>
 
           {data.summary && <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{data.summary}</p>}
+
+          {(data.evidenceReferences?.length ?? 0) > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5" aria-label="Frozen evidence references used">
+              <span className="text-[10.5px] text-ink-faint">Evidence used</span>
+              {data.evidenceReferences!.map((reference) => (
+                <span key={reference.id} className="chip normal-case tracking-normal" title={reference.path}>{reference.label}</span>
+              ))}
+            </div>
+          )}
 
           <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
             {harsh.length > 0 && (

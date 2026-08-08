@@ -118,7 +118,7 @@ describe("trust graph provenance", () => {
     });
   });
 
-  it("labels accepted browser contributions client-submitted and ignores provenance spoofing", async () => {
+  it("labels browser contributions client-submitted and strips caller-chosen verdict authority", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify([
         { provenance_state: "legacy" },
@@ -146,10 +146,51 @@ describe("trust graph provenance", () => {
       organization_id: ORGANIZATION_ID,
       canonical_key: "alice",
       provenance_state: "client_submitted",
-      verdict: "CAUTION",
+      verdict: null,
     });
     expect(inserted).not.toHaveProperty("report_version_id");
     expect(captured).toMatchObject({ status: 200, body: { ok: true, canonicalKey: "alice" } });
+  });
+
+  it("strips reserved verdict-bearing risk nodes and their edges from browser contributions", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler({
+      method: "POST",
+      headers: {},
+      body: {
+        handle: "@Alice",
+        nodes: [
+          { type: "Person", key: "@Alice", subject: true },
+          { type: "Identity", key: "risk:lazarus", subtype: "risk-avoid" },
+          { type: "Identity", key: "wallet:ethereum:0x0000000000000000000000000000000000000001" },
+        ],
+        edges: [
+          { src: "@Alice", dst: "risk:lazarus", type: "TRANSACTS_WITH" },
+          { src: "@Alice", dst: "wallet:ethereum:0x0000000000000000000000000000000000000001", type: "USES" },
+        ],
+        verdict: "AVOID",
+      },
+    } as unknown as VercelRequest, res);
+
+    const inserted = JSON.parse(String(fetchMock.mock.calls[1][1]?.body)) as {
+      verdict: unknown;
+      nodes: Array<{ key: string }>;
+      edges: Array<{ dst: string }>;
+    };
+    expect(inserted.verdict).toBeNull();
+    expect(inserted.nodes.map((node) => node.key)).toEqual([
+      "@Alice",
+      "wallet:ethereum:0x0000000000000000000000000000000000000001",
+    ]);
+    expect(inserted.edges).toEqual([
+      expect.objectContaining({ dst: "wallet:ethereum:0x0000000000000000000000000000000000000001" }),
+    ]);
+    expect(captured.status).toBe(200);
   });
 
   it("returns immutable provenance fields on organization-scoped reads", async () => {

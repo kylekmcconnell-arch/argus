@@ -1,6 +1,11 @@
 // NOTE: this module is loaded as native ESM by the api/ functions — every
 // runtime import here MUST carry an explicit .js extension.
-import { CLEARANCE_COVERAGE_FLOOR_PERCENT, NEVER_WAIVE_CHECK_IDS, POST_SCAN_ENRICHMENT_CHECK_IDS } from "./scanChecklist.js";
+import {
+  CLEARANCE_COVERAGE_FLOOR_PERCENT,
+  NEVER_WAIVE_CHECK_IDS,
+  POST_SCAN_ENRICHMENT_CHECK_IDS,
+  neverWaiveCheckRecorded,
+} from "./scanChecklist.js";
 
 export type PublicCompleteness = "complete" | "partial" | "failed";
 
@@ -70,7 +75,7 @@ function normalizedCompleteness(value: unknown): PublicCompleteness {
 }
 
 const TRUSTED_ATTESTATIONS = new Set(["server_collected", "analyst_submitted"]);
-const SUCCESSFUL_CHECK_STATES = new Set(["confirmed", "finding", "checked-empty", "complete"]);
+const SUCCESSFUL_CHECK_STATES = new Set(["confirmed", "reported", "finding", "checked-empty", "complete"]);
 
 function checkRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -141,19 +146,30 @@ export function coverageQualifiedCompleteness(input: {
   const nowMs = Date.now();
   const rows = applicable.map((value) => {
     const check = checkRecord(value);
+    const metadata = checkRecord(check.metadata);
     const id = typeof check.checkId === "string"
       ? check.checkId
       : typeof check.check_id === "string"
         ? check.check_id
         : "";
-    const recorded = !checkIsStale(check, nowMs)
-      && SUCCESSFUL_CHECK_STATES.has(String(check.status ?? check.state ?? ""));
-    return { id, recorded };
+    // Persisted check_runs normalize every successful detailed outcome to
+    // state=complete and retain confirmed/reported/finding/checked-empty in
+    // metadata.status. Safety semantics must read that frozen detailed state;
+    // otherwise a registry miss would become indistinguishable from a legal-
+    // entity confirmation after persistence.
+    const status = String(check.status ?? metadata.status ?? check.state ?? "");
+    const current = !checkIsStale(check, nowMs);
+    const recorded = current && SUCCESSFUL_CHECK_STATES.has(status);
+    return {
+      id,
+      recorded,
+      neverWaiveRecorded: current && neverWaiveCheckRecorded(id, status),
+    };
   });
   const hasStableIds = rows.some((row) => row.id);
   const recordedCount = rows.filter((row) => row.recorded).length;
   const openNeverWaive = hasStableIds
-    && rows.some((row) => row.id && NEVER_WAIVE_CHECK_IDS.has(row.id) && !row.recorded);
+    && rows.some((row) => row.id && NEVER_WAIVE_CHECK_IDS.has(row.id) && !row.neverWaiveRecorded);
   const recordedPercent = Math.floor((recordedCount / rows.length) * 100);
   const coverageSufficient = hasStableIds
     ? !openNeverWaive && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT

@@ -2,12 +2,13 @@ import type { Dossier } from "../src/data/dossier";
 import type { TraceStep } from "../src/data/evidence";
 import type { ResolvedInput, RunnableTokenInput } from "../src/lib/resolveInput";
 import type { ScreenDeployerRiskFn, ScreenSanctionsFn, TokenDossier } from "../src/token/audit";
+import type { ResearchIntent } from "../src/lib/researchDirector";
 
 /** Typed boundary for the generated server collector bundle. */
 export function runAudit(
   handle: string,
   emit?: (step: TraceStep) => void,
-  options?: { organizationId?: string; analystDeadlineAt?: number },
+  options?: { organizationId?: string; analystDeadlineAt?: number; intent?: ResearchIntent },
 ): Promise<Dossier | null>;
 
 export function auditToken(

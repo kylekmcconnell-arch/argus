@@ -15,6 +15,8 @@
 
 import { recordCall } from "../cost";
 import { env } from "../config";
+import { captureTimestamp } from "../captureTime";
+import { canonicalOfficialWebsite } from "../../src/lib/fundScaleEvidence";
 import { formatUsd } from "./defiLlama";
 
 const API_BASE = "https://api.monid.ai/v1";
@@ -101,6 +103,8 @@ export interface CompanyEnrichment {
   firmographic?: FirmographicInfo;
   /** human-facing reference for the resolved company (its site), else Monid */
   sourceUrl: string;
+  /** Observation time of this exact enrichment result. */
+  capturedAt: string;
 }
 
 export type CompanyEnrichmentOutcome =
@@ -503,14 +507,34 @@ export function companyEnrichmentMatchesOfficialDomain(
     identityMatch?: CompanyEnrichment["identityMatch"];
     requestedDomain?: string;
     matchedDomain?: string;
+    matchMethod?: CompanyEnrichment["matchMethod"];
     sourceUrl: string;
+    capturedAt?: string;
   },
   officialWebsite?: string | null,
 ): boolean {
   if (enrichment.identityMatch !== "official_domain") return false;
-  const expected = hostOf(officialWebsite) ?? hostOf(enrichment.requestedDomain);
-  const matched = hostOf(enrichment.matchedDomain) ?? hostOf(enrichment.sourceUrl);
-  return Boolean(expected && matched && relatedOfficialHosts(expected, matched));
+  const expected = canonicalOfficialWebsite(officialWebsite)?.domain ?? null;
+  const requested = canonicalOfficialWebsite(enrichment.requestedDomain)?.domain ?? null;
+  const matched = canonicalOfficialWebsite(enrichment.matchedDomain)?.domain ?? null;
+  const source = canonicalOfficialWebsite(enrichment.sourceUrl)?.domain ?? null;
+  const methodCoherent = enrichment.matchMethod === "exact_host"
+    ? requested !== null && requested === matched
+    : enrichment.matchMethod === "parent_or_subdomain"
+      ? Boolean(requested && matched && requested !== matched && relatedOfficialHosts(requested, matched))
+      : false;
+  return Boolean(
+    expected
+    && requested
+    && matched
+    && source
+    && typeof enrichment.capturedAt === "string"
+    && Number.isFinite(Date.parse(enrichment.capturedAt))
+    && methodCoherent
+    && relatedOfficialHosts(expected, requested)
+    && relatedOfficialHosts(expected, matched)
+    && relatedOfficialHosts(source, matched),
+  );
 }
 
 /** Akta date {day,month,year} → YYYY-MM-DD / YYYY-MM / YYYY / null. */
@@ -794,6 +818,7 @@ export async function collectCompanyEnrichment(
       ...(management ? { management } : {}),
       ...(firmographic ? { firmographic } : {}),
       sourceUrl: websiteUrl(chosen.website) ?? "https://monid.ai",
+      capturedAt: captureTimestamp(),
     },
   };
 }

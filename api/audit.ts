@@ -19,6 +19,7 @@ import {
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
 } from "../src/lib/investigationRuntime.js";
 import { activateReportVersionWithAuthoritativeGraph } from "./_graph.js";
+import type { ResearchIntent } from "../src/lib/researchDirector.js";
 
 export const config = { maxDuration: 600 };
 
@@ -29,6 +30,12 @@ interface ServerDossier extends Dossier {
 
 const LINEAGE_METHODOLOGY_VERSION = "argus-person-v5-project-strength-bands";
 const FINAL_GRAPH_VERDICTS = new Set(["PASS", "CAUTION", "FAIL", "AVOID", "UNVERIFIABLE_IDENTITY"]);
+const RESEARCH_INTENTS = new Set<ResearchIntent>([
+  "investment_due_diligence",
+  "counterparty_risk",
+  "alpha_discovery",
+  "identity_and_control",
+]);
 
 const normRef = (value: string) =>
   value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
@@ -293,6 +300,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }));
     const dossier = await runAudit(handle, emit, {
       organizationId: auth.organizationId,
+      intent: typeof req.query.intent === "string" && RESEARCH_INTENTS.has(req.query.intent as ResearchIntent)
+        ? req.query.intent as ResearchIntent
+        : "investment_due_diligence",
       analystDeadlineAt: requestStartedAt
         + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
         - ANALYST_FINALIZATION_RESERVE_MS,

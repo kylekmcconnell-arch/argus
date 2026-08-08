@@ -9,6 +9,7 @@ import { auditToken, type TokenDossier } from "../token/audit";
 import { streamInvestigation, type Investigation } from "./investigation";
 import type { RunnableTokenInput } from "./resolveInput";
 import type { TraceStep } from "../data/evidence";
+import type { ResearchIntent } from "./researchDirector";
 
 export type ScanKind = "token" | "investigation";
 export interface ScanRun {
@@ -25,6 +26,7 @@ export interface ScanRun {
   error?: string;
   hop?: string;       // investigation subtitle
   startedAt: number;
+  intent?: ResearchIntent;
 }
 
 type Listener = () => void;
@@ -90,14 +92,18 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
 }
 
 // Start (or re-attach to) a background token investigation.
-export function startInvestigationScan(input: RunnableTokenInput, priv = false, opts?: { force?: boolean }): ScanRun {
+export function startInvestigationScan(
+  input: RunnableTokenInput,
+  priv = false,
+  opts?: { force?: boolean; intent?: ResearchIntent },
+): ScanRun {
   const rawInput = input.ref;
   const ref = norm(input.ref);
   const key = `investigation:${ref}`;
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
 
-  const run: ScanRun = { id: `inv:${ref}:${Date.now()}`, kind: "investigation", ref, input: rawInput, label: trunc(rawInput.replace(/^[@$]/, "")), priv, steps: [], pct: 0, status: "running", startedAt: Date.now() };
+  const run: ScanRun = { id: `inv:${ref}:${Date.now()}`, kind: "investigation", ref, input: rawInput, label: trunc(rawInput.replace(/^[@$]/, "")), priv, steps: [], pct: 0, status: "running", startedAt: Date.now(), intent: opts?.intent };
   runs.set(key, run);
   emit();
 
@@ -107,7 +113,7 @@ export function startInvestigationScan(input: RunnableTokenInput, priv = false, 
     onHop: (sub) => { run.hop = sub; emit(); },
     onDone: (inv) => { run.status = "done"; run.result = inv; run.pct = 100; aborts.delete(key); emit(); onComplete?.(run); },
     onError: () => { run.status = "error"; run.error = "error"; aborts.delete(key); emit(); },
-  }, { forceTokenAudit: opts?.force });
+  }, { forceTokenAudit: opts?.force, intent: opts?.intent });
   aborts.set(key, abort);
   return run;
 }

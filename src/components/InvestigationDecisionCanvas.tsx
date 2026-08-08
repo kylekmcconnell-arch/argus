@@ -6,7 +6,8 @@ import {
 } from "./ReportCanvasPrimitives";
 import { plainLanguageSummary } from "../lib/plainLanguage";
 import type { VerdictArgument } from "../lib/reportInsights";
-import { VerdictArgumentBlock } from "./InvestigatorBrief";
+import type { DecisionLensId } from "../intelligence/types";
+import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief";
 
 export interface DecisionCanvasItem {
   label: string;
@@ -106,6 +107,7 @@ export function InvestigationDecisionCanvas({
   verdictTone,
   supports,
   concerns,
+  context = [],
   nextSteps,
   verified,
   openQuestions,
@@ -114,6 +116,8 @@ export function InvestigationDecisionCanvas({
   applicable,
   capturedAt,
   argument,
+  decisionLensId,
+  onDecisionLensChange,
   evidenceHref = "#token-evidence",
   methodologyHref = "#token-methodology",
 }: {
@@ -121,8 +125,11 @@ export function InvestigationDecisionCanvas({
   favorable: boolean;
   verdictTone: ReportCanvasTone;
   argument?: VerdictArgument | undefined;
+  decisionLensId?: DecisionLensId | undefined;
+  onDecisionLensChange?: ((lensId: DecisionLensId) => void) | undefined;
   supports: DecisionCanvasItem[];
   concerns: DecisionCanvasItem[];
+  context?: DecisionCanvasItem[];
   nextSteps: DecisionCanvasItem[];
   verified: DecisionCanvasItem[];
   openQuestions: DecisionCanvasItem[];
@@ -155,6 +162,9 @@ export function InvestigationDecisionCanvas({
       <div className="panel mt-3 overflow-hidden">
         {argument && (
           <div className="border-b border-line/70 px-5 py-4">
+            {decisionLensId && onDecisionLensChange && (
+              <DecisionLensSelector value={decisionLensId} onChange={onDecisionLensChange} />
+            )}
             <VerdictArgumentBlock argument={argument} />
           </div>
         )}
@@ -183,6 +193,16 @@ export function InvestigationDecisionCanvas({
                 ? "No risk or major unanswered question is recorded in this saved report."
                 : "No sourced positive finding is recorded in this saved report."}
             />
+            {context.length > 0 && (
+              <ReportCanvasNarrativeSection
+                id="report-important-context"
+                title="Important context"
+                description="Relevant saved observations that are neither support nor an adverse finding."
+                tone="neutral"
+                items={narrativeItems("context", context, evidenceHref)}
+                emptyCopy=""
+              />
+            )}
           </div>
 
           <aside className="border-t border-line/60 bg-panel-2/20 px-4 py-5 lg:border-l lg:border-t-0" aria-label="Scan progress">

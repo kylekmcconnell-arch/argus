@@ -96,4 +96,19 @@ describe("screenSanctionedAddresses (server-side direct screener)", () => {
 
     expect(out).toMatchObject({ available: false, sanctioned: [] });
   });
+
+  it("returns unavailable and does not cache when any EVM constituent list fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("_ETH.txt")) {
+        return listResponse("0x1111111111111111111111111111111111111111\n");
+      }
+      return { ok: false, status: 503, text: async () => "" } as Response;
+    }));
+
+    const out = await screenSanctionedAddresses("ethereum", [SANCTIONED_EVM]);
+
+    expect(out).toMatchObject({ available: false, checked: 1, sanctioned: [] });
+    expect(cacheSetJson).not.toHaveBeenCalled();
+  });
 });

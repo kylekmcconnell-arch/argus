@@ -40,6 +40,7 @@ describe("SnapshotEvidenceControl", () => {
     expect(container.querySelector("time")?.textContent).toContain("saved");
     expect(container.querySelector<HTMLButtonElement>("button")?.textContent?.trim()).toBe("Check current data");
     expect(container.querySelector("[role='status']")).toBeNull();
+    expect(container.querySelector("details")?.textContent).toContain("Saved-data options");
   });
 
   it("labels enabled intelligence as current and outside the stored verdict", async () => {
@@ -49,6 +50,7 @@ describe("SnapshotEvidenceControl", () => {
     expect(container.querySelector("[role='status']")?.textContent?.trim()).toBe(
       "Current data is shown separately and does not change the saved score.",
     );
+    expect(container.querySelector("details")?.textContent).toContain("Current data is separate");
   });
 
   it("nudges a re-scan on snapshots captured before the recall engine upgrades", () => {

@@ -46,10 +46,36 @@ describe("audit SSE liveness", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/audit?handle=%40argus&intent=investment_due_diligence",
+      expect.objectContaining({ headers: { accept: "text/event-stream" } }),
+    );
     expect(handlers.onStep).not.toHaveBeenCalled();
     expect(handlers.onDone).toHaveBeenCalledOnce();
     expect(handlers.onError).not.toHaveBeenCalled();
     abort();
+  });
+
+  it("sends the decision intent to the research director", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: done\ndata: {"handle":"@argus","report":{}}\n\n'));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    streamAudit("@argus", true, { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() }, "identity_and_control");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/audit?handle=%40argus&intent=identity_and_control&private=1",
+      expect.any(Object),
+    );
   });
 
   it("aborts and reports a genuinely inactive stream", async () => {

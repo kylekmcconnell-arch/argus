@@ -19,7 +19,7 @@ function payload(overrides: Partial<GovernancePayload> = {}): GovernancePayload 
       verifiedBySnapshot: true,
       followers: 125274,
       proposalCount: 197,
-      binding: "token_contract",
+      binding: "official_x",
     },
     proposals: [{
       id: "0x1",
@@ -35,7 +35,7 @@ function payload(overrides: Partial<GovernancePayload> = {}): GovernancePayload 
       top1Pct: 43.0,
       top2Pct: 80.5,
       contested: true,
-      topVoterCouldHaveFlipped: false,
+      topVoterExceedsMargin: false,
       endedAt: "2026-01-01T00:00:00.000Z",
     }],
     delegationDetected: true,
@@ -88,7 +88,7 @@ describe("who decides", () => {
     await render();
 
     expect(container.textContent).toContain("Verified by Snapshot");
-    expect(container.textContent).toContain("voting strategy reading this token's contract");
+    expect(container.textContent).toContain("matched by the project's official X account");
   });
 
   it("carries the voting-power caveat and never concludes capture", async () => {

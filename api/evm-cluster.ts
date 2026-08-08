@@ -10,6 +10,7 @@
 //
 // EVM only. Gated on ETHERSCAN_API_KEY (GoPlus is keyless). Bounded + graceful.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { describeWalletClusterTrace, type WalletClusterCoverage } from "../src/lib/walletClusterTruth.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
@@ -44,45 +45,95 @@ const SKIP = new Set<string>([
 ]);
 
 const ES = "https://api.etherscan.io/v2/api";
-async function txlist(chainid: number, address: string, key: string, offset: number, usage: ProviderUsage): Promise<any[]> {
+interface ExplorerRows {
+  rows: any[];
+  completed: boolean;
+  capped: boolean;
+}
+
+function noTransactions(body: any): boolean {
+  return body?.status === "0"
+    && typeof body?.result === "string"
+    && /no transactions found/i.test(body.result);
+}
+
+async function txlist(chainid: number, address: string, key: string, offset: number, usage: ProviderUsage): Promise<ExplorerRows> {
   usage.etherscan += 1;
   const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "txlist", address, startblock: "0", endblock: "99999999", page: "1", offset: String(offset), sort: "asc", apikey: key });
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
-  if (!r || !r.ok) return [];
+  if (!r || !r.ok) return { rows: [], completed: false, capped: false };
   const d = (await r.json().catch(() => null)) as any;
-  if (d != null) usage.etherscanSucceeded += 1;
-  return Array.isArray(d?.result) ? d.result : [];
+  if (Array.isArray(d?.result)) {
+    usage.etherscanSucceeded += 1;
+    return { rows: d.result, completed: true, capped: d.result.length >= offset };
+  }
+  if (noTransactions(d)) {
+    usage.etherscanSucceeded += 1;
+    return { rows: [], completed: true, capped: false };
+  }
+  return { rows: [], completed: false, capped: false };
 }
 
 // ERC-20 transfers of a SPECIFIC token for a wallet — holders passing the token
 // among themselves is a stronger coordination signal than sharing ETH.
-async function tokentx(chainid: number, wallet: string, token: string, key: string, usage: ProviderUsage): Promise<any[]> {
+async function tokentx(chainid: number, wallet: string, token: string, key: string, usage: ProviderUsage): Promise<ExplorerRows> {
+  const offset = 200;
   usage.etherscan += 1;
-  const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "tokentx", contractaddress: token, address: wallet, page: "1", offset: "200", sort: "desc", apikey: key });
+  const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "tokentx", contractaddress: token, address: wallet, page: "1", offset: String(offset), sort: "desc", apikey: key });
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
-  if (!r || !r.ok) return [];
+  if (!r || !r.ok) return { rows: [], completed: false, capped: false };
   const d = (await r.json().catch(() => null)) as any;
-  if (d != null) usage.etherscanSucceeded += 1;
-  return Array.isArray(d?.result) ? d.result : [];
+  if (Array.isArray(d?.result)) {
+    usage.etherscanSucceeded += 1;
+    return { rows: d.result, completed: true, capped: d.result.length >= offset };
+  }
+  if (noTransactions(d)) {
+    usage.etherscanSucceeded += 1;
+    return { rows: [], completed: true, capped: false };
+  }
+  return { rows: [], completed: false, capped: false };
 }
 
 // A holder's first funder + the set-members it directly transacted with. Reads both
 // ETH (txlist, oldest-first — captures the funding tx) AND transfers of the token
 // itself (tokentx) so wallets that pass the token to each other are linked.
-async function profile(chainid: number, wallet: string, token: string, key: string, inSet: Set<string>, usage: ProviderUsage): Promise<{ wallet: string; funder: string | null; cps: string[] }> {
-  const [txs, ttx] = await Promise.all([txlist(chainid, wallet, key, 2000, usage), tokentx(chainid, wallet, token, key, usage)]);
+async function profile(
+  chainid: number,
+  wallet: string,
+  token: string,
+  key: string,
+  inSet: Set<string>,
+  usage: ProviderUsage,
+): Promise<{
+  wallet: string;
+  funder: string | null;
+  cps: string[];
+  fundingCompleted: boolean;
+  transfersCompleted: boolean;
+  providerFailed: boolean;
+}> {
+  const [txRead, tokenRead] = await Promise.all([txlist(chainid, wallet, key, 2000, usage), tokentx(chainid, wallet, token, key, usage)]);
   let funder: string | null = null;
   const cps = new Set<string>();
-  for (const t of txs) {
+  for (const t of txRead.rows) {
     if (!funder && lc(t.to) === lc(wallet) && t.from && lc(t.from) !== lc(wallet) && Number(t.value) > 0 && t.isError !== "1") funder = lc(t.from);
     const other = lc(t.from) === lc(wallet) ? lc(t.to || "") : lc(t.from || "");
     if (other && other !== lc(wallet) && inSet.has(other)) cps.add(other);
   }
-  for (const t of ttx) {
+  for (const t of tokenRead.rows) {
     const other = lc(t.from) === lc(wallet) ? lc(t.to || "") : lc(t.from || "");
     if (other && other !== lc(wallet) && inSet.has(other)) cps.add(other);
   }
-  return { wallet: lc(wallet), funder, cps: [...cps] };
+  return {
+    wallet: lc(wallet),
+    funder: txRead.completed ? funder : null,
+    cps: [...cps],
+    // An ascending account-history page can establish a positive first funder,
+    // but a capped page with no funder cannot establish that none exists.
+    fundingCompleted: txRead.completed && (!txRead.capped || funder !== null),
+    transfersCompleted: txRead.completed && !txRead.capped && tokenRead.completed && !tokenRead.capped,
+    providerFailed: !txRead.completed || !tokenRead.completed,
+  };
 }
 
 class DSU {
@@ -123,7 +174,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const gd = gr && gr.ok ? ((await gr.json().catch(() => null)) as any) : null;
     if (gd != null) usage.goplusSucceeded += 1;
     const tok = gd?.result?.[lc(address)] ?? gd?.result?.[address] ?? null;
-    if (!tok) { res.status(200).json({ address, chain, available: true, clusters: [], walletsAnalyzed: 0, note: "No holder data available for this token." }); return; }
+    if (!tok) {
+      res.status(200).json({
+        address,
+        chain,
+        available: false,
+        clusters: [],
+        walletsAnalyzed: 0,
+        note: "GoPlus returned no holder record, so EVM wallet links were not measured.",
+      });
+      return;
+    }
     const creator = typeof tok.creator_address === "string" && isAddr(tok.creator_address) ? lc(tok.creator_address) : null;
     const holders = (tok.holders ?? [])
       .map((h: any) => ({ address: lc(String(h.address || "")), pct: Number(h.percent || 0) * 100, isContract: Number(h.is_contract) === 1, tag: String(h.tag || "") }))
@@ -133,12 +194,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const pctOf = new Map<string, number>();
     for (const h of holders.slice(0, MAX_WALLETS)) if (!pctOf.has(h.address)) { set.push(h.address); pctOf.set(h.address, h.pct); }
     if (creator && !SKIP.has(creator) && !pctOf.has(creator)) { set.push(creator); pctOf.set(creator, 0); }
-    if (set.length < 2) { res.status(200).json({ address, chain, available: true, clusters: [], walletsAnalyzed: set.length, note: "Not enough non-exchange holders to cluster." }); return; }
+    if (set.length < 2) {
+      const coverage: WalletClusterCoverage = {
+        sampled: set.length,
+        fullyTraced: 0,
+        historyTruncated: 0,
+        deadlineSkipped: 0,
+        providerFailed: 0,
+      };
+      const description = describeWalletClusterTrace({
+        clusters: [],
+        coverage,
+        directLinkLabel: "a direct token or native-currency transfer",
+      });
+      res.status(200).json({ address, chain, available: true, clusters: [], walletsAnalyzed: set.length, coverage, ...description });
+      return;
+    }
 
     // 2. Each holder's funder + in-set counterparties.
     const inSet = new Set(set);
     const deadline = Date.now() + 50000;
-    const profiles = await inChunks(set, CHUNK, async (w) => (Date.now() > deadline ? { wallet: w, funder: null, cps: [] } : profile(chainid, w, lc(address), key, inSet, usage)));
+    const profiles = await inChunks(set, CHUNK, async (w) => Date.now() > deadline
+      ? {
+          wallet: w,
+          funder: null as string | null,
+          cps: [] as string[],
+          fundingCompleted: false,
+          transfersCompleted: false,
+          providerFailed: false,
+          deadlineSkipped: true,
+        }
+      : {
+          ...(await profile(chainid, w, lc(address), key, inSet, usage)),
+          deadlineSkipped: false,
+        });
+
+    const coverage: WalletClusterCoverage = {
+      sampled: set.length,
+      fullyTraced: profiles.filter((p) => p.fundingCompleted && p.transfersCompleted).length,
+      historyTruncated: profiles.filter((p) => !p.deadlineSkipped && !p.fundingCompleted && !p.providerFailed).length,
+      deadlineSkipped: profiles.filter((p) => p.deadlineSkipped).length,
+      providerFailed: profiles.filter((p) => p.providerFailed).length,
+    };
 
     // 3. Union: shared non-exchange funder, or a direct transfer between members.
     const dsu = new DSU();
@@ -167,14 +264,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const funders = [...new Set(clinks.filter((l) => l.via).map((l) => l.via as string))];
       return {
         wallets: ws.map((w) => ({ address: w, pct: pctOf.get(w) ?? 0, insider: false, isCreator: w === creator })),
-        size: ws.length, combinedPct, sharedFunders: funders, links, includesCreator: creator ? ws.includes(creator) : false,
+        size: ws.length, combinedPct, sharedFunders: funders, links: clinks, includesCreator: creator ? ws.includes(creator) : false,
       };
     }).sort((a, b) => b.combinedPct - a.combinedPct || b.size - a.size);
 
-    const top = clusters[0];
-    const note = !clusters.length
-      ? `Analyzed ${set.length} top holders; found no on-chain links between them (independently funded, no direct transfers). No hidden common ownership detected.`
-      : `${clusters.length} coordinated wallet group${clusters.length === 1 ? "" : "s"} among the top holders. The largest is ${top.size} wallets controlling a combined ${top.combinedPct.toFixed(1)}% of supply${top.sharedFunders.length ? `, seeded by one funder (${top.sharedFunders[0].slice(0, 8)}…)` : " via direct transfers"}${top.includesCreator ? ", including the token's creator" : ""}. A holder chart shows these as separate wallets; on-chain they are one hand.`;
+    const description = describeWalletClusterTrace({
+      clusters,
+      coverage,
+      directLinkLabel: "a direct token or native-currency transfer",
+    });
 
     // Full analyzed set + edges for the client bubble map.
     const walletCluster = new Map<string, number>();
@@ -182,9 +280,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const allWallets = set.map((w) => ({ address: w, pct: pctOf.get(w) ?? 0, cluster: walletCluster.has(w) ? walletCluster.get(w)! : null, isCreator: w === creator }));
     const edges = links.map((l) => ({ a: l.a, b: l.b, type: l.type }));
 
-    res.status(200).json({ address, chain, available: true, walletsAnalyzed: set.length, clusters, allWallets, edges, note });
+    res.status(200).json({
+      address,
+      chain,
+      available: true,
+      walletsAnalyzed: set.length,
+      clusters,
+      allWallets,
+      edges,
+      coverage,
+      ...description,
+    });
   } catch (e) {
-    res.status(200).json({ address, chain, available: true, clusters: [], error: String(e), note: "EVM wallet clustering failed." });
+    res.status(200).json({ address, chain, available: false, clusters: [], error: String(e), note: "EVM wallet clustering failed." });
   } finally {
     if (usage.goplus > 0) {
       await attachPanelCost(auth.organizationId, panelCostVersionId, {

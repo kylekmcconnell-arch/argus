@@ -8,8 +8,9 @@
 //
 // The space is never bound by name. Candidate ids come from naming conventions
 // and a candidate is accepted only when Snapshot marks it verified AND one
-// independent fact ties it to this subject (a strategy reading the audited
-// token contract, the official X handle, or the official domain). See the
+// independent fact ties it to this subject (the official X handle or official
+// domain). A strategy address is chosen by the space creator and is not
+// identity evidence. See the
 // header of server/adapters/snapshot.ts for the live evidence that anything
 // looser binds a squatter: a zero-follower space named "uniswap" votes on the
 // genuine UNI contract.
@@ -31,14 +32,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const name = str(req.query.name);
-  const spaceId = str(req.query.space);
-  if (!name && !spaceId) return res.status(400).json({ error: "name or space is required" });
+  if (!name) return res.status(400).json({ error: "name is required" });
   // Bound before spending a call; these are identity hints, not free text.
-  if (name.length > 120 || spaceId.length > 120) return res.status(400).json({ error: "identity hint is too long" });
+  if (name.length > 120) return res.status(400).json({ error: "identity hint is too long" });
 
   const reading = await fetchGovernance({
-    name: name || null,
-    spaceId: spaceId || null,
+    name,
+    // Caller-supplied space ids are discovery input, not project provenance.
+    // The public route intentionally ignores ?space= and binds candidates only
+    // through Snapshot verification plus the subject's official X or domain.
+    spaceId: null,
     tokenAddress: str(req.query.address) || null,
     handle: str(req.query.handle) || null,
     website: str(req.query.website) || null,

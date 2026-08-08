@@ -8,6 +8,7 @@ import {
   analystAvailable,
   buildAnalystEvidencePacket,
   buildScoringEvidencePacket,
+  deriveInvestorStrengthBands,
   deriveProjectStrengthBands,
   extractScoringEvidenceCatalog,
   inspectAnalystScoringPreflight,
@@ -2374,6 +2375,7 @@ describe("analyst verdict integrity", () => {
         profile_collection_state: "resolved",
         profile_provider: "twitterapi",
         profile_captured_at: "2026-07-11T12:00:00.000Z",
+        identity_binding: "independent_exact_handle",
       },
       ventures: [{
         project_name: "Verified Venture",
@@ -2381,9 +2383,18 @@ describe("analyst verdict integrity", () => {
         outcome: "Active",
         artifact_verified: true,
       }],
+      basicFacts: [{
+        predicate: "conflict_of_interest",
+        value: "Published an ethics and related-party recusal policy.",
+        status: "verified",
+        artifact_verified: true,
+      }],
       testimonials: [{
         claimed_endorser_handle: "@verified_backer",
         claimed_relationship: "repeat backer",
+        public_acknowledgment: "endorsement",
+        relationship_corroborated: true,
+        corroboration_verdict: "Corroborated",
         artifact_verified: true,
       }],
       recentActivity: Array.from({ length: 12 }, (_, index) => ({
@@ -2404,7 +2415,10 @@ describe("analyst verdict integrity", () => {
           match: "relationship_confirmed",
           relationship: "invested_in",
           subjectName: "Subject",
+          subjectHandle: "@subject",
           projectName: "Verified Portfolio Company",
+          projectDomain: "verifiedportfolio.com",
+          attribution: "direct_subject",
           sourceClass: "first_party_subject",
         },
         verifiedFundScaleArtifact(),
@@ -2622,6 +2636,7 @@ describe("analyst verdict integrity", () => {
         profile_collection_state: "resolved",
         profile_provider: "twitterapi",
         profile_captured_at: "2026-07-11T12:00:00.000Z",
+        identity_binding: "independent_exact_handle",
       },
       sourceArtifacts: [...fundScaleRows, {
         kind: "portfolio_relationship",
@@ -2637,6 +2652,7 @@ describe("analyst verdict integrity", () => {
         subjectName: "Subject",
         subjectHandle: "@subject",
         projectName: "Verified Portfolio Company",
+        projectDomain: "verifiedportfolio.com",
         sourceClass: "first_party_subject",
         investorEntityName: "Subject",
         investorEntityDomain: "subject.example",
@@ -2829,6 +2845,15 @@ describe("analyst verdict integrity", () => {
       { axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" },
     ];
     const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@paradigm",
+        display_name: "Paradigm",
+        bio: "We invest in crypto companies and protocols.",
+        website: "https://paradigm.xyz",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-11T12:00:00.000Z",
+      },
       sourceArtifacts: [{
         kind: "portfolio_relationship",
         provider: "portfolio-web",
@@ -2840,7 +2865,12 @@ describe("analyst verdict integrity", () => {
         match: "relationship_confirmed",
         relationship: "invested_in",
         subjectName: "Paradigm",
+        subjectHandle: "@paradigm",
         projectName: "Acme Protocol",
+        projectDomain: "acmeprotocol.com",
+        investorEntityName: "Paradigm",
+        investorEntityDomain: "paradigm.xyz",
+        attribution: "direct_subject",
         sourceClass: "first_party_subject",
       }],
     }, axes);
@@ -3614,6 +3644,16 @@ describe("analyst verdict integrity", () => {
       provider: "public-web",
     });
     const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@famousinvestor",
+        display_name: "Famous Investor",
+        resolved_name: "Famous Investor",
+        bio: "Angel investor",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-13T12:00:00.000Z",
+        identity_binding: "independent_exact_handle",
+      },
       basicFacts: [
         fact("official_identity", "Verified investor identity"),
         fact("current_role", "Partner at Example Ventures"),
@@ -3633,8 +3673,8 @@ describe("analyst verdict integrity", () => {
 
     expect(eligibleAxes("Verified investor identity")).toEqual(["I1_identity_legitimacy"]);
     expect(eligibleAxes("Partner at Example Ventures")).toEqual(["I1_identity_legitimacy"]);
-    expect(eligibleAxes("Previously operator at Acme")).toEqual(["I2_portfolio_quality"]);
-    expect(eligibleAxes("Founded Example Ventures")).toEqual(["I2_portfolio_quality"]);
+    expect(eligibleAxes("Previously operator at Acme")).toBeUndefined();
+    expect(eligibleAxes("Founded Example Ventures")).toBeUndefined();
     expect(eligibleAxes("Personally invested in Portfolio Co")).toEqual(["I2_portfolio_quality"]);
     expect(eligibleAxes("Three source-backed portfolio exits")).toEqual(["I2_portfolio_quality"]);
     expect(eligibleAxes("Direct attributed regulatory event")).toEqual(["I5_reputation_fud"]);
@@ -4357,6 +4397,7 @@ describe("analyst verdict integrity", () => {
         profile_collection_state: "resolved",
         profile_provider: "twitterapi",
         profile_captured_at: "2026-07-11T11:58:00.000Z",
+        identity_binding: "independent_exact_handle",
       },
       ventures: [{
         project_name: "Verified Venture",
@@ -4364,9 +4405,18 @@ describe("analyst verdict integrity", () => {
         outcome: "Active",
         artifact_verified: true,
       }],
+      basicFacts: [{
+        predicate: "conflict_of_interest",
+        value: "Published an ethics and related-party recusal policy.",
+        status: "verified",
+        artifact_verified: true,
+      }],
       testimonials: [{
         claimed_endorser_handle: "@verified_backer",
         claimed_relationship: "repeat backer",
+        public_acknowledgment: "endorsement",
+        relationship_corroborated: true,
+        corroboration_verdict: "Corroborated",
         artifact_verified: true,
       }],
       recentActivity: [{
@@ -4399,7 +4449,10 @@ describe("analyst verdict integrity", () => {
               match: "relationship_confirmed",
               relationship: "invested_in",
               subjectName: "Subject",
+              subjectHandle: "@subject",
               projectName: "Verified Portfolio Company",
+              projectDomain: "verifiedportfolio.com",
+              attribution: "direct_subject",
               sourceClass: "first_party_subject",
             }
           : index === 2
@@ -4416,6 +4469,7 @@ describe("analyst verdict integrity", () => {
           }),
     }, productionCatalog);
     const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const investorBands = deriveInvestorStrengthBands(evidenceJson, productionCatalog);
     const aliasFor = (axis: string) => {
       const index = scorerCatalog.findIndex((artifact) =>
         artifact.verification !== "unavailable"
@@ -4428,9 +4482,11 @@ describe("analyst verdict integrity", () => {
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       requestBody = String(init?.body);
       const request = JSON.parse(requestBody) as { tool_choice: { name: string } };
-      const axes = productionCatalog.map(({ axis, weight }) => ({
+      const axes = productionCatalog.map(({ axis, weight, role }) => ({
         axis,
-        score: Math.floor(weight * 0.7),
+        score: role === SubjectClass.INVESTOR
+          ? investorBands[axis].minScore
+          : Math.floor(weight * 0.7),
         rationale: `Evidence-backed rationale for ${axis}`,
         primaryEvidenceRef: aliasFor(axis),
         additionalEvidenceRefs: [],
@@ -4517,6 +4573,7 @@ describe("analyst verdict integrity", () => {
         profile_collection_state: "resolved",
         profile_provider: "twitterapi",
         profile_captured_at: "2026-07-11T11:58:00.000Z",
+        identity_binding: "independent_exact_handle",
       },
       ventures: [{
         project_name: "Verified Venture",
@@ -4527,6 +4584,9 @@ describe("analyst verdict integrity", () => {
       testimonials: [{
         claimed_endorser_handle: "@verified_backer",
         claimed_relationship: "repeat backer and advisory counterparty",
+        public_acknowledgment: "endorsement",
+        relationship_corroborated: true,
+        corroboration_verdict: "Corroborated",
         artifact_verified: true,
       }],
       advised: [{
@@ -4558,6 +4618,7 @@ describe("analyst verdict integrity", () => {
         { predicate: "audit", value: "Independent protocol audit", status: "verified", artifact_verified: true },
         { predicate: "funding", value: "Bootstrapped with a disclosed treasury", status: "verified", artifact_verified: true },
         { predicate: "traction", value: "Verified protocol transaction volume", status: "verified", artifact_verified: true },
+        { predicate: "conflict_of_interest", value: "Published an ethics and related-party recusal policy", status: "verified", artifact_verified: true },
       ],
       projectToken: {
         verified: true,
@@ -4597,7 +4658,10 @@ describe("analyst verdict integrity", () => {
         match: "relationship_confirmed",
         relationship: "invested_in",
         subjectName: "Subject",
+        subjectHandle: "@subject",
         projectName: "Verified Portfolio Company",
+        projectDomain: "verifiedportfolio.com",
+        attribution: "direct_subject",
         sourceClass: "first_party_subject",
       }, verifiedFundScaleArtifact({ contentHash: "c".repeat(64), sourceContentHash: "d".repeat(64) }), {
         kind: "press",
@@ -4612,6 +4676,7 @@ describe("analyst verdict integrity", () => {
     }, allAxes);
     const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
     const projectBands = deriveProjectStrengthBands(evidenceJson, allAxes);
+    const investorBands = deriveInvestorStrengthBands(evidenceJson, allAxes);
     const aliasFor = (axis: string) => {
       const index = scorerCatalog.findIndex((artifact) =>
         artifact.verification !== "unavailable"
@@ -4636,6 +4701,8 @@ describe("analyst verdict integrity", () => {
               axis,
               score: role === SubjectClass.PROJECT
                 ? projectBands[axis].minScore
+                : role === SubjectClass.INVESTOR
+                  ? investorBands[axis].minScore
                 : Math.floor(weight * 0.7),
               rationale: `Evidence-backed rationale for ${axis}`,
               primaryEvidenceRef: aliasFor(axis),
@@ -5998,6 +6065,43 @@ describe("blue-chip evidence recall (report UX overhaul)", () => {
 // that once and killed the immutable save; every band must now carry at least
 // one reason for every tier the evidence can produce.
 describe("project band reasons contract (failed-persist regression)", () => {
+  it("never lets a provider projection mint a project score floor", async () => {
+    const { getProfile, SubjectClass } = await import("../src/engine");
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      basicFacts: [{
+        predicate: "investor",
+        value: "Aggregator-listed investor",
+        status: "verified",
+        artifact_verified: true,
+        providerProjection: true,
+      }],
+    }, axes);
+
+    expect(deriveProjectStrengthBands(packet, axes).P4_backing_and_partners.tier).toBe("none");
+    expect(projectScoreFloorsForPacket(packet, axes).P4_backing_and_partners).toBe(0);
+  });
+
+  it("does not turn a source-reported check outcome into an assessed-null score anchor", async () => {
+    const { getProfile, SubjectClass } = await import("../src/engine");
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      checkOutcomes: [{
+        checkId: "project-backing-partners",
+        status: "reported",
+        provider: "basic-facts-web",
+        note: "An aggregator attributed a backer, but no independent investment confirmation passed.",
+      }],
+    }, axes);
+    const artifact = extractScoringEvidenceCatalog(packet).find((row) =>
+      row.operation === "checkOutcomes:project-backing-partners");
+
+    expect(artifact?.verification).toBe("reported");
+    expect(deriveProjectStrengthBands(packet, axes).P4_backing_and_partners.tier).toBe("none");
+  });
+
   it("an investor-only P4 band carries a reason for its solid tier", async () => {
     const { buildScoringEvidencePacket, deriveProjectStrengthBands } = await import("./agent");
     const { getProfile, SubjectClass } = await import("../src/engine");

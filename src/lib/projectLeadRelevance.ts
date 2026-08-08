@@ -49,6 +49,18 @@ const PROJECT_FUNDING_CONTEXT = /\b(?:backed by|financ(?:e|ed|ing)|fund(?:ed|ing
 const PROJECT_INVESTOR_CONTEXT = /\b(?:backed by|funded by|invest(?:ed|ment|or)|led (?:the )?(?:financing|round)|participated in (?:the )?(?:financing|round))\b/i;
 const PROJECT_NEGATIVE_AUDIT_CONTEXT = /\b(?:no|not|none|without)\b[^.]{0,80}\baudits?\b|\baudits?\b[^.]{0,80}\b(?:absent|limited|not published|unpublished|unknown)\b/i;
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Match an X handle as one identity token, not as an arbitrary substring.
+ * `@base` must not bind a lead about "Database Protocol"; underscores remain
+ * part of a handle while punctuation and whitespace are valid boundaries.
+ */
+function namesHandle(text: string, handle: string): boolean {
+  if (!handle) return false;
+  return new RegExp(`(^|[^a-z0-9_])@?${escapeRegExp(handle)}(?=$|[^a-z0-9_])`, "i").test(text);
+}
+
 const UNBOUND_SOCIAL_LEAD_HOSTS = new Set([
   "facebook.com",
   "instagram.com",
@@ -127,8 +139,9 @@ export function projectLeadIsRelevant(subject: ProjectLeadSubject, lead: Project
   const normalizedText = text.toLowerCase();
   const wordText = normalizedText.replace(/[^a-z0-9]+/g, " ").trim();
   const wordName = displayName.replace(/[^a-z0-9]+/g, " ").trim();
+  const namesOfficialHandle = namesHandle(normalizedText, handle);
   const namesSubject = Boolean(
-    (handle && normalizedText.includes(handle))
+    namesOfficialHandle
     || (wordName.length >= 3 && ` ${wordText} `.includes(` ${wordName} `)),
   );
   const predicate = canonicalBasicFactPredicate(lead.predicate);
@@ -148,7 +161,10 @@ export function projectLeadIsRelevant(subject: ProjectLeadSubject, lead: Project
   // A docs page is not a source-code repository, and merely running on a
   // counterparty's chain is not proof of a partnership. Keep those search hits
   // out of the reader-facing lead list until the relationship language exists.
-  if (predicate === "repository") return PROJECT_REPOSITORY_CONTEXT.test(text);
+  if (predicate === "repository") {
+    return PROJECT_REPOSITORY_CONTEXT.test(text)
+      && (officialSource || namesSubject);
+  }
 
   // Money is the collision that costs the most to get wrong, and it used to be
   // the only branch with no identity test at all: the predicate vocabulary

@@ -37,7 +37,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("the reduced-coverage banner", () => {
+describe("the deployment configuration diagnostic", () => {
   it("says nothing when the only unconfigured providers are retired", async () => {
     // The live symptom: Crunchbase and Reddit are commented out of the adapter
     // registry and cannot run, yet every report carried a red "2 providers are
@@ -61,7 +61,7 @@ describe("the reduced-coverage banner", () => {
     await renderAlert();
 
     expect(container.textContent).toContain("Helius");
-    expect(container.textContent).toContain("is unavailable");
+    expect(container.textContent).toContain("is not configured in this deployment");
     // The retired lane must not be counted into the headline or listed.
     expect(container.textContent).not.toContain("Crunchbase");
     expect(container.textContent).not.toContain("2 providers");
@@ -76,6 +76,7 @@ describe("the reduced-coverage banner", () => {
     // The old copy asserted "team search, portfolios, namesake, identity"
     // depend on whatever happens to be down, which this banner cannot know.
     expect(container.textContent).not.toContain("Deep digs");
-    expect(container.textContent).toContain("missing from this report");
+    expect(container.textContent).toContain("does not establish whether any report lost coverage");
+    expect(container.textContent).not.toContain("missing from this report");
   });
 });

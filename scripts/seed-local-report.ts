@@ -41,7 +41,7 @@ const checks = personChecks({
 });
 
 const checkState = (check: ScanCheck): "complete" | "partial" | "unavailable" | "failed" | "not_run" => {
-  if (check.status === "confirmed" || check.status === "finding" || check.status === "checked-empty") return "complete";
+  if (check.status === "confirmed" || check.status === "reported" || check.status === "finding" || check.status === "checked-empty") return "complete";
   if (check.status === "unavailable") return "unavailable";
   if (check.status === "stale") return "partial";
   return "not_run";

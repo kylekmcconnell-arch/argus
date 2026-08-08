@@ -62,6 +62,7 @@ function context(website: string | undefined = "https://jup.ag") {
   const evidence = emptyEvidence("@JupiterExchange");
   evidence.profile.display_name = "Jupiter";
   evidence.profile.resolved_name = "Jupiter";
+  evidence.profile.identity_binding = "licensed_exact_social";
   evidence.profile.website = website;
   evidence.roles = [SubjectClass.PROJECT];
   const ctx: CollectContext = {
@@ -109,6 +110,9 @@ describe("basic-facts lead parsing", () => {
     expect(prompts.join("\n")).toContain("[project.official_token]");
     expect(prompts.join("\n")).toContain("publicly traded equity or debt security");
     expect(prompts.join("\n")).toContain("attributed_entity and event_status");
+    expect(prompts.join("\n")).toContain("Canonical project identity fingerprint: exact X account @JupiterExchange");
+    expect(prompts.join("\n")).toContain("display name by itself is never sufficient identity evidence");
+    expect(prompts.join("\n")).toContain("first-party homepages and footers");
   });
 
   it("uses different question ledgers for projects, founders, and investors", () => {
@@ -173,6 +177,56 @@ describe("basic-facts lead parsing", () => {
     expect(investor.find((question) => question.id === "investor.founder")?.critical).toBe(true);
     expect(investor.find((question) => question.id === "investor.public_security")?.critical).toBe(true);
     expect(investor.find((question) => question.id === "investor.official_token")?.critical).toBe(true);
+  });
+
+  it("gives a fund account an organization ledger instead of a person's biography ledger", () => {
+    const { ctx, evidence } = context(undefined);
+    ctx.handle = "@theformsvc";
+    evidence.profile = {
+      ...evidence.profile,
+      handle: "@theformsvc",
+      display_name: "TheForms - Your Partner",
+      resolved_name: undefined,
+      bio: "Capital follows understanding. We back founders building infrastructure for what comes next.",
+    };
+    evidence.roles = [SubjectClass.INVESTOR];
+
+    const questions = basicFactsResearchQuestions(ctx);
+    expect(questions.map((question) => question.id)).toEqual(expect.arrayContaining([
+      "investor_org.official_identity",
+      "investor_org.executive",
+      "investor_org.investor",
+      "investor_org.legal_entity",
+      "investor_org.track_record",
+    ]));
+    expect(questions.some((question) => question.predicate === "current_role")).toBe(false);
+    expect(questions.some((question) => question.predicate === "education")).toBe(false);
+    expect(questions.some((question) => question.predicate === "official_token")).toBe(false);
+    expect(questions.some((question) => question.predicate === "public_security")).toBe(false);
+  });
+
+  it("gives an agency account a business ledger instead of a person's biography ledger", () => {
+    const { ctx, evidence } = context(undefined);
+    ctx.handle = "@acmegrowth";
+    evidence.profile = {
+      ...evidence.profile,
+      handle: "@acmegrowth",
+      display_name: "Acme Growth Studio",
+      resolved_name: undefined,
+      bio: "We help companies grow through product and marketing.",
+    };
+    evidence.roles = [SubjectClass.AGENCY];
+
+    const questions = basicFactsResearchQuestions(ctx);
+    expect(questions.map((question) => question.id)).toEqual(expect.arrayContaining([
+      "organization.official_identity",
+      "organization.executive",
+      "organization.product",
+      "organization.partnership",
+      "organization.legal_entity",
+    ]));
+    expect(questions.some((question) => question.predicate === "education")).toBe(false);
+    expect(questions.some((question) => question.predicate === "current_role")).toBe(false);
   });
 
   it.each([
@@ -453,6 +507,7 @@ describe("question-specific asset search", () => {
     const { ctx, evidence } = context("https://alice.example");
     evidence.profile.display_name = "Alice";
     evidence.profile.resolved_name = "Alice";
+    evidence.profile.identity_binding = "licensed_exact_social";
     evidence.roles = [SubjectClass.FOUNDER];
     const prompts: string[] = [];
     const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
@@ -653,7 +708,9 @@ describe("critical-gap search recovery", () => {
     ctx.handle = "@StaniKulechov";
     evidence.profile.handle = "@StaniKulechov";
     evidence.profile.display_name = "Stani";
-    evidence.profile.resolved_name = "Stani";
+    evidence.profile.resolved_name = "Stani Kulechov";
+    evidence.profile.identity_binding = "licensed_exact_social";
+    evidence.profile.identity_binding = undefined;
     evidence.roles = [SubjectClass.FOUNDER];
     let prompt = "";
     const question = basicFactsResearchQuestions(ctx).filter((candidate) =>
@@ -683,12 +740,13 @@ describe("critical-gap search recovery", () => {
     expect(prompt).toContain("value must contain only the person's full public name");
   });
 
-  it("checks a handle-derived full name against bounded first-party identity pages", async () => {
+  it("keeps a handle-derived full name unbound when only a profile-supplied first-party page names it", async () => {
     const { ctx, evidence } = context("https://aave.com/");
     ctx.handle = "@StaniKulechov";
     evidence.profile.handle = "@StaniKulechov";
     evidence.profile.display_name = "Stani";
     evidence.profile.resolved_name = "Stani";
+    evidence.profile.identity_binding = undefined;
     evidence.roles = [SubjectClass.FOUNDER];
     const aboutUrl = "https://aave.com/about";
 
@@ -704,14 +762,11 @@ describe("critical-gap search recovery", () => {
       }),
     });
 
-    expect(evidence.profile.resolved_name).toBe("Stani Kulechov");
-    expect(evidence.profile.identity_confidence).toBe("Probable");
-    expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
+    expect(evidence.profile.resolved_name).toBe("Stani");
+    expect(evidence.profile.identity_binding).toBeUndefined();
+    expect(evidence.basicFacts).not.toContainEqual(expect.objectContaining({
       predicate: "official_identity",
       value: "Stani Kulechov",
-      status: "verified",
-      discoveryProvider: "argus-identity-bootstrap",
-      sources: [expect.objectContaining({ url: aboutUrl, sourceClass: "official_subject" })],
     }));
     expect(evidence.basicFactLeads).toContainEqual(expect.objectContaining({
       predicate: "official_identity",
@@ -776,6 +831,83 @@ describe("critical-gap search recovery", () => {
       value: "Stani Kulechov",
       status: "verified",
     }));
+  });
+
+  it("rejects a same-named company's funding as a project fact", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Clutch",
+        predicate: "funding",
+        value: "$50 million Series D",
+        questionId: "project.funding",
+        excerpt: "Clutch raises $50 million Series D funding.",
+        sourceUrl: "https://www.torys.com/work/2021/11/clutch-series-d-financing",
+        sourceTitle: "Clutch Series D financing",
+      }),
+      document({
+        url: "https://www.torys.com/work/2021/11/clutch-series-d-financing",
+        host: "torys.com",
+        text: "<p>Canadian online used-car retailer Clutch raises $50 million Series D funding.</p>",
+      }),
+      ["Clutch", "@ClutchMarkets"],
+      "@ClutchMarkets",
+      ["https://stonkbrokers.io/"],
+    );
+
+    expect(fact).toBeNull();
+  });
+
+  it("rejects a same-named retail product as a crypto-project fact", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Clutch",
+        predicate: "product",
+        value: "Clutch Marketing Platform",
+        questionId: "project.product",
+        excerpt: "Clutch Marketing Platform is a retail behavior optimization product.",
+        sourceUrl: "https://www.utcretail.com/clutch-marketing-platform",
+        sourceTitle: "Clutch Marketing Platform",
+      }),
+      document({
+        url: "https://www.utcretail.com/clutch-marketing-platform",
+        host: "utcretail.com",
+        text: "<p>Clutch Marketing Platform is a retail behavior optimization product.</p>",
+      }),
+      ["Clutch", "@ClutchMarkets"],
+      "@ClutchMarkets",
+      ["https://stonkbrokers.io/"],
+    );
+
+    expect(fact).toBeNull();
+  });
+
+  it("accepts an identity-bound crypto founder interview for the project", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Clutch Markets",
+        predicate: "founder",
+        value: "OxSimpleFarmer",
+        questionId: "project.founder",
+        excerpt: "OxSimpleFarmer, founder of Clutch Markets, breaks down DeFi markets on Arbitrum.",
+        sourceUrl: "https://podcasts.apple.com/example/clutch-markets-founder",
+        sourceTitle: "Clutch Markets founder breaks down DeFi markets",
+      }),
+      document({
+        url: "https://podcasts.apple.com/example/clutch-markets-founder",
+        host: "podcasts.apple.com",
+        text: "<p>OxSimpleFarmer, founder of Clutch Markets, breaks down DeFi markets on Arbitrum.</p>",
+      }),
+      ["Clutch Markets", "Clutch", "@ClutchMarkets"],
+      "@ClutchMarkets",
+      ["https://stonkbrokers.io/"],
+    );
+
+    expect(fact).toMatchObject({
+      predicate: "founder",
+      value: "OxSimpleFarmer",
+      status: "lead",
+      artifact_verified: true,
+    });
   });
 
   it("does not borrow another nearby person's title for identity binding", () => {
@@ -1226,11 +1358,13 @@ describe("basic-facts source verification", () => {
     evidence.profile.handle = "@StaniKulechov";
     evidence.profile.display_name = "Stani";
     evidence.profile.resolved_name = "Stani";
+    evidence.profile.identity_binding = undefined;
     evidence.profile.profile_collection_state = "resolved";
     evidence.profile.profile_provider = "twitterapi";
     evidence.roles = [SubjectClass.FOUNDER];
     const aboutUrl = "https://aave.com/about";
-    const identityUrl = "https://aave.com/blog/stable-acquire";
+    const identityUrl = "https://www.coindesk.com/profile/stani-kulechov";
+    const identityWitnessUrl = "https://www.reuters.com/technology/stani-kulechov";
     const productUrl = "https://aave.com/history";
     const primary = [
       lead({
@@ -1261,8 +1395,9 @@ describe("basic-facts source verification", () => {
           predicate: "official_identity",
           value: "Stani Kulechov",
           questionId: "person.official_identity",
-          excerpt: "said Stani Kulechov, founder of Aave Labs.",
+          excerpt: "Stani Kulechov, an entrepreneur, uses the X account @StaniKulechov.",
           sourceUrl: identityUrl,
+          candidateUrls: [identityWitnessUrl],
         })];
       },
       fetchSource: fetchDocuments({
@@ -1274,9 +1409,15 @@ describe("basic-facts source verification", () => {
         }),
         [identityUrl]: document({
           url: identityUrl,
-          host: "aave.com",
-          text: "<p>This acquisition expands Aave's savings product, said Stani Kulechov, founder of Aave Labs.</p>",
+          host: "www.coindesk.com",
+          text: "<p>Stani Kulechov, an entrepreneur, uses the X account @StaniKulechov.</p>",
           contentHash: "c".repeat(64),
+        }),
+        [identityWitnessUrl]: document({
+          url: identityWitnessUrl,
+          host: "www.reuters.com",
+          text: "<p>Stani Kulechov, an entrepreneur, uses the X account @StaniKulechov.</p>",
+          contentHash: "d".repeat(64),
         }),
         [productUrl]: document({
           url: productUrl,
@@ -1287,9 +1428,10 @@ describe("basic-facts source verification", () => {
       }),
     });
 
-    expect(repairIds).not.toContain("person.official_identity");
+    expect(repairIds).toContain("person.official_identity");
     expect(evidence.profile.resolved_name).toBe("Stani Kulechov");
     expect(evidence.profile.identity_confidence).toBe("Probable");
+    expect(evidence.profile.identity_binding).toBe("independent_exact_handle");
     expect(evidence.basicFacts).toEqual(expect.arrayContaining([
       expect.objectContaining({
         predicate: "official_identity",
@@ -1306,16 +1448,11 @@ describe("basic-facts source verification", () => {
         value: "Aave Protocol",
         status: "verified",
       }),
-      expect.objectContaining({
-        predicate: "founder",
-        value: "Aave Labs",
-        status: "verified",
-      }),
     ]));
     expect(evidence.basicFactQuestionLedger?.find((entry) =>
       entry.questionId === "person.official_identity")).toEqual(expect.objectContaining({ status: "answered" }));
     expect(evidence.basicFactQuestionLedger?.find((entry) =>
-      entry.questionId === "person.founder")).toEqual(expect.objectContaining({ status: "answered" }));
+      entry.questionId === "person.founder")).toEqual(expect.objectContaining({ status: "unanswered" }));
   });
 
   it("does not recover another person's founder title from a shared official passage", async () => {
@@ -1323,7 +1460,8 @@ describe("basic-facts source verification", () => {
     ctx.handle = "@StaniKulechov";
     evidence.profile.handle = "@StaniKulechov";
     evidence.profile.display_name = "Stani";
-    evidence.profile.resolved_name = "Stani";
+    evidence.profile.resolved_name = "Stani Kulechov";
+    evidence.profile.identity_binding = "licensed_exact_social";
     evidence.roles = [SubjectClass.FOUNDER];
     const identityUrl = "https://aave.com/profile/stani";
     const roleUrl = "https://aave.com/about";
@@ -3824,7 +3962,8 @@ WBTC is an ERC-20 wrapped token issued by BitGo. Coinbase customers can trade WB
     ctx.handle = "@StaniKulechov";
     evidence.profile.handle = "@StaniKulechov";
     evidence.profile.display_name = "Stani";
-    evidence.profile.resolved_name = "Stani";
+    evidence.profile.resolved_name = "Stani Kulechov";
+    evidence.profile.identity_binding = "licensed_exact_social";
     evidence.roles = [SubjectClass.FOUNDER];
     const identityUrl = "https://stani.example/about";
     const officialRoleUrl = "https://stani.example/role";
@@ -5125,16 +5264,10 @@ describe("lead value core normalization", () => {
   });
 });
 
-// Regression: @VitalikButerin published INCOMPLETE in the live pipeline because
-// his pseudonymous display name ("vitalik.eth") never matched the "Vitalik
-// Buterin" that sources use, so no fact verified and no role routed. The
-// notability-gated reading alias is supposed to bridge that, but its only proof
-// of authority was a >=10 notable-follower reverse-check, which under-observes
-// for individuals (the curated reference set is org/fund accounts that do not
-// follow a person, even a famous one). A mega follower count is an alternate,
-// sufficient authority proof. This alias is READING ONLY and must never leak
-// into resolved_name (which feeds name-based OFAC / court screening).
-describe("pseudonymous mega-account name alias (Vitalik regression)", () => {
+// A follower count and a name-shaped handle are useful search hints, not an
+// account-to-person bridge. Name-only pages must remain quarantined until an
+// external receipt explicitly links the exact handle to the named person.
+describe("pseudonymous mega-account identity boundary", () => {
   function pseudonymousFounderCtx(followers: string) {
     const evidence = emptyEvidence("@VitalikButerin");
     evidence.profile.display_name = "vitalik.eth";
@@ -5165,11 +5298,10 @@ describe("pseudonymous mega-account name alias (Vitalik regression)", () => {
       fact.predicate === "founder" && fact.value === "Ethereum"
       && (fact.status === "verified" || fact.status === "corroborated"));
 
-  it("verifies a founder fact for a mega-account with a pseudonymous display name", async () => {
+  it("does not bind a mega-account to name-only founder pages", async () => {
     const { ctx, evidence } = pseudonymousFounderCtx("5.3M");
     await collectBasicFacts(ctx, { discover: founderLeads, fetchSource: founderDocs() });
-    expect(verifiedFounderOfEthereum(evidence)).toBe(true);
-    // Impersonation safety: the reading alias must never become resolved_name.
+    expect(verifiedFounderOfEthereum(evidence)).toBe(false);
     expect(evidence.profile.resolved_name ?? "").not.toMatch(/Vitalik Buterin/);
     expect(evidence.profile.identity_confidence ?? "").not.toBe("Confirmed");
   });
@@ -5200,6 +5332,7 @@ describe("knowledge base read-through", () => {
     const evidence = emptyEvidence("@alice");
     evidence.profile.display_name = "Alice";
     evidence.profile.resolved_name = "Alice";
+    evidence.profile.identity_binding = "licensed_exact_social";
     evidence.profile.website = "https://alice.example";
     evidence.profile.profile_collection_state = "resolved";
     evidence.profile.profile_provider = "twitterapi";
@@ -5467,35 +5600,41 @@ describe("grounded discovery lane", () => {
     }
   });
 
-  it("does not move an unprovisioned grounded lane to Claude when fallbacks are disabled", async () => {
+  it("moves an unprovisioned grounded lane to Claude even when duplicate-provider fallbacks are disabled", async () => {
     vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     vi.stubEnv("SERPER_API_KEY", "");
-    const fetchSpy = vi.fn();
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({
+      content: [{ type: "text", text: '{"facts":[]}' }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchSpy);
     const { ctx } = context();
 
     const result = await discoverPrimary(ctx, basicFactsResearchQuestions(ctx));
 
-    expect(result.provider).toBe("grounded");
-    expect(result.state).toBe("skipped");
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.provider).toBe("claude-web-search");
+    expect(result.state).toBe("partial");
+    expect(fetchSpy).toHaveBeenCalled();
   });
 
-  it("does not invoke Claude repair after a grounded primary outage when fallbacks are disabled", async () => {
+  it("does invoke Claude after a grounded primary is unavailable", async () => {
     vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     vi.stubEnv("SERPER_API_KEY", "");
-    const fetchSpy = vi.fn();
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({
+      content: [{ type: "text", text: '{"facts":[]}' }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchSpy);
     const { ctx } = context();
 
     const result = await collectBasicFacts(ctx);
 
     expect(result.state).toBe("partial");
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalled();
   });
 
   it("accepts Serper plus OpenRouter as a fully provisioned grounded primary", async () => {

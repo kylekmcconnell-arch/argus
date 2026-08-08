@@ -9,7 +9,7 @@ import { beginScan, endScan } from "../lib/activescans";
 import { syncReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
-import type { WebPerson } from "../lib/investigation";
+import type { WebPerson, WebTeamDiscoveryResult } from "../lib/investigation";
 import { ProjectResearch } from "./ProjectResearch";
 import { resolveProjectToken, type ResolvedProjectToken } from "../lib/resolveProjectToken";
 import { AddInfo } from "./AddInfo";
@@ -92,6 +92,33 @@ const hostFromUrl = (u: string) => { try { return new URL(/^https?:\/\//.test(u)
 // Verdict/finding text asserting an absent team — suppressed when a team IS known.
 const TEAM_ABSENCE = /\bno team\b|team not (?:established|found)|no (?:leadership|team) section|anonymous team/i;
 
+export function reconTeamPresentation(
+  siteNames: readonly string[],
+  discovery: WebTeamDiscoveryResult | null,
+): {
+  sitePeople: string[];
+  supplementalLeads: WebPerson[];
+  discoveryCopy: string;
+} {
+  const sitePeople = [...new Set(siteNames.map((name) => name.trim()).filter(Boolean))];
+  const supplementalLeads = discovery?.people ?? [];
+  const discoveryCopy = !discovery?.attempted
+    ? "Supplemental people discovery did not run. People outside the rendered site remain unknown."
+    : discovery.completed
+      ? supplementalLeads.length > 0
+        ? "Configured supplemental discovery completed. Its rows are follow-up context, not verified employment."
+        : "Configured supplemental discovery completed and surfaced no additional candidates in that bounded read."
+      : "Supplemental people discovery did not complete. People outside the rendered site remain unknown.";
+  return { sitePeople, supplementalLeads, discoveryCopy };
+}
+
+function supplementalPersonLabel(person: WebPerson): string {
+  if (person.evidenceKind === "project_association") return "X association only";
+  if (person.evidenceKind === "code_contribution") return "GitHub contribution";
+  if (person.evidenceKind === "team_attribution") return "team attribution";
+  return "web/X candidate";
+}
+
 export function ReconPage({ initialUrl, initialRecon, initialVersionContext, initialPrivate, onAudit, onInvestigate, onOpenRecent, onOpenBrief, onStartFresh }: { initialUrl?: string; initialRecon?: Recon; initialVersionContext?: ReportVersionContext; initialPrivate?: boolean; onAudit?: (q: string, priv?: boolean) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void; onOpenBrief?: (ref: string) => void; onStartFresh?: () => void }) {
   const [url, setUrl] = useState(initialUrl ?? initialRecon?.retrieval.url ?? "");
   const [priv, setPriv] = useState(!!initialPrivate);
@@ -118,7 +145,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
   const [briefBound, setBriefBound] = useState(Boolean(initialRecon && onOpenBrief));
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [webTeam, setWebTeam] = useState<WebPerson[]>([]);
+  const [webTeamDiscovery, setWebTeamDiscovery] = useState<WebTeamDiscoveryResult | null>(null);
   const [teamSearching, setTeamSearching] = useState(false);
   const [teamSearched, setTeamSearched] = useState(false);
   const [projToken, setProjToken] = useState<ResolvedProjectToken | null>(null);
@@ -154,7 +181,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
     setBriefBound(false);
     setStages([]);
     setPivotNotes([]);
-    setWebTeam([]);
+    setWebTeamDiscovery(null);
     setTeamSearched(false);
     setProjToken(null);
     setRedirecting(null);
@@ -260,7 +287,10 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
     if (isCurrent() && r.retrieval.status !== "gap" && panelCostToken) {
       setTeamSearching(true);
       void fetchReconWebTeam(r.retrieval.url, r.title ?? "", r, panelCostToken)
-        .then((people) => { if (isCurrent()) setWebTeam(people); })
+        .then((discovery) => {
+          if (!isCurrent()) return;
+          setWebTeamDiscovery(discovery);
+        })
         .finally(() => { if (isCurrent()) { setTeamSearching(false); setTeamSearched(true); } });
     }
     if (isCurrent()) setRunning(false);
@@ -281,9 +311,10 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
   // The recon'd host, for deleted-content archaeology.
   let reconHost = "";
   try { reconHost = recon ? new URL(recon.retrieval.url).hostname.replace(/^www\./, "") : ""; } catch { /* keep empty */ }
-  // Don't assert "no team" when we DID identify one (via the web/LinkedIn dig or
-  // the rendered page) — the thin render missing a team section isn't its absence.
-  const teamKnown = (recon?.team.names.length ?? 0) > 0 || webTeam.length > 0;
+  // Only names measured on the rendered first-party page can rebut the page's
+  // own missing-team signal. Supplemental rows are candidates, associations, or
+  // contributors and never establish employment.
+  const teamKnown = (recon?.team.names.length ?? 0) > 0;
 
   const openRecent = onOpenRecent
     ? (ref: string, kind?: ReportKind) => onOpenRecent(ref, kind)
@@ -563,48 +594,54 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
             </div>
           )}
 
-          {/* TEAM — the headline. Merge the names on the rendered page with the
-              deeper web/LinkedIn dig so every person shows, each enriched with a
-              handle/LinkedIn where the search found one. */}
+          {/* Keep first-party site names separate from supplemental candidates.
+              Search, association, and contribution rows never establish that a
+              person works for the project. */}
           {(recon.team.names.length > 0 || teamSearching || teamSearched) && (() => {
-            const merged = new Map<string, { name: string; handle?: string; role?: string; linkedin?: string; source: string }>();
-            const key = (n: string) => n.trim().toLowerCase();
-            for (const n of recon.team.names) merged.set(key(n), { name: n, source: "site" });
-            for (const p of webTeam) {
-              const ex = [...merged.values()].find((m) => key(m.name) === key(p.name));
-              if (ex) { ex.handle = ex.handle ?? p.handle; ex.role = ex.role ?? p.role; ex.linkedin = ex.linkedin ?? p.linkedin; ex.source = "site + web"; }
-              else merged.set(key(p.name), { name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, source: "web/LinkedIn" });
-            }
-            const people = [...merged.values()];
+            const team = reconTeamPresentation(recon.team.names, webTeamDiscovery);
             return (
               <div className="mt-3 panel p-4">
                 <div className="flex items-center gap-2">
-                  <span className="eyebrow">Team · {people.length} {people.length === 1 ? "person" : "people"}</span>
-                  {teamSearching && <span className="text-[11px] text-ink-faint">checking Google, LinkedIn, Crunchbase, and X…</span>}
+                  <span className="eyebrow">Named on the project site · {team.sitePeople.length}</span>
+                  {teamSearching && <span className="text-[11px] text-ink-faint">checking supplemental sources…</span>}
                 </div>
-                {people.length > 0 ? (
-                  <div className="mt-2 space-y-1.5">
-                    {people.map((p) => (
-                      <div key={p.handle ?? p.name} className="flex items-center justify-between gap-2">
-                        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                          <span className="text-[12.5px] text-ink">{p.name}</span>
-                          {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
-                          {p.role && <span className="text-[11px] text-ink-faint">{p.role}</span>}
-                          {p.linkedin && (
-                            <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
-                          )}
-                          <span className="text-[11px] text-ink-faint">({p.source})</span>
-                        </span>
-                        {p.handle && onAudit ? (
-                          <button onClick={() => onAudit(p.handle!, resultPolicy.displayedPrivate)} className="btn-chip tint-signal shrink-0">audit →</button>
-                        ) : (
-                          <span className="mono shrink-0 text-[11px] text-ink-faint">named only</span>
-                        )}
-                      </div>
-                    ))}
+                {team.sitePeople.length > 0 ? (
+                  <div className="mt-2">
+                    <p className="text-[11px] leading-snug text-ink-faint">First-party context from the rendered site, not independent identity verification.</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {team.sitePeople.map((name) => <span key={name} className="chip normal-case tracking-normal">{name}</span>)}
+                    </div>
                   </div>
                 ) : (
-                  !teamSearching && <p className="mt-1.5 text-[12.5px] text-ink-faint">ARGUS did not find named team members on the website, LinkedIn, or X.</p>
+                  <p className="mt-1.5 text-[12.5px] text-ink-faint">The rendered site did not name a team member.</p>
+                )}
+
+                {team.supplementalLeads.length > 0 && (
+                  <section className="mt-3 border-t border-line/60 pt-3" aria-label="Possible team leads">
+                    <div className="eyebrow">Possible people to verify · {team.supplementalLeads.length}</div>
+                    <p className="mt-1 text-[11px] leading-snug text-ink-faint">Search results, X associations, and code contributions are follow-up context. They are not counted as verified team.</p>
+                    <div className="mt-2 space-y-1.5">
+                      {team.supplementalLeads.map((person, index) => (
+                        <div key={`${person.provider ?? "unknown"}:${person.handle ?? person.name}:${index}`} className="flex items-center justify-between gap-2">
+                          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                            <span className="text-[12.5px] text-ink">{person.name}</span>
+                            {person.handle && <span className="mono text-[11px] text-ink-faint">{person.handle}</span>}
+                            {person.role && <span className="text-[11px] text-ink-faint">{person.role}</span>}
+                            {person.linkedin && <a href={person.linkedin} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>}
+                            <span className="chip normal-case tracking-normal">{supplementalPersonLabel(person)}</span>
+                          </span>
+                          {person.handle && onAudit ? (
+                            <button onClick={() => onAudit(person.handle!, resultPolicy.displayedPrivate)} className="btn-chip tint-signal shrink-0">Review</button>
+                          ) : (
+                            <span className="mono shrink-0 text-[11px] text-ink-faint">candidate only</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+                {!teamSearching && (teamSearched || webTeamDiscovery) && (
+                  <p className="mt-3 border-t border-line/60 pt-3 text-[11px] leading-snug text-ink-faint">{team.discoveryCopy}</p>
                 )}
               </div>
             );

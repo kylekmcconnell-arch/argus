@@ -37,6 +37,7 @@ const details = (overrides: Record<string, unknown> = {}) => ({
   symbol: "pdx",
   asset_platform_id: "solana",
   market_cap_rank: 42,
+  last_updated: "2026-07-12T16:55:00.000Z",
   platforms: { solana: SOLANA_TOKEN },
   links: { twitter_screen_name: "projectdex", homepage: ["https://project.example/"] },
   market_data: {
@@ -51,15 +52,19 @@ const details = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const pair = (overrides: Record<string, unknown> = {}) => ({
-  chainId: "solana",
-  pairAddress: "pool-valid",
-  baseToken: { address: SOLANA_TOKEN, symbol: "PDX" },
-  quoteToken: { address: OTHER_TOKEN, symbol: "USDC" },
-  priceUsd: "0.51",
-  liquidity: { usd: 5_000_000 },
-  ...overrides,
-});
+const pair = (overrides: Record<string, unknown> = {}) => {
+  const pairAddress = typeof overrides.pairAddress === "string" ? overrides.pairAddress : "pool-valid";
+  return {
+    chainId: "solana",
+    pairAddress,
+    url: `https://dexscreener.com/solana/${pairAddress}`,
+    baseToken: { address: SOLANA_TOKEN, symbol: "PDX" },
+    quoteToken: { address: OTHER_TOKEN, symbol: "USDC" },
+    priceUsd: "0.51",
+    liquidity: { usd: 5_000_000 },
+    ...overrides,
+  };
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -110,6 +115,30 @@ describe("verified project-token collection", () => {
         drawdownPct: -89.47,
       },
       providers: ["coingecko", "dexscreener", "geckoterminal"],
+      capturedAt: expect.any(String),
+      producerSources: {
+        identity: {
+          provider: "coingecko",
+          sourceUrl: "https://www.coingecko.com/en/coins/project-token",
+          capturedAt: expect.any(String),
+        },
+        market: {
+          provider: "coingecko",
+          sourceUrl: "https://www.coingecko.com/en/coins/project-token",
+          capturedAt: expect.any(String),
+          providerUpdatedAt: "2026-07-12T16:55:00.000Z",
+        },
+        liquidity: {
+          provider: "dexscreener",
+          sourceUrl: "https://dexscreener.com/solana/pool-valid",
+          capturedAt: expect.any(String),
+        },
+        history: {
+          provider: "geckoterminal",
+          sourceUrl: "https://api.geckoterminal.com/api/v2/networks/solana/pools/pool-valid/ohlcv/day?aggregate=1&limit=90&currency=usd",
+          capturedAt: expect.any(String),
+        },
+      },
       history: {
         points: [0.4, 0.6, 0.5],
         first: 0.4,
@@ -120,8 +149,11 @@ describe("verified project-token collection", () => {
         timeframe: "day",
         poolAddress: "pool-valid",
         sourceUrl: "https://api.geckoterminal.com/api/v2/networks/solana/pools/pool-valid/ohlcv/day?aggregate=1&limit=90&currency=usd",
+        capturedAt: expect.any(String),
       },
     });
+    expect(evidence.projectToken?.producerSources?.liquidity?.capturedAt).not.toBe("2026-07-12T16:55:00.000Z");
+    expect(evidence.projectToken?.producerSources?.history?.capturedAt).not.toBe("2026-07-12T16:55:00.000Z");
     expect(captured.cost.calls).toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: "coingecko", op: "project-search", calls: 1, succeeded: 1 }),
       expect.objectContaining({ provider: "coingecko", op: "project-details", calls: 1, succeeded: 1 }),
@@ -299,6 +331,28 @@ describe("verified project-token collection", () => {
       liquidityUsd: 1_552_550.02,
       pairAddress: PONS_POOL,
       providers: ["dexscreener", "geckoterminal"],
+      producerSources: {
+        identity: {
+          provider: "dexscreener",
+          sourceUrl: `https://dexscreener.com/robinhood/${PONS_POOL.toLowerCase()}`,
+          capturedAt: expect.any(String),
+        },
+        market: {
+          provider: "dexscreener",
+          sourceUrl: `https://dexscreener.com/robinhood/${PONS_POOL.toLowerCase()}`,
+          capturedAt: expect.any(String),
+        },
+        liquidity: {
+          provider: "dexscreener",
+          sourceUrl: `https://dexscreener.com/robinhood/${PONS_POOL.toLowerCase()}`,
+          capturedAt: expect.any(String),
+        },
+        history: {
+          provider: "geckoterminal",
+          sourceUrl: `https://api.geckoterminal.com/api/v2/networks/robinhood/pools/${PONS_POOL}/ohlcv/day?aggregate=1&limit=90&currency=usd`,
+          capturedAt: expect.any(String),
+        },
+      },
       history: {
         points: [0.01, 0.03, 0.04],
         first: 0.01,
@@ -309,6 +363,7 @@ describe("verified project-token collection", () => {
         timeframe: "day",
         poolAddress: PONS_POOL,
         sourceUrl: `https://api.geckoterminal.com/api/v2/networks/robinhood/pools/${PONS_POOL}/ohlcv/day?aggregate=1&limit=90&currency=usd`,
+        capturedAt: expect.any(String),
       },
     });
     expect(evidence.projectToken?.coingeckoId).toBeUndefined();
@@ -498,6 +553,60 @@ describe("verified project-token collection", () => {
 });
 
 describe("token declared on the project's own site", () => {
+  it("keeps official-site identity separate from DEX market and liquidity producers", async () => {
+    const siteToken = "0xe934e36a439c94017b64a3fece66af12099abf50";
+    const sitePool = "0x2222222222222222222222222222222222222222";
+    const dexSourceUrl = `https://dexscreener.com/base/${sitePool}`;
+    const historySourceUrl = `https://api.geckoterminal.com/api/v2/networks/base/pools/${sitePool}/ohlcv/day?aggregate=1&limit=90&currency=usd`;
+    const { ctx, evidence } = context("@projectdex", "Project Dex", "https://project.example/");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://project.example/") return new Response(`<button>${siteToken}</button>`, { status: 200 });
+      if (url.includes(`/latest/dex/tokens/${siteToken}`)) return json({
+        pairs: [{
+          chainId: "base",
+          pairAddress: sitePool,
+          url: dexSourceUrl,
+          baseToken: { address: siteToken, name: "Project Dex", symbol: "PDX" },
+          quoteToken: { address: "0x1111111111111111111111111111111111111111", symbol: "USDC" },
+          priceUsd: "0.25",
+          marketCap: 25_000_000,
+          fdv: 50_000_000,
+          volume: { h24: 1_250_000 },
+          liquidity: { usd: 2_500_000 },
+        }],
+      });
+      if (url === historySourceUrl) return json({
+        data: { attributes: { ohlcv_list: [[100, 0.2, 0.3, 0.1, 0.25, 50_000]] } },
+      });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toMatchObject({
+      verification: "official_domain",
+      sourceUrl: "https://project.example/",
+      priceUsd: 0.25,
+      marketCapUsd: 25_000_000,
+      liquidityUsd: 2_500_000,
+      producerSources: {
+        identity: {
+          provider: "official_site",
+          sourceUrl: "https://project.example/",
+          capturedAt: expect.any(String),
+        },
+        market: { provider: "dexscreener", sourceUrl: dexSourceUrl, capturedAt: expect.any(String) },
+        liquidity: { provider: "dexscreener", sourceUrl: dexSourceUrl, capturedAt: expect.any(String) },
+        history: { provider: "geckoterminal", sourceUrl: historySourceUrl, capturedAt: expect.any(String) },
+      },
+      history: { sourceUrl: historySourceUrl, capturedAt: expect.any(String) },
+    });
+    expect(evidence.projectToken?.producerSources?.identity.sourceUrl)
+      .not.toBe(evidence.projectToken?.producerSources?.market?.sourceUrl);
+  });
+
   it("extracts every distinct address and drops burn sinks", () => {
     // The live stonkbrokers.cash shape: a vault address linked to the
     // explorer, and the token contract behind a copy button.

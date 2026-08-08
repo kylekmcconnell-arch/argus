@@ -201,17 +201,18 @@ describe("the note reports shape, floors and the exchange rule, never a verdict"
       windowSigCount: 100,
       windowTxCount: 100,
       tracedCount: 36,
+      resolvedFunderCount: 36,
       clusters: [cluster()],
       cexFundedCount: 0,
       busyWalletCount: 0,
       sameBlock: [{ slot: 123, count: 9 }],
     });
 
-    expect(note).toContain("17 of the 36 traced");
+    expect(note).toContain("17 of the 36 wallets with a readable non-exchange seed funder");
     expect(note).toContain("still holds 12%");
     expect(note).toContain(", the rest sold or moved on");
     expect(note).toContain("together the group still holds");
-    expect(note).toContain("9 of them took supply in a single block");
+    expect(note).toContain("9 of the analyzed wallets took supply in a single block");
     expect(note).not.toMatch(/bundled|coordinated|scam/i);
   });
 
@@ -222,6 +223,7 @@ describe("the note reports shape, floors and the exchange rule, never a verdict"
       windowSigCount: 40,
       windowTxCount: 40,
       tracedCount: 10,
+      resolvedFunderCount: 10,
       clusters: [cluster({ funderIsCreator: true, size: 4, stillHeldPct: null })],
       cexFundedCount: 0,
       busyWalletCount: 0,
@@ -240,6 +242,7 @@ describe("the note reports shape, floors and the exchange rule, never a verdict"
       windowSigCount: 100,
       windowTxCount: 60,
       tracedCount: 30,
+      resolvedFunderCount: 10,
       clusters: [],
       cexFundedCount: 1,
       busyWalletCount: 19,
@@ -247,12 +250,31 @@ describe("the note reports shape, floors and the exchange rule, never a verdict"
     });
 
     expect(note).toContain("a floor");
-    expect(note).toContain("No two of the 30 traced wallets share a funding source.");
+    expect(note).toContain("No shared non-exchange seed funder was established among the 10 wallets whose funding origin was readable.");
+    expect(note).not.toContain("No two of the 30 traced wallets share a funding source.");
     expect(note).toContain("never counted as a shared funder");
     // A deep-history sniper wallet is unresolved, never independent, and one
     // exchange-funded wallet gets the singular verb.
     expect(note).toContain("19 of the traced are high-activity wallets");
     expect(note).toContain("unresolved is never counted as independent");
     expect(note).toContain("1 was funded straight from exchange custody");
+  });
+
+  it("does not publish unreadable funding as a negative result", () => {
+    const note = earlyBuyerNote({
+      buyersFound: 20,
+      buyersCapped: false,
+      windowSigCount: 100,
+      windowTxCount: 100,
+      tracedCount: 20,
+      resolvedFunderCount: 1,
+      clusters: [],
+      cexFundedCount: 0,
+      busyWalletCount: 19,
+      sameBlock: [],
+    });
+
+    expect(note).toContain("too little coverage to test for a shared source");
+    expect(note).not.toMatch(/no two|independently funded|no shared funder was found/i);
   });
 });
