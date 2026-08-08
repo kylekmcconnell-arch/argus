@@ -35,6 +35,34 @@ const SAFE_CONTENT_TYPES = new Set([
   "text/xml",
 ]);
 
+// A challenge page is served as a normal 200 with clean headers, and the
+// reader proxy relays it verbatim as if it were the article. Header-only
+// detection therefore misses it entirely, and the interstitial becomes "the
+// fetched source text": verification then searches a Cloudflare notice for
+// the claim, finds nothing, and books the lead as CHECKED AND NOT MATCHED.
+// Three live scans each verified 0 of their leads this way (0/28, 0/12, 0/0),
+// which is a failed read published as a negative finding.
+//
+// Bounded on purpose. These markers only fire on a SHORT body, because a real
+// article about Cloudflare outages legitimately contains this vocabulary and
+// must not be discarded.
+const ANTI_BOT_BODY_MARKERS: readonly RegExp[] = [
+  /^\s*title:\s*just a moment/im,
+  /^\s*title:\s*attention required/im,
+  /^\s*title:\s*(?:access denied|you have been blocked|security check)/im,
+  /this page maybe requiring captcha/i,
+  /enable javascript and cookies to continue/i,
+  /checking your browser before accessing/i,
+  /verify you are human/i,
+];
+const MAX_CHALLENGE_BODY_CHARS = 4000;
+
+export function bodyLooksLikeAntiBotChallenge(text: string): boolean {
+  const body = text.trim();
+  if (!body || body.length > MAX_CHALLENGE_BODY_CHARS) return false;
+  return ANTI_BOT_BODY_MARKERS.some((marker) => marker.test(body));
+}
+
 function antiBotChallengeHeaders(headers: Headers): boolean {
   const mitigation = headers.get("cf-mitigated") ?? "";
   const captcha = headers.get("x-datadome") ?? headers.get("x-captcha") ?? "";
@@ -483,7 +511,7 @@ export async function fetchPublicTextWithRecovery(
   if (!originalTarget) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
 
   const direct = await fetchValidatedPublicText(originalTarget, dependencies);
-  if (direct.status === "ok") {
+  if (direct.status === "ok" && !bodyLooksLikeAntiBotChallenge(direct.text)) {
     return {
       ...direct,
       retrievalMethod: "direct",
@@ -491,18 +519,28 @@ export async function fetchPublicTextWithRecovery(
       retrievalUrl: direct.url,
     };
   }
+  // A 200 whose body is a challenge page is a BLOCKED read, not a page. It
+  // takes the same recovery path a 403 does; if the reader is blocked too, the
+  // caller receives a failure it can publish as unavailable coverage instead
+  // of searching an interstitial for evidence that was never served.
+  const directWasChallenged = direct.status === "ok";
   // Rejected redirects are security decisions, not recoverable availability
   // failures. Never disclose their target to a third-party reader.
   if (direct.status === "rejected") return direct;
-  if (!JINA_RECOVERABLE_FAILURES.has(direct.reason)) return direct;
+  if (direct.status === "failed" && !JINA_RECOVERABLE_FAILURES.has(direct.reason)) return direct;
+  // When the direct read was a challenge, an unusable recovery must NOT fall
+  // back to that challenge body.
+  const unrecovered = (): PublicTextWithRecoveryResult => (
+    directWasChallenged ? { status: "failed", reason: "anti_bot_challenge_body" } : direct
+  );
   // Query strings routinely carry share tokens, OAuth codes, and other opaque
   // capabilities whose names cannot be exhaustively classified. Never forward
   // any query-bearing evidence URL to a third-party rendering service.
-  if (originalTarget.url.search) return direct;
+  if (originalTarget.url.search) return unrecovered();
   // Some products put the same bearer capability in a path segment. Direct
   // origin retrieval remains allowed, but a likely token/share/invite path or
   // opaque high-entropy segment must never be disclosed to the reader proxy.
-  if (pathnameMayContainCapability(originalTarget.url)) return direct;
+  if (pathnameMayContainCapability(originalTarget.url)) return unrecovered();
 
   const readerTarget = await validatedPublicTarget(
     `${JINA_READER_ORIGIN}${originalTarget.url.toString()}`,
@@ -526,6 +564,14 @@ export async function fetchPublicTextWithRecovery(
   }
   if (normalizedJinaSource(recovered.text) !== originalTarget.url.toString()) {
     return { status: "failed", reason: "reader_source_mismatch" };
+  }
+  // The reader answers 200 with its own clean text/markdown headers even when
+  // the upstream served an interstitial, so antiBotChallengeBody above cannot
+  // see it: that function requires an HTML content type. This is where the
+  // relayed challenge actually lands, and where three live scans lost every
+  // one of their leads to a "checked, did not match" that never happened.
+  if (bodyLooksLikeAntiBotChallenge(recovered.text)) {
+    return { status: "failed", reason: "reader_anti_bot_challenge" };
   }
 
   return {

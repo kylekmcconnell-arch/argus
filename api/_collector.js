@@ -11447,6 +11447,21 @@ var SAFE_CONTENT_TYPES = /* @__PURE__ */ new Set([
   "text/plain",
   "text/xml"
 ]);
+var ANTI_BOT_BODY_MARKERS = [
+  /^\s*title:\s*just a moment/im,
+  /^\s*title:\s*attention required/im,
+  /^\s*title:\s*(?:access denied|you have been blocked|security check)/im,
+  /this page maybe requiring captcha/i,
+  /enable javascript and cookies to continue/i,
+  /checking your browser before accessing/i,
+  /verify you are human/i
+];
+var MAX_CHALLENGE_BODY_CHARS = 4e3;
+function bodyLooksLikeAntiBotChallenge(text2) {
+  const body = text2.trim();
+  if (!body || body.length > MAX_CHALLENGE_BODY_CHARS) return false;
+  return ANTI_BOT_BODY_MARKERS.some((marker2) => marker2.test(body));
+}
 function antiBotChallengeHeaders(headers4) {
   const mitigation = headers4.get("cf-mitigated") ?? "";
   const captcha = headers4.get("x-datadome") ?? headers4.get("x-captcha") ?? "";
@@ -11713,7 +11728,7 @@ async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
   const originalTarget = await validatedPublicTarget(raw, void 0, lookup2);
   if (!originalTarget) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
   const direct = await fetchValidatedPublicText(originalTarget, dependencies);
-  if (direct.status === "ok") {
+  if (direct.status === "ok" && !bodyLooksLikeAntiBotChallenge(direct.text)) {
     return {
       ...direct,
       retrievalMethod: "direct",
@@ -11721,10 +11736,12 @@ async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
       retrievalUrl: direct.url
     };
   }
+  const directWasChallenged = direct.status === "ok";
   if (direct.status === "rejected") return direct;
-  if (!JINA_RECOVERABLE_FAILURES.has(direct.reason)) return direct;
-  if (originalTarget.url.search) return direct;
-  if (pathnameMayContainCapability(originalTarget.url)) return direct;
+  if (direct.status === "failed" && !JINA_RECOVERABLE_FAILURES.has(direct.reason)) return direct;
+  const unrecovered = () => directWasChallenged ? { status: "failed", reason: "anti_bot_challenge_body" } : direct;
+  if (originalTarget.url.search) return unrecovered();
+  if (pathnameMayContainCapability(originalTarget.url)) return unrecovered();
   const readerTarget = await validatedPublicTarget(
     `${JINA_READER_ORIGIN}${originalTarget.url.toString()}`,
     void 0,
@@ -11744,6 +11761,9 @@ async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
   }
   if (normalizedJinaSource(recovered.text) !== originalTarget.url.toString()) {
     return { status: "failed", reason: "reader_source_mismatch" };
+  }
+  if (bodyLooksLikeAntiBotChallenge(recovered.text)) {
+    return { status: "failed", reason: "reader_anti_bot_challenge" };
   }
   return {
     ...recovered,

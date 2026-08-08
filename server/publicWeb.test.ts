@@ -418,6 +418,52 @@ describe("public web evidence fetcher", () => {
     expect(requestMock).toHaveBeenCalledTimes(2);
   });
 
+  it("treats a reader-relayed bot challenge as a failed read, not as page content", async () => {
+    // The exact body shape three live scans received. The reader answers 200
+    // with text/plain, so the HTML-only challenge check cannot see it, and the
+    // interstitial became "the fetched source text" that verification then
+    // searched for the claim. Every lead was booked as checked-and-not-matched.
+    const requestMock = vi.fn(async (url: URL) => {
+      if (url.hostname === "example.com") return new Response("Cloudflare", { status: 403 });
+      return new Response([
+        "Title: Just a moment...",
+        "URL Source: https://example.com/evidence",
+        "Warning: This page maybe requiring CAPTCHA, please make sure you have the proper access.",
+        "Markdown Content:",
+        "Enable JavaScript and cookies to continue",
+      ].join("\n"), {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      });
+    });
+
+    const result = await fetchPublicTextWithRecovery("https://example.com/evidence", {
+      request: requestMock,
+      lookup: publicLookup,
+    });
+
+    expect(result).toEqual({ status: "failed", reason: "reader_anti_bot_challenge" });
+    expect(result).not.toHaveProperty("text");
+  });
+
+  it("keeps a long article that merely discusses bot challenges", async () => {
+    // The marker list must not discard real reporting about Cloudflare.
+    const article = `Title: How Cloudflare's challenge pages work\nURL Source: https://example.com/evidence\nMarkdown Content:\n${
+      "Operators see 'checking your browser before accessing' when a challenge fires. ".repeat(80)
+    }`;
+    const requestMock = vi.fn(async (url: URL) => {
+      if (url.hostname === "example.com") return new Response("Cloudflare", { status: 403 });
+      return new Response(article, { status: 200, headers: { "content-type": "text/plain" } });
+    });
+
+    const result = await fetchPublicTextWithRecovery("https://example.com/evidence", {
+      request: requestMock,
+      lookup: publicLookup,
+    });
+
+    expect(result).toMatchObject({ status: "ok", retrievalMethod: "reader_recovery" });
+  });
+
   it("rejects a reader HTTP redirect even when the final body declares the original source", async () => {
     const requestMock = vi.fn(async (url: URL) => {
       if (url.hostname === "example.com") return new Response("Cloudflare", { status: 403 });
