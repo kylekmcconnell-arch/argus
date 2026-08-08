@@ -336,17 +336,25 @@ const evalRequest: RequestFn = (url, options) => globalThis.fetch(
 
 /**
  * Eval mode swaps in a transport whose DNS "resolution" returns a fixed public
- * address, which is correct inside the harness (global fetch is patched and an
- * uncovered request fails closed) but removes the pinned-address SSRF guard
- * for every public-web read. It is a harness affordance, so a deployed
- * environment may never enter it, however the variable happens to be set.
+ * address. That is correct inside the harness, where global fetch is patched
+ * and an uncovered request fails closed without a socket, but on its own it
+ * removes the pinned-address SSRF guard from every public-web read.
+ *
+ * So it is NOT reachable from the environment. An env var is the wrong switch
+ * in both directions: a stray ARGUS_EVAL_MODE in a deployment would disable
+ * the guard in production, and a `vercel env pull` that drops VERCEL_ENV into
+ * a developer's shell would have defeated any environment-based counter-guard,
+ * silently sending an offline replay to the live internet. The harness turns
+ * this on for its own process and turns it off in a finally block.
  */
-function evalModeAllowed(): boolean {
-  return process.env.VERCEL_ENV === undefined && process.env.VERCEL === undefined;
+let evalTransportMode: "record" | "replay" | null = null;
+
+export function setEvalTransportMode(mode: "record" | "replay" | null): void {
+  evalTransportMode = mode;
 }
 
 function evalMode(): string | undefined {
-  return evalModeAllowed() ? process.env.ARGUS_EVAL_MODE : undefined;
+  return evalTransportMode ?? undefined;
 }
 
 function defaultRequestForMode(): RequestFn {

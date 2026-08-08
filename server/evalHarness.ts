@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { evalNativeRequest } from "./evalTransport";
+import { setEvalTransportMode } from "./publicWeb";
 
 export type EvalMode = "record" | "replay";
 
@@ -218,6 +219,10 @@ export async function withRecordedFetch<T>(
   const priorEvalMode = process.env.ARGUS_EVAL_MODE;
   const priorEvalCapturedAt = process.env.ARGUS_EVAL_CAPTURED_AT;
   process.env.ARGUS_EVAL_MODE = mode;
+  // The public-web transport takes eval mode from THIS call, not from the
+  // environment, so a stray variable can neither switch it on in a deployment
+  // nor switch it off in a local shell that has pulled deployment env vars.
+  setEvalTransportMode(mode);
   if (mode === "replay") {
     if (options.replayCapturedAt && Number.isFinite(Date.parse(options.replayCapturedAt))) {
       process.env.ARGUS_EVAL_CAPTURED_AT = new Date(options.replayCapturedAt).toISOString();
@@ -367,6 +372,7 @@ export async function withRecordedFetch<T>(
     return { result, fidelity, recordedCalls };
   } finally {
     globalThis.fetch = originalFetch;
+    setEvalTransportMode(null);
     if (priorEvalMode === undefined) delete process.env.ARGUS_EVAL_MODE;
     else process.env.ARGUS_EVAL_MODE = priorEvalMode;
     if (priorEvalCapturedAt === undefined) delete process.env.ARGUS_EVAL_CAPTURED_AT;
