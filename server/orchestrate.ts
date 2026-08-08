@@ -626,7 +626,17 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
         ctx.evidence.profile.website = hubResolved.website;
         ctx.emit({ phase: "P0 · Intake", label: "Official site resolved through the profile link hub", detail: `${hubResolved.hubUrl} lists ${hubResolved.website}, and that site links back to ${ctx.handle}. Using it as the official website.`, source: "site fetch", tone: "neutral" });
       } else {
-        ctx.emit({ phase: "P0 · Intake", label: "Profile links a link hub, not a website", detail: `${profileWebsite} did not resolve to a single site that links back to ${ctx.handle}. Site-based checks treat the official website as unknown.`, source: "site fetch", tone: "warn" });
+        // Actually treat it as unknown. Leaving the hub URL in place made the
+        // sentence below false: every site, team, and infrastructure check
+        // then ran against the AGGREGATOR. A live @theformsvc scan quoted
+        // Linktree's own marketing page as the subject's live site and went
+        // on to crawl linktr.ee/team and /leadership for the subject's
+        // people. The verification gate withheld those candidates, but a
+        // report must not spend calls hunting an unrelated company's staff,
+        // and one gate is the wrong place to first notice the subject is
+        // wrong. An unresolvable hub yields no official website.
+        ctx.evidence.profile.website = undefined;
+        ctx.emit({ phase: "P0 · Intake", label: "Profile links a link hub, not a website", detail: `${profileWebsite} did not resolve to a single site that links back to ${ctx.handle}. The link aggregator is not treated as the official website, so site-based checks run without one.`, source: "site fetch", tone: "warn" });
       }
     }
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
@@ -4123,7 +4133,17 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       // a decision-ready investor report with no track-record evidence. They
       // record the deliberate reason instead of sitting at an unexplained
       // "unknown" that reads as a collection failure.
-      const note = `Portfolio and fund-scale work was not dispatched under the ${researchPlan.intent} research intent. This is a deliberate scope choice, not a finding about the subject, and it leaves the investor track-record question open.`;
+      //
+      // The reason has to be the REAL one. A live run showed this row telling
+      // the reader the work was descoped by an intent that in fact dispatches
+      // it; the workstream was actually held back by an unresolved identity
+      // gate, which is a different fact about a different problem.
+      const identityGates = researchPlan.tasks
+        .filter((task) => task.capability === "portfolio_and_outcomes" || task.capability === "fund_scale")
+        .flatMap((task) => task.blockedBy ?? []);
+      const note = identityGates.length > 0
+        ? `Portfolio and fund-scale work was held back because the subject's exact identity is not yet bound (${identityGates.length} unresolved identity gate${identityGates.length === 1 ? "" : "s"}). Relationship searches stay blocked until then so evidence cannot bind to the wrong person, and the investor track-record question remains open.`
+        : `Portfolio and fund-scale work was not dispatched under the ${researchPlan.intent} research intent. This is a deliberate scope choice, not a finding about the subject, and it leaves the investor track-record question open.`;
       checkTracker.record({
         id: "vc-portfolio-track-record",
         status: "unavailable",

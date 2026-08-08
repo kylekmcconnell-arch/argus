@@ -11615,11 +11615,9 @@ var evalRequest = (url, options) => globalThis.fetch(
     redirect: "manual"
   }, () => nativeRequest(url, options))
 );
-function evalModeAllowed() {
-  return process.env.VERCEL_ENV === void 0 && process.env.VERCEL === void 0;
-}
+var evalTransportMode = null;
 function evalMode() {
-  return evalModeAllowed() ? process.env.ARGUS_EVAL_MODE : void 0;
+  return evalTransportMode ?? void 0;
 }
 function defaultRequestForMode() {
   return evalMode() === "record" || evalMode() === "replay" ? evalRequest : nativeRequest;
@@ -29068,7 +29066,8 @@ async function resolveProfile(ctx) {
         ctx.evidence.profile.website = hubResolved.website;
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Official site resolved through the profile link hub", detail: `${hubResolved.hubUrl} lists ${hubResolved.website}, and that site links back to ${ctx.handle}. Using it as the official website.`, source: "site fetch", tone: "neutral" });
       } else {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Profile links a link hub, not a website", detail: `${profileWebsite} did not resolve to a single site that links back to ${ctx.handle}. Site-based checks treat the official website as unknown.`, source: "site fetch", tone: "warn" });
+        ctx.evidence.profile.website = void 0;
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Profile links a link hub, not a website", detail: `${profileWebsite} did not resolve to a single site that links back to ${ctx.handle}. The link aggregator is not treated as the official website, so site-based checks run without one.`, source: "site fetch", tone: "warn" });
       }
     }
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
@@ -31611,7 +31610,8 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     checkTracker.provider("portfolio-verification", "Source-backed portfolio verification", "skipped", reason);
     checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "skipped", reason);
     if (directorDeselected) {
-      const note = `Portfolio and fund-scale work was not dispatched under the ${researchPlan.intent} research intent. This is a deliberate scope choice, not a finding about the subject, and it leaves the investor track-record question open.`;
+      const identityGates = researchPlan.tasks.filter((task) => task.capability === "portfolio_and_outcomes" || task.capability === "fund_scale").flatMap((task) => task.blockedBy ?? []);
+      const note = identityGates.length > 0 ? `Portfolio and fund-scale work was held back because the subject's exact identity is not yet bound (${identityGates.length} unresolved identity gate${identityGates.length === 1 ? "" : "s"}). Relationship searches stay blocked until then so evidence cannot bind to the wrong person, and the investor track-record question remains open.` : `Portfolio and fund-scale work was not dispatched under the ${researchPlan.intent} research intent. This is a deliberate scope choice, not a finding about the subject, and it leaves the investor track-record question open.`;
       checkTracker.record({
         id: "vc-portfolio-track-record",
         status: "unavailable",
