@@ -12,6 +12,7 @@ import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat
 import { threatScan } from "../threat/scan";
 import { aiCodeRead } from "../threat/codereview";
 import { receiptStats, sharedReceiptStats } from "../threat/receipts";
+import { ThreatReceipts } from "./ThreatReceipts";
 
 const VERDICT_META: Record<ThreatVerdict, { color: string; blurb: string }> = {
   SAFE: { color: "var(--color-pass)", blurb: "no mechanical red flags" },
@@ -175,6 +176,19 @@ function Tokenomics({ tk }: { tk: ThreatScan["tokenomics"] }) {
   );
 }
 
+function ShareButton({ address }: { address: string }) {
+  const [copied, setCopied] = useState(false);
+  const share = () => {
+    const url = `${window.location.origin}${window.location.pathname}?threat=${address}`;
+    void navigator.clipboard?.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); });
+  };
+  return (
+    <button onClick={share} className="mono rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">
+      {copied ? "link copied ✓" : "share ↗"}
+    </button>
+  );
+}
+
 function Report({ scan }: { scan: ThreatScan }) {
   const { call, dossier: d, code, deployer, checks } = scan;
   const m = VERDICT_META[call.verdict];
@@ -184,10 +198,11 @@ function Report({ scan }: { scan: ThreatScan }) {
       {/* header */}
       <div className="flex items-center gap-5 py-6">
         <RiskRing risk={call.risk} verdict={call.verdict} />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
             <h1 className="text-[22px] font-semibold text-ink">${scan.symbol}</h1>
             <span className="truncate text-[13px] text-ink-faint">{scan.name}</span>
+            <span className="ml-auto shrink-0"><ShareButton address={scan.address} /></span>
           </div>
           <div className="mono mt-0.5 text-[11px] text-ink-faint">{scan.chain} · {shortAddr(scan.address)} · {money(d.liquidityUsd)} liq · {money(d.mcap)} mcap</div>
           <div className="mt-2 flex items-center gap-2">
@@ -276,21 +291,40 @@ function Report({ scan }: { scan: ThreatScan }) {
 // Entry surface for the Threat scan rail item: paste a contract / DexScreener
 // URL → run. Shows the recent-flags ledger line so the track record is visible
 // before you even scan.
+type LandingMode = "token" | "wallet" | "receipts";
+
 export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" | "wallet") => void }) {
   const [val, setVal] = useState("");
-  const [mode, setMode] = useState<"token" | "wallet">("token");
+  const [mode, setMode] = useState<LandingMode>("token");
   const rs = useLedgerStats();
-  const submit = () => { const s = val.trim(); if (s) onScan(s, mode); };
+  const submit = () => { const s = val.trim(); if (s && mode !== "receipts") onScan(s, mode); };
   const samples = [
     { label: "$PEPE", ref: "0x6982508145454ce325ddbe47a25d4ec3d2311933" },
     { label: "$BONK", ref: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" },
   ];
-  const Tab = ({ m, label }: { m: "token" | "wallet"; label: string }) => (
+  const Tab = ({ m, label }: { m: LandingMode; label: string }) => (
     <button
       onClick={() => setMode(m)}
       className={`rounded-md px-3 py-1.5 text-[12.5px] font-medium transition ${mode === m ? "bg-panel text-ink soft-shadow" : "text-ink-faint hover:text-ink-dim"}`}
     >{label}</button>
   );
+  const tabs = (
+    <div className="inline-flex w-fit gap-1 rounded-lg border border-line p-1">
+      <Tab m="token" label="Scan a token" />
+      <Tab m="wallet" label="Scan a wallet" />
+      <Tab m="receipts" label={`Track record${rs.flagged ? ` · ${rs.flagged}` : ""}`} />
+    </div>
+  );
+
+  if (mode === "receipts") {
+    return (
+      <div className="mx-auto max-w-3xl px-4 pt-10">
+        {tabs}
+        <ThreatReceipts onOpen={(addr) => onScan(addr, "token")} />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex min-h-full max-w-2xl flex-col justify-center px-4 py-16">
       <h1 className="text-[26px] font-semibold tracking-tight text-ink">{mode === "token" ? "Token threat scan" : "Wallet threat triage"}</h1>
@@ -299,10 +333,7 @@ export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" 
           ? "Paste a contract address or DexScreener link. NERON reads the chain — authorities, liquidity, holders, the deployer's history — and LYRA reads the actual contract code, citing the functions and lines. You get a plain-English verdict on whether it's a trap."
           : "Paste a wallet address. Every token position is joined against the scanner's verdicts, with an at-risk-USD figure and a flag on any position with no market left to sell into. EVM is read keyless; Solana needs a Helius key on the backend."}
       </p>
-      <div className="mt-4 inline-flex w-fit gap-1 rounded-lg border border-line p-1">
-        <Tab m="token" label="Scan a token" />
-        <Tab m="wallet" label="Scan a wallet" />
-      </div>
+      <div className="mt-4">{tabs}</div>
       <div className="mt-4 flex gap-2">
         <input
           value={val}
@@ -323,9 +354,9 @@ export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" 
         </div>
       )}
       {rs.flagged > 0 && (
-        <p className="mono mt-8 text-[10.5px] text-ink-faint">
-          ledger: {rs.flagged} token{rs.flagged === 1 ? "" : "s"} flagged to date{rs.checked > 0 ? ` · ${rs.confirmedDead}/${rs.checked} re-checked flags confirmed dead` : ""}
-        </p>
+        <button onClick={() => setMode("receipts")} className="mono mt-8 text-left text-[10.5px] text-ink-faint hover:text-ink-dim">
+          ledger: {rs.flagged} token{rs.flagged === 1 ? "" : "s"} flagged to date{rs.checked > 0 ? ` · ${rs.confirmedDead}/${rs.checked} re-checked flags confirmed dead` : ""} — see the track record →
+        </button>
       )}
     </div>
   );
