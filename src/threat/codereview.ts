@@ -76,9 +76,9 @@ export async function aiCodeRead(
       { signal: AbortSignal.timeout(55000) },
     );
     if (!res.ok) return null;
-    const d = (await res.json()) as { ok?: boolean; summary?: string; dissent?: "cleaner" | "darker" | null };
+    const d = (await res.json()) as { ok?: boolean; summary?: string; dissent?: "cleaner" | "darker" | null; proxyOf?: string | null };
     if (!d.ok || !d.summary) return null;
-    return { summary: d.summary, dissent: d.dissent ?? null };
+    return { summary: d.summary, dissent: d.dissent ?? null, proxyOf: d.proxyOf ?? null };
   } catch {
     return null;
   }

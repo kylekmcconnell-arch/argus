@@ -10,9 +10,10 @@
 // averaging it away.
 //
 // Source tiers: Etherscan v2 (keyed, best coverage) → Sourcify (keyless).
-// Verdicts are cached by contract — source code is immutable, so a cached read
-// never goes stale (a proxy upgrade changes the implementation ADDRESS, which
-// the mechanical scan flags separately).
+// PROXIES: Etherscan's getsourcecode returns the PROXY STUB's source, not the
+// implementation where the token logic (and any trap) actually lives — so for a
+// verified proxy we resolve the implementation address and read ITS source, and
+// cache keyed on that address so an upgrade invalidates the read.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 // @ts-ignore — bundled JS sibling
 import { attachPanelCost, cacheGetJson, cacheSetJson, claudeUsd } from "./_cache.js";
@@ -26,10 +27,29 @@ const CHAINID: Record<string, number> = {
 };
 
 const MAX_SOURCE = 120_000; // chars of source fed to the model (~30k tokens)
+const ADDR = /^0x[a-f0-9]{40}$/;
 
-interface Fetched { name: string | null; source: string }
+interface Fetched { name: string | null; source: string; readAddress: string; proxyOf: string | null }
 
-async function fromEtherscan(chainid: number, address: string, key: string): Promise<Fetched | null> {
+// Flatten an Etherscan SourceCode field (raw single-file, or {{...}}-wrapped
+// multi-file JSON) into one blob with per-file headers so line citations stay
+// meaningful per file.
+function flattenEtherscanSource(raw: string): string {
+  if (raw.startsWith("{{") || raw.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(raw.replace(/^\{\{/, "{").replace(/\}\}$/, "}"));
+      const files = parsed.sources ?? parsed;
+      const flat = Object.entries(files as Record<string, { content?: string }>)
+        .map(([p, v]) => `// ===== FILE: ${p} =====\n${v?.content ?? ""}`)
+        .join("\n\n");
+      if (flat.trim()) return flat;
+    } catch { /* fall through to raw */ }
+  }
+  return raw;
+}
+
+// One raw getsourcecode row -> {name, source, proxy fields} or null.
+async function etherscanRow(chainid: number, address: string, key: string): Promise<any | null> {
   try {
     const r = await fetch(
       `https://api.etherscan.io/v2/api?chainid=${chainid}&module=contract&action=getsourcecode&address=${address}&apikey=${key}`,
@@ -37,24 +57,26 @@ async function fromEtherscan(chainid: number, address: string, key: string): Pro
     );
     if (!r.ok) return null;
     const d = (await r.json()) as any;
-    const row = d.result?.[0];
-    if (!row?.SourceCode) return null;
-    let src: string = row.SourceCode;
-    // Multi-file uploads arrive as {{...}}-wrapped JSON; flatten to one blob
-    // with per-file headers so line citations stay meaningful per file.
-    if (src.startsWith("{{") || src.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(src.replace(/^\{\{/, "{").replace(/\}\}$/, "}"));
-        const files = parsed.sources ?? parsed;
-        src = Object.entries(files as Record<string, { content?: string }>)
-          .map(([p, v]) => `// ===== FILE: ${p} =====\n${v?.content ?? ""}`)
-          .join("\n\n");
-      } catch { /* keep raw */ }
-    }
-    return { name: row.ContractName || null, source: src };
+    return d.result?.[0] ?? null;
   } catch {
     return null;
   }
+}
+
+async function fromEtherscan(chainid: number, address: string, key: string): Promise<Fetched | null> {
+  const row = await etherscanRow(chainid, address, key);
+  if (!row?.SourceCode) return null;
+  // If this is a proxy with a resolvable implementation, read the implementation's
+  // source instead — that's where the logic lives. Fall back to the proxy's own
+  // source when the implementation isn't verified.
+  const impl = String(row.Implementation ?? "").toLowerCase();
+  if ((row.Proxy === "1" || row.Proxy === 1) && ADDR.test(impl) && impl !== address) {
+    const implRow = await etherscanRow(chainid, impl, key);
+    if (implRow?.SourceCode) {
+      return { name: implRow.ContractName || row.ContractName || null, source: flattenEtherscanSource(implRow.SourceCode), readAddress: impl, proxyOf: address };
+    }
+  }
+  return { name: row.ContractName || null, source: flattenEtherscanSource(row.SourceCode), readAddress: address, proxyOf: null };
 }
 
 async function fromSourcify(chainid: number, address: string): Promise<Fetched | null> {
@@ -70,10 +92,44 @@ async function fromSourcify(chainid: number, address: string): Promise<Fetched |
       .filter(([p]) => /\.sol$/i.test(p))
       .map(([p, v]) => `// ===== FILE: ${p} =====\n${v?.content ?? ""}`)
       .join("\n\n");
-    return source ? { name: d.compilation?.name ?? null, source } : null;
+    return source ? { name: d.compilation?.name ?? null, source, readAddress: address, proxyOf: null } : null;
   } catch {
     return null;
   }
+}
+
+// Truncate long source at a FILE boundary when possible, so a citation never
+// lands past a mid-file cut.
+function clampSource(source: string): { source: string; truncated: boolean } {
+  if (source.length <= MAX_SOURCE) return { source, truncated: false };
+  const head = source.slice(0, MAX_SOURCE);
+  const lastBoundary = head.lastIndexOf("\n// ===== FILE:");
+  return { source: lastBoundary > MAX_SOURCE * 0.5 ? head.slice(0, lastBoundary) : head, truncated: true };
+}
+
+// Robustly turn the model's reply into {summary, dissent}. Prefers strict JSON,
+// then a fenced ```json block, and finally falls back to the cleaned prose as
+// the summary — showing LYRA's read beats failing with "unparseable output".
+export function parseReview(text: string): { summary: string; dissent: "cleaner" | "darker" | null } | null {
+  const clean = (s: string) => s.replace(/```json\s*|\s*```/g, "").trim();
+  const dissentOf = (v: unknown) => (v === "cleaner" || v === "darker" ? v : null);
+  // 1) a JSON object anywhere in the reply
+  const m = text.match(/\{[\s\S]*\}/);
+  if (m) {
+    try {
+      const p = JSON.parse(m[0]);
+      if (typeof p.summary === "string" && p.summary.trim()) {
+        return { summary: p.summary.trim().slice(0, 4000), dissent: dissentOf(p.dissent) };
+      }
+    } catch { /* fall through */ }
+  }
+  // 2) fenced block or raw prose — use the whole thing as the summary
+  const prose = clean(text);
+  if (prose) {
+    const dissent = /\bcleaner\b/i.test(prose) && !/\bdarker\b/i.test(prose) ? "cleaner" : /\bdarker\b/i.test(prose) && !/\bcleaner\b/i.test(prose) ? "darker" : null;
+    return { summary: prose.slice(0, 4000), dissent };
+  }
+  return null;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -87,11 +143,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const chainid = CHAINID[chain];
   if (!chainid) { res.status(200).json({ ok: false, note: "chain not supported" }); return; }
 
-  // Source is immutable per address — cache the read forever.
-  const cacheKey = `code-review:${chainid}:${address}`;
-  const cached = await cacheGetJson<{ summary: string; dissent: string | null; name: string | null }>(cacheKey);
-  if (cached) { res.status(200).json({ ok: true, cached: true, ...cached }); return; }
-
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (!anthropicKey) { res.status(200).json({ ok: false, note: "Claude not configured" }); return; }
 
@@ -101,8 +152,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     (await fromSourcify(chainid, address));
   if (!fetched) { res.status(200).json({ ok: false, note: "no verified source" }); return; }
 
-  const source = fetched.source.slice(0, MAX_SOURCE);
-  const truncated = fetched.source.length > MAX_SOURCE;
+  // Cache keyed on the address whose source was actually READ — for a proxy that
+  // is the implementation, so an upgrade to a new implementation reads fresh.
+  const cacheKey = `code-review:${chainid}:${fetched.readAddress}`;
+  const cached = await cacheGetJson<{ summary: string; dissent: string | null; name: string | null; proxyOf?: string | null }>(cacheKey);
+  if (cached) { res.status(200).json({ ok: true, cached: true, ...cached }); return; }
+
+  const { source, truncated } = clampSource(fetched.source);
 
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -124,8 +180,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           role: "user",
           content:
             `Token contract ${fetched.name ?? "(unnamed)"} at ${address} on ${chain}.\n` +
+            (fetched.proxyOf ? `NOTE: this is an upgradeable PROXY; the source below is its current implementation (${fetched.readAddress}). The logic can be swapped by whoever controls the upgrade — weigh that.\n` : "") +
             `Mechanical scan: verdict ${mechVerdict || "n/a"}${mechRisk ? ` (${mechRisk}/100 risk points)` : ""}, ` +
-            `${danger} danger-pattern hits, ${gated} privileged functions.${truncated ? " NOTE: source truncated." : ""}\n\n` +
+            `${danger} danger-pattern hits, ${gated} privileged functions.${truncated ? " NOTE: source truncated at a file boundary." : ""}\n\n` +
             `Verified source:\n\n${source}`,
         }],
       }),
@@ -135,18 +192,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const d = (await r.json()) as any;
     await attachPanelCost(address, { provider: "claude", op: "panel:code-review", calls: 1, usd: claudeUsd(d.usage) });
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
-    const m = text.match(/\{[\s\S]*\}/);
-    let parsed: any = {};
-    if (m) { try { parsed = JSON.parse(m[0]); } catch { /* */ } }
-    if (typeof parsed.summary !== "string" || !parsed.summary.trim()) {
-      res.status(200).json({ ok: false, note: "unparseable model output" });
-      return;
-    }
-    const out = {
-      summary: parsed.summary.trim().slice(0, 4000),
-      dissent: parsed.dissent === "cleaner" || parsed.dissent === "darker" ? parsed.dissent : null,
-      name: fetched.name,
-    };
+    const review = parseReview(text);
+    if (!review) { res.status(200).json({ ok: false, note: "empty model output" }); return; }
+    const out = { ...review, name: fetched.name, proxyOf: fetched.proxyOf };
     await cacheSetJson(cacheKey, out);
     res.status(200).json({ ok: true, cached: false, ...out });
   } catch (e) {

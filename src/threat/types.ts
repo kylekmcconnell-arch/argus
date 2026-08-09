@@ -72,8 +72,8 @@ export interface CodeReview {
   // Server-side AI pass (Claude reading the actual source). Null when the API
   // is unreachable or unkeyed — the static flags above always still apply. The
   // AI may DISSENT from the mechanical verdict; that dissent is surfaced, not
-  // averaged away.
-  ai: { summary: string; dissent: "cleaner" | "darker" | null } | null;
+  // averaged away. proxyOf is set when the read is of a proxy's implementation.
+  ai: { summary: string; dissent: "cleaner" | "darker" | null; proxyOf?: string | null } | null;
 }
 
 // ---- deployer reputation ----

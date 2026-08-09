@@ -129,6 +129,9 @@ function LyraRead({ scan }: { scan: ThreatScan }) {
         )}
       </div>
       {state === "loading" && <p className="mt-2 animate-pulse text-[12.5px] text-ink-faint">Reading the source line by line…</p>}
+      {ai?.proxyOf && (
+        <p className="mono mt-2 text-[10.5px] text-caution">⚠ upgradeable proxy — read the current implementation; the logic can be swapped by whoever controls the upgrade</p>
+      )}
       {ai && ai.summary.split(/\n{2,}/).map((p, i) => (
         <p key={i} className="mt-2 text-[13px] leading-relaxed text-ink-dim">{p}</p>
       ))}
