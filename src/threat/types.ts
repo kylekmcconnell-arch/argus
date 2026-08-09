@@ -131,4 +131,6 @@ export interface Receipt {
   status?: "alive" | "bleeding" | "dead";
   checkedAt?: number;
   deployer?: string | null;
+  codeVerified?: boolean;
+  flagCount?: number;
 }

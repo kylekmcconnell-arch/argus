@@ -13,7 +13,7 @@ import type {
   CodeReview, DeployerRep, ThreatCall, ThreatCheck, ThreatScan, ThreatVerdict,
 } from "./types";
 import { reviewCode } from "./codereview";
-import { byDeployer, recordReceipt } from "./receipts";
+import { recordReceipt, sharedByDeployer } from "./receipts";
 import { honeypotDeep, rugcheckReport, type HoneypotDeep, type RugcheckReport } from "./deepsources";
 
 const money = (n: number) =>
@@ -54,9 +54,9 @@ export async function threatScan(
     tone: code.verified ? (code.flags.some((f) => f.severity === "critical") ? "bad" : "good") : "warn",
   });
 
-  const deployer = deployerRep(dossier);
+  const deployer = await deployerRep(dossier);
   if (deployer.priorRugs > 0) {
-    emit?.({ phase: "NERON · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the ledger.`, tone: "bad" });
+    emit?.({ phase: "NERON · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the shared ledger.`, tone: "bad" });
   }
 
   const call = judge(dossier, code, deployer, rc, hp);
@@ -77,14 +77,15 @@ export async function threatScan(
     address: dossier.address, chain: dossier.chain, symbol: dossier.symbol,
     verdict: call.verdict, risk: call.risk, flaggedAt: scan.scannedAt,
     liqThen: dossier.liquidityUsd ?? 0, deployer: dossier.deployer,
+    codeVerified: code.verified, flagCount: code.flags.length,
   });
 
   return scan;
 }
 
-function deployerRep(d: TokenDossier): DeployerRep {
+async function deployerRep(d: TokenDossier): Promise<DeployerRep> {
   const prior = d.deployer
-    ? byDeployer(d.deployer).filter((r) => r.address.toLowerCase() !== d.address.toLowerCase())
+    ? (await sharedByDeployer(d.deployer)).filter((r) => r.address.toLowerCase() !== d.address.toLowerCase())
     : [];
   return {
     address: d.deployer,

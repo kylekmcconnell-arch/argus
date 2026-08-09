@@ -11,7 +11,7 @@ import type { TraceStep } from "../data/evidence";
 import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat/types";
 import { threatScan } from "../threat/scan";
 import { aiCodeRead } from "../threat/codereview";
-import { receiptStats } from "../threat/receipts";
+import { receiptStats, sharedReceiptStats } from "../threat/receipts";
 
 const VERDICT_META: Record<ThreatVerdict, { color: string; blurb: string }> = {
   SAFE: { color: "var(--color-pass)", blurb: "no mechanical red flags" },
@@ -20,6 +20,13 @@ const VERDICT_META: Record<ThreatVerdict, { color: string; blurb: string }> = {
   RUG: { color: "var(--color-avoid)", blurb: "confirmed trap" },
   UNKNOWN: { color: "var(--color-ink-faint)", blurb: "could not verify" },
 };
+
+// Ledger stats: instant local first paint, then the shared server figures.
+function useLedgerStats() {
+  const [stats, setStats] = useState(() => receiptStats());
+  useEffect(() => { sharedReceiptStats().then((s) => setStats({ flagged: s.flagged, confirmedDead: s.confirmedDead, checked: s.checked })); }, []);
+  return stats;
+}
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 const money = (n?: number) =>
@@ -132,7 +139,7 @@ function LyraRead({ scan }: { scan: ThreatScan }) {
 function Report({ scan }: { scan: ThreatScan }) {
   const { call, dossier: d, code, deployer, checks } = scan;
   const m = VERDICT_META[call.verdict];
-  const rs = receiptStats();
+  const rs = useLedgerStats();
   return (
     <div className="mx-auto max-w-3xl px-4 pb-16">
       {/* header */}
@@ -229,7 +236,7 @@ function Report({ scan }: { scan: ThreatScan }) {
 // before you even scan.
 export function ThreatLanding({ onScan }: { onScan: (ref: string) => void }) {
   const [val, setVal] = useState("");
-  const rs = receiptStats();
+  const rs = useLedgerStats();
   const submit = () => { const s = val.trim(); if (s) onScan(s); };
   const samples = [
     { label: "$PEPE", ref: "0x6982508145454ce325ddbe47a25d4ec3d2311933" },
