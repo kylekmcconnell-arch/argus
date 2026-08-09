@@ -176,10 +176,16 @@ function Tokenomics({ tk }: { tk: ThreatScan["tokenomics"] }) {
   );
 }
 
-function ShareButton({ address }: { address: string }) {
+function ShareButton({ scan }: { scan: ThreatScan }) {
   const [copied, setCopied] = useState(false);
   const share = () => {
-    const url = `${window.location.origin}${window.location.pathname}?threat=${address}`;
+    // The /api/card unfurl route: crawlers (X/TG/Discord) render the verdict
+    // card image; humans are redirected into ?threat=<address>.
+    const p = new URLSearchParams({
+      k: "threat", t: scan.address, title: scan.symbol, v: scan.call.verdict,
+      sc: String(scan.call.risk), s: scan.call.action,
+    });
+    const url = `${window.location.origin}/api/card?${p.toString()}`;
     void navigator.clipboard?.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); });
   };
   return (
@@ -202,7 +208,7 @@ function Report({ scan }: { scan: ThreatScan }) {
           <div className="flex items-baseline gap-2">
             <h1 className="text-[22px] font-semibold text-ink">${scan.symbol}</h1>
             <span className="truncate text-[13px] text-ink-faint">{scan.name}</span>
-            <span className="ml-auto shrink-0"><ShareButton address={scan.address} /></span>
+            <span className="ml-auto shrink-0"><ShareButton scan={scan} /></span>
           </div>
           <div className="mono mt-0.5 text-[11px] text-ink-faint">{scan.chain} · {shortAddr(scan.address)} · {money(d.liquidityUsd)} liq · {money(d.mcap)} mcap</div>
           <div className="mt-2 flex items-center gap-2">

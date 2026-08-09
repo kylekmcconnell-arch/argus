@@ -11,17 +11,23 @@ const VCOLOR: Record<string, string> = {
   FAIL: "#ea580c",
   AVOID: "#dc2626",
   UNVERIFIABLE_IDENTITY: "#7c3aed",
+  // threat-scan verdicts (higher risk = worse)
+  SAFE: "#16a34a",
+  DANGER: "#dc2626",
+  RUG: "#b91c1c",
+  UNKNOWN: "#71717a",
 };
 
 export default function handler(req: Request) {
   const u = new URL(req.url);
   const p = u.searchParams;
-  const kind = p.get("k") || "token"; // token | person
+  const kind = p.get("k") || "token"; // token | person | threat
+  const threat = kind === "threat";
   const title = (p.get("t") || "ARGUS").slice(0, 28);
   const sub = (p.get("s") || "").slice(0, 90);
-  const verdict = (p.get("v") || "PASS").toUpperCase();
+  const verdict = (p.get("v") || (threat ? "SAFE" : "PASS")).toUpperCase();
   const score = p.get("sc") || "";
-  const chip = p.get("c") || (kind === "token" ? "TOKEN AUDIT" : "PRINCIPAL AUDIT");
+  const chip = p.get("c") || (threat ? "THREAT SCAN" : kind === "token" ? "TOKEN AUDIT" : "PRINCIPAL AUDIT");
   const color = VCOLOR[verdict] || "#38e1c4";
 
   return new ImageResponse(
@@ -49,7 +55,7 @@ export default function handler(req: Request) {
 
         {/* subject */}
         <div style={{ display: "flex", marginTop: "70px", fontSize: "76px", fontWeight: 600, color: "#09090b", letterSpacing: "-2px" }}>
-          {kind === "token" ? "$" + title.replace(/^\$/, "") : title}
+          {kind === "person" ? title : "$" + title.replace(/^\$/, "")}
         </div>
         <div style={{ display: "flex", marginTop: "18px", fontSize: "28px", lineHeight: 1.35, color: "#52525b", maxWidth: "760px" }}>
           {sub}
@@ -64,7 +70,7 @@ export default function handler(req: Request) {
           {score && (
             <div style={{ display: "flex", alignItems: "baseline", border: `3px solid ${color}`, borderRadius: "9999px", padding: "16px 30px", color }}>
               <div style={{ fontSize: "56px", fontWeight: 800 }}>{score}</div>
-              <div style={{ fontSize: "24px", marginLeft: "4px", color: "#a1a1aa" }}>/100</div>
+              <div style={{ fontSize: "24px", marginLeft: "4px", color: "#a1a1aa" }}>{threat ? " risk" : "/100"}</div>
             </div>
           )}
         </div>

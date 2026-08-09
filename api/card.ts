@@ -7,27 +7,31 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   const q = req.query as Record<string, string>;
-  const kind = q.k === "person" ? "person" : "token";
+  const kind = q.k === "person" ? "person" : q.k === "threat" ? "threat" : "token";
   const ref = q.t || q.id || "";
   const title = q.title || ref;
   const verdict = (q.v || "").toUpperCase();
   const score = q.sc || "";
   const sub = q.s || "";
-  const chip = kind === "token" ? "TOKEN AUDIT" : "PRINCIPAL AUDIT";
+  const chip = kind === "threat" ? "THREAT SCAN" : kind === "token" ? "TOKEN AUDIT" : "PRINCIPAL AUDIT";
 
   const proto = (req.headers["x-forwarded-proto"] as string) || "https";
   const host = req.headers["host"];
   const base = `${proto}://${host}`;
 
-  const ogParams = new URLSearchParams({ k: kind, t: title, v: verdict || "PASS", sc: score, s: sub, c: chip });
+  const ogParams = new URLSearchParams({ k: kind, t: title, v: verdict || (kind === "threat" ? "SAFE" : "PASS"), sc: score, s: sub, c: chip });
   const ogImage = `${base}/api/og?${ogParams.toString()}`;
 
   // where a human should land
-  const appUrl = kind === "token" ? `/?t=${encodeURIComponent(ref)}` : `/?s=${encodeURIComponent(ref.replace(/^@/, ""))}`;
+  const appUrl =
+    kind === "threat" ? `/?threat=${encodeURIComponent(ref)}`
+    : kind === "token" ? `/?t=${encodeURIComponent(ref)}`
+    : `/?s=${encodeURIComponent(ref.replace(/^@/, ""))}`;
 
-  const heading = kind === "token" ? `$${title.replace(/^\$/, "")}` : title;
-  const ogTitle = `${heading} — ${verdict || "audit"}${score ? ` · ${score}/100` : ""} · ARGUS`;
-  const ogDesc = sub || "Forensic due-diligence: tokens audited on-chain, people on their evidence.";
+  const heading = kind === "person" ? title : `$${title.replace(/^\$/, "")}`;
+  const scoreLabel = kind === "threat" ? (score ? ` · ${score}/100 risk` : "") : score ? ` · ${score}/100` : "";
+  const ogTitle = `${heading} — ${verdict || "scan"}${scoreLabel} · ARGUS`;
+  const ogDesc = sub || (kind === "threat" ? "Token threat scan: authorities, liquidity, holders, deployer, and the contract code — read." : "Forensic due-diligence: tokens audited on-chain, people on their evidence.");
 
   const html = `<!doctype html><html><head><meta charset="utf-8"/>
 <title>${esc(ogTitle)}</title>
