@@ -77,6 +77,92 @@ export interface HoneypotDeep {
 
 const HP_CHAIN: Record<string, string> = { ethereum: "1", bsc: "56", base: "8453" };
 
+// ---- GoPlus meta flags the base audit doesn't carry (EVM) ----
+// Counterfeit / airdrop-scam / trust-list signals. `fake_token` means the
+// contract impersonates an established token (a namesquat trap — the exact case
+// the investigation methodology's token-disambiguation step warns about).
+export interface GoPlusMeta {
+  fakeToken: boolean;
+  fakeTokenOf: string | null; // the real token address it impersonates, if given
+  airdropScam: boolean;
+  trustListed: boolean; // GoPlus's own allowlist of reputable tokens
+  inCex: boolean;
+}
+const GP_CHAIN: Record<string, string> = {
+  ethereum: "1", bsc: "56", base: "8453", polygon: "137", arbitrum: "42161",
+  optimism: "10", avalanche: "43114", fantom: "250", cronos: "25", zksync: "324",
+  linea: "59144", scroll: "534352",
+};
+export async function goplusMeta(chain: string, address: string): Promise<GoPlusMeta | null> {
+  const id = GP_CHAIN[chain];
+  if (!id) return null;
+  try {
+    const res = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${id}?contract_addresses=${address}`, {
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) return null;
+    const d = (await res.json()) as { result?: Record<string, any> };
+    const row = d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : undefined);
+    if (!row) return null;
+    const ft = row.fake_token;
+    return {
+      fakeToken: ft?.value === 1 || ft?.value === "1" || row.is_fake_token === 1,
+      fakeTokenOf: ft?.true_token_address ?? null,
+      airdropScam: row.is_airdrop_scam === "1" || row.is_airdrop_scam === 1,
+      trustListed: row.trust_list === "1" || row.trust_list === 1,
+      inCex: row.is_in_cex?.listed === "1" || row.is_in_cex?.listed === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ---- runtime-bytecode fingerprint (EVM) via api/bytecode.ts ----
+// The fingerprint bridges byte-identical contracts: a fresh token that clones a
+// known-AVOID rug lights up on its own. Server-side (needs RPC egress).
+export interface Fingerprint {
+  fingerprint: string;
+  isToken: boolean;
+  proxy: boolean;
+  capabilities: { name: string; risk: string }[];
+}
+export async function codeFingerprint(chain: string, address: string): Promise<Fingerprint | null> {
+  if (!GP_CHAIN[chain]) return null;
+  try {
+    const res = await fetch(`/api/bytecode?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, {
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) return null;
+    const d = (await res.json()) as any;
+    if (!d.available || !d.fingerprint) return null;
+    return {
+      fingerprint: String(d.fingerprint).toLowerCase(),
+      isToken: !!d.isToken,
+      proxy: !!d.proxy,
+      capabilities: Array.isArray(d.capabilities) ? d.capabilities.map((c: any) => ({ name: String(c.name), risk: String(c.risk) })) : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Prior flagged tokens that share this fingerprint — the known-rug-clone check.
+export async function knownRugClones(fingerprint: string, selfAddress: string): Promise<{ symbol: string; address: string; verdict: string }[]> {
+  try {
+    const res = await fetch(`/api/threat-receipts?fingerprint=${encodeURIComponent(fingerprint)}`, {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return [];
+    const d = (await res.json()) as { available?: boolean; receipts?: { symbol: string; address: string; verdict: string }[] };
+    if (!d.available || !Array.isArray(d.receipts)) return [];
+    return d.receipts
+      .filter((r) => r.address.toLowerCase() !== selfAddress.toLowerCase() && (r.verdict === "RUG" || r.verdict === "DANGER"))
+      .map((r) => ({ symbol: r.symbol, address: r.address, verdict: r.verdict }));
+  } catch {
+    return [];
+  }
+}
+
 export async function honeypotDeep(chain: string, address: string): Promise<HoneypotDeep | null> {
   const chainID = HP_CHAIN[chain];
   if (!chainID) return null;

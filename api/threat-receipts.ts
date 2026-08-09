@@ -10,7 +10,7 @@
 // store is configured, so the client falls back to its localStorage ledger.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 // @ts-ignore — bundled JS sibling
-import { ledgerAvailable, ledgerUpsert, ledgerRecent, ledgerByDeployer, ledgerGet, type LedgerReceipt } from "./_ledger.js";
+import { ledgerAvailable, ledgerUpsert, ledgerRecent, ledgerByDeployer, ledgerByFingerprint, ledgerGet, type LedgerReceipt } from "./_ledger.js";
 
 export const config = { maxDuration: 15 };
 
@@ -47,6 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       deployer: body.deployer ? s(body.deployer).toLowerCase() : null,
       codeVerified: !!body.codeVerified,
       flagCount: Number.isFinite(body.flagCount) ? body.flagCount : 0,
+      codeFingerprint: body.codeFingerprint ? s(body.codeFingerprint).toLowerCase().replace(/[^0-9a-f]/g, "") || null : null,
     };
     const ok = await ledgerUpsert(receipt);
     res.status(200).json({ available: true, ok });
@@ -57,6 +58,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (deployer) {
     const rows = await ledgerByDeployer(deployer);
     res.status(200).json({ available: true, deployer: deployer.toLowerCase(), receipts: rows, stats: statsOf(rows) });
+    return;
+  }
+  const fingerprint = s(req.query.fingerprint);
+  if (fingerprint) {
+    const rows = await ledgerByFingerprint(fingerprint);
+    res.status(200).json({ available: true, fingerprint: fingerprint.toLowerCase(), receipts: rows, stats: statsOf(rows) });
     return;
   }
   const address = s(req.query.address);

@@ -14,7 +14,10 @@ import type {
 } from "./types";
 import { reviewCode } from "./codereview";
 import { recordReceipt, sharedByDeployer } from "./receipts";
-import { honeypotDeep, rugcheckReport, type HoneypotDeep, type RugcheckReport } from "./deepsources";
+import {
+  honeypotDeep, rugcheckReport, goplusMeta, codeFingerprint, knownRugClones,
+  type HoneypotDeep, type RugcheckReport, type GoPlusMeta,
+} from "./deepsources";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -38,11 +41,22 @@ export async function threatScan(
       : "Simulating sells for real holders — selective honeypots, siphoned wallets, max caps…",
     tone: "neutral",
   });
-  const [code, rc, hp] = await Promise.all([
+  const [code, rc, hp, meta, fp] = await Promise.all([
     reviewCode(dossier.chain, dossier.address),
     sol ? rugcheckReport(dossier.address) : Promise.resolve(null),
     sol ? Promise.resolve(null) : honeypotDeep(dossier.chain, dossier.address),
+    sol ? Promise.resolve(null) : goplusMeta(dossier.chain, dossier.address),
+    sol ? Promise.resolve(null) : codeFingerprint(dossier.chain, dossier.address),
   ]);
+  // Known-rug-clone check: does this contract's bytecode fingerprint match a
+  // token we already flagged? A byte-identical clone of a known rug is the same
+  // trap wearing a new ticker.
+  const clones = fp ? await knownRugClones(fp.fingerprint, dossier.address) : [];
+  if (clones.length) {
+    emit?.({ phase: "NERON · Fingerprint", label: "Known-rug clone", detail: `Byte-identical to ${clones.length} previously flagged token${clones.length === 1 ? "" : "s"} (${clones.slice(0, 3).map((c) => "$" + c.symbol).join(", ")}).`, tone: "bad" });
+  } else if (meta?.fakeToken) {
+    emit?.({ phase: "NERON · Counterfeit", label: "Fake token", detail: "GoPlus flags this as a counterfeit of an established token.", tone: "bad" });
+  }
   emit?.({
     phase: "LYRA · Code",
     label: code.verified ? `${code.contractName ?? "Contract"} read` : code.checked ? "No verified source" : "No per-token code on this chain",
@@ -59,8 +73,8 @@ export async function threatScan(
     emit?.({ phase: "NERON · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the shared ledger.`, tone: "bad" });
   }
 
-  const call = judge(dossier, code, deployer, rc, hp);
-  const checks = buildChecks(dossier, code, deployer, rc, hp);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -69,7 +83,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, call, code, deployer, checks,
-    deep: { rugcheck: rc, honeypot: hp },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones },
     scannedAt: Date.now(),
   };
 
@@ -78,6 +92,7 @@ export async function threatScan(
     verdict: call.verdict, risk: call.risk, flaggedAt: scan.scannedAt,
     liqThen: dossier.liquidityUsd ?? 0, deployer: dossier.deployer,
     codeVerified: code.verified, flagCount: code.flags.length,
+    codeFingerprint: fp?.fingerprint ?? null,
   });
 
   return scan;
@@ -101,6 +116,7 @@ async function deployerRep(d: TokenDossier): Promise<DeployerRep> {
 function judge(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
+  meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -136,6 +152,21 @@ function judge(
   if (s.cannotSellAll && !trap) { trap = true; flags.push("You can buy but you CANNOT sell your full balance — a honeypot with the door ajar"); }
   if (rc?.rugged && !trap) { trap = true; flags.push("RugCheck marks this token as already RUGGED — the pull has happened"); }
   if (hp?.reason && trap) warnings.push(`Simulator's reason: ${hp.reason}`);
+
+  // --- counterfeit / known-rug clone (never relaxed — impersonation is intent) ---
+  if (meta?.fakeToken) {
+    add(45);
+    flags.push(meta.fakeTokenOf
+      ? `COUNTERFEIT — this contract impersonates an established token (the real one is ${meta.fakeTokenOf.slice(0, 10)}…). You are not buying what you think.`
+      : "COUNTERFEIT — GoPlus flags this as a fake of an established token. You are not buying what you think.");
+  }
+  if (clones.length) {
+    add(50);
+    const names = clones.slice(0, 3).map((c) => `$${c.symbol}`).join(", ");
+    flags.push(`Byte-identical to ${clones.length} token${clones.length === 1 ? "" : "s"} we already flagged (${names}) — the same trap redeployed under a new name`);
+  }
+  if (meta?.airdropScam) { add(30); flags.push("Flagged as an AIRDROP SCAM — the token was dusted to wallets to lure them to a drainer site"); }
+  if (meta?.trustListed) positives.push("On GoPlus's trust list of established, reputable tokens");
 
   // --- per-holder sell analysis (EVM, Honeypot.is deep) ---
   // A selective honeypot lets the simulator's fresh wallet sell while real
@@ -286,7 +317,7 @@ const EVM = (chain: string) => chain !== "solana";
 // ---- the transparent checklist: what was examined, including clean results ----
 function buildChecks(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
-  rc: RugcheckReport | null, hp: HoneypotDeep | null,
+  rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -321,6 +352,9 @@ function buildChecks(
     chk("holders", "holders", "Holder concentration",
       na ? "na" : (d.bundleRisk === "high" || (s.topHolderPct ?? 0) > 50 || (rc?.insiderPct ?? 0) >= 25) && !established ? "fail" : d.bundleRisk !== "low" || (s.topHolderPct ?? 0) > 25 || (rc?.insiderPct ?? 0) >= 10 ? "warn" : "pass",
       na ? "Unchecked" : `${s.holderCount.toLocaleString()} holders${s.topHolderPct != null ? `, top ${s.topHolderPct.toFixed(0)}%` : ""}${rc?.insidersDetected ? `, insider net ${rc.insiderPct}%` : d.insiderPct ? `, ${d.insiderPct}% insider cluster` : ""}`),
+    chk("authenticity", "authority", "Authenticity",
+      meta == null ? "na" : meta.fakeToken || meta.airdropScam ? "fail" : meta.trustListed ? "pass" : "pass",
+      meta == null ? (sol ? "n/a on Solana" : "Unchecked") : meta.fakeToken ? "Counterfeit of an established token" : meta.airdropScam ? "Airdrop-scam pattern" : meta.trustListed ? "On GoPlus trust list" : "No counterfeit signal"),
     chk("deployer", "deployer", "Deployer history",
       s.serialScammerCreator || dep.priorRugs > 0 ? "fail" : dep.address ? "pass" : "na",
       s.serialScammerCreator ? "Has shipped honeypots before" : dep.priorRugs > 0 ? `${dep.priorRugs} flagged tokens in ledger` : dep.address ? "No adverse history found" : "Deployer not resolvable"),

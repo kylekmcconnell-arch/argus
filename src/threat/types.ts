@@ -111,6 +111,9 @@ export interface ThreatScan {
   deep: {
     rugcheck: import("./deepsources").RugcheckReport | null;
     honeypot: import("./deepsources").HoneypotDeep | null;
+    meta: import("./deepsources").GoPlusMeta | null;
+    fingerprint: string | null;
+    clones: { symbol: string; address: string; verdict: string }[];
   };
   scannedAt: number;
 }
@@ -133,4 +136,5 @@ export interface Receipt {
   deployer?: string | null;
   codeVerified?: boolean;
   flagCount?: number;
+  codeFingerprint?: string | null;
 }

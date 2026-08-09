@@ -13,6 +13,7 @@ export interface LedgerReceipt {
   deployer?: string | null;
   codeVerified?: boolean;
   flagCount?: number;
+  codeFingerprint?: string | null;
 }
 export function ledgerAvailable(): boolean;
 export function ledgerUpsert(receipt: LedgerReceipt): Promise<boolean>;
@@ -20,3 +21,4 @@ export function ledgerRecent(limit?: number): Promise<LedgerReceipt[]>;
 export function ledgerByDeployer(deployer: string): Promise<LedgerReceipt[]>;
 export function ledgerGet(address: string): Promise<LedgerReceipt | null>;
 export function ledgerFlagged(limit?: number): Promise<LedgerReceipt[]>;
+export function ledgerByFingerprint(fingerprint: string): Promise<LedgerReceipt[]>;

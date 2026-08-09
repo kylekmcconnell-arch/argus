@@ -90,3 +90,11 @@ export async function ledgerGet(address) {
 export async function ledgerFlagged(limit = 200) {
   return query(`select=payload&kind=eq.${KIND}&or=(verdict.eq.DANGER,verdict.eq.RUG)&order=ts.desc&limit=${Math.min(500, limit)}`);
 }
+
+// Every token sharing a runtime-bytecode fingerprint — byte-identical contracts
+// are the SAME trap wearing a new ticker. Powers the known-rug-clone detector.
+export async function ledgerByFingerprint(fingerprint) {
+  const fp = String(fingerprint || "").toLowerCase().replace(/[^0-9a-f]/g, "");
+  if (fp.length < 8) return [];
+  return query(`select=payload&kind=eq.${KIND}&payload->>codeFingerprint=eq.${encodeURIComponent(fp)}&order=ts.desc&limit=50`);
+}
