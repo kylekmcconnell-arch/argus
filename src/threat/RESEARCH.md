@@ -62,6 +62,33 @@ cross-chain similar-contract search; pre-launch liquidity simulation
 GoPlus `fake_token` counterfeit flag (namesquat detection — pairs with the
 methodology memory's token-disambiguation step).
 
+## Tokenomics methodology (operator requirement, 2026-08-09)
+
+Standing checks the scanner must run on every token (`tokenomics.ts` +
+`solidity.ts::tokenomicsSignals`). The naive "big holder = bad / tax = bad"
+read is wrong for launchpad and RWA-distributing tokens:
+
+1. **Separate the LP from holder concentration** — pools (and CEX/reward
+   contracts) are identified by holder tag and excluded; `realHolderTopPct` is
+   the top holder *after* those exclusions.
+2. **LP lock, launchpad-aware** — recognizes lockers by name (Pons LaunchLocker,
+   Team Finance, Unicrypt, Streamflow…). CRITICAL: on early launchpad chains
+   (Robinhood/Pons) a real lock may **not surface in DexScreener/GoPlus**, so the
+   `unconfirmed` status never asserts "removable" as fact — it says verify on the
+   launchpad. A recognized launchpad locker → `launchpad-locked` ("by design").
+3. **Reward / emission pools** — identified and separated (tag match). Their
+   distribution *cadence over time* + **FDV-vs-mcap by emission stage** graph is
+   the **deferred next phase** (needs snapshot infra).
+4. **Tax destination** — `tokenomicsSignals` reads the source for reflection /
+   buyback-burn / auto-liquidity / marketing-treasury / **RWA-stock
+   distribution** (the new Robinhood/Solana pattern: tax buys stocks and
+   distributes to holders — a *positive*, not a rug tax). LYRA is prompted to
+   name the destination too.
+5. **Burns** — % of total supply at burn addresses (snapshot), plus burn-function
+   / auto-burn-on-transfer detection. **Deferred:** tracking ongoing burn cadence
+   via the project's X burn-announcement feed + a burned-over-time series (needs
+   the X adapter + snapshots).
+
 ## Design deltas vs nlyra (deliberate)
 
 - **Legitimacy gate**: soft signals (unverified LP custody, concentration,

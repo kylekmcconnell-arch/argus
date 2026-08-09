@@ -9,7 +9,7 @@
 
 import type { CodeReview, CodeStats, ContractSource } from "./types";
 import { fetchContractSource, EVM_CHAIN_ID } from "./source";
-import { scanSolidity, stripComments, functionsOf } from "./solidity";
+import { scanSolidity, stripComments, functionsOf, tokenomicsSignals } from "./solidity";
 
 const DANGER_PATTERNS =
   /\bselfdestruct\b|\bdelegatecall\b|blacklist|\bbots?\b|banned|tradingEnabled|tradingOpen|whenNotPaused|_balances\s*\[[^\]]+\]\s*=(?!=)/gi;
@@ -32,7 +32,7 @@ function statsOf(src: ContractSource): CodeStats {
 
 const notChecked: CodeReview = {
   checked: false, verified: false, origin: null, contractName: null,
-  compiler: null, stats: null, flags: [], ai: null,
+  compiler: null, stats: null, flags: [], tokenomics: null, ai: null,
 };
 
 export async function reviewCode(chain: string, address: string): Promise<CodeReview> {
@@ -51,6 +51,7 @@ export async function reviewCode(chain: string, address: string): Promise<CodeRe
     compiler: src.compiler,
     stats,
     flags,
+    tokenomics: tokenomicsSignals(src.files),
     ai: null,
   };
 }

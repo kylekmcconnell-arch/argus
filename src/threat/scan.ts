@@ -13,6 +13,7 @@ import type {
   CodeReview, DeployerRep, ThreatCall, ThreatCheck, ThreatScan, ThreatVerdict,
 } from "./types";
 import { reviewCode } from "./codereview";
+import { analyzeTokenomics, type TokenomicsView } from "./tokenomics";
 import { recordReceipt, sharedByDeployer } from "./receipts";
 import {
   honeypotDeep, rugcheckReport, goplusMeta, codeFingerprint, knownRugClones,
@@ -73,8 +74,12 @@ export async function threatScan(
     emit?.({ phase: "NERON · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the shared ledger.`, tone: "bad" });
   }
 
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta);
+  const tokenomics = analyzeTokenomics(dossier, meta, rc, code.tokenomics);
+  if (tokenomics.tax.destinations.includes("rwa-distribution")) {
+    emit?.({ phase: "NERON · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders — a yield mechanism, not a rug tax.", tone: "good" });
+  }
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -82,7 +87,7 @@ export async function threatScan(
     chain: dossier.chain,
     symbol: dossier.symbol,
     name: dossier.name,
-    dossier, call, code, deployer, checks,
+    dossier, call, code, deployer, tokenomics, checks,
     deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones },
     scannedAt: Date.now(),
   };
@@ -117,6 +122,7 @@ function judge(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
   meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
+  tk: TokenomicsView,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -203,7 +209,8 @@ function judge(
       if (red) { add(25); flags.push(`Insider network: ${rc.insidersDetected} linked wallets hold ~${rc.insiderPct}% of supply — funded from common sources`); }
       else { soft(8); warnings.push(`Linked-wallet network holds ~${rc.insiderPct}% of supply (${rc.insidersDetected} wallets, common funding) — normal for airdropped tokens, a snipe signature on fresh ones`); }
     }
-    if (rc.lockerPct >= 50) positives.push(`LP in known lockers (${rc.lockerNames.join(", ")}) — ${rc.lockerPct}% of pooled liquidity`);
+    // LP locker positive is emitted from the tokenomics block below (which folds
+    // in rc.lockerNames/lockerPct), so it isn't repeated here.
   }
 
   // --- authority / owner powers ---
@@ -257,31 +264,56 @@ function judge(
     warnings.push("UNVERIFIED contract — the source is hidden, so nobody can read what the code really does");
   }
 
-  // --- taxes ---
+  // --- taxes: the % AND what the tax DOES ---
+  // A tax is not automatically bad. Reflections, buyback-burn, and the new
+  // real-world-asset/stock distribution pattern are legitimate — even attractive —
+  // mechanisms. Read the destination, weigh the percentage against it.
+  const rwaTax = tk.tax.destinations.includes("rwa-distribution");
   if (s.sellTax >= 40) { add(40); flags.push(`Sell tax is ${s.sellTax.toFixed(0)}% — a toll booth on the exit`); }
-  else if (s.sellTax >= 15) { add(20); warnings.push(`Sell tax is ${s.sellTax.toFixed(0)}% — you lose a real cut on every exit`); }
-  else if (s.available && s.buyTax + s.sellTax > 0) warnings.push(`Taxes: buy ${s.buyTax.toFixed(1)}% / sell ${s.sellTax.toFixed(1)}%`);
-  else if (s.available && d.chain !== "solana") positives.push(`Low taxes (buy ${s.buyTax.toFixed(1)}% / sell ${s.sellTax.toFixed(1)}%)`);
+  else if (s.sellTax >= 15 && !rwaTax) { add(20); warnings.push(`Sell tax is ${s.sellTax.toFixed(0)}% — you lose a real cut on every exit`); }
+  else if (s.sellTax >= 15 && rwaTax) { soft(8); warnings.push(`Sell tax is ${s.sellTax.toFixed(0)}%, but it funds real-world-asset distribution to holders — weigh the yield against the exit cost`); }
+  if (tk.tax.destinations.length) {
+    if (rwaTax) positives.push(`Tax → real-world assets: the transfer tax buys stocks/RWAs and distributes them to holders — a yield mechanism, not a rug tax`);
+    else if (tk.tax.destinations.includes("reflection")) positives.push(`Tax → reflections: holders earn a share of every taxed transfer`);
+    else if (tk.tax.destinations.includes("buyback-burn")) positives.push(`Tax → buyback & burn: collected tax is used to buy back and burn supply`);
+    else warnings.push(tk.tax.note);
+  } else if (s.available && s.buyTax + s.sellTax > 0 && s.sellTax < 15) warnings.push(`Taxes: buy ${s.buyTax.toFixed(1)}% / sell ${s.sellTax.toFixed(1)}%${d.chain === "solana" ? "" : " (destination not readable from the code)"}`);
+  else if (s.available && d.chain !== "solana" && s.buyTax + s.sellTax === 0) positives.push(`No buy or sell tax`);
   if (s.simChecked && !s.honeypot) positives.push("Sell simulation PASSED — a real sell went through");
 
-  // --- liquidity ---
+  // --- liquidity: pool separated, launchpad-lock aware ---
   const liq = d.liquidityUsd ?? 0;
   if (s.available) {
-    if (s.lpBurnedPct >= 50) positives.push(`LP burned ${s.lpBurnedPct.toFixed(0)}% — the pool can never be pulled`);
-    else if (s.lpLockedPct >= 50) positives.push(`LP locked ${s.lpLockedPct.toFixed(0)}%`);
-    else if (s.lpTopUnlockedEoaPct >= 80) { add(35); flags.push(`${s.lpTopUnlockedEoaPct.toFixed(0)}% of the liquidity sits in ONE unlocked wallet — it can be pulled at any moment`); }
-    else if (s.lpTopUnlockedEoaPct >= 50) { add(20); warnings.push(`Most of the liquidity (${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet — treat the pool as removable`); }
-    else if (!established) { add(12); warnings.push("LP CUSTODY UNVERIFIED — nobody could confirm the liquidity is locked or burned, so treat the pool as removable"); }
-    else warnings.push("LP lock/burn not confirmed — on a token this established, liquidity typically sits in pair and market-maker contracts");
+    switch (tk.lp.status) {
+      case "burned": positives.push(`LP burned ${tk.lp.burnedPct.toFixed(0)}% — the pool can never be pulled`); break;
+      case "locked": positives.push(`LP locked ${tk.lp.lockedPct.toFixed(0)}%${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`); break;
+      case "launchpad-locked": positives.push(tk.lp.note); break; // "held by a launchpad locker — auto-locked by design"
+      case "unlocked":
+        if (tk.lp.unlockedTopPct >= 80) { add(35); flags.push(`${tk.lp.unlockedTopPct.toFixed(0)}% of the liquidity sits in ONE unlocked wallet — it can be pulled at any moment`); }
+        else { add(20); warnings.push(`Most of the liquidity (${tk.lp.unlockedTopPct.toFixed(0)}%) is in one unlocked wallet — treat the pool as removable`); }
+        break;
+      case "unconfirmed":
+        // Don't assert "removable" as fact — on early launchpad chains the lock
+        // may be real but not surface here.
+        if (!established) soft(10);
+        warnings.push(tk.lp.note);
+        break;
+    }
   }
   if (liq < 15000) { add(10); warnings.push(`Thin liquidity (${money(liq)}) — easy to drain, brutal to exit`); }
 
-  // --- holders ---
-  if (d.bundleRisk === "high" && !established) { add(25); flags.push(`${d.insiderPct}% of supply sits in ${d.bundleCount} fresh wallets — a bundled launch or coordinated snipe`); }
-  else if (d.bundleRisk !== "low") { soft(12); warnings.push(`${d.insiderPct}% of supply is concentrated in ${d.bundleCount} non-contract wallets`); }
-  const top = s.topHolderPct;
-  if (top != null && top > 50 && !established) { add(25); flags.push(`One wallet holds ${top.toFixed(0)}% of the supply — they ARE the market`); }
-  else if (top != null && top > 25) { soft(12); warnings.push(`Top holder owns ${top.toFixed(0)}% of supply`); }
+  // --- burns ---
+  if (tk.burn.burnedSupplyPct >= 1 || tk.burn.hasAutoBurn) positives.push(tk.burn.note);
+
+  // --- holders: the POOL and reward contracts are excluded first ---
+  if (tk.pools.length) positives.push(`${tk.pools.length} liquidity pool${tk.pools.length === 1 ? "" : "s"} identified and set aside — not counted as holder concentration`);
+  if (tk.rewardPools.length) positives.push(`${tk.rewardPools.length} reward/emission pool${tk.rewardPools.length === 1 ? "" : "s"} identified and set aside from holder concentration`);
+  // Prefer the pool-excluded top-holder figure; fall back to the base audit's.
+  const realTop = tk.realHolderTopPct > 0 ? tk.realHolderTopPct : s.topHolderPct;
+  if (d.bundleRisk === "high" && !established) { add(25); flags.push(`${d.insiderPct}% of supply sits in ${d.bundleCount} fresh wallets (pools excluded) — a bundled launch or coordinated snipe`); }
+  else if (d.bundleRisk !== "low") { soft(12); warnings.push(`${d.insiderPct}% of supply is concentrated in ${d.bundleCount} non-contract wallets (pools excluded)`); }
+  if (realTop != null && realTop > 50 && !established) { add(25); flags.push(`One non-pool wallet holds ${realTop.toFixed(0)}% of the supply — they ARE the market`); }
+  else if (realTop != null && realTop > 25) { soft(12); warnings.push(`Top non-pool holder owns ${realTop.toFixed(0)}% of supply`); }
   if (s.creatorPercent >= 15) { add(12); warnings.push(`The creator still holds ~${s.creatorPercent.toFixed(0)}% of supply`); }
   if (s.holderCount >= 5000) positives.push(`${s.holderCount.toLocaleString()} holders — distribution is real`);
 
@@ -318,6 +350,7 @@ const EVM = (chain: string) => chain !== "solana";
 function buildChecks(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
+  tk: TokenomicsView,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -344,14 +377,22 @@ function buildChecks(
       na ? "na" : s.hiddenOwner || s.takeBack ? "fail" : s.ownerRenounced ? "pass" : "warn",
       na ? "Unchecked" : s.hiddenOwner ? "Hidden owner detected" : s.takeBack ? "Renounce is reversible" : s.ownerRenounced ? "Renounced / authorities revoked" : "Owner is active"),
     chk("lp", "liquidity", "Liquidity custody",
-      na ? "na" : s.lpBurnedPct + s.lpLockedPct >= 50 ? "pass" : s.lpTopUnlockedEoaPct >= 50 ? "fail" : established ? "pass" : "warn",
-      na ? "Unchecked" : s.lpBurnedPct >= 50 ? `${s.lpBurnedPct.toFixed(0)}% burned` : s.lpLockedPct >= 50 ? `${s.lpLockedPct.toFixed(0)}% locked` : s.lpTopUnlockedEoaPct >= 50 ? "Pullable by one wallet" : established ? "In pair/market contracts (established token)" : "Lock/burn not confirmed"),
-    chk("tax", "honeypot", "Exit taxes",
-      na ? "na" : s.sellTax >= 15 ? "fail" : s.sellTax > 5 ? "warn" : "pass",
-      na ? "Unchecked" : `buy ${s.buyTax.toFixed(1)}% / sell ${s.sellTax.toFixed(1)}%`),
-    chk("holders", "holders", "Holder concentration",
-      na ? "na" : (d.bundleRisk === "high" || (s.topHolderPct ?? 0) > 50 || (rc?.insiderPct ?? 0) >= 25) && !established ? "fail" : d.bundleRisk !== "low" || (s.topHolderPct ?? 0) > 25 || (rc?.insiderPct ?? 0) >= 10 ? "warn" : "pass",
-      na ? "Unchecked" : `${s.holderCount.toLocaleString()} holders${s.topHolderPct != null ? `, top ${s.topHolderPct.toFixed(0)}%` : ""}${rc?.insidersDetected ? `, insider net ${rc.insiderPct}%` : d.insiderPct ? `, ${d.insiderPct}% insider cluster` : ""}`),
+      na ? "na" : tk.lp.status === "burned" || tk.lp.status === "locked" || tk.lp.status === "launchpad-locked" ? "pass" : tk.lp.status === "unlocked" ? "fail" : established ? "pass" : "warn",
+      na ? "Unchecked"
+        : tk.lp.status === "burned" ? `${tk.lp.burnedPct.toFixed(0)}% burned`
+        : tk.lp.status === "locked" ? `${tk.lp.lockedPct.toFixed(0)}% locked${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`
+        : tk.lp.status === "launchpad-locked" ? `Launchpad-locked${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`
+        : tk.lp.status === "unlocked" ? `Pullable — ${tk.lp.unlockedTopPct.toFixed(0)}% in one wallet`
+        : "Lock not confirmed by standard tools (may be launchpad-locked)"),
+    chk("tax", "market", "Buy/sell tax & destination",
+      na ? "na" : s.sellTax >= 15 && !tk.tax.destinations.includes("rwa-distribution") ? "fail" : tk.tax.tone === "good" ? "pass" : s.sellTax > 5 ? "warn" : "pass",
+      na ? "Unchecked" : tk.tax.note),
+    chk("burn", "market", "Burn",
+      tk.burn.burnedSupplyPct >= 1 || tk.burn.hasAutoBurn ? "pass" : "na",
+      tk.burn.note),
+    chk("holders", "holders", "Holder concentration (pools excluded)",
+      na ? "na" : (d.bundleRisk === "high" || (tk.realHolderTopPct) > 50 || (rc?.insiderPct ?? 0) >= 25) && !established ? "fail" : d.bundleRisk !== "low" || tk.realHolderTopPct > 25 || (rc?.insiderPct ?? 0) >= 10 ? "warn" : "pass",
+      na ? "Unchecked" : `${s.holderCount.toLocaleString()} holders, top non-pool ${tk.realHolderTopPct.toFixed(0)}%${tk.pools.length ? `, ${tk.pools.length} pool(s) set aside` : ""}${rc?.insidersDetected ? `, insider net ${rc.insiderPct}%` : ""}`),
     chk("authenticity", "authority", "Authenticity",
       meta == null ? "na" : meta.fakeToken || meta.airdropScam ? "fail" : meta.trustListed ? "pass" : "pass",
       meta == null ? (sol ? "n/a on Solana" : "Unchecked") : meta.fakeToken ? "Counterfeit of an established token" : meta.airdropScam ? "Airdrop-scam pattern" : meta.trustListed ? "On GoPlus trust list" : "No counterfeit signal"),

@@ -116,8 +116,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           "(1) Cite specific functions and approximate line numbers for every claim — functions and lines, not vibes. " +
           "(2) Distinguish GUARDED power from OPEN power: a bounded setFee (require <= 10%) or a timelocked owner is not a rug switch; an unbounded one is. Say which. " +
           "(3) Look hardest at _transfer/_update and any modifier gates — that is where traps live (conditional blocks on sells, hidden fee escalation, balance rewrites). " +
-          "(4) You may DISSENT from the mechanical scan: if the flags overstate the danger (capabilities that are bounded/renounced/dead code) say the code is CLEANER than the score; if the code hides a trap the flags missed, say it is DARKER. " +
-          "(5) Plain English, second person for consequences ('you would not be able to sell'), 2-4 short paragraphs, no headings. End with one plain sentence: is this code a trap, safe, or conditionally safe. " +
+          "(4) If the token has a buy/sell TAX, say what the tax DOES with the money: reflections to holders, buyback-and-burn, auto-liquidity, a marketing/treasury wallet, or the newer pattern of buying real-world assets/stocks to distribute to holders. A tax that funds reflections/buyback/RWA distribution is a legitimate — even attractive — mechanism, not a rug tax; say so. Also note any burn mechanic (manual burn vs auto-burn on transfer) and, if visible, the burn address. " +
+          "(5) You may DISSENT from the mechanical scan: if the flags overstate the danger (capabilities that are bounded/renounced/dead code) say the code is CLEANER than the score; if the code hides a trap the flags missed, say it is DARKER. " +
+          "(6) Plain English, second person for consequences ('you would not be able to sell'), 2-4 short paragraphs, no headings. End with one plain sentence: is this code a trap, safe, or conditionally safe. " +
           "Reply with ONLY compact JSON: {\"summary\":\"the 2-4 paragraph read\",\"dissent\":\"cleaner\"|\"darker\"|null}",
         messages: [{
           role: "user",

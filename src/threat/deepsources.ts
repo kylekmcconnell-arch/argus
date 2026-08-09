@@ -81,12 +81,24 @@ const HP_CHAIN: Record<string, string> = { ethereum: "1", bsc: "56", base: "8453
 // Counterfeit / airdrop-scam / trust-list signals. `fake_token` means the
 // contract impersonates an established token (a namesquat trap — the exact case
 // the investigation methodology's token-disambiguation step warns about).
+export interface LabeledHolder {
+  address: string;
+  percent: number; // 0–100
+  tag: string;
+  isLocked: boolean;
+  isContract: boolean;
+}
 export interface GoPlusMeta {
   fakeToken: boolean;
   fakeTokenOf: string | null; // the real token address it impersonates, if given
   airdropScam: boolean;
   trustListed: boolean; // GoPlus's own allowlist of reputable tokens
   inCex: boolean;
+  // Raw labeled holders + LP holders, so tokenomics.ts can separate the pool and
+  // reward contracts from genuine holder concentration and read locker names.
+  holders: LabeledHolder[];
+  lpHolders: LabeledHolder[];
+  totalSupply: number | null;
 }
 const GP_CHAIN: Record<string, string> = {
   ethereum: "1", bsc: "56", base: "8453", polygon: "137", arbitrum: "42161",
@@ -105,12 +117,22 @@ export async function goplusMeta(chain: string, address: string): Promise<GoPlus
     const row = d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : undefined);
     if (!row) return null;
     const ft = row.fake_token;
+    const mapH = (h: any): LabeledHolder => ({
+      address: String(h.address ?? h.account ?? ""),
+      percent: Number(h.percent) * 100,
+      tag: String(h.tag ?? ""),
+      isLocked: h.is_locked === 1 || h.is_locked === "1",
+      isContract: h.is_contract === 1 || h.is_contract === "1",
+    });
     return {
       fakeToken: ft?.value === 1 || ft?.value === "1" || row.is_fake_token === 1,
       fakeTokenOf: ft?.true_token_address ?? null,
       airdropScam: row.is_airdrop_scam === "1" || row.is_airdrop_scam === 1,
       trustListed: row.trust_list === "1" || row.trust_list === 1,
       inCex: row.is_in_cex?.listed === "1" || row.is_in_cex?.listed === true,
+      holders: Array.isArray(row.holders) ? row.holders.map(mapH).filter((h: LabeledHolder) => h.address) : [],
+      lpHolders: Array.isArray(row.lp_holders) ? row.lp_holders.map(mapH).filter((h: LabeledHolder) => h.address) : [],
+      totalSupply: row.total_supply != null ? Number(row.total_supply) : null,
     };
   } catch {
     return null;

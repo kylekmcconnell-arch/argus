@@ -136,6 +136,42 @@ function LyraRead({ scan }: { scan: ThreatScan }) {
   );
 }
 
+function LpBadge({ status }: { status: ThreatScan["tokenomics"]["lp"]["status"] }) {
+  const map: Record<string, { c: string; t: string }> = {
+    burned: { c: "var(--color-pass)", t: "LP burned" },
+    locked: { c: "var(--color-pass)", t: "LP locked" },
+    "launchpad-locked": { c: "var(--color-pass)", t: "Launchpad-locked" },
+    unlocked: { c: "var(--color-avoid)", t: "LP unlocked" },
+    unconfirmed: { c: "var(--color-caution)", t: "Lock unconfirmed" },
+  };
+  const m = map[status];
+  return <span className="mono rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider" style={{ color: m.c, border: "1px solid currentColor" }}>{m.t}</span>;
+}
+
+function Tokenomics({ tk }: { tk: ThreatScan["tokenomics"] }) {
+  const taxColor = tk.tax.tone === "good" ? "var(--color-pass)" : tk.tax.tone === "warn" ? "var(--color-caution)" : "var(--color-ink-dim)";
+  const row = (label: string, body: React.ReactNode) => (
+    <div className="flex items-start justify-between gap-3 border-b border-line/60 py-2 last:border-0">
+      <span className="shrink-0 text-[12.5px] text-ink-dim">{label}</span>
+      <span className="text-right text-[12px] text-ink-faint">{body}</span>
+    </div>
+  );
+  return (
+    <div className="mt-4 rounded-xl border border-line p-4">
+      <h2 className="text-[14px] font-semibold text-ink">Tokenomics</h2>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">Pools and reward contracts separated from holders; LP lock read at the launchpad level; what the tax does; and burns.</p>
+      <div className="mt-2">
+        {row("Liquidity", <span className="flex flex-col items-end gap-1"><LpBadge status={tk.lp.status} /><span>{tk.lp.note}</span></span>)}
+        {row("Buy / sell tax", <span style={{ color: taxColor }}>{tk.tax.note}</span>)}
+        {row("Burn", <span>{tk.burn.note}</span>)}
+        {row("Pools set aside", tk.pools.length ? <span>{tk.pools.map((p) => `${p.label} ${p.pct.toFixed(1)}%`).join(", ")}</span> : <span>none identified</span>)}
+        {tk.rewardPools.length > 0 && row("Reward / emission pools", <span>{tk.rewardPools.map((p) => `${p.label} ${p.pct.toFixed(1)}%`).join(", ")} <span className="text-ink-faint/70">· cadence tracking is a next phase</span></span>)}
+        {row("Top non-pool holder", <span>{tk.realHolderTopPct.toFixed(1)}%</span>)}
+      </div>
+    </div>
+  );
+}
+
 function Report({ scan }: { scan: ThreatScan }) {
   const { call, dossier: d, code, deployer, checks } = scan;
   const m = VERDICT_META[call.verdict];
@@ -187,6 +223,9 @@ function Report({ scan }: { scan: ThreatScan }) {
         )}
         <LyraRead scan={scan} />
       </div>
+
+      {/* tokenomics */}
+      <Tokenomics tk={scan.tokenomics} />
 
       {/* deployer */}
       {(deployer.address || deployer.serialHoneypoter) && (

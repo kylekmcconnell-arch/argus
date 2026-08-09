@@ -67,6 +67,8 @@ export interface CodeReview {
   compiler: string | null;
   stats: CodeStats | null;
   flags: CodeFlag[];
+  // Tax-destination + burn mechanics read from the source (null when unverified).
+  tokenomics: import("./solidity").CodeTokenomics | null;
   // Server-side AI pass (Claude reading the actual source). Null when the API
   // is unreachable or unkeyed — the static flags above always still apply. The
   // AI may DISSENT from the mechanical verdict; that dissent is surfaced, not
@@ -105,6 +107,7 @@ export interface ThreatScan {
   call: ThreatCall;
   code: CodeReview;
   deployer: DeployerRep;
+  tokenomics: import("./tokenomics").TokenomicsView;
   checks: ThreatCheck[];
   // Supplemental deep-source evidence (see deepsources.ts): RugCheck's Solana
   // risk report / Honeypot.is per-holder sell analysis. Kept raw for the UI.

@@ -95,6 +95,52 @@ export function functionsOf(stripped: string[]): Fn[] {
 
 const excerptOf = (lines: string[], line1: number) => (lines[line1 - 1] ?? "").trim().slice(0, 160);
 
+// ---- tokenomics signals read from the source ----
+// What a buy/sell tax DOES, and whether the contract burns. The user's
+// methodology: a tax isn't automatically bad — reflections, buyback-burn, and
+// (the new pattern) buying real-world assets/stocks to distribute to holders are
+// legitimate, even attractive, mechanisms. Identify the destination, don't just
+// flag the percentage.
+export type TaxDestination = "reflection" | "buyback-burn" | "rwa-distribution" | "marketing-treasury" | "liquidity" | "unknown";
+export interface CodeTokenomics {
+  taxDestinations: TaxDestination[];
+  hasBurnFunction: boolean;
+  hasAutoBurn: boolean; // burns on transfer, not just a manual burn()
+  rwaKeywords: string[]; // the actual words that triggered an RWA/stock read, for citation
+}
+
+export function tokenomicsSignals(files: SourceFile[]): CodeTokenomics {
+  const dest = new Set<TaxDestination>();
+  const rwaHits = new Set<string>();
+  let hasBurnFunction = false, hasAutoBurn = false;
+
+  for (const f of files) {
+    const src = stripComments(f.content).join("\n");
+    const low = src.toLowerCase();
+
+    // Reflection / static-reward tokenomics (SafeMoon lineage).
+    if (/\b_rowned\b|\breflectfee\b|\b_reflect\b|\btfeetotal\b|\b_getrate\b|\bdistributedividend/i.test(src)) dest.add("reflection");
+    // Buyback and/or burn from collected tax.
+    if (/\bbuyback\b|\bbuyandburn\b|\bswapandburn\b|\bautoburn\b/i.test(low)) dest.add("buyback-burn");
+    // Auto liquidity from tax.
+    if (/\bswapandliquify\b|\baddliquidity\b/i.test(low)) dest.add("liquidity");
+    // Marketing / treasury / dev wallet destination.
+    if (/\bmarketingwallet\b|\btreasury\b|\bdevwallet\b|\bmarketingfee\b/i.test(low)) dest.add("marketing-treasury");
+    // The new pattern: tax buys real-world assets / stocks and distributes them.
+    for (const kw of ["stock", "equity", "dividend", "rwa", "realworld", "real_world", "tbill", "treasury bill", "distributeasset", "stockreward", "sharedistribut"]) {
+      if (low.includes(kw)) { rwaHits.add(kw); dest.add("rwa-distribution"); }
+    }
+    // rwa-distribution also implied by dividend-style distribution to holders.
+    if (/distribute\w*\(.*(holder|shareholder)/i.test(src)) { dest.add("rwa-distribution"); rwaHits.add("distribute-to-holders"); }
+
+    // Burn mechanics.
+    if (/function\s+burn\s*\(|_burn\s*\(/i.test(src)) hasBurnFunction = true;
+    // Auto-burn: a _burn / transfer-to-dead inside _transfer/_update.
+    if (/_transfer|_update/i.test(src) && /_burn\s*\(|0x0*dead|address\(0\)/i.test(src) && /\bfee\b|\btax\b|\bburnfee\b/i.test(low)) hasAutoBurn = true;
+  }
+  return { taxDestinations: [...dest], hasBurnFunction, hasAutoBurn, rwaKeywords: [...rwaHits] };
+}
+
 export function scanSolidity(files: SourceFile[]): CodeFlag[] {
   const flags: CodeFlag[] = [];
   const push = (
