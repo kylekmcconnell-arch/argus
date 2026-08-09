@@ -79,6 +79,7 @@ const ICONS = {
   project: "M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3M4 7.5l8 4.5 8-4.5M12 12v9",
   bell: "M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0",
   trending: "M3 17l6-6 4 4 8-8M21 7v6h-6",
+  shield: "M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3M9.5 12l1.8 1.8L15 10",
 };
 
 function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof ICONS; label: string; active?: boolean; onClick?: () => void; badge?: number }) {
@@ -156,7 +157,7 @@ function AnalystBadge() {
   );
 }
 
-export type NavTarget = "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
+export type NavTarget = "idle" | "radar" | "trending" | "recon" | "find" | "threat" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
 
 export function Sidebar({
   onNav,
@@ -220,6 +221,7 @@ export function Sidebar({
       <nav className="space-y-0.5 px-2.5 pt-1">
         <NavItem icon="home" label="Home" active={view === "idle"} onClick={() => nav("idle")} />
         <NavItem icon="radar" label="Radar" active={view === "radar"} onClick={() => nav("radar")} />
+        <NavItem icon="shield" label="Threat scan" active={view === "threat"} onClick={() => nav("threat")} />
         <NavItem icon="trending" label="Trending" active={view === "trending"} onClick={() => nav("trending")} />
         <NavItem icon="recon" label="Site recon" active={view === "recon"} onClick={() => nav("recon")} />
         <NavItem icon="wallet" label="Find wallet" active={view === "find"} onClick={() => nav("find")} />

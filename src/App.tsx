@@ -25,6 +25,7 @@ import { syncReport, fetchReport } from "./lib/reports";
 import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
+import { ThreatScanPage, ThreatLanding } from "./components/ThreatScanPage";
 import { InvestigationRun } from "./components/InvestigationRun";
 import { InvestigationReport } from "./components/InvestigationReport";
 import { ProjectView } from "./components/ProjectView";
@@ -41,6 +42,7 @@ type Phase =
   | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
+  | "threat"
   | "investigation" | "investigation-report"
   | "project"
   | "notfound";
@@ -58,6 +60,8 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
   if (live) return { phase: "live", dossier: null, query: live };
   const token = params.get("t");
   if (token) return { phase: "token-run", dossier: null, query: token };
+  const threat = params.get("threat");
+  if (threat) return { phase: "threat", dossier: null, query: threat };
   const site = params.get("site");
   if (site) return { phase: "recon", dossier: null, query: site };
   const inv = params.get("inv");
@@ -75,6 +79,9 @@ export default function App() {
     boot.phase === "token-run" && boot.query ? resolveInput(boot.query) : null,
   );
   const [tokenDossier, setTokenDossier] = useState<TokenDossier | null>(null);
+  const [threatInput, setThreatInput] = useState<ResolvedInput | null>(
+    boot.phase === "threat" && boot.query ? resolveInput(boot.query) : null,
+  );
   const [reconUrl, setReconUrl] = useState<string | null>(boot.phase === "recon" ? boot.query : null);
   const [investigationInput, setInvestigationInput] = useState<string | null>(boot.phase === "investigation" ? boot.query : null);
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
@@ -147,6 +154,16 @@ export default function App() {
   }, [onAudit]);
 
   const onInvestigationError = useCallback(() => setPhase("notfound"), []);
+
+  // Threat scan: a standalone surface. Resolves any token ref to the threat
+  // report; non-token input falls through to the normal audit routing.
+  const onThreatScan = useCallback((raw: string) => {
+    const resolved = resolveInput(raw);
+    if (resolved.kind !== "token") { onAudit(raw); return; }
+    setQuery(raw);
+    setThreatInput(resolved);
+    setPhase("threat");
+  }, [onAudit]);
 
   // Open a project-centric view: dig who worked on it, all auditable.
   const onOpenProject = useCallback((name: string, domain?: string) => {
@@ -344,6 +361,8 @@ export default function App() {
     }
     // opening Site recon from the rail is a fresh, manual page (private off by default)
     if (t === "recon") { setReconUrl(null); privRef.current = false; }
+    // opening Threat scan from the rail is a fresh entry surface (clear any prior token)
+    if (t === "threat") setThreatInput(null);
     setPhase(t);
   }, []);
 
@@ -352,7 +371,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "alerts" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
+    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "threat" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "alerts" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
       ? phase
       : "idle";
 
@@ -404,6 +423,10 @@ export default function App() {
       )}
 
       {phase === "token-report" && tokenDossier && <TokenReport dossier={tokenDossier} onReset={reset} onAudit={onAudit} />}
+
+      {phase === "threat" && (threatInput
+        ? <ThreatScanPage key={threatInput.ref} input={threatInput} onError={() => setPhase("notfound")} />
+        : <ThreatLanding onScan={onThreatScan} />)}
 
       {phase === "investigation" && investigationInput && (
         <InvestigationRun input={investigationInput} onDone={onInvestigationDone} onError={onInvestigationError} />
