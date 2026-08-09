@@ -273,37 +273,52 @@ function Report({ scan }: { scan: ThreatScan }) {
 // Entry surface for the Threat scan rail item: paste a contract / DexScreener
 // URL → run. Shows the recent-flags ledger line so the track record is visible
 // before you even scan.
-export function ThreatLanding({ onScan }: { onScan: (ref: string) => void }) {
+export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" | "wallet") => void }) {
   const [val, setVal] = useState("");
+  const [mode, setMode] = useState<"token" | "wallet">("token");
   const rs = useLedgerStats();
-  const submit = () => { const s = val.trim(); if (s) onScan(s); };
+  const submit = () => { const s = val.trim(); if (s) onScan(s, mode); };
   const samples = [
     { label: "$PEPE", ref: "0x6982508145454ce325ddbe47a25d4ec3d2311933" },
     { label: "$BONK", ref: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263" },
   ];
+  const Tab = ({ m, label }: { m: "token" | "wallet"; label: string }) => (
+    <button
+      onClick={() => setMode(m)}
+      className={`rounded-md px-3 py-1.5 text-[12.5px] font-medium transition ${mode === m ? "bg-panel text-ink soft-shadow" : "text-ink-faint hover:text-ink-dim"}`}
+    >{label}</button>
+  );
   return (
     <div className="mx-auto flex min-h-full max-w-2xl flex-col justify-center px-4 py-16">
-      <h1 className="text-[26px] font-semibold tracking-tight text-ink">Token threat scan</h1>
+      <h1 className="text-[26px] font-semibold tracking-tight text-ink">{mode === "token" ? "Token threat scan" : "Wallet threat triage"}</h1>
       <p className="mt-2 text-[14px] leading-relaxed text-ink-dim">
-        Paste a contract address or DexScreener link. NERON reads the chain — authorities, liquidity, holders, the deployer's history — and LYRA reads the actual contract code, citing the functions and lines. You get a plain-English verdict on whether it's a trap.
+        {mode === "token"
+          ? "Paste a contract address or DexScreener link. NERON reads the chain — authorities, liquidity, holders, the deployer's history — and LYRA reads the actual contract code, citing the functions and lines. You get a plain-English verdict on whether it's a trap."
+          : "Paste a wallet address. Every token position is joined against the scanner's verdicts, with an at-risk-USD figure and a flag on any position with no market left to sell into. EVM is read keyless; Solana needs a Helius key on the backend."}
       </p>
-      <div className="mt-5 flex gap-2">
+      <div className="mt-4 inline-flex w-fit gap-1 rounded-lg border border-line p-1">
+        <Tab m="token" label="Scan a token" />
+        <Tab m="wallet" label="Scan a wallet" />
+      </div>
+      <div className="mt-4 flex gap-2">
         <input
           value={val}
           onChange={(e) => setVal(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="0x… / Solana mint / dexscreener.com/…"
+          placeholder={mode === "token" ? "0x… / Solana mint / dexscreener.com/…" : "0x… wallet / Solana wallet address"}
           className="mono flex-1 rounded-lg border border-line bg-panel px-3 py-2.5 text-[13px] text-ink outline-none focus:border-signal"
           autoFocus
         />
-        <button onClick={submit} className="btn-primary shrink-0 px-5 py-2.5 text-[13px] font-medium">Scan</button>
+        <button onClick={submit} className="btn-primary shrink-0 px-5 py-2.5 text-[13px] font-medium">{mode === "token" ? "Scan" : "Triage"}</button>
       </div>
-      <div className="mt-3 flex items-center gap-2 text-[12px] text-ink-faint">
-        <span>Try:</span>
-        {samples.map((s) => (
-          <button key={s.ref} onClick={() => onScan(s.ref)} className="mono rounded border border-line px-2 py-0.5 hover:border-signal">{s.label}</button>
-        ))}
-      </div>
+      {mode === "token" && (
+        <div className="mt-3 flex items-center gap-2 text-[12px] text-ink-faint">
+          <span>Try:</span>
+          {samples.map((s) => (
+            <button key={s.ref} onClick={() => onScan(s.ref, "token")} className="mono rounded border border-line px-2 py-0.5 hover:border-signal">{s.label}</button>
+          ))}
+        </div>
+      )}
       {rs.flagged > 0 && (
         <p className="mono mt-8 text-[10.5px] text-ink-faint">
           ledger: {rs.flagged} token{rs.flagged === 1 ? "" : "s"} flagged to date{rs.checked > 0 ? ` · ${rs.confirmedDead}/${rs.checked} re-checked flags confirmed dead` : ""}

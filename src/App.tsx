@@ -26,6 +26,7 @@ import { recordContribution, tokenContribution, personContribution, investigatio
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { ThreatScanPage, ThreatLanding } from "./components/ThreatScanPage";
+import { WalletScanPage } from "./components/WalletScanPage";
 import { InvestigationRun } from "./components/InvestigationRun";
 import { InvestigationReport } from "./components/InvestigationReport";
 import { ProjectView } from "./components/ProjectView";
@@ -82,6 +83,7 @@ export default function App() {
   const [threatInput, setThreatInput] = useState<ResolvedInput | null>(
     boot.phase === "threat" && boot.query ? resolveInput(boot.query) : null,
   );
+  const [walletScanAddr, setWalletScanAddr] = useState<string | null>(null);
   const [reconUrl, setReconUrl] = useState<string | null>(boot.phase === "recon" ? boot.query : null);
   const [investigationInput, setInvestigationInput] = useState<string | null>(boot.phase === "investigation" ? boot.query : null);
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
@@ -155,12 +157,21 @@ export default function App() {
 
   const onInvestigationError = useCallback(() => setPhase("notfound"), []);
 
-  // Threat scan: a standalone surface. Resolves any token ref to the threat
-  // report; non-token input falls through to the normal audit routing.
-  const onThreatScan = useCallback((raw: string) => {
+  // Threat scan: a standalone surface. Token mode resolves any token ref to the
+  // threat report; wallet mode triages a wallet's holdings. A token address and
+  // a wallet address are indistinguishable by format, so the mode is explicit.
+  const onThreatScan = useCallback((raw: string, mode: "token" | "wallet" = "token") => {
+    if (mode === "wallet") {
+      setQuery(raw);
+      setWalletScanAddr(raw.trim());
+      setThreatInput(null);
+      setPhase("threat");
+      return;
+    }
     const resolved = resolveInput(raw);
     if (resolved.kind !== "token") { onAudit(raw); return; }
     setQuery(raw);
+    setWalletScanAddr(null);
     setThreatInput(resolved);
     setPhase("threat");
   }, [onAudit]);
@@ -361,8 +372,8 @@ export default function App() {
     }
     // opening Site recon from the rail is a fresh, manual page (private off by default)
     if (t === "recon") { setReconUrl(null); privRef.current = false; }
-    // opening Threat scan from the rail is a fresh entry surface (clear any prior token)
-    if (t === "threat") setThreatInput(null);
+    // opening Threat scan from the rail is a fresh entry surface (clear prior token/wallet)
+    if (t === "threat") { setThreatInput(null); setWalletScanAddr(null); }
     setPhase(t);
   }, []);
 
@@ -424,9 +435,11 @@ export default function App() {
 
       {phase === "token-report" && tokenDossier && <TokenReport dossier={tokenDossier} onReset={reset} onAudit={onAudit} />}
 
-      {phase === "threat" && (threatInput
-        ? <ThreatScanPage key={threatInput.ref} input={threatInput} onError={() => setPhase("notfound")} />
-        : <ThreatLanding onScan={onThreatScan} />)}
+      {phase === "threat" && (walletScanAddr
+        ? <WalletScanPage key={walletScanAddr} address={walletScanAddr} />
+        : threatInput
+          ? <ThreatScanPage key={threatInput.ref} input={threatInput} onError={() => setPhase("notfound")} />
+          : <ThreatLanding onScan={onThreatScan} />)}
 
       {phase === "investigation" && investigationInput && (
         <InvestigationRun input={investigationInput} onDone={onInvestigationDone} onError={onInvestigationError} />
