@@ -856,3 +856,10 @@
   .argus-eye-live-ring,
   .argus-eye-evidence-pulse { opacity: 0; }
 }
+
+/* Print / export-PDF: strip the app chrome so a threat report saves clean. */
+@media print {
+  .app-sidebar, nav, button, .print\:hidden { display: none !important; }
+  body, html { background: #fff !important; }
+  main { max-width: 100% !important; }
+}

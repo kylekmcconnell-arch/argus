@@ -299,7 +299,12 @@ function Report({ scan }: { scan: ThreatScan }) {
           <div className="flex items-baseline gap-2">
             <h1 className="text-[22px] font-semibold text-ink">${scan.symbol}</h1>
             <span className="truncate text-[13px] text-ink-faint">{scan.name}</span>
-            <span className="ml-auto shrink-0"><ShareButton scan={scan} /></span>
+            <span className="ml-auto flex shrink-0 gap-2">
+              {/* Browser print-to-PDF: the print stylesheet strips the app chrome
+                  so what saves is the clean report itself. */}
+              <button onClick={() => window.print()} className="mono rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink print:hidden">export PDF ↓</button>
+              <ShareButton scan={scan} />
+            </span>
           </div>
           <div className="mono mt-0.5 text-[11px] text-ink-faint">{scan.chain} · {shortAddr(scan.address)} · {money(d.liquidityUsd)} liq · {money(d.mcap)} mcap</div>
           <div className="mt-2 flex items-center gap-2">
@@ -514,18 +519,53 @@ export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" 
 export function ThreatScanPage({ input, onError }: { input: ResolvedInput; onError?: () => void }) {
   const [steps, setSteps] = useState<TraceStep[]>([]);
   const [scan, setScan] = useState<ThreatScan | null>(null);
+  const [cachedAgeMs, setCachedAgeMs] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
   const started = useRef(false);
+
+  const runLive = (i: ResolvedInput) =>
+    threatScan(i, (s) => setSteps((prev) => [...prev, s]))
+      .then((r) => {
+        if (r) {
+          setScan(r);
+          // Store the finished scan so a shared link opens the report instantly
+          // instead of re-running the whole pipeline (1h freshness, server-side).
+          void fetch("/api/threat-scan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scan: r }) }).catch(() => {});
+        } else { setFailed(true); onError?.(); }
+      })
+      .catch(() => { setFailed(true); onError?.(); });
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    threatScan(input, (s) => setSteps((prev) => [...prev, s]))
-      .then((r) => { if (r) setScan(r); else { setFailed(true); onError?.(); } })
-      .catch(() => { setFailed(true); onError?.(); });
+    // Shared-link fast path: a fresh cached scan renders immediately; anything
+    // else (miss, stale, endpoint down) falls through to the live scan.
+    (async () => {
+      if (input.kind === "token" && (input.via === "evm" || input.via === "solana")) {
+        try {
+          const r = await fetch(`/api/threat-scan?address=${encodeURIComponent(input.ref)}`, { signal: AbortSignal.timeout(6000) });
+          const d = r.ok ? ((await r.json()) as { hit?: boolean; ageMs?: number; scan?: ThreatScan }) : null;
+          if (d?.hit && d.scan && d.scan.address) { setScan(d.scan); setCachedAgeMs(d.ageMs ?? 0); return; }
+        } catch { /* fall through to live */ }
+      }
+      void runLive(input);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, onError]);
 
-  if (scan) return <Report scan={scan} />;
+  const rescan = () => { setScan(null); setCachedAgeMs(null); setSteps([]); void runLive(input); };
+
+  if (scan) return (
+    <div>
+      {cachedAgeMs != null && (
+        <div className="mx-auto mt-3 flex max-w-3xl items-center justify-between gap-3 rounded-lg border border-line px-4 py-2">
+          <span className="mono text-[11px] text-ink-faint">saved scan · {Math.max(1, Math.round(cachedAgeMs / 60000))}m old · shared links reuse scans for 1h</span>
+          <button onClick={rescan} className="mono rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">rescan now ↻</button>
+        </div>
+      )}
+      <Report scan={scan} />
+    </div>
+  );
   if (failed) {
     return (
       <div className="mx-auto max-w-xl px-4 py-16 text-center">
