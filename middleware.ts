@@ -38,6 +38,11 @@ const ROUTE_UNITS: Record<string, number> = {
   "/api/audit": 15,
   "/api/v1/person": 15,
   "/api/v1/token": 1,
+  // The threat scanner's LYRA read is a real Anthropic call; weight it like the
+  // other single-model panels so a burst of scans is metered against the daily
+  // budget instead of billing as 1. (The scan's other threat endpoints — oft,
+  // burns, migration, wallet-holdings — are keyless and correctly bill as 1.)
+  "/api/code-review": 4,
   "/api/sweep": 12,
   "/api/vc-portfolio": 6,
   "/api/challenge-verdict": 4,
@@ -59,6 +64,17 @@ const ROUTE_UNITS: Record<string, number> = {
 export const config = {
   matcher: "/api/:path*",
 };
+
+// Constant-time string comparison for the shared cron secret. The Edge runtime
+// has no crypto.timingSafeEqual, so accumulate a XOR over every byte instead of
+// letting === short-circuit on the first mismatch. A length difference returns
+// early (the secret's length is not itself sensitive).
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
 /**
  * Reject anonymous or inactive-member API traffic before a paid serverless
@@ -93,7 +109,7 @@ export default async function middleware(request: Request): Promise<Response> {
   if (CRON_API_PATHS.has(pathname)) {
     const cronSecret = process.env.CRON_SECRET;
     const authz = request.headers.get("authorization") || "";
-    if (cronSecret && authz === `Bearer ${cronSecret}`) return next();
+    if (cronSecret && timingSafeEqual(authz, `Bearer ${cronSecret}`)) return next();
     return Response.json(
       { error: "authentication_required", message: "This endpoint is cron-only." },
       { status: 401, headers: { "cache-control": "no-store", "www-authenticate": 'Bearer realm="ARGUS"' } },

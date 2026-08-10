@@ -28,22 +28,29 @@ const DAY = 86_400_000;
 interface BurnTx { ts: number; amount: number }
 
 // --- Etherscan path ---
-async function etherscanBurns(chainid: number, token: string, burn: string, key: string): Promise<BurnTx[]> {
+// Returns the burn transfers (human units) AND the token's decimals as seen on
+// the tokentx rows — the caller needs decimals to convert the raw base-unit
+// supply from stats/tokensupply into the same human units, else burnedSupplyPct
+// comes out ~0 on every 18-decimal token.
+async function etherscanBurns(chainid: number, token: string, burn: string, key: string): Promise<{ txs: BurnTx[]; decimals: number | null }> {
   try {
     const url = `https://api.etherscan.io/v2/api?chainid=${chainid}&module=account&action=tokentx&contractaddress=${token}&address=${burn}&startblock=0&endblock=99999999&sort=asc&apikey=${key}`;
     const r = await fetch(url, { signal: AbortSignal.timeout(14000) });
-    if (!r.ok) return [];
+    if (!r.ok) return { txs: [], decimals: null };
     const d = (await r.json()) as any;
-    if (d.status !== "1" || !Array.isArray(d.result)) return [];
+    if (d.status !== "1" || !Array.isArray(d.result)) return { txs: [], decimals: null };
     const out: BurnTx[] = [];
+    let decimals: number | null = null;
     for (const t of d.result) {
       if (String(t.to ?? "").toLowerCase() !== burn) continue;
-      const amt = Number(t.value ?? 0) / 10 ** Number(t.tokenDecimal ?? 18);
+      const dec = Number(t.tokenDecimal ?? 18);
+      if (decimals === null && Number.isFinite(dec)) decimals = dec;
+      const amt = Number(t.value ?? 0) / 10 ** dec;
       const ts = Number(t.timeStamp ?? 0) * 1000;
       if (amt > 0 && ts > 0) out.push({ ts, amount: amt });
     }
-    return out;
-  } catch { return []; }
+    return { txs: out, decimals };
+  } catch { return { txs: [], decimals: null }; }
 }
 async function etherscanSupply(chainid: number, token: string, key: string): Promise<number | null> {
   try {
@@ -130,8 +137,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       Promise.all(BURN_ADDRS.map((b) => etherscanBurns(esId, address, b, esKey))),
       etherscanSupply(esId, address, esKey),
     ]);
-    events = lists.flat();
-    supply = sup;
+    events = lists.flatMap((l) => l.txs);
+    // tokensupply returns RAW base units; convert to the same human units as the
+    // burn amounts using the decimals seen on the tokentx rows (default 18).
+    const decimals = lists.find((l) => l.decimals != null)?.decimals ?? 18;
+    supply = sup != null ? sup / 10 ** decimals : null;
   } else {
     res.status(200).json({ available: false, note: bs ? "" : "burn history needs an Etherscan key or a Blockscout chain" });
     return;

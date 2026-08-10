@@ -41,7 +41,10 @@ export function recordReceipt(r: Receipt) {
     body: JSON.stringify({
       address: r.address, chain: r.chain, symbol: r.symbol, verdict: r.verdict,
       risk: r.risk, flaggedAt: r.flaggedAt, liqThen: r.liqThen, deployer: r.deployer,
-      codeVerified: r.codeVerified, flagCount: r.flagCount,
+      // codeFingerprint MUST be synced: the server keys known-rug-clone detection
+      // on it (ledgerByFingerprint). Omitting it stored null on every row and
+      // silently killed the whole byte-identical-clone match.
+      codeVerified: r.codeVerified, flagCount: r.flagCount, codeFingerprint: r.codeFingerprint,
     }),
   }).catch(() => { /* offline / static host — localStorage still holds it */ });
 }

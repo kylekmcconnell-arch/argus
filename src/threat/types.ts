@@ -9,7 +9,9 @@ import type { TokenDossier } from "../token/audit";
 
 // ---- verdict model ----
 // Risk points, 0–100, HIGHER = WORSE (inverse of the src/token score, which is
-// a quality score). SAFE ≈ 0–15, CAUTION ≈ 16–39, DANGER ≈ 40–69, RUG = 70+.
+// a quality score). Bands: SAFE 0–15, CAUTION 16–39, DANGER ≥ 40. RUG is NOT a
+// score band — it is reserved for a CONFIRMED trap (honeypot-class / already
+// rugged), which forces risk to 100 regardless of the accumulated points.
 export type ThreatVerdict = "SAFE" | "CAUTION" | "DANGER" | "RUG" | "UNKNOWN";
 
 export interface ThreatCall {
