@@ -2933,6 +2933,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 Rescan
               </button>
             )}
+            <button type="button" onClick={() => window.print()} title="Save this report as a PDF (opens the print dialog)" className="btn-secondary print:hidden min-h-11 gap-1.5 px-3 text-[12.5px]">
+              Export PDF
+            </button>
             {canShare && (
               <button
                 type="button"
