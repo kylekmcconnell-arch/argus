@@ -21,7 +21,8 @@ import {
 } from "./deepsources";
 import { crossChain } from "./crosschain";
 import { migrationCheck } from "./migration";
-import type { CrossChain, MigrationInfo } from "./types";
+import { launchProvenance } from "./launch";
+import type { CrossChain, MigrationInfo, LaunchProvenance } from "./types";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -48,14 +49,28 @@ export async function threatScan(
       : "Simulating sells for real holders - selective honeypots, siphoned wallets, max caps…",
     tone: "neutral",
   });
-  const [code, rc, hp, meta, fp, xchain] = await Promise.all([
+  const [code, rc, hp, meta, fp, xchain, launch] = await Promise.all([
     reviewCode(dossier.chain, dossier.address),
     sol ? rugcheckReport(dossier.address) : Promise.resolve(null),
     sol ? Promise.resolve(null) : honeypotDeep(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : goplusMeta(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : codeFingerprint(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : crossChain(dossier.chain, dossier.address, dossier.liquidityUsd ?? 0),
+    launchProvenance(dossier),
   ]);
+  if (launch && launch.kind !== "unknown") {
+    const state = launch.onCurve
+      ? `on the bonding curve${launch.curveProgressPct != null ? ` (${launch.curveProgressPct.toFixed(0)}%)` : ""}`
+      : launch.graduated
+        ? "graduated - curve completed"
+        : launch.kind === "fair-launch" ? "direct DEX listing" : "state unknown";
+    emit?.({
+      phase: "NERON · Launch",
+      label: launch.venue ?? "Fair launch",
+      detail: `${state}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${launch.lpNote ? ` · ${launch.lpNote}` : ""}`,
+      tone: "neutral",
+    });
+  }
   const migration = sol ? await migrationCheck(dossier.chain, dossier.address) : null;
   if (migration?.migrated) {
     emit?.({ phase: "NERON · Migration", label: "Migrate.fun", detail: migration.isPostMigrationToken ? `New post-migration token (${migration.projects[0]?.projectId}) - the chart restarted; claim distribution to prior holders is expected.` : `Registered in a Migrate.fun migration (${migration.projects[0]?.projectId}).`, tone: "neutral" });
@@ -96,8 +111,8 @@ export async function threatScan(
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "NERON · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -106,7 +121,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch },
     scannedAt: Date.now(),
   };
 
@@ -141,6 +156,7 @@ function judge(
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
   meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
   tk: TokenomicsView, xchain: CrossChain | null, migration: MigrationInfo | null,
+  launch: LaunchProvenance | null,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -300,6 +316,14 @@ function judge(
   if (s.simChecked && !s.honeypot) positives.push("Sell simulation PASSED - a real sell went through");
 
   // --- liquidity: pool separated, launchpad-lock aware ---
+  // Launch provenance can PROVE LP custody where the generic tools read
+  // "unconfirmed": a graduated pump.fun/bonk.fun pool is protocol-owned or
+  // burned BY THE PLATFORM'S MECHANICS, and an on-curve token has no LP at all
+  // yet (the curve contract is the market). That proof overrides the naive
+  // "treat as removable" read.
+  const launchLpSecured = launch != null
+    && (launch.lpDisposition === "burned" || launch.lpDisposition === "protocol-owned" || launch.lpDisposition === "locked")
+    && launch.lpNote != null;
   const liq = d.liquidityUsd ?? 0;
   if (s.available) {
     switch (tk.lp.status) {
@@ -312,10 +336,13 @@ function judge(
         warnings.push(tk.lp.note);
         break;
       case "unlocked":
+        if (launchLpSecured) { positives.push(`${launch!.venue}: ${launch!.lpNote}`); break; }
         if (tk.lp.unlockedTopPct >= 80) { add(35); flags.push(`${tk.lp.unlockedTopPct.toFixed(0)}% of the liquidity sits in ONE unlocked wallet - it can be pulled at any moment`); }
         else { add(20); warnings.push(`Most of the liquidity (${tk.lp.unlockedTopPct.toFixed(0)}%) is in one unlocked wallet - treat the pool as removable`); }
         break;
       case "unconfirmed":
+        if (launchLpSecured) { positives.push(`${launch!.venue}: ${launch!.lpNote}`); break; }
+        if (launch?.onCurve) { warnings.push(`Still on the ${launch.venue ?? "launchpad"} bonding curve${launch.curveProgressPct != null ? ` (${launch.curveProgressPct.toFixed(0)}% to graduation)` : ""} - liquidity lives in the curve contract (no LP to pull), but most curve tokens never graduate`); break; }
         // Don't assert "removable" as fact - on early launchpad chains the lock
         // may be real but not surface here.
         if (!established) soft(10);
@@ -323,6 +350,27 @@ function judge(
         break;
     }
   }
+  // Launch-context signals beyond LP custody: creator-fee behavior and the
+  // launch-block snipe read.
+  if (launch?.creatorFees) {
+    const cf = launch.creatorFees;
+    if (cf.usage === "buyback-burn" || cf.usage === "lp-add") {
+      positives.push(`Creator claims ${launch.venue} fees and ${cf.usage === "lp-add" ? "adds them to the LP" : "buys back and burns the token"} - fee revenue is recycled into the market. ${cf.note}`);
+    } else if (cf.usage === "buyback") {
+      positives.push(`Creator claims ${launch.venue} fees and buys the token back. ${cf.note}`);
+    } else if (cf.usage === "dump" && !established) {
+      soft(8); warnings.push(`Creator claims ${launch.venue} fee revenue and sells it - fees are an income stream, not a reinvestment. ${cf.note}`);
+    }
+  }
+  if (launch?.snipe && !established && !migration?.isPostMigrationToken) {
+    const sn = launch.snipe;
+    if (sn.sameBlockBuyers >= 4 || (sn.pctOfSupply ?? 0) >= 20) {
+      add(15); flags.push(`Launch-block snipe: ${sn.sameBlockBuyers} wallets bought in the deploy block${sn.pctOfSupply != null ? `, taking ~${sn.pctOfSupply.toFixed(0)}% of supply` : ""} (${sn.window}) - a coordinated entry at t=0`);
+    } else if (sn.sameBlockBuyers > 0) {
+      warnings.push(`${sn.sameBlockBuyers} wallet${sn.sameBlockBuyers === 1 ? "" : "s"} bought in the launch block (${sn.window}) - some sniping, below the coordination threshold`);
+    }
+  }
+  if (launch?.quoteNote) warnings.push(launch.quoteNote);
   // Thin-liquidity flag, cross-chain aware: an OFT's liquidity is spread across
   // chains, so judge it by the total mesh liquidity, not the single-chain pool.
   const oftTotal = xchain?.isOft ? xchain.totalLiquidityUsd : 0;
@@ -405,7 +453,7 @@ const EVM = (chain: string) => chain !== "solana";
 function buildChecks(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
-  tk: TokenomicsView,
+  tk: TokenomicsView, launch: LaunchProvenance | null,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -440,6 +488,14 @@ function buildChecks(
         : tk.lp.status === "nft-position" ? "Concentrated/NFT position - LP-token check n/a"
         : tk.lp.status === "unlocked" ? `Pullable - ${tk.lp.unlockedTopPct.toFixed(0)}% in one wallet`
         : "Lock not confirmed by standard tools (may be launchpad-locked)"),
+    chk("launch", "market", "Launch provenance",
+      launch == null || launch.kind === "unknown" ? "na"
+        : launch.snipe && launch.snipe.sameBlockBuyers >= 4 ? "warn"
+        : launch.creatorFees?.usage === "dump" ? "warn"
+        : "pass",
+      launch == null || launch.kind === "unknown" ? "Venue not identified"
+        : launch.kind === "fair-launch" ? `Fair launch - listed directly on ${d.dexId}${launch.quote ? ` vs ${launch.quote}` : ""}`
+        : `${launch.venue}${launch.onCurve ? ` - on curve${launch.curveProgressPct != null ? ` (${launch.curveProgressPct.toFixed(0)}%)` : ""}` : launch.graduated ? " - graduated" : ""}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${launch.creatorFees && launch.creatorFees.usage !== "unknown" ? ` · creator fees: ${launch.creatorFees.usage}` : ""}`),
     chk("tax", "market", "Buy/sell tax & destination",
       na ? "na" : s.sellTax >= 15 && !tk.tax.destinations.includes("rwa-distribution") ? "fail" : tk.tax.tone === "good" ? "pass" : s.sellTax > 5 ? "warn" : "pass",
       na ? "Unchecked" : tk.tax.note),

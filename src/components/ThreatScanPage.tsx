@@ -198,7 +198,49 @@ function LpBadge({ status }: { status: ThreatScan["tokenomics"]["lp"]["status"] 
   return <span className="mono rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider" style={{ color: m.c, border: "1px solid currentColor" }}>{m.t}</span>;
 }
 
-function Tokenomics({ tk }: { tk: ThreatScan["tokenomics"] }) {
+// Launch provenance: how the token came to market - fair launch vs launchpad,
+// bonding-curve state, quote asset, the venue's LP mechanics, and what the
+// creator does with platform fee revenue.
+function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]["launch"]> }) {
+  const row = (label: string, body: React.ReactNode) => (
+    <div className="flex items-start justify-between gap-3 border-b border-line/60 py-2 last:border-0">
+      <span className="shrink-0 text-[12.5px] text-ink-dim">{label}</span>
+      <span className="text-right text-[12px] text-ink-faint">{body}</span>
+    </div>
+  );
+  const cf = launch.creatorFees;
+  const cfGood = cf && (cf.usage === "lp-add" || cf.usage === "buyback-burn" || cf.usage === "buyback");
+  return (
+    <div className="mt-4 rounded-xl border border-line p-4">
+      <h2 className="text-[14px] font-semibold text-ink">Launch</h2>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">How this token came to market - the venue's mechanics decide what "locked liquidity" even means here.</p>
+      <div className="mt-2">
+        {row("Venue", launch.kind === "fair-launch"
+          ? "Fair launch - listed directly on a DEX, no launchpad"
+          : <span className="mono text-ink">{launch.venue ?? "unknown launchpad"}</span>)}
+        {launch.onCurve != null && (launch.onCurve || launch.graduated != null) && row("Bonding curve", launch.onCurve
+          ? <span style={{ color: "var(--color-caution)" }}>still on the curve{launch.curveProgressPct != null ? ` · ${launch.curveProgressPct.toFixed(0)}% to graduation` : ""}</span>
+          : launch.graduated
+            ? <span style={{ color: "var(--color-pass)" }}>graduated - curve completed, liquidity migrated</span>
+            : "state unknown")}
+        {launch.quote && row("Bonded to", <span className="flex flex-col items-end gap-0.5"><span className="mono text-ink">{launch.quote}</span>{launch.quoteNote && <span>{launch.quoteNote}</span>}</span>)}
+        {launch.lpNote && row("LP custody", launch.lpNote)}
+        {cf && cf.platformPays && row("Creator fees", (
+          <span className="flex flex-col items-end gap-0.5">
+            <span style={{ color: cfGood ? "var(--color-pass)" : cf.usage === "dump" ? "var(--color-caution)" : undefined }}>
+              {cf.usage === "unknown" ? (cf.claimCount != null && cf.claimCount > 0 ? `${cf.claimCount} claim${cf.claimCount === 1 ? "" : "s"} observed - usage untraced` : "platform pays creator fees - claims not observed") : cf.usage.replace(/-/g, " ")}
+            </span>
+            {cf.note && <span>{cf.note}</span>}
+          </span>
+        ))}
+        {launch.snipe && row("Launch window", `${launch.snipe.sameBlockBuyers} same-block buyer${launch.snipe.sameBlockBuyers === 1 ? "" : "s"}${launch.snipe.pctOfSupply != null ? ` · ~${launch.snipe.pctOfSupply.toFixed(0)}% of supply` : ""} (${launch.snipe.window})`)}
+        {launch.notes.map((n, i) => row(i === 0 ? "Notes" : "", n))}
+      </div>
+    </div>
+  );
+}
+
+function Tokenomics({ tk, lpOverride }: { tk: ThreatScan["tokenomics"]; lpOverride?: string | null }) {
   const taxColor = tk.tax.tone === "good" ? "var(--color-pass)" : tk.tax.tone === "warn" ? "var(--color-caution)" : "var(--color-ink-dim)";
   const row = (label: string, body: React.ReactNode) => (
     <div className="flex items-start justify-between gap-3 border-b border-line/60 py-2 last:border-0">
@@ -211,7 +253,12 @@ function Tokenomics({ tk }: { tk: ThreatScan["tokenomics"] }) {
       <h2 className="text-[14px] font-semibold text-ink">Tokenomics</h2>
       <p className="mt-0.5 text-[11.5px] text-ink-faint">Pools and reward contracts separated from holders; LP lock read at the launchpad level; what the tax does; and burns.</p>
       <div className="mt-2">
-        {row("Liquidity", <span className="flex flex-col items-end gap-1"><LpBadge status={tk.lp.status} /><span>{tk.lp.note}</span></span>)}
+        {row("Liquidity", lpOverride
+          // The launch venue's mechanics prove custody (e.g. "pump.fun graduated
+          // - migration LP burned"); show that instead of the generic
+          // lock-unconfirmed read, which would contradict it.
+          ? <span className="flex flex-col items-end gap-1"><span className="mono rounded border px-1.5 py-0.5 text-[10px]" style={{ borderColor: "var(--color-pass)", color: "var(--color-pass)" }}>SECURED BY VENUE</span><span>{lpOverride}</span></span>
+          : <span className="flex flex-col items-end gap-1"><LpBadge status={tk.lp.status} /><span>{tk.lp.note}</span></span>)}
         {row("Buy / sell tax", <span style={{ color: taxColor }}>{tk.tax.note}</span>)}
         {row("Burn", <span>{tk.burn.note}</span>)}
         {row("Pools set aside", tk.pools.length ? <span>{tk.pools.map((p) => `${p.label} ${p.pct.toFixed(1)}%`).join(", ")}</span> : <span>none identified</span>)}
@@ -292,8 +339,17 @@ function Report({ scan }: { scan: ThreatScan }) {
         <LyraRead scan={scan} />
       </div>
 
+      {/* launch provenance */}
+      {scan.deep.launch && scan.deep.launch.kind !== "unknown" && <LaunchPanel launch={scan.deep.launch} />}
+
       {/* tokenomics */}
-      <Tokenomics tk={scan.tokenomics} />
+      <Tokenomics
+        tk={scan.tokenomics}
+        lpOverride={scan.deep.launch && !scan.deep.launch.onCurve
+          && (scan.deep.launch.lpDisposition === "burned" || scan.deep.launch.lpDisposition === "protocol-owned" || scan.deep.launch.lpDisposition === "locked")
+          && (scan.tokenomics.lp.status === "unconfirmed" || scan.tokenomics.lp.status === "unlocked")
+          ? `${scan.deep.launch.venue}: ${scan.deep.launch.lpNote}` : null}
+      />
 
       {/* migration */}
       {scan.deep.migration?.migrated && (

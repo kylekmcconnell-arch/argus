@@ -121,8 +121,49 @@ export interface ThreatScan {
     clones: { symbol: string; address: string; verdict: string }[];
     xchain: CrossChain | null;
     migration: MigrationInfo | null;
+    launch: LaunchProvenance | null;
   };
   scannedAt: number;
+}
+
+// ---- launch provenance (fair launch vs launchpad, graduation, LP custody) ----
+// HOW the token came to market changes how every other signal reads: a
+// graduated pump.fun token's LP is protocol-owned (can't be pulled — "lock
+// unconfirmed" is a false alarm), while an on-curve token has no LP at all yet.
+// The bonding/quote pair sets what the floor is denominated in, and platforms
+// that pay the creator ongoing fees make "what does the creator DO with them"
+// (LP add / buyback-burn = bullish; dump = bearish) a first-class signal.
+export interface LaunchProvenance {
+  kind: "launchpad" | "fair-launch" | "unknown";
+  venue: string | null; // e.g. "pump.fun", "bonk.fun", "bags", "virtuals", "pons"
+  // Bonding-curve state. null = not curve-based or unknown.
+  onCurve: boolean | null;
+  graduated: boolean | null;
+  curveProgressPct: number | null;
+  // The bonding / current pool quote asset and what it implies.
+  quote: string | null;
+  quoteNote: string | null;
+  // Where the LP actually sits given the venue's mechanics — the rug crux.
+  lpDisposition: "burned" | "protocol-owned" | "locked" | "creator-held" | "curve" | "unknown";
+  lpNote: string | null;
+  // Platform-paid creator fee revenue: is it being claimed, and what is the
+  // creator doing with it?
+  creatorFees: {
+    platformPays: boolean;
+    claimCount: number | null; // observed claims (null = couldn't observe)
+    claimedUsd: number | null;
+    usage: "lp-add" | "buyback-burn" | "buyback" | "hold" | "dump" | "unknown";
+    note: string;
+  } | null;
+  // Launch-window snipe read: buyers in the first block(s)/slot(s).
+  snipe: {
+    window: string; // human description of the window measured
+    buyers: number;
+    sameBlockBuyers: number;
+    pctOfSupply: number | null;
+    note: string;
+  } | null;
+  notes: string[];
 }
 
 // ---- Migrate.fun migration (#5) ----

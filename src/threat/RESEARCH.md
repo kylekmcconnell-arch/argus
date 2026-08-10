@@ -129,3 +129,52 @@ spread as a distribution (not a bundle) for a confirmed post-migration token.
 - **Static code scanner with line citations runs keyless client-side**
   (`solidity.ts`); nlyra's equivalent lives behind their API only.
 - Receipts are honest both ways: recovered tokens (our misses) stay visible.
+
+## Launch provenance (verified 2026-08-10)
+
+DexScreener `labels` are AMM-type only (v2/v3/v4/CLMM/DLMM/wp) - NEVER launchpad
+names. Venue fingerprints that actually work:
+
+**Solana** - suffix `pump` = pump.fun (curve prog `6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P`,
+AMM PumpSwap `pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA`; coins API
+`frontend-api-v3.pump.fun/coins/<mint>` → `.complete`, `real_sol_reserves` (85 SOL
+curve), `creator`; graduated keeps the old pumpfun pair ALONGSIDE pumpswap;
+migration LP burned; creator fees tiered, claimed via `collect_creator_fee` /
+`collect_coin_creator_fee`). Suffix `bonk` = LetsBonk but NOT guaranteed; curve
+dexId is shared `launchlab` (Raydium LaunchLab `LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj`) -
+disambiguate platform via `launch-mint-v1.raydium.io/main/platforms` +
+`/get/list?platformId=` (LetsBonk `FfYek5vEz23cMkWsdJwG2oa6EphsvXSHrGpdALN4g6W1` /
+`BuM6KDpWiTcxvrpXywWFiw45R2RNH8WURdvqoTDV1BW4`, Bankr `kNDdb5HKMBFTH9yqRuHMJdhgFvum3A3C7LW5FgAyrFe`
+- Bankr pays creator 50% of 1% fee; current LetsBonk creator fee = 0, LP ~100%
+burned at 85 SOL → Raydium CPMM). Suffix `BAGS` / dexId `bags` = Bags (deployer
+`BAGSB9TpGrZxQbEsrEznv5jXXdwyP6AXerN8aVRiAmcv`, Meteora DBC
+`dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN` → DAMM v2
+`cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG` locked; fee-share prog V2
+`FEE2tBhCKAt7shrod19QttSVREUYPiyMzoku1mL1gqVK`). dexId `moonit` = Moonit
+(`MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG`). dexId `meteoradbc` = Believe et
+al (Believe DBC authority `5qWya6UjwWnGVhdSBL3hyZ7B45jbk6Byt1hwd7ohEGXE`, 50/50
+fee split via `claim_creator_trading_fee`). Suffix `boop` = Boop (dormant).
+RugCheck report exposes `launchpad.platform` (pump_fun / raydium_launchlab /
+meteora_dbc / moonshot) but is null on many older graduates - best-effort only.
+
+**EVM** - quote `VIRTUAL` on uniswap-v2 (base/robinhood) = graduated Virtuals
+(bonding-phase invisible on DexScreener; LP staked 10yr in "Staked <sym> by
+Virtuals"; api.virtuals.io keyless). Quote `flETH` on v4 = Flaunch (LP hook-
+managed/burned; creator fee 0-100% BY DESIGN). Address suffix `b07` = Clanker v4
+(clanker.world/api keyless; Bankr EVM deploys are Clanker under the hood). Pons
+(robinhood) has NO client fingerprint - reads as plain uniswap v3/WETH; detect
+via token creator == PonsLaunchFactory `0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB`
+(active, Blockscout-verified; legacy `0x0c37a24F5D23A486FA692d1500881d698B1F77a4`);
+locker = PonsLaunchLocker `0x736D76699C26D0d966744cAe304C000d471f7F35`, position
+NFT permanent custody; graduation = 4.2 WETH pairedPrincipal (`graduationStatus(token)`
+on factory); fees 1% split 70/30 creator/protocol, `FeeRedirectUpdated` events
+show fee-wallet changes. dexId `fourmeme` (BSC) = Four.meme → PancakeSwap v2 LP
+burned. dexId `flapsh` (BSC+robinhood) = Flap.sh (tax tokens by design).
+Stonkbrokers (robinhood, Clutch Markets): launches Aug 11 2026 - no contracts
+yet; graduation 4 units of pair asset (ETH/$STONKBROKER/tokenized stocks) into
+Uniswap V3, fee splitter → per-token staking vault. Revisit for factory address.
+
+**Off-DEX debuts:** ≥3 CEX listings without a launchpad fingerprint → likely
+exchange/ICO-era debut; vesting + unlock schedules live on cryptorank.io /
+CoinGecko/CMC token pages (full unlock-schedule integration = follow-up; needs a
+keyed source).
