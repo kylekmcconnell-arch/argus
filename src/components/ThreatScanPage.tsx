@@ -11,6 +11,7 @@ import type { TraceStep } from "../data/evidence";
 import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat/types";
 import { threatScan } from "../threat/scan";
 import { aiCodeRead } from "../threat/codereview";
+import { insiderClusters } from "../threat/insiders";
 import { receiptStats, sharedReceiptStats } from "../threat/receipts";
 import { ThreatReceipts } from "./ThreatReceipts";
 
@@ -108,6 +109,50 @@ function CheckGrid({ checks }: { checks: ThreatCheck[] }) {
 
 // Lazy AI read: fires after the mechanical verdict renders, so LYRA can be fed
 // the verdict she is allowed to dissent from.
+// Lazy insider-cluster panel (#9): proves which "separate" top holders are one
+// operator, via the funding/transfer graph. Loaded on demand after the verdict —
+// it's a keyed, slow call, so it never blocks the main scan.
+function InsiderClusters({ scan }: { scan: ThreatScan }) {
+  const [state, setState] = useState<"idle" | "loading" | "done" | "empty">("idle");
+  const [data, setData] = useState<import("../threat/types").InsiderCluster | null>(null);
+  const run = () => {
+    if (state === "loading") return;
+    setState("loading");
+    insiderClusters(scan.chain, scan.address).then((r) => {
+      if (r && r.clusters.length) { setData(r); setState("done"); }
+      else setState("empty");
+    });
+  };
+  return (
+    <div className="mt-4 rounded-xl border border-line p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink">Creator & insider clusters</h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">Which of the "separate" top holders are secretly one hand — proven from the funding graph.</p>
+        </div>
+        {state === "idle" && (
+          <button onClick={run} className="mono shrink-0 rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">run detection ↯</button>
+        )}
+      </div>
+      {state === "loading" && <p className="mt-2 animate-pulse text-[12.5px] text-ink-faint">Tracing funders and transfers across the top holders…</p>}
+      {state === "empty" && <p className="mt-2 text-[12.5px] text-ink-dim">No coordinated wallet groups found among the top holders (or clustering unavailable on this chain/tier).</p>}
+      {state === "done" && data && (
+        <>
+          <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">{data.note}</p>
+          <div className="mt-3 space-y-1.5">
+            {data.clusters.slice(0, 5).map((c, i) => (
+              <div key={i} className="flex items-center justify-between gap-3 border-b border-line/60 py-1.5">
+                <span className="text-[12.5px] text-ink-dim">{c.size} wallets = 1 operator{c.includesCreator ? " · incl. creator" : ""}{c.sharedFunders.length ? " · shared funder" : ""}</span>
+                <span className="mono text-[12px] font-semibold" style={{ color: c.combinedPct >= 25 ? "var(--color-avoid)" : c.combinedPct >= 10 ? "var(--color-caution)" : "var(--color-ink-dim)" }}>{c.combinedPct.toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function LyraRead({ scan }: { scan: ThreatScan }) {
   const [state, setState] = useState<"loading" | "done" | "off">(scan.code.verified ? "loading" : "off");
   const [ai, setAi] = useState(scan.code.ai);
@@ -255,7 +300,14 @@ function Report({ scan }: { scan: ThreatScan }) {
       {/* deployer */}
       {(deployer.address || deployer.serialHoneypoter) && (
         <div className="mt-4 rounded-xl border border-line p-4">
-          <h2 className="text-[14px] font-semibold text-ink">Deployer</h2>
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-[14px] font-semibold text-ink">Deployer</h2>
+            {d.safety.creatorPercent > 0 && (
+              <span className="mono text-[11px]" style={{ color: d.safety.creatorPercent >= 15 ? "var(--color-avoid)" : d.safety.creatorPercent >= 5 ? "var(--color-caution)" : "var(--color-ink-faint)" }}>
+                creator holds {d.safety.creatorPercent.toFixed(1)}% of supply
+              </span>
+            )}
+          </div>
           <div className="mono mt-1 text-[11.5px] text-ink-faint">{deployer.address ? shortAddr(deployer.address) : "unresolved"}</div>
           <p className="mt-1.5 text-[13px] text-ink-dim">
             {deployer.serialHoneypoter
@@ -277,6 +329,9 @@ function Report({ scan }: { scan: ThreatScan }) {
           )}
         </div>
       )}
+
+      {/* creator & insider clusters (lazy, #9) */}
+      <InsiderClusters scan={scan} />
 
       {/* checklist */}
       <div className="mt-4 rounded-xl border border-line p-4">

@@ -121,6 +121,16 @@ export interface ThreatScan {
   scannedAt: number;
 }
 
+// ---- creator & insider clustering (#9, lazy/on-demand) ----
+export interface InsiderCluster {
+  available: boolean;
+  clusters: { size: number; combinedPct: number; sharedFunders: string[]; includesCreator: boolean; wallets: string[] }[];
+  largestPct: number;
+  largestSize: number;
+  includesCreator: boolean;
+  note: string;
+}
+
 // ---- verdict-flip alerts ----
 // Emitted by the re-check cron when a token we rated tradeable (SAFE/CAUTION)
 // then loses its liquidity — "we said tradeable, its pool just got pulled."
