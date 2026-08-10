@@ -79,6 +79,42 @@ describe("analyzeTokenomics", () => {
     expect(tk.realHolderTopPct).toBe(20); // the pool's 60% is excluded
   });
 
+  it("treats a Uniswap V4 / concentrated pool as an NFT position, not 'removable'", () => {
+    const tk = analyzeTokenomics(dossier({ dexId: "uniswap", dexLabels: ["v4"] }), meta(), null, null);
+    expect(tk.lp.status).toBe("nft-position");
+    expect(tk.lp.note).toMatch(/NFT position/i);
+    expect(tk.lp.note).not.toMatch(/removable/i);
+  });
+
+  it("treats a Raydium CLMM pool as an NFT position", () => {
+    const tk = analyzeTokenomics(dossier({ chain: "solana", dexId: "raydium clmm", dexLabels: [] }), meta(), null, null);
+    expect(tk.lp.status).toBe("nft-position");
+  });
+
+  it("clamps impossible aggregates and suppresses inconsistent holder data", () => {
+    // Free-tier rows that sum well past 100% must not yield a >100% figure.
+    const m = meta({
+      holders: [
+        { address: "0x000000000000000000000000000000000000dead", percent: 200, tag: "burn", isLocked: false, isContract: false },
+        { address: "0xwhale", percent: 180, tag: "", isLocked: false, isContract: false },
+      ],
+    });
+    const tk = analyzeTokenomics(dossier(), m, null, null);
+    expect(tk.burn.burnedSupplyPct).toBeLessThanOrEqual(100);
+    expect(tk.realHolderTopPct).toBeLessThanOrEqual(100);
+    // Inconsistent (sum > 105) → holder-derived separation is suppressed, not garbage.
+    expect(tk.pools).toHaveLength(0);
+  });
+
+  it("reports one coherent LP-secured number (burn + lock)", () => {
+    const d = dossier();
+    (d.safety as any).lpBurnedPct = 30;
+    (d.safety as any).lpLockedPct = 40;
+    const tk = analyzeTokenomics(d, meta(), null, null);
+    expect(tk.lp.status).toBe("locked");
+    expect(tk.lp.lockedPct).toBe(70); // 30 burned + 40 locked = 70 secured, single figure
+  });
+
   it("recognizes a launchpad locker as locked-by-design", () => {
     const m = meta({
       lpHolders: [{ address: "0xlock", percent: 100, tag: "Pons LaunchLocker", isLocked: false, isContract: true }],

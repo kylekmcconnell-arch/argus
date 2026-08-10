@@ -288,6 +288,11 @@ function judge(
       case "burned": positives.push(`LP burned ${tk.lp.burnedPct.toFixed(0)}% — the pool can never be pulled`); break;
       case "locked": positives.push(`LP locked ${tk.lp.lockedPct.toFixed(0)}%${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`); break;
       case "launchpad-locked": positives.push(tk.lp.note); break; // "held by a launchpad locker — auto-locked by design"
+      case "nft-position":
+        // Concentrated / NFT-position AMM (V3/V4/CLMM). Not a rug signal on its
+        // own — it's how these pools work. Surface it as context, not a warning.
+        warnings.push(tk.lp.note);
+        break;
       case "unlocked":
         if (tk.lp.unlockedTopPct >= 80) { add(35); flags.push(`${tk.lp.unlockedTopPct.toFixed(0)}% of the liquidity sits in ONE unlocked wallet — it can be pulled at any moment`); }
         else { add(20); warnings.push(`Most of the liquidity (${tk.lp.unlockedTopPct.toFixed(0)}%) is in one unlocked wallet — treat the pool as removable`); }
@@ -377,11 +382,12 @@ function buildChecks(
       na ? "na" : s.hiddenOwner || s.takeBack ? "fail" : s.ownerRenounced ? "pass" : "warn",
       na ? "Unchecked" : s.hiddenOwner ? "Hidden owner detected" : s.takeBack ? "Renounce is reversible" : s.ownerRenounced ? "Renounced / authorities revoked" : "Owner is active"),
     chk("lp", "liquidity", "Liquidity custody",
-      na ? "na" : tk.lp.status === "burned" || tk.lp.status === "locked" || tk.lp.status === "launchpad-locked" ? "pass" : tk.lp.status === "unlocked" ? "fail" : established ? "pass" : "warn",
+      na ? "na" : tk.lp.status === "burned" || tk.lp.status === "locked" || tk.lp.status === "launchpad-locked" ? "pass" : tk.lp.status === "unlocked" ? "fail" : tk.lp.status === "nft-position" || established ? "pass" : "warn",
       na ? "Unchecked"
         : tk.lp.status === "burned" ? `${tk.lp.burnedPct.toFixed(0)}% burned`
-        : tk.lp.status === "locked" ? `${tk.lp.lockedPct.toFixed(0)}% locked${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`
+        : tk.lp.status === "locked" ? `${tk.lp.lockedPct.toFixed(0)}% secured${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`
         : tk.lp.status === "launchpad-locked" ? `Launchpad-locked${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`
+        : tk.lp.status === "nft-position" ? "Concentrated/NFT position — LP-token check n/a"
         : tk.lp.status === "unlocked" ? `Pullable — ${tk.lp.unlockedTopPct.toFixed(0)}% in one wallet`
         : "Lock not confirmed by standard tools (may be launchpad-locked)"),
     chk("tax", "market", "Buy/sell tax & destination",

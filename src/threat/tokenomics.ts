@@ -31,7 +31,22 @@ const LAUNCHPAD_LOCKER = /pons|launchlock/i; // "locked by design" launchpad cus
 
 const isBurnAddr = (a: string) => /^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, ""));
 
-export type LpStatus = "burned" | "locked" | "launchpad-locked" | "unlocked" | "unconfirmed";
+// A share of supply/liquidity can never exceed 100%. GoPlus/RugCheck free tiers
+// occasionally return duplicated or self-inconsistent holder rows whose percents
+// sum past 100 — clamp every supply-share figure so we never print an impossible
+// number (the "334% burned" class of bug), and gate on reliability below.
+const pct = (x: number) => Math.max(0, Math.min(100, Number.isFinite(x) ? x : 0));
+
+// Concentrated-liquidity / NFT-position AMMs (Uniswap V3/V4, Raydium CLMM/CPMM,
+// Meteora DLMM, Orca Whirlpool). Liquidity here is an NFT position, NOT an LP
+// token — so the standard "is the LP token locked/burned" check simply doesn't
+// apply, and reporting "LP CUSTODY UNVERIFIED — treat as removable" is wrong.
+const NFT_POSITION = /\bv3\b|\bv4\b|clmm|cpmm|dlmm|whirlpool|concentrated/i;
+function isNftPositionPool(dexId: string, labels: string[]): boolean {
+  return labels.some((l) => NFT_POSITION.test(l)) || NFT_POSITION.test(dexId);
+}
+
+export type LpStatus = "burned" | "locked" | "launchpad-locked" | "nft-position" | "unlocked" | "unconfirmed";
 
 export interface TokenomicsView {
   pools: { address: string; label: string; pct: number }[];
@@ -86,6 +101,11 @@ export function analyzeTokenomics(
   const s = d.safety;
   const sol = d.chain === "solana";
   const holders: LabeledHolder[] = meta?.holders ?? [];
+  // Reliability gate: if the labeled holder rows sum well past 100%, the free
+  // tier returned inconsistent data — don't derive concentration/burn figures
+  // from it (this is what prevents impossible aggregates).
+  const holderSum = holders.reduce((a, h) => a + (Number.isFinite(h.percent) ? h.percent : 0), 0);
+  const holdersReliable = holders.length > 0 && holderSum <= 105;
 
   // --- 1. separate pools / CEX / reward pools / burns from holders ---
   const pools: TokenomicsView["pools"] = [];
@@ -93,47 +113,59 @@ export function analyzeTokenomics(
   const rewardPools: TokenomicsView["rewardPools"] = [];
   const burnHolders: LabeledHolder[] = [];
   const realHolders: LabeledHolder[] = [];
-  for (const h of holders) {
+  for (const h of holdersReliable ? holders : []) {
     if (isBurnAddr(h.address) || BURN_TAG.test(h.tag)) { burnHolders.push(h); continue; }
     if (POOL_TAG.test(h.tag)) { pools.push({ address: h.address, label: label(h, "pool"), pct: h.percent }); continue; }
     if (CEX_TAG.test(h.tag)) { cexHeld.push({ address: h.address, label: label(h, "exchange"), pct: h.percent }); continue; }
     if (REWARD_TAG.test(h.tag) || (h.isContract && REWARD_TAG.test(h.tag))) { rewardPools.push({ address: h.address, label: label(h, "reward pool"), pct: h.percent }); continue; }
     realHolders.push(h);
   }
-  // When there are no labeled holders (Solana — meta is EVM-only), fall back to
-  // the base audit's top-holder figure rather than reporting a misleading 0%.
-  const realHolderTopPct = realHolders.length
+  // When there are no reliable labeled holders (Solana — meta is EVM-only, or
+  // data gated above), fall back to the base audit's top-holder figure rather
+  // than reporting a misleading 0%.
+  const realHolderTopPct = pct(realHolders.length
     ? Math.max(...realHolders.map((h) => h.percent))
-    : (s.topHolderPct ?? 0);
+    : (s.topHolderPct ?? 0));
 
-  // --- 2. LP lock, launchpad-aware ---
+  // --- 2. LP lock — one coherent "secured" figure, launchpad + NFT-position aware ---
   const lpHolders = meta?.lpHolders ?? [];
-  let burnedPct = s.lpBurnedPct;
-  let lockedPct = s.lpLockedPct;
-  let unlockedTopPct = s.lpTopUnlockedEoaPct;
+  const burnedPct = pct(s.lpBurnedPct);
+  let lockedPct = pct(s.lpLockedPct);
+  const unlockedTopPct = pct(s.lpTopUnlockedEoaPct);
   const lockers = new Set<string>();
-  // Recognize lockers by tag even when is_locked wasn't set (launchpad custody).
+  // Recognize lockers by tag even when is_locked wasn't set (launchpad/proxy
+  // custody — a contract holding the LP under a recognized locker name).
   let launchpadLockedPct = 0;
   for (const h of lpHolders) {
     if (LOCKER_TAG.test(h.tag)) {
       lockers.add(h.tag.trim());
-      if (!h.isLocked) launchpadLockedPct += h.percent; // counted as locked-by-custody
+      if (!h.isLocked) launchpadLockedPct += h.percent; // locked-by-custody
     }
   }
   // RugCheck lockers (Solana) fold in.
   if (rc?.lockerNames?.length) rc.lockerNames.forEach((n) => lockers.add(n));
-  if (rc && rc.lockerPct > lockedPct) lockedPct = rc.lockerPct;
-  const effectiveLocked = lockedPct + launchpadLockedPct;
+  if (rc && rc.lockerPct > lockedPct) lockedPct = pct(rc.lockerPct);
+  // The single number every surface should quote: burned + locked + launchpad.
+  const securedPct = pct(burnedPct + lockedPct + launchpadLockedPct);
   const hasLaunchpadLocker = [...lockers].some((l) => LAUNCHPAD_LOCKER.test(l));
+  const nftPosition = isNftPositionPool(d.dexId, d.dexLabels ?? []);
 
   let status: LpStatus;
   let note: string;
   if (burnedPct >= 50) { status = "burned"; note = `${burnedPct.toFixed(0)}% of the liquidity is burned — permanently unpullable.`; }
-  else if (effectiveLocked >= 50) {
+  else if (securedPct >= 50) {
     if (hasLaunchpadLocker && lockedPct < 50) { status = "launchpad-locked"; note = `Liquidity is held by a launchpad locker (${[...lockers].join(", ")}) — auto-locked by design.`; }
-    else { status = "locked"; note = `${effectiveLocked.toFixed(0)}% of the liquidity is locked${lockers.size ? ` (${[...lockers].join(", ")})` : ""}.`; }
+    else { status = "locked"; note = `${securedPct.toFixed(0)}% of the liquidity is secured${lockers.size ? ` via ${[...lockers].join(", ")}` : " (locked or burned)"}.`; }
   } else if (unlockedTopPct >= 50) { status = "unlocked"; note = `${unlockedTopPct.toFixed(0)}% of the liquidity sits in a single unlocked wallet — it can be pulled at any time.`; }
   else if (hasLaunchpadLocker) { status = "launchpad-locked"; note = `A launchpad locker (${[...lockers].join(", ")}) holds liquidity — likely auto-locked by design; confirm on the launchpad.`; }
+  else if (nftPosition) {
+    // #6: the pool is a concentrated/NFT-position AMM. Liquidity is a position
+    // NFT, not an LP token — the LP-token lock check doesn't apply, so don't
+    // cry "removable". Report the custody model accurately.
+    status = "nft-position";
+    const dex = (d.dexLabels ?? []).find((l) => NFT_POSITION.test(l)) ?? d.dexId;
+    note = `Liquidity is a concentrated / NFT position (${dex}) — it is a position NFT, not an LP token, so the standard lock/burn check doesn't apply here. It can still be withdrawn by whoever owns the position; judge it by the position owner and depth, not by an LP-token lock.`;
+  }
   else {
     // The Robinhood/Pons caveat: an early-launchpad lock may not surface in
     // DexScreener/GoPlus. Don't assert "removable" as fact.
@@ -160,7 +192,7 @@ export function analyzeTokenomics(
   } else { taxNote = `Tax (buy ${s.buyTax.toFixed(1)}% / sell ${s.sellTax.toFixed(1)}%) — destination not readable from ${d.chain === "solana" ? "an SPL token" : "the code"}.`; taxTone = s.sellTax >= 20 ? "warn" : "neutral"; }
 
   // --- 5. burns ---
-  const burnedSupplyPct = burnHolders.reduce((a, h) => a + h.percent, 0);
+  const burnedSupplyPct = pct(burnHolders.reduce((a, h) => a + h.percent, 0));
   const burnAddresses = burnHolders.map((h) => h.address);
   const hasBurnFunction = !!code?.hasBurnFunction;
   const hasAutoBurn = !!code?.hasAutoBurn;
@@ -178,7 +210,7 @@ export function analyzeTokenomics(
 
   return {
     pools, cexHeld, rewardPools,
-    lp: { status, burnedPct, lockedPct: effectiveLocked, unlockedTopPct, lockers: [...lockers], note },
+    lp: { status, burnedPct, lockedPct: securedPct, unlockedTopPct, lockers: [...lockers], note },
     tax: { buy: s.buyTax, sell: s.sellTax, destinations: dests, note: taxNote, tone: taxTone },
     burn: { burnedSupplyPct, hasBurnFunction, hasAutoBurn, addresses: burnAddresses, note: burnNote },
     realHolderTopPct, note: summary,

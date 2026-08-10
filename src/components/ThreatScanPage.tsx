@@ -143,8 +143,9 @@ function LyraRead({ scan }: { scan: ThreatScan }) {
 function LpBadge({ status }: { status: ThreatScan["tokenomics"]["lp"]["status"] }) {
   const map: Record<string, { c: string; t: string }> = {
     burned: { c: "var(--color-pass)", t: "LP burned" },
-    locked: { c: "var(--color-pass)", t: "LP locked" },
+    locked: { c: "var(--color-pass)", t: "LP secured" },
     "launchpad-locked": { c: "var(--color-pass)", t: "Launchpad-locked" },
+    "nft-position": { c: "var(--color-ink-dim)", t: "NFT position" },
     unlocked: { c: "var(--color-avoid)", t: "LP unlocked" },
     unconfirmed: { c: "var(--color-caution)", t: "Lock unconfirmed" },
   };
