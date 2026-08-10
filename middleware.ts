@@ -7,6 +7,12 @@ const PUBLIC_API_PATHS = new Set([
   "/api/og",
   "/api/signin",
 ]);
+// Vercel cron paths. These carry no Supabase session (the scheduler is not a
+// member), so the normal bearer-JWT gate would always 401 them. Vercel instead
+// sends "Authorization: Bearer ${CRON_SECRET}" when that env var is set, so we
+// authenticate these by the shared cron secret and fail closed when it is unset
+// or does not match. The handler re-checks the same secret (defense in depth).
+const CRON_API_PATHS = new Set(["/api/threat-recheck"]);
 const VIEWER_GET_PATHS = new Set([
   "/api/session",
   "/api/report",
@@ -83,6 +89,16 @@ export default async function middleware(request: Request): Promise<Response> {
     return new Response(null, { status: 204, headers });
   }
   if (PUBLIC_API_PATHS.has(pathname)) return next();
+
+  if (CRON_API_PATHS.has(pathname)) {
+    const cronSecret = process.env.CRON_SECRET;
+    const authz = request.headers.get("authorization") || "";
+    if (cronSecret && authz === `Bearer ${cronSecret}`) return next();
+    return Response.json(
+      { error: "authentication_required", message: "This endpoint is cron-only." },
+      { status: 401, headers: { "cache-control": "no-store", "www-authenticate": 'Bearer realm="ARGUS"' } },
+    );
+  }
 
   const authorization = request.headers.get("authorization") || "";
   if (!/^Bearer\s+\S+$/i.test(authorization)) {
