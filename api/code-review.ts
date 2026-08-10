@@ -23,7 +23,12 @@ export const config = { maxDuration: 60 };
 const CHAINID: Record<string, number> = {
   ethereum: 1, bsc: 56, base: 8453, polygon: 137, arbitrum: 42161,
   optimism: 10, avalanche: 43114, fantom: 250, cronos: 25, zksync: 324,
-  linea: 59144, scroll: 534352,
+  linea: 59144, scroll: 534352, robinhood: 4663,
+};
+
+// Chains Etherscan/Sourcify don't cover — read verified source from Blockscout.
+const BLOCKSCOUT: Record<string, string> = {
+  robinhood: "https://robinhoodchain.blockscout.com",
 };
 
 const MAX_SOURCE = 120_000; // chars of source fed to the model (~30k tokens)
@@ -98,6 +103,26 @@ async function fromSourcify(chainid: number, address: string): Promise<Fetched |
   }
 }
 
+async function fromBlockscout(base: string, address: string): Promise<Fetched | null> {
+  try {
+    const r = await fetch(`${base}/api/v2/smart-contracts/${address}`, { signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return null;
+    const d = (await r.json()) as any;
+    if (!d.is_verified || !d.source_code) return null;
+    const files = [
+      { path: d.file_path || `${d.name ?? "Contract"}.sol`, content: d.source_code as string },
+      ...((d.additional_sources ?? []) as { file_path?: string; source_code?: string }[])
+        .filter((s) => s.file_path && s.source_code)
+        .map((s) => ({ path: s.file_path!, content: s.source_code! })),
+    ].filter((f) => /\.sol$/i.test(f.path));
+    if (!files.length) return null;
+    const source = files.map((f) => `// ===== FILE: ${f.path} =====\n${f.content}`).join("\n\n");
+    return { name: d.name ?? null, source, readAddress: address, proxyOf: null };
+  } catch {
+    return null;
+  }
+}
+
 // Truncate long source at a FILE boundary when possible, so a citation never
 // lands past a mid-file cut.
 function clampSource(source: string): { source: string; truncated: boolean } {
@@ -147,9 +172,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!anthropicKey) { res.status(200).json({ ok: false, note: "Claude not configured" }); return; }
 
   const esKey = process.env.ETHERSCAN_API_KEY;
+  const bs = BLOCKSCOUT[chain];
   const fetched =
     (esKey ? await fromEtherscan(chainid, address, esKey) : null) ??
-    (await fromSourcify(chainid, address));
+    (await fromSourcify(chainid, address)) ??
+    (bs ? await fromBlockscout(bs, address) : null);
   if (!fetched) { res.status(200).json({ ok: false, note: "no verified source" }); return; }
 
   // Cache keyed on the address whose source was actually READ — for a proxy that

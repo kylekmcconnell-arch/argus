@@ -29,6 +29,7 @@ const RPC: Record<string, string[]> = {
   arbitrum: ["https://arbitrum-one-rpc.publicnode.com", "https://arb1.arbitrum.io/rpc"],
   optimism: ["https://optimism-rpc.publicnode.com", "https://mainnet.optimism.io"],
   avalanche: ["https://avalanche-c-chain-rpc.publicnode.com", "https://api.avax.network/ext/bc/C/rpc"],
+  robinhood: ["https://rpc.mainnet.chain.robinhood.com"], // chainId 4663 (verified live)
 };
 
 // Verified 4-byte selectors for the functions that actually enable a rug. Kept to

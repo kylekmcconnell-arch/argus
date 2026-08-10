@@ -22,6 +22,7 @@ export const EVM_CHAIN_ID: Record<string, number> = {
   zksync: 324,
   linea: 59144,
   scroll: 534352,
+  robinhood: 4663,
 };
 
 // Public Blockscout instances per dexscreener chainId. Only chains with a
@@ -35,6 +36,7 @@ const BLOCKSCOUT: Record<string, string> = {
   zksync: "https://zksync.blockscout.com",
   linea: "https://explorer.linea.build",
   scroll: "https://blockscout.scroll.io",
+  robinhood: "https://robinhoodchain.blockscout.com", // official Blockscout (verified live)
 };
 
 // Solidity sources only — the scanner reads Solidity; JSON metadata and Vyper

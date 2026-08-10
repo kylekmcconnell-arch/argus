@@ -156,16 +156,20 @@ export function analyzeTokenomics(
   else if (securedPct >= 50) {
     if (hasLaunchpadLocker && lockedPct < 50) { status = "launchpad-locked"; note = `Liquidity is held by a launchpad locker (${[...lockers].join(", ")}) — auto-locked by design.`; }
     else { status = "locked"; note = `${securedPct.toFixed(0)}% of the liquidity is secured${lockers.size ? ` via ${[...lockers].join(", ")}` : " (locked or burned)"}.`; }
-  } else if (unlockedTopPct >= 50) { status = "unlocked"; note = `${unlockedTopPct.toFixed(0)}% of the liquidity sits in a single unlocked wallet — it can be pulled at any time.`; }
-  else if (hasLaunchpadLocker) { status = "launchpad-locked"; note = `A launchpad locker (${[...lockers].join(", ")}) holds liquidity — likely auto-locked by design; confirm on the launchpad.`; }
+  }
+  // #6 — MUST precede the unlocked-EOA check: on a concentrated / NFT-position
+  // AMM (Uniswap V3/V4, Raydium CLMM, Meteora DLMM, Orca Whirlpool), liquidity
+  // is a position NFT, not an LP token. GoPlus reports the position/owner as a
+  // single "unlocked wallet", which naively trips the removable-LP rug flag —
+  // that is the exact false positive to avoid. The LP-token lock check simply
+  // doesn't apply; report the custody model instead of crying "removable".
   else if (nftPosition) {
-    // #6: the pool is a concentrated/NFT-position AMM. Liquidity is a position
-    // NFT, not an LP token — the LP-token lock check doesn't apply, so don't
-    // cry "removable". Report the custody model accurately.
     status = "nft-position";
     const dex = (d.dexLabels ?? []).find((l) => NFT_POSITION.test(l)) ?? d.dexId;
     note = `Liquidity is a concentrated / NFT position (${dex}) — it is a position NFT, not an LP token, so the standard lock/burn check doesn't apply here. It can still be withdrawn by whoever owns the position; judge it by the position owner and depth, not by an LP-token lock.`;
   }
+  else if (unlockedTopPct >= 50) { status = "unlocked"; note = `${unlockedTopPct.toFixed(0)}% of the liquidity sits in a single unlocked wallet — it can be pulled at any time.`; }
+  else if (hasLaunchpadLocker) { status = "launchpad-locked"; note = `A launchpad locker (${[...lockers].join(", ")}) holds liquidity — likely auto-locked by design; confirm on the launchpad.`; }
   else {
     // The Robinhood/Pons caveat: an early-launchpad lock may not surface in
     // DexScreener/GoPlus. Don't assert "removable" as fact.

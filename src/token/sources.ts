@@ -35,6 +35,7 @@ export const GOPLUS_CHAIN: Record<string, string> = {
   zksync: "324",
   linea: "59144",
   scroll: "534352",
+  robinhood: "4663", // GoPlus token_security supports Robinhood Chain (verified live)
 };
 
 // Trending + freshly-listed tokens, for the live Radar. Merges DexScreener's
