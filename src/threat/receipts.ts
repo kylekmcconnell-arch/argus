@@ -5,7 +5,7 @@
 // deployer whose past tokens were flagged and died carries that history into
 // every new scan.
 
-import type { Receipt, ThreatVerdict } from "./types";
+import type { Receipt, ThreatAlert, ThreatVerdict } from "./types";
 import { dexByToken, pickPair } from "../token/sources";
 
 const KEY = "argus.threat.receipts.v1";
@@ -120,4 +120,17 @@ export async function sharedReceiptStats(): Promise<{ flagged: number; confirmed
     }
   } catch { /* fall through to local */ }
   return { ...receiptStats(), recent: getReceipts().filter((r) => BAD.includes(r.verdict)).slice(0, 60) };
+}
+
+// Verdict-flip alerts from the shared ledger — tokens we rated tradeable that
+// then lost their liquidity. Empty when no store is configured.
+export async function sharedAlerts(): Promise<ThreatAlert[]> {
+  try {
+    const res = await fetch("/api/threat-alerts", { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return [];
+    const d = (await res.json()) as { available?: boolean; alerts?: ThreatAlert[] };
+    return d.available && Array.isArray(d.alerts) ? d.alerts : [];
+  } catch {
+    return [];
+  }
 }

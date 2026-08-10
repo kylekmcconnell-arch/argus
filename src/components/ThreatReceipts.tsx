@@ -6,8 +6,8 @@
 // misses left in.
 
 import { useEffect, useState } from "react";
-import type { Receipt, ThreatVerdict } from "../threat/types";
-import { sharedReceiptStats } from "../threat/receipts";
+import type { Receipt, ThreatAlert, ThreatVerdict } from "../threat/types";
+import { sharedAlerts, sharedReceiptStats } from "../threat/receipts";
 
 const VERDICT_COLOR: Record<ThreatVerdict, string> = {
   SAFE: "var(--color-pass)",
@@ -63,12 +63,36 @@ function ReceiptRow({ r, onOpen }: { r: Receipt; onOpen: (addr: string) => void 
   );
 }
 
+function AlertStrip({ alerts, onOpen }: { alerts: ThreatAlert[]; onOpen: (addr: string) => void }) {
+  if (!alerts.length) return null;
+  return (
+    <div className="mt-6 rounded-xl border border-avoid/40 bg-avoid/5 p-4">
+      <div className="mono text-[10.5px] uppercase tracking-widest text-avoid">Verdict flips · {alerts.length}</div>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">Tokens we rated tradeable that then lost their liquidity — the re-check caught the pool being pulled.</p>
+      <div className="mt-2 divide-y divide-line/60">
+        {alerts.slice(0, 12).map((a) => (
+          <button key={`${a.chain}:${a.address}`} onClick={() => onOpen(a.address)} className="flex w-full items-center gap-3 py-2 text-left transition hover:bg-panel/40">
+            <span className="mono w-14 shrink-0 text-[10px] uppercase" style={{ color: "var(--color-caution)" }}>was {a.wasVerdict}</span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium text-ink">${a.symbol}</div>
+              <div className="mono text-[10.5px] text-ink-faint">{a.chain} · {shortAddr(a.address)} · {a.type === "confirmed-dead" ? "market dead" : "liquidity collapsing"}</div>
+            </div>
+            <div className="mono shrink-0 text-right text-[11px] text-avoid">{money(a.liqThen)} → {money(a.liqNow)} · −{a.priceDropPct}%</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ThreatReceipts({ onOpen }: { onOpen: (addr: string) => void }) {
   const [stats, setStats] = useState<{ flagged: number; confirmedDead: number; checked: number; recent: Receipt[] } | null>(null);
+  const [alerts, setAlerts] = useState<ThreatAlert[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     sharedReceiptStats().then((s) => { setStats(s); setLoading(false); });
+    sharedAlerts().then(setAlerts);
   }, []);
 
   const hitRate = stats && stats.checked > 0 ? Math.round((stats.confirmedDead / stats.checked) * 100) : null;
@@ -83,6 +107,8 @@ export function ThreatReceipts({ onOpen }: { onOpen: (addr: string) => void }) {
       </p>
 
       {loading && <p className="mt-8 animate-pulse text-[13px] text-ink-faint">Loading the ledger…</p>}
+
+      <AlertStrip alerts={alerts} onOpen={onOpen} />
 
       {stats && (
         <>

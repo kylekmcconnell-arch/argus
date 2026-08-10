@@ -121,6 +121,21 @@ export interface ThreatScan {
   scannedAt: number;
 }
 
+// ---- verdict-flip alerts ----
+// Emitted by the re-check cron when a token we rated tradeable (SAFE/CAUTION)
+// then loses its liquidity — "we said tradeable, its pool just got pulled."
+export interface ThreatAlert {
+  address: string;
+  chain: string;
+  symbol: string;
+  type: "liquidity-collapse" | "confirmed-dead";
+  wasVerdict: ThreatVerdict | string;
+  liqThen: number;
+  liqNow: number;
+  priceDropPct: number;
+  at: number;
+}
+
 // ---- receipts: the recorded track record ----
 // Every scan is recorded with the liquidity AT flag time. Re-checking later
 // turns flagged calls into receipts: "flagged at $32K liquidity, now $0, dead."
