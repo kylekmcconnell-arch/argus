@@ -26,6 +26,11 @@
   "exclude": [
     "src/calibration/calibrate.ts",
     "src/calibration/calibration.test.ts",
+    // Imports the pure parseReview() out of the api/ serverless handler, whose
+    // @vercel/node types would otherwise leak Node globals into this browser
+    // program (making other tests' @ts-expect-error node-import guards unused).
+    // Vitest still runs it. Keep it out of the DOM typecheck graph.
+    "src/threat/parseReview.test.ts",
     "src/**/* 2.ts",
     "src/**/* 2.tsx"
   ]

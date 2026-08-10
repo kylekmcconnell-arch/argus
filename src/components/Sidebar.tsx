@@ -16,6 +16,7 @@ import {
   MegaphoneIcon,
   MoonIcon,
   PlugsConnectedIcon,
+  ShieldCheckIcon,
   SignOutIcon,
   StarIcon,
   SunIcon,
@@ -173,7 +174,7 @@ function AnalystBadge({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export type NavTarget = "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
+export type NavTarget = "idle" | "radar" | "trending" | "recon" | "find" | "threat" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
 
 export function Sidebar({
   onNav,
@@ -343,6 +344,7 @@ export function Sidebar({
           <NavGroup compact={compact} label="Investigate" />
           <NavItem compact={compact} icon={FilesIcon} label="New investigation" active={view === "idle" || view === "audit"} onClick={() => nav("idle")} />
           <NavItem compact={compact} icon={CrosshairIcon} label="Radar" active={view === "radar"} onClick={() => nav("radar")} />
+          <NavItem compact={compact} icon={ShieldCheckIcon} label="Threat scan" active={view === "threat"} onClick={() => nav("threat")} />
           <NavItem compact={compact} icon={GlobeSimpleIcon} label="Website check" active={view === "recon"} onClick={() => nav("recon")} />
           <NavItem compact={compact} icon={WalletIcon} label="Find wallet" active={view === "find"} onClick={() => nav("find")} />
 

@@ -33100,6 +33100,7 @@ async function runTokenAudit(input, emit, opts) {
     address,
     chain,
     dexId: pair.dexId,
+    dexLabels: pair.labels ?? [],
     pairAddress: pair.pairAddress,
     symbol: pair.baseToken.symbol,
     name: pair.baseToken.name,

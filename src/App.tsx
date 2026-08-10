@@ -20,13 +20,15 @@ import {
   type StoredCaseResolution,
 } from "./lib/reports";
 import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
+import { ThreatScanPage, ThreatLanding } from "./components/ThreatScanPage";
+import { WalletScanPage } from "./components/WalletScanPage";
 import type { Investigation } from "./lib/investigation";
 import type { Recon } from "./collect/recon";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
 import { startPersonAudit, setOnComplete, getRun } from "./lib/runner";
 import { startTokenScan, startInvestigationScan, setScanOnComplete, getScanRun, type ScanRun } from "./lib/scanrunner";
-import { isRunnableTokenInput, resolveInput, type RunnableTokenInput } from "./lib/resolveInput";
+import { isRunnableTokenInput, resolveInput, type RunnableTokenInput, type ResolvedInput } from "./lib/resolveInput";
 import type { TokenDossier } from "./token/audit";
 import { resolveTokenSubject, type TokenCandidate } from "./token/resolveSubject";
 import type { NavTarget } from "./components/Sidebar";
@@ -123,6 +125,7 @@ type Phase =
   | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
+  | "threat"
   | "investigation" | "investigation-report"
   | "polymarket"
   | "resolving"
@@ -269,6 +272,8 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
   if (live) return { phase: "idle", dossier: null, query: "", openRef: live, openKind: "person" };
   const token = params.get("t");
   if (token) return { phase: "idle", dossier: null, query: "", openRef: token, openKind: "token" };
+  const threat = params.get("threat");
+  if (threat) return { phase: "threat", dossier: null, query: threat };
   const site = params.get("site");
   if (site) return { phase: "idle", dossier: null, query: "", openRef: site, openKind: "site" };
   const inv = params.get("inv");
@@ -288,6 +293,10 @@ export default function App() {
   const [tokenInput, setTokenInput] = useState<RunnableTokenInput | null>(null);
   const [tokenDossier, setTokenDossier] = useState<TokenDossier | null>(null);
   const [tokenBriefTarget, setTokenBriefTarget] = useState<CaseBriefTarget | null>(null);
+  const [threatInput, setThreatInput] = useState<ResolvedInput | null>(
+    boot.phase === "threat" && boot.query ? resolveInput(boot.query) : null,
+  );
+  const [walletScanAddr, setWalletScanAddr] = useState<string | null>(null);
   const [reconUrl, setReconUrl] = useState<string | null>(boot.phase === "recon" ? boot.query : null);
   // The wallet a Polymarket profile link named. Held as the normalized lowercase
   // address rather than the pasted URL, so the page, the route and the record all
@@ -477,6 +486,25 @@ export default function App() {
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, setInvestigationInput, setPhase, setPrivateMode, setQuery, showPrivacyConflict]);
 
   const onInvestigationError = useCallback(() => setPhase("notfound"), [setPhase]);
+
+  // Threat scan: a standalone surface. Token mode resolves any token ref to the
+  // threat report; wallet mode triages a wallet's holdings. A token address and
+  // a wallet address are indistinguishable by format, so the mode is explicit.
+  const onThreatScan = useCallback((raw: string, mode: "token" | "wallet" = "token") => {
+    if (mode === "wallet") {
+      setQuery(raw);
+      setWalletScanAddr(raw.trim());
+      setThreatInput(null);
+      setPhase("threat");
+      return;
+    }
+    const resolved = resolveInput(raw);
+    if (resolved.kind !== "token") { onAudit(raw); return; }
+    setQuery(raw);
+    setWalletScanAddr(null);
+    setThreatInput(resolved);
+    setPhase("threat");
+  }, [onAudit]);
 
   // Open a project-centric view: dig who worked on it, all auditable.
   const onOpenProject = useCallback((name: string, domain?: string, priv = false, panelCostToken?: string) => {
@@ -1275,6 +1303,8 @@ export default function App() {
       privRef.current = false;
       setPrivateMode(false);
     }
+    // opening Threat scan from the rail is a fresh entry surface (clear prior token/wallet)
+    if (t === "threat") { setThreatInput(null); setWalletScanAddr(null); }
     setPhase(t);
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, setDossier, setPhase, setPrivateMode, setQuery, setReconUrl]);
 
@@ -1283,7 +1313,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "alerts" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
+    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "threat" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "alerts" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
       ? phase
       : "idle";
   const personReportPrivate = (dossier?.viewPersistence ?? dossier?.persistence)?.state === "private";
@@ -1350,6 +1380,12 @@ export default function App() {
       )}
 
       {phase === "token-report" && tokenDossier && <TokenReport key={`token:${tokenDossier.versionContext?.reportVersionId ?? tokenDossier.viewVersionContext?.reportVersionId ?? tokenDossier.persistence?.scanId ?? tokenDossier.viewPersistence?.scanId ?? tokenDossier.address}`} dossier={tokenDossier} onReset={reset} onAudit={tokenReportPrivate ? onPrivateAudit : onSafeAudit} onRescan={() => onAudit(tokenDossier.address, tokenReportPrivate, true)} onOpenBrief={!evidenceReviewVersionId && !privateMode && tokenBriefTarget ? () => setCaseBriefTarget(tokenBriefTarget) : undefined} />}
+
+      {phase === "threat" && (walletScanAddr
+        ? <WalletScanPage key={walletScanAddr} address={walletScanAddr} />
+        : threatInput
+          ? <ThreatScanPage key={threatInput.ref} input={threatInput} onError={() => setPhase("notfound")} />
+          : <ThreatLanding onScan={onThreatScan} />)}
 
       {phase === "investigation" && investigationInput && (
         <InvestigationRun input={investigationInput} onDone={onInvestigationDone} onError={onInvestigationError} />

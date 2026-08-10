@@ -112,7 +112,7 @@ export function deployerRoleLabel(
 }
 
 export interface TokenDossier {
-  address: string; chain: string; dexId: string; pairAddress?: string; symbol: string; name: string;
+  address: string; chain: string; dexId: string; dexLabels?: string[]; pairAddress?: string; symbol: string; name: string;
   imageUrl?: string; priceUsd?: number; mcap?: number; fdv?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
   /**
    * Pool-creation instant from DexScreener, in unix milliseconds. Frozen so a
@@ -1188,7 +1188,7 @@ async function runTokenAudit(
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} · ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
 
   return {
-    address, chain, dexId: pair.dexId, pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
+    address, chain, dexId: pair.dexId, dexLabels: pair.labels ?? [], pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
     mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays,
     // Keep the raw instant, not just the day count derived from it above. The
