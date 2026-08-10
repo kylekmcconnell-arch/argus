@@ -339,8 +339,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             <a href="#token-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
               <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
             </a>
+            <button type="button" onClick={() => window.print()} title="Save this report as a PDF (opens the print dialog)" className="btn-secondary print:hidden flex min-h-10 items-center gap-2 px-3 text-[12.5px]">Export PDF</button>
             {canShare && (
-              <button type="button" onClick={() => window.print()} title="Save this report as a PDF (opens the print dialog)" className="btn-secondary print:hidden flex min-h-10 items-center gap-2 px-3 text-[12.5px]">Export PDF</button><button onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
+              <button onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
                 <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
                 {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
               </button>
