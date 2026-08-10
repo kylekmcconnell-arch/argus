@@ -297,6 +297,20 @@ function Report({ scan }: { scan: ThreatScan }) {
       {/* tokenomics */}
       <Tokenomics tk={scan.tokenomics} />
 
+      {/* migration */}
+      {scan.deep.migration?.migrated && (
+        <div className="mt-4 rounded-xl border p-4" style={{ borderColor: "var(--color-caution)" }}>
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-[14px] font-semibold text-ink">Migrate.fun migration</h2>
+            <span className="mono text-[10.5px] text-ink-faint">{scan.deep.migration.projects.map((p) => p.projectId).join(", ")}</span>
+          </div>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">{scan.deep.migration.note}</p>
+          {scan.deep.migration.projects[0]?.counterpartMint && (
+            <p className="mono mt-1.5 text-[10.5px] text-ink-faint">pre/post-migration counterpart: {shortAddr(scan.deep.migration.projects[0].counterpartMint)}</p>
+          )}
+        </div>
+      )}
+
       {/* cross-chain / OFT */}
       {scan.deep.xchain?.isOft && (
         <div className="mt-4 rounded-xl border border-line p-4">

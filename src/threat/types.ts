@@ -118,8 +118,17 @@ export interface ThreatScan {
     fingerprint: string | null;
     clones: { symbol: string; address: string; verdict: string }[];
     xchain: CrossChain | null;
+    migration: MigrationInfo | null;
   };
   scannedAt: number;
+}
+
+// ---- Migrate.fun migration (#5) ----
+export interface MigrationInfo {
+  migrated: boolean;
+  isPostMigrationToken: boolean;
+  projects: { projectId: string; role: string; counterpartMint: string; creator: string }[];
+  note: string;
 }
 
 // ---- cross-chain / LayerZero OFT (#4) ----

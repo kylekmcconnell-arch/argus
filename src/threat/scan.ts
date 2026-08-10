@@ -20,7 +20,8 @@ import {
   type HoneypotDeep, type RugcheckReport, type GoPlusMeta,
 } from "./deepsources";
 import { crossChain } from "./crosschain";
-import type { CrossChain } from "./types";
+import { migrationCheck } from "./migration";
+import type { CrossChain, MigrationInfo } from "./types";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -52,6 +53,10 @@ export async function threatScan(
     sol ? Promise.resolve(null) : codeFingerprint(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : crossChain(dossier.chain, dossier.address, dossier.liquidityUsd ?? 0),
   ]);
+  const migration = sol ? await migrationCheck(dossier.chain, dossier.address) : null;
+  if (migration?.migrated) {
+    emit?.({ phase: "NERON · Migration", label: "Migrate.fun", detail: migration.isPostMigrationToken ? `New post-migration token (${migration.projects[0]?.projectId}) — the chart restarted; claim distribution to prior holders is expected.` : `Registered in a Migrate.fun migration (${migration.projects[0]?.projectId}).`, tone: "neutral" });
+  }
   const burns = sol ? null : await burnHistory(dossier.chain, dossier.address);
   if (burns && burns.count > 0) {
     emit?.({ phase: "NERON · Burns", label: `${burns.count} burns`, detail: `${burns.burnedSupplyPct != null ? `${burns.burnedSupplyPct.toFixed(burns.burnedSupplyPct < 10 ? 2 : 0)}% of supply burned; ` : ""}cadence ${burns.cadence}${burns.ongoing ? ", ongoing" : ""}.`, tone: "good" });
@@ -88,7 +93,7 @@ export async function threatScan(
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "NERON · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders — a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration);
   const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
@@ -98,7 +103,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration },
     scannedAt: Date.now(),
   };
 
@@ -132,7 +137,7 @@ function judge(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
   meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
-  tk: TokenomicsView, xchain: CrossChain | null,
+  tk: TokenomicsView, xchain: CrossChain | null, migration: MigrationInfo | null,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -342,8 +347,13 @@ function judge(
   // it, we flag it as a distribution and prompt the migration check, rather than
   // falsely branding it a coordinated launch.
   const sol = d.chain === "solana";
-  const bundleProven = !sol || (rc != null && rc.insidersDetected > 0);
+  const isMigrationClaim = !!migration?.isPostMigrationToken;
+  // A confirmed Migrate.fun migration means the spread IS the claim distribution.
+  // Otherwise, on Solana require RugCheck's common-funder proof before calling it
+  // a bundle.
+  const bundleProven = !sol || (!isMigrationClaim && rc != null && rc.insidersDetected > 0);
   if (d.bundleRisk === "high" && !established && bundleProven) { add(25); flags.push(`${d.insiderPct}% of supply sits in ${d.bundleCount} fresh wallets (pools excluded) — a bundled launch or coordinated snipe`); }
+  else if (d.bundleRisk === "high" && !established && isMigrationClaim) { positives.push(`${d.insiderPct}% of supply across ${d.bundleCount} wallets is the Migrate.fun claim distribution to the original holders — expected after a migration, not a coordinated bundle.`); }
   else if (d.bundleRisk === "high" && !established && sol) { soft(10); warnings.push(`${d.insiderPct}% of supply is spread across ${d.bundleCount} wallets, but they don't share a common funder — likely a DISTRIBUTION (airdrop / migration claim), not a coordinated bundle. If the token migrated (e.g. via Migrate.fun) the contract is new and the chart restarted; judge age and holders on that basis.`); }
   else if (d.bundleRisk !== "low") { soft(12); warnings.push(`${d.insiderPct}% of supply is concentrated in ${d.bundleCount} non-contract wallets (pools excluded)`); }
   if (realTop != null && realTop > 50 && !established) { add(25); flags.push(`One non-pool wallet holds ${realTop.toFixed(0)}% of the supply — they ARE the market`); }
@@ -354,8 +364,16 @@ function judge(
   // --- market conduct ---
   if (d.findings.some((f) => /wash-trading|wash-trade/i.test(f.claim))) { add(25); flags.push("Volume churns without moving the price — a WASH-TRADING signature, the activity is manufactured"); }
   if ((d.priceChange?.h24 ?? 0) <= -60) { add(20); warnings.push(`Down ${Math.abs(d.priceChange!.h24!).toFixed(0)}% in 24h — the dump may already have happened`); }
-  if (d.ageDays != null && d.ageDays < 1) { add(10); warnings.push("Pair created <24h ago — no history to judge, maximum uncertainty"); }
-  else if (d.ageDays != null && d.ageDays < 7) { add(6); warnings.push(`Pair is ${Math.round(d.ageDays)} day${Math.round(d.ageDays) === 1 ? "" : "s"} old`); }
+  // A post-migration token's pair is freshly created by design (the chart
+  // restarted at migration) — don't penalize the young age or read it as a
+  // fresh-launch rug. Note the migration and skip the age penalty.
+  if (migration?.migrated) {
+    positives.push(migration.note);
+  }
+  if (!migration?.isPostMigrationToken) {
+    if (d.ageDays != null && d.ageDays < 1) { add(10); warnings.push("Pair created <24h ago — no history to judge, maximum uncertainty"); }
+    else if (d.ageDays != null && d.ageDays < 7) { add(6); warnings.push(`Pair is ${Math.round(d.ageDays)} day${Math.round(d.ageDays) === 1 ? "" : "s"} old`); }
+  }
 
   // --- corroboration positives ---
   if (d.cg?.listed) positives.push(`Listed on CoinGecko${d.cg.rank ? ` (rank #${d.cg.rank})` : ""}${d.cg.cexCount ? `, ${d.cg.cexCount} CEX market${d.cg.cexCount === 1 ? "" : "s"}` : ""}`);

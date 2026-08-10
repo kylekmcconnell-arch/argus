@@ -106,14 +106,17 @@ Solana a "bundled launch / coordinated snipe" flag now requires RugCheck's
 a DISTRIBUTION (airdrop / migration claim) and prompts the migration caveat,
 never branded a coordinated launch.
 
-**Blocked (needs the program ID):** positively *identifying* that a token
-migrated via Migrate.fun. The program ID is not disclosed in any public source
-(the Halborn audit redacts it, the repo is private/404, the site is a
-client-rendered SPA with no API). To finish rigorous detection, obtain the
-program ID from a **live migrate.fun claim transaction** (inspect the invoked
-program on Solscan) or the repo's `declare_id!`, then detect: token minted/
-distributed **from that program's vault** + claimants **burning an MFT** +
-**temporal spread** → flag "migrated via Migrate.fun (new CA, chart restarted)".
+**Positive identification — DONE.** Program ID pulled from a live project page
+(mig180): **`migK824DsBMp2eZXdhSBAWFS6PbvA6UN8DV15HfmstR`** (the account `owner`;
+the "mig" vanity prefix confirms it). `api/migration.ts`:
+`getProgramAccounts(program, memcmp offset 0 = project-account discriminator
+`YSC6fNifLgY`)` → ~215 project accounts; each is `[8 disc][u32+projectId]
+[u32+name][creator:32][newMint:32][oldMint:32]`, so we read the length-prefixed
+strings to locate the mints exactly and match the scanned mint → role new/old.
+Verified live: the Rizzmas token resolves to project mig180 as the NEW mint,
+old (pre-migration) mint `ADA9…pump`, creator matching the project's creator
+endpoint. The judge then skips the fresh-age penalty and reclassifies the claim
+spread as a distribution (not a bundle) for a confirmed post-migration token.
 
 ## Design deltas vs nlyra (deliberate)
 
