@@ -168,6 +168,35 @@ export async function codeFingerprint(chain: string, address: string): Promise<F
   }
 }
 
+// ---- on-chain burn history + cadence (EVM incl. Robinhood) via api/burns ----
+export interface BurnHistory {
+  count: number;
+  burnedSupplyPct: number | null;
+  cadence: "none" | "one-off" | "regular" | "irregular" | "stalled";
+  ongoing: boolean;
+  burnsLast30d: number;
+  medianIntervalDays: number | null;
+  lastBurnAt: number | null;
+}
+export async function burnHistory(chain: string, address: string): Promise<BurnHistory | null> {
+  if (chain === "solana") return null;
+  try {
+    const res = await fetch(`/api/burns?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, {
+      signal: AbortSignal.timeout(22000),
+    });
+    if (!res.ok) return null;
+    const d = (await res.json()) as any;
+    if (!d.available || !d.count) return null;
+    return {
+      count: d.count, burnedSupplyPct: d.burnedSupplyPct ?? null, cadence: d.cadence ?? "none",
+      ongoing: !!d.ongoing, burnsLast30d: d.burnsLast30d ?? 0, medianIntervalDays: d.medianIntervalDays ?? null,
+      lastBurnAt: d.lastBurnAt ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // Prior flagged tokens that share this fingerprint — the known-rug-clone check.
 export async function knownRugClones(fingerprint: string, selfAddress: string): Promise<{ symbol: string; address: string; verdict: string }[]> {
   try {

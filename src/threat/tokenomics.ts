@@ -16,7 +16,7 @@
 
 import type { TokenDossier } from "../token/audit";
 import type { CodeTokenomics, TaxDestination } from "./solidity";
-import type { GoPlusMeta, LabeledHolder, RugcheckReport } from "./deepsources";
+import type { BurnHistory, GoPlusMeta, LabeledHolder, RugcheckReport } from "./deepsources";
 
 // Known LP/market and launchpad-locker labels. Matched against holder tags so a
 // pool or a locker is never mistaken for an insider wallet.
@@ -71,6 +71,7 @@ export interface TokenomicsView {
     burnedSupplyPct: number; // % of TOTAL SUPPLY sent to burn addresses
     hasBurnFunction: boolean;
     hasAutoBurn: boolean;
+    ongoing: boolean; // burns seen on-chain within the last 30 days
     addresses: string[];
     note: string;
   };
@@ -97,6 +98,7 @@ export function analyzeTokenomics(
   meta: GoPlusMeta | null,
   rc: RugcheckReport | null,
   code: CodeTokenomics | null,
+  burns: BurnHistory | null = null,
 ): TokenomicsView {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -196,15 +198,26 @@ export function analyzeTokenomics(
   } else { taxNote = `Tax (buy ${s.buyTax.toFixed(1)}% / sell ${s.sellTax.toFixed(1)}%) — destination not readable from ${d.chain === "solana" ? "an SPL token" : "the code"}.`; taxTone = s.sellTax >= 20 ? "warn" : "neutral"; }
 
   // --- 5. burns ---
-  const burnedSupplyPct = pct(burnHolders.reduce((a, h) => a + h.percent, 0));
+  // Prefer the on-chain burn HISTORY (actual transfers to dead addresses, with
+  // cadence) when available — it's more reliable than the holder-snapshot %, and
+  // it answers "are burns ongoing/regular?" which the snapshot can't.
+  const holderBurnedPct = pct(burnHolders.reduce((a, h) => a + h.percent, 0));
+  const burnedSupplyPct = burns?.burnedSupplyPct != null ? pct(burns.burnedSupplyPct) : holderBurnedPct;
   const burnAddresses = burnHolders.map((h) => h.address);
   const hasBurnFunction = !!code?.hasBurnFunction;
   const hasAutoBurn = !!code?.hasAutoBurn;
   let burnNote: string;
-  if (burnedSupplyPct >= 1) burnNote = `~${burnedSupplyPct.toFixed(burnedSupplyPct < 10 ? 1 : 0)}% of total supply has been sent to burn addresses${hasAutoBurn ? "; the contract also auto-burns a share of every taxed transfer" : hasBurnFunction ? "; the contract exposes a burn function" : ""}.`;
+  if (burns && burns.count > 0) {
+    const cadence = burns.cadence === "regular" ? "on a regular cadence" : burns.cadence === "irregular" ? "irregularly" : burns.cadence === "stalled" ? "but they have stalled (none recently)" : burns.cadence === "one-off" ? "as a one-off" : "";
+    const recent = burns.burnsLast30d > 0 ? `, ${burns.burnsLast30d} in the last 30 days` : "";
+    const supplyPart = burnedSupplyPct >= 0.01 ? `~${burnedSupplyPct.toFixed(burnedSupplyPct < 1 ? 2 : burnedSupplyPct < 10 ? 1 : 0)}% of total supply burned so far; ` : "";
+    burnNote = `${supplyPart}${burns.count} on-chain burns${cadence ? ` ${cadence}` : ""}${recent}${burns.ongoing ? " — burns are ongoing" : ""}.`;
+  }
+  else if (holderBurnedPct >= 1) burnNote = `~${holderBurnedPct.toFixed(holderBurnedPct < 10 ? 1 : 0)}% of total supply has been sent to burn addresses${hasAutoBurn ? "; the contract also auto-burns a share of every taxed transfer" : hasBurnFunction ? "; the contract exposes a burn function" : ""}.`;
   else if (hasAutoBurn) burnNote = "The contract auto-burns a share of every taxed transfer (ongoing deflation), though little supply has accumulated at burn addresses yet.";
   else if (hasBurnFunction) burnNote = "The contract exposes a burn function, but little supply has been burned so far.";
   else burnNote = "No meaningful burn detected.";
+  const burnsOngoing = !!burns?.ongoing;
 
   const summary = [
     pools.length ? `${pools.length} pool${pools.length === 1 ? "" : "s"} identified and excluded from holder concentration` : "",
@@ -216,7 +229,7 @@ export function analyzeTokenomics(
     pools, cexHeld, rewardPools,
     lp: { status, burnedPct, lockedPct: securedPct, unlockedTopPct, lockers: [...lockers], note },
     tax: { buy: s.buyTax, sell: s.sellTax, destinations: dests, note: taxNote, tone: taxTone },
-    burn: { burnedSupplyPct, hasBurnFunction, hasAutoBurn, addresses: burnAddresses, note: burnNote },
+    burn: { burnedSupplyPct, hasBurnFunction, hasAutoBurn, ongoing: burnsOngoing, addresses: burnAddresses, note: burnNote },
     realHolderTopPct, note: summary,
   };
 }

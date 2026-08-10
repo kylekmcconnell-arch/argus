@@ -16,7 +16,7 @@ import { reviewCode } from "./codereview";
 import { analyzeTokenomics, type TokenomicsView } from "./tokenomics";
 import { recordReceipt, sharedByDeployer } from "./receipts";
 import {
-  honeypotDeep, rugcheckReport, goplusMeta, codeFingerprint, knownRugClones,
+  honeypotDeep, rugcheckReport, goplusMeta, codeFingerprint, knownRugClones, burnHistory,
   type HoneypotDeep, type RugcheckReport, type GoPlusMeta,
 } from "./deepsources";
 import { crossChain } from "./crosschain";
@@ -52,6 +52,10 @@ export async function threatScan(
     sol ? Promise.resolve(null) : codeFingerprint(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : crossChain(dossier.chain, dossier.address, dossier.liquidityUsd ?? 0),
   ]);
+  const burns = sol ? null : await burnHistory(dossier.chain, dossier.address);
+  if (burns && burns.count > 0) {
+    emit?.({ phase: "NERON · Burns", label: `${burns.count} burns`, detail: `${burns.burnedSupplyPct != null ? `${burns.burnedSupplyPct.toFixed(burns.burnedSupplyPct < 10 ? 2 : 0)}% of supply burned; ` : ""}cadence ${burns.cadence}${burns.ongoing ? ", ongoing" : ""}.`, tone: "good" });
+  }
   if (xchain?.isOft) {
     emit?.({ phase: "NERON · Cross-chain", label: "LayerZero OFT", detail: `Bridged across ${xchain.legs.length} chain${xchain.legs.length === 1 ? "" : "s"} (${xchain.legs.map((l) => l.chain).join(", ")})${xchain.resolvedLegs > 1 ? ` · $${Math.round(xchain.totalLiquidityUsd).toLocaleString()} total liquidity` : ""}.`, tone: "neutral" });
   }
@@ -80,7 +84,7 @@ export async function threatScan(
     emit?.({ phase: "NERON · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the shared ledger.`, tone: "bad" });
   }
 
-  const tokenomics = analyzeTokenomics(dossier, meta, rc, code.tokenomics);
+  const tokenomics = analyzeTokenomics(dossier, meta, rc, code.tokenomics, burns);
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "NERON · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders — a yield mechanism, not a rug tax.", tone: "good" });
   }
@@ -322,7 +326,7 @@ function judge(
   if (effectiveLiq < 15000) { add(10); warnings.push(`Thin liquidity (${money(effectiveLiq)}${xchain?.isOft ? " across all chains" : ""}) — easy to drain, brutal to exit`); }
 
   // --- burns ---
-  if (tk.burn.burnedSupplyPct >= 1 || tk.burn.hasAutoBurn) positives.push(tk.burn.note);
+  if (tk.burn.burnedSupplyPct >= 1 || tk.burn.hasAutoBurn || tk.burn.ongoing) positives.push(tk.burn.note);
 
   // --- holders: the POOL and reward contracts are excluded first ---
   if (tk.pools.length) positives.push(`${tk.pools.length} liquidity pool${tk.pools.length === 1 ? "" : "s"} identified and set aside — not counted as holder concentration`);
