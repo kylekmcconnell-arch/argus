@@ -40,6 +40,23 @@ describe("parseReview", () => {
     expect(r?.summary).toBe("not really json, just prose in a fence");
   });
 
+  it("recovers the summary from a truncated / unterminated JSON reply", () => {
+    // max_tokens cut the reply off mid-string: no closing quote or brace. The
+    // read must still render as clean prose, never the raw {"summary":" envelope.
+    const cut = '{"summary":"PepeToken is a standard OpenZeppelin ERC20 with owner-only add-ons; burn is purely man';
+    const r = parseReview(cut);
+    expect(r?.summary).toBe("PepeToken is a standard OpenZeppelin ERC20 with owner-only add-ons; burn is purely man");
+    expect(r?.summary.startsWith("{")).toBe(false);
+    expect(r?.dissent).toBeNull();
+  });
+
+  it("unescapes quotes in a truncated summary and keeps a dissent that survived", () => {
+    const cut = '{"dissent":"darker","summary":"The \\"renounced\\" owner still holds a hidden mint via _update';
+    const r = parseReview(cut);
+    expect(r?.summary).toBe('The "renounced" owner still holds a hidden mint via _update');
+    expect(r?.dissent).toBe("darker");
+  });
+
   it("returns null on empty input", () => {
     expect(parseReview("")).toBeNull();
     expect(parseReview("   ")).toBeNull();

@@ -149,6 +149,18 @@ export function parseReview(text: string): { summary: string; dissent: "cleaner"
       }
     } catch { /* fall through */ }
   }
+  // 1b) truncated / unterminated JSON (a long reply cut off before the closing
+  // brace). Pull the summary string value out by hand so a cut-off read still
+  // renders as prose instead of dumping the raw {"summary":"..." envelope. The
+  // body pattern stops at the first UNescaped quote or at end-of-text.
+  const partial = text.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)/);
+  if (partial && partial[1].trim()) {
+    const summary = partial[1]
+      .replace(/\\"/g, '"').replace(/\\n/g, "\n").replace(/\\t/g, "\t").replace(/\\r/g, "").replace(/\\\\/g, "\\")
+      .trim();
+    const d = text.match(/"dissent"\s*:\s*"(cleaner|darker)"/);
+    return { summary: summary.slice(0, 4000), dissent: d ? (d[1] as "cleaner" | "darker") : null };
+  }
   // 2) fenced block or raw prose - use the whole thing as the summary
   const prose = clean(text);
   if (prose) {
@@ -203,7 +215,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
         model: process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6",
-        max_tokens: 1200,
+        // A cited 2-4 paragraph read of a large contract can run long; 1200 was
+        // truncating the JSON mid-string (the reply never closed the brace, so
+        // parseReview fell back to dumping the raw envelope). Give it headroom.
+        max_tokens: 2000,
         system:
           "You are LYRA-class contract reader for a token threat scanner: you read the ACTUAL Solidity source of a token and tell a non-technical buyer what the code does to them. Rules: " +
           "(1) Cite specific functions and approximate line numbers for every claim - functions and lines, not vibes. " +
