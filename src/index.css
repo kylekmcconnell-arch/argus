@@ -861,5 +861,15 @@
 @media print {
   .app-sidebar, nav, button, .print\:hidden { display: none !important; }
   body, html { background: #fff !important; }
+  /* The app shell is a fixed-height scroll viewport (h-screen overflow-hidden
+     with an overflow-y-auto main) - print only captures one viewport worth and
+     clips the rest. Unroll every container so the full report paginates. */
+  html, body, #root, main, .h-screen, .overflow-hidden {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
   main { max-width: 100% !important; }
+  /* Don't split a report panel across a page boundary mid-card. */
+  main .rounded-xl { break-inside: avoid; }
 }
