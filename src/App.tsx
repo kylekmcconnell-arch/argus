@@ -495,6 +495,9 @@ export default function App() {
       setQuery(raw);
       setWalletScanAddr(raw.trim());
       setThreatInput(null);
+      // A stale ?threat=<old token> in the URL would re-scan the OLD token on
+      // any reload (deploy-update pill, refresh) mid-scan - keep the URL true.
+      window.history.replaceState({}, "", window.location.pathname);
       setPhase("threat");
       return;
     }
@@ -503,6 +506,7 @@ export default function App() {
     setQuery(raw);
     setWalletScanAddr(null);
     setThreatInput(resolved);
+    window.history.replaceState({}, "", `${window.location.pathname}?threat=${encodeURIComponent(resolved.ref)}`);
     setPhase("threat");
   }, [onAudit]);
 
@@ -1303,8 +1307,13 @@ export default function App() {
       privRef.current = false;
       setPrivateMode(false);
     }
-    // opening Threat scan from the rail is a fresh entry surface (clear prior token/wallet)
-    if (t === "threat") { setThreatInput(null); setWalletScanAddr(null); }
+    // opening Threat scan from the rail is a fresh entry surface (clear prior
+    // token/wallet AND the deep-link param, so a reload can't resurrect them)
+    if (t === "threat") {
+      setThreatInput(null);
+      setWalletScanAddr(null);
+      if (window.location.search.includes("threat=")) window.history.replaceState({}, "", window.location.pathname);
+    }
     setPhase(t);
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, setDossier, setPhase, setPrivateMode, setQuery, setReconUrl]);
 

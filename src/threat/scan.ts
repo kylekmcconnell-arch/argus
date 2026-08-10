@@ -1,5 +1,5 @@
 // The threat scan orchestrator: token ref in → mechanical audit (src/token) →
-// code review (LYRA layer) → deployer memory → one risk call. Output model:
+// code review (AI read layer) → deployer memory → one risk call. Output model:
 // risk points 0–100 (higher = worse), a verdict bucket, a one-line action, and
 // three tiers of plain-English second-person findings (flags / warnings /
 // positives - good news is reported even on a RUG). Every scan is recorded to
@@ -38,11 +38,23 @@ export async function threatScan(
 
   const dossier = await auditToken(input, emit);
   if (!dossier) return null;
+  // The report must be about the token that was ASKED for. If the market
+  // resolver ever falls back to a different base token (search fallback, stale
+  // cache, best-liquidity pick), fail the scan rather than render a confident
+  // verdict for the wrong asset.
+  if (input.via === "evm" || input.via === "solana") {
+    const want = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
+    const got = input.via === "evm" ? dossier.address.toLowerCase() : dossier.address;
+    if (want !== got) {
+      emit?.({ phase: "P0 · Intake", label: "Resolution mismatch", detail: `Resolved to a different token (${dossier.symbol}) than the requested address - aborting rather than reporting on the wrong asset.`, tone: "bad" });
+      return null;
+    }
+  }
 
-  emit?.({ phase: "LYRA · Code", label: "Source read", detail: "Fetching verified source and reading the contract…", tone: "neutral" });
+  emit?.({ phase: "ARGUS · Code", label: "Source read", detail: "Fetching verified source and reading the contract…", tone: "neutral" });
   const sol = dossier.chain === "solana";
   emit?.({
-    phase: "NERON · Deep scan",
+    phase: "ARGUS · Deep scan",
     label: sol ? "RugCheck report" : "Holder sell analysis",
     detail: sol
       ? "Named risk patterns, insider networks, LP lockers…"
@@ -65,7 +77,7 @@ export async function threatScan(
         ? "graduated - curve completed"
         : launch.kind === "fair-launch" ? "direct DEX listing" : "state unknown";
     emit?.({
-      phase: "NERON · Launch",
+      phase: "ARGUS · Launch",
       label: launch.venue ?? "Fair launch",
       detail: `${state}${launch.quote ? ` · bonded to ${launch.quote}` : ""}${launch.lpNote ? ` · ${launch.lpNote}` : ""}`,
       tone: "neutral",
@@ -73,26 +85,26 @@ export async function threatScan(
   }
   const migration = sol ? await migrationCheck(dossier.chain, dossier.address) : null;
   if (migration?.migrated) {
-    emit?.({ phase: "NERON · Migration", label: "Migrate.fun", detail: migration.isPostMigrationToken ? `New post-migration token (${migration.projects[0]?.projectId}) - the chart restarted; claim distribution to prior holders is expected.` : `Registered in a Migrate.fun migration (${migration.projects[0]?.projectId}).`, tone: "neutral" });
+    emit?.({ phase: "ARGUS · Migration", label: "Migrate.fun", detail: migration.isPostMigrationToken ? `New post-migration token (${migration.projects[0]?.projectId}) - the chart restarted; claim distribution to prior holders is expected.` : `Registered in a Migrate.fun migration (${migration.projects[0]?.projectId}).`, tone: "neutral" });
   }
   const burns = sol ? null : await burnHistory(dossier.chain, dossier.address);
   if (burns && burns.count > 0) {
-    emit?.({ phase: "NERON · Burns", label: `${burns.count} burns`, detail: `${burns.burnedSupplyPct != null ? `${burns.burnedSupplyPct.toFixed(burns.burnedSupplyPct < 10 ? 2 : 0)}% of supply burned; ` : ""}cadence ${burns.cadence}${burns.ongoing ? ", ongoing" : ""}.`, tone: "good" });
+    emit?.({ phase: "ARGUS · Burns", label: `${burns.count} burns`, detail: `${burns.burnedSupplyPct != null ? `${burns.burnedSupplyPct.toFixed(burns.burnedSupplyPct < 10 ? 2 : 0)}% of supply burned; ` : ""}cadence ${burns.cadence}${burns.ongoing ? ", ongoing" : ""}.`, tone: "good" });
   }
   if (xchain?.isOft) {
-    emit?.({ phase: "NERON · Cross-chain", label: "LayerZero OFT", detail: `Bridged across ${xchain.legs.length} chain${xchain.legs.length === 1 ? "" : "s"} (${xchain.legs.map((l) => l.chain).join(", ")})${xchain.resolvedLegs > 1 ? ` · $${Math.round(xchain.totalLiquidityUsd).toLocaleString()} total liquidity` : ""}.`, tone: "neutral" });
+    emit?.({ phase: "ARGUS · Cross-chain", label: "LayerZero OFT", detail: `Bridged across ${xchain.legs.length} chain${xchain.legs.length === 1 ? "" : "s"} (${xchain.legs.map((l) => l.chain).join(", ")})${xchain.resolvedLegs > 1 ? ` · $${Math.round(xchain.totalLiquidityUsd).toLocaleString()} total liquidity` : ""}.`, tone: "neutral" });
   }
   // Known-rug-clone check: does this contract's bytecode fingerprint match a
   // token we already flagged? A byte-identical clone of a known rug is the same
   // trap wearing a new ticker.
   const clones = fp ? await knownRugClones(fp.fingerprint, dossier.address) : [];
   if (clones.length) {
-    emit?.({ phase: "NERON · Fingerprint", label: "Known-rug clone", detail: `Byte-identical to ${clones.length} previously flagged token${clones.length === 1 ? "" : "s"} (${clones.slice(0, 3).map((c) => "$" + c.symbol).join(", ")}).`, tone: "bad" });
+    emit?.({ phase: "ARGUS · Fingerprint", label: "Known-rug clone", detail: `Byte-identical to ${clones.length} previously flagged token${clones.length === 1 ? "" : "s"} (${clones.slice(0, 3).map((c) => "$" + c.symbol).join(", ")}).`, tone: "bad" });
   } else if (meta?.fakeToken) {
-    emit?.({ phase: "NERON · Counterfeit", label: "Fake token", detail: "GoPlus flags this as a counterfeit of an established token.", tone: "bad" });
+    emit?.({ phase: "ARGUS · Counterfeit", label: "Fake token", detail: "GoPlus flags this as a counterfeit of an established token.", tone: "bad" });
   }
   emit?.({
-    phase: "LYRA · Code",
+    phase: "ARGUS · Code",
     label: code.verified ? `${code.contractName ?? "Contract"} read` : code.checked ? "No verified source" : "No per-token code on this chain",
     detail: code.verified
       ? `${code.stats?.functions ?? 0} functions, ${code.stats?.gatedFunctions ?? 0} privileged, ${code.flags.length} code flags${code.ai ? ", AI read complete" : ""}.`
@@ -104,12 +116,12 @@ export async function threatScan(
 
   const deployer = await deployerRep(dossier);
   if (deployer.priorRugs > 0) {
-    emit?.({ phase: "NERON · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the shared ledger.`, tone: "bad" });
+    emit?.({ phase: "ARGUS · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the shared ledger.`, tone: "bad" });
   }
 
   const tokenomics = analyzeTokenomics(dossier, meta, rc, code.tokenomics, burns);
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
-    emit?.({ phase: "NERON · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
+    emit?.({ phase: "ARGUS · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
   }
   const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch);
   const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch);
@@ -271,7 +283,7 @@ function judge(
   if (dep.priorRugs > 0) { add(30); flags.push(`This deployer already has ${dep.priorRugs} flagged token${dep.priorRugs === 1 ? "" : "s"} in our ledger - a rug factory pattern`); }
   else if (dep.priorScans.length > 0) warnings.push(`Deployer seen before: ${dep.priorScans.length} prior scan${dep.priorScans.length === 1 ? "" : "s"} in the ledger, none flagged`);
 
-  // --- code review (LYRA) ---
+  // --- code review (the ARGUS engine) ---
   if (code.verified) {
     positives.push(`Verified contract - the source is public${code.contractName ? ` (${code.contractName})` : ""} and was read line by line`);
     // Capability-class code flags are dangerous in an active owner's hands and

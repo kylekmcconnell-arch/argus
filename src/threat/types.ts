@@ -23,7 +23,7 @@ export interface ThreatCall {
   positives: string[]; // green: verified good news (shown even on a RUG verdict)
 }
 
-// ---- code review (the LYRA layer) ----
+// ---- code review (the AI read layer) ----
 export interface SourceFile {
   path: string;
   content: string;

@@ -1,6 +1,6 @@
 // Token Threat Scanner - run view + report. A self-contained page: token ref in,
 // live trace while the scan runs, then the threat report: risk gauge (higher =
-// worse), one-line action, three tiers of plain-English findings, the LYRA code
+// worse), one-line action, three tiers of plain-English findings, the the ARGUS engine code
 // read (static flags with file:line citations + lazy AI read that may dissent),
 // deployer memory, and the transparent checklist of everything examined.
 
@@ -107,7 +107,7 @@ function CheckGrid({ checks }: { checks: ThreatCheck[] }) {
   );
 }
 
-// Lazy AI read: fires after the mechanical verdict renders, so LYRA can be fed
+// Lazy AI read: fires after the mechanical verdict renders, so the ARGUS engine can be fed
 // the verdict she is allowed to dissent from.
 // Lazy insider-cluster panel (#9): proves which "separate" top holders are one
 // operator, via the funding/transfer graph. Loaded on demand after the verdict -
@@ -153,7 +153,7 @@ function InsiderClusters({ scan }: { scan: ThreatScan }) {
   );
 }
 
-function LyraRead({ scan }: { scan: ThreatScan }) {
+function EngineRead({ scan }: { scan: ThreatScan }) {
   const [state, setState] = useState<"loading" | "done" | "off">(scan.code.verified ? "loading" : "off");
   const [ai, setAi] = useState(scan.code.ai);
   const fired = useRef(false);
@@ -167,7 +167,7 @@ function LyraRead({ scan }: { scan: ThreatScan }) {
   return (
     <div className="mt-3 rounded-lg border border-line/70 bg-line/20 p-3">
       <div className="flex items-center justify-between">
-        <span className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">LYRA · AI source read</span>
+        <span className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">the ARGUS engine · AI source read</span>
         {ai?.dissent && (
           <span className="mono rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider" style={{ color: ai.dissent === "cleaner" ? "var(--color-pass)" : "var(--color-avoid)", border: "1px solid currentColor" }}>
             dissents: code reads {ai.dissent}
@@ -336,7 +336,7 @@ function Report({ scan }: { scan: ThreatScan }) {
         {!code.checked && (
           <p className="mt-2 text-[13px] text-ink-dim">Solana tokens share the standard token program - there is no per-token code to read. The mint, freeze, and transfer-hook authorities above carry the equivalent risk.</p>
         )}
-        <LyraRead scan={scan} />
+        <EngineRead scan={scan} />
       </div>
 
       {/* launch provenance */}
@@ -479,7 +479,7 @@ export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" 
       <h1 className="text-[26px] font-semibold tracking-tight text-ink">{mode === "token" ? "Token threat scan" : "Wallet threat triage"}</h1>
       <p className="mt-2 text-[14px] leading-relaxed text-ink-dim">
         {mode === "token"
-          ? "Paste a contract address or DexScreener link. NERON reads the chain - authorities, liquidity, holders, the deployer's history - and LYRA reads the actual contract code, citing the functions and lines. You get a plain-English verdict on whether it's a trap."
+          ? "Paste a contract address or DexScreener link. ARGUS reads the chain - authorities, liquidity, holders, the deployer's history - and the ARGUS engine reads the actual contract code, citing the functions and lines. You get a plain-English verdict on whether it's a trap."
           : "Paste a wallet address. Every token position is joined against the scanner's verdicts, with an at-risk-USD figure and a flag on any position with no market left to sell into. EVM is read keyless; Solana needs a Helius key on the backend."}
       </p>
       <div className="mt-4">{tabs}</div>
@@ -538,7 +538,7 @@ export function ThreatScanPage({ input, onError }: { input: ResolvedInput; onErr
   return (
     <AuditConsole
       handle={label}
-      subtitle="threat scan · market + contract + code + deployer · NERON reads the chain, LYRA reads the code"
+      subtitle="threat scan · market + contract + code + deployer · the ARGUS threat engine reads the chain and the code"
       steps={steps}
       working
       mode="live"

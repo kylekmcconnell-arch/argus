@@ -1,4 +1,4 @@
-// LYRA-style AI code read. GET /api/code-review?address=<0x…>&chain=<chainId>
+// AI AI code read. GET /api/code-review?address=<0x…>&chain=<chainId>
 //   &verdict=<mechanical verdict>&risk=<n>&danger=<n>&gated=<n>
 //
 // The mechanical scan flags capabilities; this pass reads the actual Solidity
@@ -135,7 +135,7 @@ function clampSource(source: string): { source: string; truncated: boolean } {
 
 // Robustly turn the model's reply into {summary, dissent}. Prefers strict JSON,
 // then a fenced ```json block, and finally falls back to the cleaned prose as
-// the summary - showing LYRA's read beats failing with "unparseable output".
+// the summary - showing the AI read beats failing with "unparseable output".
 export function parseReview(text: string): { summary: string; dissent: "cleaner" | "darker" | null } | null {
   const clean = (s: string) => s.replace(/```json\s*|\s*```/g, "").trim();
   const dissentOf = (v: unknown) => (v === "cleaner" || v === "darker" ? v : null);
@@ -220,7 +220,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // parseReview fell back to dumping the raw envelope). Give it headroom.
         max_tokens: 2000,
         system:
-          "You are LYRA-class contract reader for a token threat scanner: you read the ACTUAL Solidity source of a token and tell a non-technical buyer what the code does to them. Rules: " +
+          "You are ARGUS threat-engine contract reader for a token threat scanner: you read the ACTUAL Solidity source of a token and tell a non-technical buyer what the code does to them. Rules: " +
           "(1) Cite specific functions and approximate line numbers for every claim - functions and lines, not vibes. " +
           "(2) Distinguish GUARDED power from OPEN power: a bounded setFee (require <= 10%) or a timelocked owner is not a rug switch; an unbounded one is. Say which. " +
           "(3) Look hardest at _transfer/_update and any modifier gates - that is where traps live (conditional blocks on sells, hidden fee escalation, balance rewrites). " +
@@ -244,7 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const d = (await r.json()) as any;
     // NOTE: panel-cost accounting is intentionally skipped here. Main scopes
     // attachPanelCost to (organizationId, persisted reportVersionId) via an
-    // x-argus-panel-token; the threat scanner's LYRA read runs on a standalone,
+    // x-argus-panel-token; the threat scanner's the ARGUS engine read runs on a standalone,
     // non-persisted surface with no such token. Wiring this endpoint into the
     // paid-panel/auth model (and thereby gating cost-abuse) is a follow-up.
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");

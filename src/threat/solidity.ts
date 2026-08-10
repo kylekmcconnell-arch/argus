@@ -1,4 +1,4 @@
-// Static Solidity red-flag scanner. This is the keyless floor of the LYRA-style
+// Static Solidity red-flag scanner. This is the keyless floor of the AI
 // code review: a set of conservative pattern detectors that read the verified
 // source line by line and cite the exact file + line for every claim, the way a
 // human auditor would. The AI pass (api/code-review.ts) reads deeper; this layer
