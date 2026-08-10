@@ -297,6 +297,25 @@ function Report({ scan }: { scan: ThreatScan }) {
       {/* tokenomics */}
       <Tokenomics tk={scan.tokenomics} />
 
+      {/* cross-chain / OFT */}
+      {scan.deep.xchain?.isOft && (
+        <div className="mt-4 rounded-xl border border-line p-4">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-[14px] font-semibold text-ink">Cross-chain (LayerZero OFT)</h2>
+            <span className="mono text-[10.5px] text-ink-faint">{scan.deep.xchain.isAdapter ? "lockbox adapter" : "native OFT"} · {scan.deep.xchain.resolvedLegs > 1 ? `${money(scan.deep.xchain.totalLiquidityUsd)} total` : ""}</span>
+          </div>
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">One asset bridged across chains — mesh proven from on-chain peers, not name-matching. Single-chain liquidity understates the real depth.</p>
+          <div className="mt-2">
+            {scan.deep.xchain.legs.map((l) => (
+              <div key={`${l.chain}:${l.address}`} className="flex items-center justify-between gap-3 border-b border-line/60 py-1.5">
+                <span className="text-[12.5px] text-ink-dim">{l.chain}{l.self ? " (this token)" : ""}</span>
+                <span className="mono text-[11px] text-ink-faint">{shortAddr(l.address)} · {l.liquidityUsd != null ? money(l.liquidityUsd) : "bridged (pool not auto-resolved)"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* deployer */}
       {(deployer.address || deployer.serialHoneypoter) && (
         <div className="mt-4 rounded-xl border border-line p-4">

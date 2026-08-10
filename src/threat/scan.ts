@@ -19,6 +19,8 @@ import {
   honeypotDeep, rugcheckReport, goplusMeta, codeFingerprint, knownRugClones,
   type HoneypotDeep, type RugcheckReport, type GoPlusMeta,
 } from "./deepsources";
+import { crossChain } from "./crosschain";
+import type { CrossChain } from "./types";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -42,13 +44,17 @@ export async function threatScan(
       : "Simulating sells for real holders — selective honeypots, siphoned wallets, max caps…",
     tone: "neutral",
   });
-  const [code, rc, hp, meta, fp] = await Promise.all([
+  const [code, rc, hp, meta, fp, xchain] = await Promise.all([
     reviewCode(dossier.chain, dossier.address),
     sol ? rugcheckReport(dossier.address) : Promise.resolve(null),
     sol ? Promise.resolve(null) : honeypotDeep(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : goplusMeta(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : codeFingerprint(dossier.chain, dossier.address),
+    sol ? Promise.resolve(null) : crossChain(dossier.chain, dossier.address, dossier.liquidityUsd ?? 0),
   ]);
+  if (xchain?.isOft) {
+    emit?.({ phase: "NERON · Cross-chain", label: "LayerZero OFT", detail: `Bridged across ${xchain.legs.length} chain${xchain.legs.length === 1 ? "" : "s"} (${xchain.legs.map((l) => l.chain).join(", ")})${xchain.resolvedLegs > 1 ? ` · $${Math.round(xchain.totalLiquidityUsd).toLocaleString()} total liquidity` : ""}.`, tone: "neutral" });
+  }
   // Known-rug-clone check: does this contract's bytecode fingerprint match a
   // token we already flagged? A byte-identical clone of a known rug is the same
   // trap wearing a new ticker.
@@ -78,7 +84,7 @@ export async function threatScan(
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "NERON · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders — a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain);
   const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
@@ -88,7 +94,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain },
     scannedAt: Date.now(),
   };
 
@@ -122,7 +128,7 @@ function judge(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
   meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
-  tk: TokenomicsView,
+  tk: TokenomicsView, xchain: CrossChain | null,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -305,7 +311,15 @@ function judge(
         break;
     }
   }
-  if (liq < 15000) { add(10); warnings.push(`Thin liquidity (${money(liq)}) — easy to drain, brutal to exit`); }
+  // Thin-liquidity flag, cross-chain aware: an OFT's liquidity is spread across
+  // chains, so judge it by the total mesh liquidity, not the single-chain pool.
+  const oftTotal = xchain?.isOft ? xchain.totalLiquidityUsd : 0;
+  const effectiveLiq = Math.max(liq, oftTotal);
+  if (xchain?.isOft) {
+    const chains = xchain.legs.map((l) => l.chain).join(", ");
+    positives.push(`LayerZero OFT — one asset bridged across ${xchain.legs.length} chain${xchain.legs.length === 1 ? "" : "s"} (${chains})${xchain.resolvedLegs > 1 ? `, ~${money(oftTotal)} total liquidity across the mesh` : ""}. Single-chain liquidity understates the real depth.`);
+  }
+  if (effectiveLiq < 15000) { add(10); warnings.push(`Thin liquidity (${money(effectiveLiq)}${xchain?.isOft ? " across all chains" : ""}) — easy to drain, brutal to exit`); }
 
   // --- burns ---
   if (tk.burn.burnedSupplyPct >= 1 || tk.burn.hasAutoBurn) positives.push(tk.burn.note);

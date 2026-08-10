@@ -117,8 +117,18 @@ export interface ThreatScan {
     meta: import("./deepsources").GoPlusMeta | null;
     fingerprint: string | null;
     clones: { symbol: string; address: string; verdict: string }[];
+    xchain: CrossChain | null;
   };
   scannedAt: number;
+}
+
+// ---- cross-chain / LayerZero OFT (#4) ----
+export interface CrossChain {
+  isOft: boolean;
+  isAdapter: boolean; // lockbox adapter vs native OFT
+  legs: { chain: string; address: string; liquidityUsd: number | null; self: boolean }[];
+  totalLiquidityUsd: number; // sum over resolved legs
+  resolvedLegs: number;
 }
 
 // ---- creator & insider clustering (#9, lazy/on-demand) ----
