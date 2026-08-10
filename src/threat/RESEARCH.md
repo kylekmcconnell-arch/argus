@@ -89,6 +89,32 @@ read is wrong for launchpad and RWA-distributing tokens:
    via the project's X burn-announcement feed + a burned-over-time series (needs
    the X adapter + snapshots).
 
+## Migrate.fun migration detection (#5) — status
+
+Migrate.fun is **Solana-only** (Emblem Vault; the on-chain program is
+`EmblemCompany/hustle-migration`, Halborn-audited commit e64c641). A migration
+mints a **new token address** (new chart). Its claim flow is **pull-based**: each
+holder deposits the old token to a program vault, gets an **MFT** (Migration
+Fungible Token) receipt, and later **burns the MFT to claim** the new token
+**from the program vault**, spread over a 90-day window. So a migration claim is
+NOT a same-block bundle — it's many *independent* wallets claiming over time.
+
+**Shipped (verifiable, no program ID needed):** the false-positive the operator
+flagged — a claim distribution reading as a "bundle" — is fixed in the judge: on
+Solana a "bundled launch / coordinated snipe" flag now requires RugCheck's
+**common-funder** insider proof; concentration WITHOUT a shared funder is called
+a DISTRIBUTION (airdrop / migration claim) and prompts the migration caveat,
+never branded a coordinated launch.
+
+**Blocked (needs the program ID):** positively *identifying* that a token
+migrated via Migrate.fun. The program ID is not disclosed in any public source
+(the Halborn audit redacts it, the repo is private/404, the site is a
+client-rendered SPA with no API). To finish rigorous detection, obtain the
+program ID from a **live migrate.fun claim transaction** (inspect the invoked
+program on Solscan) or the repo's `declare_id!`, then detect: token minted/
+distributed **from that program's vault** + claimants **burning an MFT** +
+**temporal spread** → flag "migrated via Migrate.fun (new CA, chart restarted)".
+
 ## Design deltas vs nlyra (deliberate)
 
 - **Legitimacy gate**: soft signals (unverified LP custody, concentration,

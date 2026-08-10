@@ -333,7 +333,18 @@ function judge(
   if (tk.rewardPools.length) positives.push(`${tk.rewardPools.length} reward/emission pool${tk.rewardPools.length === 1 ? "" : "s"} identified and set aside from holder concentration`);
   // Prefer the pool-excluded top-holder figure; fall back to the base audit's.
   const realTop = tk.realHolderTopPct > 0 ? tk.realHolderTopPct : s.topHolderPct;
-  if (d.bundleRisk === "high" && !established) { add(25); flags.push(`${d.insiderPct}% of supply sits in ${d.bundleCount} fresh wallets (pools excluded) — a bundled launch or coordinated snipe`); }
+  // #5 — distribution vs bundle. A coordinated bundle/snipe = wallets seeded by a
+  // COMMON FUNDER buying together. A claim/airdrop/MIGRATION distribution (e.g. a
+  // Migrate.fun claim: independent depositors each claiming their new token from a
+  // program vault, over time) spreads supply across many wallets that do NOT share
+  // a funder — and naively reads as a bundle. On Solana we require RugCheck's
+  // common-funder insider proof before calling concentration a "bundle"; without
+  // it, we flag it as a distribution and prompt the migration check, rather than
+  // falsely branding it a coordinated launch.
+  const sol = d.chain === "solana";
+  const bundleProven = !sol || (rc != null && rc.insidersDetected > 0);
+  if (d.bundleRisk === "high" && !established && bundleProven) { add(25); flags.push(`${d.insiderPct}% of supply sits in ${d.bundleCount} fresh wallets (pools excluded) — a bundled launch or coordinated snipe`); }
+  else if (d.bundleRisk === "high" && !established && sol) { soft(10); warnings.push(`${d.insiderPct}% of supply is spread across ${d.bundleCount} wallets, but they don't share a common funder — likely a DISTRIBUTION (airdrop / migration claim), not a coordinated bundle. If the token migrated (e.g. via Migrate.fun) the contract is new and the chart restarted; judge age and holders on that basis.`); }
   else if (d.bundleRisk !== "low") { soft(12); warnings.push(`${d.insiderPct}% of supply is concentrated in ${d.bundleCount} non-contract wallets (pools excluded)`); }
   if (realTop != null && realTop > 50 && !established) { add(25); flags.push(`One non-pool wallet holds ${realTop.toFixed(0)}% of the supply — they ARE the market`); }
   else if (realTop != null && realTop > 25) { soft(12); warnings.push(`Top non-pool holder owns ${realTop.toFixed(0)}% of supply`); }
