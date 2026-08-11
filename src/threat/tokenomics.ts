@@ -31,6 +31,23 @@ const LAUNCHPAD_LOCKER = /pons|launchlock/i; // "locked by design" launchpad cus
 
 const isBurnAddr = (a: string) => /^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, ""));
 
+// Singleton AMM custody contracts. Uniswap V4 has NO per-pair pool contracts -
+// every pool's tokens sit inside one PoolManager per chain, and DexScreener's
+// v4 "pairAddress" is a 32-byte poolId that never matches it. GoPlus tags it as
+// a plain wallet, so without this list the PoolManager reads as "one wallet
+// holds 50%+ of supply" - a structural false positive (seen live on $KUPO/Base).
+// Balancer's V2 Vault has the same shape. Addresses lowercased; documented
+// deployments (Base entry corroborated live 2026-08-11).
+const AMM_SINGLETONS = new Set([
+  "0x000000000004444c5dc75cb358380d2e3de08a90", // Uniswap V4 PoolManager - Ethereum
+  "0x498581ff718922c3f8e6a244956af099b2652b2b", // Uniswap V4 PoolManager - Base
+  "0x360e68faccca8ca495c1b759fd9eee466db9fb32", // Uniswap V4 PoolManager - Arbitrum
+  "0x9a13f98cb987694c9f086b1f5eb990eea8264ec3", // Uniswap V4 PoolManager - Optimism
+  "0x67366782805870060151383f4bbff9dab53e5cd6", // Uniswap V4 PoolManager - Polygon
+  "0x28e2ea090877bf75740558f6bfb36a5ffee9e9df", // Uniswap V4 PoolManager - BSC
+  "0xba12222222228d8ba445958a75a0704d566bf2c8", // Balancer V2 Vault - all chains
+]);
+
 // A share of supply/liquidity can never exceed 100%. GoPlus/RugCheck free tiers
 // occasionally return duplicated or self-inconsistent holder rows whose percents
 // sum past 100 - clamp every supply-share figure so we never print an impossible
@@ -117,6 +134,7 @@ export function analyzeTokenomics(
   const realHolders: LabeledHolder[] = [];
   for (const h of holdersReliable ? holders : []) {
     if (isBurnAddr(h.address) || BURN_TAG.test(h.tag)) { burnHolders.push(h); continue; }
+    if (AMM_SINGLETONS.has(h.address.toLowerCase())) { pools.push({ address: h.address, label: "AMM singleton (Uniswap V4 PoolManager / Balancer Vault) - pooled liquidity, not a holder", pct: h.percent }); continue; }
     if (POOL_TAG.test(h.tag)) { pools.push({ address: h.address, label: label(h, "pool"), pct: h.percent }); continue; }
     if (CEX_TAG.test(h.tag)) { cexHeld.push({ address: h.address, label: label(h, "exchange"), pct: h.percent }); continue; }
     if (REWARD_TAG.test(h.tag) || (h.isContract && REWARD_TAG.test(h.tag))) { rewardPools.push({ address: h.address, label: label(h, "reward pool"), pct: h.percent }); continue; }
