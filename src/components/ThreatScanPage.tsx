@@ -240,6 +240,52 @@ function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]["launc
   );
 }
 
+// Sell structure: who has actually been selling, and are they the bad actors -
+// the deployer (dev sold), wallets the deployer seeded directly, or launch-block
+// snipers who have exited. Answers what the honeypot sim (CAN they sell) and the
+// insider clusters (who is POSITIONED to dump) cannot: realized behaviour.
+function shortWallet(a: string) { return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a; }
+function SellStructurePanel({ s, chain }: { s: NonNullable<ThreatScan["deep"]["sellers"]>; chain: string }) {
+  const flagged = s.topSellers.filter((x) => x.flags.length > 0);
+  const rows = (flagged.length ? flagged : s.topSellers).slice(0, 8);
+  return (
+    <div className="mt-4 rounded-xl border border-line p-4">
+      <h2 className="text-[14px] font-semibold text-ink">Sell structure</h2>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">Who has actually been selling - and whether they are the deployer, wallets it seeded, or launch-block snipers cashing out.</p>
+      <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+        {s.devSold != null && (
+          <span className="mono rounded border px-2 py-0.5" style={{ borderColor: s.devSold ? "var(--color-avoid)" : "var(--color-pass)", color: s.devSold ? "var(--color-avoid)" : "var(--color-pass)" }}>
+            {s.devSold ? "DEV SOLD" : "dev has not sold"}
+          </span>
+        )}
+        <span className="mono rounded border border-line px-2 py-0.5 text-ink-dim">{s.sellerCount} sellers</span>
+        {s.badSellerCount > 0 && <span className="mono rounded border px-2 py-0.5" style={{ borderColor: "var(--color-caution)", color: "var(--color-caution)" }}>{s.badSellerCount} flagged</span>}
+      </div>
+      {rows.length > 0 && (
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full text-[11.5px]">
+            <thead><tr className="text-left text-ink-faint">
+              <th className="py-1 pr-3 font-normal">Wallet</th><th className="py-1 pr-3 font-normal">Sold</th><th className="py-1 pr-3 font-normal">Exited</th><th className="py-1 font-normal">Flag</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((x) => (
+                <tr key={x.wallet} className="border-t border-line/50">
+                  <td className="mono py-1.5 pr-3 text-ink-dim">{shortWallet(x.wallet)}</td>
+                  <td className="mono py-1.5 pr-3 tabular text-ink-dim">{x.soldPct != null ? `${x.soldPct.toFixed(1)}%` : "-"}</td>
+                  <td className="mono py-1.5 pr-3 tabular text-ink-faint">{x.boughtPct ? `${x.realizedExitPct}%` : "seeded"}</td>
+                  <td className="py-1.5 text-[11px]" style={{ color: x.isDeployer || x.deployerSeeded ? "var(--color-avoid)" : "var(--color-caution)" }}>{x.flags[0] ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {s.truncated && <p className="mt-2 text-[10.5px] text-ink-faint">Based on the token's earliest ~6k transfers; a very active token is analyzed partially.</p>}
+      <p className="mt-2 text-[10.5px] text-ink-faint">{chain === "solana" ? "" : "Sold % is of total supply; Exited % is the share of that wallet's own buys it has sold back."}</p>
+    </div>
+  );
+}
+
 function Tokenomics({ tk, lpOverride }: { tk: ThreatScan["tokenomics"]; lpOverride?: string | null }) {
   const taxColor = tk.tax.tone === "good" ? "var(--color-pass)" : tk.tax.tone === "warn" ? "var(--color-caution)" : "var(--color-ink-dim)";
   const row = (label: string, body: React.ReactNode) => (
@@ -346,6 +392,9 @@ function Report({ scan }: { scan: ThreatScan }) {
 
       {/* launch provenance */}
       {scan.deep.launch && scan.deep.launch.kind !== "unknown" && <LaunchPanel launch={scan.deep.launch} />}
+
+      {/* sell structure */}
+      {scan.deep.sellers && (scan.deep.sellers.sellerCount > 0 || scan.deep.sellers.devSold) && <SellStructurePanel s={scan.deep.sellers} chain={scan.chain} />}
 
       {/* tokenomics */}
       <Tokenomics

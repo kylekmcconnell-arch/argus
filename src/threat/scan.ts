@@ -23,7 +23,8 @@ import { crossChain } from "./crosschain";
 import { migrationCheck } from "./migration";
 import { launchProvenance } from "./launch";
 import { registryVerification } from "./verification";
-import type { CrossChain, MigrationInfo, LaunchProvenance, RegistryVerification } from "./types";
+import { sellStructure } from "./sellers";
+import type { CrossChain, MigrationInfo, LaunchProvenance, RegistryVerification, SellStructure } from "./types";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -71,6 +72,13 @@ export async function threatScan(
     sol ? Promise.resolve(null) : crossChain(dossier.chain, dossier.address, dossier.liquidityUsd ?? 0),
     launchProvenance(dossier),
   ]);
+  // Realized sell behaviour: who has actually been dumping, and are they the
+  // deployer / deployer-seeded / launch-block snipers. EVM-only for now.
+  const sellers = sol ? null : await sellStructure(dossier.chain, dossier.address, dossier.deployer ?? null);
+  if (sellers) {
+    if (sellers.devSold) emit?.({ phase: "ARGUS · Sellers", label: "Dev sold", detail: "The deployer/creator wallet has sold into the pool.", tone: "bad" });
+    else if (sellers.badSellerCount > 0) emit?.({ phase: "ARGUS · Sellers", label: `${sellers.badSellerCount} flagged seller${sellers.badSellerCount === 1 ? "" : "s"}`, detail: "Snipers / deployer-seeded wallets have been exiting.", tone: "warn" });
+  }
   if (launch && launch.kind !== "unknown") {
     const state = launch.onCurve
       ? `on the bonding curve${launch.curveProgressPct != null ? ` (${launch.curveProgressPct.toFixed(0)}%)` : ""}`
@@ -132,8 +140,8 @@ export async function threatScan(
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "ARGUS · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -142,7 +150,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers },
     scannedAt: Date.now(),
   };
 
@@ -178,6 +186,7 @@ function judge(
   meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
   tk: TokenomicsView, xchain: CrossChain | null, migration: MigrationInfo | null,
   launch: LaunchProvenance | null, verification: RegistryVerification | null,
+  sellers: SellStructure | null,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -402,6 +411,16 @@ function judge(
     }
   }
   if (launch?.quoteNote) warnings.push(launch.quoteNote);
+  // Realized sell behaviour. Dev selling is the loudest signal; deployer-seeded
+  // wallets exiting are a coordinated distribution the holder chart hides.
+  if (sellers) {
+    if (sellers.devSold) { add(20); flags.push("Dev sold - the deployer/creator wallet has sold into the pool"); }
+    const seeded = sellers.topSellers.filter((s) => s.deployerSeeded);
+    if (seeded.length >= 2) { add(15); flags.push(`${seeded.length} wallets seeded directly by the deployer have sold into the pool - a distributed dev exit the holder chart hides as separate wallets`); }
+    else if (seeded.length === 1) { add(8); warnings.push("A wallet the deployer funded directly has sold into the pool"); }
+    const sniperExits = sellers.topSellers.filter((s) => s.sameBlockSniper && s.realizedExitPct >= 80 && !s.isDeployer && !s.deployerSeeded);
+    if (sniperExits.length >= 3 && !established) { add(8); warnings.push(`${sniperExits.length} launch-block snipers have exited ~all of their position - early coordinated money is leaving`); }
+  }
   // Thin-liquidity flag, cross-chain aware: an OFT's liquidity is spread across
   // chains, so judge it by the total mesh liquidity, not the single-chain pool.
   const oftTotal = xchain?.isOft ? xchain.totalLiquidityUsd : 0;
@@ -485,6 +504,7 @@ function buildChecks(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
   tk: TokenomicsView, launch: LaunchProvenance | null, verification: RegistryVerification | null,
+  sellers: SellStructure | null,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -519,6 +539,14 @@ function buildChecks(
         : tk.lp.status === "nft-position" ? "Concentrated/NFT position - LP-token check n/a"
         : tk.lp.status === "unlocked" ? `Pullable - ${tk.lp.unlockedTopPct.toFixed(0)}% in one wallet`
         : "Lock not confirmed by standard tools (may be launchpad-locked)"),
+    chk("sellers", "market", "Sell structure",
+      sellers == null ? "na"
+        : sellers.devSold ? "fail"
+        : sellers.badSellerCount > 0 ? "warn"
+        : sellers.sellerCount > 0 ? "pass" : "na",
+      sellers == null ? (EVM(d.chain) ? "Unchecked" : "n/a on Solana (Helius follow-on)")
+        : sellers.devSold ? "Dev sold into the pool"
+        : `${sellers.sellerCount} sellers${sellers.badSellerCount > 0 ? `, ${sellers.badSellerCount} flagged (snipers / deployer-seeded)` : " - no flagged actors"}${sellers.truncated ? " (early history)" : ""}`),
     chk("registry", "authority", "Registry verification",
       verification == null ? "na"
         : verification.level === "registry-verified" ? "pass"

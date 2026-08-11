@@ -43,6 +43,8 @@ const ROUTE_UNITS: Record<string, number> = {
   // budget instead of billing as 1. (The scan's other threat endpoints — oft,
   // burns, migration, wallet-holdings — are keyless and correctly bill as 1.)
   "/api/code-review": 4,
+  "/api/sell-structure": 3,
+  "/api/launch": 2,
   "/api/sweep": 12,
   "/api/vc-portfolio": 6,
   "/api/challenge-verdict": 4,

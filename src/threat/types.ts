@@ -123,8 +123,31 @@ export interface ThreatScan {
     migration: MigrationInfo | null;
     launch: LaunchProvenance | null;
     verification: RegistryVerification | null;
+    sellers: SellStructure | null;
   };
   scannedAt: number;
+}
+
+// ---- sell structure (who has actually been selling) ----
+export interface SellStructure {
+  available: boolean;
+  truncated: boolean;
+  launchBlock: number | null;
+  sellerCount: number;
+  devSold: boolean | null;
+  soldToPoolTotalPct: number | null;
+  badSellerCount: number;
+  topSellers: {
+    wallet: string;
+    soldPct: number | null;
+    boughtPct: number | null;
+    realizedExitPct: number;
+    sameBlockSniper: boolean;
+    isDeployer: boolean;
+    deployerSeeded: boolean;
+    flags: string[];
+  }[];
+  note: string;
 }
 
 // ---- registry verification (wallet badge systems) ----
