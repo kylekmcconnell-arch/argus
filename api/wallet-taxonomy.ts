@@ -41,27 +41,36 @@ const CEX_WALLETS = new Set([
   "0xf60c2ea62edbfe808163751dd0d8693dcb30019c",
 ]);
 
+// One Etherscan call per wallet: the oldest tx gives age AND the first funder
+// (for CEX-funded). Dormancy is dropped to halve the call budget - age +
+// funding are the load-bearing signals and 2 calls/wallet was rate-limiting.
 async function evmClassify(chainid: number, wallet: string, key: string): Promise<{ ageDays: number | null; lastDays: number | null; cexFunded: boolean } | null> {
   try {
     const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "1", sort: "asc", apikey: key });
-    const r = await fetch(`https://api.etherscan.io/v2/api?${q}`, { signal: AbortSignal.timeout(9000) });
+    const r = await fetch(`https://api.etherscan.io/v2/api?${q}`, { signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const d = (await r.json()) as any;
+    if (d.status === "0" && /rate limit/i.test(String(d.message ?? d.result ?? ""))) return null;
     const first = Array.isArray(d.result) ? d.result[0] : null;
     const firstTs = first ? Number(first.timeStamp) * 1000 : null;
     const firstFrom = first ? String(first.from ?? "").toLowerCase() : "";
-    // last tx (newest) for dormancy
-    const q2 = new URLSearchParams({ chainid: String(chainid), module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "1", sort: "desc", apikey: key });
-    const r2 = await fetch(`https://api.etherscan.io/v2/api?${q2}`, { signal: AbortSignal.timeout(9000) });
-    const d2 = r2.ok ? ((await r2.json()) as any) : null;
-    const lastTs = Array.isArray(d2?.result) && d2.result[0] ? Number(d2.result[0].timeStamp) * 1000 : firstTs;
     const now = Date.now();
     return {
       ageDays: firstTs ? Math.max(0, (now - firstTs) / DAY) : null,
-      lastDays: lastTs ? Math.max(0, (now - lastTs) / DAY) : null,
+      lastDays: null,
       cexFunded: CEX_WALLETS.has(firstFrom),
     };
   } catch { return null; }
+}
+
+// Run classify in small chunks so we respect Etherscan's ~5 req/s free tier.
+async function inChunks<T, R>(items: T[], size: number, fn: (x: T) => Promise<R>, gapMs = 250): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(...await Promise.all(items.slice(i, i + size).map(fn)));
+    if (i + size < items.length) await new Promise((r) => setTimeout(r, gapMs));
+  }
+  return out;
 }
 
 async function solClassify(key: string, wallet: string): Promise<{ ageDays: number | null; lastDays: number | null; cexFunded: boolean } | null> {
@@ -123,10 +132,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const holders = sol ? await solHolders(address) : await evmHolders(Number(GOPLUS_CHAIN[chain] ?? 0), address.toLowerCase());
   if (!holders.length) { res.status(200).json({ available: true, analyzed: 0, cohorts: {}, note: "No non-pool top holders resolved." }); return; }
 
-  const rows = await Promise.all(holders.map(async (h) => {
+  const rows = await inChunks(holders, sol ? 8 : 4, async (h) => {
     const c = sol ? await solClassify(key!, h.addr) : await evmClassify(chainid, h.addr, esKey!);
     return { ...h, ...(c ?? { ageDays: null, lastDays: null, cexFunded: false }) };
-  }));
+  });
 
   const bucket = { fresh: { n: 0, pct: 0 }, recent: { n: 0, pct: 0 }, dormant: { n: 0, pct: 0 }, cexFunded: { n: 0, pct: 0 }, aged: { n: 0, pct: 0 }, unknown: { n: 0, pct: 0 } };
   for (const r of rows) {
