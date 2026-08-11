@@ -8,6 +8,7 @@ import type { TraceStep } from "../data/evidence";
 import type { ThreatVerdict } from "./types";
 import { dexByToken, pickPair } from "../token/sources";
 import { threatScan } from "./scan";
+import { apiFetch } from "./net";
 
 export interface WalletPosition {
   address: string;
@@ -48,7 +49,7 @@ const FRESH_SCAN_LIMIT = 5; // fresh-scan only the largest unknown positions
 
 async function holdings(address: string): Promise<{ positions: RawPosition[]; chain: string; available: boolean; note?: string }> {
   try {
-    const res = await fetch(`/api/wallet-holdings?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(20000) });
+    const res = await apiFetch(`/api/wallet-holdings?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(20000) });
     if (!res.ok) return { positions: [], chain: "", available: false };
     const d = (await res.json()) as { available?: boolean; chain?: string; positions?: RawPosition[]; note?: string };
     return { positions: d.positions ?? [], chain: d.chain ?? "", available: !!d.available, note: d.note };
@@ -60,7 +61,7 @@ async function holdings(address: string): Promise<{ positions: RawPosition[]; ch
 // A cached verdict from the shared ledger (no fresh scan).
 async function cachedVerdict(address: string): Promise<{ verdict: ThreatVerdict; risk: number; at: number } | null> {
   try {
-    const res = await fetch(`/api/threat-receipts?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(5000) });
+    const res = await apiFetch(`/api/threat-receipts?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
     const d = (await res.json()) as { available?: boolean; receipt?: { verdict: ThreatVerdict; risk: number; flaggedAt: number } | null };
     if (!d.available || !d.receipt) return null;

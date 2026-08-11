@@ -7,12 +7,14 @@
 
 import type { Receipt, ThreatAlert, ThreatVerdict } from "./types";
 import { dexByToken, pickPair } from "../token/sources";
+import { apiFetch, hasLocalStorage } from "./net";
 
 const KEY = "argus.threat.receipts.v1";
 const MAX = 500;
 
 export function getReceipts(): Receipt[] {
   try {
+    if (!hasLocalStorage) return []; // server-side (Telegram bot): ledger only
     return JSON.parse(localStorage.getItem(KEY) || "[]");
   } catch {
     return [];
@@ -21,6 +23,7 @@ export function getReceipts(): Receipt[] {
 
 function save(items: Receipt[]) {
   try {
+    if (!hasLocalStorage) return; // server-side: the ledger POST below still records
     localStorage.setItem(KEY, JSON.stringify(items.slice(0, MAX)));
   } catch {
     /* storage full/blocked — receipts are best-effort */
@@ -35,7 +38,7 @@ export function recordReceipt(r: Receipt) {
   save(items);
   // Fire-and-forget sync to the shared server ledger. This is what makes the
   // track record and deployer memory span every analyst, not just this browser.
-  void fetch("/api/threat-receipts", {
+  void apiFetch("/api/threat-receipts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -61,7 +64,7 @@ export function byDeployer(deployer: string): Receipt[] {
 export async function sharedByDeployer(deployer: string): Promise<Receipt[]> {
   const local = byDeployer(deployer);
   try {
-    const res = await fetch(`/api/threat-receipts?deployer=${encodeURIComponent(deployer)}`, {
+    const res = await apiFetch(`/api/threat-receipts?deployer=${encodeURIComponent(deployer)}`, {
       signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) return local;
@@ -116,7 +119,7 @@ export function receiptStats(): { flagged: number; confirmedDead: number; checke
 // the ledger line + a future track-record page. Falls back to local stats.
 export async function sharedReceiptStats(): Promise<{ flagged: number; confirmedDead: number; checked: number; recent: Receipt[] }> {
   try {
-    const res = await fetch("/api/threat-receipts", { signal: AbortSignal.timeout(6000) });
+    const res = await apiFetch("/api/threat-receipts", { signal: AbortSignal.timeout(6000) });
     if (res.ok) {
       const d = (await res.json()) as { available?: boolean; receipts?: Receipt[]; stats?: { flagged: number; confirmedDead: number; checked: number } };
       if (d.available && d.stats) return { ...d.stats, recent: d.receipts ?? [] };
@@ -129,7 +132,7 @@ export async function sharedReceiptStats(): Promise<{ flagged: number; confirmed
 // then lost their liquidity. Empty when no store is configured.
 export async function sharedAlerts(): Promise<ThreatAlert[]> {
   try {
-    const res = await fetch("/api/threat-alerts", { signal: AbortSignal.timeout(6000) });
+    const res = await apiFetch("/api/threat-alerts", { signal: AbortSignal.timeout(6000) });
     if (!res.ok) return [];
     const d = (await res.json()) as { available?: boolean; alerts?: ThreatAlert[] };
     return d.available && Array.isArray(d.alerts) ? d.alerts : [];

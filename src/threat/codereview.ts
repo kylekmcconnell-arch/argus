@@ -10,6 +10,7 @@
 import type { CodeReview, CodeStats, ContractSource } from "./types";
 import { fetchContractSource, EVM_CHAIN_ID } from "./source";
 import { scanSolidity, stripComments, functionsOf, tokenomicsSignals } from "./solidity";
+import { apiFetch } from "./net";
 
 const DANGER_PATTERNS =
   /\bselfdestruct\b|\bdelegatecall\b|blacklist|\bbots?\b|banned|tradingEnabled|tradingOpen|whenNotPaused|_balances\s*\[[^\]]+\]\s*=(?!=)/gi;
@@ -69,7 +70,7 @@ export async function aiCodeRead(
 ): Promise<CodeReview["ai"]> {
   if (!mech.verified) return null;
   try {
-    const res = await fetch(
+    const res = await apiFetch(
       `/api/code-review?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}` +
         `&danger=${mech.stats?.dangerHits ?? 0}&gated=${mech.stats?.gatedFunctions ?? 0}` +
         (call ? `&verdict=${encodeURIComponent(call.verdict)}&risk=${call.risk}` : ""),

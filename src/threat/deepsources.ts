@@ -6,6 +6,7 @@
 //   - Honeypot.is deep fields (EVM): the parts the base audit discards — per-
 //     holder sell analysis (failed sellers, siphoned wallets), max buy/sell
 //     caps, and the human-readable honeypot reason.
+import { apiFetch } from "./net";
 
 // ---- RugCheck (Solana) ----
 export interface RugcheckRisk {
@@ -151,7 +152,7 @@ export interface Fingerprint {
 export async function codeFingerprint(chain: string, address: string): Promise<Fingerprint | null> {
   if (!GP_CHAIN[chain]) return null;
   try {
-    const res = await fetch(`/api/bytecode?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, {
+    const res = await apiFetch(`/api/bytecode?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, {
       signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) return null;
@@ -181,7 +182,7 @@ export interface BurnHistory {
 export async function burnHistory(chain: string, address: string): Promise<BurnHistory | null> {
   if (chain === "solana") return null;
   try {
-    const res = await fetch(`/api/burns?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, {
+    const res = await apiFetch(`/api/burns?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, {
       signal: AbortSignal.timeout(22000),
     });
     if (!res.ok) return null;
@@ -200,7 +201,7 @@ export async function burnHistory(chain: string, address: string): Promise<BurnH
 // Prior flagged tokens that share this fingerprint — the known-rug-clone check.
 export async function knownRugClones(fingerprint: string, selfAddress: string): Promise<{ symbol: string; address: string; verdict: string }[]> {
   try {
-    const res = await fetch(`/api/threat-receipts?fingerprint=${encodeURIComponent(fingerprint)}`, {
+    const res = await apiFetch(`/api/threat-receipts?fingerprint=${encodeURIComponent(fingerprint)}`, {
       signal: AbortSignal.timeout(6000),
     });
     if (!res.ok) return [];

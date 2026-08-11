@@ -215,6 +215,8 @@ const CG_PLATFORM: Record<string, string> = {
 const CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
 export interface CgInfo {
   listed: boolean;
+  /** CoinGecko coin id (slug) - builds the public coin URL. */
+  id?: string | null;
   rank: number | null;
   mcapUsd: number | null;
   marketCount: number;
@@ -237,6 +239,7 @@ interface CoinGeckoTicker {
 }
 
 interface CoinGeckoResponse {
+  id?: string;
   tickers?: CoinGeckoTicker[];
   links?: { homepage?: unknown[]; twitter_screen_name?: unknown };
   image?: { large?: string; small?: string; thumb?: string };
@@ -275,7 +278,7 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
     const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
       signal: AbortSignal.timeout(8_000),
     });
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
+    if (res.status === 404) return { listed: false, id: null, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
     if (!res.ok) return null;
     const d = (await res.json()) as CoinGeckoResponse;
     const tickers = d.tickers ?? [];
@@ -303,6 +306,7 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
       : null;
     return {
       listed: true,
+      id: typeof d.id === "string" && d.id ? d.id : null,
       rank: d.market_cap_rank ?? null,
       mcapUsd: d.market_data?.market_cap?.usd ?? null,
       marketCount: markets.size,

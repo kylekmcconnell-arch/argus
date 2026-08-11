@@ -3,6 +3,7 @@
 // links (dossier.socials); this checks the website URLs against the layered
 // api/site-safety intel and folds in the missing-socials signal.
 import type { SiteSafety } from "./types";
+import { apiFetch } from "./net";
 
 const RANK: Record<string, number> = { malicious: 3, suspicious: 2, unknown: 1, clean: 0 };
 const isX = (s: { label: string; url: string }) =>
@@ -23,7 +24,7 @@ export async function siteSafety(socials: { label: string; url: string }[], addr
     const handle = xHandle(socials);
     // Authenticity: is the scanned CA in the project's official X bio?
     const xBio = handle && address && chain
-      ? await fetch(`/api/x-authenticity?handle=${encodeURIComponent(handle)}&address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(12000) })
+      ? await apiFetch(`/api/x-authenticity?handle=${encodeURIComponent(handle)}&address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(12000) })
           .then((r) => (r.ok ? r.json() : null))
           .then((d: any) => (d?.available ? { handle: d.handle, status: d.status, note: d.note } : null))
           .catch(() => null)
@@ -34,7 +35,7 @@ export async function siteSafety(socials: { label: string; url: string }[], addr
 
     const sites = (await Promise.all(websites.map(async (url) => {
       try {
-        const r = await fetch(`/api/site-safety?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(18000) });
+        const r = await apiFetch(`/api/site-safety?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(18000) });
         if (!r.ok) return null;
         const d = (await r.json()) as { verdict?: string; host?: string; flags?: string[]; sources?: string[] };
         return { url, host: d.host ?? "", verdict: d.verdict ?? "unknown", flags: d.flags ?? [], sources: d.sources ?? [] };

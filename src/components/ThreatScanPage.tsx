@@ -10,6 +10,7 @@ import type { ResolvedInput } from "../lib/resolveInput";
 import type { TraceStep } from "../data/evidence";
 import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat/types";
 import { threatScan } from "../threat/scan";
+import { projectLinks } from "../threat/links";
 import { aiCodeRead } from "../threat/codereview";
 import { insiderClusters } from "../threat/insiders";
 import { buyerCohort, walletTaxonomy } from "../threat/cohort";
@@ -498,6 +499,13 @@ function Report({ scan }: { scan: ThreatScan }) {
           <div className="mt-2 flex items-center gap-2">
             <span className="mono rounded px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider" style={{ color: m.color, border: "1px solid currentColor" }}>{call.verdict}</span>
             <span className="text-[13px] text-ink-dim">{call.action}</span>
+          </div>
+          {/* Every pertinent project link in one strip - what the token points
+              at, plus the chart/registry pages an analyst opens next anyway. */}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {projectLinks(d).map((l) => (
+              <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="mono rounded border border-line px-2 py-0.5 text-[10.5px] text-ink-dim transition hover:border-signal hover:text-ink print:hidden">{l.label} ↗</a>
+            ))}
           </div>
         </div>
       </div>

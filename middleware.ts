@@ -122,6 +122,21 @@ export default async function middleware(request: Request): Promise<Response> {
     );
   }
 
+  // Telegram calls the webhook with its own secret header (no bearer); the
+  // handler validates x-telegram-bot-api-secret-token and fails closed, same
+  // defense-in-depth shape as the cron route.
+  if (pathname === "/api/telegram") return next();
+
+  // Server-to-server: the Telegram webhook function runs the real threat
+  // pipeline, which calls back into these /api routes. It authenticates with a
+  // dedicated internal secret - fail closed when unset, constant-time compare
+  // like the cron branch. Never issued to browsers.
+  {
+    const internal = process.env.INTERNAL_API_SECRET;
+    const authz = request.headers.get("authorization") || "";
+    if (internal && timingSafeEqual(authz, `Bearer ${internal}`)) return next();
+  }
+
   const authorization = request.headers.get("authorization") || "";
   if (!/^Bearer\s+\S+$/i.test(authorization)) {
     return Response.json(

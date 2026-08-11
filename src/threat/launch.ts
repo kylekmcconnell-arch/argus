@@ -13,6 +13,7 @@
 import type { TokenDossier } from "../token/audit";
 import { dexByToken, pickPair } from "../token/sources";
 import type { LaunchProvenance } from "./types";
+import { apiFetch } from "./net";
 
 interface Venue {
   name: string;
@@ -217,7 +218,7 @@ const VENUES: Venue[] = [
 
 async function fromApi(chain: string, address: string): Promise<any | null> {
   try {
-    const r = await fetch(`/api/launch?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(20000) });
+    const r = await apiFetch(`/api/launch?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return null;
     return (await r.json()) as any;
   } catch {
