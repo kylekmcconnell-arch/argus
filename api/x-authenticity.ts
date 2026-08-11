@@ -8,8 +8,10 @@
 //   - a DIFFERENT CA in bio -> impersonation (the real token is elsewhere)
 //   - no CA in bio          -> weak (many legit projects omit it)
 //   - bio unreadable        -> say so; prompt manual check
-// Keyless X-bio reads are unreliable (X locked them down), so this is best-effort
-// keyless and RELIABLE only with an X API bearer (X_API_BEARER).
+// Keyless X-bio reads are unreliable (X locked them down). Primary source is
+// twitterapi.io (TWITTERAPI_KEY - the same provider x-find already uses in prod,
+// so it's reliable out of the box); falls back to the X API v2 bearer
+// (X_API_BEARER), then best-effort keyless, then honest "unreadable".
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export const config = { maxDuration: 15 };
@@ -17,6 +19,33 @@ export const config = { maxDuration: 15 };
 const HANDLE = /^[A-Za-z0-9_]{1,20}$/;
 const EVM_CA = /0x[0-9a-fA-F]{40}/g;
 const SOL_CA = /[1-9A-HJ-NP-Za-km-z]{32,44}/g;
+
+// Primary source in production: twitterapi.io (same provider x-find uses, so the
+// key is already configured). Returns the bio description plus any expanded URLs
+// linked from the bio - projects often point the CA via a basescan/etherscan link
+// rather than pasting the raw address.
+async function bioViaTwitterApi(handle: string): Promise<string | null> {
+  const key = process.env.TWITTERAPI_KEY;
+  if (!key) return null;
+  try {
+    const r = await fetch(`https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`, {
+      headers: { "x-api-key": key }, signal: AbortSignal.timeout(9000),
+    });
+    if (!r.ok) return null;
+    const d = (await r.json()) as any;
+    const p = d?.data ?? d;
+    if (!p || (p.name == null && p.description == null && p.followers == null && p.followers_count == null)) return null;
+    const desc = String(p.description ?? p.bio ?? "");
+    const urlEntities = [
+      ...(p?.profile_bio?.entities?.url?.urls ?? []),
+      ...(p?.profile_bio?.entities?.description?.urls ?? []),
+      ...(p?.entities?.url?.urls ?? []),
+      ...(p?.entities?.description?.urls ?? []),
+    ].map((u: any) => `${u?.expanded_url ?? ""} ${u?.display_url ?? ""}`).join(" ");
+    const website = typeof p?.url === "string" ? p.url : "";
+    return `${desc} ${urlEntities} ${website}`.trim() || (p.name != null ? "" : null);
+  } catch { return null; }
+}
 
 async function bioViaApi(handle: string): Promise<string | null> {
   const bearer = process.env.X_API_BEARER;
@@ -56,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!HANDLE.test(handle) || !address) { res.status(400).json({ error: "handle and address required" }); return; }
   res.setHeader("cache-control", "s-maxage=1800, stale-while-revalidate=7200");
 
-  const bio = (await bioViaApi(handle)) ?? (await bioKeyless(handle));
+  const bio = (await bioViaTwitterApi(handle)) ?? (await bioViaApi(handle)) ?? (await bioKeyless(handle));
   if (bio == null) {
     res.status(200).json({ available: true, handle, status: "unreadable", bioReadable: false, note: `Could not read @${handle}'s X bio (X restricts this without an API key) - verify the contract address in the project's X bio manually.` });
     return;

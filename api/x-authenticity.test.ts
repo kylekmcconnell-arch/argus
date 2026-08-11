@@ -12,23 +12,25 @@ function response() {
   return { res, captured };
 }
 
-// Stub the X API v2 read (X_API_BEARER path). description carries the bio text;
-// entities.description.urls carries any t.co-expanded links (bios often link the
-// CA via a shortener rather than pasting it inline).
+// Stub the primary twitterapi.io read (TWITTERAPI_KEY path). description carries
+// the bio text; profile_bio.entities.description.urls carries expanded links
+// (bios often link the CA via a basescan/etherscan URL rather than inline).
 function stubBio(bio: string | null, expandedUrls: string[] = []) {
-  process.env.X_API_BEARER = "test-bearer";
+  process.env.TWITTERAPI_KEY = "test-key";
   const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
     const url = String(input);
-    if (url.includes("api.twitter.com/2/users/by/username")) {
+    if (url.includes("api.twitterapi.io/twitter/user/info")) {
       if (bio == null) return Promise.resolve(new Response("nope", { status: 404 }));
       return Promise.resolve(new Response(JSON.stringify({ data: {
+        name: "Project",
         description: bio,
-        entities: expandedUrls.length
-          ? { description: { urls: expandedUrls.map((u) => ({ expanded_url: u, display_url: u })) } }
+        profile_bio: expandedUrls.length
+          ? { entities: { description: { urls: expandedUrls.map((u) => ({ expanded_url: u, display_url: u })) } } }
           : undefined,
       } }), { status: 200, headers: { "content-type": "application/json" } }));
     }
-    // Any keyless fallback: treat as unreadable so the API path is what's tested.
+    // Any other fallback (X API v2 / keyless): treat as unreadable so the
+    // primary path is what's under test.
     return Promise.resolve(new Response("", { status: 403 }));
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -44,7 +46,7 @@ async function run(query: Record<string, string>) {
 const REAL = "0x1111111111111111111111111111111111111111";
 const OTHER = "0x2222222222222222222222222222222222222222";
 
-afterEach(() => { vi.unstubAllGlobals(); delete process.env.X_API_BEARER; });
+afterEach(() => { vi.unstubAllGlobals(); delete process.env.TWITTERAPI_KEY; delete process.env.X_API_BEARER; });
 
 describe("x-authenticity — CA in the project's X bio", () => {
   it("verifies when the scanned CA is present in the bio", async () => {
