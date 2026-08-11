@@ -237,6 +237,24 @@ export interface InsiderCluster {
   note: string;
 }
 
+// ---- buyer cohort / Common Coins (on-demand, RAVN-style) ----
+// What OTHER tokens do this token's top holders also hold? A shared set of
+// obscure bags across many "separate" wallets is a coordinated cohort.
+export interface CohortOverlap {
+  available: boolean;
+  cohortSize: number;
+  threshold: number;
+  commonCoins: {
+    address: string;
+    symbol: string;
+    heldBy: number;      // how many of the analyzed holders hold it
+    pctOfCohort: number; // heldBy / cohortSize
+    mcap: number | null;
+    liqUsd: number | null;
+  }[];
+  note: string;
+}
+
 // ---- verdict-flip alerts ----
 // Emitted by the re-check cron when a token we rated tradeable (SAFE/CAUTION)
 // then loses its liquidity — "we said tradeable, its pool just got pulled."

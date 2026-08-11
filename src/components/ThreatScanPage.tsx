@@ -12,6 +12,7 @@ import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat
 import { threatScan } from "../threat/scan";
 import { aiCodeRead } from "../threat/codereview";
 import { insiderClusters } from "../threat/insiders";
+import { buyerCohort } from "../threat/cohort";
 import { receiptStats, sharedReceiptStats } from "../threat/receipts";
 import { ThreatReceipts } from "./ThreatReceipts";
 
@@ -146,6 +147,63 @@ function InsiderClusters({ scan }: { scan: ThreatScan }) {
                 <span className="mono text-[12px] font-semibold" style={{ color: c.combinedPct >= 25 ? "var(--color-avoid)" : c.combinedPct >= 10 ? "var(--color-caution)" : "var(--color-ink-dim)" }}>{c.combinedPct.toFixed(1)}%</span>
               </div>
             ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Lazy buyer-cohort panel (Common Coins): the OTHER tokens this token's top
+// holders also hold. A shared set of obscure bags across many wallets is a
+// coordinated crowd/insider farm - computed live per scan, so it's never stale.
+function money2(n: number | null): string {
+  if (n == null) return "-";
+  return n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(0) + "K" : "$" + Math.round(n);
+}
+function BuyerCohort({ scan }: { scan: ThreatScan }) {
+  const [state, setState] = useState<"idle" | "loading" | "done" | "empty">("idle");
+  const [data, setData] = useState<import("../threat/types").CohortOverlap | null>(null);
+  const run = () => {
+    if (state === "loading") return;
+    setState("loading");
+    buyerCohort(scan.chain, scan.address).then((r) => {
+      if (r && r.commonCoins.length) { setData(r); setState("done"); }
+      else { setData(r); setState("empty"); }
+    });
+  };
+  return (
+    <div className="mt-4 rounded-xl border border-line p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink">Buyer cohort · common coins</h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">What OTHER tokens the top holders also hold - a shared set of bags is a coordinated crowd, not independent buyers.</p>
+        </div>
+        {state === "idle" && (
+          <button onClick={run} className="mono shrink-0 rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">run cohort ↯</button>
+        )}
+      </div>
+      {state === "loading" && <p className="mt-2 animate-pulse text-[12.5px] text-ink-faint">Pulling each top holder's token bags and intersecting…</p>}
+      {state === "empty" && <p className="mt-2 text-[12.5px] text-ink-dim">{data?.note ?? "No shared holdings across the top holders (or unavailable on this chain/tier)."}</p>}
+      {state === "done" && data && (
+        <>
+          <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">{data.note}</p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-[11.5px]">
+              <thead><tr className="text-left text-ink-faint">
+                <th className="py-1 pr-3 font-normal">Token</th><th className="py-1 pr-3 font-normal">Held by</th><th className="py-1 pr-3 font-normal">Cohort</th><th className="py-1 font-normal">Mcap · liq</th>
+              </tr></thead>
+              <tbody>
+                {data.commonCoins.map((c) => (
+                  <tr key={c.address} className="border-t border-line/50">
+                    <td className="mono py-1.5 pr-3 text-ink-dim">${c.symbol}</td>
+                    <td className="mono py-1.5 pr-3 tabular text-ink-dim">{c.heldBy}/{data.cohortSize}</td>
+                    <td className="mono py-1.5 pr-3 tabular" style={{ color: c.pctOfCohort >= 50 ? "var(--color-avoid)" : c.pctOfCohort >= 30 ? "var(--color-caution)" : "var(--color-ink-faint)" }}>{c.pctOfCohort}%</td>
+                    <td className="mono py-1.5 tabular text-ink-faint">{money2(c.mcap)} · {money2(c.liqUsd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </>
       )}
@@ -500,6 +558,9 @@ function Report({ scan }: { scan: ThreatScan }) {
 
       {/* creator & insider clusters (lazy, #9) */}
       <InsiderClusters scan={scan} />
+
+      {/* buyer cohort · common coins (lazy, RAVN-style) */}
+      <BuyerCohort scan={scan} />
 
       {/* checklist */}
       <div className="mt-4 rounded-xl border border-line p-4">
