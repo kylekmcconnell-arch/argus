@@ -9,6 +9,11 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const FRESH_MS = 60 * 60 * 1000; // shared links serve the cached report for 1h
 const KIND = "threat-scan";
+// A scan cached by an older build has a stale SHAPE (missing new checks/panels).
+// Tag every stored scan with the deploy's commit SHA and only serve hits from
+// the current build, so shipping an improvement invalidates old cached scans
+// automatically instead of showing pre-feature results for up to an hour.
+const BUILD = process.env.VERCEL_GIT_COMMIT_SHA || "dev";
 
 function creds() {
   const url = process.env.SUPABASE_URL;
@@ -35,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       query: scan.symbol ? `$${scan.symbol}` : address,
       verdict: scan.call.verdict ?? null,
       score: typeof scan.call.risk === "number" ? scan.call.risk : null,
-      payload: scan, ts: new Date().toISOString(),
+      payload: { ...scan, __build: BUILD }, ts: new Date().toISOString(),
     };
     const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
       method: "POST",
@@ -59,8 +64,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const row = rows?.[0];
     const scannedAt = typeof row?.payload?.scannedAt === "number" ? row.payload.scannedAt : row?.ts ? Date.parse(row.ts) : 0;
     const ageMs = Date.now() - scannedAt;
-    if (!row?.payload || !(ageMs >= 0 && ageMs < FRESH_MS)) { res.status(200).json({ available: true, hit: false }); return; }
-    res.status(200).json({ available: true, hit: true, ageMs, scan: row.payload });
+    const staleBuild = (row?.payload?.__build ?? "") !== BUILD;
+    if (!row?.payload || staleBuild || !(ageMs >= 0 && ageMs < FRESH_MS)) { res.status(200).json({ available: true, hit: false }); return; }
+    const { __build, ...scan } = row.payload;
+    res.status(200).json({ available: true, hit: true, ageMs, scan });
   } catch {
     res.status(200).json({ available: true, hit: false });
   }
