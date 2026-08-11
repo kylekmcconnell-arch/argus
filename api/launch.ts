@@ -146,13 +146,19 @@ async function bankrDopplerCheck(token: string): Promise<boolean> {
   }
 }
 
-async function robinhoodCreatorVenue(token: string): Promise<string | null> {
+export async function robinhoodCreatorVenue(token: string): Promise<string | null> {
   try {
-    const r = await fetch(`https://robinhoodchain.blockscout.com/api/v2/addresses/${token}`, { signal: AbortSignal.timeout(10000) });
+    // The v2 REST route (/api/v2/addresses/{addr}) 500s on a LOWERCASE address
+    // on this Blockscout instance - and the handler lowercases every address -
+    // so this check silently returned null for every token since it shipped.
+    // The v1 Etherscan-style route is case-tolerant and answers the actual
+    // question directly: which FACTORY (if any) deployed this contract.
+    const r = await fetch(`https://robinhoodchain.blockscout.com/api?module=contract&action=getcontractcreation&contractaddresses=${token}`, { signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const d = (await r.json()) as any;
-    const creator = String(d.creator_address_hash ?? "").toLowerCase();
-    if (PONS_FACTORIES.has(creator)) return "pons";
+    const row = Array.isArray(d?.result) ? d.result[0] : null;
+    const factory = String(row?.contractFactory ?? row?.contractCreator ?? "").toLowerCase();
+    if (PONS_FACTORIES.has(factory)) return "pons";
     return null;
   } catch {
     return null;
