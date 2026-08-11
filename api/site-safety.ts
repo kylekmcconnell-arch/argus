@@ -72,7 +72,16 @@ async function urlhausHit(h: string): Promise<boolean | null> {
   } catch { return null; }
 }
 
-const DRAINER_SIG = /seed phrase|recovery phrase|private key|setApprovalForAll|increaseAllowance|wallet.?connect.*(verify|validate|sync)|claim your|security update|your wallet (has|was) (flagged|compromised)|migrate your (tokens|wallet)|inferno|angel drainer|drainer/i;
+// High-precision phishing/drainer tells: a legit token site never asks for
+// these. Any ONE flags.
+const DRAINER_STRONG = /seed phrase|recovery phrase|private key|setApprovalForAll\s*\(|your wallet (has been|was) (flagged|compromised|suspended)|(angel|inferno|monkey|pink) drainer/i;
+// Weaker scam-copy tells; need TWO to flag (each is common on legit sites too).
+const DRAINER_WEAK = /verify your wallet|validate your wallet|sync your wallet|claim your (reward|airdrop|token)|security update required|migrate your (tokens|wallet)|connect.{0,20}restore/gi;
+function drainerHit(body: string): boolean {
+  if (DRAINER_STRONG.test(body)) return true;
+  const weak = body.match(DRAINER_WEAK);
+  return !!weak && new Set(weak.map((s) => s.toLowerCase())).size >= 2;
+}
 
 async function pageHeuristics(url: string, wantHost: string): Promise<{ flags: string[]; finalHost: string | null }> {
   const flags: string[] = [];
@@ -83,7 +92,7 @@ async function pageHeuristics(url: string, wantHost: string): Promise<{ flags: s
       flags.push(`redirects off-domain to ${finalHost} - a token site that bounces you to another domain is a common cloaking/drainer pattern`);
     }
     const body = (await r.text()).slice(0, 200_000);
-    if (DRAINER_SIG.test(body)) flags.push("the page contains wallet-drainer / seed-phrase phishing signatures");
+    if (drainerHit(body)) flags.push("the page asks for wallet secrets / shows drainer-style phishing copy (private key, seed/recovery phrase, or 'verify wallet' prompts)");
     if (body.replace(/\s+/g, "").length < 400 && /location|redirect|window\.open/i.test(body)) flags.push("the linked site is a near-empty redirector stub, not a real project site");
   } catch { /* unreachable = its own weak signal, handled by caller */ }
   return { flags, finalHost: null };
