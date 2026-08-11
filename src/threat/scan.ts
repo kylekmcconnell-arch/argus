@@ -186,7 +186,7 @@ async function deployerRep(d: TokenDossier): Promise<DeployerRep> {
 // ---- the judge: additive risk points + tiered plain-English strings ----
 // Wording rules (deliberate): second person, the scary word in CAPS, one
 // sentence per finding, no jargon without a translation.
-function judge(
+export function judge( // exported for unit tests only
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
   meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
@@ -377,6 +377,12 @@ function judge(
       case "locked": positives.push(`LP locked ${tk.lp.lockedPct.toFixed(0)}%${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`); break;
       case "launchpad-locked": positives.push(tk.lp.note); break; // "held by a launchpad locker - auto-locked by design"
       case "nft-position":
+        // Launch provenance can prove the position's custody: on Bankr/Doppler
+        // the liquidity is book-entry inside the initializer (no NFT to pull),
+        // on Pons the position NFT sits in the PonsLaunchLocker. When the venue
+        // mechanics lock principal, "withdrawable by whoever owns the position"
+        // is simply wrong - say what the venue actually does instead.
+        if (launchLpSecured) { positives.push(`${launch!.venue}: ${launch!.lpNote}`); break; }
         // Concentrated / NFT-position AMM (V3/V4/CLMM). Not a rug signal on its
         // own - it's how these pools work. Surface it as context, not a warning.
         warnings.push(tk.lp.note);
@@ -454,7 +460,16 @@ function judge(
     const chains = xchain.legs.map((l) => l.chain).join(", ");
     positives.push(`LayerZero OFT - one asset bridged across ${xchain.legs.length} chain${xchain.legs.length === 1 ? "" : "s"} (${chains})${xchain.resolvedLegs > 1 ? `, ~${money(oftTotal)} total liquidity across the mesh` : ""}. Single-chain liquidity understates the real depth.`);
   }
-  if (effectiveLiq < 15000) { add(10); warnings.push(`Thin liquidity (${money(effectiveLiq)}${xchain?.isOft ? " across all chains" : ""}) - easy to drain, brutal to exit`); }
+  // Judge liquidity RELATIVE to market cap, not as a bare dollar floor. $10K of
+  // depth under a $15K token is a deep market for its size; $40K under a $2M
+  // mcap is the actual exit trap (paper value with no door) - and the old
+  // absolute check missed that case entirely. Established tokens are exempt
+  // from the ratio read: their depth lives on CEXes, not the DEX pool.
+  const liqRatio = mcap > 0 ? effectiveLiq / mcap : null;
+  if (effectiveLiq < 2500) { add(10); warnings.push(`Dust liquidity (${money(effectiveLiq)}) - the pool is too small to exit through at any size`); }
+  else if (!established && liqRatio != null && liqRatio < 0.05 && mcap >= 250_000) { add(15); warnings.push(`Liquidity is only ${(liqRatio * 100).toFixed(1)}% of the market cap (${money(effectiveLiq)} backing ${money(mcap)}) - the paper value cannot exit through this pool`); }
+  else if (effectiveLiq < 15000 && (liqRatio == null || liqRatio < 0.3)) { add(10); warnings.push(`Thin liquidity (${money(effectiveLiq)}${xchain?.isOft ? " across all chains" : ""}) - easy to drain, brutal to exit`); }
+  else if (effectiveLiq < 15000 && liqRatio != null && liqRatio >= 0.3) { positives.push(`Liquidity is ${(liqRatio * 100).toFixed(0)}% of market cap (${money(effectiveLiq)} vs ${money(mcap)}) - deep for the token's size; absolute depth still caps large positions`); }
 
   // --- burns ---
   if (tk.burn.burnedSupplyPct >= 1 || tk.burn.hasAutoBurn || tk.burn.ongoing) positives.push(tk.burn.note);
@@ -561,7 +576,7 @@ function buildChecks(
         : tk.lp.status === "burned" ? `${tk.lp.burnedPct.toFixed(0)}% burned`
         : tk.lp.status === "locked" ? `${tk.lp.lockedPct.toFixed(0)}% secured${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`
         : tk.lp.status === "launchpad-locked" ? `Launchpad-locked${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`
-        : tk.lp.status === "nft-position" ? "Concentrated/NFT position - LP-token check n/a"
+        : tk.lp.status === "nft-position" ? (launch != null && (launch.lpDisposition === "locked" || launch.lpDisposition === "protocol-owned" || launch.lpDisposition === "burned") && launch.lpNote != null ? `Venue-locked (${launch.venue}) - principal cannot be pulled` : "Concentrated/NFT position - LP-token check n/a")
         : tk.lp.status === "unlocked" ? `Pullable - ${tk.lp.unlockedTopPct.toFixed(0)}% in one wallet`
         : "Lock not confirmed by standard tools (may be launchpad-locked)"),
     chk("site", "authority", "Linked site & socials",
