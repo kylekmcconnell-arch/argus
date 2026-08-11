@@ -48,7 +48,7 @@ const OTHER = "0x2222222222222222222222222222222222222222";
 
 afterEach(() => { vi.unstubAllGlobals(); delete process.env.TWITTERAPI_KEY; delete process.env.X_API_BEARER; });
 
-describe("x-authenticity — CA in the project's X bio", () => {
+describe("x-authenticity - CA in the project's X bio", () => {
   it("verifies when the scanned CA is present in the bio", async () => {
     stubBio(`Kupo Terminal. CA: ${REAL}`);
     const c = await run({ handle: "kupo", address: REAL, chain: "base" });
