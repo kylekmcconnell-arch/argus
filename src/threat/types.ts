@@ -135,6 +135,9 @@ export interface SiteSafety {
   hasWebsite: boolean;
   worst: "malicious" | "suspicious" | "clean" | "unknown";
   sites: { url: string; host: string; verdict: string; flags: string[]; sources: string[] }[];
+  // Authenticity: is the scanned CA in the project's official X bio? (Enigma's
+  // impersonation-defense rule.) null when no X handle is linked.
+  xBio: { handle: string; status: "verified" | "mismatch" | "absent" | "unreadable"; note: string } | null;
 }
 
 // ---- sell structure (who has actually been selling) ----

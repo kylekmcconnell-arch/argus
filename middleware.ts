@@ -45,6 +45,7 @@ const ROUTE_UNITS: Record<string, number> = {
   "/api/code-review": 4,
   "/api/sell-structure": 3,
   "/api/site-safety": 2,
+  "/api/x-authenticity": 1,
   "/api/cohort": 4,
   "/api/wallet-taxonomy": 3,
   "/api/launch": 2,

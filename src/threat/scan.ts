@@ -75,9 +75,11 @@ export async function threatScan(
   ]);
   // Linked-site safety: is the token's own website a drainer / blacklisted host,
   // and does it even have an X account. The danger here is off-chain.
-  const site = await siteSafety(dossier.socials ?? []);
+  const site = await siteSafety(dossier.socials ?? [], dossier.address, dossier.chain);
   if (site?.worst === "malicious") emit?.({ phase: "ARGUS · Site", label: "Malicious linked site", detail: "The token's own website is flagged as a drainer / phishing site.", tone: "bad" });
   else if (site?.worst === "suspicious") emit?.({ phase: "ARGUS · Site", label: "Suspicious linked site", detail: "The token's website shows drainer-style cloaking or phishing signatures.", tone: "warn" });
+  if (site?.xBio?.status === "mismatch") emit?.({ phase: "ARGUS · Authenticity", label: "Namesake / impersonation", detail: site.xBio.note, tone: "bad" });
+  else if (site?.xBio?.status === "verified") emit?.({ phase: "ARGUS · Authenticity", label: "CA verified on X", detail: site.xBio.note, tone: "good" });
   const sellers = await sellStructure(dossier.chain, dossier.address, dossier.deployer ?? null);
   if (sellers) {
     if (sellers.devSold) emit?.({ phase: "ARGUS · Sellers", label: "Dev sold", detail: "The deployer/creator wallet has sold into the pool.", tone: "bad" });
@@ -425,6 +427,9 @@ function judge(
     else if (susp) { add(15); flags.push(`The token's website (${susp.host}) ${susp.flags[0] ?? "shows drainer-style cloaking"} - treat the project's links as hostile`); }
     if (!site.hasX && !site.hasWebsite && !established && (d.ageDays ?? 99) < 30) { soft(6); warnings.push("No website and no X account linked - a fresh token with no verifiable social footprint"); }
     else if (!site.hasX && !established && (d.ageDays ?? 99) < 14) { soft(4); warnings.push("No X/Twitter account linked - unusual for a real launch"); }
+    // Authenticity: the official token's CA lives in the project's X bio.
+    if (site.xBio?.status === "mismatch") { add(35); flags.push(site.xBio.note); }
+    else if (site.xBio?.status === "verified") { positives.push("Contract verified in the project's official X bio - this is the real token, not a namesake"); }
   }
   // Realized sell behaviour. Dev selling is the loudest signal; deployer-seeded
   // wallets exiting are a coordinated distribution the holder chart hides.
@@ -561,14 +566,15 @@ function buildChecks(
         : "Lock not confirmed by standard tools (may be launchpad-locked)"),
     chk("site", "authority", "Linked site & socials",
       site == null ? "na"
-        : site.worst === "malicious" ? "fail"
+        : site.worst === "malicious" || site.xBio?.status === "mismatch" ? "fail"
         : site.worst === "suspicious" ? "warn"
         : (!site.hasX && !site.hasWebsite) ? "warn"
-        : site.hasWebsite ? "pass" : "na",
+        : site.hasWebsite || site.xBio?.status === "verified" ? "pass" : "na",
       site == null ? "Unchecked"
+        : site.xBio?.status === "mismatch" ? "X bio lists a DIFFERENT contract - namesake/impersonation"
         : site.worst === "malicious" ? `Linked website flagged as a drainer/phishing site (${site.sites.find((x) => x.verdict === "malicious")?.host ?? ""})`
         : site.worst === "suspicious" ? "Linked website shows drainer-style cloaking / phishing signatures"
-        : `${site.hasWebsite ? "Website checked, clean" : "No website"}${site.hasX ? " · X linked" : " · no X account"}`),
+        : `${site.hasWebsite ? "Website checked, clean" : "No website"}${site.hasX ? " · X linked" : " · no X account"}${site.xBio?.status === "verified" ? " · CA in X bio ✓" : ""}`),
     chk("sellers", "market", "Sell structure",
       sellers == null ? "na"
         : sellers.devSold ? "fail"

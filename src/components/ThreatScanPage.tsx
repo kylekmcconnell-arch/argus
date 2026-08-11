@@ -352,7 +352,16 @@ function SitePanel({ s }: { s: NonNullable<ThreatScan["deep"]["site"]> }) {
         <span className="mono rounded border px-2 py-0.5" style={{ borderColor: c, color: c }}>{s.worst === "clean" ? "SITE CLEAN" : s.worst.toUpperCase()}</span>
         <span className="mono rounded border border-line px-2 py-0.5 text-ink-dim">{s.hasX ? "X linked" : "no X account"}</span>
         {!s.hasWebsite && <span className="mono rounded border border-line px-2 py-0.5 text-ink-dim">no website</span>}
+        {s.xBio && (
+          <span className="mono rounded border px-2 py-0.5" style={{
+            borderColor: s.xBio.status === "mismatch" ? "var(--color-avoid)" : s.xBio.status === "verified" ? "var(--color-pass)" : "var(--color-line)",
+            color: s.xBio.status === "mismatch" ? "var(--color-avoid)" : s.xBio.status === "verified" ? "var(--color-pass)" : "var(--color-ink-dim)",
+          }}>{s.xBio.status === "verified" ? "CA in X bio ✓" : s.xBio.status === "mismatch" ? "IMPERSONATION" : s.xBio.status === "absent" ? "CA not in X bio" : "X bio unread"}</span>
+        )}
       </div>
+      {s.xBio && s.xBio.status !== "absent" && (
+        <p className="mt-2 text-[11.5px]" style={{ color: s.xBio.status === "mismatch" ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{s.xBio.note}</p>
+      )}
       {s.sites.map((x) => (
         <div key={x.url} className="mt-2 border-t border-line/50 pt-2">
           <div className="mono text-[11.5px] text-ink-dim">{x.host} <span className="text-ink-faint">· {x.verdict}{x.sources.length ? ` (${x.sources.join(", ")})` : ""}</span></div>
@@ -527,7 +536,7 @@ function Report({ scan }: { scan: ThreatScan }) {
       {scan.deep.launch && scan.deep.launch.kind !== "unknown" && <LaunchPanel launch={scan.deep.launch} />}
 
       {/* linked-site safety */}
-      {scan.deep.site && (scan.deep.site.worst !== "clean" || !scan.deep.site.hasX) && <SitePanel s={scan.deep.site} />}
+      {scan.deep.site && (scan.deep.site.worst !== "clean" || !scan.deep.site.hasX || scan.deep.site.xBio != null) && <SitePanel s={scan.deep.site} />}
 
       {/* sell structure */}
       {scan.deep.sellers && (scan.deep.sellers.sellerCount > 0 || scan.deep.sellers.devSold || scan.deep.sellers.recentTape) && <SellStructurePanel s={scan.deep.sellers} chain={scan.chain} />}

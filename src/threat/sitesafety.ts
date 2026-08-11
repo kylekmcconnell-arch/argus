@@ -9,12 +9,28 @@ const isX = (s: { label: string; url: string }) =>
   /twitter|^x$/i.test(s.label) || /(^|\/\/)(www\.)?(x|twitter)\.com\//i.test(s.url);
 const isSite = (s: { label: string; url: string }) =>
   /site|website|home/i.test(s.label) || (/^https?:\/\//i.test(s.url) && !/(t\.me|discord|twitter|x\.com|instagram|tiktok|youtube|github|medium|reddit)/i.test(s.url));
+function xHandle(socials: { label: string; url: string }[]): string | null {
+  for (const s of socials) {
+    const m = s.url.match(/(?:x|twitter)\.com\/(?!home|search|i\/)([A-Za-z0-9_]{1,20})/i);
+    if (m) return m[1];
+  }
+  return null;
+}
 
-export async function siteSafety(socials: { label: string; url: string }[]): Promise<SiteSafety | null> {
+export async function siteSafety(socials: { label: string; url: string }[], address?: string, chain?: string): Promise<SiteSafety | null> {
   try {
     const hasX = socials.some(isX);
+    const handle = xHandle(socials);
+    // Authenticity: is the scanned CA in the project's official X bio?
+    const xBio = handle && address && chain
+      ? await fetch(`/api/x-authenticity?handle=${encodeURIComponent(handle)}&address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(12000) })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d: any) => (d?.available ? { handle: d.handle, status: d.status, note: d.note } : null))
+          .catch(() => null)
+      : null;
+
     const websites = socials.filter(isSite).map((s) => s.url).filter((u) => /^https?:\/\//i.test(u)).slice(0, 3);
-    if (!websites.length) return { hasX, hasWebsite: false, worst: "unknown", sites: [] };
+    if (!websites.length) return { hasX, hasWebsite: false, worst: "unknown", sites: [], xBio };
 
     const sites = (await Promise.all(websites.map(async (url) => {
       try {
@@ -27,7 +43,7 @@ export async function siteSafety(socials: { label: string; url: string }[]): Pro
 
     let worst: SiteSafety["worst"] = "clean";
     for (const s of sites) if ((RANK[s.verdict] ?? 0) > RANK[worst]) worst = (s.verdict as SiteSafety["worst"]);
-    return { hasX, hasWebsite: true, worst, sites };
+    return { hasX, hasWebsite: true, worst, sites, xBio };
   } catch {
     return null;
   }
