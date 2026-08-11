@@ -245,6 +245,30 @@ function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]["launc
 // snipers who have exited. Answers what the honeypot sim (CAN they sell) and the
 // insider clusters (who is POSITIONED to dump) cannot: realized behaviour.
 function shortWallet(a: string) { return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a; }
+
+// Linked-site safety: the token's own website is where drainers hide - a scam
+// tell that no contract check sees. Only rendered when there's something to say
+// (a flag, or a fresh token with no socials at all).
+function SitePanel({ s }: { s: NonNullable<ThreatScan["deep"]["site"]> }) {
+  const c = s.worst === "malicious" ? "var(--color-avoid)" : s.worst === "suspicious" ? "var(--color-caution)" : "var(--color-ink-dim)";
+  return (
+    <div className="mt-4 rounded-xl border p-4" style={{ borderColor: s.worst === "malicious" ? "var(--color-avoid)" : "var(--color-line)" }}>
+      <h2 className="text-[14px] font-semibold text-ink">Linked site &amp; socials</h2>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">Where the token points you off-chain - checked against Google Safe Browsing, GoPlus, the URLhaus malware feed, and drainer-signature heuristics.</p>
+      <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+        <span className="mono rounded border px-2 py-0.5" style={{ borderColor: c, color: c }}>{s.worst === "clean" ? "SITE CLEAN" : s.worst.toUpperCase()}</span>
+        <span className="mono rounded border border-line px-2 py-0.5 text-ink-dim">{s.hasX ? "X linked" : "no X account"}</span>
+        {!s.hasWebsite && <span className="mono rounded border border-line px-2 py-0.5 text-ink-dim">no website</span>}
+      </div>
+      {s.sites.map((x) => (
+        <div key={x.url} className="mt-2 border-t border-line/50 pt-2">
+          <div className="mono text-[11.5px] text-ink-dim">{x.host} <span className="text-ink-faint">· {x.verdict}{x.sources.length ? ` (${x.sources.join(", ")})` : ""}</span></div>
+          {x.flags.map((f, i) => <div key={i} className="mt-0.5 text-[11.5px]" style={{ color: c }}>⚠ {f}</div>)}
+        </div>
+      ))}
+    </div>
+  );
+}
 function SellStructurePanel({ s, chain }: { s: NonNullable<ThreatScan["deep"]["sellers"]>; chain: string }) {
   const flagged = s.topSellers.filter((x) => x.flags.length > 0);
   const rows = (flagged.length ? flagged : s.topSellers).slice(0, 8);
@@ -392,6 +416,9 @@ function Report({ scan }: { scan: ThreatScan }) {
 
       {/* launch provenance */}
       {scan.deep.launch && scan.deep.launch.kind !== "unknown" && <LaunchPanel launch={scan.deep.launch} />}
+
+      {/* linked-site safety */}
+      {scan.deep.site && (scan.deep.site.worst !== "clean" || !scan.deep.site.hasX) && <SitePanel s={scan.deep.site} />}
 
       {/* sell structure */}
       {scan.deep.sellers && (scan.deep.sellers.sellerCount > 0 || scan.deep.sellers.devSold) && <SellStructurePanel s={scan.deep.sellers} chain={scan.chain} />}

@@ -124,8 +124,17 @@ export interface ThreatScan {
     launch: LaunchProvenance | null;
     verification: RegistryVerification | null;
     sellers: SellStructure | null;
+    site: SiteSafety | null;
   };
   scannedAt: number;
+}
+
+// ---- linked-site safety (drainer / blacklist check on the token's website) ----
+export interface SiteSafety {
+  hasX: boolean;
+  hasWebsite: boolean;
+  worst: "malicious" | "suspicious" | "clean" | "unknown";
+  sites: { url: string; host: string; verdict: string; flags: string[]; sources: string[] }[];
 }
 
 // ---- sell structure (who has actually been selling) ----

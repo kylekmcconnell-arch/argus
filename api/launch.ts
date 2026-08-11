@@ -130,7 +130,12 @@ async function bankrDopplerCheck(token: string): Promise<boolean> {
     const r = await fetch(`https://api.bankr.bot/public/doppler/token-fees/${token}`, { signal: AbortSignal.timeout(9000) });
     if (!r.ok) return false;
     const d = (await r.json()) as any;
-    return !!(d && (d.poolId || d.initializer || d.data?.poolId));
+    // Shape: { address: <creator>, tokens: [{ tokenAddress, poolId, initializer, ... }] }.
+    // Confirm the queried token is actually one of the creator's Bankr/Doppler
+    // tokens (a poolId present) - a bare 200 with an empty list is not a match.
+    const toks = Array.isArray(d?.tokens) ? d.tokens : [];
+    const t = token.toLowerCase();
+    return toks.some((x: any) => String(x?.tokenAddress ?? "").toLowerCase() === t && (x.poolId || x.initializer));
   } catch {
     return false;
   }

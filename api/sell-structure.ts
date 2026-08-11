@@ -27,6 +27,13 @@ const KNOWN_POOLS = new Set([
   "0x67366782805870060151383f4bbff9dab53e5cd6", "0x28e2ea090877bf75740558f6bfb36a5ffee9e9df", // Uniswap V4 PoolManagers
   "0xba12222222228d8ba445958a75a0704d566bf2c8", // Balancer V2 Vault
   "0xbdf938149ac6a781f94faa0ed45e6a0e984c6544", // Doppler hook initializer (Bankr)
+  // Universal Routers - V4 swaps often show the router (not the PoolManager) as
+  // the ERC20 counterparty; a transfer to the router is still a sell in flow terms.
+  "0x6ff5693b99212da76ad316178a184ab56d299b43", // Universal Router - Ethereum
+  "0x6fF5693b99212Da76ad316178A184AB56D299b43".toLowerCase(),
+  "0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad", // Universal Router (v1) - multi-chain
+  "0x2626664c2603336e57b271c5c0b26f421741e481", // SwapRouter02 - Base
+  "0x198ef79f1f515f02dfe9e3115ed9fc07183f02fc", // Universal Router - Base
 ]);
 const PAGE = 1000, MAX_PAGES = 6; // bounded: ~6k transfers, oldest first
 

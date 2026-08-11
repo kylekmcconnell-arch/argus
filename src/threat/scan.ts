@@ -24,7 +24,8 @@ import { migrationCheck } from "./migration";
 import { launchProvenance } from "./launch";
 import { registryVerification } from "./verification";
 import { sellStructure } from "./sellers";
-import type { CrossChain, MigrationInfo, LaunchProvenance, RegistryVerification, SellStructure } from "./types";
+import { siteSafety } from "./sitesafety";
+import type { CrossChain, MigrationInfo, LaunchProvenance, RegistryVerification, SellStructure, SiteSafety } from "./types";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -72,8 +73,11 @@ export async function threatScan(
     sol ? Promise.resolve(null) : crossChain(dossier.chain, dossier.address, dossier.liquidityUsd ?? 0),
     launchProvenance(dossier),
   ]);
-  // Realized sell behaviour: who has actually been dumping, and are they the
-  // deployer / deployer-seeded / launch-block snipers. EVM-only for now.
+  // Linked-site safety: is the token's own website a drainer / blacklisted host,
+  // and does it even have an X account. The danger here is off-chain.
+  const site = await siteSafety(dossier.socials ?? []);
+  if (site?.worst === "malicious") emit?.({ phase: "ARGUS · Site", label: "Malicious linked site", detail: "The token's own website is flagged as a drainer / phishing site.", tone: "bad" });
+  else if (site?.worst === "suspicious") emit?.({ phase: "ARGUS · Site", label: "Suspicious linked site", detail: "The token's website shows drainer-style cloaking or phishing signatures.", tone: "warn" });
   const sellers = sol ? null : await sellStructure(dossier.chain, dossier.address, dossier.deployer ?? null);
   if (sellers) {
     if (sellers.devSold) emit?.({ phase: "ARGUS · Sellers", label: "Dev sold", detail: "The deployer/creator wallet has sold into the pool.", tone: "bad" });
@@ -140,8 +144,8 @@ export async function threatScan(
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "ARGUS · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers, site);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers, site);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -150,7 +154,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers, site },
     scannedAt: Date.now(),
   };
 
@@ -186,7 +190,7 @@ function judge(
   meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
   tk: TokenomicsView, xchain: CrossChain | null, migration: MigrationInfo | null,
   launch: LaunchProvenance | null, verification: RegistryVerification | null,
-  sellers: SellStructure | null,
+  sellers: SellStructure | null, site: SiteSafety | null,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -411,6 +415,17 @@ function judge(
     }
   }
   if (launch?.quoteNote) warnings.push(launch.quoteNote);
+  // Linked-site safety. A token whose own website is a drainer/blacklist is a
+  // scam tell no contract check catches - weigh it heavily. Missing socials is
+  // only a soft corroborator on a fresh token.
+  if (site) {
+    const bad = site.sites.find((x) => x.verdict === "malicious");
+    const susp = site.sites.find((x) => x.verdict === "suspicious");
+    if (bad) { add(40); flags.push(`The token's linked website (${bad.host}) is flagged as a drainer / phishing site${bad.sources.length ? ` by ${bad.sources.join(", ")}` : ""} - do not connect a wallet to it`); }
+    else if (susp) { add(15); flags.push(`The token's website (${susp.host}) ${susp.flags[0] ?? "shows drainer-style cloaking"} - treat the project's links as hostile`); }
+    if (!site.hasX && !site.hasWebsite && !established && (d.ageDays ?? 99) < 30) { soft(6); warnings.push("No website and no X account linked - a fresh token with no verifiable social footprint"); }
+    else if (!site.hasX && !established && (d.ageDays ?? 99) < 14) { soft(4); warnings.push("No X/Twitter account linked - unusual for a real launch"); }
+  }
   // Realized sell behaviour. Dev selling is the loudest signal; deployer-seeded
   // wallets exiting are a coordinated distribution the holder chart hides.
   if (sellers) {
@@ -504,7 +519,7 @@ function buildChecks(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
   tk: TokenomicsView, launch: LaunchProvenance | null, verification: RegistryVerification | null,
-  sellers: SellStructure | null,
+  sellers: SellStructure | null, site: SiteSafety | null,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -539,6 +554,16 @@ function buildChecks(
         : tk.lp.status === "nft-position" ? "Concentrated/NFT position - LP-token check n/a"
         : tk.lp.status === "unlocked" ? `Pullable - ${tk.lp.unlockedTopPct.toFixed(0)}% in one wallet`
         : "Lock not confirmed by standard tools (may be launchpad-locked)"),
+    chk("site", "authority", "Linked site & socials",
+      site == null ? "na"
+        : site.worst === "malicious" ? "fail"
+        : site.worst === "suspicious" ? "warn"
+        : (!site.hasX && !site.hasWebsite) ? "warn"
+        : site.hasWebsite ? "pass" : "na",
+      site == null ? "Unchecked"
+        : site.worst === "malicious" ? `Linked website flagged as a drainer/phishing site (${site.sites.find((x) => x.verdict === "malicious")?.host ?? ""})`
+        : site.worst === "suspicious" ? "Linked website shows drainer-style cloaking / phishing signatures"
+        : `${site.hasWebsite ? "Website checked, clean" : "No website"}${site.hasX ? " · X linked" : " · no X account"}`),
     chk("sellers", "market", "Sell structure",
       sellers == null ? "na"
         : sellers.devSold ? "fail"
