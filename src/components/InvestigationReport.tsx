@@ -23,6 +23,7 @@ import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { ArkhamName } from "./ArkhamName";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { AddInfo } from "./AddInfo";
+import { EmbeddedThreatScan } from "./ThreatScanPage";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
@@ -2227,6 +2228,14 @@ export function InvestigationReport({
             <LinkEntity subject={`$${token.symbol}`} subjectKind="investigation" canonicalRef={token.address} graphSubjectKey={tokenSubjectGraphKey} />
           </div>
         )}
+
+        {/* Full threat scan merged into the investigation: verdict, flags, AI
+            source read, launch provenance, tokenomics, checklist - shares the
+            1h scan cache with the standalone Threat scan surface. */}
+        <div className="mt-4 panel p-5">
+          <div className="eyebrow mb-1">Threat scan</div>
+          <EmbeddedThreatScan address={token.address} chain={token.chain} />
+        </div>
 
         <div className="mt-4 panel p-4 text-[12.5px] leading-relaxed text-ink-faint">
           ARGUS checked the token, website, project account, and public team. Open a person to run a deeper review. Names without a verified profile stay unconfirmed.

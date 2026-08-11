@@ -5,6 +5,7 @@ import { verdictMeta } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import { deployerRoleLabel, type TokenDossier } from "../token/audit";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
+import { EmbeddedThreatScan } from "./ThreatScanPage";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
@@ -773,6 +774,15 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             <LinkEntity subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} graphSubjectKey={tokenSubjectGraphKey} />
           </div>
         )}
+
+        {/* Full threat scan, merged into the investigation lane: verdict,
+            flags, the AI source read, launch provenance, tokenomics, and the
+            auditable checklist - same pipeline as the standalone Threat scan
+            surface, cache-shared with it (1h). */}
+        <div className="mt-8 panel p-5">
+          <div className="mb-1 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> Threat scan</div>
+          <EmbeddedThreatScan address={d.address} chain={d.chain} />
+        </div>
 
         <div className="mt-8 panel p-5">
           <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> How this result was reached</div>

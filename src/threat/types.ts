@@ -122,8 +122,20 @@ export interface ThreatScan {
     xchain: CrossChain | null;
     migration: MigrationInfo | null;
     launch: LaunchProvenance | null;
+    verification: RegistryVerification | null;
   };
   scannedAt: number;
+}
+
+// ---- registry verification (wallet badge systems) ----
+export interface RegistryVerification {
+  level: "registry-verified" | "listed" | "unknown";
+  jupiterVerified: boolean | null; // Solana only; what Phantom's badge derives from
+  organicScoreLabel: string | null;
+  cgListed: boolean;
+  goplusTrusted: boolean;
+  sources: string[];
+  note: string;
 }
 
 // ---- launch provenance (fair launch vs launchpad, graduation, LP custody) ----

@@ -764,7 +764,9 @@ describe("investigation exact sharing", () => {
     expect(share).toBeDefined();
     await act(async () => share?.click());
 
-    const request = fetchMock.mock.calls[0];
+    // The embedded threat scan fires its own cache-check fetch on mount, so find
+    // the share call rather than assuming it is first.
+    const request = fetchMock.mock.calls.find((c) => String(c[0]) === "/api/share")!;
     expect(request[0]).toBe("/api/share");
     expect(JSON.parse(String(request[1]?.body))).toEqual({
       kind: "investigation",
@@ -798,7 +800,9 @@ describe("investigation exact sharing", () => {
     expect(tldr).toBeDefined();
     await act(async () => tldr?.click());
 
-    const request = fetchMock.mock.calls[0];
+    // The embedded threat scan fires its own cache-check fetch on mount, so find
+    // the share call rather than assuming it is first.
+    const request = fetchMock.mock.calls.find((c) => String(c[0]) === "/api/share")!;
     expect(request[0]).toBe("/api/share");
     expect(JSON.parse(String(request[1]?.body))).toEqual({
       kind: "investigation",

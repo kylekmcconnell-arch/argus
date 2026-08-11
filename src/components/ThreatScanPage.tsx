@@ -447,6 +447,48 @@ function Report({ scan }: { scan: ThreatScan }) {
 // before you even scan.
 type LandingMode = "token" | "wallet" | "receipts";
 
+// Full threat scan embedded inside another report (the New Investigation token
+// lane). Cache-first: a scan saved within the last hour renders immediately;
+// otherwise the pipeline runs live with a slim progress strip. The full threat
+// Report body is reused so the merged surface never diverges from the
+// standalone one.
+export function EmbeddedThreatScan({ address, chain }: { address: string; chain: string }) {
+  const [scan, setScan] = useState<ThreatScan | null>(null);
+  const [steps, setSteps] = useState<TraceStep[]>([]);
+  const [failed, setFailed] = useState(false);
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    const input: ResolvedInput = { kind: "token", ref: address, via: chain === "solana" ? "solana" : "evm" };
+    (async () => {
+      try {
+        const r = await fetch(`/api/threat-scan?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(6000) });
+        const d = r.ok ? ((await r.json()) as { hit?: boolean; scan?: ThreatScan }) : null;
+        if (d?.hit && d.scan?.address) { setScan(d.scan); return; }
+      } catch { /* live scan below */ }
+      threatScan(input, (s) => setSteps((prev) => [...prev, s]))
+        .then((r) => {
+          if (!r) { setFailed(true); return; }
+          setScan(r);
+          void fetch("/api/threat-scan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scan: r }) }).catch(() => {});
+        })
+        .catch(() => setFailed(true));
+    })();
+  }, [address, chain]);
+  if (failed) return <div className="mono px-1 py-3 text-[11.5px] text-ink-faint">Threat scan unavailable for this token.</div>;
+  if (!scan) {
+    const last = steps[steps.length - 1];
+    return (
+      <div className="flex items-center gap-3 px-1 py-4">
+        <span className="pulse-ring h-2 w-2 shrink-0 rounded-full bg-signal" aria-hidden />
+        <span className="mono text-[11.5px] text-ink-dim">threat scan running · {last ? `${last.phase} · ${last.label}` : "starting"}</span>
+      </div>
+    );
+  }
+  return <Report scan={scan} />;
+}
+
 export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" | "wallet") => void }) {
   const [val, setVal] = useState("");
   const [mode, setMode] = useState<LandingMode>("token");

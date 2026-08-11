@@ -22,7 +22,8 @@ import {
 import { crossChain } from "./crosschain";
 import { migrationCheck } from "./migration";
 import { launchProvenance } from "./launch";
-import type { CrossChain, MigrationInfo, LaunchProvenance } from "./types";
+import { registryVerification } from "./verification";
+import type { CrossChain, MigrationInfo, LaunchProvenance, RegistryVerification } from "./types";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -83,6 +84,14 @@ export async function threatScan(
       tone: "neutral",
     });
   }
+  // Registry verification: the wallet-badge registries (Jupiter on Solana -
+  // what Phantom's check derives from; GoPlus trust list + CoinGecko on EVM).
+  const verification = await registryVerification(
+    dossier.chain, dossier.address, dossier.cg != null, !!meta?.trustListed,
+  );
+  if (verification.level !== "unknown") {
+    emit?.({ phase: "ARGUS · Registry", label: verification.level === "registry-verified" ? "Verified" : "Listed", detail: verification.note, tone: "good" });
+  }
   const migration = sol ? await migrationCheck(dossier.chain, dossier.address) : null;
   if (migration?.migrated) {
     emit?.({ phase: "ARGUS · Migration", label: "Migrate.fun", detail: migration.isPostMigrationToken ? `New post-migration token (${migration.projects[0]?.projectId}) - the chart restarted; claim distribution to prior holders is expected.` : `Registered in a Migrate.fun migration (${migration.projects[0]?.projectId}).`, tone: "neutral" });
@@ -123,8 +132,8 @@ export async function threatScan(
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "ARGUS · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -133,7 +142,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification },
     scannedAt: Date.now(),
   };
 
@@ -168,7 +177,7 @@ function judge(
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
   meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
   tk: TokenomicsView, xchain: CrossChain | null, migration: MigrationInfo | null,
-  launch: LaunchProvenance | null,
+  launch: LaunchProvenance | null, verification: RegistryVerification | null,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -219,6 +228,16 @@ function judge(
   }
   if (meta?.airdropScam) { add(30); flags.push("Flagged as an AIRDROP SCAM - the token was dusted to wallets to lure them to a drainer site"); }
   if (meta?.trustListed) positives.push("On GoPlus's trust list of established, reputable tokens");
+  // Registry verification: wallet-badge registries. Jupiter's verified list is
+  // what Phantom's check derives from; being on it means wallets show this
+  // token as verified. Absence is normal for fresh tokens - but an established
+  // token unknown to every registry is itself a signal.
+  if (verification?.jupiterVerified) {
+    positives.push("Verified on Jupiter's registry - the source wallets like Phantom derive their verified badge from");
+  }
+  if (verification && verification.level === "unknown" && (d.mcap ?? 0) >= 10_000_000 && !established) {
+    soft(6); warnings.push("A token this size unknown to every registry (Jupiter/GoPlus/CoinGecko) is unusual - wallets will flag it unverified");
+  }
 
   // --- per-holder sell analysis (EVM, Honeypot.is deep) ---
   // A selective honeypot lets the simulator's fresh wallet sell while real
@@ -465,7 +484,7 @@ const EVM = (chain: string) => chain !== "solana";
 function buildChecks(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
-  tk: TokenomicsView, launch: LaunchProvenance | null,
+  tk: TokenomicsView, launch: LaunchProvenance | null, verification: RegistryVerification | null,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -500,6 +519,14 @@ function buildChecks(
         : tk.lp.status === "nft-position" ? "Concentrated/NFT position - LP-token check n/a"
         : tk.lp.status === "unlocked" ? `Pullable - ${tk.lp.unlockedTopPct.toFixed(0)}% in one wallet`
         : "Lock not confirmed by standard tools (may be launchpad-locked)"),
+    chk("registry", "authority", "Registry verification",
+      verification == null ? "na"
+        : verification.level === "registry-verified" ? "pass"
+        : verification.level === "listed" ? "pass"
+        : (d.mcap ?? 0) >= 10_000_000 && !established ? "warn" : "na",
+      verification == null ? "Unchecked"
+        : verification.level === "unknown" ? "Not on any registry (wallets will show it unverified)"
+        : verification.sources.join(", ")),
     chk("launch", "market", "Launch provenance",
       launch == null || launch.kind === "unknown" ? "na"
         : launch.snipe && launch.snipe.sameBlockBuyers >= 4 ? "warn"
