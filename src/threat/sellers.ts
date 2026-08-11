@@ -6,7 +6,6 @@
 import type { SellStructure } from "./types";
 
 export async function sellStructure(chain: string, address: string, creator: string | null): Promise<SellStructure | null> {
-  if (chain === "solana") return null;
   try {
     const q = new URLSearchParams({ address, chain });
     if (creator) q.set("creator", creator);

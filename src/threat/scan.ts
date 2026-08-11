@@ -78,7 +78,7 @@ export async function threatScan(
   const site = await siteSafety(dossier.socials ?? []);
   if (site?.worst === "malicious") emit?.({ phase: "ARGUS · Site", label: "Malicious linked site", detail: "The token's own website is flagged as a drainer / phishing site.", tone: "bad" });
   else if (site?.worst === "suspicious") emit?.({ phase: "ARGUS · Site", label: "Suspicious linked site", detail: "The token's website shows drainer-style cloaking or phishing signatures.", tone: "warn" });
-  const sellers = sol ? null : await sellStructure(dossier.chain, dossier.address, dossier.deployer ?? null);
+  const sellers = await sellStructure(dossier.chain, dossier.address, dossier.deployer ?? null);
   if (sellers) {
     if (sellers.devSold) emit?.({ phase: "ARGUS · Sellers", label: "Dev sold", detail: "The deployer/creator wallet has sold into the pool.", tone: "bad" });
     else if (sellers.badSellerCount > 0) emit?.({ phase: "ARGUS · Sellers", label: `${sellers.badSellerCount} flagged seller${sellers.badSellerCount === 1 ? "" : "s"}`, detail: "Snipers / deployer-seeded wallets have been exiting.", tone: "warn" });
@@ -435,6 +435,11 @@ function judge(
     else if (seeded.length === 1) { add(8); warnings.push("A wallet the deployer funded directly has sold into the pool"); }
     const sniperExits = sellers.topSellers.filter((s) => s.sameBlockSniper && s.realizedExitPct >= 80 && !s.isDeployer && !s.deployerSeeded);
     if (sniperExits.length >= 3 && !established) { add(8); warnings.push(`${sniperExits.length} launch-block snipers have exited ~all of their position - early coordinated money is leaving`); }
+    // Recent-tape demand read: sustained selling with no bids on a non-established
+    // token is a dying market (holders exiting, nobody buying).
+    const tp = sellers.recentTape;
+    if (tp && !established && tp.sells >= 5 && tp.buys === 0) { soft(8); warnings.push(`Last 24h: ${tp.sells} sells and ZERO buys - holders are exiting and there is no demand`); }
+    else if (tp && !established && tp.buys > 0 && tp.sells / tp.buys >= 5 && tp.sells >= 8) { soft(4); warnings.push(`Last 24h selling is ${(tp.sells / tp.buys).toFixed(0)}x buying - demand is drying up`); }
   }
   // Thin-liquidity flag, cross-chain aware: an OFT's liquidity is spread across
   // chains, so judge it by the total mesh liquidity, not the single-chain pool.
@@ -568,10 +573,13 @@ function buildChecks(
       sellers == null ? "na"
         : sellers.devSold ? "fail"
         : sellers.badSellerCount > 0 ? "warn"
-        : sellers.sellerCount > 0 ? "pass" : "na",
-      sellers == null ? (EVM(d.chain) ? "Unchecked" : "n/a on Solana (Helius follow-on)")
+        : (sellers.recentTape && sellers.recentTape.buys === 0 && sellers.recentTape.sells >= 5) ? "warn"
+        : (sellers.sellerCount > 0 || sellers.recentTape) ? "pass" : "na",
+      sellers == null ? "Unchecked"
         : sellers.devSold ? "Dev sold into the pool"
-        : `${sellers.sellerCount} sellers${sellers.badSellerCount > 0 ? `, ${sellers.badSellerCount} flagged (snipers / deployer-seeded)` : " - no flagged actors"}${sellers.truncated ? " (early history)" : ""}`),
+        : sellers.recentTape
+          ? `24h: ${sellers.recentTape.sells} sells / ${sellers.recentTape.buys} buys${sellers.badSellerCount > 0 ? ` · ${sellers.badSellerCount} flagged` : ""}`
+          : `${sellers.sellerCount} sellers${sellers.badSellerCount > 0 ? `, ${sellers.badSellerCount} flagged` : " - no flagged actors"}${sellers.truncated ? " (early history)" : ""}`),
     chk("registry", "authority", "Registry verification",
       verification == null ? "na"
         : verification.level === "registry-verified" ? "pass"

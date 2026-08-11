@@ -156,6 +156,18 @@ export interface SellStructure {
     deployerSeeded: boolean;
     flags: string[];
   }[];
+  // Recent 24h trade tape (GeckoTerminal, keyless, per-wallet USD) - the direct
+  // "who is selling right now" answer, independent of the Etherscan history path.
+  recentTape: {
+    sells: number;
+    buys: number;
+    sellUsd: number;
+    buyUsd: number;
+    distinctSellers: number;
+    distinctBuyers: number;
+    topSellers: { wallet: string; usd: number; isDeployer: boolean; isCreator: boolean }[];
+    note: string;
+  } | null;
   note: string;
 }
 

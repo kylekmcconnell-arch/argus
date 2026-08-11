@@ -369,6 +369,22 @@ function SellStructurePanel({ s, chain }: { s: NonNullable<ThreatScan["deep"]["s
     <div className="mt-4 rounded-xl border border-line p-4">
       <h2 className="text-[14px] font-semibold text-ink">Sell structure</h2>
       <p className="mt-0.5 text-[11.5px] text-ink-faint">Who has actually been selling - and whether they are the deployer, wallets it seeded, or launch-block snipers cashing out.</p>
+      {/* Recent 24h trade tape (GeckoTerminal) - the direct "who's selling now" view. */}
+      {s.recentTape && (
+        <div className="mt-3 rounded-lg border border-line/70 p-3">
+          <p className="text-[12.5px] text-ink-dim">{s.recentTape.note}</p>
+          {s.recentTape.topSellers.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {s.recentTape.topSellers.slice(0, 6).map((t) => (
+                <div key={t.wallet} className="flex items-center justify-between gap-3 text-[11.5px]">
+                  <span className="mono text-ink-dim">{shortWallet(t.wallet)}{t.isDeployer ? " · deployer" : ""}{t.isCreator ? " · creator" : ""}</span>
+                  <span className="mono tabular" style={{ color: t.isDeployer || t.isCreator ? "var(--color-avoid)" : "var(--color-ink-faint)" }}>${t.usd.toLocaleString()} sold</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
         {s.devSold != null && (
           <span className="mono rounded border px-2 py-0.5" style={{ borderColor: s.devSold ? "var(--color-avoid)" : "var(--color-pass)", color: s.devSold ? "var(--color-avoid)" : "var(--color-pass)" }}>
@@ -514,7 +530,7 @@ function Report({ scan }: { scan: ThreatScan }) {
       {scan.deep.site && (scan.deep.site.worst !== "clean" || !scan.deep.site.hasX) && <SitePanel s={scan.deep.site} />}
 
       {/* sell structure */}
-      {scan.deep.sellers && (scan.deep.sellers.sellerCount > 0 || scan.deep.sellers.devSold) && <SellStructurePanel s={scan.deep.sellers} chain={scan.chain} />}
+      {scan.deep.sellers && (scan.deep.sellers.sellerCount > 0 || scan.deep.sellers.devSold || scan.deep.sellers.recentTape) && <SellStructurePanel s={scan.deep.sellers} chain={scan.chain} />}
 
       {/* tokenomics */}
       <Tokenomics

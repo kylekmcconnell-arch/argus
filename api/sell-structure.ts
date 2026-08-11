@@ -16,6 +16,11 @@ const ETHERSCAN_CHAINID: Record<string, number> = {
   ethereum: 1, bsc: 56, base: 8453, polygon: 137, arbitrum: 42161,
   optimism: 10, avalanche: 43114, robinhood: 4663,
 };
+// GeckoTerminal network slugs (keyless trades tape). Robinhood not covered.
+const GECKO_NET: Record<string, string> = {
+  ethereum: "eth", bsc: "bsc", base: "base", polygon: "polygon_pos",
+  arbitrum: "arbitrum", optimism: "optimism", avalanche: "avax", solana: "solana",
+};
 const EVM = /^0x[a-f0-9]{40}$/;
 const ZERO = "0x0000000000000000000000000000000000000000";
 // AMM custody/routers that never "fan out" like a pool (V4 singleton holds every
@@ -54,18 +59,69 @@ async function tokentx(chainid: number, token: string, key: string): Promise<{ t
   return { txs: out, truncated: out.length >= PAGE * MAX_PAGES };
 }
 
+// Recent 24h trade tape via GeckoTerminal (keyless, per-wallet USD, already
+// classified buy/sell). This is the reliable "who is selling now" primary
+// source - independent of Etherscan history, which rate-limits and misses
+// V4-routed tokens. Bounded to the token's deepest pool and the API's recent
+// window (~300 trades).
+async function geckoTape(net: string, token: string, deployer: string) {
+  try {
+    const pr = await fetch(`https://api.geckoterminal.com/api/v2/networks/${net}/tokens/${token}/pools?page=1`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(9000) });
+    if (!pr.ok) return null;
+    const pd = (await pr.json()) as any;
+    const pool = pd?.data?.[0]?.attributes?.address;
+    if (!pool) return null;
+    const tr = await fetch(`https://api.geckoterminal.com/api/v2/networks/${net}/pools/${pool}/trades`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(9000) });
+    if (!tr.ok) return null;
+    const td = (await tr.json()) as any;
+    const trades = Array.isArray(td?.data) ? td.data : [];
+    const now = Date.now();
+    const sells = new Map<string, number>(), buys = new Map<string, number>();
+    let sellUsd = 0, buyUsd = 0, sN = 0, bN = 0;
+    for (const t of trades) {
+      const a = t?.attributes ?? {};
+      const w = String(a.tx_from_address ?? "").toLowerCase();
+      const usd = Number(a.volume_in_usd ?? 0);
+      const ts = a.block_timestamp ? Date.parse(a.block_timestamp) : 0;
+      if (!w || !(now - ts < 24 * 3600_000)) continue;
+      if (a.kind === "sell") { sN++; sellUsd += usd; sells.set(w, (sells.get(w) ?? 0) + usd); }
+      else if (a.kind === "buy") { bN++; buyUsd += usd; buys.set(w, (buys.get(w) ?? 0) + usd); }
+    }
+    if (sN === 0 && bN === 0) return null;
+    const topSellers = [...sells.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([wallet, usd]) => ({
+      wallet, usd: Math.round(usd), isDeployer: !!deployer && wallet === deployer, isCreator: false,
+    }));
+    const ratio = bN > 0 ? sN / bN : sN;
+    return {
+      sells: sN, buys: bN, sellUsd: Math.round(sellUsd), buyUsd: Math.round(buyUsd),
+      distinctSellers: sells.size, distinctBuyers: buys.size, topSellers,
+      note: `Last 24h: ${sN} sells ($${Math.round(sellUsd).toLocaleString()}) vs ${bN} buys ($${Math.round(buyUsd).toLocaleString()}) across ${sells.size} sellers / ${buys.size} buyers.${bN === 0 && sN > 0 ? " No buyers - only exits." : ratio >= 3 ? " Heavily sell-skewed." : ""}`,
+    };
+  } catch { return null; }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const address = String(req.query.address ?? "").toLowerCase();
+  const rawAddr = String(req.query.address ?? "").trim();
   const chain = String(req.query.chain ?? "").toLowerCase();
+  const sol = chain === "solana";
   const creator = String(req.query.creator ?? "").toLowerCase();
-  if (!EVM.test(address)) { res.status(400).json({ error: "bad address" }); return; }
+  const address = sol ? rawAddr : rawAddr.toLowerCase();
+  const validAddr = sol ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) : EVM.test(address);
+  if (!validAddr) { res.status(400).json({ error: "bad address" }); return; }
   const chainid = ETHERSCAN_CHAINID[chain];
   const key = process.env.ETHERSCAN_API_KEY;
-  if (!chainid || !key) { res.status(200).json({ available: false, note: "sell-structure needs an Etherscan-covered chain and key" }); return; }
   res.setHeader("cache-control", "s-maxage=300, stale-while-revalidate=1800");
 
+  // Recent trade tape first - the reliable primary source, always attempted
+  // (keyless, and the ONLY source on Solana - Etherscan history is EVM-only).
+  const recentTape = GECKO_NET[chain] ? await geckoTape(GECKO_NET[chain], address, sol ? creator : creator) : null;
+
+  if (sol || !chainid || !key) { res.status(200).json({ available: !!recentTape, hit: !!recentTape, recentTape, devSold: null, sellerCount: 0, badSellerCount: 0, topSellers: [], note: recentTape ? "" : (sol ? "No recent trades found for this token." : "Recent-tape only (no Etherscan history source for this chain).") }); return; }
+
   const { txs, truncated } = await tokentx(chainid, address, key);
-  if (!txs.length) { res.status(200).json({ available: true, hit: false }); return; }
+  // Etherscan history is best-effort; if it's empty/rate-limited we still return
+  // the GeckoTerminal tape, which is the more reliable "who's selling" answer.
+  if (!txs.length) { res.status(200).json({ available: !!recentTape, hit: !!recentTape, recentTape, devSold: null, sellerCount: 0, badSellerCount: 0, topSellers: [], note: recentTape ? "" : "No Etherscan token-transfer history (rate-limited or unindexed) and no recent trades." }); return; }
   const dec = Number(txs[0]?.tokenDecimal ?? 18);
   const amt = (v: unknown) => Number(v ?? 0) / 10 ** dec;
   const mint = txs.find((t) => String(t.from).toLowerCase() === ZERO);
@@ -128,6 +184,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     soldToPoolTotalPct,
     badSellerCount: bad.length,
     topSellers: ranked.slice(0, 12),
+    recentTape,
     note: truncated ? "Based on the token's first ~6k transfers; very active tokens are analyzed partially." : "",
   });
 }
