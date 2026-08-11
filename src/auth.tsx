@@ -33,6 +33,24 @@ let currentAccessToken: string | null = null;
 let validatedAccessToken: string | null = null;
 let pendingAccessToken: string | null = null;
 let currentValidationId = 0;
+let refreshInFlight: Promise<string | null> | null = null;
+
+// Force a session refresh (used only when an API call 401s on a stale token).
+// Single-flight so a burst of 401s triggers one refresh, not a stampede.
+function refreshAccessTokenOnce(): Promise<string | null> {
+  if (!supabase) return Promise.resolve(null);
+  if (!refreshInFlight) {
+    refreshInFlight = supabase.auth.refreshSession()
+      .then(({ data }) => {
+        const t = data.session?.access_token ?? null;
+        if (t) currentAccessToken = t;
+        return t;
+      })
+      .catch(() => null)
+      .finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
 
 /** Add the current Supabase bearer token to same-origin API requests only. */
 function installAuthenticatedFetch(): void {
@@ -43,6 +61,7 @@ function installAuthenticatedFetch(): void {
     nativeFetch,
     window.location.origin,
     () => currentAccessToken,
+    refreshAccessTokenOnce,
   );
 }
 

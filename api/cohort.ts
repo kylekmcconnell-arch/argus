@@ -11,6 +11,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 // @ts-ignore - bundled JS sibling
 import { requireArgusAuth } from "./_auth.js";
+// @ts-ignore - bundled JS sibling
+import { ledgerRecordHolderEdges, ledgerWalletReputation } from "./_ledger.js";
 
 export const config = { maxDuration: 45 };
 
@@ -122,8 +124,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (sol ? !SOLADDR.test(address) : !EVM.test(address.toLowerCase())) { res.status(400).json({ error: "valid address required" }); return; }
 
   const self = address.toLowerCase();
+  const verdict = String(req.query.verdict ?? "").slice(0, 12) || null;
+  const symbol = String(req.query.symbol ?? "").slice(0, 24) || null;
   const holders = sol ? await solHolders(address) : await evmHolders(Number(GOPLUS_CHAIN[chain] ?? 0), address.toLowerCase());
-  if (holders.length < 4) { res.status(200).json({ available: true, cohortSize: holders.length, commonCoins: [], note: "Too few non-pool holders resolved to build a cohort." }); return; }
+
+  // Bank the holder -> token edges (fire-and-forget) so wallet reputation
+  // compounds from now, and read back any prior track record for these holders.
+  const holderAddrs = holders.map((h) => h);
+  void ledgerRecordHolderEdges(address, symbol, verdict, holderAddrs).catch(() => {});
+  const repMap = await ledgerWalletReputation(holderAddrs).catch(() => ({}));
+  const repd = Object.values(repMap as Record<string, { held: number; dead: number }>);
+  const reputation = {
+    holdersWithHistory: repd.filter((r) => r.held > 0).length,
+    holdersWithDeadBags: repd.filter((r) => r.dead > 0).length,
+    topOffenders: Object.entries(repMap as Record<string, { held: number; dead: number; deadSymbols: string[] }>)
+      .filter(([, r]) => r.dead > 0).sort((a, b) => b[1].dead - a[1].dead).slice(0, 6)
+      .map(([wallet, r]) => ({ wallet, held: r.held, dead: r.dead, deadSymbols: r.deadSymbols })),
+  };
+
+  if (holders.length < 4) { res.status(200).json({ available: true, cohortSize: holders.length, commonCoins: [], reputation, note: "Too few non-pool holders resolved to build a cohort." }); return; }
 
   // Each holder's token list, in parallel (bounded).
   const key = process.env.HELIUS_API_KEY;
@@ -167,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   res.status(200).json({
     available: true, chain, cohortSize: holders.length, threshold,
-    commonCoins,
+    commonCoins, reputation,
     note: commonCoins.length
       ? `${commonCoins.length} token(s) are held by ${threshold}+ of the ${holders.length} analyzed top holders - a shared-bag signature.`
       : `No shared holdings across ${threshold}+ of the ${holders.length} top holders - they look independent.`,

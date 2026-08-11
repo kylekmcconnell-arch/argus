@@ -12,7 +12,7 @@ import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat
 import { threatScan } from "../threat/scan";
 import { aiCodeRead } from "../threat/codereview";
 import { insiderClusters } from "../threat/insiders";
-import { buyerCohort } from "../threat/cohort";
+import { buyerCohort, walletTaxonomy } from "../threat/cohort";
 import { receiptStats, sharedReceiptStats } from "../threat/receipts";
 import { ThreatReceipts } from "./ThreatReceipts";
 
@@ -162,50 +162,85 @@ function money2(n: number | null): string {
   return n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(0) + "K" : "$" + Math.round(n);
 }
 function BuyerCohort({ scan }: { scan: ThreatScan }) {
-  const [state, setState] = useState<"idle" | "loading" | "done" | "empty">("idle");
+  const [state, setState] = useState<"idle" | "loading" | "done">("idle");
   const [data, setData] = useState<import("../threat/types").CohortOverlap | null>(null);
+  const [tax, setTax] = useState<import("../threat/types").WalletTaxonomy | null>(null);
   const run = () => {
     if (state === "loading") return;
     setState("loading");
-    buyerCohort(scan.chain, scan.address).then((r) => {
-      if (r && r.commonCoins.length) { setData(r); setState("done"); }
-      else { setData(r); setState("empty"); }
-    });
+    // Cohort (common coins + reputation) and the wallet-age/funding mix, together.
+    Promise.all([
+      buyerCohort(scan.chain, scan.address, scan.call.verdict, scan.symbol),
+      walletTaxonomy(scan.chain, scan.address),
+    ]).then(([c, t]) => { setData(c); setTax(t); setState("done"); });
   };
+  const rep = data?.reputation;
+  const chip = (label: string, o?: { n: number; pct: number }, tone?: string) =>
+    o && o.n > 0 ? <span className="mono rounded border px-2 py-0.5 text-[11px]" style={{ borderColor: tone ?? "var(--color-line)", color: tone ?? "var(--color-ink-dim)" }}>{label} {o.n} · {o.pct.toFixed(0)}%</span> : null;
   return (
     <div className="mt-4 rounded-xl border border-line p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-[14px] font-semibold text-ink">Buyer cohort · common coins</h2>
-          <p className="mt-0.5 text-[11.5px] text-ink-faint">What OTHER tokens the top holders also hold - a shared set of bags is a coordinated crowd, not independent buyers.</p>
+          <h2 className="text-[14px] font-semibold text-ink">Buyer intelligence</h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">The top holders' shared bags, their wallet age &amp; funding mix, and their track record from our own prior scans.</p>
         </div>
         {state === "idle" && (
-          <button onClick={run} className="mono shrink-0 rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">run cohort ↯</button>
+          <button onClick={run} className="mono shrink-0 rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">run analysis ↯</button>
         )}
       </div>
-      {state === "loading" && <p className="mt-2 animate-pulse text-[12.5px] text-ink-faint">Pulling each top holder's token bags and intersecting…</p>}
-      {state === "empty" && <p className="mt-2 text-[12.5px] text-ink-dim">{data?.note ?? "No shared holdings across the top holders (or unavailable on this chain/tier)."}</p>}
-      {state === "done" && data && (
-        <>
-          <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">{data.note}</p>
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full text-[11.5px]">
-              <thead><tr className="text-left text-ink-faint">
-                <th className="py-1 pr-3 font-normal">Token</th><th className="py-1 pr-3 font-normal">Held by</th><th className="py-1 pr-3 font-normal">Cohort</th><th className="py-1 font-normal">Mcap · liq</th>
-              </tr></thead>
-              <tbody>
-                {data.commonCoins.map((c) => (
-                  <tr key={c.address} className="border-t border-line/50">
-                    <td className="mono py-1.5 pr-3 text-ink-dim">${c.symbol}</td>
-                    <td className="mono py-1.5 pr-3 tabular text-ink-dim">{c.heldBy}/{data.cohortSize}</td>
-                    <td className="mono py-1.5 pr-3 tabular" style={{ color: c.pctOfCohort >= 50 ? "var(--color-avoid)" : c.pctOfCohort >= 30 ? "var(--color-caution)" : "var(--color-ink-faint)" }}>{c.pctOfCohort}%</td>
-                    <td className="mono py-1.5 tabular text-ink-faint">{money2(c.mcap)} · {money2(c.liqUsd)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {state === "loading" && <p className="mt-2 animate-pulse text-[12.5px] text-ink-faint">Reading each top holder's bags, age, funding, and history…</p>}
+      {state === "done" && (
+        <div className="mt-3 space-y-4">
+          {/* wallet mix */}
+          {tax && tax.analyzed > 0 && (
+            <div>
+              <div className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">Wallet mix ({tax.analyzed} holders)</div>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {chip("fresh", tax.cohorts.fresh, "var(--color-caution)")}
+                {chip("CEX-funded", tax.cohorts.cexFunded, "var(--color-caution)")}
+                {chip("dormant", tax.cohorts.dormant)}
+                {chip("recent", tax.cohorts.recent)}
+                {chip("aged", tax.cohorts.aged, "var(--color-pass)")}
+              </div>
+            </div>
+          )}
+          {/* wallet reputation from our ledger */}
+          {rep && (rep.holdersWithHistory > 0) && (
+            <div>
+              <div className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">Holder track record (our ledger)</div>
+              <p className="mt-1 text-[12.5px] text-ink-dim">{rep.holdersWithHistory} of these holders have appeared in our prior scans{rep.holdersWithDeadBags > 0 ? `; ${rep.holdersWithDeadBags} have held tokens that later went to zero` : " - none have held a token that later died"}.</p>
+              {rep.topOffenders.map((o) => (
+                <div key={o.wallet} className="mt-1 flex items-center justify-between gap-3 text-[11.5px]">
+                  <span className="mono text-ink-dim">{shortWallet(o.wallet)}</span>
+                  <span className="mono" style={{ color: "var(--color-avoid)" }}>{o.dead}/{o.held} died{o.deadSymbols.length ? ` (${o.deadSymbols.map((s) => "$" + s).slice(0, 3).join(", ")})` : ""}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {/* common coins */}
+          <div>
+            <div className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">Common coins</div>
+            {data && data.commonCoins.length ? (
+              <div className="mt-1.5 overflow-x-auto">
+                <table className="w-full text-[11.5px]">
+                  <thead><tr className="text-left text-ink-faint"><th className="py-1 pr-3 font-normal">Token</th><th className="py-1 pr-3 font-normal">Held by</th><th className="py-1 pr-3 font-normal">Cohort</th><th className="py-1 font-normal">Mcap · liq</th></tr></thead>
+                  <tbody>
+                    {data.commonCoins.map((c) => (
+                      <tr key={c.address} className="border-t border-line/50">
+                        <td className="mono py-1.5 pr-3 text-ink-dim">${c.symbol}</td>
+                        <td className="mono py-1.5 pr-3 tabular text-ink-dim">{c.heldBy}/{data.cohortSize}</td>
+                        <td className="mono py-1.5 pr-3 tabular" style={{ color: c.pctOfCohort >= 50 ? "var(--color-avoid)" : c.pctOfCohort >= 30 ? "var(--color-caution)" : "var(--color-ink-faint)" }}>{c.pctOfCohort}%</td>
+                        <td className="mono py-1.5 tabular text-ink-faint">{money2(c.mcap)} · {money2(c.liqUsd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="mt-1 text-[12.5px] text-ink-dim">{data?.note ?? "No shared holdings across the top holders (or unavailable on this chain/tier)."}</p>
+            )}
           </div>
-        </>
+        </div>
       )}
     </div>
   );

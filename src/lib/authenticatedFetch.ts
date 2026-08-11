@@ -22,8 +22,13 @@ export function createAuthenticatedFetch(
   nativeFetch: FetchLike,
   origin: string,
   getAccessToken: () => string | null,
+  // Optional: refresh the session and return a fresh token. Called ONLY on a
+  // 401 from an API request we authenticated (off the hot path, so it cannot
+  // deadlock the way calling auth on every request would), then the request is
+  // retried once. Without it, behaviour is unchanged.
+  refreshAccessToken?: () => Promise<string | null>,
 ): FetchLike {
-  return (input, init) => {
+  return async (input, init) => {
     const rawUrl =
       typeof input === "string" || input instanceof URL
         ? String(input)
@@ -39,10 +44,23 @@ export function createAuthenticatedFetch(
 
     const headers = new Headers(input instanceof Request ? input.headers : undefined);
     new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
-    if (!headers.has("authorization")) {
-      headers.set("authorization", `Bearer ${token}`);
-    }
+    const callerSuppliedAuth = headers.has("authorization");
+    if (!callerSuppliedAuth) headers.set("authorization", `Bearer ${token}`);
 
-    return nativeFetch(input, { ...init, headers });
+    const res = await nativeFetch(input, { ...init, headers });
+
+    // Idle tabs let Supabase's auto-refresh lapse, so a long-open report's
+    // on-demand call (cohort / insider clusters) can hit an expired token.
+    // Refresh once and retry so the panel loads instead of silently emptying.
+    if (res.status === 401 && refreshAccessToken && !callerSuppliedAuth) {
+      const fresh = await refreshAccessToken().catch(() => null);
+      if (fresh && fresh !== token) {
+        const retryHeaders = new Headers(init?.headers);
+        new Headers(input instanceof Request ? input.headers : undefined).forEach((v, k) => { if (!retryHeaders.has(k)) retryHeaders.set(k, v); });
+        retryHeaders.set("authorization", `Bearer ${fresh}`);
+        return nativeFetch(input, { ...init, headers: retryHeaders });
+      }
+    }
+    return res;
   };
 }

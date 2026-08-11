@@ -147,3 +147,63 @@ export async function ledgerByFingerprint(fingerprint) {
   if (fp.length < 8) return [];
   return query(`select=payload&kind=eq.${KIND}&payload->>codeFingerprint=eq.${encodeURIComponent(fp)}&order=ts.desc&limit=50`);
 }
+
+// ---- wallet reputation: holder → token edges ----
+// The thing that closes RAVN's only durable moat over time. Every time we scan
+// a token we record which top holders held it (with our verdict at the time);
+// the nightly re-check already learns whether each token later died. A wallet's
+// reputation is then: how many scanned tokens it has held, and how many of them
+// went to zero. It compounds from the first scan forward. One row per
+// (wallet, token) edge so a re-scan overwrites rather than piling up.
+const EDGE_KIND = "holder-edge";
+
+export async function ledgerRecordHolderEdges(token, symbol, verdict, wallets) {
+  const c = creds();
+  const t = normAddr(token);
+  if (!c || !t || !Array.isArray(wallets) || !wallets.length) return false;
+  const at = new Date().toISOString();
+  const rows = wallets.slice(0, 40).map((w) => {
+    const wl = normAddr(w);
+    return { ref: `${wl}|${t}`, kind: EDGE_KIND, query: symbol ? `$${symbol}` : t, verdict: verdict ?? null, payload: { wallet: wl, token: t, symbol: symbol ?? null, verdictAtScan: verdict ?? null, at } };
+  }).filter((r) => r.payload.wallet);
+  if (!rows.length) return false;
+  try {
+    const r = await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+      method: "POST",
+      headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(rows),
+      signal: AbortSignal.timeout(8000),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+// For a set of wallets: their prior token edges joined with each token's current
+// outcome (a threat-receipt with status 'dead' = it went to zero). Returns a map
+// wallet -> { held, dead, deadSymbols }.
+export async function ledgerWalletReputation(wallets) {
+  const c = creds();
+  if (!c || !Array.isArray(wallets) || !wallets.length) return {};
+  const ws = wallets.map(normAddr).filter(Boolean).slice(0, 40);
+  if (!ws.length) return {};
+  const edges = await query(`select=payload&kind=eq.${EDGE_KIND}&payload->>wallet=in.(${ws.map(encodeURIComponent).join(",")})&limit=2000`);
+  if (!edges.length) return {};
+  // Outcome per token: pull the threat-receipts for the tokens seen in the edges.
+  const tokens = [...new Set(edges.map((e) => e.token).filter(Boolean))];
+  const statusOf = new Map();
+  for (let i = 0; i < tokens.length; i += 40) {
+    const slice = tokens.slice(i, i + 40);
+    const recs = await query(`select=payload&kind=eq.${KIND}&ref=in.(${slice.map(encodeURIComponent).join(",")})`);
+    for (const r of recs) if (r.address) statusOf.set(normAddr(r.address), r.status ?? "alive");
+  }
+  const rep = {};
+  for (const e of edges) {
+    const w = e.wallet; if (!w) continue;
+    const r = rep[w] || (rep[w] = { held: 0, dead: 0, deadSymbols: [] });
+    r.held += 1;
+    if (statusOf.get(e.token) === "dead") { r.dead += 1; if (e.symbol && r.deadSymbols.length < 5) r.deadSymbols.push(e.symbol); }
+  }
+  return rep;
+}

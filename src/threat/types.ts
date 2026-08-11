@@ -252,6 +252,20 @@ export interface CohortOverlap {
     mcap: number | null;
     liqUsd: number | null;
   }[];
+  // Wallet reputation, banked from our own scans over time (RAVN's moat, ours).
+  reputation?: {
+    holdersWithHistory: number;
+    holdersWithDeadBags: number;
+    topOffenders: { wallet: string; held: number; dead: number; deadSymbols: string[] }[];
+  };
+  note: string;
+}
+
+// ---- wallet taxonomy (age / fresh / dormant / CEX-funded) ----
+export interface WalletTaxonomy {
+  available: boolean;
+  analyzed: number;
+  cohorts: Record<"fresh" | "recent" | "aged" | "dormant" | "cexFunded" | "unknown", { n: number; pct: number }>;
   note: string;
 }
 

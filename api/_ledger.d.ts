@@ -37,3 +37,5 @@ export function ledgerByFingerprint(fingerprint: string): Promise<LedgerReceipt[
 export function ledgerRecordAlert(alert: ThreatAlert): Promise<boolean>;
 export function ledgerRecentAlerts(limit?: number): Promise<ThreatAlert[]>;
 export function ledgerGetAlert(address: string): Promise<ThreatAlert | null>;
+export function ledgerRecordHolderEdges(token: string, symbol: string | null, verdict: string | null, wallets: string[]): Promise<boolean>;
+export function ledgerWalletReputation(wallets: string[]): Promise<Record<string, { held: number; dead: number; deadSymbols: string[] }>>;
