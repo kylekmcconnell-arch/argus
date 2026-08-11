@@ -117,8 +117,13 @@ async function pumpfunState(mint: string) {
 // fingerprint is the token's creator: PonsLaunchFactory. Both addresses
 // Blockscout-verified 2026-08-10 (active + legacy factory).
 const PONS_FACTORIES = new Set([
-  "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb", // PonsLaunchFactory (active, verified)
+  "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb", // PonsLaunchFactory (v1 active, verified)
   "0x0c37a24f5d23a486fa692d1500881d698b1f77a4", // legacy factory (docs)
+  // Pons v2 (PonsV2LaunchDeployer, Blockscout-verified 2026-08-11; found via
+  // $SWIRL, which the v1-only set misread as fair-launch). v2 tokens are named
+  // PonsV2LauncherToken and the position still goes to a locker
+  // (PonsV2LaunchLocker, per the verified ILaunchpadV2 source).
+  "0x3711cea4feade896c913c68f01eda97cb06d1a42",
 ]);
 // Bankr launches on Base/Robinhood run on Doppler protocol (not Clanker since
 // mid-2026): no vanity suffix, no fixed deployer EOA (per-user 4337 wallets) -

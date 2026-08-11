@@ -187,7 +187,7 @@ const VENUES: Venue[] = [
     // /api/launch via Blockscout. No client-side fingerprint exists.
     dexIds: [],
     lpOnGraduation: "locked",
-    lpNote: "the Uniswap V3 position NFT is transferred to the PonsLaunchLocker at launch - permanent custody, no unlock path for principal",
+    lpNote: "the liquidity position is transferred to the Pons launch locker at launch (PonsLaunchLocker on v1, PonsV2LaunchLocker on v2) - permanent custody, no unlock path for principal",
     platformPaysCreator: true,
     feeNote: "1% pool fee split ~70% creator / 30% protocol, accruing inside the locked position; the creator claims through the locker",
   },

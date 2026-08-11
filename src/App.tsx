@@ -510,6 +510,21 @@ export default function App() {
     setPhase("threat");
   }, [onAudit]);
 
+  // The ?threat= param is only true while the threat surface is actually
+  // showing. Any OTHER phase must drop it, whatever the exit path - starting a
+  // New Investigation, opening a case, a deep link. Leaving it behind means any
+  // reload (deploy-update pill, refresh) boots the app back into the stale
+  // threat scan and re-runs it over the work the user actually asked for (the
+  // SWIRL "recycling" bug: only the rail entry cleared it; onAudit never did).
+  useEffect(() => {
+    if (phase === "threat") return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("threat")) return;
+    params.delete("threat");
+    const rest = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${rest ? `?${rest}` : ""}`);
+  }, [phase]);
+
   // Open a project-centric view: dig who worked on it, all auditable.
   const onOpenProject = useCallback((name: string, domain?: string, priv = false, panelCostToken?: string) => {
     if (!closeCaseBriefForNavigation()) return;
