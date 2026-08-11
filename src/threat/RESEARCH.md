@@ -178,3 +178,21 @@ Uniswap V3, fee splitter → per-token staking vault. Revisit for factory addres
 exchange/ICO-era debut; vesting + unlock schedules live on cryptorank.io /
 CoinGecko/CMC token pages (full unlock-schedule integration = follow-up; needs a
 keyed source).
+
+## Bankr on Base/Robinhood = Doppler protocol (verified live 2026-08-11, $KUPO)
+
+Bankr migrated off Clanker: tokens are DERC20s minted by Doppler TokenFactory
+(0xf0B5141dD9096254B2ca624dff26024f46087229, callable only by Airlock
+0x660eAaEdEBc968f8f3694354FA8EC0b4c5Ba8D12), deployed via per-user 4337 smart
+wallets (no fixed deployer EOA, no vanity suffix). Full supply pools into a
+Uniswap V4 multicurve position held BOOK-ENTRY inside DopplerHookInitializer
+0xBDF938149ac6a781F94FAa0ed45E6A0e984c6544 - no position NFT, no Clanker
+locker. exitLiquidity() requires PoolStatus.Initialized but pools lock at
+creation -> structurally unreachable; graduate() only decays the fee schedule
+(80%->0.5%). Beneficiaries (95% creator EOA / 5% Doppler Safe, on-chain Lock
+event) can only collectFees. Detection: keyless
+GET api.bankr.bot/public/doppler/token-fees/{token} (404 = not Bankr); also
+/token-launches, /claimable-fees, /creator-fees. clanker.world by-address
+lookup is now key-gated. Scanner verdict: lpDisposition locked/permanent;
+extraction vectors = creator dumping claimed fees + optional 15% premint
+(1yr vest, 30d cliff).

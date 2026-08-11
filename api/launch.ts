@@ -120,6 +120,22 @@ const PONS_FACTORIES = new Set([
   "0xa5aab3f0c6eeadf30ef1d3eb997108e976351feb", // PonsLaunchFactory (active, verified)
   "0x0c37a24f5d23a486fa692d1500881d698b1f77a4", // legacy factory (docs)
 ]);
+// Bankr launches on Base/Robinhood run on Doppler protocol (not Clanker since
+// mid-2026): no vanity suffix, no fixed deployer EOA (per-user 4337 wallets) -
+// but Bankr's own keyless API resolves any of its Doppler tokens per-address.
+// (Verified live on $KUPO 2026-08-11; clanker.world's by-address lookup is now
+// key-gated, so this is the reliable probe.)
+async function bankrDopplerCheck(token: string): Promise<boolean> {
+  try {
+    const r = await fetch(`https://api.bankr.bot/public/doppler/token-fees/${token}`, { signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return false;
+    const d = (await r.json()) as any;
+    return !!(d && (d.poolId || d.initializer || d.data?.poolId));
+  } catch {
+    return false;
+  }
+}
+
 async function robinhoodCreatorVenue(token: string): Promise<string | null> {
   try {
     const r = await fetch(`https://robinhoodchain.blockscout.com/api/v2/addresses/${token}`, { signal: AbortSignal.timeout(10000) });
@@ -152,7 +168,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.ETHERSCAN_API_KEY;
   const addr = address.toLowerCase();
   if (!EVM.test(addr)) { res.status(400).json({ error: "bad address" }); return; }
-  const creatorVenue = chain === "robinhood" ? await robinhoodCreatorVenue(addr) : null;
+  let creatorVenue = chain === "robinhood" ? await robinhoodCreatorVenue(addr) : null;
+  if (!creatorVenue && (chain === "base" || chain === "robinhood")) {
+    creatorVenue = (await bankrDopplerCheck(addr)) ? "bankr" : null;
+  }
   if (!chainid || !key) { res.status(200).json({ available: !!creatorVenue, note: "snipe trace needs an Etherscan-covered chain and key", creatorVenue, pumpfun: null, snipe: null }); return; }
   const snipe = await evmSnipe(chainid, addr, key);
   res.status(200).json({ available: true, chain, pumpfun: null, snipe, creatorVenue });

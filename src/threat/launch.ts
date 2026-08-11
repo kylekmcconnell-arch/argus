@@ -162,6 +162,23 @@ const VENUES: Venue[] = [
     feeNote: "1% pool fee split to configured recipients (deployer/interface e.g. Bankr) - claimable by the fee admin",
   },
   {
+    // Bankr on Base/Robinhood runs on Doppler protocol (post-Clanker era). No
+    // client fingerprint (no suffix, per-user 4337 deployer wallets) - resolved
+    // server-side via Bankr's public per-token API. Custody verified on-chain
+    // ($KUPO): the entire supply pools into a Uniswap V4 multicurve position
+    // held book-entry INSIDE the Doppler initializer/hook - no position NFT
+    // exists, exitLiquidity() is structurally unreachable (pool locked at
+    // creation), and neither creator nor Bankr can pull liquidity or change
+    // the fee schedule.
+    name: "bankr",
+    chain: "evm",
+    chains: ["base", "robinhood"],
+    lpOnGraduation: "locked",
+    lpNote: "liquidity is locked book-entry inside Doppler's V4 multicurve initializer - no position NFT, no unlock path; creator and platform can only collect fees, never principal",
+    platformPaysCreator: true,
+    feeNote: "0.7% pool fee split 95% creator / 5% Doppler, streamed forever; watch the creator's fee-claim wallet for dumping, and the optional premint (up to 15%, 1yr vest, 30-day cliff)",
+  },
+  {
     name: "pons",
     chain: "evm",
     chains: ["robinhood"],
