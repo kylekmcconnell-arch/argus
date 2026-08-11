@@ -72,14 +72,44 @@ async function urlhausHit(h: string): Promise<boolean | null> {
   } catch { return null; }
 }
 
-// High-precision phishing/drainer tells: a legit token site never asks for
-// these. Any ONE flags.
-const DRAINER_STRONG = /seed phrase|recovery phrase|private key|setApprovalForAll\s*\(|your wallet (has been|was) (flagged|compromised|suspended)|(angel|inferno|monkey|pink) drainer/i;
+// Match phishing copy in VISIBLE page text only - not in inlined <script>/<style>
+// bundles. A wallet-embedding trading terminal (e.g. Kupo) legitimately ships
+// i18n strings like "Recovery phrase (12 words)" or "Export Private Key / Never
+// share this" inside its JS bundle; those are wallet-management + safety copy,
+// the opposite of a drainer, and must not be mistaken for one.
+function visibleText(html: string): string {
+  return html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&[a-z#0-9]+;/gi, " ")
+    .replace(/\s+/g, " ");
+}
+
+// Naming a bare secret is NOT a tell (legit wallets export/warn about them).
+// A drainer ASKS you to hand one over. Require an imperative ask next to the
+// secret, and suppress when the neighbouring words are self-custody / safety
+// copy ("never share", "export", "generate", "12/24 words", "write it down").
+const SECRET = "(?:secret recovery phrase|recovery phrase|seed phrase|private key|mnemonic)";
+const ASK = "(?:enter|paste|input|type|submit|provide|confirm|verify|import|restore|reveal|unlock|sync|connect)";
+const SECRET_ASK = new RegExp(`${ASK}[^.!?<>{}]{0,40}${SECRET}|${SECRET}[^.!?<>{}]{0,30}(?:to (?:continue|proceed|claim|restore|verify|unlock|validate))`, "i");
+const SECRET_SAFE = /never (?:share|give|enter|type|ask|reveal|store)|do ?n['o]?t share|keep (?:it|this|them)\s+(?:safe|secret|private|offline)|export|generate|new (?:address|wallet)|write .{0,20}down|controls your wallet|back ?up/i;
+// Unambiguous single-hit tells: a scare banner or a named drainer kit. (No bare
+// noun-phrases here - those live behind SECRET_ASK above.)
+const DRAINER_STRONG = /your wallet (?:has been|was|is) (?:flagged|compromised|suspended|at risk)|(?:angel|inferno|monkey|pink|pussy|venom|ice|nova) drainer/i;
 // Weaker scam-copy tells; need TWO to flag (each is common on legit sites too).
 const DRAINER_WEAK = /verify your wallet|validate your wallet|sync your wallet|claim your (reward|airdrop|token)|security update required|migrate your (tokens|wallet)|connect.{0,20}restore/gi;
-function drainerHit(body: string): boolean {
-  if (DRAINER_STRONG.test(body)) return true;
-  const weak = body.match(DRAINER_WEAK);
+export function drainerHit(body: string): boolean {
+  const text = visibleText(body);
+  if (DRAINER_STRONG.test(text)) return true;
+  // A secret-phrase ask counts only when it isn't wrapped in self-custody /
+  // "never share" safety context.
+  const ask = text.match(SECRET_ASK);
+  if (ask) {
+    const around = text.slice(Math.max(0, (ask.index ?? 0) - 60), (ask.index ?? 0) + ask[0].length + 60);
+    if (!SECRET_SAFE.test(around)) return true;
+  }
+  const weak = text.match(DRAINER_WEAK);
   return !!weak && new Set(weak.map((s) => s.toLowerCase())).size >= 2;
 }
 
