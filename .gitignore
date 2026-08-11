@@ -38,3 +38,4 @@ public/architecture.html
 
 # Written by eval replay; never part of a recording.
 eval/recordings/*/last-replay-emits.jsonl
+api/_threatlib.mjs

@@ -8,7 +8,8 @@ const { cacheGetJson, cacheSetJson, waitUntil } = vi.hoisted(() => ({
 vi.mock("./_cache.js", () => ({ cacheGetJson, cacheSetJson }));
 vi.mock("@vercel/functions", () => ({ waitUntil }));
 
-import handler, { allowedChat, extractRef, formatScanMessage } from "./telegram";
+import handler, { allowedChat, extractRef } from "./telegram";
+import { formatScanMessage } from "../src/threat/tgformat";
 
 function response() {
   const captured: { status?: number; body?: any } = {};

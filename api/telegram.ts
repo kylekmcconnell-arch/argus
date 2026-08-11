@@ -19,12 +19,23 @@ import { waitUntil } from "@vercel/functions";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
-import { resolveInput } from "../src/lib/resolveInput";
-import { configureThreatNet } from "../src/threat/net";
-import { threatScan } from "../src/threat/scan";
-import { aiCodeRead } from "../src/threat/codereview";
-import { projectLinks } from "../src/threat/links";
-import type { ThreatScan } from "../src/threat/types";
+
+// The pipeline ships as a pre-bundled single-file ESM lib (api/_threatlib.mjs,
+// built by scripts/build-threatlib.mjs during `npm run build`). Vercel's
+// function builder transpiles api/*.ts but does NOT bundle imports reaching
+// outside api/, so a static ../src import dies at runtime with
+// ERR_MODULE_NOT_FOUND under "type": "module". Dynamic import of an in-dir
+// .mjs (real file, real extension) resolves under any builder. The computed
+// specifier keeps tsc from resolving a file that only exists post-build.
+type ThreatLib = typeof import("../src/threat/serverScan");
+let libPromise: Promise<ThreatLib> | null = null;
+function threatLib(): Promise<ThreatLib> {
+  if (!libPromise) {
+    const specifier = "./_threatlib.mjs";
+    libPromise = import(/* @vite-ignore */ specifier) as Promise<ThreatLib>;
+  }
+  return libPromise;
+}
 
 export const config = { maxDuration: 300 };
 
@@ -41,46 +52,6 @@ async function tg(token: string, method: string, body: Record<string, unknown>):
     });
     return await r.json();
   } catch { return null; }
-}
-
-function verdictEmoji(v: string): string {
-  return v === "SAFE" ? "\u{1F7E2}" : v === "CAUTION" ? "\u{1F7E1}" : v === "DANGER" ? "\u{1F534}" : v === "RUG" ? "\u{2620}\u{FE0F}" : "\u{26AA}";
-}
-
-const money = (n: number) =>
-  n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
-
-// The verdict card. HTML parse mode; every dynamic string escaped.
-export function formatScanMessage(scan: ThreatScan): string {
-  const c = scan.call;
-  const d = scan.dossier;
-  const lines: string[] = [];
-  lines.push(`${verdictEmoji(c.verdict)} <b>$${esc(scan.symbol)}</b> · <b>${esc(c.verdict)}</b> (${c.risk} risk pts)`);
-  lines.push(`${esc(scan.name)} · ${esc(scan.chain)} · ${esc(money(d.liquidityUsd ?? 0))} liq · ${esc(money(d.mcap ?? 0))} mcap`);
-  lines.push(esc(c.action));
-  const tier = (title: string, items: string[], cap: number) => {
-    if (!items.length) return;
-    lines.push("");
-    lines.push(`<b>${title}</b>`);
-    for (const it of items.slice(0, cap)) lines.push(`• ${esc(it)}`);
-    if (items.length > cap) lines.push(`• +${items.length - cap} more in the full report`);
-  };
-  tier("\u{1F6A9} Flags", c.flags, 4);
-  tier("⚠️ Warnings", c.warnings, 4);
-  tier("✓ Positives", c.positives, 4);
-  if (scan.code.ai?.summary) {
-    lines.push("");
-    lines.push(`<b>Code read:</b> ${esc(scan.code.ai.summary.slice(0, 350))}${scan.code.ai.summary.length > 350 ? "…" : ""}`);
-  }
-  const links = projectLinks(d);
-  if (links.length) {
-    lines.push("");
-    lines.push(links.map((l) => `<a href="${esc(l.url)}">${esc(l.label)}</a>`).join(" · "));
-  }
-  lines.push("");
-  lines.push(`<a href="${APP_URL}/?threat=${encodeURIComponent(scan.address)}">Full ARGUS report ↗</a>`);
-  lines.push("<i>research only · not financial advice</i>");
-  return lines.join("\n");
 }
 
 const HELP = [
@@ -141,17 +112,18 @@ async function processUpdate(token: string, update: any): Promise<void> {
     return;
   }
 
-  // Point the pipeline's /api callbacks at this deployment with internal auth.
-  const internal = process.env.INTERNAL_API_SECRET;
-  const base = process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : APP_URL;
-  configureThreatNet(base, internal ? { authorization: `Bearer ${internal}` } : {});
-
   const sent = await tg(token, "sendMessage", { chat_id: chatId, parse_mode: "HTML", text: `\u{1F50E} Scanning <code>${esc(ref.slice(0, 60))}</code>… (30–60s)`, disable_web_page_preview: true });
   const progressId = sent?.result?.message_id;
 
   try {
-    const input = resolveInput(ref);
-    const scan = input.kind === "token" ? await threatScan(input) : null;
+    const lib = await threatLib();
+    // Point the pipeline's /api callbacks at this deployment with internal auth.
+    const internal = process.env.INTERNAL_API_SECRET;
+    const base = process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : APP_URL;
+    lib.configureThreatNet(base, internal ? { authorization: `Bearer ${internal}` } : {});
+
+    const input = lib.resolveInput(ref);
+    const scan = input.kind === "token" ? await lib.threatScan(input) : null;
     if (!scan) {
       const failText = input.kind !== "token"
         ? "That does not resolve to a token. Send the contract address itself."
@@ -162,10 +134,10 @@ async function processUpdate(token: string, update: any): Promise<void> {
     }
     // The ARGUS engine AI read (same as the app's panel) - best-effort.
     try {
-      scan.code.ai = await aiCodeRead(scan.chain, scan.address, scan.code, { verdict: scan.call.verdict, risk: scan.call.risk });
+      scan.code.ai = await lib.aiCodeRead(scan.chain, scan.address, scan.code, { verdict: scan.call.verdict, risk: scan.call.risk });
     } catch { /* keyless/timeout - the mechanical verdict stands */ }
 
-    const textOut = formatScanMessage(scan);
+    const textOut = lib.formatScanMessage(scan);
     if (progressId) {
       const edited = await tg(token, "editMessageText", { chat_id: chatId, message_id: progressId, parse_mode: "HTML", text: textOut, disable_web_page_preview: true });
       if (!edited?.ok) await tg(token, "sendMessage", { chat_id: chatId, parse_mode: "HTML", text: textOut, disable_web_page_preview: true });

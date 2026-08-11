@@ -8,7 +8,7 @@
     "server": "tsx watch server/index.ts",
     "dev:full": "concurrently -n web,api -c cyan,magenta \"vite\" \"tsx watch server/index.ts\"",
     "prebuild": "node --import tsx scripts/auth-env-contract.ts",
-    "build": "node scripts/build-collector.mjs && tsc -b && vite build",
+    "build": "node scripts/build-collector.mjs && tsc -b && node scripts/build-threatlib.mjs && vite build",
     "typecheck": "tsc -b && tsc -p server/tsconfig.json --noEmit && tsc -p tsconfig.api.json --noEmit",
     "test": "vitest run",
     "calibrate": "tsx src/calibration/calibrate.ts",
