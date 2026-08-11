@@ -41,12 +41,14 @@ const CEX_WALLETS = new Set([
   "0xf60c2ea62edbfe808163751dd0d8693dcb30019c",
 ]);
 
-// One Etherscan call per wallet: the oldest tx gives age AND the first funder
-// (for CEX-funded). Dormancy is dropped to halve the call budget - age +
-// funding are the load-bearing signals and 2 calls/wallet was rate-limiting.
+// One Etherscan call per wallet. txlist (normal txns) is empty for the many
+// holder addresses that never initiate a native tx - so use tokentx (token
+// TRANSFERS), which every token holder necessarily has. The oldest token
+// transfer dates the wallet's first on-chain activity (age); its sender is the
+// first funder (CEX-funded when it's a known hot wallet).
 async function evmClassify(chainid: number, wallet: string, key: string): Promise<{ ageDays: number | null; lastDays: number | null; cexFunded: boolean } | null> {
   try {
-    const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "1", sort: "asc", apikey: key });
+    const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "tokentx", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "1", sort: "asc", apikey: key });
     const r = await fetch(`https://api.etherscan.io/v2/api?${q}`, { signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const d = (await r.json()) as any;
