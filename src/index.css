@@ -1,0 +1,858 @@
+@import "tailwindcss";
+
+/* ARGUS: a forensic instrument. A calm light workspace is the product default;
+   the graphite intelligence-room theme remains available as an explicit user
+   choice. The @theme values define dark mode and the light override below
+   supplies the default visual surface. Token NAMES never change — every
+   component flips automatically.
+
+   This file also defines the component idioms (.panel, .eyebrow, .chip,
+   .verdict-pill, .finding, .btn-x, .stat-tile, .tint-x) that DESIGN.md makes
+   binding. One concept, one idiom — never restyle these concepts inline.
+
+   Deliberately off-stock palette: no value here is a default Tailwind hex. */
+@theme {
+  --color-void: #06080c; /* app background: graphite black */
+  --color-panel: #0c0e12; /* cards */
+  --color-panel-2: #15181d; /* raised / inset */
+  --color-sidebar: #090c10; /* left rail */
+  --color-line: #1a1d22; /* quiet hairline */
+  --color-line-2: #41454c; /* stronger structural border */
+  --color-control-line: #5e6877; /* accessible control boundary */
+  --color-ink: #f5f6f8; /* primary text */
+  --color-ink-dim: #a7aeb8; /* secondary text */
+  --color-ink-faint: #858e9b; /* tertiary text · AA on dark panels */
+
+  --color-signal: #3b67e8; /* electric royal blue — fills / focus */
+  --color-signal-dim: #2e52c7; /* pressed / strong fill */
+  --color-signal-lift: #7fa2ff; /* accessible blue text on graphite */
+  --color-on-signal: #ffffff; /* text / highlights on signal fills */
+  --color-accent-tint: #101621; /* localized active-state wash */
+  --color-eye-pupil: #05070b; /* live iris center; deliberately dark in both themes */
+
+  /* Jade and crimson. Adverse states share one rose-to-crimson family so
+     severity reads as depth rather than a hue change, and no orange sits
+     beside the jade. Chosen with Enigma 2026-07-27. */
+  --color-pass: #2fbd7a; /* jade: confirmed good */
+  --color-caution: #d98aa2; /* dusty rose: warn / partial */
+  --color-fail: #e2698e; /* rose: failed verdict score */
+  --color-avoid: #ef4f72; /* vivid crimson: disqualifying */
+  --color-unverifiable: #a98cf5;
+
+  --font-sans: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+}
+
+:root {
+  color-scheme: dark;
+  --shadow:
+    0 1px 2px color-mix(in oklab, var(--color-void) 72%, transparent),
+    0 20px 54px -34px color-mix(in oklab, var(--color-void) 88%, transparent);
+  --select: color-mix(in oklab, var(--color-signal-lift) 30%, transparent);
+}
+
+/* LIGHT mode — the product default. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-void: #f5f7fa;
+  --color-panel: #ffffff;
+  --color-panel-2: #eef2f6;
+  --color-sidebar: #f2f5f9;
+  --color-line: #d6dde6;
+  --color-line-2: #aeb9c8;
+  --color-control-line: #66758a;
+  --color-ink: #0f1728;
+  --color-ink-dim: #3e4b61;
+  --color-ink-faint: #596980;
+
+  --color-signal: #1769e0;
+  --color-signal-dim: #1157bd;
+  --color-signal-lift: #1458bd;
+  --color-accent-tint: #e7f0fe;
+  --color-eye-pupil: #0f1728;
+
+  --color-pass: #1a9c63;
+  --color-caution: #a4526c;
+  --color-fail: #b32e57;
+  --color-avoid: #96143a;
+  --color-unverifiable: #6940cc;
+
+  --shadow:
+    0 1px 2px color-mix(in oklab, var(--color-ink) 5%, transparent),
+    0 18px 48px -34px color-mix(in oklab, var(--color-ink) 18%, transparent);
+  --select: color-mix(in oklab, var(--color-signal) 18%, transparent);
+}
+
+/* Light mode keeps the report bright while the persistent navigation becomes
+   a midnight command rail. Scoped tokens let existing component idioms retain
+   their contrast and behavior without introducing one-off sidebar colors. */
+:root[data-theme="light"] .app-sidebar,
+:root[data-theme="light"] .app-mobile-header {
+  --color-sidebar: #0d1726;
+  --color-panel: #12233a;
+  --color-panel-2: #172a43;
+  --color-line: #2a3a50;
+  --color-line-2: #5a6f8b;
+  --color-control-line: #71829b;
+  --color-ink: #f7f9fc;
+  --color-ink-dim: #c5d0df;
+  --color-ink-faint: #91a1b6;
+  --color-signal: #1769e0;
+  --color-signal-dim: #1157bd;
+  --color-signal-lift: #68b1ff;
+  --color-accent-tint: #153a66;
+  --color-eye-pupil: #0d1726;
+  --color-pass: #45d18d;
+  --color-caution: #e79cb4;
+  --color-fail: #ee7fa4;
+  --color-avoid: #f2647f;
+  --color-unverifiable: #b49cff;
+  --shadow:
+    0 1px 2px color-mix(in oklab, var(--color-eye-pupil) 64%, transparent),
+    0 18px 40px -28px color-mix(in oklab, var(--color-eye-pupil) 88%, transparent);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+  html {
+    background: var(--color-void);
+  }
+  body {
+    margin: 0;
+    background: var(--color-void);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-optical-sizing: auto;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: var(--select);
+  }
+  /* Keyboard a11y: ONE global focus treatment — a two-layer ring that stays
+     visible on any surface (signal outline + void gap). Components must not
+     hand-roll their own focus outlines. */
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--color-void);
+  }
+  :root[data-theme="dark"] :focus-visible {
+    outline-color: color-mix(in oklab, var(--color-signal-lift) 46%, var(--color-ink-dim));
+    box-shadow:
+      0 0 0 2px var(--color-void),
+      0 0 12px color-mix(in oklab, var(--color-signal) 14%, transparent);
+  }
+}
+
+@layer components {
+/* ───────────────────────── typography ───────────────────────── */
+
+/* The brand voice: Archivo drawn wide. Only at display sizes — wordmark,
+   32/44px subject names, hero questions, verdict words (verdict words are
+   always uppercase). */
+.display {
+  font-family: var(--font-sans);
+  font-variation-settings: "wdth" 125;
+  font-stretch: 125%;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+/* Gentler width for 18–24px mixed-case page titles (full-width reads stretched
+   below ~32px). */
+.display-sm {
+  font-family: var(--font-sans);
+  font-variation-settings: "wdth" 110;
+  font-stretch: 110%;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum";
+}
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The ONE section-header treatment. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-ink-faint);
+}
+
+/* ───────────────────────── surfaces ─────────────────────────
+   Rhythm rule: .panel is the ONLY bordered container. Interior structure is
+   ledger-style — borderless zones + hairline dividers — not nested boxes. */
+
+.panel {
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--color-line) 72%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--color-panel-2) 16%, var(--color-panel)) 0%,
+    var(--color-panel) 62%
+  );
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-ink) 3.5%, transparent);
+}
+:root[data-theme="dark"] .panel {
+  border-color: color-mix(in oklab, var(--color-line-2) 54%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--color-panel-2) 12%, var(--color-panel)) 0%,
+    var(--color-panel) 62%
+  );
+}
+:root[data-theme="light"] .panel {
+  border-color: color-mix(in oklab, var(--color-line-2) 38%, var(--color-line));
+  background: var(--color-panel);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
+    0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent),
+    0 16px 36px -30px color-mix(in oklab, var(--color-ink) 26%, transparent);
+}
+
+/* Investigation hero: three equal decision lanes. Risk, readiness, and market
+   scale stay visually distinct without collapsing into one ambiguous verdict. */
+.investigation-hero-card {
+  min-height: 204px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-ink) 4%, transparent),
+    0 22px 52px -42px color-mix(in oklab, var(--color-void) 92%, transparent);
+}
+.investigation-readiness-card {
+  border-color: color-mix(in oklab, var(--tint) 42%, var(--color-line));
+  background:
+    radial-gradient(560px 240px at 100% 0%, color-mix(in oklab, var(--tint) 13%, transparent), transparent 68%),
+    linear-gradient(180deg, color-mix(in oklab, var(--tint) 7%, var(--color-panel)) 0%, var(--color-panel) 72%);
+}
+.investigation-market-card {
+  border-color: color-mix(in oklab, var(--color-signal) 42%, var(--color-line));
+  background:
+    radial-gradient(620px 270px at 100% 0%, color-mix(in oklab, var(--color-signal) 18%, transparent), transparent 68%),
+    linear-gradient(180deg, color-mix(in oklab, var(--color-signal) 6%, var(--color-panel)) 0%, var(--color-panel) 74%);
+}
+.investigation-hero-grid {
+  border: 1px solid color-mix(in oklab, var(--color-signal) 13%, var(--color-line));
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--color-accent-tint) 46%, var(--color-void));
+  margin-inline: -10px;
+  padding: 10px;
+}
+.investigation-story-cover {
+  position: relative;
+  isolation: isolate;
+}
+.investigation-story-cover::before {
+  position: absolute;
+  z-index: -1;
+  inset: -24px -20px -20px;
+  content: "";
+  border-radius: 20px;
+  background:
+    radial-gradient(760px 280px at 8% 0%, color-mix(in oklab, var(--color-signal) 10%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in oklab, var(--color-panel) 70%, transparent), transparent);
+}
+.story-chapter {
+  margin-inline: -20px;
+  padding: 14px 20px 20px;
+  border-radius: 18px;
+}
+.story-chapter-muted {
+  background: color-mix(in oklab, var(--color-panel-2) 42%, transparent);
+}
+.story-chapter-title {
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  line-height: 1.12;
+}
+.story-chapter-description {
+  font-size: 13.5px;
+}
+.investigation-story-nav {
+  overflow: hidden;
+  border-radius: 12px;
+  filter: drop-shadow(0 12px 22px color-mix(in oklab, var(--color-void) 12%, transparent));
+}
+.clearance-boundary {
+  border-color: color-mix(in oklab, var(--tint) 34%, var(--color-line));
+  background:
+    linear-gradient(90deg, color-mix(in oklab, var(--tint) 9%, var(--color-panel)) 0%, var(--color-panel) 68%);
+}
+.report-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid color-mix(in oklab, var(--color-line-2) 62%, transparent);
+  padding: 18px 2px 12px;
+}
+.report-section-heading::before {
+  content: "";
+  align-self: stretch;
+  width: 2px;
+  flex: 0 0 2px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--color-signal) 62%, transparent);
+}
+.report-section-heading > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.readiness-progress {
+  display: block;
+  width: 100%;
+  height: 5px;
+  appearance: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--color-line-2) 52%, transparent);
+}
+.readiness-progress::-webkit-progress-bar {
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--color-line-2) 52%, transparent);
+}
+.readiness-progress::-webkit-progress-value {
+  border-radius: 9999px;
+  background: var(--tint, var(--color-signal));
+}
+.readiness-progress::-moz-progress-bar {
+  border-radius: 9999px;
+  background: var(--tint, var(--color-signal));
+}
+
+:root[data-theme="light"] .investigation-hero-card {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
+    0 1px 2px color-mix(in oklab, var(--color-ink) 7%, transparent),
+    0 24px 54px -40px color-mix(in oklab, var(--color-ink) 30%, transparent);
+}
+:root[data-theme="light"] .investigation-readiness-card,
+:root[data-theme="light"] .investigation-market-card {
+  background: var(--color-panel);
+}
+
+.report-toolbar {
+  border-color: var(--color-line-2);
+  background: color-mix(in oklab, var(--color-panel) 94%, transparent);
+  box-shadow: 0 12px 28px -28px color-mix(in oklab, var(--color-ink) 55%, transparent);
+}
+
+@media (max-width: 639px) {
+  .report-toolbar .btn-primary,
+  .report-toolbar .btn-secondary {
+    white-space: nowrap;
+  }
+  .story-chapter {
+    margin-inline: -8px;
+    padding-inline: 8px;
+  }
+  .investigation-story-cover::before {
+    inset-inline: -8px;
+  }
+}
+
+.sidebar-nav-active {
+  background: var(--color-signal);
+  color: var(--color-on-signal);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-on-signal) 18%, transparent),
+    0 10px 24px -18px color-mix(in oklab, var(--color-signal) 78%, transparent);
+}
+.sidebar-nav-active:hover {
+  background: color-mix(in oklab, var(--color-signal) 80%, var(--color-signal-dim));
+}
+.app-sidebar .sidebar-case-active {
+  background: color-mix(in oklab, var(--color-signal) 20%, var(--color-panel-2));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-signal) 22%, transparent);
+}
+/* Borderless interior zone (a wash, not a box). */
+.panel-inset {
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--color-void) 42%, transparent);
+}
+:root[data-theme="light"] .panel-inset {
+  background: color-mix(in oklab, var(--color-panel-2) 75%, transparent);
+}
+
+.soft-shadow {
+  box-shadow: var(--shadow);
+}
+
+/* Atmospheric glow for hero canvases. Sits on the void. */
+.atmosphere {
+  background:
+    radial-gradient(1050px 500px at 72% -10%, color-mix(in oklab, var(--color-signal) 9%, transparent), transparent 70%),
+    radial-gradient(760px 440px at 16% 112%, color-mix(in oklab, var(--color-signal) 3%, transparent), transparent 72%),
+    var(--color-void);
+}
+:root[data-theme="light"] .atmosphere {
+  background:
+    radial-gradient(980px 460px at 78% -8%, color-mix(in oklab, var(--color-signal) 8%, transparent), transparent 72%),
+    radial-gradient(760px 400px at 8% 108%, color-mix(in oklab, var(--color-signal) 3%, transparent), transparent 74%),
+    var(--color-void);
+}
+:root[data-theme="dark"] .atmosphere {
+  background:
+    radial-gradient(900px 420px at 76% -12%, color-mix(in oklab, var(--color-signal) 3%, transparent), transparent 72%),
+    radial-gradient(640px 360px at 28% 110%, color-mix(in oklab, var(--color-signal) 1.5%, transparent), transparent 76%),
+    var(--color-void);
+}
+
+/* faint paper grid for empty canvases */
+.grid-bg {
+  background-image:
+    linear-gradient(var(--color-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(800px 460px at 50% 30%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(800px 460px at 50% 30%, #000 0%, transparent 78%);
+  opacity: 0.5;
+}
+
+/* ───────────────────────── tints ─────────────────────────
+   Theme-safe tinted surfaces. These replace BOTH the broken
+   "var(--color-x)14" string-alpha hack and hardcoded rgba() literals.
+   Text is mixed toward ink so every pair holds AA in both themes.
+   Dynamic colors: className="tint-var" + style={{ "--tint": expr }} —
+   the ONE permitted style-prop pattern for color. */
+.tint-pass         { --tint: var(--color-pass); }
+.tint-caution      { --tint: var(--color-caution); }
+.tint-avoid        { --tint: var(--color-avoid); }
+.tint-fail         { --tint: var(--color-fail); }
+.tint-signal       { --tint: var(--color-signal); }
+.tint-unverifiable { --tint: var(--color-unverifiable); }
+.tint-neutral      { --tint: var(--color-ink-faint); }
+
+.tint-pass, .tint-caution, .tint-avoid, .tint-fail, .tint-signal,
+.tint-unverifiable, .tint-neutral, .tint-var {
+  background: color-mix(in oklab, var(--tint) 9%, transparent);
+  border-color: color-mix(in oklab, var(--tint) 34%, transparent);
+  color: color-mix(in oklab, var(--tint) 76%, var(--color-ink));
+}
+/* Stronger variant for row-level banners/bands. */
+.tint-strong {
+  background: color-mix(in oklab, var(--tint) 14%, transparent);
+  border-color: color-mix(in oklab, var(--tint) 48%, transparent);
+}
+
+/* A stamped finding: the ONE grid-breaking idiom, reserved for decision-
+   critical rows (sanctions hits, risk paths, hard-cap findings, readiness
+   bands). Square corners, a 2px rail in the semantic color, tint wash. */
+.finding {
+  position: relative;
+  border-left: 2px solid var(--tint, var(--color-ink-faint));
+  background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 8%, transparent);
+  color: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 76%, var(--color-ink));
+}
+
+/* ───────────────────────── chips & verdicts ─────────────────────────
+   Composition is cascade-safe: idiom classes consume var(--tint, neutral) so
+   they work with or without a tint class, regardless of source order. */
+
+/* The ONE badge geometry. 11px — semantic metadata is never smaller. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 5px;
+  border: 1px solid color-mix(in oklab, var(--tint, var(--color-ink-faint)) 30%, transparent);
+  background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 8%, transparent);
+  padding: 1.5px 6px;
+  color: color-mix(in oklab, var(--tint, var(--color-ink-dim)) 76%, var(--color-ink));
+  white-space: nowrap;
+}
+/* Long evidence-state copy may wrap inside narrow report cards. */
+.chip-wrap {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.45;
+}
+/* Non-semantic footnote chip (counts, versions). NEVER pair with a tint. */
+.chip-sm {
+  font-size: 10px;
+  padding: 1px 5px;
+}
+
+/* The ONE verdict treatment (PASS/FAIL/CAUTION/AVOID/…): dot + stamped word.
+   fail gets a hollow dot so fail-vs-avoid survives small sizes and CVD. */
+.verdict-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: 6px;
+  border: 1px solid color-mix(in oklab, var(--tint, var(--color-ink-faint)) 42%, transparent);
+  background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 10%, transparent);
+  color: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 78%, var(--color-ink));
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.verdict-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+  flex: none;
+}
+.verdict-pill.tint-fail::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.verdict-pill-lg {
+  font-size: 13.5px;
+  padding: 5px 12px;
+  border-radius: 8px;
+}
+
+/* ───────────────────────── controls ───────────────────────── */
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--color-signal);
+  color: var(--color-on-signal);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-on-signal) 18%, transparent);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+}
+.btn-primary:hover {
+  background: color-mix(in oklab, var(--color-signal) 78%, var(--color-signal-dim));
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-on-signal) 22%, transparent),
+    0 8px 24px -16px color-mix(in oklab, var(--color-signal) 72%, transparent);
+}
+.btn-primary:active {
+  transform: scale(0.985);
+}
+.btn-primary:disabled {
+  opacity: 0.4;
+}
+
+.landing-cta-signal {
+  border: 1px solid color-mix(in oklab, var(--color-signal) 54%, var(--color-line-2));
+}
+:root[data-theme="dark"] .landing-cta-signal:disabled {
+  border-color: var(--color-line-2);
+  background: color-mix(in oklab, var(--color-panel-2) 74%, var(--color-void));
+  color: var(--color-ink-dim);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-ink) 4%, transparent);
+  opacity: 1;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--color-control-line);
+  border-radius: 8px;
+  color: var(--color-ink-dim);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.btn-secondary:hover {
+  border-color: var(--color-signal);
+  color: var(--color-ink);
+}
+
+.btn-ghost {
+  color: var(--color-ink-dim);
+  transition: color 0.15s ease;
+}
+.btn-ghost:hover {
+  color: var(--color-ink);
+}
+
+/* Row-level mono CTA ("trace →", "audit →", "run panel →"). Tint it when it
+   runs a scan/panel or pivots to a new audit: `btn-chip tint-signal`. */
+.btn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid color-mix(in oklab, var(--tint, var(--color-line-2)) 45%, transparent);
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: color-mix(in oklab, var(--tint, var(--color-ink-dim)) 76%, var(--color-ink));
+  background: transparent;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.btn-chip:hover {
+  border-color: color-mix(in oklab, var(--tint, var(--color-line-2)) 70%, transparent);
+  background: color-mix(in oklab, var(--tint, var(--color-line-2)) 12%, transparent);
+  color: color-mix(in oklab, var(--tint, var(--color-ink)) 80%, var(--color-ink));
+}
+
+/* The ONE text input. (No outline:none — the global :focus-visible ring
+   handles keyboard focus; the border shift is the pointer affordance.) */
+.field {
+  background: color-mix(in oklab, var(--color-void) 60%, transparent);
+  border: 1px solid var(--color-control-line);
+  border-radius: 8px;
+  color: var(--color-ink);
+  transition: border-color 0.15s ease;
+}
+.field::placeholder {
+  color: var(--color-ink-faint);
+}
+.field:focus {
+  border-color: var(--color-signal);
+}
+/* Dark mode: lift toward the accessible signal-lift so the focused border is
+   visibly distinct from the resting control-line border (they were identical). */
+:root[data-theme="dark"] .field:focus {
+  border-color: var(--color-signal-lift);
+}
+:root[data-theme="light"] .field {
+  background: #ffffff;
+}
+
+.investigation-trace {
+  color: var(--color-ink-faint);
+  opacity: 0.18;
+  transform: translateY(-50%) scaleX(0.82);
+  transform-origin: 100% 50%;
+  transition: color 0.18s ease, opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease;
+}
+.investigation-control:focus-within .investigation-trace {
+  color: var(--color-signal-lift);
+  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--color-signal) 48%, transparent));
+  opacity: 0.82;
+  transform: translateY(-50%) scaleX(1);
+}
+
+/* ───────────────────────── data display ───────────────────────── */
+
+/* The ONE stat tile: label above value, borderless wash (ledger rhythm). */
+.stat-tile {
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--color-void) 42%, transparent);
+  padding: 8px 12px;
+}
+:root[data-theme="light"] .stat-tile {
+  background: color-mix(in oklab, var(--color-panel-2) 75%, transparent);
+}
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-ink-faint);
+}
+.stat-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  color: var(--color-ink);
+}
+
+/* External-link affordance: one idiom, arrow included. */
+.link-ext {
+  color: color-mix(in oklab, var(--color-signal) 78%, var(--color-ink));
+  text-underline-offset: 2px;
+}
+.link-ext:hover {
+  text-decoration: underline;
+}
+.link-ext::after {
+  content: "↗";
+  font-size: 0.85em;
+  margin-left: 3px;
+  opacity: 0.75;
+}
+
+.empty-state {
+  border-radius: 12px;
+  border: 1px dashed color-mix(in oklab, var(--color-line-2) 78%, transparent);
+  background:
+    radial-gradient(460px 180px at 50% 0%, color-mix(in oklab, var(--color-signal) 6%, transparent), transparent 72%),
+    color-mix(in oklab, var(--color-panel) 74%, transparent);
+  padding: 36px 24px;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--color-ink-faint);
+}
+}
+
+/* ───────────────────────── motion ───────────────────────── */
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in 0.24s ease-out both;
+}
+
+.scan-line {
+  background: linear-gradient(90deg, transparent, var(--color-signal), transparent);
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.92); opacity: 0.6; }
+  70% { transform: scale(1.3); opacity: 0; }
+  100% { opacity: 0; }
+}
+.pulse-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--color-signal);
+  animation: pulse-ring 2.2s ease-out infinite;
+}
+
+/* The live ARGUS eye scans while sources are being gathered, holds focus while
+   the analyst is scoring, and transitions back to center during finalization. The
+   dotted mark stays fixed so the motion reads as attention, not decoration. */
+@keyframes argus-eye-search {
+  0%, 8%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  16%, 24% { transform: translate3d(-5px, -2px, 0) scale(0.98); }
+  34%, 42% { transform: translate3d(4px, -3px, 0) scale(1.02); }
+  52%, 60% { transform: translate3d(5px, 3px, 0) scale(1); }
+  70%, 78% { transform: translate3d(-3px, 4px, 0) scale(0.99); }
+  88%, 94% { transform: translate3d(2px, -1px, 0) scale(1.01); }
+}
+
+@keyframes argus-eye-focus {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  18% { transform: translate3d(2px, -1px, 0) scale(1.08); }
+  34% { transform: translate3d(-1px, 1px, 0) scale(1.03); }
+  52%, 82% { transform: translate3d(0, 0, 0) scale(1.1); }
+}
+
+@keyframes argus-eye-live-ring {
+  0% { transform: scale(0.86); opacity: 0.48; }
+  72%, 100% { transform: scale(1.65); opacity: 0; }
+}
+
+@keyframes argus-eye-evidence {
+  0% { transform: scale(0.88); opacity: 0.86; }
+  72%, 100% { transform: scale(1.9); opacity: 0; }
+}
+
+.argus-eye-field,
+.argus-eye-iris,
+.argus-eye-live-ring,
+.argus-eye-evidence-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.argus-eye-iris--searching,
+.argus-eye-iris--focused {
+  will-change: transform;
+}
+.argus-eye-iris {
+  transition: transform 700ms ease-out;
+}
+.argus-eye-iris--searching {
+  animation: argus-eye-search 5.8s cubic-bezier(0.42, 0, 0.22, 1) infinite;
+}
+.argus-eye-iris--focused {
+  animation: argus-eye-focus 2.5s ease-in-out infinite;
+}
+.argus-eye-iris--settling {
+  transform: translate3d(0, 0, 0) scale(1);
+}
+.argus-eye-live-ring {
+  opacity: 0;
+  animation: argus-eye-live-ring 2.4s ease-out infinite;
+}
+.argus-eye-evidence-pulse {
+  opacity: 0;
+  animation: argus-eye-evidence 0.9s ease-out both;
+}
+
+@keyframes sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.sweep {
+  animation: sweep 1.4s ease-in-out infinite;
+}
+
+/* Shared scan-progress bar for loading panels (WalletClusters/OperatorNetwork/
+   FunderSweep previously each shipped a private copy of these keyframes). */
+@keyframes scan-bar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
+}
+.scan-bar {
+  position: relative;
+  overflow: hidden;
+  height: 3px;
+  border-radius: 9999px;
+  background: var(--color-line);
+}
+.scan-bar::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 30%;
+  border-radius: 9999px;
+  background: var(--color-signal);
+  animation: scan-bar 1.3s ease-in-out infinite;
+}
+
+.thin-scroll::-webkit-scrollbar { width: 7px; height: 7px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: var(--color-line-2); border-radius: 99px; }
+
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* Recent-scores marquee: a slow continuous drift instead of a scrollbar. The
+   track holds two identical copies (each padded by exactly one gap) so the
+   -50% loop point is seamless. Pauses on hover so the cards stay clickable. */
+@keyframes scores-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.scores-marquee {
+  animation: scores-marquee var(--marquee-dur, 45s) linear infinite;
+  will-change: transform;
+}
+.scores-marquee:hover { animation-play-state: paused; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  :where(.animate-bounce, .animate-ping, .animate-pulse, .animate-spin) { animation: none !important; }
+  .scores-marquee { animation: none; }
+  .rise-in { animation: none; }
+  .sweep { animation: none; }
+  .scan-bar::after { animation: none; width: 100%; opacity: 0.4; }
+  .pulse-ring::after { animation: none; opacity: 0; }
+  .argus-eye-iris,
+  .argus-eye-live-ring,
+  .argus-eye-evidence-pulse { animation: none; transform: none; }
+  .argus-eye-live-ring,
+  .argus-eye-evidence-pulse { opacity: 0; }
+}

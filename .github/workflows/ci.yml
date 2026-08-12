@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+
+      - name: Start isolated Supabase database
+        run: supabase start
+
+      - name: Executable Postgres persistence and activation gates
+        run: npm run test:db
+
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Source-of-truth contract
+        run: npm run truth:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests (engine port fidelity + golden-set calibration)
+        run: npm test
+
+      - name: Calibration (verdict drift table)
+        run: npm run calibrate
+
+      - name: Deterministic release canary (no live providers)
+        run: npm run canary:offline
+
+      - name: Build (client typecheck + bundle)
+        run: npm run build

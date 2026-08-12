@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["ES2023", "DOM"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "verbatimModuleSyntax": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["api/**/*.ts", "api/**/*.tsx", "middleware.ts"],
+  "exclude": [
+    "api/_collector.js",
+    "api/_sweep.js",
+    "api/**/* 2.ts",
+    "api/**/* 2.tsx"
+  ]
+}

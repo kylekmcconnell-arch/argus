@@ -1,0 +1,193 @@
+import { useEffect, useState } from "react";
+import { labelAddress } from "../lib/addressLabels";
+import { useArkhamLabels } from "../lib/useArkhamLabels";
+import { ArkhamName } from "./ArkhamName";
+import { PanelRequestNotice } from "./PanelRequestNotice";
+import { fetchPanelJson, panelRequestFailure, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import type { LiveForensicStatusHandler } from "../lib/liveForensics";
+
+// Holder / distribution forensics — is the ownership a healthy base or a rug
+// wearing a costume? Solana pulls the rich RugCheck view (total holders, top-10
+// concentration with DEX/CEX/LP separated out, connected insider clusters, creator
+// holdings, LP-lock). EVM falls back to the on-chain audit's own holder fields.
+type RcTop = { addr: string; owner?: string; pct: number; insider: boolean; label: string | null; market: boolean };
+interface Holders {
+  available: boolean;
+  totalHolders: number;
+  top: RcTop[];
+  concentration: { top1: number; top5: number; top10: number; top10NonMarket: number; marketPct: number };
+  insiders: { detected: number; networks: number; clusteredPct: number };
+  creatorPct: number;
+  lpLockedPct: number;
+  rugged: boolean;
+  verdict: { tone: "good" | "warn" | "bad"; line: string };
+}
+
+const TONE: Record<string, string> = { good: "var(--color-pass)", warn: "var(--color-caution)", bad: "var(--color-avoid)" };
+const money = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "K" : String(n));
+
+function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="stat-tile min-w-0">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value mt-0.5 font-semibold tabular" style={tone ? { color: tone } : undefined}>{value}</div>
+    </div>
+  );
+}
+
+export function HolderForensics({ address, chain, holderCount, evmTop, insiderPct, panelCostToken, onStatusChange }: {
+  address: string;
+  chain: string;
+  holderCount: number;
+  evmTop: { pct: number; tag?: string; address?: string; isContract?: boolean }[];
+  insiderPct: number;
+  panelCostToken?: string;
+  onStatusChange?: LiveForensicStatusHandler;
+}) {
+  const [d, setD] = useState<Holders | null>(null);
+  const [state, setState] = useState<"loading" | "sol" | "evm">(chain === "solana" ? "loading" : "evm");
+  const [liveFailure, setLiveFailure] = useState<PanelRequestFailure | null>(null);
+  // Arkham entity labels for every holder wallet shown — names the anonymous ones.
+  const { labels: arkham, state: arkhamState } = useArkhamLabels(
+    [...evmTop.map((h) => h.address), ...(d?.top ?? []).map((h) => h.owner)],
+    panelCostToken,
+  );
+
+  useEffect(() => {
+    if (chain !== "solana") return;
+    let live = true;
+    onStatusChange?.({ id: "solana-holder-forensics", label: "Live Solana holder analysis", state: "running" });
+    fetchPanelJson<Holders>(`/api/holders?mint=${encodeURIComponent(address)}&chain=${chain}`)
+      .then((j) => {
+        if (!live) return;
+        if (j.available) {
+          setD(j);
+          setState("sol");
+          onStatusChange?.({ id: "solana-holder-forensics", label: "Live Solana holder analysis", state: "complete" });
+        } else {
+          setState("evm");
+          setLiveFailure("unavailable");
+          onStatusChange?.({ id: "solana-holder-forensics", label: "Live Solana holder analysis", state: "unavailable" });
+        }
+      })
+      .catch((error) => {
+        if (!live) return;
+        setState("evm");
+        setLiveFailure(panelRequestFailure(error));
+        onStatusChange?.({ id: "solana-holder-forensics", label: "Live Solana holder analysis", state: "unavailable" });
+      });
+    return () => { live = false; };
+  }, [address, chain, onStatusChange]);
+
+  if (state === "loading") {
+    return <div className="panel p-4 text-[12.5px] text-ink-faint">reading the holder base + distribution…</div>;
+  }
+
+  // ---- Solana: rich RugCheck view ----
+  if (state === "sol" && d) {
+    const c = d.concentration;
+    const barMarket = Math.min(100, c.marketPct);
+    const barRisk = Math.min(100 - barMarket, c.top10NonMarket);
+    return (
+      <div className="panel tint-var p-4" style={{ "--tint": TONE[d.verdict.tone] } as React.CSSProperties}>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="eyebrow">Holder analysis</span>
+          <span className="mono text-[11px] text-ink-faint">RugCheck</span>
+          {d.rugged && <span className="chip tint-avoid">rugged</span>}
+        </div>
+
+        <p className="mt-2 text-[13.5px] font-medium leading-relaxed" style={{ color: TONE[d.verdict.tone] }}>{d.verdict.line}</p>
+
+        {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
+          <PanelRequestNotice failure={arkhamState} label="Holder identity labels" className="mt-3" />
+        )}
+
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Metric label="holders" value={d.totalHolders ? money(d.totalHolders) : "N/A"} />
+          <Metric label="top-10 hold" value={`${c.top10.toFixed(0)}%`} tone={c.top10NonMarket >= 40 ? TONE.bad : c.top10NonMarket >= 20 ? TONE.warn : undefined} />
+          <Metric label="insider-clustered" value={`${d.insiders.clusteredPct.toFixed(0)}%`} tone={d.insiders.clusteredPct >= 15 ? TONE.warn : undefined} />
+          <Metric label="creator holds" value={`${d.creatorPct.toFixed(d.creatorPct < 1 ? 1 : 0)}%`} tone={d.creatorPct >= 10 ? TONE.warn : undefined} />
+        </div>
+
+        {/* concentration bar: market/exchange liquidity vs private-wallet concentration */}
+        <div className="mt-3">
+          <div className="mb-1 flex items-center justify-between text-[11px] text-ink-faint">
+            <span>top-10 distribution</span>
+            <span className="mono">{c.marketPct > 1 ? `${c.marketPct.toFixed(0)}% DEX/CEX/LP · ` : ""}{c.top10NonMarket.toFixed(0)}% private wallets</span>
+          </div>
+          <div className="flex h-2 w-full overflow-hidden rounded-full bg-line">
+            <span className="h-full" style={{ width: `${barMarket}%`, background: "var(--color-pass)" }} title="DEX / CEX / LP (market liquidity)" />
+            <span className="h-full" style={{ width: `${barRisk}%`, background: c.top10NonMarket >= 40 ? "var(--color-avoid)" : "var(--color-caution)" }} title="private-wallet concentration" />
+          </div>
+        </div>
+
+        {/* top holders, labeled */}
+        {d.top.length > 0 && (
+          <div className="mt-3 divide-y divide-line/60">
+            {d.top.slice(0, 8).map((h, i) => (
+              <div key={i} className="flex items-center gap-2 py-1.5 text-[11.5px]">
+                <span className="mono w-4 shrink-0 text-ink-faint">{i + 1}</span>
+                <ArkhamName address={h.owner} chain="solana" labels={arkham} fallback={h.addr} className="text-ink-dim" />
+                {h.label && <span className="chip tint-var shrink-0" style={{ "--tint": h.market ? "var(--color-pass)" : "var(--color-caution)" } as React.CSSProperties}>{h.label}</span>}
+                {h.insider && !h.label && <span className="chip tint-avoid shrink-0">insider</span>}
+                <span className="mono ml-auto shrink-0 tabular text-ink">{h.pct.toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mono mt-2.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-faint">
+          {d.insiders.detected > 0 && <span>{d.insiders.detected.toLocaleString()} linked insider wallets across {d.insiders.networks} cluster{d.insiders.networks === 1 ? "" : "s"}</span>}
+          {d.lpLockedPct > 0 && <span>LP {d.lpLockedPct.toFixed(0)}% locked</span>}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- EVM / fallback: the on-chain audit's own holder fields ----
+  const top = [...evmTop].sort((a, b) => b.pct - a.pct).slice(0, 8);
+  const topSum = top.reduce((a, h) => a + h.pct, 0);
+  const concentrated = topSum >= 50;
+  return (
+    <div className="panel p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="eyebrow">Holder analysis</span>
+        <span className="mono text-[11px] text-ink-faint">{liveFailure && chain === "solana" ? "saved scan fallback" : "blockchain data"}</span>
+      </div>
+      {liveFailure && chain === "solana" && (
+        <PanelRequestNotice failure={liveFailure} label="Live Solana holder analysis" className="mt-3" />
+      )}
+      {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
+        <PanelRequestNotice failure={arkhamState} label="Holder identity labels" className="mt-3" />
+      )}
+      <div className="mt-3 grid grid-cols-3 gap-3">
+        <Metric label="holders" value={holderCount ? holderCount.toLocaleString() : "N/A"} />
+        <Metric label={`top ${top.length} hold`} value={top.length ? `${topSum.toFixed(0)}%` : "N/A"} tone={concentrated ? TONE.bad : undefined} />
+        {/* Not "insider": nothing here ties these wallets to the project. The
+            figure is the share held by the largest non-market wallets, which
+            is a concentration reading and not a claim about who owns them. */}
+        <Metric label="top wallets hold" value={insiderPct ? `${insiderPct}%` : "N/A"} tone={insiderPct >= 20 ? TONE.warn : undefined} />
+      </div>
+      {top.length > 0 && (
+        <div className="mt-3 divide-y divide-line/60">
+          {top.map((h, i) => {
+            const lab = labelAddress(h.address, { tag: h.tag, isContract: h.isContract });
+            const color = lab.kind === "burn" || lab.market ? "var(--color-pass)" : "var(--color-ink-dim)";
+            return (
+              <div key={i} className="flex items-center gap-2 py-1.5 text-[11.5px]">
+                <span className="mono w-4 shrink-0 text-ink-faint">{i + 1}</span>
+                <ArkhamName address={h.address} chain={chain} labels={arkham} fallback={lab.text} className={color === "var(--color-pass)" ? "" : "text-ink-dim"} />
+                {lab.market && <span className="chip tint-pass shrink-0">{lab.kind === "burn" ? "burned" : "market/custody"}</span>}
+                <span className="mono ml-auto shrink-0 tabular text-ink">{h.pct.toFixed(1)}%</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="mt-2.5 text-[11px] leading-relaxed text-ink-faint">
+        {top.length ? (concentrated ? `Concentrated: the top ${top.length} wallets hold ${topSum.toFixed(0)}% of supply.` : `Top ${top.length} wallets hold ${topSum.toFixed(0)}%.`) : "Holder-level data not available for this token."}
+        {chain !== "solana" && " Deeper checks for connected or insider wallets are only available on Solana for now."}
+      </p>
+    </div>
+  );
+}

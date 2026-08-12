@@ -1,0 +1,230 @@
+import { describe, expect, it } from "vitest";
+import { collectSecurityAudits } from "./securityAudits";
+
+const page = (body: string): Response =>
+  new Response(body, { status: 200, headers: { "content-type": "text/html" } });
+
+const fetcherFor = (routes: Record<string, string | number>): typeof fetch =>
+  (async (input: string | URL | Request) => {
+    const url = String(input);
+    for (const [prefix, body] of Object.entries(routes)) {
+      if (url.startsWith(prefix)) {
+        return typeof body === "number" ? new Response("", { status: body }) : page(body);
+      }
+    }
+    return new Response("", { status: 404 });
+  }) as typeof fetch;
+
+const SECURITY_PAGE = `
+  <html><body>
+    <h1>Security</h1>
+    <p>Audited by Trail of Bits and OpenZeppelin. 65 audits total.</p>
+    <a href="https://www.trailofbits.com/publications/aave-v3">Trail of Bits report</a>
+    <a href="https://www.openzeppelin.com/security-audits/aave">OpenZeppelin report</a>
+  </body></html>`;
+
+describe("collectSecurityAudits (auditor-domain corroboration hop)", () => {
+  it("upgrades a claim only with explicit audit context and a canonical identity anchor", async () => {
+    const result = await collectSecurityAudits("Aave", "https://aave.com", [], {
+      fetcher: fetcherFor({
+        "https://aave.com/security": SECURITY_PAGE,
+        "https://www.trailofbits.com/": "<html><body>Our security audit of the Aave protocol at https://aave.com covered v3.</body></html>",
+        // OpenZeppelin page loads but never names the subject.
+        "https://www.openzeppelin.com/": "<html><body>We audit many protocols.</body></html>",
+      }),
+    });
+    expect(result.available).toBe(true);
+    expect(result.securityPageUrl).toBe("https://aave.com/security");
+    expect(result.selfAttested).toEqual(expect.arrayContaining(["Trail of Bits", "OpenZeppelin"]));
+    expect(result.attestations).toEqual(expect.arrayContaining([
+      {
+        auditor: "Trail of Bits",
+        origin: "subject_page",
+        sourceUrl: "https://aave.com/security",
+      },
+      {
+        auditor: "OpenZeppelin",
+        origin: "subject_page",
+        sourceUrl: "https://aave.com/security",
+      },
+    ]));
+    expect(result.corroborated).toHaveLength(1);
+    expect(result.corroborated[0]).toMatchObject({ auditor: "Trail of Bits" });
+    expect(result.corroborated[0].excerpt.toLowerCase()).toContain("aave");
+    expect(result.corroborated[0].matchedIdentityAnchor).toEqual({
+      type: "official_domain",
+      value: "aave.com",
+    });
+  });
+
+  it("keeps an explicit audit of a same-name entity unverified without a canonical anchor", async () => {
+    const result = await collectSecurityAudits("Aave", "https://aave.com", [], {
+      fetcher: fetcherFor({
+        "https://aave.com/security": SECURITY_PAGE,
+        "https://www.trailofbits.com/":
+          "<html><body>We completed a security audit for Aave Retail Analytics at https://aave-retail.example.</body></html>",
+        "https://www.openzeppelin.com/": "<html><body>Client directory.</body></html>",
+      }),
+    });
+    expect(result.selfAttested).toEqual(expect.arrayContaining(["Trail of Bits"]));
+    expect(result.corroborated).toEqual([]);
+  });
+
+  it("does not treat a bounty, client, generic engagement, competition, or contest as an audit", async () => {
+    const result = await collectSecurityAudits("Aave", "https://aave.com", [], {
+      fetcher: fetcherFor({
+        "https://aave.com/security": SECURITY_PAGE,
+        "https://www.trailofbits.com/":
+          "<html><body>Aave at https://aave.com/audits is a client in our bounty competition and contest engagement.</body></html>",
+        "https://www.openzeppelin.com/": "<html><body>Client directory.</body></html>",
+      }),
+    });
+    expect(result.corroborated).toEqual([]);
+  });
+
+  it("unions auditors named across MULTIPLE candidate pages (one report per auditor)", async () => {
+    // DeFiLlama audit_links typically point at one report per auditor; the
+    // collector must union them, not stop at the first page that matches
+    // (observed live: Uniswap collapsed to "1 auditors are named").
+    const result = await collectSecurityAudits("Uniswap", "https://uniswap.example", [
+      "https://reports.example/trail-of-bits.pdf",
+      "https://reports.example/abdk-certora.html",
+    ], {
+      fetcher: fetcherFor({
+        "https://reports.example/trail-of-bits.pdf":
+          "<html><body>Trail of Bits assessment of Uniswap v3 core.</body></html>",
+        "https://reports.example/abdk-certora.html":
+          "<html><body>ABDK review and Certora formal verification of Uniswap.</body></html>",
+        // The conventional /security page fetch fails outright.
+        "https://uniswap.example/security": 404,
+      }),
+    });
+    expect(result.available).toBe(true);
+    expect(result.selfAttested).toEqual(expect.arrayContaining(["Trail of Bits", "Certora", "ABDK"]));
+    expect(result.selfAttested).toHaveLength(3);
+    // Primary page = the one naming the most auditors.
+    expect(result.securityPageUrl).toBe("https://reports.example/abdk-certora.html");
+  });
+
+  it("attests auditors from curated audit-link URLs when nothing fetches (PDF/bot-walled reality)", async () => {
+    // The live Uniswap failure: every audit link is a PDF or bot-walled page,
+    // so page fetches return nothing -- but the URLs themselves carry the
+    // attestation (auditor-hosted domains, auditor names in paths).
+    const result = await collectSecurityAudits("Uniswap", "https://uniswap.example", [
+      "https://www.certora.com/reports/uniswap-v4.pdf",
+      "https://github.com/Uniswap/v3-core/blob/main/audits/abdk/audit.pdf",
+      "https://blog.openzeppelin.com/uniswap-v3-audit",
+    ], {
+      fetcher: fetcherFor({}), // every fetch 404s
+    });
+    expect(result.available).toBe(true);
+    expect(result.selfAttested).toEqual(expect.arrayContaining(["Certora", "ABDK", "OpenZeppelin"]));
+    expect(result.selfAttested).toHaveLength(3);
+    expect(result.attestations).toEqual(expect.arrayContaining([
+      {
+        auditor: "Certora",
+        origin: "curated_audit_link",
+        sourceUrl: "https://www.certora.com/reports/uniswap-v4.pdf",
+      },
+      {
+        auditor: "ABDK",
+        origin: "curated_audit_link",
+        sourceUrl: "https://github.com/Uniswap/v3-core/blob/main/audits/abdk/audit.pdf",
+      },
+      {
+        auditor: "OpenZeppelin",
+        origin: "curated_audit_link",
+        sourceUrl: "https://blog.openzeppelin.com/uniswap-v3-audit",
+      },
+    ]));
+    expect(result.attestations.every((entry) => entry.origin === "curated_audit_link")).toBe(true);
+    expect(result.corroborated).toEqual([]);
+    expect(result.securityPageUrl).toBe("https://www.certora.com/reports/uniswap-v4.pdf");
+  });
+
+  it("upgrades a URL lead when its page carries audit context and the canonical contract", async () => {
+    const canonicalContractAddress = "0x1111111111111111111111111111111111111111";
+    const result = await collectSecurityAudits("Uniswap", undefined, [
+      "https://www.certora.com/reports/uniswap-v4",
+    ], {
+      fetcher: fetcherFor({
+        "https://www.certora.com/reports/uniswap-v4":
+          `<html><body>Certora formal verification report: our audit of the Uniswap v4 core contract ${canonicalContractAddress}.</body></html>`,
+      }),
+      canonicalContractAddress,
+    });
+    expect(result.available).toBe(true);
+    expect(result.selfAttested).toEqual(["Certora"]);
+    expect(result.corroborated).toHaveLength(1);
+    expect(result.corroborated[0]).toMatchObject({ auditor: "Certora" });
+    expect(result.corroborated[0].excerpt.toLowerCase()).toContain("uniswap");
+    expect(result.corroborated[0].matchedIdentityAnchor).toEqual({
+      type: "canonical_contract",
+      value: canonicalContractAddress,
+    });
+  });
+
+  it("keeps a self-attesting security page as leads only when no auditor site confirms", async () => {
+    const result = await collectSecurityAudits("RugCoin", "https://rugcoin.example", [], {
+      fetcher: fetcherFor({
+        "https://rugcoin.example/security":
+          '<html><body>Audited by Trail of Bits! <a href="https://www.trailofbits.com/">proof</a></body></html>',
+        "https://www.trailofbits.com/": "<html><body>Publications about real clients only.</body></html>",
+      }),
+    });
+    expect(result.available).toBe(true);
+    expect(result.selfAttested).toEqual(["Trail of Bits"]);
+    expect(result.corroborated).toEqual([]);
+  });
+
+  it("returns unavailable when no candidate page names a known auditor", async () => {
+    const result = await collectSecurityAudits("Aave", "https://aave.com", [], {
+      fetcher: fetcherFor({ "https://aave.com/security": "<html><body>We take security seriously.</body></html>" }),
+    });
+    expect(result.available).toBe(false);
+    expect(result.corroborated).toEqual([]);
+  });
+
+  it("uses DeFiLlama candidate links and never throws on transport failures", async () => {
+    const result = await collectSecurityAudits("Aave", undefined, ["https://aave.com/security"], {
+      fetcher: fetcherFor({
+        "https://aave.com/security": SECURITY_PAGE,
+        "https://www.trailofbits.com/": 503,
+        "https://www.openzeppelin.com/": 503,
+      }),
+    });
+    expect(result.available).toBe(true);
+    expect(result.corroborated).toEqual([]);
+    expect(result.selfAttested.length).toBeGreaterThan(0);
+  });
+
+  it("never corroborates from an incident writeup on the auditor's site", async () => {
+    const result = await collectSecurityAudits("RugCoin", "https://rugcoin.example", [], {
+      fetcher: fetcherFor({
+        "https://rugcoin.example/security":
+          '<html><body>Audited by Trail of Bits. <a href="https://www.trailofbits.com/blog/rugcoin">see</a></body></html>',
+        "https://www.trailofbits.com/":
+          "<html><body>Postmortem: how the RugCoin exploit drained $40M from users.</body></html>",
+      }),
+    });
+    expect(result.available).toBe(true);
+    expect(result.corroborated).toEqual([]);
+    expect(result.selfAttested).toEqual(["Trail of Bits"]);
+  });
+
+  it("mints one corroboration per auditor page even when sister brands share it", async () => {
+    const shared = '<html><body>Security. Spearbit and Cantina engaged. ' +
+      '<a href="https://cantina.xyz/competitions/aave-v3">report</a></body></html>';
+    const result = await collectSecurityAudits("Aave", "https://aave.com", [], {
+      fetcher: fetcherFor({
+        "https://aave.com/security": shared,
+        "https://cantina.xyz/": "<html><body>Aave V3 competition: security review results for https://aave.com.</body></html>",
+      }),
+    });
+    expect(result.corroborated).toHaveLength(1);
+    expect(result.corroborated[0].matchedIdentityAnchor).toEqual({
+      type: "official_domain",
+      value: "aave.com",
+    });
+  });
+});

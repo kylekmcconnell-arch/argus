@@ -1,0 +1,220 @@
+// Shill-timing: how a KOL's call actually performed. GET /api/call-performance
+//   ?handle=<kol>&ticker=$X&address=<mint>&chain=<dexscreener chain>
+//
+// Finds the earliest tweet where the KOL called the token (their "call"), reads
+// the on-chain price at that moment, then measures the token 1h / 12h / 24h / 1w
+// / 1m / 2m / 3m later. Turns "they promoted it" into "promoted at $8M, -95% a
+// month later." If no call tweet is found, anchors to the token's launch instead
+// and says so. twitterapi.io (call tweet) + GeckoTerminal (price, no key).
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
+
+export const config = { maxDuration: 30 };
+
+const TW = "https://api.twitterapi.io";
+const HANDLE = /^[A-Za-z0-9_]{1,30}$/;
+
+// On-chain OHLCV comes from GeckoTerminal. With a paid CoinGecko key we hit the
+// Pro on-chain endpoint (same path shape) for deeper history + higher rate
+// limits — which is what lets us price calls older than the free tier's ~6mo
+// window. Falls back to the free public GeckoTerminal API when no key is set.
+const CG_KEY = process.env.COINGECKO_API_KEY;
+const GT_FREE = "https://api.geckoterminal.com/api/v2";
+const GT_PRO = "https://pro-api.coingecko.com/api/v3/onchain";
+
+const NETWORK: Record<string, string> = {
+  solana: "solana", ethereum: "eth", eth: "eth", bsc: "bsc", base: "base",
+  arbitrum: "arbitrum", polygon: "polygon_pos", polygon_pos: "polygon_pos",
+  avalanche: "avax", avax: "avax", optimism: "optimism", fantom: "ftm",
+  sui: "sui", ton: "ton", tron: "tron", blast: "blast", sei: "sei-evm",
+};
+
+// hours after the call → label
+const OFFSETS: [string, number][] = [
+  ["1h", 1], ["12h", 12], ["24h", 24], ["1w", 168], ["1m", 720], ["2m", 1440], ["3m", 2160],
+];
+
+interface CallCounter { calls: number; succeeded: number }
+const usageStatus = (counter: CallCounter): "succeeded" | "partial" | "failed" => (
+  counter.succeeded === counter.calls ? "succeeded" : counter.succeeded > 0 ? "partial" : "failed"
+);
+
+async function gtOnce(base: string, headers: Record<string, string>, path: string, counter?: CallCounter): Promise<any | null> {
+  if (counter) counter.calls += 1;
+  try {
+    const r = await fetch(`${base}${path}`, { headers, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (counter) counter.succeeded += 1;
+    return data;
+  } catch { return null; }
+}
+// Prefer the paid CoinGecko on-chain endpoint (deeper history, higher limits)
+// when a key is set, but always fall back to the free GeckoTerminal API so a
+// missing/invalid key or an unsupported path can never break the feature.
+async function gt(path: string, proUsage: CallCounter): Promise<any | null> {
+  if (CG_KEY) {
+    const pro = await gtOnce(GT_PRO, { accept: "application/json", "x-cg-pro-api-key": CG_KEY }, path, proUsage);
+    if (pro) return pro;
+  }
+  return gtOnce(GT_FREE, { accept: "application/json" }, path);
+}
+async function tw(url: string, key: string, counter: CallCounter): Promise<any | null> {
+  counter.calls += 1;
+  try {
+    const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return null;
+    const data = await r.json();
+    counter.succeeded += 1;
+    return data;
+  } catch { return null; }
+}
+
+type Candle = [number, number, number, number, number, number]; // ts,o,h,l,c,v
+function nearest(candles: Candle[], targetSec: number): number | null {
+  if (!candles.length) return null;
+  let best: Candle | null = null;
+  let bestD = Infinity;
+  for (const c of candles) { const d = Math.abs(c[0] - targetSec); if (d < bestD) { bestD = d; best = c; } }
+  // Reject if the closest candle is more than ~2 days off the target (no data there).
+  return best && bestD <= 2 * 86400 ? best[4] : null;
+}
+
+async function poolFor(network: string, address: string, proUsage: CallCounter): Promise<string | null> {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`, proUsage);
+  const first = d?.data?.[0];
+  const id: string | undefined = first?.attributes?.address ?? first?.id;
+  return id ? id.replace(`${network}_`, "") : null;
+}
+
+// The earliest tweet from this handle that mentions the token (contract first,
+// then ticker). Returns { sec, url, text } or null.
+async function findCall(handle: string, ticker: string | undefined, address: string | undefined, key: string, counter: CallCounter) {
+  const queries = [address ? `from:${handle} ${address}` : "", ticker ? `from:${handle} ${ticker.startsWith("$") ? ticker : "$" + ticker}` : ""].filter(Boolean);
+  for (const q of queries) {
+    const d = await tw(`${TW}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Latest`, key, counter);
+    const tweets: any[] = d?.tweets ?? d?.data?.tweets ?? [];
+    if (!tweets.length) continue;
+    const dated = tweets
+      .map((t) => ({ sec: Math.floor(Date.parse(t.createdAt ?? t.created_at ?? "") / 1000), url: t.url ?? t.twitterUrl ?? (t.id ? `https://x.com/${handle}/status/${t.id}` : undefined), text: (t.text ?? "").slice(0, 160) }))
+      .filter((t) => Number.isFinite(t.sec));
+    if (!dated.length) continue;
+    dated.sort((a, b) => a.sec - b.sec); // earliest = the first time they called it
+    return dated[0];
+  }
+  return null;
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const q = req.query;
+  const handle = typeof q.handle === "string" ? q.handle.replace(/^@/, "").trim() : "";
+  const ticker = typeof q.ticker === "string" ? q.ticker.trim() : undefined;
+  const address = typeof q.address === "string" ? q.address.trim() : undefined;
+  const chain = typeof q.chain === "string" ? q.chain.trim().toLowerCase() : "";
+  const panelToken = req.headers["x-argus-panel-token"];
+  const panelTokenValue = Array.isArray(panelToken) ? panelToken[0] : panelToken;
+  const panelCostVersionId = resolvePanelCostVersion(
+    auth.organizationId,
+    panelTokenValue,
+  );
+  if (!panelCostVersionId) { res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." }); return; }
+  if (!handle || !HANDLE.test(handle) || !address) { res.status(400).json({ error: "handle + address required" }); return; }
+  const network = NETWORK[chain] ?? chain;
+  if (!network) { res.status(200).json({ available: true, note: "unsupported chain" }); return; }
+
+  const twitterUsage: CallCounter = { calls: 0, succeeded: 0 };
+  const coingeckoUsage: CallCounter = { calls: 0, succeeded: 0 };
+  const target = `${network}:${address}`.slice(0, 128);
+  try {
+    const pool = await poolFor(network, address, coingeckoUsage);
+    if (!pool) { res.status(200).json({ available: true, note: "no pool indexed for this token" }); return; }
+
+    // Find the call time (or fall back to the token's launch = oldest candle).
+    const twKey = process.env.TWITTERAPI_KEY;
+    const call = twKey ? await findCall(handle, ticker, address, twKey, twitterUsage) : null;
+
+    // Daily candles across the token's life (for launch anchor + long offsets).
+    const dailyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/day?aggregate=1&limit=1000&currency=usd`, coingeckoUsage);
+    const daily: Candle[] = (dailyD?.data?.attributes?.ohlcv_list ?? []).slice().sort((a: Candle, b: Candle) => a[0] - b[0]);
+    if (daily.length < 2) { res.status(200).json({ available: true, note: "not enough price history" }); return; }
+
+    // Anchor to the call if its price is in range; otherwise (call predates the
+    // ~6 months of history GeckoTerminal retains) fall back to the launch/oldest
+    // candle. We still surface the call tweet + date either way.
+    const dailyPriceAt = (sec: number) => nearest(daily, sec);
+    let anchorSec = daily[0][0];
+    let anchor: "call" | "launch" = "launch";
+    let callPredatesHistory = false;
+    if (call) {
+      if (dailyPriceAt(call.sec) != null) { anchorSec = call.sec; anchor = "call"; }
+      else callPredatesHistory = true;
+    }
+
+    // Hourly candles around the anchor for fine early offsets (1h..1w).
+    const hourlyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/hour?aggregate=1&limit=200&before_timestamp=${anchorSec + 8 * 86400}&currency=usd`, coingeckoUsage);
+    const hourly: Candle[] = (hourlyD?.data?.attributes?.ohlcv_list ?? []).slice().sort((a: Candle, b: Candle) => a[0] - b[0]);
+
+    const priceAt = (sec: number): number | null => {
+      const h = nearest(hourly, sec);
+      if (h != null) return h;
+      return nearest(daily, sec);
+    };
+
+    const anchorPrice = priceAt(anchorSec);
+    if (anchorPrice == null || anchorPrice <= 0) { res.status(200).json({ available: true, note: "no price at anchor time" }); return; }
+
+    const nowSec = daily[daily.length - 1][0];
+    const periods = OFFSETS.map(([label, hrs]) => {
+      const t = anchorSec + hrs * 3600;
+      if (t > nowSec + 86400) return { label, pct: null as number | null, elapsed: false };
+      const p = priceAt(t);
+      return { label, pct: p != null ? ((p - anchorPrice) / anchorPrice) * 100 : null, elapsed: true };
+    });
+
+    const curPrice = daily[daily.length - 1][4];
+    const peak = Math.max(...daily.filter((c) => c[0] >= anchorSec).map((c) => c[4]), anchorPrice);
+
+    res.status(200).json({
+      available: true,
+      anchor,
+      anchorTime: anchorSec,
+      anchorPrice,
+      callTime: call?.sec ?? null,
+      callPredatesHistory,
+      tweetUrl: call?.url ?? null,
+      tweetText: call?.text ?? null,
+      periods,
+      current: { pct: ((curPrice - anchorPrice) / anchorPrice) * 100 },
+      peakPct: ((peak - anchorPrice) / anchorPrice) * 100,
+    });
+  } catch (e) {
+    res.status(200).json({ available: true, error: String(e), note: "call-performance failed" });
+  } finally {
+    const lines: Promise<unknown>[] = [];
+    if (twitterUsage.calls > 0) {
+      lines.push(attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "twitterapi",
+        op: `panel:call-performance:${target}`,
+        calls: twitterUsage.calls,
+        usd: twitterUsage.calls * 0.0002,
+        initiatedBy: auth.userId,
+        status: usageStatus(twitterUsage),
+      }));
+    }
+    if (coingeckoUsage.calls > 0) {
+      lines.push(attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "coingecko",
+        op: `panel:call-performance:${target}`,
+        calls: coingeckoUsage.calls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usageStatus(coingeckoUsage),
+      }));
+    }
+    await Promise.all(lines.map((line) => line.catch(() => undefined)));
+  }
+}

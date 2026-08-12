@@ -1,0 +1,325 @@
+// EVM wallet identity clustering. GET /api/evm-cluster?address=<token>&chain=<id>
+//
+// The EVM parallel to api/cluster.ts (Solana/RugCheck). Same question — how many
+// of the "top holders" are secretly one hand? — answered with EVM sources: GoPlus
+// for the holder list (keyless) and Etherscan for each holder's first funder and
+// its transfers. Any two holders tied by a SHARED non-exchange FUNDER or a DIRECT
+// transfer are unioned into one operator; the combined supply each group controls
+// is the concentration a per-wallet holder chart hides. Returns the SAME shape as
+// the Solana endpoint so the client panel is chain-agnostic.
+//
+// EVM only. Gated on ETHERSCAN_API_KEY (GoPlus is keyless). Bounded + graceful.
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { canSeedFunderCluster } from "../src/lib/marketAddresses.js";
+import { describeWalletClusterTrace, type WalletClusterCoverage } from "../src/lib/walletClusterTruth.js";
+import { requireArgusAuth } from "./_auth.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
+
+export const config = { maxDuration: 60 };
+
+const CHAINID: Record<string, number> = {
+  ethereum: 1, bsc: 56, base: 8453, polygon: 137, arbitrum: 42161,
+  optimism: 10, avalanche: 43114, fantom: 250, linea: 59144, scroll: 534352,
+};
+const MAX_WALLETS = 20;
+const CHUNK = 4;
+interface ProviderUsage { etherscan: number; etherscanSucceeded: number; goplus: number; goplusSucceeded: number }
+const isAddr = (s: string) => /^0x[a-fA-F0-9]{40}$/.test(s);
+const lc = (s: string) => s.toLowerCase();
+
+// Exchange hot + cold wallets and burn/null addresses: a shared EXCHANGE funder is
+// not a same-operator signal (everyone withdraws from Binance), and an exchange
+// custody wallet holding supply is not an insider. Includes the big cold wallets
+// GoPlus leaves untagged (e.g. Binance 0xf977…) that would otherwise read as a
+// concentrated "holder".
+const SKIP = new Set<string>([
+  "0x0000000000000000000000000000000000000000", "0x000000000000000000000000000000000000dead",
+  "0xf977814e90da44bfa03b6295a0616a897441acec", "0x28c6c06298d514db089934071355e5743bf21d60",
+  "0x21a31ee1afc51d94c2efccaa2092ad1028285549", "0xdfd5293d8e347dfe59e90efd55b2956a1343963d",
+  "0x56eddb7aa87536c09ccc2793473599fd21a8b17f", "0x9696f59e4d72e237be84ffd425dcad154bf96976",
+  "0x3f5ce5fbfe3e9af3971dd833d26ba9b5c936f0be", "0xd551234ae421e3bcba99a0da6d736074f22192ff",
+  "0x564286362092d8e7936f0549571a803b203aaced", "0x0681d8db095565fe8a346fa0277bffde9c0edbbf",
+  "0x71660c4005ba85c37ccec55d0c4493e66fe775d3", "0x503828976d22510aad0201ac7ec88293211d23da",
+  "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43", "0x2910543af39aba0cd09dbb2d50200b3e800a63d2",
+  "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b", "0xf89d7b9c864f589bbf53a82105107622b35eaa40",
+  "0x0d0707963952f2fba59dd06f2b425ace40b492fe", "0x1522900b6dafac587d499a862861c0869be6e428",
+]);
+
+const ES = "https://api.etherscan.io/v2/api";
+interface ExplorerRows {
+  rows: any[];
+  completed: boolean;
+  capped: boolean;
+}
+
+function noTransactions(body: any): boolean {
+  return body?.status === "0"
+    && typeof body?.result === "string"
+    && /no transactions found/i.test(body.result);
+}
+
+async function txlist(chainid: number, address: string, key: string, offset: number, usage: ProviderUsage): Promise<ExplorerRows> {
+  usage.etherscan += 1;
+  const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "txlist", address, startblock: "0", endblock: "99999999", page: "1", offset: String(offset), sort: "asc", apikey: key });
+  const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
+  if (!r || !r.ok) return { rows: [], completed: false, capped: false };
+  const d = (await r.json().catch(() => null)) as any;
+  if (Array.isArray(d?.result)) {
+    usage.etherscanSucceeded += 1;
+    return { rows: d.result, completed: true, capped: d.result.length >= offset };
+  }
+  if (noTransactions(d)) {
+    usage.etherscanSucceeded += 1;
+    return { rows: [], completed: true, capped: false };
+  }
+  return { rows: [], completed: false, capped: false };
+}
+
+// ERC-20 transfers of a SPECIFIC token for a wallet — holders passing the token
+// among themselves is a stronger coordination signal than sharing ETH.
+async function tokentx(chainid: number, wallet: string, token: string, key: string, usage: ProviderUsage): Promise<ExplorerRows> {
+  const offset = 200;
+  usage.etherscan += 1;
+  const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "tokentx", contractaddress: token, address: wallet, page: "1", offset: String(offset), sort: "desc", apikey: key });
+  const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
+  if (!r || !r.ok) return { rows: [], completed: false, capped: false };
+  const d = (await r.json().catch(() => null)) as any;
+  if (Array.isArray(d?.result)) {
+    usage.etherscanSucceeded += 1;
+    return { rows: d.result, completed: true, capped: d.result.length >= offset };
+  }
+  if (noTransactions(d)) {
+    usage.etherscanSucceeded += 1;
+    return { rows: [], completed: true, capped: false };
+  }
+  return { rows: [], completed: false, capped: false };
+}
+
+// A holder's first funder + the set-members it directly transacted with. Reads both
+// ETH (txlist, oldest-first — captures the funding tx) AND transfers of the token
+// itself (tokentx) so wallets that pass the token to each other are linked.
+async function profile(
+  chainid: number,
+  wallet: string,
+  token: string,
+  key: string,
+  inSet: Set<string>,
+  usage: ProviderUsage,
+): Promise<{
+  wallet: string;
+  funder: string | null;
+  cps: string[];
+  fundingCompleted: boolean;
+  transfersCompleted: boolean;
+  providerFailed: boolean;
+}> {
+  const [txRead, tokenRead] = await Promise.all([txlist(chainid, wallet, key, 2000, usage), tokentx(chainid, wallet, token, key, usage)]);
+  let funder: string | null = null;
+  const cps = new Set<string>();
+  for (const t of txRead.rows) {
+    if (!funder && lc(t.to) === lc(wallet) && t.from && lc(t.from) !== lc(wallet) && Number(t.value) > 0 && t.isError !== "1") funder = lc(t.from);
+    const other = lc(t.from) === lc(wallet) ? lc(t.to || "") : lc(t.from || "");
+    if (other && other !== lc(wallet) && inSet.has(other)) cps.add(other);
+  }
+  for (const t of tokenRead.rows) {
+    const other = lc(t.from) === lc(wallet) ? lc(t.to || "") : lc(t.from || "");
+    if (other && other !== lc(wallet) && inSet.has(other)) cps.add(other);
+  }
+  return {
+    wallet: lc(wallet),
+    funder: txRead.completed ? funder : null,
+    cps: [...cps],
+    // An ascending account-history page can establish a positive first funder,
+    // but a capped page with no funder cannot establish that none exists.
+    fundingCompleted: txRead.completed && (!txRead.capped || funder !== null),
+    transfersCompleted: txRead.completed && !txRead.capped && tokenRead.completed && !tokenRead.capped,
+    providerFailed: !txRead.completed || !tokenRead.completed,
+  };
+}
+
+class DSU {
+  p = new Map<string, string>();
+  find(x: string): string { const pp = this.p.get(x) ?? x; if (pp === x) { this.p.set(x, x); return x; } const r = this.find(pp); this.p.set(x, r); return r; }
+  union(a: string, b: string) { const ra = this.find(a), rb = this.find(b); if (ra !== rb) this.p.set(ra, rb); }
+}
+async function inChunks<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += size) out.push(...(await Promise.all(items.slice(i, i + size).map(fn))));
+  return out;
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
+  const key = process.env.ETHERSCAN_API_KEY;
+  const address = typeof req.query.address === "string" ? req.query.address.trim() : "";
+  const chain = (typeof req.query.chain === "string" ? req.query.chain : "").toLowerCase();
+  const chainid = CHAINID[chain];
+  if (!isAddr(address)) { res.status(400).json({ error: "valid EVM token address required" }); return; }
+  if (!chainid) { res.status(200).json({ address, chain, available: false, note: `No chain id for '${chain}'.` }); return; }
+  if (!key) { res.status(200).json({ address, chain, available: false, note: "Etherscan not configured; EVM clustering unavailable." }); return; }
+
+  const usage: ProviderUsage = { etherscan: 0, etherscanSucceeded: 0, goplus: 0, goplusSucceeded: 0 };
+  try {
+    // 1. Holder set from GoPlus (keyless). percent is a 0..1 fraction.
+    usage.goplus += 1;
+    const gr = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainid}?contract_addresses=${address}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
+    const gd = gr && gr.ok ? ((await gr.json().catch(() => null)) as any) : null;
+    if (gd != null) usage.goplusSucceeded += 1;
+    const tok = gd?.result?.[lc(address)] ?? gd?.result?.[address] ?? null;
+    if (!tok) {
+      res.status(200).json({
+        address,
+        chain,
+        available: false,
+        clusters: [],
+        walletsAnalyzed: 0,
+        note: "GoPlus returned no holder record, so EVM wallet links were not measured.",
+      });
+      return;
+    }
+    const creator = typeof tok.creator_address === "string" && isAddr(tok.creator_address) ? lc(tok.creator_address) : null;
+    const holders = (tok.holders ?? [])
+      .map((h: any) => ({ address: lc(String(h.address || "")), pct: Number(h.percent || 0) * 100, isContract: Number(h.is_contract) === 1, tag: String(h.tag || "") }))
+      .filter((h: any) => isAddr(h.address) && !h.isContract && !h.tag && !SKIP.has(h.address));
+
+    const set: string[] = [];
+    const pctOf = new Map<string, number>();
+    for (const h of holders.slice(0, MAX_WALLETS)) if (!pctOf.has(h.address)) { set.push(h.address); pctOf.set(h.address, h.pct); }
+    if (creator && !SKIP.has(creator) && !pctOf.has(creator)) { set.push(creator); pctOf.set(creator, 0); }
+    if (set.length < 2) {
+      const coverage: WalletClusterCoverage = {
+        sampled: set.length,
+        fullyTraced: 0,
+        historyTruncated: 0,
+        deadlineSkipped: 0,
+        providerFailed: 0,
+      };
+      const description = describeWalletClusterTrace({
+        clusters: [],
+        coverage,
+        directLinkLabel: "a direct token or native-currency transfer",
+      });
+      res.status(200).json({ address, chain, available: true, clusters: [], walletsAnalyzed: set.length, coverage, ...description });
+      return;
+    }
+
+    // 2. Each holder's funder + in-set counterparties.
+    const inSet = new Set(set);
+    const deadline = Date.now() + 50000;
+    const profiles = await inChunks(set, CHUNK, async (w) => Date.now() > deadline
+      ? {
+          wallet: w,
+          funder: null as string | null,
+          cps: [] as string[],
+          fundingCompleted: false,
+          transfersCompleted: false,
+          providerFailed: false,
+          deadlineSkipped: true,
+        }
+      : {
+          ...(await profile(chainid, w, lc(address), key, inSet, usage)),
+          deadlineSkipped: false,
+        });
+
+    const coverage: WalletClusterCoverage = {
+      sampled: set.length,
+      fullyTraced: profiles.filter((p) => p.fundingCompleted && p.transfersCompleted).length,
+      historyTruncated: profiles.filter((p) => !p.deadlineSkipped && !p.fundingCompleted && !p.providerFailed).length,
+      deadlineSkipped: profiles.filter((p) => p.deadlineSkipped).length,
+      providerFailed: profiles.filter((p) => p.providerFailed).length,
+    };
+
+    // 3. Union: shared non-exchange funder, or a direct transfer between members.
+    const dsu = new DSU();
+    for (const w of set) dsu.find(w);
+    const links: { a: string; b: string; type: "co-funded" | "transfer"; via?: string }[] = [];
+    // The route's local SKIP list is narrower than the shared custody map, so
+    // the funder is tested against both. Neither can recognize an arbitrary
+    // bridge or relayer payout wallet; the published copy carries that limit.
+    const byFunder = new Map<string, string[]>();
+    for (const p of profiles) {
+      if (!p.funder || SKIP.has(p.funder)) continue;
+      if (!canSeedFunderCluster(p.funder)) continue;
+      (byFunder.get(p.funder) ?? byFunder.set(p.funder, []).get(p.funder)!).push(p.wallet);
+    }
+    for (const [funder, ws] of byFunder) {
+      if (ws.length < 2) continue;
+      for (let i = 1; i < ws.length; i++) { dsu.union(ws[0], ws[i]); links.push({ a: ws[0], b: ws[i], type: "co-funded", via: funder }); }
+    }
+    for (const p of profiles) for (const cp of p.cps) {
+      const a = p.wallet < cp ? p.wallet : cp, b = p.wallet < cp ? cp : p.wallet;
+      if (!links.some((l) => l.type === "transfer" && l.a === a && l.b === b)) { dsu.union(a, b); links.push({ a, b, type: "transfer" }); }
+    }
+
+    // 4. Assemble clusters (size >= 2), same shape as the Solana endpoint.
+    const groups = new Map<string, string[]>();
+    for (const w of set) { const r = dsu.find(w); (groups.get(r) ?? groups.set(r, []).get(r)!).push(w); }
+    const clusters = [...groups.values()].filter((ws) => ws.length >= 2).map((ws) => {
+      const combinedPct = ws.reduce((s, w) => s + (pctOf.get(w) ?? 0), 0);
+      const clinks = links.filter((l) => ws.includes(l.a) && ws.includes(l.b));
+      const funders = [...new Set(clinks.filter((l) => l.via).map((l) => l.via as string))];
+      return {
+        wallets: ws.map((w) => ({ address: w, pct: pctOf.get(w) ?? 0, insider: false, isCreator: w === creator })),
+        size: ws.length, combinedPct, sharedFunders: funders, links: clinks, includesCreator: creator ? ws.includes(creator) : false,
+      };
+    }).sort((a, b) => b.combinedPct - a.combinedPct || b.size - a.size);
+
+    const description = describeWalletClusterTrace({
+      clusters,
+      coverage,
+      directLinkLabel: "a direct token or native-currency transfer",
+    });
+
+    // Full analyzed set + edges for the client bubble map.
+    const walletCluster = new Map<string, number>();
+    clusters.forEach((c, i) => c.wallets.forEach((w) => walletCluster.set(w.address, i)));
+    const allWallets = set.map((w) => ({ address: w, pct: pctOf.get(w) ?? 0, cluster: walletCluster.has(w) ? walletCluster.get(w)! : null, isCreator: w === creator }));
+    const edges = links.map((l) => ({ a: l.a, b: l.b, type: l.type }));
+
+    res.status(200).json({
+      address,
+      chain,
+      available: true,
+      walletsAnalyzed: set.length,
+      clusters,
+      allWallets,
+      edges,
+      coverage,
+      ...description,
+    });
+  } catch (e) {
+    res.status(200).json({ address, chain, available: false, clusters: [], error: String(e), note: "EVM wallet clustering failed." });
+  } finally {
+    if (usage.goplus > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "goplus",
+        op: "panel:evm-cluster",
+        calls: usage.goplus,
+        usd: 0,
+        meta: "keyless",
+        initiatedBy: auth.userId,
+        status: usage.goplusSucceeded === usage.goplus ? "succeeded" : usage.goplusSucceeded > 0 ? "partial" : "failed",
+      });
+    }
+    if (usage.etherscan > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "etherscan",
+        op: "panel:evm-cluster",
+        calls: usage.etherscan,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.etherscanSucceeded === usage.etherscan ? "succeeded" : usage.etherscanSucceeded > 0 ? "partial" : "failed",
+      });
+    }
+  }
+}

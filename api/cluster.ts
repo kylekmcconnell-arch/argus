@@ -1,0 +1,380 @@
+// Wallet identity clustering. GET /api/cluster?mint=<mint>&chain=solana
+//
+// "Top 10 holders hold 40%" is only half the question. The half that matters is:
+// how many of those wallets are the SAME hand? A team that splits its supply
+// across ten fresh wallets looks decentralised on a holder chart and controls the
+// float in practice. RugCheck flags SOME insiders but doesn't label every wallet
+// and sums overlapping networks; this proves the linkage from first principles.
+//
+// We take the token's top holders (+ its deployer) and connect any two wallets by
+// the two on-chain signals that mean "same operator": (1) a SHARED FUNDER — both
+// wallets got their first SOL from the same non-exchange address (siblings seeded
+// by one hand); (2) a DIRECT TRANSFER between them. Union-find over those edges
+// yields the real distinct entities, and the combined supply each cluster controls
+// is the concentration that a per-wallet holder chart hides.
+//
+// Solana only (Helius RPC + RugCheck). Gated on HELIUS_API_KEY. Bounded + graceful.
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { canSeedFunderCluster, SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
+import { describeWalletClusterTrace, type WalletClusterCoverage } from "../src/lib/walletClusterTruth.js";
+import { requireArgusAuth } from "./_auth.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
+
+export const config = { maxDuration: 60 };
+
+const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const MAX_WALLETS = 20;   // top holders we bother to cluster (cost bound)
+const CHUNK = 5;          // per-wallet concurrency
+interface ProviderUsage { helius: number; heliusSucceeded: number; rugcheck: number; rugcheckSucceeded: number }
+
+// CEX hot wallets + programs: a shared *exchange* funder is NOT a same-operator
+// signal (thousands of unrelated users withdraw from Binance), so these can never
+// be the "via" of a co-funding link.
+const SYSTEM = new Set<string>([
+  "11111111111111111111111111111111", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb", "ComputeBudget111111111111111111111111111111",
+]);
+// A holder whose RugCheck label is market infrastructure (AMM/LP/CEX/program) is
+// liquidity or custody, not a person — exclude it from the operator analysis.
+const MARKET = /amm|dex|pool|cex|exchange|program|vault|locker|market|raydium|meteora|orca|pump/i;
+
+async function rpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<any> {
+  usage.helius += 1;
+  const res = await fetch(url, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error(`rpc ${method} ${res.status}`);
+  const d = (await res.json()) as any;
+  if (d.error) throw new Error(`rpc ${method}: ${d.error.message}`);
+  usage.heliusSucceeded += 1;
+  return d.result;
+}
+
+interface OldestSignatureRead {
+  sigs: string[];
+  reachedBeginning: boolean;
+  failed: boolean;
+}
+
+// The oldest few signatures for a wallet. A full final page proves that the
+// beginning was NOT reached; those signatures are the oldest reached, not the
+// wallet's first transactions, and can never establish its seed funder.
+async function oldestSigs(url: string, wallet: string, usage: ProviderUsage): Promise<OldestSignatureRead> {
+  let before: string | undefined;
+  let last: any[] = [];
+  for (let page = 0; page < 4; page++) {
+    let batch: any[];
+    try {
+      batch = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage);
+    } catch {
+      return { sigs: [], reachedBeginning: false, failed: true };
+    }
+    if (!batch?.length) return { sigs: [], reachedBeginning: true, failed: false };
+    last = batch;
+    if (batch.length < 1000) {
+      return {
+        sigs: last.slice(-6).reverse().map((s) => s.signature),
+        reachedBeginning: true,
+        failed: false,
+      };
+    }
+    before = batch[batch.length - 1].signature;
+  }
+  return { sigs: [], reachedBeginning: false, failed: false };
+}
+
+// The account that first sent SOL into the wallet (the funder). Same shapes the
+// deployer trail recognises: plain transfer, account-create funding, or the
+// balance-delta fallback (the account that lost the most SOL in a funding tx).
+async function fundingSource(
+  url: string,
+  wallet: string,
+  sigs: string[],
+  usage: ProviderUsage,
+): Promise<{ funder: string | null; completed: boolean }> {
+  const scan = (instrs: any[]): string | null => {
+    for (const ix of instrs ?? []) {
+      const p = ix.parsed;
+      if (!p?.info) continue;
+      if (p.type === "transfer" && p.info.destination === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
+      if ((p.type === "createAccount" || p.type === "createAccountWithSeed") && p.info.newAccount === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
+    }
+    return null;
+  };
+  for (const sig of sigs) {
+    let tx: any;
+    try {
+      tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
+    } catch {
+      // A missed earlier transaction means a later sender cannot safely be
+      // called the seed funder.
+      return { funder: null, completed: false };
+    }
+    if (!tx) return { funder: null, completed: false };
+    const direct = scan(tx.transaction?.message?.instructions);
+    if (direct) return { funder: direct, completed: true };
+    for (const inner of tx.meta?.innerInstructions ?? []) {
+      const found = scan(inner.instructions);
+      if (found) return { funder: found, completed: true };
+    }
+    const keys: string[] = (tx.transaction?.message?.accountKeys ?? []).map((k: any) => (typeof k === "string" ? k : k.pubkey));
+    const pre: number[] = tx.meta?.preBalances ?? [], post: number[] = tx.meta?.postBalances ?? [];
+    const wi = keys.indexOf(wallet);
+    if (wi >= 0 && (post[wi] ?? 0) > (pre[wi] ?? 0)) {
+      let best = -1, drop = 0;
+      for (let i = 0; i < keys.length; i++) { if (i === wi) continue; const d = (pre[i] ?? 0) - (post[i] ?? 0); if (d > drop && d > 1_000_000) { drop = d; best = i; } }
+      if (best >= 0) return { funder: keys[best], completed: true };
+    }
+  }
+  return { funder: null, completed: true };
+}
+
+// Native-SOL counterparties of a wallet (recent), to catch a DIRECT transfer
+// between two members of the holder set — a wallet paying another is a hard link.
+async function counterparties(
+  key: string,
+  wallet: string,
+  usage: ProviderUsage,
+): Promise<{ addresses: Set<string>; completed: boolean }> {
+  const out = new Set<string>();
+  usage.helius += 1;
+  try {
+    const r = await fetch(`https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${key}&limit=100`, { signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return { addresses: out, completed: false };
+    const txs = await r.json();
+    if (!Array.isArray(txs)) return { addresses: out, completed: false };
+    usage.heliusSucceeded += 1;
+    for (const t of txs) {
+      for (const nt of t.nativeTransfers ?? []) {
+        if (nt.fromUserAccount === wallet && nt.toUserAccount) out.add(nt.toUserAccount);
+        if (nt.toUserAccount === wallet && nt.fromUserAccount) out.add(nt.fromUserAccount);
+      }
+    }
+    return { addresses: out, completed: true };
+  } catch {
+    return { addresses: out, completed: false };
+  }
+}
+
+// Union-find for grouping linked wallets into distinct operators.
+class DSU {
+  p = new Map<string, string>();
+  find(x: string): string { const pp = this.p.get(x) ?? x; if (pp === x) { this.p.set(x, x); return x; } const r = this.find(pp); this.p.set(x, r); return r; }
+  union(a: string, b: string) { const ra = this.find(a), rb = this.find(b); if (ra !== rb) this.p.set(ra, rb); }
+}
+
+async function inChunks<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += size) out.push(...(await Promise.all(items.slice(i, i + size).map(fn))));
+  return out;
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
+  const key = process.env.HELIUS_API_KEY;
+  const mint = typeof req.query.mint === "string" ? req.query.mint.trim() : "";
+  const chain = (typeof req.query.chain === "string" ? req.query.chain : "solana").toLowerCase();
+  if (!mint || !SOLADDR.test(mint)) { res.status(400).json({ error: "valid Solana mint required" }); return; }
+  if (chain !== "solana") { res.status(200).json({ available: false, note: "Wallet clustering is Solana-only for now." }); return; }
+  if (!key) { res.status(200).json({ mint, available: false, note: "Helius not configured; clustering unavailable." }); return; }
+
+  const usage: ProviderUsage = { helius: 0, heliusSucceeded: 0, rugcheck: 0, rugcheckSucceeded: 0 };
+  try {
+    // 1. Pull the holder set + labels + creator from RugCheck (full addresses).
+    usage.rugcheck += 1;
+    const rr = await fetch(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, { signal: AbortSignal.timeout(15000), headers: { accept: "application/json" } });
+    if (!rr.ok) { res.status(200).json({ mint, available: false, error: `rugcheck ${rr.status}` }); return; }
+    const rc = (await rr.json()) as any;
+    usage.rugcheckSucceeded += 1;
+    const ka: Record<string, { name?: string; type?: string }> = rc.knownAccounts ?? {};
+    // The pair records name the pools directly, so a pool that RugCheck did
+    // not also label in knownAccounts still cannot seed a cluster.
+    const poolAddresses: string[] = (Array.isArray(rc.markets) ? rc.markets : [])
+      .map((m: any) => (typeof m?.pubkey === "string" ? m.pubkey : null))
+      .filter(Boolean);
+    const isMarket = (h: any) => { const lab = ka[h.address] || ka[h.owner]; return !!(lab?.type && MARKET.test(lab.type)); };
+    const holders = (rc.topHolders ?? [])
+      .map((h: any) => ({ address: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0), insider: !!h.insider, market: isMarket(h) }))
+      .filter((h: any) => SOLADDR.test(h.address) && !h.market && !CEX[h.address] && !SYSTEM.has(h.address));
+    const creator = typeof rc.creator === "string" && SOLADDR.test(rc.creator) ? rc.creator : null;
+
+    const set: string[] = [];
+    const pctOf = new Map<string, number>();
+    const insiderOf = new Map<string, boolean>();
+    for (const h of holders.slice(0, MAX_WALLETS)) { if (!pctOf.has(h.address)) { set.push(h.address); pctOf.set(h.address, h.pct); insiderOf.set(h.address, h.insider); } }
+    if (creator && !pctOf.has(creator)) { set.push(creator); pctOf.set(creator, 0); }
+    if (set.length < 2) {
+      const coverage: WalletClusterCoverage = {
+        sampled: set.length,
+        fullyTraced: 0,
+        historyTruncated: 0,
+        deadlineSkipped: 0,
+        providerFailed: 0,
+      };
+      const description = describeWalletClusterTrace({ clusters: [], coverage, directLinkLabel: "a direct SOL transfer" });
+      res.status(200).json({ mint, available: true, clusters: [], walletsAnalyzed: set.length, coverage, ...description });
+      return;
+    }
+
+    // 2. For each wallet, resolve its funder + its recent SOL counterparties.
+    const url = `https://mainnet.helius-rpc.com/?api-key=${key}`;
+    const deadline = Date.now() + 50000;
+    const profiles = await inChunks(set, CHUNK, async (w) => {
+      if (Date.now() > deadline) {
+        return {
+          wallet: w,
+          funder: null as string | null,
+          cps: new Set<string>(),
+          fundingState: "deadline" as const,
+          counterpartiesCompleted: false,
+        };
+      }
+      const [history, cpRead] = await Promise.all([oldestSigs(url, w, usage), counterparties(key, w, usage)]);
+      if (history.failed) {
+        return {
+          wallet: w,
+          funder: null as string | null,
+          cps: cpRead.addresses,
+          fundingState: "failed" as const,
+          counterpartiesCompleted: cpRead.completed,
+        };
+      }
+      if (!history.reachedBeginning) {
+        return {
+          wallet: w,
+          funder: null as string | null,
+          cps: cpRead.addresses,
+          fundingState: "truncated" as const,
+          counterpartiesCompleted: cpRead.completed,
+        };
+      }
+      const funding = history.sigs.length
+        ? await fundingSource(url, w, history.sigs, usage)
+        : { funder: null, completed: true };
+      return {
+        wallet: w,
+        funder: funding.completed ? funding.funder : null,
+        cps: cpRead.addresses,
+        fundingState: funding.completed ? "complete" as const : "failed" as const,
+        counterpartiesCompleted: cpRead.completed,
+      };
+    });
+
+    const coverage: WalletClusterCoverage = {
+      sampled: set.length,
+      fullyTraced: profiles.filter((p) => p.fundingState === "complete" && p.counterpartiesCompleted).length,
+      historyTruncated: profiles.filter((p) => p.fundingState === "truncated").length,
+      deadlineSkipped: profiles.filter((p) => p.fundingState === "deadline").length,
+      providerFailed: profiles.filter((p) => p.fundingState === "failed" || !p.counterpartiesCompleted).length,
+    };
+
+    // 3. Build links + union-find. A shared non-CEX funder OR a direct transfer
+    //    between two set members ties them into one operator.
+    const inSet = new Set(set);
+    const dsu = new DSU();
+    for (const w of set) dsu.find(w);
+    const links: { a: string; b: string; type: "co-funded" | "transfer"; via?: string }[] = [];
+    // co-funding: group by funder. The funder must clear the SAME venue test
+    // the holder set already applies, using RugCheck's own labels: a pool or
+    // launcher vault pays out to unrelated buyers exactly as custody does, and
+    // checking only the static CEX map let those form "co-funded" groups.
+    const byFunder = new Map<string, string[]>();
+    for (const p of profiles) {
+      if (!p.funder || SYSTEM.has(p.funder)) continue;
+      if (!canSeedFunderCluster(p.funder, { knownAccounts: ka, poolAddresses })) continue;
+      (byFunder.get(p.funder) ?? byFunder.set(p.funder, []).get(p.funder)!).push(p.wallet);
+    }
+    for (const [funder, ws] of byFunder) {
+      if (ws.length < 2) continue;
+      for (let i = 1; i < ws.length; i++) { dsu.union(ws[0], ws[i]); links.push({ a: ws[0], b: ws[i], type: "co-funded", via: funder }); }
+    }
+    // direct transfers between set members
+    for (const p of profiles) {
+      for (const cp of p.cps) {
+        if (cp !== p.wallet && inSet.has(cp)) {
+          const a = p.wallet < cp ? p.wallet : cp, b = p.wallet < cp ? cp : p.wallet;
+          if (!links.some((l) => l.type === "transfer" && l.a === a && l.b === b)) { dsu.union(a, b); links.push({ a, b, type: "transfer" }); }
+        }
+      }
+    }
+
+    // 4. Assemble clusters (size >= 2), with the combined supply each controls.
+    const groups = new Map<string, string[]>();
+    for (const w of set) { const r = dsu.find(w); (groups.get(r) ?? groups.set(r, []).get(r)!).push(w); }
+    const clusters = [...groups.values()]
+      .filter((ws) => ws.length >= 2)
+      .map((ws) => {
+        const combinedPct = ws.reduce((s, w) => s + (pctOf.get(w) ?? 0), 0);
+        const clinks = links.filter((l) => ws.includes(l.a) && ws.includes(l.b));
+        const funders = [...new Set(clinks.filter((l) => l.via).map((l) => l.via as string))];
+        return {
+          wallets: ws.map((w) => ({ address: w, pct: pctOf.get(w) ?? 0, insider: !!insiderOf.get(w), isCreator: w === creator })),
+          size: ws.length,
+          combinedPct,
+          sharedFunders: funders,
+          links: clinks,
+          includesCreator: creator ? ws.includes(creator) : false,
+        };
+      })
+      .sort((a, b) => b.combinedPct - a.combinedPct || b.size - a.size);
+
+    const description = describeWalletClusterTrace({
+      clusters,
+      coverage,
+      directLinkLabel: "a direct SOL transfer",
+    });
+
+    // Full analyzed set + edges, so the client can draw a bubble map (each wallet a
+    // bubble sized by supply, colored by its cluster, linked by co-funding/transfers).
+    const walletCluster = new Map<string, number>();
+    clusters.forEach((c, i) => c.wallets.forEach((w) => walletCluster.set(w.address, i)));
+    const allWallets = set.map((w) => ({ address: w, pct: pctOf.get(w) ?? 0, cluster: walletCluster.has(w) ? walletCluster.get(w)! : null, isCreator: w === creator }));
+    const edges = links.map((l) => ({ a: l.a, b: l.b, type: l.type }));
+
+    res.status(200).json({
+      mint,
+      available: true,
+      walletsAnalyzed: set.length,
+      clusters,
+      allWallets,
+      edges,
+      coverage,
+      ...description,
+    });
+  } catch (e) {
+    res.status(200).json({ mint, available: false, clusters: [], error: String(e), note: "Wallet clustering failed." });
+  } finally {
+    if (usage.rugcheck > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "rugcheck",
+        op: "panel:solana-cluster",
+        calls: usage.rugcheck,
+        usd: 0,
+        meta: "keyless",
+        initiatedBy: auth.userId,
+        status: usage.rugcheckSucceeded === usage.rugcheck ? "succeeded" : usage.rugcheckSucceeded > 0 ? "partial" : "failed",
+      });
+    }
+    if (usage.helius > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "helius",
+        op: "panel:solana-cluster",
+        calls: usage.helius,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.heliusSucceeded === usage.helius ? "succeeded" : usage.heliusSucceeded > 0 ? "partial" : "failed",
+      });
+    }
+  }
+}

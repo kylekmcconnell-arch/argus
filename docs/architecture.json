@@ -1,0 +1,356 @@
+{
+ "$schema": "self-describing architecture map; read this BEFORE excavating the codebase",
+ "app": "ARGUS - crypto due-diligence engine (@handle/token -> evidence -> scored verdict)",
+ "generated": "2026-08-06",
+ "generatedFrom": "branch main",
+ "maintenance": "Update this file in the SAME commit as any architecture-level change (new adapter, pipeline stage, budget constant, invariant, env var). Line anchors drift; trust names over numbers and re-grep when precision matters.",
+ "humanTwin": "docs/architecture.html (same content, visual)",
+ "topology": {
+  "units": {
+   "client": "Vite React SPA in src/ (entry src/main.tsx -> src/App.tsx phase-router; pages lazy-loaded)",
+   "apiRoutes": "~55 Vercel serverless functions in api/*.ts; underscore files (_collector.js, _auth.ts, _provenance.ts, _cache.js, _graph.ts) are shared internals, not routes",
+   "serverEngine": "server/ (orchestrator + adapters + analyst agent), bundled by scripts/build-collector.mjs (esbuild, entry server/_entry.ts) into api/_collector.js; API routes import the BUNDLE, never server/ source. Rebuild with `npm run build` after server/ edits",
+   "db": "Supabase Postgres via PostgREST + RPCs; migrations in supabase/migrations/"
+  },
+  "personAuditFlow": "client SSE -> api/audit.ts (requireArgusAuth + consumeInvestigationQuota, config.maxDuration=600) -> runAudit(handle, emit, {organizationId, analystDeadlineAt}) in server/orchestrate.ts -> adapters -> analyst -> persistServerDossier (api/_provenance.ts persist_report_version_bundle RPC) -> SSE done",
+  "tokenAuditFlow": "src/token/audit.ts auditToken() (bundled into _collector + _sweep) serves api/v1/token.ts and the token UI",
+  "keyRoutes": {
+   "api/audit.ts": "authenticated person-investigation SSE stream (the core pipeline entry)",
+   "api/v1/person.ts + api/v1/token.ts": "public documented v1 API",
+   "api/ask.ts": "Q&A over one exact frozen report. A deterministic question director classifies investment, alpha, counterparty, or identity-and-control intent; independently selects answer, challenge-thesis, trace-connection, explain-score, compare-scenarios, or plan-investigation reasoning mode; combines supporting routes for mixed questions; and maps the result to saved research capabilities, allowlisted specialist delegates, identity gates, and Intelligence Spine questions. It also builds a bounded evidence-focus packet and claim chains with the relevant saved signal IDs, findings, evidence states, measurement values, source classes, lineage completeness, same-domain counterweights, change conditions, and explicit inference boundaries. Every high-severity adverse signal remains eligible across intents so a selected lens cannot hide it. A referential follow-up may inherit intent only from prior user questions; prior answers remain non-evidence. The route enters the bounded reasoning layer as an investigation directive, never as evidence, and the API returns the same auditable route with every answer or withheld answer",
+   "api/challenge-verdict.ts": "adversarial AI second-opinion review; the signed panel token selects one exact org-scoped immutable report, the server reloads the applicable token, investigation, project-account and Decision Intelligence evidence, browser-authored verdict/evidence fields are ignored, and null remains unknown. Every omission or bound has a receipt. An incomplete challenged domain stops before provider spend, and every published sentence plus recommendation requires validated complete frozen-artifact refs; malformed or forged refs are withheld",
+   "api/health.ts": "zero-spend provider-readiness + extraction-routing diagnostic (check env wiring here before spending on a test audit)",
+   "api/sweep.ts": "manual watchlist sweep; deliberately NO cron",
+   "api/polymarket-trader.ts": "scan-time Polymarket trader-record check, GET ?wallet=<0x addr>. Keyless, no panel-cost token (same scan-time split as deployer-origin), 5-min TTL in _cache, and a record carrying failures is never cached. Computes nothing itself: src/polymarket/trader.ts fetches, src/polymarket/record.ts derives.",
+   "forensicFamily": "arkham*, deployer*, evm-*, holders, bytecode, site-infra, sanctions*, legal-screen, news, pfp-check, recon-team, find-wallet, vc-portfolio, project-docs, namesake, cryptorank, gmgn-holders, gmgn-bundle, early-buyers",
+   "api/gmgn-holders.ts + api/gmgn-bundle.ts": "scan-time ungated GMGN readings (server/adapters/gmgn.ts): holder cost basis, and the /v1/token/info launch-pattern read (bundler/insider volume shares, wallet-tag counts, dev record). Every figure is GMGN's classification, published attributed, never adopted as an ARGUS finding, never a score floor; their AI rating is deliberately not read. wallet_tags_stat counts CAP at 1000 (GMGN_TAG_COUNT_CAP), so a count at the cap is a floor; 0-1 ratios are range-gated. Auth: X-APIKEY header + timestamp/client_id query nonces (in VOLATILE_PATTERNS for eval replay).",
+   "api/governance.ts": "scan-time Snapshot governance concentration (server/adapters/snapshot.ts; keyless, free, ungated, 15-min client cache). Reports how few addresses carried the last 5 closed proposals, quorum misses, and on CONTESTED votes only whether the top voter exceeded the winning margin. BINDING IS NEVER BY NAME, A CALLER-SUPPLIED SPACE ID, OR TOKEN STRATEGY: candidate space ids come from bounded conventions because Snapshot search is unreliable, but a candidate is accepted only when Snapshot marks it verified AND its X handle exactly matches the audited official X account or its website relates to the audited official domain. A genuine token contract in a strategy still does not prove that a namesake space governs the audited project. Two caveats are unconditional in the copy: voting power is not a holding, and Snapshot is off-chain signalling. Soft evidence: sets no score floors.",
+   "api/early-buyers.ts": "scan-time ARGUS-owned early-buyer funding trace (Solana, Helius, ungated like deployer-origin, deliberately uncached because the still-holds figures are live balances). Walks the mint's first successful transactions (window collected across the last pages walked because failed sniper spam dominates oldest pages; >30 pages of history = honest refusal, never a mid-life window), lists the wallets that took supply, traces each wallet's seed funder via api/_funding-core.ts, and reports SHAPE only: N of M share a funder, K in one block, what a cluster still holds. Rules: a shared CEX custody funder (marketAddresses) never clusters; a history-truncated wallet is unresolved and never independent; capped/partial reads publish floors. _funding-core.ts is the first shared home of the funding walk; folding deployer/deployer-origin/cluster onto it is the open follow-up.",
+   "supplementalFailClosed": "GitHub forensics, project docs, site history, site infrastructure, Solana/EVM funder traces, wallet clustering, and sanctions families distinguish completed empty reads from failed, malformed, capped, or partial reads. A failed constituent makes the conclusion unavailable; only a completed bounded read may publish a negative, and only complete results are cached.",
+   "panelVsScanTime": "A forensic route gated on an x-argus-panel-token needs a PERSISTED report version to bill against, so a LIVE scan (which is still producing that version) gets 409 from it. Scan-time callers need an ungated sibling, analyst-metered by middleware, on the api/deployer-risk.ts pattern: api/deployer.ts (panel) / api/deployer-origin.ts (scan-time) are the worked example. The two return the identical wire shape and import every user-facing sentence from api/deployer.ts so they cannot word the same fact differently; the RPC walk itself is still duplicated, and extracting it into api/_deployer-core.ts is the open follow-up."
+  }
+ },
+ "pipeline": {
+  "file": "server/orchestrate.ts (runAudit ~:3168 wraps runAuditWithLedger ~:2193 in withCostLedger)",
+  "stagesOrdered": [
+   "budget-setup: analystDeadlineAt, collectionDeadlineAt = analystDeadline - COLLECTION_ANALYST_RESERVE_MS, graphScreenDeadlineAt = collectionDeadline + TRUST_GRAPH_SCREEN_RESERVE_MS",
+   "cold-intake: resolveProfile (twitterapi) -> projectTokenPass (coingecko/dexscreener/geckoterminal) -> parallel token enrichment (DeFiLlama tvl/fees/funding, holder profile, CryptoRank unlocks, security audits, Monid) -> coldIntake posts/claims/team",
+   "adapter-lanes: 3 concurrent lanes (IDENTITY: x/github/pdl/offchain, TOKEN: dexscreener/coingecko, WALLET: onchain); serial within lane; ARGUS_SERIAL_ADAPTERS collapses",
+   "basic-facts: runs ALONE post-barrier (Claude web_search discovery; the dominant cost line); fact-level, predicate-specific KB cooldowns when ARGUS_ENTITY_REUSE=on; funding/investors/partnerships/security/legal/live metrics always refresh",
+   "founder financing / venture-token binding / SEC registry screen",
+   "projections: projectProviderBackedBasicFacts, projectVerifiedBasicFacts; source-attributed provider projections publish as reported context and never as strict verification",
+   "signal-passes (budget-gated, skippable): token-lifecycle, post-cadence, adverse-sweep",
+   "role classification: providerBackedRoles ONLY (model role leads never route)",
+   "project core outcomes (backing/disclosure), portfolio + fund-scale (investor-only)",
+   "trust-graph: LAST collection pass AND a never-waive screen; runs in its reserved window past the general collection deadline",
+   "repeat-backing (deterministic founder F3)",
+   "evm-control-reality: after canonical token binding is final, supported EVM PROJECT scans verify eth_chainId, freeze one block, and retain bounded standard proxy/owner/Safe-compatible receipts; the entire field is removed from analyst scoring and contradiction packets",
+   "analyst: scanContradictions + analyzeSubject concurrent under analystDeadlineAt; fail-closed preflight",
+   "finalize: assembleDossier, deterministic score-neutral Intelligence Spine snapshot, checkTracker.completeness, prior-outcome delta, cost attach, org-scoped writeEntityFacts (verified facts only; legal/sanctions/adverse EXCLUDED)"
+  ],
+  "budgetModel": {
+   "file": "src/lib/investigationRuntime.ts",
+   "DEEP_INVESTIGATION_MAX_DURATION_SECONDS": 600,
+   "ANALYST_SCORING_TIMEOUT_MS": 180000,
+   "ANALYST_REPAIR_TIMEOUT_MS": 90000,
+   "ANALYST_FINALIZATION_RESERVE_MS": 90000,
+   "COLLECTION_ANALYST_RESERVE_MS": 250000,
+   "TRUST_GRAPH_SCREEN_RESERVE_MS": 60000,
+   "invariant": "COLLECTION_ANALYST_RESERVE_MS - TRUST_GRAPH_SCREEN_RESERVE_MS >= ANALYST_SCORING_TIMEOUT_MS (250-60=190>=180); tested in src/lib/investigationRuntime.test.ts"
+  }
+ },
+ "adapters": {
+  "registry": "ADAPTERS in server/orchestrate.ts (~:180); retired-but-present: crunchbase.ts, reddit.ts; bitquery = reserved credential, never runs",
+  "catalog": {
+   "basicFacts.ts": {
+    "collects": "cited foundational facts (founders/product/token/governance/audits/funding/traction)",
+    "via": "Claude web_search on DISCOVERY_MODEL (=ANALYST_MODEL default)",
+    "cost": "DOMINANT cost line",
+    "flags": "ARGUS_BASIC_FACTS_PRIMARY=grounded (Serper+fetch+cheap-extract lane, falls through when unprovisioned) or =grok; ARGUS_BASIC_FACTS_REPAIR=grok; ARGUS_ENTITY_REUSE=on"
+   },
+   "x.ts": {
+    "collects": "X profile/posts/follow-graph + general web discovery",
+    "via": "twitterapi.io + dispatcher generalWebSearch: grounded(Serper)->claudeWebSearch->grok",
+    "cost": "twitterapi $0.0002/call; grok ceiling ARGUS_GROK_AUDIT_CEILING_USD=$8",
+    "note": "searchAdverseSignals returns {completed, signals}: an empty list from a provider that never answered, or answered unparseably, is a screen that did NOT run and must not record as a completed empty sweep. The enumerate path also tallies an AudienceSample off the follower rows it already paid for (creation cohort, zero-post, default avatar over empty bio, follow ratio), every figure a count over its own denominator, gated at AUDIENCE_SAMPLE_MIN=50 per dimension, never projected onto the account follower total, and never labelled as bought or fake."
+   },
+   "groundedSearch.ts": {
+    "collects": "decoupled search+extract",
+    "via": "Serper SERP ($1/1k) + page fetch + cheap extract (ARGUS_EXTRACT_MODEL; OpenRouter+ZDR when model is a provider/model slug e.g. google/gemini-2.5-flash-lite)",
+    "dormantUntil": "SERPER_API_KEY",
+    "failurePolicy": "a valid empty result owns the lane; when every Serper request is rejected or unavailable, an already-provisioned Claude researcher may recover the report even with duplicate-provider cascading off; rejection diagnostics are reduced to safe stable categories"
+   },
+   "wayback.ts": {
+    "collects": "bounded archived team/about corroboration for an already-discovered affiliation",
+    "via": "Internet Archive CDX first; Arquivo.pt CDX + capture fallback after an Internet Archive transport, HTTP, or response failure",
+    "failurePolicy": "a recovered Internet Archive failure remains partial in the technical ledger and is not published as an unanswered source; both archives must fail before the report shows an archive outage"
+   },
+   "securityAudits.ts": {
+    "collects": "bounded audit leads with exact subject-page versus curated-audit-link origin, plus auditor-domain corroboration",
+    "note": "A lead never becomes corroborated by name. The auditor-owned page must preserve one bounded proof window with explicit audit context, the subject name, and an official-domain or canonical-contract identity anchor. Client lists, generic engagements, bounties, competitions, contests, and incident-only prose do not qualify. The full qualifying window and matched anchor persist with the report. selfAttested>=2 registry auditors can widen the P3/P6 exceptional CEILING but cannot set a floor."
+   },
+   "defiLlama.ts": {
+    "collects": "TVL(+trend) / fees(+30d-over-30d trend) / funding rounds / audit links",
+    "via": "api.llama.fi, free",
+    "note": "funding rounds also project one `investor` basic fact per distinct named backer (server/basicFactsProjection.ts), answering the project ledger's investor question. Leads and other investors keep their aggregator role and are never promoted. providerProjection:true / floorEligible:false, so they are never written back to the KB and cannot lift the P4 floor. Capped at 12 backers, and the cap declares itself in the excerpt when it bites. TVL, funding and audit-links all read the SAME /protocol/{slug} document; reads are coalesced on the full URL with a short scan-scoped memo (fetchJsonOnce, 30s, cleared at the top of runAudit), collapsing three 1.86 MB pulls into one. Only a SUCCESS is ever retained: a transport failure, an HTTP failure, an unreadable body and a completed 400 no-match are all dropped immediately, so a provider blip can never freeze into a clean-looking absence. A document served from the memo books as ledger status \"cached\", never as a second provider attempt."
+   },
+   "tokenUnlocks.ts": {
+    "collects": "upcoming unlock date/allocation/%supply/$ + 90d load",
+    "via": "CryptoRank v3, <=2 credits/audit",
+    "dormantUntil": "CRYPTORANK_API_KEY"
+   },
+   "tokenHolders.ts": {
+    "collects": "float control: top-10 WALLET %, LP lock/burn, plus GoPlus contract-control and deployer-history flags (serial-scammer creator, mint, take-back, hidden owner, selfdestruct, pausable, owner-change-balance, creator share)",
+    "via": "GoPlus, free; RugCheck (free, keyless) on Solana",
+    "solanaLpLock": "GoPlus returns no lp_holders rows on Solana, so the ONE RugCheck report fetch the Solana scan already makes now also answers the LP lock, supplies the labelled accounts that drop pools/exchanges out of holder concentration, and carries its rugged flag and largest connected cluster as findings. Every one of those is RugCheck's own reading and is published named and sourced 'rugcheck'. A RugCheck lpLockedPct of 0 counts as measured ONLY when the report also shows a market it could have read (src/token/sources.ts lockedShare); an unevidenced zero stays unmeasured, because it is the same value the field carries when RugCheck holds no market at all.",
+    "note": "GoPlus holder ORDER is untrusted on chains in GOPLUS_UNSORTED_HOLDER_CHAINS (Robinhood 4663 returned a ~0.36% sample while the real top holder held 4.17%); blockscoutHolders in src/token/sources.ts supplies the ordered top ten from the chain's keyless CORS-open explorer, and with no explorer result the distribution goes silent rather than falling back. The project lane applies the same rule: it takes its distribution from blockscoutHolders or goes silent, it measures concentration over NON-CONTRACT wallets (pools, locked and exchange-tagged rows are excluded and the exclusion is named in distributionNote), and it additionally suppresses on the sum-past-100 self-inconsistency gate. Suppression is explicit: holdersAssessed=false means suppressed, never low; distributionSource says which register produced the figures; a register shorter than ten wallet rows declares the top-ten share a floor. In the token score, a verified non-market wallet at 50% or more caps the verdict below CAUTION, while a wallet at 25% or more, or at least 60% split across no more than three material wallets, caps it below PASS. Those are concentration ceilings only: the holder snapshot never claims common ownership, coordination, bundling or sniping. Contract flags carry the token lane sentences verbatim so the two lanes cannot word the same GoPlus flag differently, and they project as a disclosure-only public_security fact (floorEligible:false). An empty contractFlags array means no flag fired, never clean."
+   },
+   "trustgraph.ts": {
+    "collects": "frozen cross-report graph reconciliation (never-waive screen)",
+    "via": "Supabase graph_contributions"
+   },
+   "priorOutcome.ts": {
+    "collects": "'Since last scan' outcome delta vs latest persisted version",
+    "via": "cases -> report_versions read-only"
+   },
+   "offchain.ts": {
+    "collects": "news, US court captions, OFAC SDN exact-name screen, avatar",
+    "via": "google-news/courtlistener/opensanctions",
+    "note": "always LIVE, never KB-cached"
+   },
+   "profilePhoto.ts": {
+    "collects": "PFP integrity screen",
+    "via": "Claude vision"
+   },
+   "peopledatalabs.ts": {
+    "collects": "identity + off-LinkedIn career (F1/F2); employment records carry start AND end dates, so src/lib/employmentCurrency.ts derives current/departed/absent per company and a departure lands as a dated identity-continuity finding plus evidence.employmentDepartures. For a PROJECT, checkLeaderDepartures answers whether the named founders/C-level still list the project, recorded on the project-leadership-currency checklist row (NOT founder-company-relationships, whose FOUNDER role gate published \"not a founder\" on the very run that paid for the answer). Three states stay apart: dated departure = finding, all-still-listed = confirmed, a record matching nobody = checked-empty. Absent rows are counted separately and never inflate the still-listed tally.",
+    "cost": "~$0.10/match",
+    "dormantUntil": "PDL_API_KEY"
+   },
+   "github.ts": {
+    "collects": "org/repo affiliations, twitter-linked identity",
+    "dormantUntil": "GITHUB_TOKEN"
+   },
+   "monid.ts": {
+    "collects": "private-company enrichment (funding/leadership)",
+    "via": "Monid/Akta, metered",
+    "dormantUntil": "MONID_API_KEY",
+    "note": "management profiles merge into webTeam as verified leadership rows (mergeManagementIntoWebTeam)"
+   },
+   "projectToken.ts": {
+    "collects": "canonical token binding via official-X/official-domain (never a name match); frozen GeckoTerminal candle window",
+    "note": "ProjectTokenSnapshot.producerSources freezes separate producer, URL, and capture-time records for identity, market, liquidity, and history because one snapshot can combine CoinGecko, DexScreener, GeckoTerminal, or an official site. The frozen history is derived by src/lib/priceHistory.ts (summarizeCandles), shared with the live client sparkline so a frozen series and a refresh cannot describe the same candle differently. Beyond closes it carries the reported per-candle highs and lows (range), a recent-vs-prior volume trend with both window widths, and spanPeriods/windowIsPartial. A candle high is ONE source reading inside ONE period, never an all-time high; a gapped window reports itself partial; a window whose candles did not all report volume reports a floor."
+   },
+   "evmControlReality.ts": {
+    "collects": "score-neutral fixed-block standard EVM control evidence for the verified canonical token address",
+    "via": "free public JSON-RPC endpoints for ethereum, base, bsc, polygon, arbitrum, optimism, and avalanche; 0 model calls; marginalUsd=0",
+    "binding": "The selected endpoint must return the expected normalized eth_chainId before any block or contract read. A mismatch returns an unavailable snapshot immediately; malformed identity or RPC failure can fall through only to another endpoint that must pass the same check. Cross-chain evidence cannot enter the snapshot.",
+    "reads": "One verified block number/hash/timestamp; target bytecode; EIP-1167 runtime; ERC-1967 implementation, beacon, and admin slots; implementation bytecode; bounded owner() probes; Safe-compatible getOwners()/getThreshold() probes; exact receipts with raw bounded results or hashes.",
+    "semantics": "No-code means eth_getCode returned no runtime bytecode at that block, never EOA, one key, one signer, or one human. A Safe-compatible response is interface evidence only. A zero standard slot does not prove immutability; custom proxies, diamonds, role maps, timelocks, modules, guards, and project-wide authority remain unresolved.",
+    "scoring": "EvmControlRealitySnapshot declares scoringImpact none and is structurally removed from both analyst scoring and contradiction packets. It persists only as frozen diligence context and Intelligence Spine input."
+   },
+   "linkHub.ts": {
+    "collects": "official-site dereference when the profile website is a link aggregator (linktr.ee etc); hub page must link the exact audited handle AND the extracted site must link back; ambiguity fails closed",
+    "note": "runs inside resolveProfile; without it a linktree-only profile silently loses PROJECT routing and token binding (the @orbitgroup_ai INCOMPLETE case)"
+   },
+   "portfolio.ts + fundScale.ts + investorDiscovery.ts": {
+    "collects": "investor I2 portfolio authenticity candidates + I3 source-bound fund scale context",
+    "binding": "One shared browser-safe portfolioRelationshipBinding predicate governs collector output, scorer eligibility, dossier graph edges, project intelligence, and entity intelligence. A confirmed relationship requires an exact audited subject or fully proven affiliated-fund attribution, a stable project domain, complete HTTP and content-hash receipts, and a source combination strong enough to bind the investment. Names and logo walls remain candidates. Multiple receipts group under one canonical relationship and cannot inflate the count.",
+    "scaleTruth": "AUM, first close, final close, named vehicle size, and manager-reported scale remain distinct metric-and-time claims. A partial or completed-empty discovery read is coverage only and never becomes verified low scale, current dry powder, deployable capital, or personal wealth."
+   },
+   "coingecko/dexscreener/onchain(Helius)/sitecheck/teampage/wayback/wallet/notableAccounts": {
+    "collects": "market data, rug signals, Solana wallets, site substance, /team fetch, archive corroboration, wallet resolution, reverse-follow references",
+    "waybackSampling": "archivedAffiliation reads the NEWEST capture first and returns there when it still names both parties (the common case still costs one snapshot fetch). Only a silent newest capture buys a bounded spread of older ones, <=4 per path, via a SINGLE collapse=timestamp:4 field (the CDX server honours the first collapse field and silently ignores any others). A tie surviving only in older captures returns `disappearance` {lastSeen,newestChecked,capturesChecked,note}; orchestrate records it through archiveCorroborationLabels(). It reports two dates and a sampled floor, never that the affiliation ended: pages get restructured and re-pathed."
+   },
+   "teampage.ts": {
+    "collects": "first-party /team roster; profileAnchors reads LinkedIn and X hrefs from the RAW html (htmlToText deletes tags, which silently dropped every profile link) and bindProfileAnchor attaches one to a person by anchor text, then slug, then nearest position, each requiring that person's own name tokens",
+    "note": "404/410 records as partial, not a provider outage"
+   }
+  },
+  "sharedInfra": "server/publicWeb.ts (fetch/normalize), server/cache.ts (provider_cache), server/entityStore.ts (entity_facts KB read/write, org-scoped, gated ARGUS_ENTITY_REUSE)"
+ },
+ "scoring": {
+  "flow": "evidence -> server/agent.ts (analyst) -> src/engine/audit.ts (deterministic engine) -> server/checks.ts + src/lib/scanChecklist.ts (completeness) -> src/lib/reportPresentation.ts (display)",
+  "analyst": {
+   "transport": "structured<T>(): Claude ANALYST_MODEL (default claude-sonnet-4-6) then Grok fallback, one deadline, forced single tool call",
+   "tools": "record_claims, record_contradictions, record_verdict",
+   "partialAxes": "A missing substantive artifact withholds only that axis. The analyst still scores every supported axis from a separately rebuilt strict packet. The engine preserves those axis receipts but publishes INCOMPLETE with no raw, governing, or overall score until the full role profile is measured. The report names assessed and unmeasured areas; absence is never coerced to zero.",
+   "projectBands": "deriveProjectStrengthBands: per-axis tiers none/assessed_null/adverse/emerging(40-69%)/solid(70-84%)/exceptional(85-100% of weight); validateAnalystVerdict REJECTS out-of-band project scores (triggers repair)",
+   "H2": "floors only from strict verifiedFacts() with floorEligible!==false; recall/corroborated facts + press + audit self-attestation widen the CEILING only"
+  },
+  "engine": {
+   "perRole": "raw = sum(axis scores) + doxBonus(Confirmed 5/Probable 3; PROJECT always 0), then hard caps",
+   "governing": "most-severe verdict governs (AVOID>UNVERIFIABLE_IDENTITY>FAIL>CAUTION>PASS>INCOMPLETE); TIE BREAKS TO THE LOWER SCORE",
+   "bands": "PASS 70-100, CAUTION 40-69, FAIL 0-39; cap ceiling<=10 forces AVOID",
+   "sharedCaps": "deception_confirmed 10, investigator_verified_fraud 10, trust_graph_hard_link 10, trust_graph_medium_link 69",
+   "capEligibility": "model_lead / artifact_verified===false evidence can NEVER trigger a cap or floor"
+  },
+  "completeness": {
+   "gate": "clearanceCoverage (src/lib/scanChecklist.ts): every applicable NEVER_WAIVE check recorded AND recordedPercent >= 75 (floored)",
+   "neverWaive": [
+    "identity-resolution",
+    "ofac-sanctions-name",
+    "organization-registration",
+    "organization-sanctions",
+    "ofac-sanctions-address",
+    "trust-graph-connections",
+    "founder-asset-distinction"
+   ],
+   "checklistRows": "29 rows (server/checks.ts CHECKS). Institutional INVESTOR/AGENCY organizations add never-waive organization-registration and organization-sanctions gates; a person-only legal or OFAC row is not a substitute. A strict direct legal_entity BasicFact binds the entity, then a separate OpenSanctions OFAC entity index freezes the sanctions outcome. Generic PROJECT accounts show the rows only as non-gating follow-ups until their recorded route has the same replacement collection, so existing project clearance is not made structurally impossible. Contract matching in trustgraph.ts is exact-set: FUND_SCALE_ERA_PERSON_CHECK_IDS pins the 25-row era and PRE_ORGANIZATION_SAFETY_PERSON_CHECK_IDS pins the 27-row era."
+  },
+  "presentation": "presentPublicReport: complete+band-matching -> DECISION-READY; partial+all-axes-supported+PASS -> PROVISIONAL; adverse+partial -> RISK SIGNAL; else INCOMPLETE. Score/verdict mismatch fails closed. Checklist status reported means a provider or first party supplied attributable context; it counts as a completed read but is not the same thing as ARGUS-verified evidence, cannot anchor an assessed-null score floor, and cannot satisfy a never-waive safety screen. The facts panel mirrors that contract: score-floor-grade facts render as confirmed, provider projections render as source reported, and corroboration that is intentionally floor-ineligible renders as supporting context.",
+  "decisionIntelligence": {
+   "files": "src/intelligence/types.ts + archetypes.ts + buildPointInTimeIntelligence.ts + buildEntityPointInTimeIntelligence.ts + src/lib/portfolioRelationshipBinding.ts",
+   "contract": "PROJECT, person, individual-investor, investment-firm, and operating-company scans freeze one schema-versioned IntelligenceSpineSnapshot inside the Dossier. It is deterministic, point-in-time, score-neutral, and derived only from the exact collected evidence bag. Older stored reports without the field stay unchanged and never reconstruct it under newer rules.",
+   "classification": "PROJECT token/protocol/company forms come only from structural records. A specific product archetype comes only from a strict direct-subject passage-backed product fact; names, tickers, bios, caller values, provider projections, relaxed facts, and relational noun mentions never route it. Entity intelligence separates a person, individual investor, investment firm, and operating company before synthesis. A licensed employee never replaces an audited organization. Multiple supported project archetypes remain hybrid. Question packs exist for project archetypes plus people, investors, funds, and companies.",
+   "sourceLineage": "Each BasicFact support or contradiction artifact gets its own stable source ref with exact frozen input path, relation, provider, URL, capture time, excerpt, and content hash. Canonical-token identity/market/liquidity/history and holder GoPlus/explorer artifacts keep separate producer refs, so a value can never inherit the first convenient URL from a composite snapshot.",
+   "questions": "Question truth comes from the frozen Basic Facts ledger plus archetype-specific expected questions. PROJECT ledger semantics are atomic and fail closed. Only strict official_identity, founded, launched, or official_token facts can fully resolve their atomic answered question. People, individual investors, investment firms, and operating companies receive separate identity, career, portfolio, fund-scale, operations, governance, legal, relationship, outcome, and conflict packs. A strict fact or exact measurement addressing one facet of a broader question remains partial. Conflicts remain partial; failed collection is unavailable, never a negative.",
+   "signals": "Direct findings remain in the governing report and are separate from derived observations, arithmetic, screening heuristics, and coverage gaps. Verified direct-subject adverse findings are carried as attributed pressure observations into every lens so ordering cannot hide them; provider opinion remains reported context.",
+   "temporalAlignment": "Cross-source ratios and comparisons require valid frozen as-of times no more than 72 hours apart. Each admitted arithmetic receipt preserves every input time, observed skew and policy. Missing, invalid or stale alignment withholds the result and emits an exact temporal gap; incident amount divided by current TVL is explicitly historical-to-current scale.",
+   "integrityGate": "Before persistence, unique IDs and every source, measurement, denominator, question answer, signal, arithmetic, temporal and subject-classification reference are validated as one graph. Colliding or dangling records are withheld, affected questions reopen, and a high-severity intelligence_integrity_gap replaces any conclusion with broken lineage.",
+   "reportSurfaces": "Project and entity report surfaces render the saved evidence atlas, role-aware question and coverage ledgers, exact source lineage, decision map, chronology, and four lenses. Their short answer makes the case explicit as strongest confirmed evidence, sharpest concern, and the next fact that could change the conclusion. The user can synchronize that short answer and the full atlas to investment, alpha research, counterparty, or general diligence relevance; selection only reorders the invariant saved evidence, never changes the score or hides a hard risk. It promotes lens-ranked support, pressure, and attempted open questions from that same saved spine, after hard caps and direct findings; an absent support line stays absent, not-collected template questions stay in the deep research map, and reported context remains labeled in the promoted headline. Project surfaces also render fixed-block EVM control receipts, exact official-domain company rows, exact CoinGecko-bound public funding and incident ledgers, BasicFact artifact disclosures, team role-proof and developer-profile lineage, and frozen leadership-continuity states. Argus Eye receives a bounded projection of the same saved Intelligence Spine, including its evidence states, lineage refs, measurements, questions, coverage, signals and lenses; it does not reconstruct or strengthen the spine. These panels make no render-time call and never strengthen provider context.",
+   "lenses": "investment, alpha_research, counterparty, and general_diligence reorder and emphasize one invariant saved signal set. A lens never hide-removes a risk, changes the score, or triggers another provider/model call. The panel makes no render-time call.",
+   "governingVerdict": "The parent report owns completeness, score, findings, and verdict. The derived panel withholds a competing thesis when the parent is not decision-ready or governs with AVOID/FAIL; CAUTION and other non-PASS framing remains explicitly inside the governing report.",
+   "truth": "Every measurement carries unit, window, evidence state, and source refs. Every arithmetic signal carries its exact input IDs and expression. Missing data stays an explicit question or coverage state, never zero, clean, safe, unfunded, unaudited, or exonerated.",
+   "cost": "Saved-snapshot derivation and report rendering make 0 provider calls and 0 model calls, for $0 marginal cost. The separate direct EVM collector uses free public RPC, records 0-dollar calls, declares modelCalls=0 and marginalUsd=0, and remains score-neutral."
+  }
+ },
+ "dataStores": {
+  "cases + case_events": "case lifecycle (api/report.ts, api/_provenance.ts RPCs)",
+  "report_versions": "immutable report snapshots; DB triggers block certified mutation; activate_report_version_with_graph promotes",
+  "report_axis_evidence": "axis citation lineage",
+  "graph_contributions": "org trust graph (api/_graph.ts). Only immutable server_collected rows tied to a report_version_id may influence another report's verdict or warning. Browser submissions and provider-attributed graph context remain visible research material, with caller-chosen verdicts and reserved risk nodes stripped by api/graph.ts.",
+  "entity_facts": "knowledge base: verified facts write-back every audit, fact-level freshness read-through when ARGUS_ENTITY_REUSE=on; source capturedAt governs freshness, not the row updated_at; historical funding and security incidents may carry forward but always trigger a fresh update search; NEVER stores legal/sanctions/adverse; NEVER stores or reuses providerProjection facts (market/TVL/fee captures are regenerated free each run - reuse compounds stale duplicates)",
+  "provider_cache": "server/cache.ts",
+  "provider_usage_events + report_cost_lines": "cost telemetry",
+  "argus_members": "auth + RBAC + quotas (api/_auth.ts, consume_usage_quota RPC)",
+  "clientLocal": "src/lib/auditlog.ts localStorage log (reconciled to ACTIVE version on case open)",
+  "audit_log": "shared analyst activity rail. The row is written SERVER-side in persistServerDossier keyed client_id = userId:reportVersionId, because the browser-only write silently lost completed scans when a tab crashed between save and render; the client sync uses the same id so both collapse onto one entry"
+ },
+ "envVars": {
+  "requiredForLive": [
+   "ANTHROPIC_API_KEY",
+   "SUPABASE_URL",
+   "SUPABASE_SECRET_KEY",
+   "TWITTERAPI_KEY"
+  ],
+  "providerKeys": [
+   "XAI_API_KEY",
+   "SERPER_API_KEY",
+   "OPENROUTER_API_KEY",
+   "COINGECKO_API_KEY",
+   "CRYPTORANK_API_KEY",
+   "PDL_API_KEY",
+   "GITHUB_TOKEN",
+   "HELIUS_API_KEY",
+   "MONID_API_KEY",
+   "ARKHAM_API_KEY",
+   "ETHERSCAN_API_KEY"
+  ],
+  "modelRouting": {
+   "ARGUS_ANALYST_MODEL": "default claude-sonnet-4-6 (verdict quality-critical; do not cheapen without live label validation)",
+   "ARGUS_DISCOVERY_MODEL": "defaults to ANALYST_MODEL; Haiku A/B REGRESSED recall (documented in server/config.ts) - do not lower casually",
+   "ARGUS_EXTRACT_MODEL": "default claude-haiku-4-5; a provider/model slug + OPENROUTER_API_KEY routes via OpenRouter with data_collection=deny (ZDR)",
+   "ARGUS_GENERAL_WEB_PROVIDER": "grok forces legacy grok-direct",
+   "ARGUS_ENTITY_REUSE": "on = predicate-specific verified-fact cooldowns; live risk and additive event searches still refresh",
+   "ARGUS_GROK_AUDIT_CEILING_USD": "default 8.00 mid-run Grok stop"
+  },
+  "providerCapabilities": {
+   "VITE_ARKHAM_PROVIDER_ENABLED": "default off; true reactivates client Arkham calls and makes a missing scan-time funding trace decision-critical"
+  },
+  "checkWiring": "GET /api/health reports key presence + extraction routing with zero spend; env changes require a Vercel REDEPLOY to take effect"
+ },
+ "costLedger": {
+  "file": "server/cost.ts",
+  "model": "withCostLedger AsyncLocalStorage per-audit isolation; getCost() attaches full LedgerLine[] to the dossier; persist REJECTS a live dossier without an observed ledger",
+  "recorders": "addClaudeUsage (Haiku-vs-Sonnet by model), addGrokUsage (never books fewer sources than tool calls imply - xAI under-reports), addOpenRouterUsage (books ACTUAL usage.cost), recordSerper/Twitterapi/PdlMatch/Helius, and 0-dollar public EVM RPC calls through recordCall",
+  "discipline": "live audits cost real dollars (~$0.7-1.5 person audit); ask the user before batteries; never trust the in-app ledger over the provider invoice. Report-time Intelligence Spine derivation costs $0; direct EVM collection also declares marginalUsd=0 and modelCalls=0."
+ },
+ "qualityGates": {
+  "npm run typecheck": "tsc -b + server + api tsconfigs (NEVER bare npx tsc --noEmit; it skips 2 projects)",
+  "npm test": "full vitest suite (263 files / 3080 tests at the 2026-08-06 review): engine fidelity, adapters, invariants",
+  "npm run audit:reports": "stored-report corpus auditor over raw report_versions payloads (needs Supabase creds; manual only, NOT wired into CI)",
+  "npm run truth:check": "source-of-truth doc contract",
+  "npm run canary:offline": "7 deterministic release cases, all providers intercepted, 0 unexpected URLs",
+  "npm run calibrate": "20-case golden verdict set; the safety net proving scoring changes don't inflate bad actors",
+  "ci": ".github/workflows/ci.yml on push to main: db-gates (supabase test:db) + truth/typecheck/test/calibrate/canary/build",
+  "uiCopyPolicy": "NO em/en dashes in authored runtime copy (also enforced in analyst output + truth:check)",
+  "evalHarness": "server/evalHarness.ts + scripts/eval-harness.ts: record ONE paid live audit's provider traffic (headers never stored, sensitive params redacted) to eval/recordings/<slug>/, then npm run eval:replay re-runs the full pipeline against eval/expectations.json. Replay intercepts both global fetch and the pinned native HTTP/HTTPS transport in server/publicWeb.ts; unrecorded DNS and public-page reads fail closed without a socket. --allow-live hosts create an explicit A/B lane. Structured decision-tool recordings are exact request matches only: verdict and contradiction calls cannot consume an untagged or mismatched response. Legacy responses infer a tool only from exactly one structured provider tool_use block."
+ },
+ "clientSurface": {
+  "src/App.tsx": "phase router (~19 phases) + report/token/investigation state",
+  "src/components/Report.tsx": "flagship person/project report renderer (206KB; edit with care, fresh context); render-time lead pruning, funding consolidation, and frozen-snapshot repairs live here",
+  "src/components/TokenReport.tsx + src/token/audit.ts": "token dossier + token audit engine",
+  "src/components/InvestigationRun.tsx / LiveRun.tsx": "SSE audit runners",
+  "src/components/InvestigationDecisionCanvas.tsx / InvestigationReport.tsx": "decision canvas + numbered story chapters (2026-07-24 restructure)",
+  "src/components/PointInTimeIntelligencePanel.tsx": "saved PROJECT Decision Intelligence: four accessible lenses over one complete signal register, arithmetic receipts, every tracked question and basis, explicit recheck/evidence conditions, unique artifact and lineage-origin counts, a lens-prioritized evidence atlas, frozen event chronology, complete measurement and source-lineage registers, capture window, and all-domain coverage. It reads the frozen snapshot only, makes no render-time provider call, and never changes the score. The parent verdict governs: an incomplete parent or AVOID/FAIL withholds a competing derived thesis.",
+  "src/components/SnapshotEvidenceControl.tsx": "frozen-snapshot control + pre-upgrade re-scan nudge",
+  "decisionFirstMobile": "On narrow screens the report opens in decision order: subject identity, verdict or readiness, material alerts, then supporting score/fundamentals. Profile metadata and saved-report details collapse; Case Brief is the primary toolbar action and secondary actions move under More. Incomplete investigation reports lead with NOT READY and label the score preliminary.",
+  "savedExample": "Landing offers a frozen saved Uniswap report through the stored-only route (?s=uniswap&kind=person). Opening it reads saved storage only and never launches a scan or current-provider overlay; any rescan remains an explicit separate action.",
+  "frozenVisuals": "MarketPerformancePanel / TokenSnapshotVisuals / UsageVisuals render frozen chart series with explicit captured-with-scan vs live-refresh chips",
+  "arkhamPanels": "Dormant by default. VITE_ARKHAM_PROVIDER_ENABLED=true re-enables MoneyFlowStory, EntityConcentration and related Arkham panels. When disabled, no client Arkham request runs and the operator funding trace is not decision-critical, including an old frozen row that still carries its former critical marker. Existing routes remain available for later reactivation.",
+  "bundlePanels": "OnChainForensics mounts adjacent launch-shape panels: GmgnHolderCosts (cost basis), GmgnBundlePanel (GMGN's attributed launch-pattern read), EarlyBuyerFunding (api/early-buyers, ARGUS's own checkable trace, Solana only), and holder analysis. GMGN classifications never become ARGUS findings. Snapshot concentration never becomes a bundle claim. Each auto-running panel reports running, complete or unavailable to the canonical surface; any unavailable live read produces a prominent current-forensic-coverage warning while leaving the immutable saved score unchanged.",
+  "governancePanel": "GovernancePanel (api/governance) mounts in OnChainForensics and binds only when InvestigationReport supplies an official project X handle or website that matches the Snapshot space. A bare TokenReport has no independent project identity binding, so governance stays unmeasured even when the space strategy names the same token contract. An unbound space renders its reason and NO figures.",
+  "polymarketTraderLane": "src/polymarket/{types,trader,record}.ts + api/polymarket-trader.ts + src/components/PolymarketTraderRun.tsx -> PolymarketTraderReport.tsx. Reached ONLY from a polymarket.com/profile/<addr> link: resolveInput returns kind 'polymarket' for the path and deliberately NOT for a bare 0x address, which stays an EVM token contract. Lane rules: a claim with no published wallet is 'not checkable as written' and never false; a published wallet is attributed, not proven to be the poster's (same split as DeployerAttribution); the lb-api /rank endpoint's `amount` is VOLUME whatever the rankType, so only `rank` is ever read; realized and unrealized are never summed; nothing is annualised; a floored window (activitySpanIsFloor) makes the monthly rate a CEILING, which downgrades every verdict except 'overstated' to not_checkable.",
+  "src/lib/plainLanguage.ts": "render-time jargon rewriter for model prose + status labels (display-only; stored payloads and presentation tier types unchanged)",
+  "src/lib/fundingEvidence.ts": "raise-vs-valuation separation for the funding card; corroboration counted by independent non-self registrable domains",
+  "theme": "light-first since 2026-07-24 via versioned storage key argus-theme-v2 (prior dark preference deliberately reset once); midnight nav rail is a scoped token override in index.css",
+  "src/components/AppErrorBoundary.tsx": "wraps the whole app in main.tsx; every page is lazy-loaded, so a tab open across a deploy 404s on replaced chunks and React throws. A stale-chunk error self-recovers with ONE reload (sessionStorage argus:stale-chunk-reload, 30s cooldown); any other error renders the message + component stack so the next crash self-diagnoses instead of going white",
+  "src/lib/useDeployFreshness.ts": "polls index.html last-modified against a frozen baseline; the sidebar shows an Update chip when the tab is behind the server",
+  "src/lib/reportInsights.ts + src/components/InvestigatorBrief.tsx": "deterministic render-time investigator brief: deriveNoticedSignals (anomaly rules incl. unlock priced in days of volume, fees/TVL divergence, 90d/180d official-account silence) and deriveVerdictArgument (strongest evidence / sharpest concern / what would change it); a cap always wins the concern slot",
+  "src/lib/employmentCurrency.ts": "current / departed / absent from employment records; reports the end date and never a reason for leaving"
+ },
+ "invariants": [
+  "H2: no score floor from soft evidence - floors only from strict verified facts (floorEligible!==false); recall facts, press, and audit self-attestation are ceiling-only",
+  "Never-waive screens (identity-resolution, person OFAC name, institutional-organization legal-entity binding and entity OFAC, OFAC address, trust-graph-connections, founder-asset-distinction) must be RECORDED for clearance; organization registration specifically requires a confirmed strict legal_entity fact, not a bounded registry miss; generic PROJECT rows remain non-gating until that route has replacement entity collection; trust-graph gets a reserved budget window so it is never clipped",
+  "resolved_name is NEVER set from an inferred/model name; legal+OFAC screens require a provider-resolved real person",
+  "model_lead evidence never routes roles, never triggers caps, never floors scores; it stays investigator-visible lead material",
+  "sanctions/legal are screened LIVE every run - never cached in the knowledge base (entity_facts write-back excludes them)",
+  "deploy prod ONLY by pushing main (Vercel git integration); never vercel --prod from a worktree; no cron jobs by design (sweep is manual)",
+  "no em/en dashes anywhere in authored copy (uiCopyPolicy + analyst validator + truth:check)",
+  "budget arithmetic: COLLECTION_ANALYST_RESERVE - TRUST_GRAPH_SCREEN_RESERVE >= ANALYST_SCORING_TIMEOUT; in-flight adapters are never abandoned mid-mutation",
+  "report versions are immutable (DB triggers); every audit runs in an isolated AsyncLocalStorage cost ledger; persist rejects a dossier without one",
+  "after editing server/, run `npm run build` to regenerate api/_collector.js - routes import the bundle, not source",
+  "a completed scan registers in the shared audit_log server-side at persist time; a client that crashes must never be able to lose it",
+  "routing classifies the bio, and falls back to the account's OWN posts (profile.self_post_sample) when the bio is empty; a model lead never routes a role",
+  "a provider that returns holder data is not trusted to have ORDERED it; unordered chains take their distribution from an explorer or go silent",
+  "An empty provider result is only an ANSWER when the provider answered: searchAdverseSignals, the holder register and the candle window each separate \"did not run / not measured\" from \"ran and found nothing\", and only the latter completes a coverage row",
+  "A bounded read publishes a floor: a capped bundle read (512 KB), a short holder register, a partly reported candle window and an interrupted follower sample all say so rather than reporting a total",
+  "A source field name is not a finding: provider projections and first-party descriptions publish as source-attributed reported context, never as ARGUS verification, a score floor, or completion of a never-waive safety screen",
+  "Identity binding requires an official relationship, not a matching name, ticker, caller-supplied identifier, or attacker-controlled text; token contracts and wallet addresses retain full canonical identity",
+  "A person's display name, biography, profile website, follower count, and model-discovered employer are identity hypotheses only; person-dependent career, portfolio, legal and scoring evidence remains quarantined until an exact account-to-person bridge is frozen",
+  "Entity kind is frozen before enrichment: an employee discovered for a fund or company becomes an operator candidate and never replaces the audited organization",
+  "Portfolio membership and portfolio quality are separate predicates: only a canonically bound investor-to-company relationship can enter the graph, and one relationship without outcomes cannot establish a high-quality cohort",
+  "One canonical relationship, fund-scale claim, vehicle or outcome owns many source receipts; repeated pages and provider rows can corroborate one record but never multiply it",
+  "Fund scale preserves metric, vehicle, qualifier, basis and claim time: capture time never impersonates an as-of date, and bounded absence never becomes small scale, current dry powder, deployable capital or personal wealth",
+  "Persisted Basic Fact question ledgers own report wording and answer state for their matching audience; static question templates are legacy fallback only and cannot fabricate questions that the scan never asked",
+  "A compound screen is complete only when every required constituent read completed; partial sanctions, archive, infrastructure, repository, funding and clustering reads publish unavailable or bounded coverage, never a clean negative",
+  "People discovery preserves relationship provenance: web/X candidates, project-account associations and GitHub contributions never become verified employment, positive team support, or WORKED_ON graph edges; a failed supplemental read leaves team coverage unknown",
+  "Only immutable server_collected graph contributions tied to a report version can change another verdict or render a failed-peer warning; client submissions, Arkham labels and other provider taxonomies are context only",
+  "Source freshness comes from the provider's captured or last-updated timestamp when supplied, never from replay time or the time ARGUS happened to parse an old body",
+  "Decision Intelligence is immutable and score-neutral: every lens renders the same complete saved signal set, changing order/emphasis only; no render-time rule may revise an old report",
+  "The governing report owns direct findings, completeness, score and verdict: derived support cannot override it, and the Decision Intelligence thesis is withheld for a non-decision-ready parent or an AVOID/FAIL verdict",
+  "Direct findings and derived signals stay distinct: verified direct-subject adverse findings are carried into every lens as attributed pressure observations, while arithmetic, screening heuristics and coverage gaps remain labeled derivations",
+  "Missing Intelligence Spine inputs stay absent or explicitly unresolved; no arithmetic, thesis, challenge, or coverage row may coerce them to zero or a clean negative",
+  "Cross-source arithmetic is time-bound: every material input needs a valid frozen as-of time, the input skew must be at most 72 hours, and the arithmetic receipt must retain the temporal proof; otherwise the comparison is withheld as an alignment gap",
+  "The final Intelligence Spine is a validated graph, not a last-write-wins map: duplicate IDs and dangling source, answer, denominator, signal, arithmetic, temporal or classification references are withheld and reopen affected questions",
+  "Integrity filtering is monotone: losing lineage can preserve or weaken unresolved, unavailable and not-collected question states, never upgrade them; canonical fact:<id> aliases remain valid when their unique fact survives",
+  "Evidence-bearing signals must carry their own complete lineage: non-gap signals require source refs, measurement sources must be included, and arithmetic plus temporal inputs must belong to the signal's measurement register",
+  "Provider omission remains omission in the report: DeFiLlama incident recovery is tri-state, so a missing returned-funds value cannot print No or become an unrecovered-loss claim",
+  "Optional licensed provider sections preserve collection state: an unrequested company funding or management section renders not collected, never zero rounds or no managers",
+  "Saved report chronology never reads the viewer clock: leadership age and every other persisted point-in-time label anchor to a frozen report or source timestamp, or remain undated",
+  "Decision Intelligence source lineage is per artifact, not per composite object: support and contradiction sources, token identity/market/liquidity/history producers, and holder security/distribution producers keep independent refs and capture times",
+  "Cross-producer Decision Intelligence is fail-closed: TVL and funding require exact canonical CoinGecko-id joins; fees require a complete same-slug binding receipt; holder, unlock and direct-control rows require exact normalized canonical address and chain receipts; unbound rows remain visible receipts but cannot produce measurements or arithmetic",
+  "Company and chronology enums are not identity: licensed company data is recomputed against an independently resolved non-shared canonical host, requested and matched hosts, match method, company website and valid capture time; it cannot fall back to its own requested domain. RDAP and launch chronology are recomputed from an exact canonical queried hostname, registrable domain, endpoint and frozen account-creation receipt",
+  "Impossible numeric provider values remain receipts, not evidence: percentages must be finite in 0..100, a 90-day unlock aggregate cannot exceed 100, and circulating supply cannot exceed its positive total-supply denominator",
+  "Existing frozen evidence is reused at its original ceiling: legal/sanctions name matches remain identity-resolution gaps, profile-image classifications remain provider opinions, graph risk requires a qualified complete server-collected adverse report and non-weak exact ties, and checked-empty evidence never becomes support",
+  "A PROJECT question resolves only when an atomic strict fact answers an atomic predicate; one fact or measurement addressing a facet of a broader product, team, legal, funding, governance, control, treasury, security or audit question remains partial",
+  "A specific product archetype requires a strict source-backed product fact; names, tickers, bios, caller-supplied values, provider projections, and relaxed facts cannot select one",
+  "Direct EVM evidence is chain-bound and score-neutral: eth_chainId must match before block or contract reads, every successful snapshot is fixed to a verified block hash, no-code is not EOA, Safe-compatible is not authenticated Safe, and the field is excluded from analyst/scorer packets",
+  "Audit corroboration requires auditor-owned explicit audit context plus a canonical official-domain or contract anchor in the same persisted bounded proof window; subject claims, curated links, names, client lists and bounties remain leads",
+  "Challenge Verdict receives only an analyst question from the browser; its subject, verdict, score, evidence, and exact version come from the authenticated immutable report store",
+  "A second-opinion recommendation is explicitly AI-attributed and can publish only when every sentence carries validated complete frozen-artifact refs for the challenged domain; bounded, omitted, credential-bearing, missing, or forged evidence withholds before or after the model as applicable",
+  "An adverse all-clear is scoped only to named screens with a recorded checked-empty outcome; zero completed clean screens or any open decision-critical coverage cannot produce an absence claim",
+  "Offline replay owns every outbound transport: global fetch and pinned public-web HTTP/HTTPS reads pass through the same frozen ledger, and an uncovered replay request fails closed without DNS or a native socket"
+ ]
+}

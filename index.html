@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-theme="light" style="color-scheme: light">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#f5f7fa" />
+    <script>
+      // Apply the validated saved theme before paint. Invalid or unavailable
+      // storage always falls back to ARGUS's light default.
+      (() => {
+        let theme = "light";
+        try {
+          if (localStorage.getItem("argus-theme-v2") === "dark") theme = "dark";
+        } catch (e) {}
+        const root = document.documentElement;
+        root.dataset.theme = theme;
+        root.style.colorScheme = theme;
+        document.querySelector('meta[name="theme-color"]')?.setAttribute(
+          "content",
+          theme === "light" ? "#f5f7fa" : "#06080c",
+        );
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Archivo variable (weight + width axes — the width axis is the brand
+         voice, see DESIGN.md .display) + Geist Mono for all data. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,200..900&family=Geist+Mono:wght@400..600&display=swap"
+      rel="stylesheet"
+    />
+    <title>ARGUS: forensic due diligence</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

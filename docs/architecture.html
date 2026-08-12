@@ -1,0 +1,581 @@
+<title>ARGUS - anatomy of an investigation</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#141821; --card:#171c26; --card-hi:#1b2130;
+    --ink:#eceef2; --dim-ink:#a7adb8; --faint:#697080;
+    --line:#242b38; --accent:#f2b63c; --accent-soft:rgba(242,182,60,.14);
+    --accent-ink:#131002; --good:#57c98e; --warn:#d9a44a;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,"SF Pro Display","Segoe UI",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: light){ :root{
+    --bg:#f7f5f1; --panel:#ffffff; --card:#ffffff; --card-hi:#fbf8f2;
+    --ink:#20232a; --dim-ink:#5a5f6a; --faint:#8b909b;
+    --line:#e3e0d9; --accent:#a97507; --accent-soft:rgba(169,117,7,.12);
+    --accent-ink:#ffffff; --good:#177a4b; --warn:#996408;
+  }}
+  :root[data-theme="dark"]{ --bg:#0b0e14; --panel:#141821; --card:#171c26; --card-hi:#1b2130; --ink:#eceef2; --dim-ink:#a7adb8; --faint:#697080; --line:#242b38; --accent:#f2b63c; --accent-soft:rgba(242,182,60,.14); --accent-ink:#131002; --good:#57c98e; --warn:#d9a44a; }
+  :root[data-theme="light"]{ --bg:#f7f5f1; --panel:#ffffff; --card:#ffffff; --card-hi:#fbf8f2; --ink:#20232a; --dim-ink:#5a5f6a; --faint:#8b909b; --line:#e3e0d9; --accent:#a97507; --accent-soft:rgba(169,117,7,.12); --accent-ink:#ffffff; --good:#177a4b; --warn:#996408; }
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  body{
+    background:
+      radial-gradient(1100px 500px at 72% -10%, var(--accent-soft), transparent 60%),
+      radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 1.4px) 0 0/26px 26px,
+      var(--bg);
+    color:var(--ink); font:14px/1.5 var(--sans); margin:0;
+  }
+  header{ padding:2.6rem 1.6rem 1rem; max-width:1520px; margin:0 auto; }
+  .eyebrow{ font:600 .68rem/1 var(--mono); letter-spacing:.34em; color:var(--accent); text-transform:uppercase; }
+  .eyebrow .pupil{ display:inline-block; width:.5rem; height:.5rem; border-radius:50%; border:1.5px solid var(--accent); margin:0 .5rem -.05rem 0; position:relative; }
+  .eyebrow .pupil::after{ content:""; position:absolute; inset:2px; border-radius:50%; background:var(--accent); animation:blink 6s infinite; }
+  @keyframes blink{ 0%,92%,100%{ transform:scaleY(1);} 95%{ transform:scaleY(.1);} }
+  h1{ font-size:clamp(1.7rem,3.4vw,2.6rem); font-weight:800; letter-spacing:-.02em; line-height:1.08; margin:.55rem 0 .4rem; text-wrap:balance; }
+  h1 em{ font-style:normal; color:var(--accent); }
+  header .sub{ color:var(--dim-ink); margin:0 0 1.1rem; max-width:56rem; font-size:.95rem; }
+  .statrow{ display:flex; gap:1.6rem 2.4rem; flex-wrap:wrap; margin:0 0 1.2rem; }
+  .stat b{ display:block; font:700 1.35rem/1.1 var(--mono); color:var(--ink); font-variant-numeric:tabular-nums; }
+  .stat span{ font:600 .64rem/1.6 var(--mono); letter-spacing:.18em; text-transform:uppercase; color:var(--faint); }
+  .bar{ display:flex; gap:.55rem; flex-wrap:wrap; align-items:center; }
+  #q{ background:var(--panel); border:1px solid var(--line); border-radius:9px; color:var(--ink); padding:.55rem .85rem; font:inherit; width:min(20rem,90vw); }
+  #q:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  button{ background:var(--panel); border:1px solid var(--line); border-radius:999px; color:var(--dim-ink); padding:.5rem 1rem; font:600 .82rem/1 var(--sans); cursor:pointer; transition:border-color .15s,color .15s,background .15s; }
+  button:hover{ border-color:var(--faint); color:var(--ink); }
+  button.flow.on{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  #flowdesc{ color:var(--dim-ink); font-size:.92rem; margin-top:.85rem; min-height:2.6em; max-width:62rem; }
+  #flowdesc strong{ color:var(--accent); }
+  #flowdesc em{ color:var(--faint); font-style:normal; font-size:.84rem; }
+  #flowdesc .stepno{ font:700 .78rem/1 var(--mono); color:var(--accent); margin-right:.5rem; }
+  #wrap{ position:relative; overflow-x:auto; padding:0 1.6rem 1rem; }
+  #graph{ position:relative; display:grid; grid-template-columns:repeat(7,minmax(174px,1fr)); gap:0 28px; min-width:1400px; max-width:1520px; margin:0 auto; padding-bottom:2.4rem; }
+  #iris{ position:absolute; z-index:0; left:44%; top:34%; width:520px; height:520px; transform:translate(-50%,-50%); pointer-events:none; opacity:.5;
+    background:
+      radial-gradient(circle, transparent 58px, var(--accent-soft) 59px, transparent 61px),
+      radial-gradient(circle, transparent 118px, var(--accent-soft) 119px, transparent 121px),
+      radial-gradient(circle, transparent 188px, var(--accent-soft) 189px, transparent 191px),
+      radial-gradient(circle, transparent 258px, var(--accent-soft) 259px, transparent 260px);
+  }
+  #edges{ position:absolute; inset:0; pointer-events:none; overflow:visible; z-index:1; }
+  #edges path{ fill:none; stroke:var(--faint); stroke-width:1; opacity:.15; transition:opacity .2s,stroke .2s; }
+  #edges path.lit{ stroke:var(--accent); stroke-width:1.7; opacity:1; }
+  #edges path.flowing{ stroke-dasharray:5 9; animation:march 1.1s linear infinite; }
+  @keyframes march{ to{ stroke-dashoffset:-14; } }
+  #edges path.lit2{ stroke:var(--accent); stroke-width:1; opacity:.30; }
+  #edges path.hide{ opacity:.035; }
+  .col{ position:relative; z-index:2; }
+  .col h2{ font:700 .66rem/1 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--ink); margin:1.2rem 0 .15rem; }
+  .col h2::before{ content:""; display:inline-block; width:.55rem; height:.55rem; border:1.5px solid var(--accent); border-radius:2px; margin-right:.45rem; transform:rotate(45deg) translateY(-1px); }
+  .col .colsub{ font-size:.7rem; color:var(--faint); margin:.15rem 0 .6rem; }
+  .node{ position:relative; background:linear-gradient(180deg,var(--card-hi),var(--card)); border:1px solid var(--line); border-left:3px solid var(--line); border-radius:10px; padding:.55rem .7rem; margin:0 0 .55rem; cursor:pointer; transition:opacity .18s,border-color .18s,box-shadow .18s,transform .12s; }
+  .node:hover{ transform:translateY(-1px); border-color:var(--faint); }
+  .node .t{ font-weight:650; font-size:.83rem; line-height:1.25; padding-right:1.2rem; }
+  .node .s{ color:var(--faint); font-size:.64rem; font-family:var(--mono); margin-top:.18rem; }
+  .node .u{ color:var(--dim-ink); font-size:.72rem; line-height:1.35; margin-top:.28rem; }
+  .node .chip{ position:absolute; top:.5rem; right:.55rem; font:600 .58rem/1.3 var(--mono); color:var(--warn); border:1px solid var(--warn); border-radius:999px; padding:.05rem .38rem; opacity:.9; }
+  .node .chip.free{ color:var(--good); border-color:var(--good); }
+  .node .chip.core{ color:var(--accent); border-color:var(--accent); }
+  .node .chip.fallback{ color:var(--faint); border-color:var(--faint); }
+  .node.lit{ border-color:var(--accent); border-left-color:var(--accent); box-shadow:0 0 0 1px var(--accent-soft), 0 4px 22px var(--accent-soft); }
+  .node.half{ opacity:.92; border-left-color:var(--warn); }
+  .node.peek{ border-color:var(--faint); }
+  .node.dim{ opacity:.18; }
+  .node .step{ display:none; position:absolute; top:-.55rem; left:-.65rem; width:1.35rem; height:1.35rem; border-radius:50%; background:var(--accent); color:var(--accent-ink); font:800 .74rem/1.35rem var(--mono); text-align:center; box-shadow:0 2px 10px var(--accent-soft); }
+  .node.lit .step.on{ display:block; animation:pop .28s ease-out; }
+  @keyframes pop{ 0%{ transform:scale(.4); } 70%{ transform:scale(1.18);} 100%{ transform:scale(1);} }
+  @media (prefers-reduced-motion: reduce){
+    .eyebrow .pupil::after, #edges path.flowing, .node.lit .step.on{ animation:none; }
+  }
+  footer{ max-width:1520px; margin:0 auto; padding:.4rem 1.6rem 3.4rem; }
+  footer h2{ font:700 .66rem/1 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--ink); margin:1.4rem 0 .8rem; }
+  .rules{ display:grid; grid-template-columns:repeat(auto-fill,minmax(310px,1fr)); gap:.6rem; max-width:1520px; padding:0; margin:0; list-style:none; }
+  .rules li{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:.6rem .8rem; color:var(--dim-ink); font-size:.8rem; line-height:1.45; }
+  .rules li strong{ color:var(--ink); display:block; margin-bottom:.1rem; }
+  .credit{ color:var(--faint); font-size:.72rem; margin-top:1.6rem; font-family:var(--mono); }
+</style>
+<header>
+  <div class="eyebrow"><span class="pupil"></span>ARGUS · SYSTEM MAP</div>
+  <h1>Anatomy of an <em>investigation</em>.</h1>
+  <p class="sub">Watch a due-diligence request travel the system, step by step. <strong>Click any box for a plain-English explanation</strong> of what it is and what it talks to; search anything; pick a journey to replay it. Small print is the code name for engineers; jargon is translated at the bottom.</p>
+  <div class="statrow" id="stats">
+    <div class="stat"><b data-n="73">0</b><span>systems</span></div>
+    <div class="stat"><b data-n="96">0</b><span>connections</span></div>
+    <div class="stat"><b data-n="14">0</b><span>evidence collectors</span></div>
+    <div class="stat"><b data-n="600">0</b><span>second ceiling</span></div>
+    <div class="stat"><b data-cash="1">$0</b><span>typical audit</span></div>
+  </div>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Find anything: audits, sanctions, Grok..." autocomplete="off">
+    <button id="reset">Show everything</button>
+    <span id="flows"></span>
+  </div>
+  <div id="flowdesc"></div>
+</header>
+<div id="wrap">
+  <div id="graph">
+    <div id="iris"></div>
+    <svg id="edges"></svg>
+  </div>
+</div>
+<footer>
+  <h2>Rules a change must never break</h2>
+  <ul class="rules">
+    <li><strong>No score without proof.</strong> Minimum scores come only from strictly verified facts; corroboration, press, and self-claims can raise the ceiling but never guarantee points.</li>
+    <li><strong>Safety screens are mandatory.</strong> Identity, applicable person or institutional-entity sanctions, institutional legal-entity binding, wallet sanctions, bad-actor graph, and founder-asset checks must all reach their evidence threshold before a report is called complete.</li>
+    <li><strong>Names are never guessed.</strong> Person legal and sanctions screens require a provider-verified real person. An institutional organization never borrows that clearance: a strict frozen legal-entity fact must bind the exact entity before its separate OFAC entity screen runs. Generic project accounts show these as follow-ups, not unsatisfiable gates, until their route has equivalent entity collection.</li>
+    <li><strong>Sanctions run fresh every time.</strong> Never served from memory, because someone can be sanctioned tomorrow.</li>
+    <li><strong>AI suggestions are leads, not evidence.</strong> They never pick the methodology, cap a score, or set a floor.</li>
+    <li><strong>Provider labels stay attributed.</strong> A provider or first party can supply useful context, but ARGUS does not silently adopt that description as a verified finding. The facts panel separates source-reported and floor-ineligible supporting context from confirmed facts.</li>
+    <li><strong>Person facts wait for an exact identity bridge.</strong> A copied display name, biography, website, or model-discovered employer cannot attach a real person's career, portfolio, legal, or scoring evidence to the audited handle.</li>
+    <li><strong>Portfolio membership is not portfolio quality.</strong> Only a canonically bound investor-to-company relationship can enter the graph. Repeated pages support one relationship, and one relationship without outcomes cannot establish a top-tier cohort.</li>
+    <li><strong>Fund size keeps its meaning.</strong> AUM, first close, final close, vehicle size, current deployable capital, and personal wealth are separate claims. A bounded empty search proves none of them.</li>
+    <li><strong>Failure is not a clean answer.</strong> Empty findings publish only after every required source answered; failed, malformed, capped, and partial reads publish their limits.</li>
+    <li><strong>A person-shaped result is not employment.</strong> Web and X candidates, project-account associations, and GitHub contributors stay context until a direct team relationship is grounded.</li>
+    <li><strong>Only immutable graph evidence changes a verdict.</strong> Browser submissions and provider risk labels remain research context until a server-collected report version verifies them.</li>
+    <li><strong>Reports are immutable.</strong> Once saved they cannot change; every run carries its own cost ledger and cannot save without one.</li>
+    <li><strong>Decision lenses share one truth set.</strong> Investment, alpha, counterparty, and general diligence may reorder emphasis, but they never hide a saved risk, revise the score, or buy new data.</li>
+    <li><strong>The parent verdict governs.</strong> Direct findings, completeness, score, and verdict stay outside the derived layer. An incomplete parent or an AVOID or FAIL verdict withholds a competing Decision Intelligence thesis.</li>
+    <li><strong>Lineage follows each artifact.</strong> Contradicting sources stay beside supporting sources. Token identity, market, liquidity, history, holder-security, and holder-distribution values keep the exact producer that supplied each one.</li>
+    <li><strong>Cross-provider facts rebind before use.</strong> TVL and funding need the canonical CoinGecko id; fees need a complete same-slug protocol receipt; holder, unlock, and control rows need the canonical address and chain. An unbound row stays visible but cannot produce a measurement.</li>
+    <li><strong>Company and chronology labels do not bind themselves.</strong> Company enrichment requires an independently resolved non-shared official host, coherent requested and matched hosts, the declared method, matched company website, and valid capture time. It cannot authenticate itself from its own request. RDAP age and launch chronology are recomputed from the exact official hostname, registrable domain, endpoint, and account-creation receipt.</li>
+    <li><strong>Impossible numbers stay receipts.</strong> Percentages outside zero to one hundred, a ninety-day unlock total above one hundred, and circulating supply above total supply are withheld and surfaced as reconciliation gaps.</li>
+    <li><strong>Existing evidence keeps its ceiling.</strong> Legal and sanctions name matches are identity-resolution gaps, image classifications are provider opinions, and checked-empty evidence never becomes support. Graph risk needs an exact qualified tie to a complete server-collected adverse report.</li>
+    <li><strong>Missing is never zero.</strong> Decision Intelligence keeps absent measurements and failed checks unresolved. It never turns them into clean, safe, unfunded, unaudited, or exonerated claims.</li>
+    <li><strong>One missing axis does not erase the others.</strong> The analyst scores every decision area with substantive evidence, preserves unsupported areas as unmeasured, and withholds the overall score until the full role profile is assessed.</li>
+    <li><strong>Cross-source arithmetic is time-bound.</strong> Every input needs a valid frozen as-of time within the 72-hour skew policy. A stale or undated comparison is withheld and published as an alignment gap.</li>
+    <li><strong>Lineage fails closed.</strong> The final intelligence graph rejects duplicate IDs and dangling source, answer, denominator, signal, arithmetic, temporal, and classification references. Affected questions reopen and the report exposes the integrity gap.</li>
+    <li><strong>Integrity filtering cannot improve an answer.</strong> Losing lineage may preserve or weaken unresolved, unavailable, or not-collected states, never upgrade them. Evidence-bearing signals must retain their complete measurement and source graph.</li>
+    <li><strong>Provider omission stays unanswered.</strong> Incident recovery has three states: yes, no, and not recorded. A missing field cannot become No or an unrecovered-loss claim.</li>
+    <li><strong>Unrequested sections are not empty sections.</strong> Missing company funding or management enrichment renders not collected, never zero rounds or no managers.</li>
+    <li><strong>Saved chronology cannot drift.</strong> Leadership age and every persisted point-in-time label use a frozen report or source timestamp, never the viewer's clock.</li>
+    <li><strong>EVM evidence is chain-bound.</strong> The public RPC must return the expected chain ID before any block or contract read. No bytecode never means one key, and a Safe-compatible interface never authenticates an official Safe.</li>
+    <li><strong>An audit name is only a lead.</strong> Corroboration requires an auditor-owned page with explicit audit context, the subject name, and a canonical domain or contract anchor in the same saved proof window.</li>
+    <li><strong>Challenge evidence comes from storage.</strong> The browser sends the analyst's question only; the server reloads the exact authenticated report before asking for a second opinion.</li>
+    <li><strong>Time is budgeted.</strong> Evidence gathering stops early enough that scoring and the bad-actor screen always get their full window.</li>
+    <li><strong>One build path.</strong> Server code ships inside one bundle; deploys happen only by pushing main.</li>
+  </ul>
+  <h2>Jargon, translated</h2>
+  <ul class="rules">
+    <li><strong>API</strong> A door that other software (not people) uses to ask a system for something and get a structured answer back.</li>
+    <li><strong>v1</strong> Version 1 of a public interface. Numbering it lets it evolve later (v2) without breaking anyone already plugged in.</li>
+    <li><strong>Route / endpoint</strong> One specific door with one job, like "start an investigation" or "open a saved report."</li>
+    <li><strong>Serverless</strong> Code that only exists while handling a request, then vanishes. No servers to babysit; each run pays only for itself.</li>
+    <li><strong>SSE / stream</strong> A connection held open so the server can keep sending updates live, which is how you watch evidence arrive in real time.</li>
+    <li><strong>Adapter / collector</strong> A specialist module that knows how to fetch one kind of evidence, so the engine can send many out at once.</li>
+    <li><strong>Provider</strong> An outside company or dataset we pay (or use free) for raw data: Google results, court records, chain data.</li>
+    <li><strong>Immutable</strong> Cannot be changed after saving. Re-running creates a new version instead of editing history.</li>
+    <li><strong>Cache</strong> A short-term copy of an answer so asking the same question twice does not cost twice.</li>
+    <li><strong>Quota</strong> A daily spending allowance per member, enforced before any paid work starts.</li>
+  </ul>
+  <p class="credit">machine twin for agents: docs/architecture.json · generated from the live codebase</p>
+</footer>
+<script>
+const COLS = [
+  ["actors","People","who uses it"],
+  ["client","App screens","what they see"],
+  ["routes","API entry points","the doors in"],
+  ["engine","Investigation engine","the pipeline"],
+  ["adapters","Evidence collectors","what gathers proof"],
+  ["providers","Outside data sources","who we ask"],
+  ["data","Storage","what we keep"],
+];
+const N = [
+  ["u-analyst","actors","Customer / analyst","runs searches",null,null,
+   "A person with an ARGUS login who runs investigations: you, a fund analyst, a researcher vetting a deal."],
+  ["u-owner","actors","Owner admin","manages access + cost",null,null,
+   "The account owner. Approves team members, sets daily limits, watches what every investigation cost."],
+  ["u-sweep","actors","Watchlist re-check","manual button, no cron",null,null,
+   "A button that re-checks everything on your watchlist. It only runs when a human presses it: nothing in ARGUS runs on a timer, by design."],
+
+  ["ui-canvas","client","Search + live run screen","InvestigationRun",null,null,
+   "The screen where you type a handle and watch the investigation happen live, evidence appearing as it is found."],
+  ["ui-report","client","The report","Report.tsx",null,null,
+   "The finished product: identity, governing verdict or readiness, direct findings, open questions, sources, and a frozen point-in-time decision map. Four lenses reorder one complete derived signal set without hiding a saved risk, changing the score, or buying more data. On mobile the decision comes first and supporting profile detail collapses."],
+  ["ui-token","client","Token report","TokenReport",null,null,
+   "The same idea for a token contract: safety flags, holder concentration, market data, sanctions."],
+  ["ui-graph","client","Connections map","TrustGraph",null,null,
+   "A visual web of how everyone you have investigated connects: shared wallets, teams, backers."],
+  ["ui-library","client","Entity library","founders, VCs, KOLs",null,null,
+   "Browsable shelves of everyone investigated so far, organized by type: founders, projects, VCs, KOLs."],
+  ["ui-watch","client","Watchlist + alerts","WatchlistPage",null,null,
+   "Subjects you are tracking over time, with alerts when something about them changes."],
+  ["ui-admin","client","Admin + spend","AdminPage",null,null,
+   "Team management plus the money view: which runs cost what, across every data source."],
+
+  ["rt-audit","routes","Start an investigation","api/audit (SSE)",null,null,
+   "The door the app knocks on to start an investigation. It checks who you are and your quota, then keeps the line open for up to 10 minutes, streaming progress back as it happens."],
+  ["rt-v1","routes","Public API","api/v1 person + token",null,null,
+   "An API is a door other SOFTWARE can use, no screens involved. This is ours: a fund can plug ARGUS into their own tools and request person or token reports programmatically. The v1 just means version 1 of that public interface, so it can evolve without breaking anyone."],
+  ["rt-report","routes","Open a saved report","report + provenance",null,null,
+   "Fetches a saved report from storage when you open one, along with its full evidence lineage."],
+  ["rt-panels","routes","Ask-the-report panels","ask / challenge / brief",null,null,
+   "Powers the follow-up buttons on a report: ask it a question, challenge the verdict, generate a case brief. Challenge reloads the exact signed, organization-scoped report on the server and ignores browser-authored verdict evidence."],
+  ["rt-forensics","routes","Forensic lookups","wallets, sanctions, evm",null,null,
+   "One-off lookup doors used by panels inside reports: trace a wallet, screen a sanctions list, inspect a contract. Failed or partial source reads return unavailable, never a clean-looking zero."],
+  ["rt-graph","routes","Graph reads","api/graph",null,null,
+   "Serves the connection web to the graph screen."],
+  ["rt-health","routes","Config health check","api/health, zero spend",null,null,
+   "A free status check: which data sources are configured and wired on the live deployment. Costs nothing to call."],
+  ["rt-sweep","routes","Watchlist sweep","api/sweep, manual",null,null,
+   "The door the watchlist re-check button knocks on. Manual only."],
+
+  ["en-orch","engine","Run controller","budgets the 10 minutes",null,null,
+   "The foreman. Splits the 10-minute window into phases and guarantees scoring and the bad-actor screen always get their share of time."],
+  ["en-intake","engine","Who is this?","profile + official token",null,null,
+   "Establishes identity first: the X profile, and the project's official token, matched through the project's own links, never by name, because names can be faked."],
+  ["en-lanes","engine","Gather evidence","3 parallel lanes",null,null,
+   "Three crews work at once so the job fits the window: one on identity, one on the token, one on wallets."],
+  ["en-basics","engine","Deep fact research","the expensive step",null,null,
+   "The expensive step: an AI researches foundational facts. Strict facts are independently fetched and checked against their cited page; provider and first-party descriptions remain attributed context."],
+  ["en-signals","engine","Extra signals","skipped if out of time",null,null,
+   "Nice-to-have extras: posting cadence, token lifecycle, adverse chatter. The first thing skipped if time runs short."],
+  ["en-tg","engine","Bad-actor screen","reserved time slot",null,null,
+   "Checks the subject against immutable server-collected reports for ties to known bad actors. Browser contributions and provider labels cannot change a verdict. Holds a protected time slot so a slow run can never squeeze it out."],
+  ["en-analyst","engine","AI analyst scores","writes the verdict",null,null,
+   "The AI analyst reads all verified evidence and scores every axis, writing the reasoning behind the verdict."],
+  ["en-score","engine","Verdict math","caps, bands, composite",null,null,
+   "Pure math, no AI: disqualifiers act as hard caps (a prior rug pull caps the score at 10 no matter what), scores stay inside evidence bands, and the weakest role governs the final number."],
+  ["en-clear","engine","Complete enough?","safety screens + 75%",null,null,
+   "Decides whether the report has earned a full verdict: every applicable person or organization safety screen reaches its required evidence state plus 75% coverage. If not, it says PROVISIONAL, it never pretends."],
+  ["en-present","engine","Final presentation","decision-ready or not",null,null,
+   "Formats the outcome honestly: decision-ready, provisional, or incomplete, with the gaps listed."],
+  ["en-intelligence","engine","Decision Intelligence","one frozen truth set",null,null,
+   "Builds per-artifact source lineage, typed measurements, explicit unanswered questions, four decision lenses, a prioritized evidence atlas, dated-event chronology, and complete measurement and source registers from the exact collected evidence. Projects receive product-archetype questions. People, individual investors, investment firms, and operating companies receive separate identity, career, portfolio, fund-scale, operating, relationship, governance, and legal contracts. One shared exact-binding rule governs portfolio collection, scoring, graph edges, and both intelligence builders. A final graph-integrity gate withholds duplicate or dangling records and reopens affected questions. Existing legal, sanctions, graph, portfolio, fund-scale, contradiction, and scorer records keep their original evidence ceiling. The layer is deterministic, score-neutral, costs nothing to derive, and stays subordinate to the governing report."],
+  ["en-token","engine","Token scanner","separate fast path",null,null,
+   "A separate, faster pipeline just for token contracts. About a minute, about a cent."],
+
+  ["ad-basics","adapters","Fact researcher","basicFacts","key",null,
+   "The heavy-duty researcher: Claude with live web search finds founders, funding, products, and governance, and every claim is then re-fetched and verified from the original source."],
+  ["ad-x","adapters","X + social collector","x.ts + twitterapi","key",null,
+   "Pulls the X side: profile, posts, follower graph. Also the traffic director that routes general web searches to the cheapest capable searcher."],
+  ["ad-grounded","adapters","Cheap web reader","groundedSearch","key",null,
+   "The budget researcher: Google results from Serper for a tenth of a cent, pages fetched by us, and a cheap AI extracts the answer instead of an expensive one browsing."],
+  ["ad-audits","adapters","Audit checker","securityAudits",null,null,
+   "Keeps subject-page and curated-link audit leads separate. An engagement is corroborated only when an auditor-owned page contains explicit audit context plus the project's official domain or canonical contract in the same saved proof window."],
+  ["ad-llama","adapters","DeFi metrics","defiLlama",null,null,
+   "Pulls usage numbers that cannot be faked cheaply: value locked, fees users actually paid, funding rounds."],
+  ["ad-unlocks","adapters","Unlock schedule","tokenUnlocks","key",null,
+   "Answers 'when does locked supply hit the market next, and how much' from vesting calendars."],
+  ["ad-holders","adapters","Whale + LP check","tokenHolders",null,null,
+   "How concentrated is the token: the top-10 holders' share, and whether the trading liquidity is locked or could be pulled."],
+  ["ad-tgraph","adapters","Known-bad connections","trustgraph",null,null,
+   "Cross-references every past report for shared wallets, teams, or infrastructure with known bad actors."],
+  ["ad-prior","adapters","What changed since last scan","priorOutcome",null,null,
+   "Compares this run to your previous one and says so in the report: score moved, coverage completed."],
+  ["ad-offchain","adapters","Courts + sanctions + news","offchain, always live",null,null,
+   "Court records, sanctions lists, and press. Deliberately never cached: a person can be sanctioned tomorrow, so it checks fresh every run."],
+  ["ad-pfp","adapters","Profile-photo integrity","profilePhoto",null,null,
+   "Is the profile photo a real person, a stolen image, or AI-generated? A common scam tell."],
+  ["ad-pdl","adapters","Career verifier","peopledatalabs","key",null,
+   "Verifies career claims against employment-data records beyond what LinkedIn shows."],
+  ["ad-github","adapters","Code footprint","github","key",null,
+   "Does the team actually ship code? Repos, activity, and identity links between GitHub and X."],
+  ["ad-monid","adapters","Private-market data","monid","key",null,
+   "Private-company records: funding rounds, leadership, firmographics. The PitchBook-style layer."],
+  ["ad-ptoken","adapters","Official-token binder","projectToken",null,null,
+   "Binds the OFFICIAL token through the project's own account and domain, so a copycat token with the same name cannot sneak into the report. Identity, market, liquidity, and history each retain their exact producer URL and capture time."],
+  ["ad-evmcontrol","adapters","EVM control reality","fixed block, score-neutral","free",null,
+   "After canonical token binding is final, verifies the public RPC's chain ID, freezes one block hash, and records bounded standard proxy, implementation, owner, bytecode, and Safe-compatible interface receipts. No-code is not EOA, interface compatibility is not authenticated custody, and this evidence never enters scoring."],
+  ["ad-investor","adapters","Investor verifier","portfolio + fundScale",null,null,
+   "For VC subjects: verifies the claimed portfolio and fund size from primary sources instead of taking the website's word."],
+  ["ad-kb","adapters","Fact memory","entityStore","flag",null,
+   "The memory: verified facts are saved per entity, so auditing the same subject again starts from everything already proven. Sanctions are never stored here."],
+  ["ad-cache","adapters","Response cache","cache.ts",null,null,
+   "Briefly saves raw provider responses so the same lookup is not paid for twice in quick succession."],
+  ["ad-web","adapters","Page fetcher","publicWeb",null,null,
+   "The shared downloader every researcher uses to fetch and clean web pages before reading them."],
+
+  ["pv-claude","providers","Anthropic Claude","sonnet-4-6 + haiku","core",
+   "The brain. Scores every verdict, runs deep fact research, checks profile photos. Quality-critical: never downgraded."],
+  ["pv-grok","providers","xAI Grok","grok-4-fast","fallback",
+   "Backup only: steps in when Claude paths fail, plus X-native adverse sweeps. Hard-capped at $8 per run."],
+  ["pv-or","providers","Gemini via OpenRouter","gemini-2.5-flash-lite","cheap",
+   "Reads fetched web pages and extracts facts at ~3% of Sonnet's price. Zero-data-retention enforced."],
+  ["pv-serper","providers","Serper","google search api","cheap",
+   "Raw Google results that feed the cheap reader. $1 per 1,000 searches."],
+  ["pv-tw","providers","twitterapi.io","x / twitter data","cheap",
+   "Profiles, posts, follower graph, account age. $0.0002 per call."],
+  ["pv-llama","providers","DeFiLlama","api.llama.fi","free",
+   "TVL + 30-day trend, protocol fees + trend, funding rounds, audit links."],
+  ["pv-cr","providers","CryptoRank","v3 api","key",
+   "Upcoming token-unlock dates, sizes, and 90-day supply load. 2 credits per audit."],
+  ["pv-goplus","providers","GoPlus","goplus.io","free",
+   "Top-10 holder concentration, LP lock/burn status, honeypot flags."],
+  ["pv-mkts","providers","CoinGecko + DexScreener","market apis","free",
+   "Official-token binding, price, market cap, rank, live DEX liquidity."],
+  ["pv-osint","providers","Sanctions + courts + news","ofac eu un uk + courtlistener","free",
+   "Live sanctions screens, US court records, press. Runs fresh every audit, never cached."],
+  ["pv-pdl","providers","People Data Labs","person enrichment","key",
+   "Verifies career history beyond LinkedIn. $0.10 per matched person."],
+  ["pv-gh","providers","GitHub","rest api","key",
+   "Repos, org membership, code footprint, identity links back to X."],
+  ["pv-monid","providers","Monid / Akta","private-market data","key",
+   "PitchBook-grade funding rounds and leadership records. Metered."],
+  ["pv-chain","providers","Helius + Etherscan + Arkham (dormant)","chain apis","key",
+   "Wallet forensics and on-chain history. Arkham client calls are off by default and cannot affect readiness unless VITE_ARKHAM_PROVIDER_ENABLED=true."],
+  ["pv-publicrpc","providers","Public EVM RPC","direct fixed-block reads","free",
+   "Free public endpoints for supported EVM networks. Every endpoint must prove the expected eth_chainId before ARGUS reads a block or contract. The collector makes no model call and records zero marginal dollars."],
+
+  ["db-versions","data","Saved reports","immutable versions",null,null,
+   "Every finished report, frozen forever. A re-run creates a NEW version; old ones cannot be edited. That is the audit trail investors can rely on."],
+  ["db-cases","data","Case files","lifecycle + events",null,null,
+   "One folder per subject holding all its report versions and activity over time."],
+  ["db-graph","data","Trust-graph store","cross-report links",null,null,
+   "The stored web of connections between investigated subjects. Only rows tied to immutable server-collected report versions can affect another report's result; the rest stay visible context."],
+  ["db-kb","data","Fact memory store","entity_facts",null,null,
+   "The table behind fact memory: what has been verified about each entity, and across how many audits."],
+  ["db-cache","data","Response cache","provider_cache",null,null,
+   "Short-term storage of raw data-source responses to avoid paying twice for the same lookup."],
+  ["db-usage","data","Cost telemetry","every provider call",null,null,
+   "Every provider call and its cost, per run. This is why the report can say what it cost: measured, not guessed."],
+  ["db-members","data","Members + quotas","who may spend what",null,null,
+   "Who is on the team, their role, and their daily spending limits."],
+  ["db-local","data","Browser history log","this device only",null,null,
+   "A history list stored in your own browser, so your recent cases appear instantly. Never leaves your device."],
+];
+const E = [
+  ["u-analyst","ui-canvas"],["u-analyst","ui-report"],["u-analyst","ui-token"],["u-analyst","ui-library"],["u-analyst","ui-watch"],
+  ["u-owner","ui-admin"],["u-sweep","rt-sweep"],
+  ["ui-canvas","rt-audit"],["ui-canvas","db-local"],["ui-report","rt-report"],["ui-report","rt-panels"],["ui-report","rt-forensics"],["ui-report","db-local"],
+  ["ui-token","rt-v1"],["ui-graph","rt-graph"],["ui-library","rt-report"],["ui-watch","rt-report"],["ui-admin","rt-health"],["ui-admin","db-usage"],
+  ["rt-audit","en-orch"],["rt-v1","en-orch"],["rt-v1","en-token"],["rt-sweep","en-token"],
+  ["rt-report","db-versions"],["rt-report","db-cases"],["rt-graph","db-graph"],["rt-panels","pv-claude"],["rt-panels","db-versions"],
+  ["rt-forensics","pv-chain"],["rt-forensics","pv-osint"],["rt-audit","db-members"],
+  ["en-orch","en-intake"],["en-intake","en-lanes"],["en-lanes","en-basics"],["en-basics","en-signals"],["en-signals","en-tg"],["en-tg","en-analyst"],
+  ["en-analyst","en-score"],["en-score","en-clear"],["en-clear","en-intelligence"],["en-intelligence","en-present"],
+  ["en-orch","db-versions"],["en-orch","db-usage"],["en-orch","ad-prior"],["en-orch","ad-investor"],["en-orch","ad-evmcontrol"],
+  ["en-token","pv-mkts"],["en-token","pv-goplus"],["en-token","pv-osint"],["en-token","db-versions"],
+  ["en-intake","ad-ptoken"],["en-intake","ad-x"],["en-intake","ad-llama"],["en-intake","ad-unlocks"],["en-intake","ad-holders"],["en-intake","ad-audits"],["en-intake","ad-monid"],
+  ["en-lanes","ad-x"],["en-lanes","ad-github"],["en-lanes","ad-pdl"],["en-lanes","ad-offchain"],["en-lanes","ad-pfp"],
+  ["en-basics","ad-basics"],["en-basics","ad-kb"],["en-signals","ad-x"],["en-tg","ad-tgraph"],
+  ["en-analyst","pv-claude"],["en-analyst","pv-grok"],
+  ["ad-basics","pv-claude"],["ad-basics","ad-web"],
+  ["ad-x","pv-tw"],["ad-x","pv-grok"],["ad-x","pv-claude"],["ad-x","ad-grounded"],
+  ["ad-grounded","pv-serper"],["ad-grounded","pv-or"],["ad-grounded","ad-web"],
+  ["ad-audits","ad-llama"],["ad-audits","ad-web"],
+  ["ad-llama","pv-llama"],["ad-unlocks","pv-cr"],["ad-holders","pv-goplus"],["ad-ptoken","pv-mkts"],["ad-evmcontrol","pv-publicrpc"],["ad-evmcontrol","en-intelligence"],
+  ["ad-offchain","pv-osint"],["ad-pfp","pv-claude"],["ad-pdl","pv-pdl"],["ad-github","pv-gh"],["ad-monid","pv-monid"],["ad-investor","pv-claude"],
+  ["ad-kb","db-kb"],["ad-cache","db-cache"],["ad-tgraph","db-graph"],["ad-prior","db-versions"],["ad-web","ad-cache"],
+];
+const FLOWS = [
+  ["Customer searches a founder or project",
+   ["u-analyst","ui-canvas","rt-audit","en-orch","en-intake","en-lanes","en-basics","en-signals","en-tg","en-analyst","en-score","en-clear","en-intelligence","en-present","db-versions"],
+   "The main journey, replayed above in numbered steps. Bright boxes are the path; soft-lit boxes are the tools each step calls.",
+   ["A member decides to vet someone before capital moves.",
+    "Types @handle, hits Start. A live evidence stream opens.",
+    "Auth and quota check; a 10-minute serverless window opens.",
+    "The run controller carves the budget: collect, screen, score.",
+    "Who is this? Profile resolved; official token bound, never by name.",
+    "Three parallel lanes fan out: identity, token, wallets.",
+    "Deep research: strict facts fetched and checked; attributed context stays labeled.",
+    "Cadence, lifecycle, and adverse sweeps, if time allows.",
+    "The bad-actor screen runs in its reserved slot. Never skipped.",
+    "The AI analyst scores every axis and writes the verdict.",
+    "Deterministic math: hard caps override, the weakest role governs.",
+    "Complete enough? Applicable person or organization safety screens plus 75% coverage decide.",
+    "Decision Intelligence freezes per-artifact lineage, measurements, arithmetic, gaps, four lenses, a dated evidence atlas, and role-aware project, person, investor, fund, or company questions without changing or overriding the governing result.",
+    "Decision-ready or provisional. Never silently cleared.",
+    "Saved immutably with its full cost ledger. About a dollar, six minutes."]],
+  ["Customer scans a token",
+   ["u-analyst","ui-token","rt-v1","en-token","pv-mkts","db-versions"],
+   "The fast path for a contract address: market, holder, honeypot, and sanctions data into a saved token report. About a minute, about a cent.",
+   ["Someone pastes a contract address.",
+    "The token report screen sends it to the public API.",
+    "One API unit, no long window needed.",
+    "The token scanner pulls safety, holders, and market data.",
+    "Prices, liquidity, and honeypot flags corroborated across sources.",
+    "Saved as an immutable token report."]],
+  ["How a fact gets found cheaply",
+   ["ad-x","ad-grounded","pv-serper","pv-or"],
+   "Instead of paying the expensive model to browse, the cheap reader gets Google results for a tenth of a cent and has Gemini extract the answer with zero data retention.",
+   ["A collector needs a web fact.",
+    "The cheap reader takes the job before any expensive model.",
+    "Serper returns Google results for $0.001.",
+    "Gemini reads the fetched pages and extracts the answer at ~3% of Sonnet's price."]],
+  ["How facts are remembered between runs",
+   ["en-basics","ad-kb","db-kb"],
+   "Every audit writes its verified facts into fact memory; the next audit reads them back instead of re-paying discovery. Sanctions and legal are never remembered - they run fresh every time.",
+   ["Deep research verifies a fact the hard way once.",
+    "Fact memory stores it, keyed to the entity.",
+    "Next audit of the same entity starts from everything already proven."]],
+  ["How audits get verified",
+   ["pv-llama","ad-llama","ad-audits","ad-web"],
+   "DeFiLlama supplies bounded audit-link leads. The audit checker keeps each lead's origin, then corroborates only an auditor-owned page whose saved proof window contains explicit audit context and a canonical project identity anchor.",
+   ["DeFiLlama curates the protocol's audit links.",
+    "The DeFi metrics adapter hands them over.",
+    "Subject pages and curated links remain attributed leads, never proof by name.",
+    "The auditor-owned page must carry explicit audit work plus the official domain or canonical contract in the same bounded proof window."]],
+  ["How EVM control is frozen",
+   ["en-orch","ad-ptoken","ad-evmcontrol","pv-publicrpc","en-intelligence","db-versions"],
+   "After the canonical token address is final, a free direct-RPC lane verifies the network, freezes one block, and records a bounded standard control surface. The evidence stays score-neutral and costs zero marginal dollars.",
+   ["The run controller waits for the canonical token binding to become final.",
+    "The official-token binder supplies the verified chain and full address, never a name match.",
+    "The control collector checks eth_chainId first. A mismatch yields unavailable before any contract read; a matching endpoint then fixes one block and records standard proxy, owner, bytecode, and Safe-compatible receipts.",
+    "The public RPC supplies direct chain data with no model call and no paid provider charge.",
+    "Decision Intelligence turns the bounded receipts and unresolved limits into score-neutral context.",
+    "The exact snapshot is saved with the immutable report version."]],
+];
+
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const graph = document.getElementById("graph");
+const svg = document.getElementById("edges");
+const nodeEl = new Map();
+for (const [id,label,sub] of COLS){
+  const col = document.createElement("div");
+  col.className = "col"; col.dataset.col = id;
+  col.innerHTML = `<h2>${label}</h2><p class="colsub">${sub}</p>`;
+  for (const n of N.filter(n => n[1]===id)){
+    const d = document.createElement("div");
+    d.className = "node"; d.id = "n-"+n[0];
+    const chipClass = ({free:"free",cheap:"free",core:"core",fallback:"fallback"})[n[4]] || "";
+    d.innerHTML = `<span class="step"></span><div class="t">${n[2]}</div><div class="s">${n[3]}</div>`
+      + (n[5] ? `<div class="u">${n[5]}</div>` : "")
+      + (n[4] ? `<span class="chip ${chipClass}">${n[4]}</span>` : "");
+    d.addEventListener("click", ev => { ev.stopPropagation(); focusNode(n[0]); });
+    d.addEventListener("mouseenter", () => peek(n[0], true));
+    d.addEventListener("mouseleave", () => peek(n[0], false));
+    col.appendChild(d); nodeEl.set(n[0], d);
+  }
+  graph.appendChild(col);
+}
+const adj = new Map(N.map(n => [n[0], new Set()]));
+for (const [a,b] of E){ adj.get(a)?.add(b); adj.get(b)?.add(a); }
+const colIndex = new Map(COLS.map((c,i)=>[c[0],i]));
+const colOf = new Map(N.map(n=>[n[0],n[1]]));
+const paths = [];
+function draw(){
+  const g = graph.getBoundingClientRect();
+  svg.setAttribute("width", graph.scrollWidth); svg.setAttribute("height", graph.scrollHeight);
+  svg.innerHTML = ""; paths.length = 0;
+  for (const [a,b] of E){
+    const ea = nodeEl.get(a), eb = nodeEl.get(b);
+    if (!ea || !eb) continue;
+    const ra = ea.getBoundingClientRect(), rb = eb.getBoundingClientRect();
+    const leftToRight = colIndex.get(colOf.get(a)) <= colIndex.get(colOf.get(b));
+    const x1 = (leftToRight ? ra.right : ra.left) - g.left, y1 = ra.top + ra.height/2 - g.top;
+    const x2 = (leftToRight ? rb.left : rb.right) - g.left, y2 = rb.top + rb.height/2 - g.top;
+    const dx = Math.max(30, Math.abs(x2-x1)*0.45) * (leftToRight ? 1 : -1);
+    const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+    p.setAttribute("d",`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`);
+    svg.appendChild(p); paths.push([p,a,b]);
+  }
+  applyState();
+}
+let state = { mode:"all", id:null, q:"", flow:-1, upTo:Infinity };
+let playTimer = null;
+const flowdesc = document.getElementById("flowdesc");
+function stopPlayback(){ if (playTimer){ clearInterval(playTimer); playTimer = null; } }
+function peek(id, on){
+  if (state.mode !== "all") return;
+  for (const nb of (adj.get(id)||[])) nodeEl.get(nb)?.classList.toggle("peek", on);
+}
+function applyState(){
+  let litNodes = null, litEdge = () => false;
+  let halfNodes = new Set(), halfEdge = () => false;
+  const steps = new Map();
+  if (state.mode==="focus" && state.id){
+    litNodes = new Set([state.id, ...(adj.get(state.id)||[])]);
+    litEdge = (a,b) => a===state.id || b===state.id;
+    const n = N.find(n=>n[0]===state.id);
+    const explain = n ? (n[6] || n[5] || n[3]) : "";
+    flowdesc.innerHTML = n ? `<strong>${n[2]}</strong> ${explain} <em>Lit boxes are everything it talks to; click again to clear.</em>` : "";
+  } else if (state.mode==="search" && state.q){
+    const q = state.q.toLowerCase();
+    litNodes = new Set(N.filter(n => (n[2]+" "+n[3]+" "+(n[4]||"")+" "+(n[5]||"")+" "+n[1]).toLowerCase().includes(q)).map(n=>n[0]));
+    litEdge = (a,b) => litNodes.has(a) && litNodes.has(b);
+    flowdesc.textContent = `${litNodes.size} match${litNodes.size===1?"":"es"}`;
+  } else if (state.mode==="flow" && state.flow>=0){
+    const [name, chain, desc, captions] = FLOWS[state.flow];
+    const visible = chain.slice(0, state.upTo);
+    litNodes = new Set(visible);
+    visible.forEach((id,i)=>steps.set(id, i+1));
+    const pairs = new Set(visible.slice(1).map((id,i)=>[visible[i],id].sort().join("|")));
+    litEdge = (a,b) => pairs.has([a,b].sort().join("|"));
+    for (const id of visible){
+      if (colOf.get(id) === "actors") continue;
+      for (const nb of (adj.get(id)||[])) if (!litNodes.has(nb)) halfNodes.add(nb);
+    }
+    for (const id of [...halfNodes]) if (colOf.get(id) === "adapters")
+      for (const nb of (adj.get(id)||[])) if (colOf.get(nb) === "providers" && !litNodes.has(nb)) halfNodes.add(nb);
+    const inRun = (x) => litNodes.has(x) || halfNodes.has(x);
+    halfEdge = (a,b) => inRun(a) && inRun(b);
+    if (state.upTo <= chain.length && captions){
+      const i = state.upTo - 1;
+      flowdesc.innerHTML = `<span class="stepno">STEP ${state.upTo}/${chain.length}</span> ${captions[i] ?? ""}`;
+    } else {
+      flowdesc.innerHTML = `<strong>${name}:</strong> ${desc}`;
+    }
+  } else {
+    flowdesc.innerHTML = `Hover any box to preview its connections. <em>Pick a journey above to replay it.</em>`;
+  }
+  for (const [id,el] of nodeEl){
+    const lit = litNodes ? litNodes.has(id) : false;
+    const half = !lit && halfNodes.has(id);
+    el.classList.toggle("lit", lit);
+    el.classList.toggle("half", half);
+    el.classList.toggle("dim", litNodes ? !lit && !half : false);
+    if (!litNodes) el.classList.remove("peek");
+    const badge = el.querySelector(".step");
+    if (steps.has(id)){ badge.textContent = steps.get(id); badge.classList.add("on"); }
+    else badge.classList.remove("on");
+  }
+  const done = state.mode!=="flow" || state.upTo >= (FLOWS[state.flow]?.[1].length ?? 0);
+  for (const [p,a,b] of paths){
+    const lit = litEdge(a,b);
+    const half = !lit && halfEdge(a,b);
+    p.classList.toggle("lit", lit);
+    p.classList.toggle("flowing", lit && state.mode==="flow" && done && !reduceMotion);
+    p.classList.toggle("lit2", half);
+    p.classList.toggle("hide", (!!litNodes) && !lit && !half);
+  }
+  document.querySelectorAll("button.flow").forEach((btn,i)=>btn.classList.toggle("on", state.mode==="flow" && state.flow===i));
+}
+function playFlow(i){
+  stopPlayback();
+  const chain = FLOWS[i][1];
+  if (reduceMotion){ state = {mode:"flow",id:null,q:"",flow:i,upTo:chain.length}; applyState(); return; }
+  state = {mode:"flow",id:null,q:"",flow:i,upTo:1}; applyState();
+  playTimer = setInterval(()=>{
+    if (state.mode!=="flow" || state.flow!==i){ stopPlayback(); return; }
+    state.upTo += 1; applyState();
+    if (state.upTo >= chain.length){ stopPlayback(); setTimeout(()=>{ if (state.mode==="flow"&&state.flow===i){ state.upTo = chain.length + 1; applyState(); } }, 1400); }
+  }, 620);
+}
+function clearAll(){
+  stopPlayback();
+  state = {mode:"all",id:null,q:"",flow:-1,upTo:Infinity};
+  document.getElementById("q").value = ""; applyState();
+}
+function focusNode(id){
+  stopPlayback();
+  state = (state.mode==="focus" && state.id===id) ? {mode:"all",id:null,q:"",flow:-1,upTo:Infinity} : {mode:"focus",id,q:"",flow:-1,upTo:Infinity};
+  document.getElementById("q").value = ""; applyState();
+}
+const flowsBar = document.getElementById("flows");
+FLOWS.forEach(([name],i)=>{
+  const b = document.createElement("button"); b.className="flow"; b.textContent = name;
+  b.addEventListener("click",()=>{ if (state.mode==="flow"&&state.flow===i){ clearAll(); } else playFlow(i); });
+  flowsBar.appendChild(b);
+});
+document.getElementById("q").addEventListener("input", e => {
+  stopPlayback();
+  state = e.target.value.trim() ? {mode:"search",id:null,q:e.target.value.trim(),flow:-1,upTo:Infinity} : {mode:"all",id:null,q:"",flow:-1,upTo:Infinity};
+  applyState();
+});
+document.getElementById("reset").addEventListener("click", clearAll);
+document.addEventListener("keydown", e => { if (e.key==="Escape") clearAll(); });
+// Count-up stats, then auto-play the customer journey: the map demos itself.
+function countUp(el, target, cash){
+  if (reduceMotion){ el.textContent = cash ? "$1" : String(target); return; }
+  const t0 = performance.now(), dur = 900;
+  const tick = (t)=>{
+    const k = Math.min(1,(t-t0)/dur), v = Math.round(target * (1-Math.pow(1-k,3)));
+    el.textContent = cash ? "$"+v : String(v);
+    if (k<1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+document.querySelectorAll("#stats b").forEach(b=>countUp(b, Number(b.dataset.n ?? b.dataset.cash), b.dataset.cash !== undefined));
+draw();
+window.addEventListener("resize", draw);
+setTimeout(()=>{ if (state.mode==="all") playFlow(0); }, reduceMotion ? 0 : 700);
+</script>
