@@ -858,9 +858,34 @@
 }
 
 /* Print / export-PDF: strip the app chrome so a threat report saves clean. */
+/* Export PDF: the website on paper. src/lib/printTheme.ts flips the app to the
+   light theme for the print pass, so every token below IS the site's own light
+   palette - the PDF cannot drift from the website's styling. This block only
+   (1) makes the browser actually print those colors, (2) removes interactive
+   chrome and floating overlays so nothing overlaps the report, and (3) unrolls
+   the app's scroll viewport so the full report paginates cleanly. */
 @media print {
-  .app-sidebar, nav, button, .print\:hidden { display: none !important; }
-  body, html { background: #fff !important; }
+  @page { size: a4; margin: 12mm; }
+
+  /* Browsers strip backgrounds by default; the site's look depends on them
+     (page wash, white cards, chips, verdict tints). Print them exactly. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  body, html { background: var(--color-void) !important; }
+
+  /* Interactive chrome and floating overlays. `fixed` catches every screen
+     overlay (ARGUS EYE assistant, skip link, mobile scrim) - anything fixed
+     would otherwise print on top of report content on every page. */
+  .app-sidebar, .app-mobile-header, nav, button, dialog,
+  [class~="fixed"], .print\:hidden { display: none !important; }
+
+  /* Sticky toolbars and section headers print in normal flow. On screen they
+     float over scrolled content with a translucent blur; in a paged medium
+     that reads as an overlap, so they become plain rows of the document. */
+  [class~="sticky"], .report-toolbar { position: static !important; }
+
   /* The app shell is a fixed-height scroll viewport (h-screen overflow-hidden
      with an overflow-y-auto main) - print only captures one viewport worth and
      clips the rest. Unroll every container so the full report paginates. */
@@ -869,7 +894,13 @@
     max-height: none !important;
     overflow: visible !important;
   }
+  /* Horizontal scrollers can't scroll on paper - let their content flow. */
+  .overflow-x-auto { overflow: visible !important; }
   main { max-width: 100% !important; }
-  /* Don't split a report panel across a page boundary mid-card. */
-  main .rounded-xl { break-inside: avoid; }
+
+  /* Pagination hygiene: never split a card, a table row, or a finding across
+     a page boundary; repeat table headers on each page. */
+  main .rounded-xl, .panel, .finding, tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  h1, h2, h3 { break-after: avoid; }
 }
