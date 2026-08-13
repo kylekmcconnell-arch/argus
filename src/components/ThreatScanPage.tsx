@@ -504,7 +504,7 @@ function Report({ scan }: { scan: ThreatScan }) {
               at, plus the chart/registry pages an analyst opens next anyway. */}
           <div className="mt-2 flex flex-wrap gap-1.5">
             {projectLinks(d).map((l) => (
-              <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="mono rounded border border-line px-2 py-0.5 text-[10.5px] text-ink-dim transition hover:border-signal hover:text-ink print:hidden">{l.label} ↗</a>
+              <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer" className="mono rounded border border-line px-2 py-0.5 text-[10.5px] text-ink-dim transition hover:border-signal hover:text-ink">{l.label} ↗</a>
             ))}
           </div>
         </div>
