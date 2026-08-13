@@ -228,7 +228,7 @@ export function DossiersPage({
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal-lift">{letter}</span>
                 )}
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                     {isArchived ? (
                       <span className="mono min-w-0 truncate text-[13.5px] text-ink">{r.query ?? r.ref}</span>
                     ) : (
@@ -245,10 +245,10 @@ export function DossiersPage({
                     <span className="chip tint-var shrink-0" style={{ "--tint": km.color } as React.CSSProperties}>{km.label}</span>
                     {isArchived && <span className="chip shrink-0">archived</span>}
                     {readout.positiveNeedsQualification && (
-                      <span className="chip shrink-0">partial evidence</span>
+                      <span className="chip chip-wrap min-w-0">partial evidence</span>
                     )}
                   </span>
-                  <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-ink-faint">
+                  <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] text-ink-faint">
                     <span className="truncate">
                       {isArchived ? `archived ${ago(r.archivedAt)} · report ${ago(r.ts)}` : ago(r.ts)}
                       {r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}
@@ -385,13 +385,13 @@ export function DossiersPage({
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal-lift">{letter}</span>
           )}
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5">
+            <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
               <span className="mono truncate text-[13.5px] text-ink">{title}</span>
               <span className="chip tint-unverifiable shrink-0">project</span>
               <span className="mono shrink-0 text-[11px] text-ink-faint">{sorted.length} facets</span>
               {isArchived && <span className="chip shrink-0">archived</span>}
               {readout.positiveNeedsQualification && (
-                <span className="chip shrink-0">partial evidence</span>
+                <span className="chip chip-wrap min-w-0">partial evidence</span>
               )}
             </span>
             <span className="mt-0.5 block truncate text-[11px] text-ink-faint">
