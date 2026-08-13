@@ -23,6 +23,7 @@ import {
   UserFocus,
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
+import { printReportPdf } from "../lib/printPdf";
 import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
 import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
 import type { DecisionLensId } from "../intelligence/types";
@@ -2933,7 +2934,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 Rescan
               </button>
             )}
-            <button type="button" onClick={() => window.print()} title="Save this report as a PDF (opens the print dialog)" className="btn-secondary print:hidden min-h-11 gap-1.5 px-3 text-[12.5px]">
+            <button type="button" onClick={() => printReportPdf(dossier.handle)} title="Save this report as a PDF (opens the print dialog)" className="btn-secondary print:hidden min-h-11 gap-1.5 px-3 text-[12.5px]">
               Export PDF
             </button>
             {canShare && (

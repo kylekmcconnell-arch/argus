@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
 import type { ResolvedInput } from "../lib/resolveInput";
+import { printReportPdf } from "../lib/printPdf";
 import type { TraceStep } from "../data/evidence";
 import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat/types";
 import { threatScan } from "../threat/scan";
@@ -491,7 +492,7 @@ function Report({ scan }: { scan: ThreatScan }) {
             <span className="ml-auto flex shrink-0 gap-2">
               {/* Browser print-to-PDF: the print stylesheet strips the app chrome
                   so what saves is the clean report itself. */}
-              <button onClick={() => window.print()} className="mono rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink print:hidden">export PDF ↓</button>
+              <button onClick={() => printReportPdf(scan.name || scan.symbol)} className="mono rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink print:hidden">export PDF ↓</button>
               <ShareButton scan={scan} />
             </span>
           </div>
