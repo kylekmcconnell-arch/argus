@@ -14,6 +14,17 @@
  */
 import { usdCompact } from "./format";
 
+// Same pattern as src/threat/tokenomics.ts's NFT_POSITION check: a
+// concentrated-liquidity AMM (Uniswap V3/V4, Raydium CLMM/CPMM, Meteora DLMM,
+// Orca Whirlpool) holds liquidity as a position NFT, not an ERC20 LP token —
+// duplicated here rather than imported so this presentation module stays
+// independent of the standalone threat-scanner module's internals.
+const CONCENTRATED_LIQUIDITY_DEX = /\bv3\b|\bv4\b|clmm|cpmm|dlmm|whirlpool|concentrated/i;
+export function isConcentratedLiquidityPool(dexId?: string | null, dexLabels?: readonly string[] | null): boolean {
+  return (dexLabels ?? []).some((label) => CONCENTRATED_LIQUIDITY_DEX.test(label))
+    || CONCENTRATED_LIQUIDITY_DEX.test(dexId ?? "");
+}
+
 export type NoticedSeverity = "alert" | "watch" | "note";
 
 export interface NoticedSignal {
@@ -48,6 +59,16 @@ export function top10ShareFromRows(
 
 export interface NoticedInputs {
   lpLockedPct?: number | null;
+  /**
+   * True when the pool is a concentrated-liquidity / position-NFT AMM
+   * (Uniswap V3/V4, Raydium CLMM, Meteora DLMM, Orca Whirlpool). There is no
+   * ERC20 LP token to lock or burn on these pools, so lpLockedPct reads as 0
+   * by construction — that is not evidence the liquidity is removable, and
+   * asserting "None of the trading liquidity is locked" from it is a false
+   * positive (the same class of pool src/threat/tokenomics.ts already treats
+   * as "nft-position" rather than "unlocked").
+   */
+  isConcentratedLiquidityPool?: boolean;
   largestHolderPct?: number | null;
   top10HolderPct?: number | null;
   /** Number of wallet rows included in top10HolderPct. */
@@ -114,7 +135,7 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
       : ` The top 10 wallets hold ${pct(holderAggregate.sharePct)}.`
     : "";
 
-  if (isNum(input.lpLockedPct) && input.lpLockedPct <= 5) {
+  if (isNum(input.lpLockedPct) && input.lpLockedPct <= 5 && !input.isConcentratedLiquidityPool) {
     signals.push({
       id: "lp-unlocked",
       severity: "alert",

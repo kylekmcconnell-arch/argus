@@ -69,7 +69,7 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { formatRoleLabel, plainLanguageSummary } from "../lib/plainLanguage";
-import { deriveNoticedSignals, deriveVerdictArgument, top10ShareFromRows } from "../lib/reportInsights";
+import { deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
 import { deriveIntelligenceBrief } from "../lib/intelligenceBrief";
 import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
@@ -1014,6 +1014,7 @@ export function InvestigationReport({
   const upcomingUnlocks = projectAccount?.tokenUnlocks;
   const noticedSignals = deriveNoticedSignals({
     lpLockedPct: lpLockedOrBurnedPct,
+    isConcentratedLiquidityPool: isConcentratedLiquidityPool(token.dexId, token.dexLabels),
     largestHolderPct: token.safety?.topHolderPct ?? projectAccount?.holderProfile?.topHolderPct,
     top10HolderPct: projectAccount?.holderProfile?.top10Pct ?? top10FromRows,
     assessedWalletCount: projectHolderAggregate

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument, top10ShareFromRows } from "./reportInsights";
+import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "./reportInsights";
 
 describe("deriveNoticedSignals", () => {
   it("lifts unlocked liquidity and holder concentration out of the stat grid", () => {
@@ -21,6 +21,28 @@ describe("deriveNoticedSignals", () => {
     });
     expect(signals[1].headline).toBe("One wallet holds 30% of the supply");
     expect(signals[1].detail).toContain("top 10 wallets hold 92%");
+  });
+
+  it("does not flag a concentrated-liquidity (v3/v4) pool as unlocked: there is no LP token to lock", () => {
+    const signals = deriveNoticedSignals({
+      lpLockedPct: 0,
+      isConcentratedLiquidityPool: true,
+      largestHolderPct: 30,
+      marketCapUsd: 557_000_000,
+      anchors: { market: "#investigation-visuals" },
+    });
+
+    expect(signals.map((signal) => signal.id)).not.toContain("lp-unlocked");
+  });
+
+  it("still flags a standard-AMM pool with no lock as unlocked", () => {
+    const signals = deriveNoticedSignals({
+      lpLockedPct: 0,
+      isConcentratedLiquidityPool: false,
+      marketCapUsd: 557_000_000,
+    });
+
+    expect(signals.map((signal) => signal.id)).toContain("lp-unlocked");
   });
 
   it("describes a short holder register as a floor across the assessed wallets", () => {
@@ -199,5 +221,23 @@ describe("top10ShareFromRows", () => {
 
   it("returns null when a row carries no measured share", () => {
     expect(top10ShareFromRows([...rows.slice(0, 9), { percent: null }], true)).toBeNull();
+  });
+});
+
+describe("isConcentratedLiquidityPool", () => {
+  it("detects a Uniswap V3 pool by dex label", () => {
+    expect(isConcentratedLiquidityPool("uniswap", ["v3"])).toBe(true);
+  });
+
+  it("detects by dexId when no labels are present (e.g. Raydium CLMM)", () => {
+    expect(isConcentratedLiquidityPool("raydium clmm", [])).toBe(true);
+  });
+
+  it("is false for a standard V2-style AMM", () => {
+    expect(isConcentratedLiquidityPool("uniswap", ["v2"])).toBe(false);
+  });
+
+  it("handles missing dexId/labels", () => {
+    expect(isConcentratedLiquidityPool(undefined, undefined)).toBe(false);
   });
 });
