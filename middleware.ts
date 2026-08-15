@@ -38,11 +38,14 @@ const ROUTE_UNITS: Record<string, number> = {
   "/api/audit": 15,
   "/api/v1/person": 15,
   "/api/v1/token": 1,
-  // The threat scanner's LYRA read is a real Anthropic call; weight it like the
-  // other single-model panels so a burst of scans is metered against the daily
-  // budget instead of billing as 1. (The scan's other threat endpoints — oft,
-  // burns, migration, wallet-holdings — are keyless and correctly bill as 1.)
+  // The threat scanner's AI code read is a real Anthropic call; weight it like
+  // the other single-model panels so a burst of scans is metered against the
+  // daily budget instead of billing as 1. (The scan's other threat endpoints —
+  // oft, burns, migration, wallet-holdings — are keyless and correctly bill as 1.)
   "/api/code-review": 4,
+  // Keyless but expensive: a budgeted ~40s adaptive eth_getLogs walk of the
+  // token's whole recent transfer ledger.
+  "/api/behindledger": 3,
   "/api/sell-structure": 3,
   "/api/site-safety": 2,
   "/api/x-authenticity": 1,

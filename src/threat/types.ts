@@ -284,6 +284,38 @@ export interface WalletTaxonomy {
   note: string;
 }
 
+// ---- Behind the Ledger (lazy/on-demand) ----
+// The deep transfer-graph read (api/behindledger.ts): where sold tokens
+// actually came from - emission farms, presale/insider vaults, churn, or
+// hop-wallet distribution - plus launch selling and LP flight.
+export interface BehindLedgerReport {
+  available: boolean;
+  coverage: "full" | "partial";
+  coveredDays: number;
+  transferCount: number;
+  attribution: {
+    totalUserSold: number;
+    botShuttled: number;
+    farmPct: number;
+    vaultPct: number;
+    churnPct: number;
+    hopPct: number;
+    otherPct: number;
+    earlyWindowSoldPct: number;
+    earlyVaultSoldPct: number;
+  };
+  sellers: {
+    address: string; sold: number; trades: number;
+    farmPct: number; vaultPct: number; boughtPct: number; otherPct: number;
+    hopFunded: boolean;
+  }[];
+  farms: { address: string; payouts: number; recipients: number; tokensOut: number; activeDays: number }[];
+  vaults: { address: string; claimants: number; tokensOut: number }[];
+  lp: { added: number; removed: number; removedLast3d: number } | null;
+  findings: string[];
+  note: string;
+}
+
 // ---- verdict-flip alerts ----
 // Emitted by the re-check cron when a token we rated tradeable (SAFE/CAUTION)
 // then loses its liquidity — "we said tradeable, its pool just got pulled."
