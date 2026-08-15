@@ -19,6 +19,7 @@ import { buyerCohort, walletTaxonomy } from "../threat/cohort";
 import { behindLedger } from "../threat/behindledger";
 import { receiptStats, sharedReceiptStats } from "../threat/receipts";
 import { ThreatReceipts } from "./ThreatReceipts";
+import { MarketStructurePanel } from "./MarketStructure";
 
 const VERDICT_META: Record<ThreatVerdict, { color: string; blurb: string }> = {
   SAFE: { color: "var(--color-pass)", blurb: "no mechanical red flags" },
@@ -669,6 +670,9 @@ function Report({ scan }: { scan: ThreatScan }) {
           && (scan.tokenomics.lp.status === "unconfirmed" || scan.tokenomics.lp.status === "unlocked")
           ? `${scan.deep.launch.venue}: ${scan.deep.launch.lpNote}` : null}
       />
+
+      {/* market structure: chart, trading ranges, volume concentration, fib zones */}
+      <MarketStructurePanel address={scan.address} chain={scan.chain} pairAddress={scan.dossier.pairAddress} />
 
       {/* migration */}
       {scan.deep.migration?.migrated && (

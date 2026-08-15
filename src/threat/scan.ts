@@ -638,5 +638,8 @@ function buildChecks(
     chk("market", "market", "Market conduct",
       d.findings.some((f) => /wash-trad/i.test(f.claim)) ? "fail" : (d.liquidityUsd ?? 0) < 15000 ? "warn" : "pass",
       d.findings.some((f) => /wash-trad/i.test(f.claim)) ? "Wash-trading signature" : `${money(d.liquidityUsd ?? 0)} liquidity, ${money(d.vol24 ?? 0)} 24h volume`),
+    chk("structure", "market", "Market structure",
+      d.pairAddress ? "pass" : "na",
+      d.pairAddress ? "Trading ranges, volume concentration and fib zones charted from pool candles on this report" : "No pool candles to chart"),
   ];
 }

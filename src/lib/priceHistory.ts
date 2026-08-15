@@ -300,3 +300,39 @@ export async function fetchPriceHistory(
   }
   return null;
 }
+
+/**
+ * Raw candle window for the market-structure read: the same endpoint and row
+ * parse as fetchPriceHistory, returning the candles themselves instead of a
+ * summary. Pass a timeframe to force it; otherwise daily candles with an
+ * hourly fallback for young tokens that have no daily data yet.
+ */
+export interface OhlcvWindow {
+  candles: Candle[];     // oldest -> newest, closes > 0
+  timeframe: "day" | "hour";
+}
+
+export async function fetchOhlcv(
+  address: string,
+  chain: string,
+  pairAddress?: string,
+  timeframe?: "day" | "hour",
+): Promise<OhlcvWindow | null> {
+  const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
+  if (!network || !address) return null;
+  const pool = pairAddress || (await topPool(network, address));
+  if (!pool) return null;
+
+  for (const tf of timeframe ? [timeframe] : (["day", "hour"] as const)) {
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${tf}?aggregate=1&limit=200&currency=usd`);
+    const rawList = record(record(record(d).data).attributes).ohlcv_list;
+    const candles = (Array.isArray(rawList)
+      ? rawList.map(readCandle).filter((candle): candle is Candle => candle !== null)
+      : [])
+      .filter((candle) => candle.close > 0)
+      .sort((left, right) => left.ts - right.ts);
+    if (candles.length < 3) continue;
+    return { candles, timeframe: tf };
+  }
+  return null;
+}
