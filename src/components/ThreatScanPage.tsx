@@ -14,6 +14,7 @@ import { aiCodeRead } from "../threat/codereview";
 import { insiderClusters } from "../threat/insiders";
 import { receiptStats, sharedReceiptStats } from "../threat/receipts";
 import { ThreatReceipts } from "./ThreatReceipts";
+import { MarketStructurePanel } from "./MarketStructure";
 
 const VERDICT_META: Record<ThreatVerdict, { color: string; blurb: string }> = {
   SAFE: { color: "var(--color-pass)", blurb: "no mechanical red flags" },
@@ -296,6 +297,9 @@ function Report({ scan }: { scan: ThreatScan }) {
 
       {/* tokenomics */}
       <Tokenomics tk={scan.tokenomics} />
+
+      {/* market structure: chart, trading ranges, volume concentration, fib zones */}
+      <MarketStructurePanel address={scan.address} chain={scan.chain} pairAddress={scan.dossier.pairAddress} />
 
       {/* migration */}
       {scan.deep.migration?.migrated && (

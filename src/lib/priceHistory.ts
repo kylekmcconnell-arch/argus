@@ -20,6 +20,20 @@ export interface PriceHistory {
   timeframe: string;     // "day" | "hour"
 }
 
+export interface Candle {
+  t: number; // unix seconds
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number; // volume in USD
+}
+
+export interface OhlcvHistory {
+  candles: Candle[];     // oldest -> newest
+  timeframe: "day" | "hour";
+}
+
 const GT = "https://api.geckoterminal.com/api/v2";
 
 async function gt(path: string): Promise<any | null> {
@@ -39,38 +53,54 @@ async function topPool(network: string, address: string): Promise<string | null>
   return id ? id.replace(`${network}_`, "") : null;
 }
 
-export async function fetchPriceHistory(
+// Full OHLCV candles (price + volume) for the market-structure read. Same
+// endpoint the sparkline uses, keeping every column instead of just closes.
+// Pass a timeframe to force it; otherwise daily with an hourly fallback for
+// young tokens that have no daily data yet.
+export async function fetchOhlcv(
   address: string,
   chain: string,
   pairAddress?: string,
-): Promise<PriceHistory | null> {
+  timeframe?: "day" | "hour",
+): Promise<OhlcvHistory | null> {
   const network = NETWORK[chain?.toLowerCase()] ?? chain?.toLowerCase();
   if (!network || !address) return null;
   const pool = pairAddress || (await topPool(network, address));
   if (!pool) return null;
 
-  // Prefer daily candles for a real history; fall back to hourly for young
-  // tokens that have no daily data yet.
-  for (const timeframe of ["day", "hour"]) {
-    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${timeframe}?aggregate=1&limit=200&currency=usd`);
+  for (const tf of timeframe ? [timeframe] : (["day", "hour"] as const)) {
+    const d = await gt(`/networks/${network}/pools/${pool}/ohlcv/${tf}?aggregate=1&limit=200&currency=usd`);
     const list: number[][] = d?.data?.attributes?.ohlcv_list ?? [];
     if (list.length < 3) continue;
     // GeckoTerminal returns newest-first; sort oldest -> newest by timestamp.
     const rows = [...list].sort((a, b) => a[0] - b[0]);
-    const points = rows.map((r) => r[4]).filter((n) => typeof n === "number" && n > 0);
-    if (points.length < 3) continue;
-    const first = points[0];
-    const last = points[points.length - 1];
-    const peak = Math.max(...points);
-    return {
-      points,
-      first,
-      last,
-      peak,
-      changePct: first > 0 ? ((last - first) / first) * 100 : 0,
-      drawdownPct: peak > 0 ? ((last - peak) / peak) * 100 : 0,
-      timeframe,
-    };
+    const candles = rows
+      .map((r) => ({ t: r[0], o: r[1], h: r[2], l: r[3], c: r[4], v: r[5] ?? 0 }))
+      .filter((k) => typeof k.c === "number" && k.c > 0 && k.h >= k.l);
+    if (candles.length < 3) continue;
+    return { candles, timeframe: tf };
   }
   return null;
+}
+
+export async function fetchPriceHistory(
+  address: string,
+  chain: string,
+  pairAddress?: string,
+): Promise<PriceHistory | null> {
+  const hist = await fetchOhlcv(address, chain, pairAddress);
+  if (!hist) return null;
+  const points = hist.candles.map((k) => k.c);
+  const first = points[0];
+  const last = points[points.length - 1];
+  const peak = Math.max(...points);
+  return {
+    points,
+    first,
+    last,
+    peak,
+    changePct: first > 0 ? ((last - first) / first) * 100 : 0,
+    drawdownPct: peak > 0 ? ((last - peak) / peak) * 100 : 0,
+    timeframe: hist.timeframe,
+  };
 }
