@@ -1,7 +1,8 @@
 // Token Threat Scanner - run view + report. A self-contained page: token ref in,
 // live trace while the scan runs, then the threat report: risk gauge (higher =
-// worse), one-line action, three tiers of plain-English findings, the the ARGUS engine code
-// read (static flags with file:line citations + lazy AI read that may dissent),
+// worse), one-line action, three tiers of plain-English findings, the ARGUS
+// engine code read (static flags with file:line citations + lazy AI read that
+// may dissent),
 // deployer memory, and the transparent checklist of everything examined.
 
 import { useEffect, useRef, useState } from "react";
@@ -15,6 +16,7 @@ import { projectLinks } from "../threat/links";
 import { aiCodeRead } from "../threat/codereview";
 import { insiderClusters } from "../threat/insiders";
 import { buyerCohort, walletTaxonomy } from "../threat/cohort";
+import { behindLedger } from "../threat/behindledger";
 import { receiptStats, sharedReceiptStats } from "../threat/receipts";
 import { ThreatReceipts } from "./ThreatReceipts";
 
@@ -243,6 +245,116 @@ function BuyerCohort({ scan }: { scan: ThreatScan }) {
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// Behind the Ledger (lazy): the deep transfer-graph read. Walks the token's
+// recent Transfer history server-side and attributes every sell to where the
+// seller's tokens actually came from - emission farms, presale/insider vaults,
+// churn, or hop-wallet distribution. Slow (a budgeted ~40s chain walk), so it
+// sits behind a run button like the insider-cluster panel.
+const compact = (n: number) =>
+  n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : n.toFixed(0);
+
+function BehindLedger({ scan }: { scan: ThreatScan }) {
+  const [state, setState] = useState<"idle" | "loading" | "done" | "empty">("idle");
+  const [data, setData] = useState<import("../threat/types").BehindLedgerReport | null>(null);
+  const run = () => {
+    if (state === "loading") return;
+    setState("loading");
+    behindLedger(scan.chain, scan.address, scan.dossier.pairAddress).then((r) => {
+      if (r) { setData(r); setState("done"); }
+      else setState("empty");
+    });
+  };
+  const a = data?.attribution;
+  const segments = a
+    ? [
+        { label: "farmed emissions", pct: a.farmPct, color: "var(--color-avoid)" },
+        { label: "presale / insider", pct: a.vaultPct, color: "var(--color-caution)" },
+        { label: "trader churn", pct: a.churnPct, color: "var(--color-signal)" },
+        { label: "hop-wallet funded", pct: a.hopPct, color: "var(--color-avoid)" },
+        { label: "plain transfers", pct: a.otherPct, color: "var(--color-ink-faint)" },
+      ].filter((s) => s.pct >= 0.5)
+    : [];
+  return (
+    <div className="mt-4 rounded-xl border border-line p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink">Behind the Ledger</h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">An in-depth analysis of all farming activity, launch selling, pre-sale and insider vault allocations, trader churn, and more.</p>
+        </div>
+        {state === "idle" && (
+          <button onClick={run} className="mono shrink-0 rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">run analysis ↯</button>
+        )}
+      </div>
+      {state === "loading" && <p className="mt-2 animate-pulse text-[12.5px] text-ink-faint">Walking the transfer ledger - classifying vaults, farms, venues, and tracing every sell to its origin…</p>}
+      {state === "empty" && <p className="mt-2 text-[12.5px] text-ink-dim">The ledger could not be read for this token (unsupported chain, or too little transfer history in the window).</p>}
+      {state === "done" && data && a && (
+        <>
+          {/* where sold supply came from */}
+          <div className="mt-3">
+            <div className="flex items-baseline justify-between">
+              <span className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">sold supply, by origin</span>
+              <span className="mono text-[10.5px] text-ink-faint">{compact(a.totalUserSold)} sold by users · {compact(a.botShuttled)} arb shuttle excluded</span>
+            </div>
+            <div className="mt-1.5 flex h-2.5 w-full overflow-hidden rounded-full bg-line/40">
+              {segments.map((s) => (
+                <div key={s.label} style={{ width: `${s.pct}%`, background: s.color }} title={`${s.label} ${s.pct.toFixed(0)}%`} />
+              ))}
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+              {segments.map((s) => (
+                <span key={s.label} className="flex items-center gap-1.5 text-[11px] text-ink-dim">
+                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: s.color }} />
+                  {s.label} <span className="mono tabular">{s.pct.toFixed(0)}%</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          {/* findings */}
+          <ul className="mt-3 space-y-1.5">
+            {data.findings.map((f, i) => (
+              <li key={i} className="flex gap-2 text-[13px] leading-snug text-ink-dim">
+                <span className="mono shrink-0 text-ink-faint">▸</span>
+                <span>{f}</span>
+              </li>
+            ))}
+          </ul>
+          {/* top sellers */}
+          {data.sellers.length > 0 && (
+            <div className="mt-3">
+              <span className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">largest sellers, resolved through router hops</span>
+              <div className="mt-1 divide-y divide-line/60">
+                {data.sellers.slice(0, 6).map((s) => {
+                  const tag = s.hopFunded ? { t: "hop-funded", c: "var(--color-avoid)" }
+                    : s.vaultPct >= 50 ? { t: "insider supply", c: "var(--color-caution)" }
+                    : s.farmPct >= 50 ? { t: "farm supply", c: "var(--color-avoid)" }
+                    : s.boughtPct >= 50 ? { t: "churn", c: "var(--color-ink-faint)" }
+                    : null;
+                  return (
+                    <div key={s.address} className="flex items-center justify-between gap-3 py-1.5">
+                      <span className="mono min-w-0 truncate text-[11px] text-ink-faint">{shortAddr(s.address)} · {s.trades} sell{s.trades === 1 ? "" : "s"}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {tag && <span className="mono rounded px-1.5 py-0.5 text-[9.5px] uppercase tracking-wider" style={{ color: tag.c, border: "1px solid currentColor" }}>{tag.t}</span>}
+                        <span className="mono text-[11.5px] font-semibold tabular text-ink-dim">{compact(s.sold)}</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {/* LP flow */}
+          {data.lp && (data.lp.added > 0 || data.lp.removed > 0) && (
+            <p className="mono mt-3 text-[10.5px] text-ink-faint">
+              LP flow: {compact(data.lp.added)} added · {compact(data.lp.removed)} removed{data.lp.removedLast3d > 0 ? ` · ${compact(data.lp.removedLast3d)} of that in the last 3 days` : ""}
+            </p>
+          )}
+          <p className="mono mt-1.5 text-[10.5px] text-ink-faint">{data.note}</p>
+        </>
       )}
     </div>
   );
@@ -630,6 +742,9 @@ function Report({ scan }: { scan: ThreatScan }) {
 
       {/* buyer cohort · common coins (lazy, RAVN-style) */}
       <BuyerCohort scan={scan} />
+
+      {/* behind the ledger (lazy): the deep transfer-graph read */}
+      <BehindLedger scan={scan} />
 
       {/* checklist */}
       <div className="mt-4 rounded-xl border border-line p-4">
