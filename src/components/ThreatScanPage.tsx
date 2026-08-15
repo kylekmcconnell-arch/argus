@@ -250,25 +250,27 @@ function BuyerCohort({ scan }: { scan: ThreatScan }) {
   );
 }
 
-// Behind the Ledger (lazy): the deep transfer-graph read. Walks the token's
-// recent Transfer history server-side and attributes every sell to where the
-// seller's tokens actually came from - emission farms, presale/insider vaults,
-// churn, or hop-wallet distribution. Slow (a budgeted ~40s chain walk), so it
-// sits behind a run button like the insider-cluster panel.
+// Behind the Ledger: the deep transfer-graph read. Walks the token's recent
+// Transfer history server-side and attributes every sell to where the seller's
+// tokens actually came from - emission farms, presale/insider vaults, churn,
+// or hop-wallet distribution. Runs automatically once the verdict renders
+// (like the AI code read) - it's a budgeted ~40s chain walk, so it streams in
+// after the report rather than blocking it.
 const compact = (n: number) =>
   n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : n.toFixed(0);
 
 function BehindLedger({ scan }: { scan: ThreatScan }) {
-  const [state, setState] = useState<"idle" | "loading" | "done" | "empty">("idle");
+  const [state, setState] = useState<"loading" | "done" | "empty">("loading");
   const [data, setData] = useState<import("../threat/types").BehindLedgerReport | null>(null);
-  const run = () => {
-    if (state === "loading") return;
-    setState("loading");
+  const fired = useRef(false);
+  useEffect(() => {
+    if (fired.current) return;
+    fired.current = true;
     behindLedger(scan.chain, scan.address, scan.dossier.pairAddress).then((r) => {
       if (r) { setData(r); setState("done"); }
       else setState("empty");
     });
-  };
+  }, [scan]);
   const a = data?.attribution;
   const segments = a
     ? [
@@ -286,9 +288,6 @@ function BehindLedger({ scan }: { scan: ThreatScan }) {
           <h2 className="text-[14px] font-semibold text-ink">Behind the Ledger</h2>
           <p className="mt-0.5 text-[11.5px] text-ink-faint">An in-depth analysis of all farming activity, launch selling, pre-sale and insider vault allocations, trader churn, and more.</p>
         </div>
-        {state === "idle" && (
-          <button onClick={run} className="mono shrink-0 rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">run analysis ↯</button>
-        )}
       </div>
       {state === "loading" && <p className="mt-2 animate-pulse text-[12.5px] text-ink-faint">Walking the transfer ledger - classifying vaults, farms, venues, and tracing every sell to its origin…</p>}
       {state === "empty" && <p className="mt-2 text-[12.5px] text-ink-dim">The ledger could not be read for this token (unsupported chain, or too little transfer history in the window).</p>}
