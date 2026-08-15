@@ -218,6 +218,19 @@ describe("investigation exact sharing", () => {
     const mobileActions = toolbar?.querySelector("details");
     expect(mobileActions?.textContent).toContain("Challenge report");
     expect(mobileActions?.textContent).toContain("Rescan current evidence");
+
+    // The "Checks finished" counter expands into the list of exactly the rows
+    // it counts as unfinished, each with its status and required marking.
+    const statusCardDropdown = statusCard?.querySelector<HTMLDetailsElement>("details");
+    expect(statusCardDropdown?.textContent).toContain("Checks finished");
+    const unfinishedList = statusCardDropdown?.querySelector('[aria-label="Checks not finished"]');
+    expect(unfinishedList?.textContent).toContain("Trust-graph reconciliation");
+    expect(unfinishedList?.textContent).toContain("news-press");
+    expect(unfinishedList?.textContent).toContain("did not finish");
+    expect(unfinishedList?.textContent).toContain("required");
+    // Post-scan enrichment rows are not part of the counter and must not
+    // appear in the list that explains it.
+    expect(unfinishedList?.textContent).not.toContain("deployer-trail-evm");
   });
 
   it("separates a company's equity round from its token market value", () => {

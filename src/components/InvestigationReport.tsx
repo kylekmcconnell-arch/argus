@@ -16,6 +16,7 @@ import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import {
   clearanceCoverage,
+  decisionCriticalChecks,
   personChecks,
   reconcileInvestigationChecks,
   tokenChecks,
@@ -34,6 +35,7 @@ import { Holdings } from "./Holdings";
 import { MoneyFlowStory } from "./MoneyFlowStory";
 import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 import { TokenSnapshotVisuals } from "./TokenSnapshotVisuals";
+import { LpCustody } from "./LpCustody";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { UsageVisuals } from "./UsageVisuals";
 import { NamesakeCheck } from "./NamesakeCheck";
@@ -769,6 +771,11 @@ export function InvestigationReport({
       : "var(--color-avoid)";
   const recordedChecks = diligenceChecks.filter((check) => ["confirmed", "reported", "finding", "checked-empty"].includes(check.status));
   const gapChecks = diligenceChecks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
+  // The exact rows behind the "Checks finished N/M" counter: the same
+  // decision-critical set deriveDecisionReadiness counts, minus the finished
+  // ones — so the dropdown's list always sums with the counter it explains.
+  const unfinishedCounterChecks = decisionCriticalChecks(diligenceChecks)
+    .filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
   const requiredGapChecks = gapChecks.filter((check) =>
     check.checkId ? clearance.openNeverWaive.includes(check.checkId) : false);
   const enrichmentGapChecks = gapChecks.filter((check) => !requiredGapChecks.includes(check));
@@ -1461,18 +1468,59 @@ export function InvestigationReport({
                     : "Read the open questions below. Do not rely on this score yet."}
               </p>
               <div className="mt-auto pt-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">Checks finished</span>
-                  <span className="mono text-[11px] text-ink-dim">
-                    {readiness.successful}/{readiness.applicable} · {readiness.coveragePercent}%
-                  </span>
-                </div>
-                <progress
-                  className="readiness-progress mt-2"
-                  value={readiness.coveragePercent}
-                  max={100}
-                  aria-label={`Checks finished: ${readiness.coveragePercent}%`}
-                />
+                {unfinishedCounterChecks.length > 0 ? (
+                  <details className="group">
+                    <summary className="list-none [&::-webkit-details-marker]:hidden">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">Checks finished</span>
+                        <span className="mono flex items-center gap-1.5 text-[11px] text-ink-dim">
+                          {readiness.successful}/{readiness.applicable} · {readiness.coveragePercent}%
+                          <span aria-hidden="true" className="text-[9px] text-ink-faint transition-transform group-open:rotate-180">▾</span>
+                        </span>
+                      </div>
+                      <progress
+                        className="readiness-progress mt-2"
+                        value={readiness.coveragePercent}
+                        max={100}
+                        aria-label={`Checks finished: ${readiness.coveragePercent}%`}
+                      />
+                      <p className="mt-1.5 text-[10.5px] text-ink-faint group-open:hidden">
+                        {unfinishedCounterChecks.length} not finished · click to see which, and why
+                      </p>
+                    </summary>
+                    <ul className="mt-2 divide-y divide-line/60 border-t border-line/70" aria-label="Checks not finished">
+                      {unfinishedCounterChecks.map((check) => (
+                        <li key={check.checkId ?? check.label} className="py-2">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <span className="text-[12px] font-medium text-ink">{check.label}</span>
+                            {check.checkId && clearance.openNeverWaive.includes(check.checkId) && (
+                              <span className="mono rounded border border-current px-1 py-0.5 text-[9px] uppercase tracking-wider" style={{ color: "var(--color-avoid)" }}>required</span>
+                            )}
+                            <span className="mono ml-auto text-[10px] uppercase tracking-wider text-ink-faint">
+                              {check.status === "unavailable" ? "source unavailable" : check.status === "stale" ? "out of date" : "did not finish"}
+                            </span>
+                          </div>
+                          {check.note && <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">{check.note}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">Checks finished</span>
+                      <span className="mono text-[11px] text-ink-dim">
+                        {readiness.successful}/{readiness.applicable} · {readiness.coveragePercent}%
+                      </span>
+                    </div>
+                    <progress
+                      className="readiness-progress mt-2"
+                      value={readiness.coveragePercent}
+                      max={100}
+                      aria-label={`Checks finished: ${readiness.coveragePercent}%`}
+                    />
+                  </>
+                )}
               </div>
             </section>
 
@@ -1704,6 +1752,9 @@ export function InvestigationReport({
               onLoadCurrentIntelligence={loadCurrentIntelligence}
             />
             <TokenSnapshotVisuals token={token} showPriceMomentum={false} />
+            {isConcentratedLiquidityPool(token.dexId, token.dexLabels) && token.pairAddress && (
+              <LpCustody chain={token.chain} pairAddress={token.pairAddress} />
+            )}
             {(projectAccount?.protocolTvl || projectAccount?.protocolFees || projectAccount?.holderProfile) && (
               <UsageVisuals
                 tvl={projectAccount.protocolTvl}
