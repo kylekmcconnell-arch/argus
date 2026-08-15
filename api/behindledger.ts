@@ -47,8 +47,52 @@ const LP_TOPICS = new Set([
 const TARGET_DAYS = 14; // ideal window; the budget may shrink it
 const MAX_TRANSFERS = 60_000;
 const TIME_BUDGET_MS = 40_000;
+// The launch window gets its own guaranteed slice of the budget, scanned FIRST.
+// On a busy ledger the newest-first sweep never reaches launch day - and the
+// launch window is where presale/insider vault loads and the launch dump live,
+// which is the panel's headline promise (learned on $BULL: 300k+ transfers in
+// 8 days left the whole insider story outside a recent-only window).
+const LAUNCH_HOURS = 6;
+const LAUNCH_MAX_TRANSFERS = 25_000;
+const LAUNCH_BUDGET_MS = 15_000;
+
+// Contract-creation lookup, for anchoring the launch window. Blockscout v1
+// where available (NOTE: the Robinhood v2 REST route 500s on lowercase
+// addresses; the v1 module route is case-tolerant), Etherscan v2 elsewhere
+// when a key is present. Failure just degrades to the recent-only scan.
+const BLOCKSCOUT: Record<string, string> = {
+  robinhood: "https://robinhoodchain.blockscout.com",
+  base: "https://base.blockscout.com",
+};
+const ETHERSCAN_CHAINID: Record<string, number> = { ethereum: 1, bsc: 56 };
 
 interface RawLog { blockNumber: string; transactionHash: string; logIndex: string; topics: string[]; data: string; address: string }
+
+async function creationBlock(chain: string, address: string, rpc: string[]): Promise<bigint | null> {
+  const bs = BLOCKSCOUT[chain];
+  const esId = ETHERSCAN_CHAINID[chain];
+  const esKey = process.env.ETHERSCAN_API_KEY;
+  try {
+    let row: any = null;
+    if (bs) {
+      const r = await fetch(`${bs}/api?module=contract&action=getcontractcreation&contractaddresses=${address}`, { signal: AbortSignal.timeout(8000) });
+      row = ((await r.json()) as any)?.result?.[0] ?? null;
+    } else if (esId && esKey) {
+      const r = await fetch(`https://api.etherscan.io/v2/api?chainid=${esId}&module=contract&action=getcontractcreation&contractaddresses=${address}&apikey=${esKey}`, { signal: AbortSignal.timeout(8000) });
+      row = ((await r.json()) as any)?.result?.[0] ?? null;
+    }
+    if (!row) return null;
+    // Blockscout answers with blockNumber inline; Etherscan gives only the
+    // creation txHash, one receipt lookup away.
+    if (row.blockNumber != null && /^\d+$/.test(String(row.blockNumber))) return BigInt(row.blockNumber);
+    const txHash = row.txHash ?? row.transactionHash ?? null;
+    if (!txHash) return null;
+    const receipt = await rpcCall(rpc, "eth_getTransactionReceipt", [txHash]);
+    return receipt?.blockNumber ? BigInt(receipt.blockNumber) : null;
+  } catch {
+    return null;
+  }
+}
 
 async function rpcCall(urls: string[], method: string, params: unknown[], timeoutMs = 9000): Promise<any> {
   for (const url of urls) {
@@ -74,9 +118,9 @@ async function rpcCall(urls: string[], method: string, params: unknown[], timeou
 // outright - split on any failure or a suspiciously capped result.
 async function getLogsAdaptive(
   urls: string[], filter: { address: string; topics?: (string | null)[] },
-  lo: bigint, hi: bigint, out: RawLog[], deadline: number,
+  lo: bigint, hi: bigint, out: RawLog[], deadline: number, maxOut = MAX_TRANSFERS,
 ): Promise<boolean> {
-  if (Date.now() > deadline || out.length > MAX_TRANSFERS) return false;
+  if (Date.now() > deadline || out.length > maxOut) return false;
   let logs: RawLog[] | undefined;
   try {
     logs = await rpcCall(urls, "eth_getLogs", [{ ...filter, fromBlock: "0x" + lo.toString(16), toBlock: "0x" + hi.toString(16) }]);
@@ -86,8 +130,8 @@ async function getLogsAdaptive(
   if (logs === undefined || logs.length >= 9_999) {
     if (hi - lo < 200n) return true; // give up on a stubborn sliver, keep going
     const mid = lo + (hi - lo) / 2n;
-    const a = await getLogsAdaptive(urls, filter, lo, mid, out, deadline);
-    const b = await getLogsAdaptive(urls, filter, mid + 1n, hi, out, deadline);
+    const a = await getLogsAdaptive(urls, filter, lo, mid, out, deadline, maxOut);
+    const b = await getLogsAdaptive(urls, filter, mid + 1n, hi, out, deadline, maxOut);
     return a && b;
   }
   out.push(...logs);
@@ -117,8 +161,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const decimals = decHex && decHex !== "0x" ? Number(BigInt(decHex)) : 18;
     const scale = 10 ** decimals;
 
-    // Scan newest-first in day-sized strides so a blown budget still leaves the
-    // recent window complete - the part the user is asking about.
+    // Phase A - the launch window, scanned FIRST with its own budget slice.
+    // Creation block -> first LAUNCH_HOURS of the ledger: the mint, the
+    // presale/insider vault loads, and the launch-day dump all live here, and
+    // a newest-first sweep of a busy ledger never reaches them.
+    const launchRaw: RawLog[] = [];
+    let launchLo: bigint | null = null;
+    let launchHi: bigint | null = null;
+    // Engage whenever creation is more than a day back - not just when it
+    // predates the target window: on a busy ledger the newest-first sweep can
+    // run out of budget long before reaching even a week-old launch. Overlap
+    // with the recent sweep is deduped below.
+    const born = await creationBlock(chain, address, profile.rpc);
+    if (born != null && head - born > BigInt(blocksPerDay)) {
+      launchLo = born;
+      launchHi = born + BigInt(Math.round((blocksPerDay * LAUNCH_HOURS) / 24));
+      const launchDeadline = Math.min(started + LAUNCH_BUDGET_MS, deadline);
+      await getLogsAdaptive(profile.rpc, { address, topics: [TRANSFER_TOPIC] }, launchLo, launchHi, launchRaw, launchDeadline, LAUNCH_MAX_TRANSFERS);
+    }
+
+    // Phase B - newest-first in day-sized strides with the remaining budget,
+    // so the recent window (what the user is looking at) stays complete.
     const raw: RawLog[] = [];
     let coveredFrom = head;
     const stride = BigInt(blocksPerDay);
@@ -128,12 +191,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!done) break;
       coveredFrom = lo;
       hi = lo - 1n;
-      if (Date.now() > deadline || raw.length > MAX_TRANSFERS) break;
+      if (Date.now() > deadline || raw.length + launchRaw.length > MAX_TRANSFERS) break;
     }
 
     const transfers: LedgerTransfer[] = [];
-    for (const l of raw) {
+    const seen = new Set<string>();
+    for (const l of [...launchRaw, ...raw]) {
       if (l.topics?.[0] !== TRANSFER_TOPIC || l.topics.length !== 3) continue;
+      const key = `${l.transactionHash}:${l.logIndex}`;
+      if (seen.has(key)) continue; // launch and recent windows can overlap on a young token
+      seen.add(key);
       let v = 0;
       try { v = Number(BigInt(l.data)) / scale; } catch { continue; }
       transfers.push({
@@ -149,12 +216,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const coverage: "full" | "partial" = coveredFrom <= from + 1n ? "full" : "partial";
     const coveredDays = Math.max(1, Math.round(Number(head - coveredFrom) / blocksPerDay));
 
-    // Pair event classification (swap vs LP op) + LP add/remove tallies.
+    // Pair event classification (swap vs LP op) + LP add/remove tallies - for
+    // BOTH windows, so the launchpad's initial liquidity add isn't miscounted
+    // as launch selling.
     const swapTx = new Set<string>();
     const lpTx = new Set<string>();
     if (pair) {
       const pairLogs: RawLog[] = [];
-      await getLogsAdaptive(profile.rpc, { address: pair }, coveredFrom, head, pairLogs, Math.min(deadline + 6_000, started + 52_000));
+      const pairDeadline = Math.min(deadline + 6_000, started + 52_000);
+      if (launchLo != null && launchHi != null && launchHi < coveredFrom) {
+        await getLogsAdaptive(profile.rpc, { address: pair }, launchLo, launchHi, pairLogs, pairDeadline);
+      }
+      await getLogsAdaptive(profile.rpc, { address: pair }, coveredFrom, head, pairLogs, pairDeadline);
       for (const l of pairLogs) {
         const t0 = l.topics?.[0];
         if (t0 && SWAP_TOPICS.has(t0)) swapTx.add(l.transactionHash);
@@ -167,8 +240,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const minted = transfers.filter((t) => t.f === "0x0000000000000000000000000000000000000000").reduce((a, t) => a + t.v, 0);
     const totalMinted = minted > 0 ? minted : transfers.reduce((a, t) => a + t.v, 0) * 0.1; // fallback floor basis when mint predates the window
     const cls = classifyAddresses(transfers, stats, { pair, blocksPerDay, totalMinted });
-    const firstBlock = transfers[0].b;
-    const earlyEndBlock = firstBlock + blocksPerDay * 2; // "launch window" = the ledger's first ~48h
+    // "Launch window" = the token's first ~48h when creation is known, else the
+    // covered ledger's first ~48h (the pre-two-phase behavior).
+    const earlyEndBlock = (launchLo != null ? Number(launchLo) : transfers[0].b) + blocksPerDay * 2;
     const attribution = attributeSells(transfers, stats, cls, { swapTx: swapTx.size ? swapTx : undefined, lpTx, pair, earlyEndBlock });
     const farms = farmStats(cls, stats, blocksPerDay).slice(0, 5);
     const vaults = vaultStats(transfers, cls).slice(0, 6);
@@ -229,7 +303,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       findings,
       note: coverage === "full"
         ? `Read ${transfers.length.toLocaleString()} transfers across the last ${coveredDays} days of the ledger.`
-        : `Budgeted read: the most recent ${coveredDays} day${coveredDays === 1 ? "" : "s"} (${transfers.length.toLocaleString()} transfers) - a busy ledger, older history not covered.`,
+        : launchLo != null
+          ? `Budgeted read of ${transfers.length.toLocaleString()} transfers: the launch window (first ${LAUNCH_HOURS}h from creation) plus the most recent ${coveredDays} day${coveredDays === 1 ? "" : "s"} - a busy ledger, the days between not covered.`
+          : `Budgeted read: the most recent ${coveredDays} day${coveredDays === 1 ? "" : "s"} (${transfers.length.toLocaleString()} transfers) - a busy ledger, older history (including launch) not covered.`,
     });
   } catch (e) {
     res.status(200).json({ available: false, error: String(e), note: "Behind the Ledger failed to read the chain." });
