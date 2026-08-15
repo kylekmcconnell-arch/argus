@@ -2180,11 +2180,15 @@ export function InvestigationReport({
                 />
                 <span className="ml-auto text-[11px] text-ink-faint">{projectAccount.followers} followers · joined {projectAccount.joined}</span>
               </div>
-              {/* why the score landed where it did */}
+              {/* why the score landed where it did. This score reviews the X
+                  ACCOUNT behind the project (team, backing, disclosures) and is
+                  deliberately separate from the token score at the top of the
+                  report, which audits the contract and its market. Say so, or
+                  the report reads as carrying two contradictory scores. */}
               <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
                 {projectAccount.report.governing_role
-                  ? <span><span className="text-ink-dim">{String(projectAccount.report.governing_role).toLowerCase()}</span> score used</span>
-                  : <span>Score not ready</span>}
+                  ? <span>this scores the project's X account ({String(projectAccount.report.governing_role).toLowerCase()} review), separate from the token score above</span>
+                  : <span>Account score not ready</span>}
                 {projectAccount.report.cap_applied && <span className="chip tint-avoid">score limited · {String(projectAccount.report.cap_applied).replace(/_/g, " ")}</span>}
                 <button onClick={onOpenProjectAccount} className="btn-chip tint-signal ml-auto">Open full report</button>
               </div>

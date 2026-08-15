@@ -20,8 +20,30 @@ const STALE_CHUNK_PATTERNS = [
   /dynamically imported module.*(404|not found)/i,
 ];
 
-const RELOAD_MARKER = "argus:stale-chunk-reload";
+export const RELOAD_MARKER = "argus:stale-chunk-reload";
+const RELOAD_NOTICE_SHOWN = "argus:stale-chunk-reload-noticed";
 const RELOAD_COOLDOWN_MS = 30_000;
+
+/**
+ * Whether THIS page load is the landing side of a stale-chunk auto-reload.
+ * The reload is silent and drops the user on the home screen mid-task, which
+ * reads as "the button I just clicked wiped my screen" - the app must say what
+ * happened. A separate shown-key (not marker removal) keeps the notice to one
+ * showing per reload while leaving the reload-loop cooldown intact.
+ */
+export function consumeStaleChunkReloadNotice(storage: Storage | undefined = typeof window === "undefined" ? undefined : window.sessionStorage): boolean {
+  if (!storage) return false;
+  try {
+    const marker = storage.getItem(RELOAD_MARKER) ?? "";
+    const at = Number(marker);
+    if (!marker || !Number.isFinite(at) || Date.now() - at > RELOAD_COOLDOWN_MS) return false;
+    if (storage.getItem(RELOAD_NOTICE_SHOWN) === marker) return false;
+    storage.setItem(RELOAD_NOTICE_SHOWN, marker);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function isStaleChunkError(error: unknown): boolean {
   const text = error instanceof Error

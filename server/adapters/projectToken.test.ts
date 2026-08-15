@@ -384,6 +384,90 @@ describe("verified project-token collection", () => {
     }));
   });
 
+  it("retries the DEX search without the display name's generic suffix when the full name misses the token", async () => {
+    // The $GWOOD shape: the X account is "Greenwood Finance" but the token is
+    // named just "Greenwood", and DexScreener's search for the two-word name
+    // does not return it at all. The one-word retry finds it; the identity
+    // gate still has to bridge the exact X account and official domain.
+    const GWOOD_TOKEN = "0x24d8657e10AF588b12de3E102a116f77b9E35ee8";
+    const GWOOD_POOL = "0x72678B2e8dDedad5865272A857733d8dC98Eb771";
+    const { ctx, evidence } = context("@GwoodFinance", "Greenwood Finance", "https://greenwood.fi/");
+    const gwoodPair = {
+      chainId: "robinhood",
+      pairAddress: GWOOD_POOL,
+      url: `https://dexscreener.com/robinhood/${GWOOD_POOL.toLowerCase()}`,
+      baseToken: { address: GWOOD_TOKEN, name: "Greenwood", symbol: "GWOOD" },
+      quoteToken: { address: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", symbol: "WETH" },
+      priceUsd: "0.005049",
+      marketCap: 5_049_766,
+      liquidity: { usd: 818_142.12 },
+      info: {
+        websites: [{ url: "https://greenwood.fi", label: "Website" }],
+        socials: [{ url: "https://x.com/GwoodFinance", type: "twitter" }],
+      },
+    };
+    const dexQueries: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) {
+        const q = new URL(url).searchParams.get("q") ?? "";
+        dexQueries.push(q);
+        // The literal two-word search misses the token; the one-word retry hits.
+        return json({ pairs: q === "Greenwood" ? [gwoodPair] : [] });
+      }
+      if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("identity-bound DEX pair"),
+    });
+    expect(dexQueries).toEqual(["Greenwood Finance", "Greenwood"]);
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      symbol: "GWOOD",
+      address: GWOOD_TOKEN,
+      chain: "robinhood",
+      officialX: "@gwoodfinance",
+    });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+      provider: "dexscreener",
+    }));
+  });
+
+  it("records an unavailable outcome instead of nothing when a registry search fails", async () => {
+    // A provider failure used to record NOTHING, so the report fell back to
+    // the placeholder "no official token identity was bound to this project
+    // account", which reads as an assessed result. The row must say what
+    // actually happened: the registries could not be read on this scan.
+    const { ctx, evidence } = context("@GwoodFinance", "Greenwood Finance", "https://greenwood.fi/");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ error: "rate limited" }, 429);
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ error: "unavailable" }, 500);
+      // The own-site declaration tier still runs; let it find nothing.
+      if (url.startsWith("https://greenwood.fi")) return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "partial",
+      detail: expect.stringContaining("recorded as an unavailable token-identity outcome"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "unavailable",
+      provider: "coingecko/dexscreener",
+      note: expect.stringContaining("a rescan can close it"),
+    }));
+  });
+
   it("rejects an exact name match when neither official identity surface matches", async () => {
     const { ctx, evidence } = context("@unrelated", "Project Dex", "https://unrelated.example/");
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
