@@ -525,6 +525,16 @@
 
 /* ───────────────────────── controls ───────────────────────── */
 
+/* Tailwind v4's preflight sets `button { cursor: default }` (a change from v3),
+   which left every ARGUS button — including primary calls to action like
+   "Retry required scan" — showing a plain arrow cursor, reading as inert.
+   Restore the affordance for anything actually clickable. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary {
+  cursor: pointer;
+}
+
 .btn-primary {
   display: inline-flex;
   align-items: center;

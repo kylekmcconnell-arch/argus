@@ -530,17 +530,44 @@ export function reconcileInvestigationChecks(
     return rows;
   }
 
-  const binding = projectRows.find((row) =>
-    row.checkId === "project-token-identity" || row.label === "Canonical project token");
-  if (!binding || binding.status !== "confirmed") return rows;
-  const boundAddress = (projectAccount?.projectToken?.address ?? "").trim().toLowerCase();
-  const subjectAddress = (tokenAddress ?? "").trim().toLowerCase();
-  if (boundAddress && boundAddress !== subjectAddress) return rows;
-
   const handle = (projectAccount?.handle ?? "").trim();
   const provenance = handle
     ? `the bound project account scan (${handle})`
     : "the bound project account scan";
+  // When crediting is refused, the refusal reason is written into each still-
+  // open bridgeable row instead of being silently discarded. The status stays
+  // exactly as fail-closed as before; only the note changes, so an analyst
+  // reading "Trust-graph reconciliation did not finish" can see WHICH link in
+  // the credit chain broke instead of retrying a scan that cannot help.
+  const annotateOpenBridgeRows = (reason: string) => {
+    for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
+      const target = rows.find((row) =>
+        row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
+      if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
+      target.note = reason;
+    }
+    return rows;
+  };
+
+  const binding = projectRows.find((row) =>
+    row.checkId === "project-token-identity" || row.label === "Canonical project token");
+  if (!binding) {
+    return annotateOpenBridgeRows(
+      `resolves through ${provenance}, which recorded no canonical-token binding check, so its outcomes cannot be credited to this token`,
+    );
+  }
+  if (binding.status !== "confirmed") {
+    return annotateOpenBridgeRows(
+      `resolves through ${provenance}, but that scan did not confirm this project's canonical token (${binding.note ?? `binding status: ${binding.status}`}), so its outcomes cannot be credited to this token`,
+    );
+  }
+  const boundAddress = (projectAccount?.projectToken?.address ?? "").trim().toLowerCase();
+  const subjectAddress = (tokenAddress ?? "").trim().toLowerCase();
+  if (boundAddress && boundAddress !== subjectAddress) {
+    return annotateOpenBridgeRows(
+      `resolves through ${provenance}, but that scan bound a different token contract (${boundAddress.slice(0, 10)}…), so its outcomes cannot be credited to this token`,
+    );
+  }
 
   for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
     const target = rows.find((row) =>
@@ -548,7 +575,13 @@ export function reconcileInvestigationChecks(
     if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
     const source = projectRows.find((row) =>
       row.checkId === bridge.projectCheckId || row.label === bridge.projectLabel);
-    if (!source || !SUCCESSFUL.has(source.status)) continue;
+    if (!source) continue;
+    if (!SUCCESSFUL.has(source.status)) {
+      // The project scan ran this question and could not finish it. Copy its
+      // own diagnosis so the token report explains itself.
+      target.note = `resolves through ${provenance}, where it also did not finish (${source.status}${source.note ? `: ${source.note}` : ""})`;
+      continue;
+    }
     target.status = source.status;
     target.note = `recorded on ${provenance}: ${source.note ?? "completed"}`;
     if (source.provider) target.provider = source.provider;

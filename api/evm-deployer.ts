@@ -9,7 +9,7 @@
 //
 // EVM only. Gated on ETHERSCAN_API_KEY. Bounded + graceful when unset.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { EVM_CEX_WALLETS as CEX } from "../src/lib/marketAddresses";
+import { EVM_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 

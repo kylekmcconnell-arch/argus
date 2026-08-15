@@ -455,16 +455,19 @@ describe("reconcileInvestigationChecks", () => {
     expect(byLabel(rows, "Creator wallet details").status).toBe("unknown");
   });
 
-  it("credits nothing without a confirmed canonical binding", () => {
+  it("credits nothing without a confirmed canonical binding, and says why in the open rows", () => {
     const unbound = projectRows().map((row) =>
       row.checkId === "project-token-identity" ? { ...row, status: "unknown" as CheckStatus } : row);
     const rows = reconcileInvestigationChecks(tokenChecks(dossier()), TOKEN_ADDRESS, boundAccount({ checkRuns: unbound }));
 
     expect(byLabel(rows, "News & press").status).toBe("unknown");
     expect(byLabel(rows, "GitHub forensics").status).toBe("unknown");
+    expect(byLabel(rows, "Trust-graph reconciliation").status).toBe("unknown");
+    expect(byLabel(rows, "Trust-graph reconciliation").note).toContain("did not confirm this project's canonical token");
+    expect(byLabel(rows, "Trust-graph reconciliation").note).toContain("@askvenice");
   });
 
-  it("credits nothing when the bound token address is a different asset", () => {
+  it("credits nothing when the bound token address is a different asset, and says why", () => {
     const rows = reconcileInvestigationChecks(
       tokenChecks(dossier()),
       TOKEN_ADDRESS,
@@ -473,11 +476,12 @@ describe("reconcileInvestigationChecks", () => {
 
     expect(byLabel(rows, "News & press").status).toBe("unknown");
     expect(byLabel(rows, "Documents & audits").status).toBe("unknown");
+    expect(byLabel(rows, "News & press").note).toContain("bound a different token contract (0x11111111");
   });
 
   it("never overwrites a recorded token outcome and never credits from an unrecorded source", () => {
     const sources = projectRows().map((row) =>
-      row.checkId === "news-press" ? { ...row, status: "unknown" as CheckStatus } : row);
+      row.checkId === "news-press" ? { ...row, status: "unknown" as CheckStatus, note: "press search hit its provider budget" } : row);
     const tokenRows = tokenChecks(dossier()).map((row) =>
       row.checkId === "documents-audits"
         ? { ...row, status: "finding" as CheckStatus, note: "token-side docs finding already recorded" }
@@ -485,6 +489,10 @@ describe("reconcileInvestigationChecks", () => {
     const rows = reconcileInvestigationChecks(tokenRows, TOKEN_ADDRESS, boundAccount({ checkRuns: sources }));
 
     expect(byLabel(rows, "News & press").status).toBe("unknown");
+    // The unfinished source's own diagnosis is copied over so the token report
+    // explains where the gap actually lives.
+    expect(byLabel(rows, "News & press").note).toContain("where it also did not finish");
+    expect(byLabel(rows, "News & press").note).toContain("press search hit its provider budget");
     expect(byLabel(rows, "Documents & audits")).toMatchObject({
       status: "finding",
       note: "token-side docs finding already recorded",
