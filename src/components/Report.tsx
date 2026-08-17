@@ -45,6 +45,7 @@ import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
+import { GithubAssessment } from "./GithubAssessment";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { decisionCriticalChecks, isAdverseFinding, personChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
@@ -4289,6 +4290,19 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <div className="min-w-0 lg:col-span-2">
               <Section title="Profile photo" kicker="current supplemental overlay · outside the frozen core evidence and stored verdict">
                 <PfpCheck handle={report.handle} brand={roles.some((role) => String(role) === "PROJECT") && !roles.some((role) => String(role) === "FOUNDER")} panelCostToken={panelCostToken} />
+              </Section>
+            </div>
+          )}
+
+          {/* GitHub assessment — quality of work · account history · bio claims vs
+              GitHub reality (resolved + frozen during the audit; self-hides when
+              no account was matched) */}
+          {f.githubAssessment && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="GitHub assessment" kicker="quality of work · account history · bio claims vs GitHub reality">
+                <Card className="p-4">
+                  <GithubAssessment a={f.githubAssessment} />
+                </Card>
               </Section>
             </div>
           )}
