@@ -6,12 +6,12 @@ const SOL = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"; // $BONK
 
 describe("tokenFromBio", () => {
   it("finds an EVM contract stated in the bio", () => {
-    const c = tokenFromBio(`The people's frog. CA: ${EVM} — no tax, no games.`);
+    const c = tokenFromBio(`The people's frog. CA: ${EVM} - no tax, no games.`);
     expect(c).toMatchObject({ address: EVM, via: "evm" });
   });
 
   it("finds a Solana mint as a standalone word", () => {
-    const c = tokenFromBio(`$BONK — the dog coin of Solana\n${SOL}`);
+    const c = tokenFromBio(`$BONK - the dog coin of Solana\n${SOL}`);
     expect(c).toMatchObject({ address: SOL, via: "solana" });
   });
 
@@ -22,7 +22,7 @@ describe("tokenFromBio", () => {
   it("does not false-positive on prose, handles, or URLs", () => {
     expect(tokenFromBio("Building the future of onchain finance | DeFi maxi | jup.ag")).toBeNull();
     expect(tokenFromBio("")).toBeNull();
-    // 31 base58 chars — one short of a plausible mint.
+    // 31 base58 chars - one short of a plausible mint.
     expect(tokenFromBio("a".repeat(31))).toBeNull();
     // base58 run embedded in a longer non-base58 token (0/O/l break it apart
     // but the fragments stay under 32 chars).

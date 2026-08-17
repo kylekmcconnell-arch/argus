@@ -64,7 +64,7 @@ describe("reportToHtml", () => {
         action: "No mechanical red flags (not financial advice)",
         flags: [],
         warnings: ["37% of supply is concentrated in 9 non-contract wallets (pools excluded)"],
-        positives: ["Ownership renounced — no owner powers remain"],
+        positives: ["Ownership renounced - no owner powers remain"],
       },
       code: {
         checked: true,
@@ -113,7 +113,7 @@ describe("reportToHtml", () => {
 
   it("lists publishable findings when present", () => {
     const withFindings = dossiers.find((d) => d.report.publishable_findings.length > 0);
-    if (!withFindings) return; // no fixture carries findings — nothing to assert
+    if (!withFindings) return; // no fixture carries findings - nothing to assert
     const html = reportToHtml(withFindings);
     expect(html).toContain("Publishable findings");
     expect(html).toContain(withFindings.report.publishable_findings[0].claim.slice(0, 20));

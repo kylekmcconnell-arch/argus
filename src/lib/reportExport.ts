@@ -1,7 +1,7 @@
 // Export a rendered audit to a portable document. Two dependency-free targets:
-//   • PDF      — render a print-styled standalone page and hand it to the browser's
+//   • PDF      - render a print-styled standalone page and hand it to the browser's
 //                native "Save as PDF" (window.print). Highest fidelity, no libs.
-//   • Google Doc — emit a Word/Docs-importable .doc (HTML under an msword MIME).
+//   • Google Doc - emit a Word/Docs-importable .doc (HTML under an msword MIME).
 //                Google Docs opens it directly (Drive → Open with Google Docs), as
 //                does Word/Pages. This is the honest keyless path: creating a doc
 //                straight into the user's Drive would need an OAuth integration.
@@ -70,7 +70,7 @@ function verdictBanner(d: Dossier): string {
   const cap = r.cap_applied ? `<div class="cap">▲ Hard cap · ${esc(capLabel(r.cap_applied))}</div>` : "";
   return `
     <div class="banner" style="border-color:${color}">
-      <div class="banner-score" style="color:${color}">${r.governing_score == null ? "—" : r.governing_score}<span>/100</span></div>
+      <div class="banner-score" style="color:${color}">${r.governing_score == null ? "-" : r.governing_score}<span>/100</span></div>
       <div class="banner-body">
         <div class="banner-kicker">Composite verdict</div>
         <div class="banner-verdict" style="color:${color}">${esc(verdictLabel(r.composite_verdict))}${gov}</div>
@@ -113,7 +113,7 @@ function contradictionsBlock(d: Dossier): string {
       (c) => `
       <li>
         <span class="sev sev-${esc(c.severity)}">${esc(c.severity)}</span>
-        <span class="claim">${esc(c.claim)}</span> — but <span class="dim">${esc(c.conflict)}</span>
+        <span class="claim">${esc(c.claim)}</span> - but <span class="dim">${esc(c.conflict)}</span>
         ${c.confidence === "low" ? `<span class="dim">(low confidence)</span>` : ""}
       </li>`,
     )
@@ -144,7 +144,7 @@ function roleBreakdown(d: Dossier): string {
         <div class="role-card">
           <div class="role-head">
             <span class="role-name">${esc(roleLabel(rr.role))}${rr.role === gov ? ' <span class="pill">governs</span>' : ""}</span>
-            <span class="role-verdict" style="color:${color}">${esc(verdictLabel(rr.verdict))} · ${rr.score_total == null ? "—" : rr.score_total}/100</span>
+            <span class="role-verdict" style="color:${color}">${esc(verdictLabel(rr.verdict))} · ${rr.score_total == null ? "-" : rr.score_total}/100</span>
           </div>
           ${rr.cap_applied ? `<p class="cap-line">cap · ${esc(capLabel(rr.cap_applied))}</p>` : ""}
           ${axes}
@@ -209,7 +209,7 @@ function testimonialsBlock(d: Dossier): string {
     .map(
       (x) => `
       <tr>
-        <td>${esc(x.claimed_endorser_handle ?? x.claimed_endorser_name ?? "—")}${x.claimed_relationship ? `<br><span class="dim">claims: ${esc(x.claimed_relationship)}</span>` : ""}</td>
+        <td>${esc(x.claimed_endorser_handle ?? x.claimed_endorser_name ?? "-")}${x.claimed_relationship ? `<br><span class="dim">claims: ${esc(x.claimed_relationship)}</span>` : ""}</td>
         <td>${x.follows_subject ? "follows" : "no follow"} · ${esc(x.public_acknowledgment && x.public_acknowledgment !== "none" ? x.public_acknowledgment : "no ack")}</td>
         <td>${esc(x.corroboration_verdict ?? "Unconfirmed")}</td>
       </tr>`,
@@ -235,11 +235,11 @@ function founderBlock(d: Dossier): string {
 
 // ── the token threat leg of the FULL scan ──
 // The full scan carries the project token's complete threat report; the export
-// must too — a printed dossier that silently dropped the token verdict would
+// must too - a printed dossier that silently dropped the token verdict would
 // misrepresent what the audit covered. Renders the verdict banner, the three
 // finding tiers, the code read (file:line citations), tokenomics, deployer
 // memory, and the transparent checklist. When the leg was skipped or failed,
-// the threatNote states why — a gap is reported as a gap.
+// the threatNote states why - a gap is reported as a gap.
 const THREAT_HEX: Record<string, string> = {
   SAFE: "#16a34a",
   CAUTION: "#d97706",
@@ -249,7 +249,7 @@ const THREAT_HEX: Record<string, string> = {
 };
 
 const usd = (n?: number | null): string =>
-  n == null ? "—"
+  n == null ? "-"
     : n >= 1e9 ? "$" + (n / 1e9).toFixed(2) + "B"
     : n >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M"
     : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K"
@@ -287,8 +287,8 @@ function threatBlock(d: Dossier): string {
   const codeHead = code.verified
     ? `${esc(code.contractName ?? "contract")} · ${code.stats?.functions ?? 0} functions · ${code.stats?.gatedFunctions ?? 0} privileged${code.origin ? ` · via ${esc(code.origin)}` : ""}`
     : code.checked
-      ? "no verified source — the code cannot be read"
-      : "SPL — standard token program, no per-token code";
+      ? "no verified source - the code cannot be read"
+      : "SPL - standard token program, no per-token code";
   const codeFlags = code.flags
     .map(
       (f) => `
@@ -327,7 +327,7 @@ function threatBlock(d: Dossier): string {
 
   const dep = t.deployer;
   const depLine = dep.serialHoneypoter
-    ? "This wallet has deployed honeypot tokens before — a serial scammer's wallet."
+    ? "This wallet has deployed honeypot tokens before - a serial scammer's wallet."
     : dep.priorRugs > 0
       ? `Seen before in the scanner's ledger: ${dep.priorRugs} of this wallet's tokens were flagged DANGER or RUG.`
       : dep.priorScans.length > 0
@@ -337,7 +337,7 @@ function threatBlock(d: Dossier): string {
     ? `<div class="sub"><h3>Deployer <span class="kicker mono">${esc(dep.address ?? "unresolved")}</span></h3><p class="note">${esc(depLine)}</p></div>`
     : "";
 
-  const CHK = { pass: "✓ pass", warn: "⚠ warn", fail: "✗ fail", na: "— n/a" } as const;
+  const CHK = { pass: "✓ pass", warn: "⚠ warn", fail: "✗ fail", na: "- n/a" } as const;
   const checks = t.checks
     .map((c) => `<tr><td>${esc(c.label)}</td><td><span class="chk chk-${esc(c.status)}">${CHK[c.status] ?? c.status}</span></td><td class="dim">${esc(c.detail)}</td></tr>`)
     .join("");
@@ -457,10 +457,10 @@ export interface ReportHtmlOptions {
 }
 
 // Turn a Dossier into a complete, self-contained HTML document. Pure: no DOM,
-// no window — safe to unit-test and to reuse on a server if ever needed.
+// no window - safe to unit-test and to reuse on a server if ever needed.
 export function reportToHtml(d: Dossier, opts: ReportHtmlOptions = {}): string {
   const r = d.report;
-  const title = opts.docTitle ?? `${d.display_name || d.handle} — ${verdictLabel(r.composite_verdict)} · ARGUS`;
+  const title = opts.docTitle ?? `${d.display_name || d.handle} - ${verdictLabel(r.composite_verdict)} · ARGUS`;
   const stamp = opts.generatedAt ?? "";
   const printScript = opts.autoPrint ? `<script>window.onload=function(){setTimeout(function(){window.print();},120);};</script>` : "";
   return `<!doctype html>
@@ -533,7 +533,7 @@ type BrowserGlobals = typeof globalThis & {
   };
 };
 
-// Open the styled document in a fresh window and let the browser print it —
+// Open the styled document in a fresh window and let the browser print it -
 // the "Save as PDF" destination produces the file. No PDF library needed.
 export function exportReportPdf(d: Dossier): boolean {
   const g = globalThis as BrowserGlobals;
@@ -544,7 +544,7 @@ export function exportReportPdf(d: Dossier): boolean {
     docTitle: reportFilename(d, "pdf").replace(/\.pdf$/, ""),
   });
   const w = g.window.open("", "_blank", "noopener,noreferrer");
-  if (!w) return false; // popup blocked — caller can fall back
+  if (!w) return false; // popup blocked - caller can fall back
   w.document.open();
   w.document.write(html);
   w.document.close();

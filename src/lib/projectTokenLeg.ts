@@ -1,11 +1,11 @@
 // Attribute the subject's own project token, so the FULL scan can run the token
 // threat leg in the same run. Attribution order is a trust order:
-//   1. a contract address in the subject's OWN bio — authoritative (the
+//   1. a contract address in the subject's OWN bio - authoritative (the
 //      impersonation defense: the official account states its contract),
 //   2. a claimed promotion that carries a contract address,
 //   3. (client-side, elsewhere) a canonical CoinGecko name-match, guarded
 //      against namesakes by the bio's own domain.
-// Pure string logic only — this file is also compiled by the DOM-less server
+// Pure string logic only - this file is also compiled by the DOM-less server
 // tsconfig and bundled into the collector.
 
 export interface TokenCandidate {
