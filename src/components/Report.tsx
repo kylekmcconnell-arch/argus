@@ -23,7 +23,6 @@ import {
   UserFocus,
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
-import { printReportPdf } from "../lib/printPdf";
 import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
 import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
 import type { DecisionLensId } from "../intelligence/types";
@@ -45,6 +44,9 @@ import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
+import { GithubAssessment } from "./GithubAssessment";
+import { ThreatReport } from "./ThreatScanPage";
+import { ExportMenu } from "./ExportMenu";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { decisionCriticalChecks, isAdverseFinding, personChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
@@ -2934,9 +2936,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 Rescan
               </button>
             )}
-            <button type="button" onClick={() => printReportPdf(dossier.handle)} title="Save this report as a PDF (opens the print dialog)" className="btn-secondary print:hidden min-h-11 gap-1.5 px-3 text-[12.5px]">
-              Export PDF
-            </button>
+            <ExportMenu dossier={dossier} />
             {canShare && (
               <button
                 type="button"
@@ -4289,6 +4289,39 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <div className="min-w-0 lg:col-span-2">
               <Section title="Profile photo" kicker="current supplemental overlay · outside the frozen core evidence and stored verdict">
                 <PfpCheck handle={report.handle} brand={roles.some((role) => String(role) === "PROJECT") && !roles.some((role) => String(role) === "FOUNDER")} panelCostToken={panelCostToken} />
+              </Section>
+            </div>
+          )}
+
+          {/* GitHub assessment — quality of work · account history · bio claims vs
+              GitHub reality (resolved + frozen during the audit; self-hides when
+              no account was matched) */}
+          {f.githubAssessment && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="GitHub assessment" kicker="quality of work · account history · bio claims vs GitHub reality">
+                <Card className="p-4">
+                  <GithubAssessment a={f.githubAssessment} />
+                </Card>
+              </Section>
+            </div>
+          )}
+
+          {/* the token threat leg of the FULL scan — the subject's own token,
+              scanned by the complete threat pipeline in the same run. Absent
+              field = older report from before the fold-in; a note without a
+              scan = the leg was skipped or failed, and says why. */}
+          {(f.threat || f.threatNote) && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="Project token · threat scan" kicker={f.threatNote ?? "the token threat leg of this audit"}>
+                {f.threat ? (
+                  <Card className="p-2">
+                    <ThreatReport scan={f.threat} />
+                  </Card>
+                ) : (
+                  <Card className="p-4">
+                    <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.threatNote}</p>
+                  </Card>
+                )}
               </Section>
             </div>
           )}

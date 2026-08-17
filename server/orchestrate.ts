@@ -29,6 +29,7 @@ import {
   scanContradictions,
 } from "./agent";
 import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cost";
+import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
@@ -3528,6 +3529,28 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
+
+  // -- Project-token announcement: the FULL scan includes the token threat leg.
+  // Resolve the subject's token as early as possible and stamp it on a step
+  // (machine-readable `token` field) so the CLIENT launches the browser-side
+  // threat scanner in parallel with everything below - one product, no added
+  // wall-clock. The bio CA is authoritative (impersonation defense: the
+  // official account states its own contract); a claimed promotion with a
+  // contract is second. No match here is not terminal - the client falls back
+  // to a canonical name-match after the dossier lands.
+  try {
+    const tokenCand = tokenFromBio(evidence.profile.bio) ?? tokenFromPromotions(evidence.promotions);
+    if (tokenCand) {
+      emit({
+        phase: "ARGUS · Threat",
+        label: "Project token resolved",
+        detail: `${tokenCand.address.slice(0, 10)}… (${tokenCand.via}) via ${tokenCand.source} - the token threat scan runs in parallel with the rest of this audit.`,
+        source: "argus",
+        tone: "neutral",
+        token: tokenCand,
+      });
+    }
+  } catch { /* attribution is best-effort; the client can still resolve later */ }
 
   // The investigation director turns the resolved subject and decision intent
   // into explicit evidence questions with allowlisted specialist delegates.

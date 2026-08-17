@@ -15,7 +15,8 @@
 import type { Adapter, CollectContext } from "./types";
 import { recordCall } from "../cost";
 import { env } from "../config";
-import { VentureOutcome } from "../../src/engine";
+import { VentureOutcome, SubjectClass } from "../../src/engine";
+import type { GithubAssessment, GithubClaimCheck, GithubRepoBrief } from "../../src/data/evidence";
 
 const GH = "https://api.github.com";
 const headers = (key: string) => ({
@@ -70,7 +71,7 @@ async function ghJson<T>(path: string, key: string): Promise<T | null> {
 
 interface GhUser { login: string; name?: string; bio?: string; company?: string; twitter_username?: string; blog?: string; public_repos?: number; created_at?: string }
 interface GhOrg { login: string; description?: string }
-interface GhRepo { name: string; html_url: string; owner: { login: string; type: string }; stargazers_count?: number; fork?: boolean }
+interface GhRepo { name: string; html_url: string; owner: { login: string; type: string }; stargazers_count?: number; fork?: boolean; language?: string; pushed_at?: string }
 
 export interface GithubMatch {
   login: string;
@@ -187,6 +188,113 @@ export async function githubAffiliations(login: string, key: string): Promise<{ 
   return [...out.values()].slice(0, 10);
 }
 
+// Team fan-out budget + the leader-role test (a project's founders/leads only).
+const MAX_TEAM = 5;
+const LEADER_RE = /founder|cofounder|co-?founder|ceo|cto|coo|president|chief|head of|\blead\b/i;
+
+const yearsSince = (fromIso: string, toMs: number): number | undefined => {
+  const t = Date.parse(fromIso);
+  return Number.isFinite(t) ? (toMs - t) / (365.25 * 864e5) : undefined;
+};
+
+// Deterministic (no-LLM) cross-check of the X bio's self-claims against what the
+// GitHub account actually shows. Every result is GRADED, never accusatory: a
+// "contradicted" grade means bio and GitHub disagree on a checkable fact, which
+// is a lead for a human, not a verdict.
+export function buildClaimChecks(
+  bio: string,
+  a: { createdAt?: string; accountAgeYears?: number; originalCount: number; forkCount: number; forkRatio: number; totalStarsOnOriginals: number },
+): GithubClaimCheck[] {
+  const checks: GithubClaimCheck[] = [];
+  const b = bio ?? "";
+
+  // 1) "since YYYY" / "est. 'YY" tenure claims vs the account's creation year.
+  const ym = b.match(/\b(?:since|est\.?|building since|from)\s*'?(\d{4})\b/i) ?? b.match(/\bsince\s*'?(\d{2})\b/i);
+  if (ym && a.createdAt) {
+    let claimedYear = parseInt(ym[1], 10);
+    if (claimedYear < 100) claimedYear += 2000; // "since '09" -> 2009
+    const createdYear = new Date(a.createdAt).getFullYear();
+    if (Number.isFinite(createdYear)) {
+      if (claimedYear >= createdYear - 1) {
+        checks.push({ claim: `Bio implies presence since ${claimedYear}`, observation: `GitHub account created ${createdYear} - consistent`, grade: "consistent" });
+      } else {
+        checks.push({ claim: `Bio implies presence since ${claimedYear}`, observation: `but the GitHub account was only created in ${createdYear}`, grade: "context" });
+      }
+    }
+  }
+
+  // 2) Builder/founder persona vs actual original output.
+  if (/founder|co-?founder|builder|\bbuild|\bdev\b|developer|engineer|\bship|core contributor|hacker|programmer/i.test(b)) {
+    const total = a.originalCount + a.forkCount;
+    const claim = "Bio presents a builder/founder persona";
+    if (total === 0) {
+      checks.push({ claim, observation: "GitHub account has no public repositories", grade: "unsupported" });
+    } else if (a.originalCount === 0) {
+      checks.push({ claim, observation: `all ${total} public repos are forks - no original repositories`, grade: "contradicted" });
+    } else if (a.forkRatio >= 0.8) {
+      checks.push({ claim, observation: `${a.forkCount} of ${total} repos are forks; ${a.originalCount} original with ${a.totalStarsOnOriginals}★`, grade: "unsupported" });
+    } else {
+      checks.push({ claim, observation: `${a.originalCount} original repos (${a.totalStarsOnOriginals}★)`, grade: "consistent" });
+    }
+  }
+
+  return checks;
+}
+
+// Assess a resolved GitHub account: age, original-vs-fork mix, stars, languages,
+// recency, and the bio-claim cross-checks. Two API calls (user + repos list);
+// every field is derived from the list payload, so no per-repo detail fetch.
+export async function assessGithub(match: GithubMatch, key: string, bio: string, opts?: { maxRepos?: number }): Promise<GithubAssessment | null> {
+  const login = match.login;
+  const perPage = opts?.maxRepos ?? 30;
+  const u = await ghJson<GhUser>(`/users/${encodeURIComponent(login)}`, key);
+  if (!u) return null;
+  const repos = (await ghJson<GhRepo[]>(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=owner&per_page=${perPage}`, key)) ?? [];
+
+  const originals = repos.filter((r) => !r.fork);
+  const forks = repos.filter((r) => r.fork);
+  const total = repos.length;
+  const forkRatio = total ? forks.length / total : 0;
+  const totalStarsOnOriginals = originals.reduce((s, r) => s + (r.stargazers_count ?? 0), 0);
+
+  const langTally = new Map<string, number>();
+  for (const r of originals) if (r.language) langTally.set(r.language, (langTally.get(r.language) ?? 0) + 1);
+  const topLanguages = [...langTally.entries()].map(([language, repos]) => ({ language, repos })).sort((a, b) => b.repos - a.repos).slice(0, 6);
+
+  const notableRepos: GithubRepoBrief[] = [...originals]
+    .sort((a, b) => (b.stargazers_count ?? 0) - (a.stargazers_count ?? 0))
+    .slice(0, 5)
+    .map((r) => ({ name: r.name, stars: r.stargazers_count ?? 0, language: r.language, lastPush: r.pushed_at, fork: false, url: r.html_url }));
+
+  const nowMs = Date.now();
+  const pushes = repos.map((r) => (r.pushed_at ? Date.parse(r.pushed_at) : NaN)).filter((t) => Number.isFinite(t));
+  const lastMs = pushes.length ? Math.max(...pushes) : undefined;
+  const ageY = u.created_at ? yearsSince(u.created_at, nowMs) : undefined;
+
+  const base = {
+    createdAt: u.created_at,
+    accountAgeYears: ageY != null ? Math.round(ageY * 10) / 10 : undefined,
+    originalCount: originals.length,
+    forkCount: forks.length,
+    forkRatio: Math.round(forkRatio * 100) / 100,
+    totalStarsOnOriginals,
+  };
+  const summary = `github.com/${login}: ${ageY != null ? `~${Math.round(ageY)}y old, ` : ""}${originals.length} original + ${forks.length} fork repos${totalStarsOnOriginals ? `, ${totalStarsOnOriginals}★ on originals` : ""}${topLanguages.length ? ` (${topLanguages.slice(0, 3).map((l) => l.language).join(", ")})` : ""}.`;
+
+  return {
+    login,
+    confidence: match.confidence === "gold" ? "gold" : "weak",
+    ...base,
+    publicRepos: u.public_repos ?? total,
+    topLanguages,
+    notableRepos,
+    lastActivity: lastMs ? new Date(lastMs).toISOString() : undefined,
+    daysSinceActivity: lastMs ? Math.round((nowMs - lastMs) / 864e5) : undefined,
+    claimChecks: buildClaimChecks(bio, base),
+    summary,
+  };
+}
+
 export const githubAdapter: Adapter = {
   id: "github",
   label: "GitHub forensics",
@@ -253,6 +361,37 @@ export const githubAdapter: Adapter = {
       sourceCount: 1,
     });
     ctx.emit({ phase: "P1 · Identity", label: "GitHub confirmed", detail: `github.com/${match.login} links back to ${ctx.handle} (twitter_username match).`, source: "github", tone: "good" });
+
+    // Assess the subject's own account: quality of work, account history, and how
+    // the X bio's self-claims hold up against the actual GitHub.
+    const assessment = await assessGithub(match, key, ctx.evidence.profile.bio);
+    if (assessment) {
+      ctx.evidence.profile.githubAssessment = assessment;
+      ctx.emit({ phase: "P1 · Identity", label: "GitHub assessment", detail: assessment.summary, source: "github", tone: assessment.forkRatio > 0.8 || assessment.originalCount === 0 ? "warn" : "neutral" });
+      for (const c of assessment.claimChecks) {
+        if (c.grade === "contradicted" || c.grade === "unsupported") {
+          ctx.emit({ phase: "P1 · Identity", label: "Bio vs GitHub", detail: `${c.claim} - ${c.observation}.`, source: "github", tone: "warn" });
+        }
+      }
+    }
+
+    // Project path: resolve + assess the founders'/leaders' GitHubs by matching
+    // each leader's X handle to a GitHub twitter_username (gold match only), so a
+    // project account's real builders get the same scrutiny as a person.
+    if (ctx.evidence.roles.includes(SubjectClass.PROJECT)) {
+      const leaders = (ctx.evidence.webTeam ?? []).filter((m) => m.handle && LEADER_RE.test(m.role ?? "")).slice(0, MAX_TEAM);
+      let assessed = 0;
+      for (const m of leaders) {
+        const tm = await resolveGithub(m.handle!, m.name, key);
+        if (tm?.confidence !== "gold") continue;
+        const ta = await assessGithub(tm, key, "", { maxRepos: 15 });
+        if (ta) { m.github = ta; assessed++; }
+      }
+      if (leaders.length) {
+        ctx.emit({ phase: "P1 · Identity", label: "Team GitHubs", detail: assessed ? `${assessed} of ${leaders.length} leader X handle(s) linked to a GitHub (twitter_username match) and assessed.` : "No leader X handle linked back to a GitHub account.", source: "github", tone: assessed ? "good" : "neutral" });
+      }
+    }
+
 
     const affs = await githubAffiliations(match.login, key);
     if (!affs.length) {

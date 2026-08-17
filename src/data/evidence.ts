@@ -18,6 +18,46 @@ import type {
   EvidenceOrigin,
 } from "../engine";
 
+// A single owned repo, summarized from the repos-list payload (no per-repo call).
+export interface GithubRepoBrief {
+  name: string;
+  stars: number;
+  language?: string;
+  lastPush?: string; // ISO date of the most recent push
+  fork: boolean;
+  url: string;
+}
+
+// One evidence-graded cross-check of an X-bio claim against GitHub reality.
+// Grades describe support, never assert fraud: "contradicted" means the bio and
+// GitHub disagree on a checkable fact, not that the person is lying.
+export interface GithubClaimCheck {
+  claim: string;       // the bio claim being tested
+  observation: string; // what GitHub shows
+  grade: "consistent" | "unsupported" | "contradicted" | "context";
+}
+
+// A structured read of a resolved GitHub account: how old it is, how much of the
+// work is original vs forked, what its stars/languages look like, and how the
+// bio's self-claims hold up against it. Computed server-side during the audit.
+export interface GithubAssessment {
+  login: string;
+  confidence: "gold" | "weak"; // carried from the twitter_username match
+  createdAt?: string;          // account creation date (ISO)
+  accountAgeYears?: number;
+  publicRepos: number;
+  originalCount: number;       // non-fork owned repos
+  forkCount: number;
+  forkRatio: number;           // forks / (originals + forks), 0 when no repos
+  totalStarsOnOriginals: number;
+  topLanguages: { language: string; repos: number }[];
+  notableRepos: GithubRepoBrief[]; // top originals by stars
+  lastActivity?: string;       // most recent push across owned repos (ISO)
+  daysSinceActivity?: number;  // computed at collect time
+  claimChecks: GithubClaimCheck[];
+  summary: string;             // one-line evidence-graded headline
+}
+
 export interface SubjectProfile {
   handle: string;
   display_name: string;
@@ -53,6 +93,7 @@ export interface SubjectProfile {
   last_post_at?: string;    // ISO time of the most recent tweet (dormancy signal)
   days_since_post?: number; // days since that post, computed at collect time
   identity_emails?: string[]; // PDL-resolved emails — bridge to leaked GitHub commit emails
+  githubAssessment?: GithubAssessment; // resolved GitHub account: quality/claims/history
   /** A placeholder handle is not provider evidence until this is `resolved`. */
   profile_collection_state?: "resolved" | "unavailable";
   /** Provider that returned the frozen profile, when collection succeeded. */
@@ -165,6 +206,12 @@ export interface TraceStep {
   detail: string;
   source?: string;
   tone: "neutral" | "good" | "warn" | "bad";
+  // Machine-readable project-token announcement. The server resolves the
+  // subject's token as early as it can and stamps it on a step; the client
+  // runner sees it mid-stream and launches the browser-side token threat scan
+  // IN PARALLEL with the rest of the collection, so the full audit carries the
+  // threat report without extending the critical path.
+  token?: { address: string; via: "evm" | "solana"; source: string };
 }
 
 /**
@@ -794,6 +841,7 @@ export interface WebTeamMember {
   /** Exact fetched page that directly supports the person's project role. */
   sourceUrl?: string;
   projects?: { name: string; role?: string }[]; // their OTHER projects (serial-founder web)
+  github?: GithubAssessment; // resolved from this member's X handle (gold match only)
   /** Developer profiles linked directly from this person's own X profile. */
   developerProfiles?: Array<{
     provider: "github" | "huggingface";

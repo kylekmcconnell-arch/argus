@@ -106,6 +106,9 @@ export interface ThreatScan {
   symbol: string;
   name: string;
   dossier: TokenDossier; // the underlying market/safety audit (data layer)
+  // What KIND of token this is (meme / utility / RWA / equity / security-like),
+  // decided at the outset so the judge measures it against the right yardstick.
+  classification?: import("./classify").TokenClassification;
   call: ThreatCall;
   code: CodeReview;
   deployer: DeployerRep;

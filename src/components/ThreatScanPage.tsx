@@ -588,6 +588,13 @@ function ShareButton({ scan }: { scan: ThreatScan }) {
   );
 }
 
+// The full threat report body, exported for surfaces that already HOLD a scan
+// (the person report's frozen token leg) - EmbeddedThreatScan stays the entry
+// point when only an address is known.
+export function ThreatReport({ scan }: { scan: ThreatScan }) {
+  return <Report scan={scan} />;
+}
+
 function Report({ scan }: { scan: ThreatScan }) {
   const { call, dossier: d, code, deployer, checks } = scan;
   const m = VERDICT_META[call.verdict];
@@ -611,8 +618,16 @@ function Report({ scan }: { scan: ThreatScan }) {
           <div className="mono mt-0.5 text-[11px] text-ink-faint">{scan.chain} · {shortAddr(scan.address)} · {money(d.liquidityUsd)} liq · {money(d.mcap)} mcap</div>
           <div className="mt-2 flex items-center gap-2">
             <span className="mono rounded px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider" style={{ color: m.color, border: "1px solid currentColor" }}>{call.verdict}</span>
+            {scan.classification && scan.classification.kind !== "unknown" && (
+              <span className="mono rounded border border-line px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider text-ink-dim" title={scan.classification.signals.join("; ")}>
+                {scan.classification.label}
+              </span>
+            )}
             <span className="text-[13px] text-ink-dim">{call.action}</span>
           </div>
+          {scan.classification && (
+            <p className="mt-1.5 text-[12.5px] leading-snug text-ink-faint">{scan.classification.lens}</p>
+          )}
           {/* Every pertinent project link in one strip - what the token points
               at, plus the chart/registry pages an analyst opens next anyway. */}
           <div className="mt-2 flex flex-wrap gap-1.5">

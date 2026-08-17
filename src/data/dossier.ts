@@ -24,6 +24,7 @@ import type {
   BasicFactLead,
   BasicFactQuestionLedgerEntry,
   BasicFactSource,
+  GithubAssessment,
 } from "./evidence";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
 import type { ScanCheck } from "../lib/scanChecklist";
@@ -207,6 +208,15 @@ export interface Dossier {
   leaderDepartures?: CollectedEvidence["leaderDepartures"];
   /** Model-only or otherwise unverified team candidates; never grounded evidence. */
   webTeamLeads?: WebTeamMember[];
+  githubAssessment?: GithubAssessment; // subject's resolved GitHub: quality/claims/history
+  // The token threat leg of the FULL scan. Attached client-side by the runner
+  // (the threat scanner runs in the browser, in parallel with the server
+  // collection) and persisted with the report. Absent: no project token could
+  // be attributed to this subject. null: a token was found but the scan failed.
+  threat?: import("../threat/types").ThreatScan | null;
+  // Why the threat leg ran on that token (or why it was skipped) - one line,
+  // rendered with the section so the attribution is auditable.
+  threatNote?: string;
   /** Second-hop discovery stays inspectable even when excluded from the graph. */
   ventureTeams?: CollectedEvidence["ventureTeams"];
   /** Cited model discoveries that did not govern the frozen result. */
@@ -425,6 +435,16 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     const ekey = `email:${email.toLowerCase()}`;
     if (!hasNode(ekey)) graph.nodes.push({ type: "Identity", subtype: "Email", key: ekey, label: email } as PanoptesNode);
     graph.edges.push({ src: subjectKey, dst: ekey, type: "IDENTITY_EMAIL" });
+  }
+
+  // The resolved GitHub login as its own identity node (github:<login>), so two
+  // audits that land on the same GitHub account bridge to one node - same pattern
+  // as the email bridge above.
+  const gh = ev.profile.githubAssessment;
+  if (gh) {
+    const gkey = `github:${gh.login.toLowerCase()}`;
+    if (!hasNode(gkey)) graph.nodes.push({ type: "Identity", subtype: "GitHub", key: gkey, label: `github.com/${gh.login}` } as PanoptesNode);
+    graph.edges.push({ src: subjectKey, dst: gkey, type: "IDENTITY_GITHUB" });
   }
 
   // The operator's launch record, frozen into the payload so a saved report
@@ -654,6 +674,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
         providerRuns: entry.providerRuns.map((run) => ({ ...run })),
       })),
     } : {}),
+    ...(ev.profile.githubAssessment ? { githubAssessment: ev.profile.githubAssessment } : {}),
     report,
     graph,
     founderSummary: ev.roles.includes(SubjectClass.FOUNDER) ? a.founderSummary() : undefined,
