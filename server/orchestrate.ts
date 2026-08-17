@@ -32,7 +32,7 @@ import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cos
 import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
-import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
@@ -996,6 +996,18 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // no press and no listing, this is often the only first-party operator
     // evidence that exists (and it is two crossing signals, not a guess).
     discoverOperatorsFromFollowings(ctx.handle, ctx.evidence.profile.display_name),
+    // Same doctrine over the OTHER first-party edge: accounts this account
+    // retweets/quote-posts whose own bio claims they run it. Catches the
+    // founder the follow scan misses (no follow edge, or beyond its page
+    // budget) — e.g. a project account amplifying its founder's posts while
+    // the founder's bio says "Founder @project".
+    discoverOperatorsFromAmplified(ctx.handle, ctx.evidence.profile.display_name),
+    // Reverse role-phrase search: who does the PUBLIC RECORD say founded or
+    // leads this project? Runs quoted queries ("founder of @y", "cofounder of
+    // @y", "CEO at @y", "@y team", name/domain variants) across X and the web,
+    // where the project's own surfaces never name anyone but the founder's
+    // bio, a press piece, or an AI answer does.
+    findRoleClaimants(ctx.handle, ctx.evidence.profile.display_name, domain),
   ]);
 
   const claims = await claimsPromise;
@@ -1070,7 +1082,22 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // is where the team page actually lives — mine it like Site recon would.
   // discoverAffiliations now covers the reverse-mention angle too (was a second
   // Grok search call — merged to halve intake search spend).
-  const [bySubject, people, siteTeam, pageTeam, operatorTeam] = await discoveryPromise;
+  const [bySubject, people, siteTeam, pageTeam, operatorTeam, amplifiedTeam, reverseTeam] = await discoveryPromise;
+
+  // Reverse-search leads are model output until the claimed person's LIVE bio
+  // is fetched and really carries the claim. A confirmed bio is a first-party
+  // artifact from the claimant's side; it upgrades the lead's identity link
+  // and evidence quote, while subject-side vouching still comes only from the
+  // account's own edges (follow, amplification, its posts, its site).
+  const reverseBioClaims = reverseTeam.length
+    ? await confirmClaimantBios(reverseTeam, ctx.handle, ctx.evidence.profile.display_name)
+    : new Map<string, { role: string; phrase: string }>();
+  if (reverseBioClaims.size) {
+    const quoted = [...reverseBioClaims.entries()]
+      .map(([h, claim]) => `@${h} ("${claim.phrase}")`)
+      .join(", ");
+    ctx.emit({ phase: "P1 · Team", label: "Role claim in live bio", detail: `Reverse role-phrase search surfaced ${reverseBioClaims.size} candidate${reverseBioClaims.size === 1 ? "" : "s"} whose current X bio carries the claim first-party: ${quoted}.`, source: "reverse role search + bio fetch", tone: "good" });
+  }
 
   // Auto-pivot team: merge everyone found across the website search, the account's
   // own X content, and a deterministic post role-word scan (founder/CEO/CTO...).
@@ -1139,6 +1166,36 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
     })),
+    // Same two crossing first-party signals as the followings lane, over the
+    // amplification edge (the subject's own timeline retweeted/quoted the
+    // claimant, and the claimant's own bio states the role).
+    ...amplifiedTeam.map((member) => ({
+      ...member,
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic" as const,
+      projects_evidence_origin: "model_lead" as const,
+    })),
+    // Reverse-search leads stay model leads (one-sided until the subject's own
+    // edges vouch — the deterministic lanes above own that call and win the
+    // merge), but a live-bio-confirmed claim upgrades the identity link and
+    // swaps the model's paraphrase for the fetched artifact's own words.
+    ...reverseTeam.map((member) => {
+      const claim = member.handle ? reverseBioClaims.get(member.handle.replace(/^@/, "").toLowerCase()) : undefined;
+      return {
+        ...member,
+        ...(claim ? {
+          role: claim.role,
+          evidence: `their current X bio states "${claim.phrase}"`,
+        } : {}),
+        evidence_origin: "model_lead" as const,
+        artifact_verified: false,
+        provider: "reverse-role-search",
+        identity_link_evidence_origin: claim ? "deterministic" as const : "model_lead" as const,
+        projects_evidence_origin: "model_lead" as const,
+      };
+    }),
   ];
   for (const t of teamCandidates) {
     const h = t.handle ? norm(t.handle) : "";
@@ -1282,6 +1339,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   const accountVouchesTeam = !!domain
     || postRoleTeam.length > 0
     || operatorTeam.length > 0
+    || amplifiedTeam.length > 0
     || webTeam.some((t) => t.artifact_verified === true && norm(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
