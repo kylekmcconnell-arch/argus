@@ -7,6 +7,7 @@
 //     holder sell analysis (failed sellers, siphoned wallets), max buy/sell
 //     caps, and the human-readable honeypot reason.
 import { apiFetch } from "./net";
+import { retryFetch } from "../lib/retry";
 
 // ---- RugCheck (Solana) ----
 export interface RugcheckRisk {
@@ -28,7 +29,7 @@ export interface RugcheckReport {
 
 export async function rugcheckReport(mint: string): Promise<RugcheckReport | null> {
   try {
-    const res = await fetch(`https://api.rugcheck.xyz/v1/tokens/${mint}/report`, {
+    const res = await retryFetch(`https://api.rugcheck.xyz/v1/tokens/${mint}/report`, {
       signal: AbortSignal.timeout(12000),
     });
     if (!res.ok) return null;
@@ -110,7 +111,7 @@ export async function goplusMeta(chain: string, address: string): Promise<GoPlus
   const id = GP_CHAIN[chain];
   if (!id) return null;
   try {
-    const res = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${id}?contract_addresses=${address}`, {
+    const res = await retryFetch(`https://api.gopluslabs.io/api/v1/token_security/${id}?contract_addresses=${address}`, {
       signal: AbortSignal.timeout(12000),
     });
     if (!res.ok) return null;
@@ -219,7 +220,7 @@ export async function honeypotDeep(chain: string, address: string): Promise<Hone
   const chainID = HP_CHAIN[chain];
   if (!chainID) return null;
   try {
-    const res = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainID}`, {
+    const res = await retryFetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainID}`, {
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) return null;

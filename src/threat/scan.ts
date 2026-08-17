@@ -13,6 +13,7 @@ import type {
   CodeReview, DeployerRep, ThreatCall, ThreatCheck, ThreatScan, ThreatVerdict,
 } from "./types";
 import { reviewCode } from "./codereview";
+import { classifyToken, type TokenClassification } from "./classify";
 import { analyzeTokenomics, type TokenomicsView } from "./tokenomics";
 import { recordReceipt, sharedByDeployer } from "./receipts";
 import {
@@ -53,6 +54,17 @@ export async function threatScan(
       return null;
     }
   }
+
+  // Classify the token FIRST - meme / utility / RWA / equity / security-like -
+  // so everything downstream is judged against the right yardstick (an anon team
+  // on a meme coin is the norm; a live mint on tokenized equity is issuance).
+  let classification = classifyToken(dossier);
+  emit?.({
+    phase: "ARGUS · Class",
+    label: classification.label,
+    detail: `${classification.signals[0] ?? "no strong signals"}${classification.confidence !== "high" ? ` (${classification.confidence} confidence)` : ""}.`,
+    tone: "neutral",
+  });
 
   emit?.({ phase: "ARGUS · Code", label: "Source read", detail: "Fetching verified source and reading the contract…", tone: "neutral" });
   const sol = dossier.chain === "solana";
@@ -137,6 +149,15 @@ export async function threatScan(
     tone: code.verified ? (code.flags.some((f) => f.severity === "critical") ? "bad" : "good") : "warn",
   });
 
+  // Re-run classification now that the code has been read - what the tax
+  // actually DOES (e.g. buys RWAs/stocks for holders) outranks the blurb, and
+  // can move the class. Only re-announce when the call changed.
+  const refined = classifyToken(dossier, code.tokenomics);
+  if (refined.kind !== classification.kind) {
+    emit?.({ phase: "ARGUS · Class", label: refined.label, detail: `Reclassified after the code read: ${refined.signals[0]}.`, tone: "neutral" });
+  }
+  classification = refined;
+
   const deployer = await deployerRep(dossier);
   if (deployer.priorRugs > 0) {
     emit?.({ phase: "ARGUS · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the shared ledger.`, tone: "bad" });
@@ -146,8 +167,8 @@ export async function threatScan(
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
     emit?.({ phase: "ARGUS · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers, site);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers, site);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers, site, classification);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers, site, classification);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -155,7 +176,7 @@ export async function threatScan(
     chain: dossier.chain,
     symbol: dossier.symbol,
     name: dossier.name,
-    dossier, call, code, deployer, tokenomics, checks,
+    dossier, classification, call, code, deployer, tokenomics, checks,
     deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers, site },
     scannedAt: Date.now(),
   };
@@ -193,6 +214,7 @@ export function judge( // exported for unit tests only
   tk: TokenomicsView, xchain: CrossChain | null, migration: MigrationInfo | null,
   launch: LaunchProvenance | null, verification: RegistryVerification | null,
   sellers: SellStructure | null, site: SiteSafety | null,
+  cls: TokenClassification = UNCLASSIFIED,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -295,13 +317,21 @@ export function judge( // exported for unit tests only
 
   // --- authority / owner powers ---
   const authorityRelaxed = (d.findings.some((f) => f.tone === "warn" && /governed emissions|ops mechanism/i.test(f.claim)));
+  // Tokenized equity / RWA on a credible issuer: mint & freeze are the
+  // ISSUANCE/COMPLIANCE model (shares are minted on deposit, redeemed on burn;
+  // freezes serve transfer restrictions), not a rug switch. Only relaxed when
+  // the market legitimacy gate or GoPlus's trust list backs the issuer - a
+  // fresh anonymous "tokenized stock" gets NO benefit of the doubt.
+  const issuanceModel = (cls.kind === "equity" || cls.kind === "rwa") && cls.confidence !== "low" && (established || !!meta?.trustListed);
   if (s.hiddenOwner) { add(45); flags.push("HIDDEN OWNER - control is disguised behind a wallet the renounce doesn't touch"); }
   if (s.mintable) {
-    if (authorityRelaxed) warnings.push("Mint authority is live - on this listed token it reads as a governed emissions switch, but confirm who holds it");
+    if (issuanceModel) warnings.push(`Mint authority is live - on ${cls.kind === "equity" ? "tokenized equity" : "an RWA token"} this is the issuer's issuance/redemption mechanism, but it still means trusting the issuer`);
+    else if (authorityRelaxed) warnings.push("Mint authority is live - on this listed token it reads as a governed emissions switch, but confirm who holds it");
     else { add(40); flags.push("Mint authority is LIVE - the team can print supply and dilute you to zero"); }
   }
   if (s.freezable) {
-    if (authorityRelaxed) warnings.push("Freeze authority is live - governed on a listed token, but it can still freeze accounts");
+    if (issuanceModel) warnings.push("Freeze authority is live - expected for compliance on issuer-backed assets, but the issuer can freeze your tokens");
+    else if (authorityRelaxed) warnings.push("Freeze authority is live - governed on a listed token, but it can still freeze accounts");
     else { add(40); flags.push("Freeze authority is LIVE - your tokens can be frozen in your wallet"); }
   }
   if (s.takeBack && !s.hiddenOwner) {
@@ -516,6 +546,11 @@ export function judge( // exported for unit tests only
     else if (d.ageDays != null && d.ageDays < 7) { add(6); warnings.push(`Pair is ${Math.round(d.ageDays)} day${Math.round(d.ageDays) === 1 ? "" : "s"} old`); }
   }
 
+  // --- class-aware framing ---
+  // Not risk points - regulatory context the holder should price in.
+  if (cls.kind === "security-like") warnings.push("Dividend / revenue-share mechanics make this SECURITY-LIKE - securities-law exposure (delisting, enforcement) sits on top of ordinary market risk");
+  if (cls.kind === "meme" && cls.confidence !== "low") positives.push("Assessed as a meme coin - judged on exit mechanics, liquidity custody and holder spread, not on utility it never claimed (an anon team is the norm in this class)");
+
   // --- corroboration positives ---
   if (d.cg?.listed) positives.push(`Listed on CoinGecko${d.cg.rank ? ` (rank #${d.cg.rank})` : ""}${d.cg.cexCount ? `, ${d.cg.cexCount} CEX market${d.cg.cexCount === 1 ? "" : "s"}` : ""}`);
   if (s.ownerRenounced && !s.mintable && !s.freezable && !s.takeBack)
@@ -537,6 +572,9 @@ export function judge( // exported for unit tests only
   return { verdict, risk, action, flags, warnings, positives };
 }
 
+// Default for callers (tests) that predate classification.
+const UNCLASSIFIED: TokenClassification = { kind: "unknown", confidence: "low", label: "UNCLASSIFIED", signals: [], lens: "" };
+
 const EVM = (chain: string) => chain !== "solana";
 
 // ---- the transparent checklist: what was examined, including clean results ----
@@ -545,6 +583,7 @@ function buildChecks(
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
   tk: TokenomicsView, launch: LaunchProvenance | null, verification: RegistryVerification | null,
   sellers: SellStructure | null, site: SiteSafety | null,
+  cls: TokenClassification = UNCLASSIFIED,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -558,6 +597,9 @@ function buildChecks(
   ): ThreatCheck => ({ key, category, label, status, detail });
 
   return [
+    chk("class", "market", "Token class",
+      cls.kind === "unknown" ? "na" : "pass",
+      `${cls.label}${cls.confidence !== "high" ? ` (${cls.confidence} confidence)` : ""} - ${cls.signals[0] ?? "no strong signals"}`),
     chk("honeypot", "honeypot", "Can holders sell?",
       na ? "na" : s.honeypot || s.cannotSellAll || (hp?.siphoned ?? 0) > 0 ? "fail" : "pass",
       na ? "Not verifiable on this chain keyless" : s.honeypot ? "Selling is blocked" : (hp?.siphoned ?? 0) > 0 ? "Real holders' sells are siphoned" : hp && hp.holdersAnalyzed >= 5 ? `Sells simulated for ${hp.holdersAnalyzed} real holders` : s.simChecked ? "Real sell simulated successfully" : "No sell restriction found on-chain"),
