@@ -18,6 +18,8 @@ import {
   type BasicFactsAudience,
 } from "../lib/basicFactQuestions";
 import { ExpandableText } from "./ExpandableText";
+import { ProvenanceTag } from "./ProvenanceTag";
+import { provenanceForBasicFactStatus } from "../lib/provenance";
 
 export type { BasicFactsAudience } from "../lib/basicFactQuestions";
 
@@ -95,13 +97,16 @@ const SINGLE_VALUE_PREDICATES = new Set([
   "official_token",
 ]);
 
-const STATUS_META: Record<Exclude<BasicFactStatus, "lead">, { label: string; className: string }> = {
-  verified: { label: "Verified", className: "tint-pass text-pass" },
-  corroborated: { label: "Confirmed twice", className: "tint-pass text-pass" },
-  conflicted: { label: "Conflicted", className: "tint-avoid text-avoid" },
-  unresolved: { label: "Unresolved", className: "tint-caution text-caution" },
-  checked_empty: { label: "Checked, none found", className: "tint-neutral text-ink-dim" },
-  not_applicable: { label: "Not applicable", className: "tint-neutral text-ink-faint" },
+// Labels only: provenance colour now comes from ProvenanceTag / provenanceForBasicFactStatus
+// (DESIGN.md 2.1), never from the verdict palette. Where a fact came from is not whether
+// it's good news.
+const STATUS_META: Record<Exclude<BasicFactStatus, "lead">, { label: string }> = {
+  verified: { label: "Verified" },
+  corroborated: { label: "Confirmed twice" },
+  conflicted: { label: "Conflicted" },
+  unresolved: { label: "Unresolved" },
+  checked_empty: { label: "Checked, none found" },
+  not_applicable: { label: "Not applicable" },
 };
 
 function displayValue(value: unknown): string {
@@ -953,7 +958,7 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
     ? parseFactMetrics(displayFact)
     : null;
   return (
-    <li className={`panel-inset min-w-0 ${prominent ? `border-l-2 ${strictlyVerified ? "border-pass/40" : "border-signal/35"} px-3.5 py-3` : "px-3 py-2.5"}`}>
+    <li className={`panel-inset min-w-0 ${prominent ? `border-l-2 ${strictlyVerified ? "border-sourced/40" : "border-signal/35"} px-3.5 py-3` : "px-3 py-2.5"}`}>
       <div className="flex items-start justify-between gap-2.5">
         <div className="min-w-0 flex-1">
           {statGrid ? (
@@ -971,16 +976,20 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
           {extra}
         </div>
         {!strictlyVerified ? (
-          <span className="chip tint-signal shrink-0 normal-case tracking-normal text-signal-lift">
-            {sourceReported ? "Source reported" : "Supporting context"}
-          </span>
+          <ProvenanceTag
+            state={sourceReported ? { tier: "derived" } : { tier: "sourced" }}
+            label={sourceReported ? "Source reported" : "Supporting context"}
+            className="shrink-0"
+          />
         ) : fact.status === "corroborated" ? (
-          <span className={`chip shrink-0 normal-case tracking-normal ${meta.className}`}>{meta.label}</span>
+          <ProvenanceTag state={provenanceForBasicFactStatus(fact.status)!} label={meta.label} className="shrink-0" />
         ) : (
-          <span className={`chip shrink-0 gap-1 normal-case tracking-normal ${meta.className}`}>
-            <CheckCircle aria-hidden="true" size={12} weight="fill" />
-            {meta.label}
-          </span>
+          <ProvenanceTag
+            state={provenanceForBasicFactStatus(fact.status)!}
+            label={meta.label}
+            icon={<CheckCircle aria-hidden="true" size={12} weight="fill" />}
+            className="shrink-0"
+          />
         )}
       </div>
       {!strictlyVerified && (
@@ -991,7 +1000,7 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
         </p>
       )}
       {hard && (
-        <p className="mono mt-1.5 flex items-center gap-1.5 text-[10.5px] text-pass" title={hard.excerpt}>
+        <p className="mono mt-1.5 flex items-center gap-1.5 text-[10.5px] text-sourced" title={hard.excerpt}>
           <ShieldCheck aria-hidden="true" size={12} weight="fill" className="shrink-0" />
           {hard.line}
         </p>
@@ -1194,9 +1203,7 @@ export function BasicFactsPanel({
                     <p className="text-[10.5px] leading-relaxed text-ink-faint">{fact.question ?? basicFactQuestionFor(fact.predicate, audience)}</p>
                     <p className="mt-1 text-[13px] font-medium leading-snug text-ink-dim">{answerFor(fact)}</p>
                   </div>
-                  <span className={`chip shrink-0 normal-case tracking-normal ${STATUS_META.checked_empty.className}`}>
-                    {STATUS_META.checked_empty.label}
-                  </span>
+                  <ProvenanceTag state={provenanceForBasicFactStatus("checked_empty")!} label={STATUS_META.checked_empty.label} className="shrink-0" />
                 </div>
               </li>
             ))}
@@ -1205,9 +1212,9 @@ export function BasicFactsPanel({
       )}
 
       {conflictedRows.length > 0 && (
-        <div className="border-t border-avoid/30 bg-avoid/[0.035] px-4 py-4 sm:px-5" aria-label="Conflicted basic facts">
+        <div className="border-t border-sourced/30 bg-sourced/[0.035] px-4 py-4 sm:px-5" aria-label="Conflicted basic facts">
           <div className="flex items-start gap-2.5">
-            <Warning aria-hidden="true" size={18} weight="fill" className="mt-0.5 shrink-0 text-avoid" />
+            <Warning aria-hidden="true" size={18} weight="fill" className="mt-0.5 shrink-0 text-sourced" />
             <div>
               <h3 className="text-[13px] font-semibold text-ink">Sources disagree</h3>
               <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">ARGUS has not selected a clean answer for these points.</p>
@@ -1221,11 +1228,9 @@ export function BasicFactsPanel({
                 <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset px-3 py-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-[10.5px] text-ink-faint">{fact.question ?? basicFactQuestionFor(fact.predicate, audience)}</p>
-                    <span className={`chip shrink-0 normal-case tracking-normal ${STATUS_META.conflicted.className}`}>
-                      {STATUS_META.conflicted.label}
-                    </span>
+                    <ProvenanceTag state={provenanceForBasicFactStatus(fact.status)!} label={STATUS_META.conflicted.label} className="shrink-0" />
                   </div>
-                  <p className="mt-1 text-[12.5px] leading-relaxed text-avoid">{answerFor(fact)}</p>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-ink">{answerFor(fact)}</p>
                   <LegalEventMetadata fact={fact} audience={audience} />
                   {sourceLinks.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${fact.question ?? basicFactQuestionFor(fact.predicate, audience)}`}>
@@ -1369,7 +1374,7 @@ export function BasicFactsPanel({
                       <p className="text-[10px] uppercase tracking-[0.11em] text-ink-faint">{questionFor(lead.predicate)}</p>
                       <p className="mt-1 break-words text-[12.5px] leading-relaxed text-ink-dim">{leadAnswer || "Candidate answer not recorded"}</p>
                     </div>
-                    <span className="chip tint-caution shrink-0 normal-case tracking-normal">Possible lead</span>
+                    <ProvenanceTag state={provenanceForBasicFactStatus("lead")!} label="Possible lead" className="shrink-0" />
                   </div>
                   {urls.length > 0 && (
                     <div className="mt-2 flex min-w-0 flex-wrap gap-1.5">

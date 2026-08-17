@@ -8,6 +8,8 @@ import {
   type CheckStatus,
 } from "../lib/scanChecklist";
 import { plainLanguageSummary } from "../lib/plainLanguage";
+import { provenanceForCheckStatus } from "../lib/provenance";
+import { ProvenanceTag } from "./ProvenanceTag";
 
 // Transparent scan methodology: successful execution coverage and evidence
 // outcomes are separate. Collapsed by default so this reads as a trust footer.
@@ -151,9 +153,11 @@ export function MethodologyChecklist({
                   // A neutral assessment null is recorded as a substantive "finding" so
                   // it can cover its axis, but it must not read as an adverse discovery.
                   // Render it as a completed-null outcome, not an amber caution.
-                  const meta = check.status === "finding" && !isAdverseFinding(check)
-                    ? META["checked-empty"]
-                    : META[check.status];
+                  const effectiveStatus = check.status === "finding" && !isAdverseFinding(check)
+                    ? "checked-empty"
+                    : check.status;
+                  const meta = META[effectiveStatus];
+                  const provenance = provenanceForCheckStatus(effectiveStatus);
                   return (
                     <li key={`${check.label}-${index}`} className="flex items-start gap-2.5 rounded-lg px-2 py-1.5">
                       <span aria-hidden="true" className="mono mt-0.5 w-3.5 shrink-0 text-center text-[12.5px]" style={{ color: meta.color }}>{meta.glyph}</span>
@@ -161,7 +165,11 @@ export function MethodologyChecklist({
                         <span className="text-[12.5px] text-ink">{plainCheckLabel(check.label)}</span>
                         {check.note && <span className="ml-2 text-[11px] text-ink-faint">{plainCheckNote(check.note)}</span>}
                       </span>
-                      <span className="chip tint-var shrink-0" style={{ ["--tint" as string]: meta.color }}>{meta.label}</span>
+                      {provenance ? (
+                        <ProvenanceTag state={provenance} label={meta.label} className="shrink-0" />
+                      ) : (
+                        <span className="chip tint-var shrink-0" style={{ ["--tint" as string]: meta.color }}>{meta.label}</span>
+                      )}
                     </li>
                   );
                 })}

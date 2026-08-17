@@ -57,8 +57,37 @@ chips, "own token" / "rugged" / drift-alert flags. These use `.chip` + tint or
 ## 2 · Color
 
 Token NAMES are frozen (`--color-void/panel/panel-2/sidebar/line/line-2/control-line/ink/
-ink-dim/ink-faint/signal/signal-dim/signal-lift/on-signal/accent-tint/pass/caution/fail/avoid/unverifiable`). Values are
-tuned in `src/index.css` for both themes — components never hardcode color.
+ink-dim/ink-faint/signal/signal-dim/signal-lift/on-signal/accent-tint/pass/caution/fail/avoid/
+unverifiable/sourced/derived`). Values are tuned in `src/index.css` for both themes — components
+never hardcode color.
+
+### 2.1 · Provenance (where a value came from, never whether it is good news)
+
+A second, orthogonal ramp answers a different question than the verdict palette above: not
+"is this good or bad" but "how grounded is this." Three tiers, one new mark idiom:
+
+| Tier | Means | Token | Tint utility |
+|---|---|---|---|
+| **Sourced** | Confirmed against an outside artifact, or two artifacts conflict with each other | `--color-sourced` | `.tint-sourced` |
+| **Derived** | ARGUS calculated or inferred this from grounded inputs; source-reported but not independently confirmed | `--color-derived` | `.tint-derived` |
+| **Unestablished** | Nobody has evidenced this — a lead, an open question, a completed-empty check, or a hole | `--color-unverifiable` (reused) | `.tint-unverifiable` |
+
+A `conflicted` state (two fetched sources disagree) belongs in **sourced**, not derived — a
+contradiction is better grounded than a calculation, and louder. Render it as sourced tier plus
+the `.mark-contested` hollow-dot modifier on `.provenance-tag` (see `ProvenanceTag` in
+`src/lib/provenance.ts` / `src/components/ProvenanceTag.tsx`), the same hollow-vs-filled dot
+technique `.verdict-pill` already uses to split `fail` from `avoid`. A `lead` (a search model's
+unconfirmed candidate, per `ARGUS-SOURCE-OF-TRUTH.md`) belongs in **unestablished** — it has no
+grounded input and must never sit beside a computed metric.
+
+Colour answers how grounded a value is; the mark answers what kind of state it is in. Never let
+a mark carry a distinction the colour then contradicts. `--color-sourced` must never read as
+green — that would collide with `pass` (confirmed-good) and re-create the exact conflation this
+ramp exists to remove.
+
+A locked/paid module (not yet run) is never rendered in `sourced`, `derived`, or
+`unverifiable` — "we have not looked" is a fourth, distinct state and must stay visually
+unconfusable with `unestablished` ("we looked and found nothing").
 
 The signal family has three jobs: `signal` is the accessible primary fill/focus color,
 `signal-dim` is its pressed/strong-fill partner, and `signal-lift` is blue text/icons on
