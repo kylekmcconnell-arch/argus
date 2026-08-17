@@ -119,6 +119,33 @@ const normalized = (value: string): string => value.toLowerCase().replace(/[^a-z
 const projectName = (value: string): string =>
   value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*/)[0]?.trim() || value.trim();
 
+// Registry searches are literal enough that a display name carrying a generic
+// corporate suffix misses the token named without it: DexScreener's search for
+// "Greenwood Finance" does not return the $GWOOD token named "Greenwood" at
+// all, so the binding silently never happened and every downstream org-side
+// credit (news, docs, GitHub, trust graph) stayed open on the investigation.
+// Widen the SEARCH net only - every candidate still has to bridge the exact
+// audited X account and official domain, so recall can grow without any new
+// false-bind risk.
+const GENERIC_NAME_SUFFIX = /^(?:finance|protocol|labs?|network|official|app|exchange|capital|fund|foundation|dao|token|coin|money|cash|club|world|games?|inu)$/i;
+export function tokenSearchQueries(raw: string): string[] {
+  const primary = projectName(raw);
+  const queries: string[] = [];
+  const push = (candidate: string) => {
+    const trimmed = candidate.trim();
+    if (trimmed.length >= 2 && !queries.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) {
+      queries.push(trimmed);
+    }
+  };
+  push(primary);
+  const words = primary.split(/\s+/);
+  while (words.length > 1 && GENERIC_NAME_SUFFIX.test(words[words.length - 1])) {
+    words.pop();
+    push(words.join(" "));
+  }
+  return queries;
+}
+
 const normalizeHandle = (value: string): string => value.trim().replace(/^@/, "").toLowerCase();
 
 const sameAddress = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
@@ -901,8 +928,38 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     // often trade on a DEX before they are listed there, so a CoinGecko miss
     // must fall through to an identity-bound DEX search before ARGUS records a
     // substantive null. Exact X/domain matching remains mandatory.
-    const dexFallback = await collectDexProjectToken(ctx, query);
-    const attempts = 1 + detailAttempts + dexFallback.attempts;
+    //
+    // The DEX search runs each fallback query in turn (the full cleaned name,
+    // then the name with its generic corporate suffix dropped) until one yields
+    // an identity-bound match: DexScreener's search for "Greenwood Finance"
+    // does not return the token named "Greenwood" at all. Only recall widens;
+    // the identity gate is unchanged.
+    const dexQueries = tokenSearchQueries(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
+    let dexFallback = await collectDexProjectToken(ctx, dexQueries[0] ?? query);
+    let dexAttempts = dexFallback.attempts;
+    let dexSearchEverFailed = dexFallback.state === "failed";
+    const dexNameMatches = new Set<string>(dexFallback.state === "empty" ? dexFallback.nameMatches ?? [] : []);
+    let dexNameMatchCount = dexFallback.state === "empty" ? dexFallback.nameMatchCount ?? 0 : 0;
+    for (const fallbackQuery of dexQueries.slice(1)) {
+      if (dexFallback.state === "matched") break;
+      const retry = await collectDexProjectToken(ctx, fallbackQuery);
+      dexAttempts += retry.attempts;
+      if (retry.state === "failed") dexSearchEverFailed = true;
+      if (retry.state === "empty") {
+        for (const match of retry.nameMatches ?? []) dexNameMatches.add(match);
+        dexNameMatchCount = Math.max(dexNameMatchCount, retry.nameMatchCount ?? 0);
+      }
+      if (retry.state === "matched") dexFallback = retry;
+    }
+    if (dexFallback.state !== "matched" && dexNameMatches.size) {
+      dexFallback = {
+        ...dexFallback,
+        state: "empty",
+        nameMatches: [...dexNameMatches].slice(0, 3),
+        nameMatchCount: Math.max(dexNameMatchCount, dexNameMatches.size),
+      };
+    }
+    const attempts = 1 + detailAttempts + dexAttempts;
     if (dexFallback.state === "matched" && dexFallback.snapshot) {
       const snapshot = dexFallback.snapshot;
       ctx.evidence.projectToken = snapshot;
@@ -959,15 +1016,27 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     }
 
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
-    if (!search || coinDetailsUnavailable || dexFallback.state === "failed") {
+    if (!search || coinDetailsUnavailable || dexSearchEverFailed) {
       const gaps = [
         !search ? "CoinGecko search failed" : null,
         coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
-        dexFallback.state === "failed" ? dexFallback.detail : null,
+        dexSearchEverFailed ? "DexScreener project search failed" : null,
       ].filter((part): part is string => Boolean(part));
+      // A provider failure is not an assessed null, but it must still be
+      // RECORDED: leaving this decision-critical row unwritten made the report
+      // fall back to its placeholder note ("no official token identity was
+      // bound"), which reads as an assessed result and points nowhere. The
+      // sanctions screen set the precedent: an unreachable source records
+      // unavailable instead of silently passing or silently vanishing.
+      ctx.recordCheck?.({
+        id: "project-token-identity",
+        status: "unavailable",
+        note: `token-identity registries could not be fully read on this scan (${gaps.join("; ")}); this is a provider gap, not an assessed result, and a rescan can close it`,
+        provider: "coingecko/dexscreener",
+      });
       return {
         state: "partial",
-        detail: `${gaps.join("; ")}; no canonical-token null was recorded`,
+        detail: `${gaps.join("; ")}; recorded as an unavailable token-identity outcome`,
         attempts,
       };
     }

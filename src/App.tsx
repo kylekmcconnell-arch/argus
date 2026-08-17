@@ -41,6 +41,7 @@ import type { ReportPersistenceContext, ReportVersionContext } from "./lib/repor
 import type { ResearchIntent } from "./lib/researchDirector";
 import { fetchReconWebTeam } from "./lib/reconSupplements";
 import { recentReportKind } from "./lib/recentReportRoute";
+import { consumeStaleChunkReloadNotice } from "./components/AppErrorBoundary";
 
 // Product areas load on demand. The home/search shell stays immediate while
 // heavyweight reports, graph views, recon, and admin tooling become cached
@@ -373,6 +374,10 @@ export default function App() {
   // graphed, or shown in the sidebar/tickers.
   const privRef = useRef(false);
   const [privateMode, setPrivateMode] = useState(false);
+  // The landing side of a stale-chunk auto-reload (AppErrorBoundary): the tab
+  // was running an older build, a lazy page chunk 404'd, and the app reloaded
+  // itself - silently dropping the user on the home screen mid-task. Say so.
+  const [staleReloadNotice, setStaleReloadNotice] = useState(() => consumeStaleChunkReloadNotice());
 
   const leaveEvidenceReview = useCallback(() => {
     if (!evidenceReviewVersionId) return;
@@ -1347,6 +1352,13 @@ export default function App() {
   return (
     <AppShell onNav={onNav} onAudit={onSafeAudit} onOpenRecent={onOpenRecent} activeHandle={activeHandle} view={view}>
       <Suspense fallback={<RouteLoading />}>
+      {staleReloadNotice && (
+        <div className="tint-signal mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-[12.5px]" role="status">
+          <span className="font-medium text-signal-lift">ARGUS updated while this tab was open</span>
+          <span className="text-ink-dim">The page reloaded itself to pick up the new version, which closed what you were viewing. Nothing was lost: reopen your report from the case library.</span>
+          <button type="button" onClick={() => setStaleReloadNotice(false)} className="btn-chip ml-auto">Dismiss</button>
+        </div>
+      )}
       {evidenceReviewVersionId && phase !== "idle" && phase !== "notfound" && (
         <div className="tint-signal mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-[12.5px]">
           <span className="font-medium text-signal-lift">Immutable evidence review</span>

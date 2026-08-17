@@ -115,3 +115,35 @@ describe("AppErrorBoundary", () => {
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
   });
 });
+
+describe("consumeStaleChunkReloadNotice", () => {
+  const store = () => {
+    const map = new Map<string, string>();
+    return {
+      getItem: (key: string) => map.get(key) ?? null,
+      setItem: (key: string, value: string) => { map.set(key, value); },
+      removeItem: (key: string) => { map.delete(key); },
+    } as Storage;
+  };
+
+  it("reports a fresh auto-reload exactly once and leaves the cooldown marker intact", async () => {
+    const { consumeStaleChunkReloadNotice, RELOAD_MARKER } = await import("./AppErrorBoundary");
+    const storage = store();
+    storage.setItem(RELOAD_MARKER, String(Date.now()));
+
+    expect(consumeStaleChunkReloadNotice(storage)).toBe(true);
+    // Marker survives so the boundary's one-reload-per-cooldown guard still holds.
+    expect(storage.getItem(RELOAD_MARKER)).not.toBeNull();
+    // A second boot inside the window (or a re-render) shows nothing new.
+    expect(consumeStaleChunkReloadNotice(storage)).toBe(false);
+  });
+
+  it("stays silent with no marker, an old marker, or no storage", async () => {
+    const { consumeStaleChunkReloadNotice, RELOAD_MARKER } = await import("./AppErrorBoundary");
+    expect(consumeStaleChunkReloadNotice(store())).toBe(false);
+    const stale = store();
+    stale.setItem(RELOAD_MARKER, String(Date.now() - 10 * 60_000));
+    expect(consumeStaleChunkReloadNotice(stale)).toBe(false);
+    expect(consumeStaleChunkReloadNotice(undefined)).toBe(false);
+  });
+});
