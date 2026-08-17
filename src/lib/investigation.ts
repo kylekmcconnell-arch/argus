@@ -16,7 +16,9 @@
 //     synthesized from a name. Names without a handle are shown, not audited.
 //   - recon.team.state drives the founder section verbatim; a coverage gap is a
 //     gap, not an absence claim.
-import { auditToken, type TokenDossier } from "../token/audit";
+import { type TokenDossier } from "../token/audit";
+import { threatScan } from "../threat/scan";
+import type { ThreatScan } from "../threat/types";
 import { resolveInput } from "./resolveInput";
 import { runRecon, type Recon } from "../collect/recon";
 import { streamAudit, probeBackend } from "./live";
@@ -53,6 +55,10 @@ export interface WebPerson { name: string; handle?: string; linkedin?: string; r
 export interface Investigation {
   rootRef: string;
   token: TokenDossier;
+  // The FULL threat pipeline's read of the same token (code review, deep
+  // sources, tokenomics, deployer memory, the judge's verdict). The full scan
+  // always carries it; older persisted investigations won't have it.
+  threat?: ThreatScan | null;
   projectX: string | null;
   siteUrl: string | null;
   recon: Recon | null;
@@ -194,12 +200,19 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
 
   (async () => {
     try {
-      // ── Hop 1: on-chain token audit (free) ──
-      h.onHop("auditing the token on-chain");
-      h.onStep(milestone("Step 1 · On-chain token audit", "DexScreener + GoPlus, keyless.", "neutral"));
-      const token = await auditToken(resolveInput(rootRef), (s) => { if (!aborted) h.onStep(s); });
+      // ── Hop 1: the FULL token threat scan (mechanical audit + deep sources +
+      //    code read + tokenomics + deployer memory). The full scan is the
+      //    everything-tier: the light Threat tab runs this pipeline alone; the
+      //    investigation runs it as its first hop and keeps going into the
+      //    site, the team, and the people. threatScan wraps auditToken, so the
+      //    base TokenDossier comes back with it. ──
+      h.onHop("running the full token threat scan");
+      h.onStep(milestone("Step 1 · Token threat scan", "The complete threat pipeline: mechanical audit, honeypot/RugCheck deep sources, source-code read, tokenomics, deployer memory.", "neutral"));
+      const threat = await threatScan(resolveInput(rootRef), (s) => { if (!aborted) h.onStep(s); }).catch(() => null);
       if (aborted) return;
-      if (!token) { h.onError("Could not resolve that contract on any DEX."); return; }
+      if (!threat) { h.onError("Could not resolve that contract on any DEX."); return; }
+      const token = threat.dossier;
+      h.onStep(milestone("Threat verdict", `$${token.symbol}: ${threat.call.verdict} · ${threat.call.risk}/100 risk — ${threat.call.action}`, threat.call.verdict === "SAFE" ? "good" : threat.call.verdict === "CAUTION" ? "warn" : "bad"));
 
       let projectX = token.projectX;
       let siteUrl = token.socials.find((s) => /^https?:\/\//i.test(s.url) && !/x\.com|twitter\.com|t\.me|discord|github\.com/i.test(s.url))?.url ?? null;
@@ -308,7 +321,7 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       }
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
-      h.onDone({ rootRef, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail, webTeam });
+      h.onDone({ rootRef, token, threat, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail, webTeam });
     } catch (e) {
       if (!aborted) h.onError(String(e));
     }

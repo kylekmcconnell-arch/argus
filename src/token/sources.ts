@@ -3,6 +3,8 @@
 //   - DexScreener: market, liquidity, volume, txns, age, socials.
 //   - GoPlus: contract safety (honeypot, mint authority, ownership, tax, holders).
 
+import { retryFetch } from "../lib/retry";
+
 export interface DexPair {
   chainId: string;
   dexId: string;
@@ -64,10 +66,14 @@ export async function radarTokens(): Promise<RadarRef[]> {
 }
 
 export async function dexByToken(address: string): Promise<DexPair[]> {
-  const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
-  if (!res.ok) return [];
-  const d = (await res.json()) as { pairs?: DexPair[] };
-  return d.pairs ?? [];
+  try {
+    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
+    if (!res.ok) return [];
+    const d = (await res.json()) as { pairs?: DexPair[] };
+    return d.pairs ?? [];
+  } catch {
+    return [];
+  }
 }
 
 // Keyless, CORS-open free-text search across DexScreener — lets a site recon
@@ -92,7 +98,7 @@ const CG_PLATFORM: Record<string, string> = {
   optimism: "optimistic-ethereum", avalanche: "avalanche", fantom: "fantom",
 };
 const CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
-export interface CgInfo { listed: boolean; rank: number | null; mcapUsd: number | null; marketCount: number; cexCount: number; cexNames: string[]; homepage: string | null; twitter: string | null; image: string | null; description: string | null; }
+export interface CgInfo { listed: boolean; rank: number | null; mcapUsd: number | null; marketCount: number; cexCount: number; cexNames: string[]; homepage: string | null; twitter: string | null; image: string | null; description: string | null; categories: string[]; }
 
 // CoinGecko's description.en is the project's own blurb — the "what it actually
 // does" a report should lead with. Strip HTML + markdown links to plain text and
@@ -119,8 +125,8 @@ const CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bit
 export async function coingeckoToken(chain: string, address: string): Promise<CgInfo | null> {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
+    const res = await retryFetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
+    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null, categories: [] };
     if (!res.ok) return null;
     const d = (await res.json()) as any;
     const tickers: any[] = d.tickers ?? [];
@@ -135,17 +141,25 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
     const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
     const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
     const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image, description: cleanBlurb(d.description?.en) };
+    // Categories are CoinGecko's own taxonomy ("Meme", "Real World Assets (RWA)",
+    // "Tokenized Stocks"…) — the single strongest signal for classifying what
+    // KIND of token this is before we judge it.
+    const categories = Array.isArray(d.categories) ? d.categories.filter((c: unknown): c is string => typeof c === "string" && !!c.trim()) : [];
+    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image, description: cleanBlurb(d.description?.en), categories };
   } catch {
     return null;
   }
 }
 
 export async function dexByPair(chain: string, pair: string): Promise<DexPair | null> {
-  const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`);
-  if (!res.ok) return null;
-  const d = (await res.json()) as { pairs?: DexPair[]; pair?: DexPair };
-  return d.pair ?? d.pairs?.[0] ?? null;
+  try {
+    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`);
+    if (!res.ok) return null;
+    const d = (await res.json()) as { pairs?: DexPair[]; pair?: DexPair };
+    return d.pair ?? d.pairs?.[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function pickPair(pairs: DexPair[], wantAddress?: string): DexPair | null {
@@ -200,7 +214,7 @@ export interface HoneypotSim {
 }
 export async function honeypotIs(chainId: string, address: string): Promise<HoneypotSim | null> {
   try {
-    const res = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
+    const res = await retryFetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
     if (!res.ok) return null;
     const d = (await res.json()) as any;
     return {
@@ -236,7 +250,7 @@ export interface SolanaSecurity {
 }
 export async function goplusSolana(mint: string): Promise<SolanaSecurity | null> {
   try {
-    const res = await fetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
+    const res = await retryFetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
     if (!res.ok) return null;
     const d = (await res.json()) as { result?: Record<string, SolanaSecurity> };
     const row = d.result?.[mint] ?? (d.result ? Object.values(d.result)[0] : undefined);
@@ -249,7 +263,7 @@ export async function goplusSolana(mint: string): Promise<SolanaSecurity | null>
 export async function goplus(chainId: string, address: string): Promise<GoPlusSecurity | null> {
   const once = async (): Promise<GoPlusSecurity | null> => {
     try {
-      const res = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
+      const res = await retryFetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
       if (!res.ok) return null;
       const d = (await res.json()) as { result?: Record<string, GoPlusSecurity> };
       return d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : undefined) ?? null;
@@ -258,11 +272,14 @@ export async function goplus(chainId: string, address: string): Promise<GoPlusSe
     }
   };
   let row = await once();
-  // GoPlus free tier sometimes omits the holders array on the first call; retry once.
-  if (row && !(row.holders && row.holders.length)) {
+  // GoPlus free tier sometimes omits the holders array (or the whole call comes
+  // back empty after retryFetch's own retries are exhausted); one more pass
+  // after a short pause self-heals both cases instead of shipping a degraded
+  // safety read.
+  if (!row || !(row.holders && row.holders.length)) {
     await new Promise((r) => setTimeout(r, 700));
     const retry = await once();
-    if (retry?.holders?.length) row = retry;
+    if (retry && (retry.holders?.length || !row)) row = retry;
   }
   return row;
 }

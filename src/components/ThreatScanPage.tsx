@@ -1,8 +1,9 @@
 // Token Threat Scanner — run view + report. A self-contained page: token ref in,
 // live trace while the scan runs, then the threat report: risk gauge (higher =
-// worse), one-line action, three tiers of plain-English findings, the LYRA code
-// read (static flags with file:line citations + lazy AI read that may dissent),
-// deployer memory, and the transparent checklist of everything examined.
+// worse), one-line action, three tiers of plain-English findings, the ARGUS
+// engine code read (static flags with file:line citations + lazy AI read that
+// may dissent), deployer memory, and the transparent checklist of everything
+// examined.
 
 import { useEffect, useRef, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
@@ -12,6 +13,7 @@ import type { CodeFlag, ThreatCheck, ThreatScan, ThreatVerdict } from "../threat
 import { threatScan } from "../threat/scan";
 import { aiCodeRead } from "../threat/codereview";
 import { insiderClusters } from "../threat/insiders";
+import { behindLedger } from "../threat/behindledger";
 import { receiptStats, sharedReceiptStats } from "../threat/receipts";
 import { ThreatReceipts } from "./ThreatReceipts";
 import { MarketStructurePanel } from "./MarketStructure";
@@ -108,8 +110,8 @@ function CheckGrid({ checks }: { checks: ThreatCheck[] }) {
   );
 }
 
-// Lazy AI read: fires after the mechanical verdict renders, so LYRA can be fed
-// the verdict she is allowed to dissent from.
+// Lazy AI read: fires after the mechanical verdict renders, so the engine can
+// be fed the verdict it is allowed to dissent from.
 // Lazy insider-cluster panel (#9): proves which "separate" top holders are one
 // operator, via the funding/transfer graph. Loaded on demand after the verdict —
 // it's a keyed, slow call, so it never blocks the main scan.
@@ -154,7 +156,116 @@ function InsiderClusters({ scan }: { scan: ThreatScan }) {
   );
 }
 
-function LyraRead({ scan }: { scan: ThreatScan }) {
+// Behind the Ledger: the deep transfer-graph read. Walks the token's recent
+// Transfer history server-side and attributes every sell to where the seller's
+// tokens actually came from - emission farms, presale/insider vaults, churn,
+// or hop-wallet distribution. Runs automatically once the verdict renders
+// (like the AI code read) - it's a budgeted ~40s chain walk, so it streams in
+// after the report rather than blocking it.
+const compact = (n: number) =>
+  n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : n.toFixed(0);
+
+function BehindLedger({ scan }: { scan: ThreatScan }) {
+  const [state, setState] = useState<"loading" | "done" | "empty">("loading");
+  const [data, setData] = useState<import("../threat/types").BehindLedgerReport | null>(null);
+  const fired = useRef(false);
+  useEffect(() => {
+    if (fired.current) return;
+    fired.current = true;
+    behindLedger(scan.chain, scan.address, scan.dossier.pairAddress).then((r) => {
+      if (r) { setData(r); setState("done"); }
+      else setState("empty");
+    });
+  }, [scan]);
+  const a = data?.attribution;
+  const segments = a
+    ? [
+        { label: "farmed emissions", pct: a.farmPct, color: "var(--color-avoid)" },
+        { label: "presale / insider", pct: a.vaultPct, color: "var(--color-caution)" },
+        { label: "trader churn", pct: a.churnPct, color: "var(--color-signal)" },
+        { label: "hop-wallet funded", pct: a.hopPct, color: "var(--color-avoid)" },
+        { label: "plain transfers", pct: a.otherPct, color: "var(--color-ink-faint)" },
+      ].filter((s) => s.pct >= 0.5)
+    : [];
+  return (
+    <div className="mt-4 rounded-xl border border-line p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-[14px] font-semibold text-ink">Behind the Ledger</h2>
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">An in-depth analysis of all farming activity, launch selling, pre-sale and insider vault allocations, trader churn, and more.</p>
+        </div>
+      </div>
+      {state === "loading" && <p className="mt-2 animate-pulse text-[12.5px] text-ink-faint">Walking the transfer ledger - classifying vaults, farms, venues, and tracing every sell to its origin…</p>}
+      {state === "empty" && <p className="mt-2 text-[12.5px] text-ink-dim">The ledger could not be read for this token (unsupported chain, or too little transfer history in the window).</p>}
+      {state === "done" && data && a && (
+        <>
+          {/* where sold supply came from */}
+          <div className="mt-3">
+            <div className="flex items-baseline justify-between">
+              <span className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">sold supply, by origin</span>
+              <span className="mono text-[10.5px] text-ink-faint">{compact(a.totalUserSold)} sold by users · {compact(a.botShuttled)} arb shuttle excluded</span>
+            </div>
+            <div className="mt-1.5 flex h-2.5 w-full overflow-hidden rounded-full bg-line/40">
+              {segments.map((s) => (
+                <div key={s.label} style={{ width: `${s.pct}%`, background: s.color }} title={`${s.label} ${s.pct.toFixed(0)}%`} />
+              ))}
+            </div>
+            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+              {segments.map((s) => (
+                <span key={s.label} className="flex items-center gap-1.5 text-[11px] text-ink-dim">
+                  <span className="inline-block h-2 w-2 rounded-sm" style={{ background: s.color }} />
+                  {s.label} <span className="mono tabular">{s.pct.toFixed(0)}%</span>
+                </span>
+              ))}
+            </div>
+          </div>
+          {/* findings */}
+          <ul className="mt-3 space-y-1.5">
+            {data.findings.map((f, i) => (
+              <li key={i} className="flex gap-2 text-[13px] leading-snug text-ink-dim">
+                <span className="mono shrink-0 text-ink-faint">▸</span>
+                <span>{f}</span>
+              </li>
+            ))}
+          </ul>
+          {/* top sellers */}
+          {data.sellers.length > 0 && (
+            <div className="mt-3">
+              <span className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">largest sellers, resolved through router hops</span>
+              <div className="mt-1 divide-y divide-line/60">
+                {data.sellers.slice(0, 6).map((s) => {
+                  const tag = s.hopFunded ? { t: "hop-funded", c: "var(--color-avoid)" }
+                    : s.vaultPct >= 50 ? { t: "insider supply", c: "var(--color-caution)" }
+                    : s.farmPct >= 50 ? { t: "farm supply", c: "var(--color-avoid)" }
+                    : s.boughtPct >= 50 ? { t: "churn", c: "var(--color-ink-faint)" }
+                    : null;
+                  return (
+                    <div key={s.address} className="flex items-center justify-between gap-3 py-1.5">
+                      <span className="mono min-w-0 truncate text-[11px] text-ink-faint">{shortAddr(s.address)} · {s.trades} sell{s.trades === 1 ? "" : "s"}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {tag && <span className="mono rounded px-1.5 py-0.5 text-[9.5px] uppercase tracking-wider" style={{ color: tag.c, border: "1px solid currentColor" }}>{tag.t}</span>}
+                        <span className="mono text-[11.5px] font-semibold tabular text-ink-dim">{compact(s.sold)}</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {/* LP flow */}
+          {data.lp && (data.lp.added > 0 || data.lp.removed > 0) && (
+            <p className="mono mt-3 text-[10.5px] text-ink-faint">
+              LP flow: {compact(data.lp.added)} added · {compact(data.lp.removed)} removed{data.lp.removedLast3d > 0 ? ` · ${compact(data.lp.removedLast3d)} of that in the last 3 days` : ""}
+            </p>
+          )}
+          <p className="mono mt-1.5 text-[10.5px] text-ink-faint">{data.note}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function EngineRead({ scan }: { scan: ThreatScan }) {
   const [state, setState] = useState<"loading" | "done" | "off">(scan.code.verified ? "loading" : "off");
   const [ai, setAi] = useState(scan.code.ai);
   const fired = useRef(false);
@@ -168,7 +279,7 @@ function LyraRead({ scan }: { scan: ThreatScan }) {
   return (
     <div className="mt-3 rounded-lg border border-line/70 bg-line/20 p-3">
       <div className="flex items-center justify-between">
-        <span className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">LYRA · AI source read</span>
+        <span className="mono text-[10.5px] uppercase tracking-widest text-ink-faint">the ARGUS engine · AI source read</span>
         {ai?.dissent && (
           <span className="mono rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider" style={{ color: ai.dissent === "cleaner" ? "var(--color-pass)" : "var(--color-avoid)", border: "1px solid currentColor" }}>
             dissents: code reads {ai.dissent}
@@ -191,6 +302,8 @@ function LpBadge({ status }: { status: ThreatScan["tokenomics"]["lp"]["status"] 
     burned: { c: "var(--color-pass)", t: "LP burned" },
     locked: { c: "var(--color-pass)", t: "LP secured" },
     "launchpad-locked": { c: "var(--color-pass)", t: "Launchpad-locked" },
+    "nft-locked": { c: "var(--color-pass)", t: "NFT position locked" },
+    "nft-unlocked": { c: "var(--color-avoid)", t: "NFT position unlocked" },
     "nft-position": { c: "var(--color-ink-dim)", t: "NFT position" },
     unlocked: { c: "var(--color-avoid)", t: "LP unlocked" },
     unconfirmed: { c: "var(--color-caution)", t: "Lock unconfirmed" },
@@ -242,12 +355,15 @@ function ShareButton({ scan }: { scan: ThreatScan }) {
   );
 }
 
-function Report({ scan }: { scan: ThreatScan }) {
+// The threat report body. Exported so the FULL scan surfaces (the person audit
+// report and the token investigation report) can embed the same report the
+// standalone Threat tab renders — one pipeline, one rendering, two tiers.
+export function ThreatReport({ scan, embedded = false }: { scan: ThreatScan; embedded?: boolean }) {
   const { call, dossier: d, code, deployer, checks } = scan;
   const m = VERDICT_META[call.verdict];
   const rs = useLedgerStats();
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-16">
+    <div className={embedded ? "" : "mx-auto max-w-3xl px-4 pb-16"}>
       {/* header */}
       <div className="flex items-center gap-5 py-6">
         <RiskRing risk={call.risk} verdict={call.verdict} />
@@ -260,8 +376,16 @@ function Report({ scan }: { scan: ThreatScan }) {
           <div className="mono mt-0.5 text-[11px] text-ink-faint">{scan.chain} · {shortAddr(scan.address)} · {money(d.liquidityUsd)} liq · {money(d.mcap)} mcap</div>
           <div className="mt-2 flex items-center gap-2">
             <span className="mono rounded px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider" style={{ color: m.color, border: "1px solid currentColor" }}>{call.verdict}</span>
+            {scan.classification && scan.classification.kind !== "unknown" && (
+              <span className="mono rounded border border-line px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider text-ink-dim" title={scan.classification.signals.join("; ")}>
+                {scan.classification.label}
+              </span>
+            )}
             <span className="text-[13px] text-ink-dim">{call.action}</span>
           </div>
+          {scan.classification && (
+            <p className="mt-1.5 text-[12.5px] leading-snug text-ink-faint">{scan.classification.lens}</p>
+          )}
         </div>
       </div>
 
@@ -292,7 +416,7 @@ function Report({ scan }: { scan: ThreatScan }) {
         {!code.checked && (
           <p className="mt-2 text-[13px] text-ink-dim">Solana tokens share the standard token program — there is no per-token code to read. The mint, freeze, and transfer-hook authorities above carry the equivalent risk.</p>
         )}
-        <LyraRead scan={scan} />
+        <EngineRead scan={scan} />
       </div>
 
       {/* tokenomics */}
@@ -300,6 +424,32 @@ function Report({ scan }: { scan: ThreatScan }) {
 
       {/* market structure: chart, trading ranges, volume concentration, fib zones */}
       <MarketStructurePanel address={scan.address} chain={scan.chain} pairAddress={scan.dossier.pairAddress} />
+
+      {/* NFT-position liquidity custody — traced, not guessed */}
+      {scan.deep.nftlock && scan.deep.nftlock.positions.length > 0 && (
+        <div className="mt-4 rounded-xl border border-line p-4">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-[14px] font-semibold text-ink">LP position custody</h2>
+            <span className="mono text-[10.5px] text-ink-faint">traced on-chain · largest by size</span>
+          </div>
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">A v3/v4 pool's liquidity is a position NFT, not an LP token. Each position below was traced to its CURRENT owner and checked for a callable exit — not matched against a locker name.</p>
+          <div className="mt-2 divide-y divide-line/60">
+            {scan.deep.nftlock.positions.map((p) => {
+              const color = p.ownerKind === "burned" || p.locked === true ? "var(--color-pass)" : p.locked === false ? "var(--color-avoid)" : "var(--color-caution)";
+              const label = p.ownerKind === "closed" ? "closed" : p.ownerKind === "burned" ? "burned" : p.locked === true ? "locked" : p.locked === false ? "removable" : "unconfirmed";
+              return (
+                <div key={p.tokenId} className="py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="mono text-[11px] text-ink-faint">#{p.tokenId}{p.ownerName ? ` · ${p.ownerName}` : p.owner ? ` · ${shortAddr(p.owner)}` : ""}</span>
+                    <span className="mono rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider" style={{ color, border: "1px solid currentColor" }}>{label}</span>
+                  </div>
+                  <p className="mt-0.5 text-[12px] leading-snug text-ink-dim">{p.reason}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* migration */}
       {scan.deep.migration?.migrated && (
@@ -370,6 +520,9 @@ function Report({ scan }: { scan: ThreatScan }) {
       {/* creator & insider clusters (lazy, #9) */}
       <InsiderClusters scan={scan} />
 
+      {/* behind the ledger (lazy): the deep transfer-graph read */}
+      <BehindLedger scan={scan} />
+
       {/* checklist */}
       <div className="mt-4 rounded-xl border border-line p-4">
         <h2 className="text-[14px] font-semibold text-ink">Everything we checked</h2>
@@ -429,7 +582,7 @@ export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" 
       <h1 className="text-[26px] font-semibold tracking-tight text-ink">{mode === "token" ? "Token threat scan" : "Wallet threat triage"}</h1>
       <p className="mt-2 text-[14px] leading-relaxed text-ink-dim">
         {mode === "token"
-          ? "Paste a contract address or DexScreener link. NERON reads the chain — authorities, liquidity, holders, the deployer's history — and LYRA reads the actual contract code, citing the functions and lines. You get a plain-English verdict on whether it's a trap."
+          ? "Paste a contract address or DexScreener link. ARGUS reads the chain - authorities, liquidity, holders, the deployer's history - and the ARGUS engine reads the actual contract code, citing the functions and lines. You get a plain-English verdict on whether it's a trap."
           : "Paste a wallet address. Every token position is joined against the scanner's verdicts, with an at-risk-USD figure and a flag on any position with no market left to sell into. EVM is read keyless; Solana needs a Helius key on the backend."}
       </p>
       <div className="mt-4">{tabs}</div>
@@ -475,7 +628,7 @@ export function ThreatScanPage({ input, onError }: { input: ResolvedInput; onErr
       .catch(() => { setFailed(true); onError?.(); });
   }, [input, onError]);
 
-  if (scan) return <Report scan={scan} />;
+  if (scan) return <ThreatReport scan={scan} />;
   if (failed) {
     return (
       <div className="mx-auto max-w-xl px-4 py-16 text-center">
@@ -488,7 +641,7 @@ export function ThreatScanPage({ input, onError }: { input: ResolvedInput; onErr
   return (
     <AuditConsole
       handle={label}
-      subtitle="threat scan · market + contract + code + deployer · NERON reads the chain, LYRA reads the code"
+      subtitle="threat scan · market + contract + code + deployer · the ARGUS threat engine reads the chain and the code"
       steps={steps}
       pct={Math.min(95, steps.length * 9)}
       working

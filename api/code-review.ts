@@ -1,4 +1,4 @@
-// LYRA-style AI code read. GET /api/code-review?address=<0x…>&chain=<chainId>
+// The ARGUS engine AI code read. GET /api/code-review?address=<0x…>&chain=<chainId>
 //   &verdict=<mechanical verdict>&risk=<n>&danger=<n>&gated=<n>
 //
 // The mechanical scan flags capabilities; this pass reads the actual Solidity
@@ -134,7 +134,7 @@ function clampSource(source: string): { source: string; truncated: boolean } {
 
 // Robustly turn the model's reply into {summary, dissent}. Prefers strict JSON,
 // then a fenced ```json block, and finally falls back to the cleaned prose as
-// the summary — showing LYRA's read beats failing with "unparseable output".
+// the summary — showing the engine's read beats failing with "unparseable output".
 export function parseReview(text: string): { summary: string; dissent: "cleaner" | "darker" | null } | null {
   const clean = (s: string) => s.replace(/```json\s*|\s*```/g, "").trim();
   const dissentOf = (v: unknown) => (v === "cleaner" || v === "darker" ? v : null);
@@ -195,7 +195,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         model: process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6",
         max_tokens: 1200,
         system:
-          "You are LYRA-class contract reader for a token threat scanner: you read the ACTUAL Solidity source of a token and tell a non-technical buyer what the code does to them. Rules: " +
+          "You are ARGUS threat-engine contract reader for a token threat scanner: you read the ACTUAL Solidity source of a token and tell a non-technical buyer what the code does to them. Rules: " +
           "(1) Cite specific functions and approximate line numbers for every claim — functions and lines, not vibes. " +
           "(2) Distinguish GUARDED power from OPEN power: a bounded setFee (require <= 10%) or a timelocked owner is not a rug switch; an unbounded one is. Say which. " +
           "(3) Look hardest at _transfer/_update and any modifier gates — that is where traps live (conditional blocks on sells, hidden fee escalation, balance rewrites). " +

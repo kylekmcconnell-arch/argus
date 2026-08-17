@@ -1,4 +1,4 @@
-// The LYRA layer: read the actual contract code. Three tiers, best-effort:
+// The ARGUS engine layer: read the actual contract code. Three tiers, best-effort:
 //   1. Verified source fetched keyless (Sourcify / Blockscout).
 //   2. Static red-flag scan with file+line citations (always runs on source).
 //   3. AI read via /api/code-review (Claude, server-side, keyed) — a cached

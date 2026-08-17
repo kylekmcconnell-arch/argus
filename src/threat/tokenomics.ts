@@ -17,6 +17,7 @@
 import type { TokenDossier } from "../token/audit";
 import type { CodeTokenomics, TaxDestination } from "./solidity";
 import type { BurnHistory, GoPlusMeta, LabeledHolder, RugcheckReport } from "./deepsources";
+import type { NftLockReport } from "./types";
 
 // Known LP/market and launchpad-locker labels. Matched against holder tags so a
 // pool or a locker is never mistaken for an insider wallet.
@@ -46,7 +47,7 @@ function isNftPositionPool(dexId: string, labels: string[]): boolean {
   return labels.some((l) => NFT_POSITION.test(l)) || NFT_POSITION.test(dexId);
 }
 
-export type LpStatus = "burned" | "locked" | "launchpad-locked" | "nft-position" | "unlocked" | "unconfirmed";
+export type LpStatus = "burned" | "locked" | "launchpad-locked" | "nft-locked" | "nft-unlocked" | "nft-position" | "unlocked" | "unconfirmed";
 
 export interface TokenomicsView {
   pools: { address: string; label: string; pct: number }[];
@@ -99,6 +100,7 @@ export function analyzeTokenomics(
   rc: RugcheckReport | null,
   code: CodeTokenomics | null,
   burns: BurnHistory | null = null,
+  nftLock: NftLockReport | null = null,
 ): TokenomicsView {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -166,9 +168,26 @@ export function analyzeTokenomics(
   // that is the exact false positive to avoid. The LP-token lock check simply
   // doesn't apply; report the custody model instead of crying "removable".
   else if (nftPosition) {
-    status = "nft-position";
     const dex = (d.dexLabels ?? []).find((l) => NFT_POSITION.test(l)) ?? d.dexId;
-    note = `Liquidity is a concentrated / NFT position (${dex}) — it is a position NFT, not an LP token, so the standard lock/burn check doesn't apply here. It can still be withdrawn by whoever owns the position; judge it by the position owner and depth, not by an LP-token lock.`;
+    const dom = nftLock?.dominant;
+    if (dom) {
+      // The custody check (api/nftlock.ts) actually traced the largest live
+      // position to its current owner — burned/an exit-less contract is a real
+      // lock; a plain wallet is removable, exactly like any other unlocked LP.
+      if (dom.ownerKind === "burned" || dom.locked === true) {
+        status = "nft-locked";
+        note = `Liquidity is a concentrated / NFT position (${dex}). Traced on-chain: the largest position is ${dom.ownerKind === "burned" ? "burned" : `held by ${dom.ownerName ?? "a contract"}, which exposes no way to withdraw it`} — ${nftLock!.note}`;
+      } else if (dom.locked === false) {
+        status = "nft-unlocked";
+        note = `Liquidity is a concentrated / NFT position (${dex}), but the largest position is ${dom.ownerKind === "eoa" ? `held directly by wallet ${dom.owner}` : `held by ${dom.ownerName ?? dom.owner}, which CAN move it`} — it can be withdrawn at any time. ${nftLock!.note}`;
+      } else {
+        status = "nft-position";
+        note = `Liquidity is a concentrated / NFT position (${dex}) — the largest position's custody couldn't be confirmed either way (${dom.reason}). ${nftLock!.note}`;
+      }
+    } else {
+      status = "nft-position";
+      note = `Liquidity is a concentrated / NFT position (${dex}) — it is a position NFT, not an LP token, so the standard lock/burn check doesn't apply here. It can still be withdrawn by whoever owns the position; judge it by the position owner and depth, not by an LP-token lock.`;
+    }
   }
   else if (unlockedTopPct >= 50) { status = "unlocked"; note = `${unlockedTopPct.toFixed(0)}% of the liquidity sits in a single unlocked wallet — it can be pulled at any time.`; }
   else if (hasLaunchpadLocker) { status = "launchpad-locked"; note = `A launchpad locker (${[...lockers].join(", ")}) holds liquidity — likely auto-locked by design; confirm on the launchpad.`; }

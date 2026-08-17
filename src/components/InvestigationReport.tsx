@@ -17,6 +17,7 @@ import { RingAlert } from "./RingAlert";
 import { TrustGraph } from "./TrustGraph";
 import { investigationContribution, getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
+import { ThreatReport } from "./ThreatScanPage";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -299,6 +300,17 @@ export function InvestigationReport({
             )}
           </Card>
         </div>
+
+        {/* THREAT — the full token threat pipeline ran as this investigation's
+            first hop (same report the standalone Threat tab renders): code
+            read, deep sources, tokenomics, deployer memory, the judge. */}
+        {inv.threat && (
+          <div className="mt-3">
+            <Card title={`Threat scan · ${inv.threat.call.verdict} · ${inv.threat.call.risk}/100 risk`} accent={inv.threat.call.verdict === "SAFE" ? "var(--color-pass)" : inv.threat.call.verdict === "CAUTION" ? "var(--color-caution)" : "var(--color-avoid)"}>
+              <ThreatReport scan={inv.threat} embedded />
+            </Card>
+          </div>
+        )}
 
         {/* TEAM — the headline section, merged from every source, each clickable */}
         {(teamPeople.length > 0 || advisors.length > 0) && (

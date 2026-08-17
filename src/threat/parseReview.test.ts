@@ -1,4 +1,4 @@
-// The LYRA response parser lives in api/code-review.ts (server-side). It's a
+// The ARGUS engine response parser lives in api/code-review.ts (server-side). It's a
 // pure function, so we test it here to lock down the robustness contract: a
 // clean JSON reply, a fenced block, and raw prose must all yield a usable read
 // rather than the old hard "unparseable output" failure.

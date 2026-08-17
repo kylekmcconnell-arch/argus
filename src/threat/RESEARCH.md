@@ -118,6 +118,69 @@ old (pre-migration) mint `ADA9…pump`, creator matching the project's creator
 endpoint. The judge then skips the fresh-age penalty and reclassifies the claim
 spread as a distribution (not a bundle) for a confirmed post-migration token.
 
+## Concentrated-liquidity (Uniswap V3) position custody — status
+
+Reported bug: on a v3/v4 pool (Robinhood, Base), the scan called liquidity an
+"NFT position" and gave up — "judge it by the position owner," without ever
+looking up who the owner actually is. `$GWOOD` (Robinhood, pool
+`0x72678B2e…Eb771`) was the concrete case.
+
+**How a v3 position is actually custodied (verified on-chain, not assumed):**
+the pool's own `Mint` event always names the chain's NonfungiblePositionManager
+(NFPM) as `owner` — the periphery contract mints the position NFT to *itself*
+per Uniswap's own code, so the pool alone never reveals who really holds it.
+The real owner only shows up by: taking the Mint tx, finding the NFPM's
+`Transfer` (initial mint) or `IncreaseLiquidity` log in the same tx to recover
+the `tokenId`, then calling `ownerOf(tokenId)` on the NFPM **now** (it may have
+moved since mint — e.g. transferred into a locker).
+
+**NFPM addresses are chain-specific, not a shared constant** — verified by
+finding a real V3 pool's Mint-log owner and cross-checking the explorer's
+contract name, not by assuming Ethereum's canonical address ports over:
+- Robinhood: `0x73991a25C818Bf1f1128dEAaB1492D45638DE0D3` ("Uniswap V3
+  Positions NFT-V1", 39k+ holders — confirmed via
+  `robinhoodchain.blockscout.com`).
+- Base: `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1` (same explorer check on
+  `base.blockscout.com`). Ethereum's address
+  (`0xC36442b4a4522E871399CD717aBDD847Ab11FE88`) is a *different*, unrelated
+  contract on Base ("Recover") — it does NOT port over; guessing it would have
+  silently misidentified every position on Base.
+
+**Once the current owner is known, classify it — don't stop at "it's a
+contract":**
+- Burn address → permanently locked, best case.
+- Plain EOA (`eth_getCode` = `0x`) → removable at will; report the wallet.
+- Contract → read verified source (Blockscout) for any reachable
+  `transferFrom` / `safeTransferFrom` / `decreaseLiquidity` / `burn(tokenId)`
+  call. None found → provably locked, not "locked by design" folklore. Found →
+  it has an exit; name it. Unverified → fall back to a bytecode selector probe
+  (weaker: misses a custom function that internally forwards the call).
+- `ownerOf` reverting "nonexistent token" means the position was fully
+  withdrawn and its NFT closed — worth reporting on its own (a large historical
+  add that's since been fully pulled), not silently dropped.
+
+**Ground-truthed on `$GWOOD`** (`api/nftlock.ts`, RPC + Blockscout, both
+keyless): 49 Mint events, all "owned" by the Robinhood NFPM as expected. The
+**largest** live position (tokenId 267009, ~45× the next largest) is held by a
+plain wallet (`0xf48ac1…01df`, not the token's own on-chain creator) —
+**removable**, not locked. A second, much smaller position IS genuinely locked
+forever, in a verified `LpHolder` contract (`ERC721Holder` + `Ownable`,
+source confirms it exposes fee-collection and an owner-only ERC20 `sweep()`
+only — no function anywhere can move the NFT out). Two other large historical
+positions were fully withdrawn and closed. The old blanket "NFT position, can't
+tell" message would have reported all of this as one undifferentiated
+shrug — the traced answer is neither "locked" nor "unlocked," it's specific and
+checkable per position.
+
+**Ranking caveat (documented in the API's own `note` field, not hidden):** the
+top-5-by-size positions traced are ranked by liquidity **at mint time**, not
+netted against later Burns — directional ("which positions mattered most
+historically"), not a live TVL split. Bounded to 5 positions and two chains
+(Base, Robinhood) for now; an unsupported chain degrades to the pre-existing
+generic "NFT position, custody unconfirmed" behavior rather than a wrong
+answer — see `src/threat/tokenomics.ts`'s `nft-locked` / `nft-unlocked` /
+`nft-position` statuses.
+
 ## Design deltas vs nlyra (deliberate)
 
 - **Legitimacy gate**: soft signals (unverified LP custody, concentration,

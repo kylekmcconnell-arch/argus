@@ -14,11 +14,12 @@ import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEnt
 import { env } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
-import { emptyEvidence } from "../src/data/evidence";
+import { emptyEvidence, type GithubAssessment } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
 import { resetCost, getCost } from "./cost";
 
+import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
@@ -645,10 +646,45 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
 
   const ctx: CollectContext = { handle: evidence.profile.handle, evidence, emit };
 
-  // cold handle: resolve profile + extract self-claims before verification
-  if (!fixture) await coldIntake(ctx);
+  // cold handle: resolve profile + extract self-claims before verification.
+  // Isolated like every other phase below: a failure here (a flaky upstream
+  // call) should degrade this one phase, not force the whole audit to be
+  // rerun from scratch — the adapters below still have a bag to enrich.
+  if (!fixture) {
+    try {
+      await coldIntake(ctx);
+    } catch (e) {
+      emit({ phase: "P0 · Intake", label: "Intake error", detail: String(e), tone: "warn" });
+    }
+  }
 
-  // run each available adapter
+  // ── Project-token announcement: the FULL scan includes the token threat leg.
+  // Resolve the subject's token as early as possible and stamp it on a step
+  // (machine-readable `token` field) so the CLIENT launches the browser-side
+  // threat scanner in parallel with everything below — one product, no added
+  // wall-clock. The bio CA is authoritative (impersonation defense: the
+  // official account states its own contract); a claimed promotion with a
+  // contract is second. No match here is not terminal — the client falls back
+  // to a canonical name-match after the dossier lands.
+  try {
+    const cand = tokenFromBio(evidence.profile.bio) ?? tokenFromPromotions(evidence.promotions);
+    if (cand) {
+      emit({
+        phase: "ARGUS · Threat",
+        label: "Project token resolved",
+        detail: `${cand.address.slice(0, 10)}… (${cand.via}) via ${cand.source} — the token threat scan runs in parallel with the rest of this audit.`,
+        source: "argus",
+        tone: "neutral",
+        token: cand,
+      });
+    }
+  } catch { /* attribution is best-effort; the client can still resolve later */ }
+
+  // run each available adapter — each is its own isolated task: a failure here
+  // is skipped on its own (not retried in place, since adapters push directly
+  // into the shared evidence bag and a blind re-run could duplicate entries
+  // already recorded before the failure) and never discards what the other
+  // adapters already collected or forces the whole audit to be rerun.
   for (const a of ADAPTERS) {
     if (!a.available()) continue;
     try {
@@ -684,6 +720,21 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
   // what the LLMs see: the analyst writes identity_note fresh, and the
   // contradiction scanner must never "contradict" our metadata against itself.
   const { identity_confidence: _ic, identity_note: _in, ...profileForLlm } = evidence.profile;
+  // Compact GitHub projection for the analyst: enough to reason over build
+  // substance + bio-claim consistency, without the token-heavy repo detail (the
+  // report renders the full object).
+  const ghProj = (g?: GithubAssessment) =>
+    g && {
+      login: g.login,
+      accountAgeYears: g.accountAgeYears,
+      originalCount: g.originalCount,
+      forkCount: g.forkCount,
+      forkRatio: g.forkRatio,
+      totalStarsOnOriginals: g.totalStarsOnOriginals,
+      topLanguages: g.topLanguages.map((l) => l.language),
+      daysSinceActivity: g.daysSinceActivity,
+      claimChecks: g.claimChecks,
+    };
   const baseEvidence = {
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -693,21 +744,39 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
     wallets: evidence.wallets,
     // The named people behind the project (from the site + LinkedIn + X content),
     // so identity/founder scoring reflects the team we actually found.
-    team: (evidence.webTeam ?? []).map((p) => ({ name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, otherProjects: p.projects })),
+    team: (evidence.webTeam ?? []).map((p) => ({ name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, otherProjects: p.projects, github: ghProj(p.github) })),
+    // Resolved GitHub for the subject: build substance + bio-claim cross-checks
+    // feed the F4/P2 build-substance and identity axes.
+    github: ghProj(evidence.profile.githubAssessment),
     findings: evidence.findings,
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12),
   };
 
   // ── Phase 4 contradiction scan + axis scoring, run CONCURRENTLY (both read the
-  //    same evidence) so the extra Claude call doesn't extend the critical path. ──
+  //    same evidence) so the extra Claude call doesn't extend the critical path.
+  //    Each is isolated with its own retry: a Promise.all on two bare calls would
+  //    let one call's transient failure (rate limit, timeout) discard the OTHER
+  //    call's already-successful result and force the whole audit to be redone. ──
   if (analystAvailable()) {
     emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions…", tone: "neutral" });
     emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence…", tone: "neutral" });
     const evidenceJson = JSON.stringify(baseEvidence, null, 0).slice(0, 12000);
+    const withRetry = async <T>(label: string, fn: () => Promise<T | null>): Promise<T | null> => {
+      try {
+        return await fn();
+      } catch {
+        try {
+          return await fn(); // one automatic retry before this phase degrades alone
+        } catch (e) {
+          emit({ phase: "Analyst", label: `${label} failed`, detail: String(e), tone: "warn" });
+          return null;
+        }
+      }
+    };
     const [found, verdict] = await Promise.all([
-      scanContradictions(evidence.profile.handle, evidenceJson),
-      analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson),
+      withRetry("Contradiction scan", () => scanContradictions(evidence.profile.handle, evidenceJson)),
+      withRetry("Axis scoring", () => analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson)),
     ]);
     if (found && found.length) {
       evidence.contradictions = found;

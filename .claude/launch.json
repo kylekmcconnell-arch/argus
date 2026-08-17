@@ -2,9 +2,36 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "botboard",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "/Users/enigma/botboard"
+      ],
+      "port": 8090
+    },
+    {
       "name": "argus",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "/Users/enigma/argus"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "argus-gwood-fix",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "/Users/enigma/argus-wt/gwood-lp-fix"
+      ],
       "port": 5173
     }
   ]

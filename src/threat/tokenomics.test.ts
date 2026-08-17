@@ -91,6 +91,37 @@ describe("analyzeTokenomics", () => {
     expect(tk.lp.status).toBe("nft-position");
   });
 
+  it("reports nft-locked when the traced position is burned", () => {
+    const nftLock = {
+      available: true, manager: "0xnfpm",
+      dominant: { tokenId: 1, owner: "0x000000000000000000000000000000000000dead", ownerKind: "burned" as const, ownerName: null, amount: "100", locked: true, reason: "burned" },
+      positions: [], note: "1 live position traced by size; largest is burned.",
+    };
+    const tk = analyzeTokenomics(dossier({ dexId: "uniswap", dexLabels: ["v3"] }), meta(), null, null, null, nftLock);
+    expect(tk.lp.status).toBe("nft-locked");
+  });
+
+  it("reports nft-locked when the traced position is a contract with no exit path", () => {
+    const nftLock = {
+      available: true, manager: "0xnfpm",
+      dominant: { tokenId: 2, owner: "0xholder", ownerKind: "contract" as const, ownerName: "LpHolder", amount: "100", locked: true, reason: "no exit function found" },
+      positions: [], note: "1 live position traced by size; largest is locked (no exit path found).",
+    };
+    const tk = analyzeTokenomics(dossier({ dexId: "uniswap", dexLabels: ["v3"] }), meta(), null, null, null, nftLock);
+    expect(tk.lp.status).toBe("nft-locked");
+  });
+
+  it("reports nft-unlocked when the traced position is a plain wallet", () => {
+    const nftLock = {
+      available: true, manager: "0xnfpm",
+      dominant: { tokenId: 3, owner: "0xdeployerwallet", ownerKind: "eoa" as const, ownerName: null, amount: "100", locked: false, reason: "held by a wallet" },
+      positions: [], note: "1 live position traced by size; largest is removable.",
+    };
+    const tk = analyzeTokenomics(dossier({ dexId: "uniswap", dexLabels: ["v3"] }), meta(), null, null, null, nftLock);
+    expect(tk.lp.status).toBe("nft-unlocked");
+    expect(tk.lp.note).toMatch(/0xdeployerwallet/);
+  });
+
   it("clamps impossible aggregates and suppresses inconsistent holder data", () => {
     // Free-tier rows that sum well past 100% must not yield a >100% figure.
     const m = meta({

@@ -1,5 +1,5 @@
 // The threat scan orchestrator: token ref in → mechanical audit (src/token) →
-// code review (LYRA layer) → deployer memory → one risk call. Output model:
+// code review (AI read layer) → deployer memory → one risk call. Output model:
 // risk points 0–100 (higher = worse), a verdict bucket, a one-line action, and
 // three tiers of plain-English second-person findings (flags / warnings /
 // positives — good news is reported even on a RUG). Every scan is recorded to
@@ -13,6 +13,7 @@ import type {
   CodeReview, DeployerRep, ThreatCall, ThreatCheck, ThreatScan, ThreatVerdict,
 } from "./types";
 import { reviewCode } from "./codereview";
+import { classifyToken, type TokenClassification } from "./classify";
 import { analyzeTokenomics, type TokenomicsView } from "./tokenomics";
 import { recordReceipt, sharedByDeployer } from "./receipts";
 import {
@@ -21,6 +22,7 @@ import {
 } from "./deepsources";
 import { crossChain } from "./crosschain";
 import { migrationCheck } from "./migration";
+import { nftLiquidityLock } from "./nftlock";
 import type { CrossChain, MigrationInfo } from "./types";
 
 const money = (n: number) =>
@@ -35,46 +37,71 @@ export async function threatScan(
   const dossier = await auditToken(input, emit);
   if (!dossier) return null;
 
-  emit?.({ phase: "LYRA · Code", label: "Source read", detail: "Fetching verified source and reading the contract…", tone: "neutral" });
+  // Classify the token FIRST — meme / utility / RWA / equity / security-like —
+  // so everything downstream is judged against the right yardstick (an anon team
+  // on a meme coin is the norm; a live mint on tokenized equity is issuance).
+  let classification = classifyToken(dossier);
+  emit?.({
+    phase: "ARGUS · Class",
+    label: classification.label,
+    detail: `${classification.signals[0] ?? "no strong signals"}${classification.confidence !== "high" ? ` (${classification.confidence} confidence)` : ""}.`,
+    tone: "neutral",
+  });
+
+  emit?.({ phase: "ARGUS · Code", label: "Source read", detail: "Fetching verified source and reading the contract…", tone: "neutral" });
   const sol = dossier.chain === "solana";
   emit?.({
-    phase: "NERON · Deep scan",
+    phase: "ARGUS · Deep scan",
     label: sol ? "RugCheck report" : "Holder sell analysis",
     detail: sol
       ? "Named risk patterns, insider networks, LP lockers…"
       : "Simulating sells for real holders — selective honeypots, siphoned wallets, max caps…",
     tone: "neutral",
   });
-  const [code, rc, hp, meta, fp, xchain] = await Promise.all([
+  const [code, rc, hp, meta, fp, xchain, nftLock] = await Promise.all([
     reviewCode(dossier.chain, dossier.address),
     sol ? rugcheckReport(dossier.address) : Promise.resolve(null),
     sol ? Promise.resolve(null) : honeypotDeep(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : goplusMeta(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : codeFingerprint(dossier.chain, dossier.address),
     sol ? Promise.resolve(null) : crossChain(dossier.chain, dossier.address, dossier.liquidityUsd ?? 0),
+    // Only worth tracing on a concentrated-liquidity (v3/v4) pool — cheap to
+    // attempt elsewhere too (the endpoint short-circuits on an unsupported
+    // chain or a pool with no Mint events), but skip it outright without a
+    // pair address to key the pool lookup on.
+    sol || !dossier.pairAddress ? Promise.resolve(null) : nftLiquidityLock(dossier.chain, dossier.pairAddress),
   ]);
+  if (nftLock?.dominant) {
+    const dom = nftLock.dominant;
+    emit?.({
+      phase: "ARGUS · LP custody",
+      label: dom.ownerKind === "burned" || dom.locked === true ? "Position locked" : dom.locked === false ? "Position removable" : "Position unconfirmed",
+      detail: nftLock.note,
+      tone: dom.ownerKind === "burned" || dom.locked === true ? "good" : dom.locked === false ? "warn" : "neutral",
+    });
+  }
   const migration = sol ? await migrationCheck(dossier.chain, dossier.address) : null;
   if (migration?.migrated) {
-    emit?.({ phase: "NERON · Migration", label: "Migrate.fun", detail: migration.isPostMigrationToken ? `New post-migration token (${migration.projects[0]?.projectId}) — the chart restarted; claim distribution to prior holders is expected.` : `Registered in a Migrate.fun migration (${migration.projects[0]?.projectId}).`, tone: "neutral" });
+    emit?.({ phase: "ARGUS · Migration", label: "Migrate.fun", detail: migration.isPostMigrationToken ? `New post-migration token (${migration.projects[0]?.projectId}) — the chart restarted; claim distribution to prior holders is expected.` : `Registered in a Migrate.fun migration (${migration.projects[0]?.projectId}).`, tone: "neutral" });
   }
   const burns = sol ? null : await burnHistory(dossier.chain, dossier.address);
   if (burns && burns.count > 0) {
-    emit?.({ phase: "NERON · Burns", label: `${burns.count} burns`, detail: `${burns.burnedSupplyPct != null ? `${burns.burnedSupplyPct.toFixed(burns.burnedSupplyPct < 10 ? 2 : 0)}% of supply burned; ` : ""}cadence ${burns.cadence}${burns.ongoing ? ", ongoing" : ""}.`, tone: "good" });
+    emit?.({ phase: "ARGUS · Burns", label: `${burns.count} burns`, detail: `${burns.burnedSupplyPct != null ? `${burns.burnedSupplyPct.toFixed(burns.burnedSupplyPct < 10 ? 2 : 0)}% of supply burned; ` : ""}cadence ${burns.cadence}${burns.ongoing ? ", ongoing" : ""}.`, tone: "good" });
   }
   if (xchain?.isOft) {
-    emit?.({ phase: "NERON · Cross-chain", label: "LayerZero OFT", detail: `Bridged across ${xchain.legs.length} chain${xchain.legs.length === 1 ? "" : "s"} (${xchain.legs.map((l) => l.chain).join(", ")})${xchain.resolvedLegs > 1 ? ` · $${Math.round(xchain.totalLiquidityUsd).toLocaleString()} total liquidity` : ""}.`, tone: "neutral" });
+    emit?.({ phase: "ARGUS · Cross-chain", label: "LayerZero OFT", detail: `Bridged across ${xchain.legs.length} chain${xchain.legs.length === 1 ? "" : "s"} (${xchain.legs.map((l) => l.chain).join(", ")})${xchain.resolvedLegs > 1 ? ` · $${Math.round(xchain.totalLiquidityUsd).toLocaleString()} total liquidity` : ""}.`, tone: "neutral" });
   }
   // Known-rug-clone check: does this contract's bytecode fingerprint match a
   // token we already flagged? A byte-identical clone of a known rug is the same
   // trap wearing a new ticker.
   const clones = fp ? await knownRugClones(fp.fingerprint, dossier.address) : [];
   if (clones.length) {
-    emit?.({ phase: "NERON · Fingerprint", label: "Known-rug clone", detail: `Byte-identical to ${clones.length} previously flagged token${clones.length === 1 ? "" : "s"} (${clones.slice(0, 3).map((c) => "$" + c.symbol).join(", ")}).`, tone: "bad" });
+    emit?.({ phase: "ARGUS · Fingerprint", label: "Known-rug clone", detail: `Byte-identical to ${clones.length} previously flagged token${clones.length === 1 ? "" : "s"} (${clones.slice(0, 3).map((c) => "$" + c.symbol).join(", ")}).`, tone: "bad" });
   } else if (meta?.fakeToken) {
-    emit?.({ phase: "NERON · Counterfeit", label: "Fake token", detail: "GoPlus flags this as a counterfeit of an established token.", tone: "bad" });
+    emit?.({ phase: "ARGUS · Counterfeit", label: "Fake token", detail: "GoPlus flags this as a counterfeit of an established token.", tone: "bad" });
   }
   emit?.({
-    phase: "LYRA · Code",
+    phase: "ARGUS · Code",
     label: code.verified ? `${code.contractName ?? "Contract"} read` : code.checked ? "No verified source" : "No per-token code on this chain",
     detail: code.verified
       ? `${code.stats?.functions ?? 0} functions, ${code.stats?.gatedFunctions ?? 0} privileged, ${code.flags.length} code flags${code.ai ? ", AI read complete" : ""}.`
@@ -84,17 +111,26 @@ export async function threatScan(
     tone: code.verified ? (code.flags.some((f) => f.severity === "critical") ? "bad" : "good") : "warn",
   });
 
+  // Re-run classification now that the code has been read — what the tax
+  // actually DOES (e.g. buys RWAs/stocks for holders) outranks the blurb, and
+  // can move the class. Only re-announce when the call changed.
+  const refined = classifyToken(dossier, code.tokenomics);
+  if (refined.kind !== classification.kind) {
+    emit?.({ phase: "ARGUS · Class", label: refined.label, detail: `Reclassified after the code read: ${refined.signals[0]}.`, tone: "neutral" });
+  }
+  classification = refined;
+
   const deployer = await deployerRep(dossier);
   if (deployer.priorRugs > 0) {
-    emit?.({ phase: "NERON · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the shared ledger.`, tone: "bad" });
+    emit?.({ phase: "ARGUS · Deployer", label: "Known deployer", detail: `This wallet has ${deployer.priorRugs} previously flagged token${deployer.priorRugs === 1 ? "" : "s"} in the shared ledger.`, tone: "bad" });
   }
 
-  const tokenomics = analyzeTokenomics(dossier, meta, rc, code.tokenomics, burns);
+  const tokenomics = analyzeTokenomics(dossier, meta, rc, code.tokenomics, burns, nftLock);
   if (tokenomics.tax.destinations.includes("rwa-distribution")) {
-    emit?.({ phase: "NERON · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders — a yield mechanism, not a rug tax.", tone: "good" });
+    emit?.({ phase: "ARGUS · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders — a yield mechanism, not a rug tax.", tone: "good" });
   }
-  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics);
+  const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, classification);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, classification);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -102,8 +138,8 @@ export async function threatScan(
     chain: dossier.chain,
     symbol: dossier.symbol,
     name: dossier.name,
-    dossier, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration },
+    dossier, classification, call, code, deployer, tokenomics, checks,
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, nftlock: nftLock },
     scannedAt: Date.now(),
   };
 
@@ -138,6 +174,7 @@ function judge(
   rc: RugcheckReport | null, hp: HoneypotDeep | null,
   meta: GoPlusMeta | null, clones: { symbol: string; address: string; verdict: string }[],
   tk: TokenomicsView, xchain: CrossChain | null, migration: MigrationInfo | null,
+  cls: TokenClassification,
 ): ThreatCall {
   const s = d.safety;
   const flags: string[] = [];
@@ -230,13 +267,21 @@ function judge(
 
   // --- authority / owner powers ---
   const authorityRelaxed = (d.findings.some((f) => f.tone === "warn" && /governed emissions|ops mechanism/i.test(f.claim)));
+  // Tokenized equity / RWA on a credible issuer: mint & freeze are the
+  // ISSUANCE/COMPLIANCE model (shares are minted on deposit, redeemed on burn;
+  // freezes serve transfer restrictions), not a rug switch. Only relaxed when
+  // the market legitimacy gate or GoPlus's trust list backs the issuer — a
+  // fresh anonymous "tokenized stock" gets NO benefit of the doubt.
+  const issuanceModel = (cls.kind === "equity" || cls.kind === "rwa") && cls.confidence !== "low" && (established || !!meta?.trustListed);
   if (s.hiddenOwner) { add(45); flags.push("HIDDEN OWNER — control is disguised behind a wallet the renounce doesn't touch"); }
   if (s.mintable) {
-    if (authorityRelaxed) warnings.push("Mint authority is live — on this listed token it reads as a governed emissions switch, but confirm who holds it");
+    if (issuanceModel) warnings.push(`Mint authority is live — on ${cls.kind === "equity" ? "tokenized equity" : "an RWA token"} this is the issuer's issuance/redemption mechanism, but it still means trusting the issuer`);
+    else if (authorityRelaxed) warnings.push("Mint authority is live — on this listed token it reads as a governed emissions switch, but confirm who holds it");
     else { add(40); flags.push("Mint authority is LIVE — the team can print supply and dilute you to zero"); }
   }
   if (s.freezable) {
-    if (authorityRelaxed) warnings.push("Freeze authority is live — governed on a listed token, but it can still freeze accounts");
+    if (issuanceModel) warnings.push("Freeze authority is live — expected for compliance on issuer-backed assets, but the issuer can freeze your tokens");
+    else if (authorityRelaxed) warnings.push("Freeze authority is live — governed on a listed token, but it can still freeze accounts");
     else { add(40); flags.push("Freeze authority is LIVE — your tokens can be frozen in your wallet"); }
   }
   if (s.takeBack && !s.hiddenOwner) {
@@ -252,7 +297,7 @@ function judge(
   if (dep.priorRugs > 0) { add(30); flags.push(`This deployer already has ${dep.priorRugs} flagged token${dep.priorRugs === 1 ? "" : "s"} in our ledger — a rug factory pattern`); }
   else if (dep.priorScans.length > 0) warnings.push(`Deployer seen before: ${dep.priorScans.length} prior scan${dep.priorScans.length === 1 ? "" : "s"} in the ledger, none flagged`);
 
-  // --- code review (LYRA) ---
+  // --- code review (the AI read) ---
   if (code.verified) {
     positives.push(`Verified contract — the source is public${code.contractName ? ` (${code.contractName})` : ""} and was read line by line`);
     // Capability-class code flags are dangerous in an active owner's hands and
@@ -303,9 +348,21 @@ function judge(
       case "burned": positives.push(`LP burned ${tk.lp.burnedPct.toFixed(0)}% — the pool can never be pulled`); break;
       case "locked": positives.push(`LP locked ${tk.lp.lockedPct.toFixed(0)}%${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`); break;
       case "launchpad-locked": positives.push(tk.lp.note); break; // "held by a launchpad locker — auto-locked by design"
+      case "nft-locked":
+        // Traced on-chain to a burn address or a contract proven to expose no
+        // withdrawal path (see api/nftlock.ts) — a real lock, not a guess.
+        positives.push(tk.lp.note);
+        break;
       case "nft-position":
-        // Concentrated / NFT-position AMM (V3/V4/CLMM). Not a rug signal on its
-        // own — it's how these pools work. Surface it as context, not a warning.
+        // Concentrated / NFT-position AMM (V3/V4/CLMM) where custody couldn't be
+        // traced. Not a rug signal on its own — it's how these pools work.
+        // Surface it as context, not a warning.
+        warnings.push(tk.lp.note);
+        break;
+      case "nft-unlocked":
+        // Traced on-chain: the largest position is a plain wallet (or a contract
+        // that can still move it) — same risk as any other removable pool.
+        add(20);
         warnings.push(tk.lp.note);
         break;
       case "unlocked":
@@ -375,6 +432,11 @@ function judge(
     else if (d.ageDays != null && d.ageDays < 7) { add(6); warnings.push(`Pair is ${Math.round(d.ageDays)} day${Math.round(d.ageDays) === 1 ? "" : "s"} old`); }
   }
 
+  // --- class-aware framing ---
+  // Not risk points — regulatory context the holder should price in.
+  if (cls.kind === "security-like") warnings.push("Dividend / revenue-share mechanics make this SECURITY-LIKE — securities-law exposure (delisting, enforcement) sits on top of ordinary market risk");
+  if (cls.kind === "meme" && cls.confidence !== "low") positives.push("Assessed as a meme coin — judged on exit mechanics, liquidity custody and holder spread, not on utility it never claimed (an anon team is the norm in this class)");
+
   // --- corroboration positives ---
   if (d.cg?.listed) positives.push(`Listed on CoinGecko${d.cg.rank ? ` (rank #${d.cg.rank})` : ""}${d.cg.cexCount ? `, ${d.cg.cexCount} CEX market${d.cg.cexCount === 1 ? "" : "s"}` : ""}`);
   if (s.ownerRenounced && !s.mintable && !s.freezable && !s.takeBack)
@@ -402,7 +464,7 @@ const EVM = (chain: string) => chain !== "solana";
 function buildChecks(
   d: TokenDossier, code: CodeReview, dep: DeployerRep,
   rc: RugcheckReport | null, hp: HoneypotDeep | null, meta: GoPlusMeta | null,
-  tk: TokenomicsView,
+  tk: TokenomicsView, cls: TokenClassification,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -416,6 +478,9 @@ function buildChecks(
   ): ThreatCheck => ({ key, category, label, status, detail });
 
   return [
+    chk("class", "market", "Token class",
+      cls.kind === "unknown" ? "na" : "pass",
+      `${cls.label}${cls.confidence !== "high" ? ` (${cls.confidence} confidence)` : ""} — ${cls.signals[0] ?? "no strong signals"}`),
     chk("honeypot", "honeypot", "Can holders sell?",
       na ? "na" : s.honeypot || s.cannotSellAll || (hp?.siphoned ?? 0) > 0 ? "fail" : "pass",
       na ? "Not verifiable on this chain keyless" : s.honeypot ? "Selling is blocked" : (hp?.siphoned ?? 0) > 0 ? "Real holders' sells are siphoned" : hp && hp.holdersAnalyzed >= 5 ? `Sells simulated for ${hp.holdersAnalyzed} real holders` : s.simChecked ? "Real sell simulated successfully" : "No sell restriction found on-chain"),
@@ -429,12 +494,14 @@ function buildChecks(
       na ? "na" : s.hiddenOwner || s.takeBack ? "fail" : s.ownerRenounced ? "pass" : "warn",
       na ? "Unchecked" : s.hiddenOwner ? "Hidden owner detected" : s.takeBack ? "Renounce is reversible" : s.ownerRenounced ? "Renounced / authorities revoked" : "Owner is active"),
     chk("lp", "liquidity", "Liquidity custody",
-      na ? "na" : tk.lp.status === "burned" || tk.lp.status === "locked" || tk.lp.status === "launchpad-locked" ? "pass" : tk.lp.status === "unlocked" ? "fail" : tk.lp.status === "nft-position" || established ? "pass" : "warn",
+      na ? "na" : tk.lp.status === "burned" || tk.lp.status === "locked" || tk.lp.status === "launchpad-locked" || tk.lp.status === "nft-locked" ? "pass" : tk.lp.status === "unlocked" || tk.lp.status === "nft-unlocked" ? "fail" : tk.lp.status === "nft-position" || established ? "pass" : "warn",
       na ? "Unchecked"
         : tk.lp.status === "burned" ? `${tk.lp.burnedPct.toFixed(0)}% burned`
         : tk.lp.status === "locked" ? `${tk.lp.lockedPct.toFixed(0)}% secured${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`
         : tk.lp.status === "launchpad-locked" ? `Launchpad-locked${tk.lp.lockers.length ? ` (${tk.lp.lockers.join(", ")})` : ""}`
-        : tk.lp.status === "nft-position" ? "Concentrated/NFT position — LP-token check n/a"
+        : tk.lp.status === "nft-locked" ? "Position NFT traced on-chain — no withdrawal path found"
+        : tk.lp.status === "nft-unlocked" ? "Position NFT traced on-chain — removable by its current holder"
+        : tk.lp.status === "nft-position" ? "Concentrated/NFT position — custody could not be traced"
         : tk.lp.status === "unlocked" ? `Pullable — ${tk.lp.unlockedTopPct.toFixed(0)}% in one wallet`
         : "Lock not confirmed by standard tools (may be launchpad-locked)"),
     chk("tax", "market", "Buy/sell tax & destination",

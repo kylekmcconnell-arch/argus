@@ -13,6 +13,7 @@ import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
+import { GithubAssessment, GithubAssessmentInline } from "./GithubAssessment";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { personChecks } from "../lib/scanChecklist";
 import { AddInfo } from "./AddInfo";
@@ -26,6 +27,8 @@ import { ServiceAlert } from "./ServiceAlert";
 import { LegalScreen } from "./LegalScreen";
 import { SanctionsNameScreen } from "./SanctionsNameScreen";
 import { RingAlert } from "./RingAlert";
+import { ExportMenu } from "./ExportMenu";
+import { ThreatReport } from "./ThreatScanPage";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -365,6 +368,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               </button>
             )}
             <button onClick={share} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copied ? "Copied ✓" : "Share"}</button>
+            <ExportMenu dossier={f} />
             <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
               {watched ? "★ Watching" : "☆ Watch"}
             </button>
@@ -528,6 +532,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
                       ))}
                     </div>
                   )}
+                  {p.github && <GithubAssessmentInline a={p.github} />}
                 </div>
               ))}
             </Card>
@@ -803,6 +808,18 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             </Section>
           </div>
 
+          {/* GitHub assessment — quality of work · account history · bio claims vs
+              GitHub reality (resolved during the audit; self-hides when unmatched) */}
+          {dossier.githubAssessment && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="GitHub assessment" kicker="quality of work · account history · bio claims vs GitHub reality">
+                <Card className="p-4">
+                  <GithubAssessment a={dossier.githubAssessment} />
+                </Card>
+              </Section>
+            </div>
+          )}
+
           {/* code footprint — resolve the subject's GitHub from their handle/name/bio
               and analyse it (self-hides when no account is confidently matched) */}
           <PersonGithub className="min-w-0 lg:col-span-2" handle={report.handle} name={f.display_name} bio={f.bio} />
@@ -840,6 +857,26 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               </div>
             ) : null;
           })()}
+
+          {/* the token threat leg of the FULL scan — the subject's own token,
+              scanned by the complete threat pipeline in the same run. Absent
+              field = older report from before the fold-in; a note without a
+              scan = the leg was skipped or failed, and says why. */}
+          {(f.threat || f.threatNote) && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="Project token · threat scan" kicker={f.threatNote ?? "the token threat leg of this audit"}>
+                {f.threat ? (
+                  <Card className="p-4">
+                    <ThreatReport scan={f.threat} embedded />
+                  </Card>
+                ) : (
+                  <Card className="p-4">
+                    <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.threatNote}</p>
+                  </Card>
+                )}
+              </Section>
+            </div>
+          )}
 
           <div className="min-w-0 lg:col-span-2">
             <Section title="In the news" kicker="recent press — funding, launches, hacks, exits; an empty trail is itself a signal">

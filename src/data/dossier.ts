@@ -9,7 +9,8 @@ import {
   type PanoptesNode,
   type PanoptesEdge,
 } from "../engine";
-import type { CollectedEvidence, NotableFollower, Contradiction, WebTeamMember } from "./evidence";
+import type { CollectedEvidence, NotableFollower, Contradiction, WebTeamMember, GithubAssessment } from "./evidence";
+import type { ThreatScan } from "../threat/types";
 
 export interface Dossier {
   handle: string;
@@ -27,10 +28,19 @@ export interface Dossier {
   notableFollowers: NotableFollower[];
   contradictions: Contradiction[];
   webTeam: WebTeamMember[];
+  githubAssessment?: GithubAssessment; // subject's resolved GitHub: quality/claims/history
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
   cost?: { usd: number; grokUsd: number; claudeUsd: number; grokCalls: number; claudeCalls: number; sources: number; estimated: boolean; calls?: { provider: string; op: string; calls: number; usd: number; meta?: string }[] };
+  // The token threat leg of the FULL scan. Attached client-side by the runner
+  // (the threat scanner runs in the browser, in parallel with the server
+  // collection) and persisted with the report. Absent: no project token could
+  // be attributed to this subject. null: a token was found but the scan failed.
+  threat?: ThreatScan | null;
+  // Why the threat leg ran on that token (or why it was skipped) — one line,
+  // rendered with the section so the attribution is auditable.
+  threatNote?: string;
   graph: { nodes: PanoptesNode[]; edges: PanoptesEdge[] };
   founderSummary?: ReturnType<Audit["founderSummary"]>;
   evidence: {
@@ -113,6 +123,16 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     graph.edges.push({ src: subjectKey, dst: ekey, type: "IDENTITY_EMAIL" });
   }
 
+  // The resolved GitHub login as its own identity node (github:<login>), so two
+  // audits that land on the same GitHub account bridge to one node — same pattern
+  // as the email bridge above.
+  const gh = ev.profile.githubAssessment;
+  if (gh) {
+    const gkey = `github:${gh.login.toLowerCase()}`;
+    if (!hasNode(gkey)) graph.nodes.push({ type: "Identity", subtype: "GitHub", key: gkey, label: `github.com/${gh.login}` } as PanoptesNode);
+    graph.edges.push({ src: subjectKey, dst: gkey, type: "IDENTITY_GITHUB" });
+  }
+
   return {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
@@ -129,6 +149,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
     webTeam: ev.webTeam ?? [],
+    githubAssessment: ev.profile.githubAssessment,
     report,
     graph,
     founderSummary: ev.roles.includes(SubjectClass.FOUNDER) ? a.founderSummary() : undefined,

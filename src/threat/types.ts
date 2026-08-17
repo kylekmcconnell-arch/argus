@@ -21,7 +21,7 @@ export interface ThreatCall {
   positives: string[]; // green: verified good news (shown even on a RUG verdict)
 }
 
-// ---- code review (the LYRA layer) ----
+// ---- code review (the AI read layer) ----
 export interface SourceFile {
   path: string;
   content: string;
@@ -104,6 +104,9 @@ export interface ThreatScan {
   symbol: string;
   name: string;
   dossier: TokenDossier; // the underlying market/safety audit (data layer)
+  // What KIND of token this is (meme / utility / RWA / equity / security-like),
+  // decided at the outset so the judge measures it against the right yardstick.
+  classification: import("./classify").TokenClassification;
   call: ThreatCall;
   code: CodeReview;
   deployer: DeployerRep;
@@ -119,6 +122,7 @@ export interface ThreatScan {
     clones: { symbol: string; address: string; verdict: string }[];
     xchain: CrossChain | null;
     migration: MigrationInfo | null;
+    nftlock: NftLockReport | null;
   };
   scannedAt: number;
 }
@@ -128,6 +132,27 @@ export interface MigrationInfo {
   migrated: boolean;
   isPostMigrationToken: boolean;
   projects: { projectId: string; role: string; counterpartMint: string; creator: string }[];
+  note: string;
+}
+
+// ---- concentrated-liquidity (Uniswap V3) position custody ----
+// A v3/v4 pool's liquidity is a position NFT, not an LP token — this proves who
+// can actually withdraw it (burned / a genuinely exit-less locker contract / a
+// plain wallet) rather than guessing from a locker-name tag. See api/nftlock.ts.
+export interface NftPosition {
+  tokenId: number;
+  owner: string | null; // null only when ownerKind is "closed"
+  ownerKind: "burned" | "eoa" | "contract" | "closed";
+  ownerName: string | null; // verified contract name, when known
+  amount: string; // raw liquidity units at mint — a relative size proxy, not live TVL
+  locked: boolean | null; // true = no exit path found; false = one was found; null = unconfirmed
+  reason: string;
+}
+export interface NftLockReport {
+  available: boolean;
+  manager: string | null;
+  positions: NftPosition[];
+  dominant: NftPosition | null; // the largest LIVE (non-closed) position by size
   note: string;
 }
 
@@ -147,6 +172,38 @@ export interface InsiderCluster {
   largestPct: number;
   largestSize: number;
   includesCreator: boolean;
+  note: string;
+}
+
+// ---- Behind the Ledger (lazy/on-demand) ----
+// The deep transfer-graph read (api/behindledger.ts): where sold tokens
+// actually came from - emission farms, presale/insider vaults, churn, or
+// hop-wallet distribution - plus launch selling and LP flight.
+export interface BehindLedgerReport {
+  available: boolean;
+  coverage: "full" | "partial";
+  coveredDays: number;
+  transferCount: number;
+  attribution: {
+    totalUserSold: number;
+    botShuttled: number;
+    farmPct: number;
+    vaultPct: number;
+    churnPct: number;
+    hopPct: number;
+    otherPct: number;
+    earlyWindowSoldPct: number;
+    earlyVaultSoldPct: number;
+  };
+  sellers: {
+    address: string; sold: number; trades: number;
+    farmPct: number; vaultPct: number; boughtPct: number; otherPct: number;
+    hopFunded: boolean;
+  }[];
+  farms: { address: string; payouts: number; recipients: number; tokensOut: number; activeDays: number }[];
+  vaults: { address: string; claimants: number; tokensOut: number }[];
+  lp: { added: number; removed: number; removedLast3d: number } | null;
+  findings: string[];
   note: string;
 }
 

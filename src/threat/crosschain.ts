@@ -8,6 +8,7 @@
 
 import type { CrossChain } from "./types";
 import { dexByToken, pickPair } from "../token/sources";
+import { retryFetch } from "../lib/retry";
 
 export async function crossChain(chain: string, address: string, selfLiquidityUsd: number): Promise<CrossChain | null> {
   let oft: {
@@ -15,7 +16,7 @@ export async function crossChain(chain: string, address: string, selfLiquidityUs
     peers?: { eid: number; chain: string; address: string }[];
   };
   try {
-    const res = await fetch(`/api/oft?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, {
+    const res = await retryFetch(`/api/oft?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, {
       signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) return null;
