@@ -209,6 +209,14 @@ export interface Dossier {
   /** Model-only or otherwise unverified team candidates; never grounded evidence. */
   webTeamLeads?: WebTeamMember[];
   githubAssessment?: GithubAssessment; // subject's resolved GitHub: quality/claims/history
+  // The token threat leg of the FULL scan. Attached client-side by the runner
+  // (the threat scanner runs in the browser, in parallel with the server
+  // collection) and persisted with the report. Absent: no project token could
+  // be attributed to this subject. null: a token was found but the scan failed.
+  threat?: import("../threat/types").ThreatScan | null;
+  // Why the threat leg ran on that token (or why it was skipped) - one line,
+  // rendered with the section so the attribution is auditable.
+  threatNote?: string;
   /** Second-hop discovery stays inspectable even when excluded from the graph. */
   ventureTeams?: CollectedEvidence["ventureTeams"];
   /** Cited model discoveries that did not govern the frozen result. */

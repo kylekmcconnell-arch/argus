@@ -46,6 +46,7 @@ import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
 import { GithubAssessment } from "./GithubAssessment";
+import { ThreatReport } from "./ThreatScanPage";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { decisionCriticalChecks, isAdverseFinding, personChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
@@ -4303,6 +4304,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <Card className="p-4">
                   <GithubAssessment a={f.githubAssessment} />
                 </Card>
+              </Section>
+            </div>
+          )}
+
+          {/* the token threat leg of the FULL scan — the subject's own token,
+              scanned by the complete threat pipeline in the same run. Absent
+              field = older report from before the fold-in; a note without a
+              scan = the leg was skipped or failed, and says why. */}
+          {(f.threat || f.threatNote) && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="Project token · threat scan" kicker={f.threatNote ?? "the token threat leg of this audit"}>
+                {f.threat ? (
+                  <Card className="p-2">
+                    <ThreatReport scan={f.threat} />
+                  </Card>
+                ) : (
+                  <Card className="p-4">
+                    <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.threatNote}</p>
+                  </Card>
+                )}
               </Section>
             </div>
           )}

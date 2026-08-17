@@ -588,6 +588,13 @@ function ShareButton({ scan }: { scan: ThreatScan }) {
   );
 }
 
+// The full threat report body, exported for surfaces that already HOLD a scan
+// (the person report's frozen token leg) - EmbeddedThreatScan stays the entry
+// point when only an address is known.
+export function ThreatReport({ scan }: { scan: ThreatScan }) {
+  return <Report scan={scan} />;
+}
+
 function Report({ scan }: { scan: ThreatScan }) {
   const { call, dossier: d, code, deployer, checks } = scan;
   const m = VERDICT_META[call.verdict];

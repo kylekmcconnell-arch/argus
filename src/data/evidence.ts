@@ -206,6 +206,12 @@ export interface TraceStep {
   detail: string;
   source?: string;
   tone: "neutral" | "good" | "warn" | "bad";
+  // Machine-readable project-token announcement. The server resolves the
+  // subject's token as early as it can and stamps it on a step; the client
+  // runner sees it mid-stream and launches the browser-side token threat scan
+  // IN PARALLEL with the rest of the collection, so the full audit carries the
+  // threat report without extending the critical path.
+  token?: { address: string; via: "evm" | "solana"; source: string };
 }
 
 /**
