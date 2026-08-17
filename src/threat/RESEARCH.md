@@ -196,3 +196,25 @@ GET api.bankr.bot/public/doppler/token-fees/{token} (404 = not Bankr); also
 lookup is now key-gated. Scanner verdict: lpDisposition locked/permanent;
 extraction vectors = creator dumping claimed fees + optional 15% premint
 (1yr vest, 30d cliff).
+
+## Concentrated-liquidity (Uniswap V3) position custody — status
+
+Reported bug: on a v3/v4 pool (Robinhood, Base), the scan called liquidity an
+"NFT position" and gave up — "judge it by the position owner," without ever
+looking up who the owner actually is. `$GWOOD` (Robinhood, pool
+`0x72678B2e…Eb771`) was the concrete case.
+
+**How a v3 position is actually custodied (verified on-chain, not assumed):**
+the pool's own `Mint` event always names the chain's NonfungiblePositionManager
+(NFPM) as `owner` — the periphery contract mints the position NFT to *itself*
+per Uniswap's own code, so the pool alone never reveals who really holds it.
+The real owner only shows up by: taking the Mint tx, finding the NFPM's
+`Transfer` (initial mint) or `IncreaseLiquidity` log in the same tx to recover
+the `tokenId`, then calling `ownerOf(tokenId)` on the NFPM **now** (it may have
+moved since mint — e.g. transferred into a locker).
+
+**NFPM addresses are chain-specific, not a shared constant** — resolved per
+chain by finding a real V3 pool's Mint-log owner and cross-checking the
+explorer's contract name (see api/nftlock.ts for the resolved table). The
+live tracing of this custody chain ships as api/nftlock.ts + the LpCustody
+panel; this note records the mechanism so the next reader doesn't re-derive it.
