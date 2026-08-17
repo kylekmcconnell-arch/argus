@@ -1596,6 +1596,166 @@ export async function discoverOperatorsFromFollowings(
   return out.slice(0, 6);
 }
 
+/**
+ * AMPLIFIED-ACCOUNT ATTRIBUTION: the followings scan's sibling for the other
+ * first-party edge a project account draws itself. A project account that
+ * retweets or quote-posts its founder has vouched for them exactly as loudly
+ * as by following them — and founders routinely state the role in their own
+ * bio ("Founder @clutchmarkets"). The followings lane misses this whenever the
+ * follow edge is absent or beyond its bounded page budget; the timeline page
+ * is already fetched (and memoized) for every audit, so the amplified authors
+ * are free to read. Crossing them with each author's own bio claim resolves
+ * the operator with two first-party signals, same doctrine as the follow lane.
+ */
+interface AmplifiedAuthor { handle: string; name?: string; bio?: string }
+
+/** Distinct authors this timeline page retweets or quote-posts, with their
+ *  embedded profile bio when the provider ships one. Pure, for testability. */
+export function amplifiedAuthorsFromTimeline(payload: unknown, subjectHandle: string): AmplifiedAuthor[] {
+  const root = asRecord(payload) ?? {};
+  const data = asRecord(root.data);
+  const rows = (data?.tweets ?? root.tweets ?? (Array.isArray(root.data) ? root.data : [])) as unknown;
+  const subject = subjectHandle.replace(/^@/, "").toLowerCase();
+  const out: AmplifiedAuthor[] = [];
+  const seen = new Set<string>();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const tweet = asRecord(row);
+    for (const key of ["retweeted_tweet", "retweeted_status", "quoted_tweet", "quoted_status"]) {
+      const inner = asRecord(tweet[key]);
+      // asRecord maps non-records to {}, so pick whichever shape has content.
+      const authorRec = asRecord(inner.author);
+      const author = Object.keys(authorRec).length ? authorRec : asRecord(inner.user);
+      const userName = typeof author.userName === "string" ? author.userName
+        : typeof author.screen_name === "string" ? author.screen_name : "";
+      if (!userName || userName.toLowerCase() === subject || seen.has(userName.toLowerCase())) continue;
+      seen.add(userName.toLowerCase());
+      out.push({
+        handle: userName,
+        name: typeof author.name === "string" && author.name.trim() ? author.name.trim() : undefined,
+        bio: typeof author.description === "string" ? author.description : undefined,
+      });
+    }
+  }
+  return out.slice(0, 12);
+}
+
+/**
+ * Accounts the subject's own timeline amplifies (retweets/quote-posts) whose
+ * own bio claims they run the subject. Returns [] (never throws) when
+ * twitterapi is unset or the timeline is unavailable. Authors whose bio the
+ * timeline payload does not embed get one bounded profile fetch each.
+ */
+const MAX_AMPLIFIED_PROFILE_FETCHES = 8;
+export async function discoverOperatorsFromAmplified(
+  subjectHandle: string,
+  subjectName?: string,
+): Promise<TeamMember[]> {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return [];
+  const handle = subjectHandle.replace(/^@/, "");
+  const page = await lastTweetsFirstPage(handle, key);
+  if (!page) return [];
+  const authors = amplifiedAuthorsFromTimeline(page, handle);
+  const out: TeamMember[] = [];
+  let fetches = 0;
+  for (const author of authors) {
+    let bio = author.bio;
+    let name = author.name;
+    if (bio === undefined && fetches < MAX_AMPLIFIED_PROFILE_FETCHES) {
+      fetches += 1;
+      const profile = await getProfile(author.handle);
+      bio = profile?.bio ?? "";
+      name = name ?? profile?.name;
+    }
+    if (!bio) continue;
+    const claim = operatorClaimInBio(bio, handle, subjectName);
+    if (!claim) continue;
+    out.push({
+      name: name?.trim() || `@${author.handle}`,
+      handle: `@${author.handle}`,
+      role: claim.role,
+      kind: "team",
+      evidence: `the official account retweeted/quoted @${author.handle}, whose own X bio states "${claim.phrase}"`,
+      source: "operator attribution (amplified + bio claim)",
+      sourceUrl: `https://x.com/${author.handle}`,
+      projects: otherProjectsInBio(bio, handle),
+    });
+  }
+  return out.slice(0, 6);
+}
+
+/**
+ * REVERSE ROLE-PHRASE SEARCH: instead of asking who the project names, ask who
+ * the public record says LEADS the project. People state this in exactly a few
+ * phrasings — "founder of @y", "cofounder of @y", "CEO at @y", "@y team" — in
+ * X bios, posts, press, and the answers AI search surfaces. A project audit
+ * that only mines the subject's own surfaces misses the founder whose bio
+ * carries the claim (the Clutch Markets case: @OxSimpleFarmer's bio said
+ * "Founder @clutchmarkets" while the project account itself named no one).
+ * Results are model leads; confirmClaimantBios below upgrades the ones whose
+ * live first-party bio really carries the claim.
+ */
+export async function findRoleClaimants(
+  subjectHandle: string,
+  subjectName?: string,
+  domain?: string,
+): Promise<TeamMember[]> {
+  const h = subjectHandle.replace(/^@/, "");
+  const nameVariant = subjectName?.trim() && subjectName.trim().toLowerCase() !== h.toLowerCase()
+    ? subjectName.trim()
+    : "";
+  const domainVariant = domain?.trim() ? domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : "";
+  const queries = [
+    `"founder of @${h}"`, `"cofounder of @${h}"`, `"co-founder of @${h}"`,
+    `"CEO of @${h}"`, `"CEO at @${h}"`, `"@${h} team"`, `"Founder @${h}"`,
+    ...(nameVariant ? [`"founder of ${nameVariant}"`, `"${nameVariant} founder"`, `"${nameVariant} team"`] : []),
+    ...(domainVariant ? [`"founder of ${domainVariant}"`] : []),
+  ];
+  const system =
+    "You are a forensic OSINT researcher with live web and X search. The subject is a crypto/tech project's X account. Find the PEOPLE the public record credits with leading it: founders, cofounders, CEO/CTO/COO, core team. " +
+    "Work the REVERSE direction: run the exact quoted searches given below on X AND on the general web (Google-style), and read what AI-answer search summaries say about who founded the project. " +
+    "Pay special attention to X BIOS: accounts whose own bio contains phrases like 'Founder @project' are first-party role claims. Also check the project site's credits (footers often say 'Built by X'), press, and LinkedIn. " +
+    "Include ONLY people with a real, quotable public claim tying them to THIS exact project (match the handle/name/domain; never a same-named project). For each person quote the claim VERBATIM in evidence and say where it lives (X bio, post URL, page). " +
+    "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"founder|cofounder|ceo|cto|team\",\"kind\":\"team\",\"evidence\":\"\"}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
+  const text = await generalWebSearch(
+    system,
+    `Project X account: @${h}${nameVariant ? ` (${nameVariant})` : ""}${domainVariant ? `, website ${domainVariant}` : ""}. Who does the public record say founded or leads it? Run these exact searches on X and the web, then verify each hit: ${queries.join(", ")}.`,
+    { maxToolCalls: 6, cacheKey: `reverse-role:${h}` },
+  );
+  return parseTeamJSON(text, h, "reverse role-phrase search");
+}
+
+/**
+ * Live first-party confirmation for reverse-search leads: fetch each named
+ * handle's CURRENT bio and keep only claims the bio really carries. The
+ * returned map (normalized handle -> claim) lets the orchestrator quote the
+ * fetched artifact as evidence instead of a model summary. Bounded: at most
+ * `cap` profile fetches, never throws.
+ */
+export async function confirmClaimantBios(
+  candidates: readonly TeamMember[],
+  subjectHandle: string,
+  subjectName?: string,
+  cap = 5,
+): Promise<Map<string, { role: string; phrase: string }>> {
+  const subject = subjectHandle.replace(/^@/, "");
+  const confirmed = new Map<string, { role: string; phrase: string }>();
+  const handles = [...new Set(
+    candidates
+      .map((c) => (c.handle ?? "").replace(/^@/, ""))
+      .filter((h) => h && h.toLowerCase() !== subject.toLowerCase()),
+  )].slice(0, cap);
+  for (const h of handles) {
+    try {
+      const profile = await getProfile(`@${h}`);
+      if (!profile?.bio) continue;
+      const claim = operatorClaimInBio(profile.bio, subject, subjectName);
+      if (claim) confirmed.set(h.toLowerCase(), claim);
+    } catch { /* confirmation is best-effort; the lead stays a lead */ }
+  }
+  return confirmed;
+}
+
 export function scanPostsForRoles(posts: string[], projectName?: string): TeamMember[] {
   const out: TeamMember[] = [];
   const seen = new Set<string>();

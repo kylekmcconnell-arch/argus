@@ -214,18 +214,125 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-async function fetchPage(url: string, expectedApex: string): Promise<TeamPage | null> {
+// ── First-party credit-grammar scan ──
+// The Clutch Markets case: the founder was credited ONLY in the page footer
+// ("Built by OxSimpleFarmer", "© … Built by OxSimpleFarmer") — no team
+// section, no "founder" word anywhere, so both the roster gate and the LLM
+// extractor had nothing to read. Credits follow a tiny grammar ("built by X",
+// "founded by X", "founder: X", "a X production"), so mine them the same way
+// scanPostsForRoles mines posts: bind ONLY the immediately adjacent name or
+// @handle, deterministically, and let the fetched first-party page itself be
+// the artifact that verifies the claim.
+
+/** Credit verb -> the role the credit actually states. Nothing here upgrades
+ *  a "built by" into "founder"; the page said builder, we say builder. */
+const CREDIT_ROLES: Record<string, string> = {
+  built: "builder", founded: "founder", created: "creator", developed: "developer", made: "creator",
+};
+
+// A credited identity: an @handle, or 1-3 words whose casing says "name"
+// ("OxSimpleFarmer", "John Smith"). Matched case-insensitively with the
+// grammar, then re-validated case-sensitively below so "built by the
+// community" never binds "the".
+const CREDIT_NAME = "(@[A-Za-z0-9_]{2,30}|[A-Za-z0-9][\\w.'-]{1,29}(?:\\s+[A-Za-z0-9][\\w.'-]{1,29}){0,2})";
+const CREDIT_GRAMMARS: { pattern: RegExp; role: (match: RegExpMatchArray) => string }[] = [
+  // "built by X", "founded by X", "created with ❤ by X"
+  {
+    pattern: new RegExp(`\\b(built|founded|created|developed|made)(?:\\s+with\\s+\\S{1,16})?\\s+by\\s+${CREDIT_NAME}`, "gi"),
+    role: (match) => CREDIT_ROLES[match[1].toLowerCase()] ?? "team",
+  },
+  // "Founder: X", "Co-founders: X"
+  {
+    pattern: new RegExp(`\\b(co-?founders?|founders?)\\s*[::]\\s*${CREDIT_NAME}`, "gi"),
+    role: (match) => (/^co/i.test(match[1]) ? "cofounder" : "founder"),
+  },
+  // "a X production"
+  {
+    pattern: new RegExp(`\\ban?\\s+${CREDIT_NAME}\\s+production\\b`, "gi"),
+    role: () => "creator",
+  },
+];
+
+// Footers credit site builders and platforms in the same grammar ("Built by
+// Webflow"); a platform is not a person. Also drops articles/collectives the
+// name shape can't reject on its own.
+const NON_PERSON_CREDITS = new Set([
+  "the", "a", "an", "our", "us", "we", "you", "team", "community", "fans", "ai",
+  "webflow", "framer", "wix", "squarespace", "wordpress", "shopify", "vercel", "netlify",
+  "gitbook", "notion", "carrd", "canva", "gamma", "figma", "react", "nextjs", "next.js",
+  "bubble", "durable", "lovable", "bolt", "v0", "replit", "cursor", "claude", "chatgpt",
+]);
+
+const creditKey = (value: string): string => value.toLowerCase().replace(/^@/, "").replace(/[^a-z0-9]/g, "");
+
+/**
+ * Deterministic scan of fetched first-party page text for credit grammars.
+ * Mirrors the scanPostsForRoles doctrine: a narrow adjacent-binding grammar,
+ * dedupe, hard cap — a model may keep broader candidates as leads, but
+ * governing evidence requires this grammar inside a fetched first-party page.
+ * When the page's anchors are supplied, a credited bare name whose footer
+ * link points at their X profile gets that handle bound deterministically.
+ */
+export function scanPageTextForCredits(
+  text: string,
+  sourceUrl: string,
+  projectName?: string,
+  anchors?: readonly ProfileAnchor[],
+): TeamMember[] {
+  const out: TeamMember[] = [];
+  const seen = new Set<string>();
+  const corpus = text.replace(/\s+/g, " ").slice(0, 40_000);
+  const projectKey = projectName?.trim() ? creditKey(projectName) : "";
+  for (const grammar of CREDIT_GRAMMARS) {
+    for (const match of corpus.matchAll(grammar.pattern)) {
+      const captured = match[match.length - 1].trim();
+      // Case-sensitive re-validation: keep leading words that look like a
+      // name or handle ("OxSimpleFarmer team" -> "OxSimpleFarmer"); reject
+      // the match entirely when the FIRST word already fails.
+      const words: string[] = [];
+      for (const word of captured.split(/\s+/)) {
+        if (!/^[@0-9A-Z]/.test(word) || NON_PERSON_CREDITS.has(word.toLowerCase())) break;
+        words.push(word);
+      }
+      if (!words.length) continue;
+      const name = words.join(" ").replace(/[.,;:]+$/, "");
+      const key = creditKey(name);
+      if (!key || NON_PERSON_CREDITS.has(name.toLowerCase()) || seen.has(key)) continue;
+      // A project crediting itself ("Built by Clutch") names no person.
+      if (projectKey && (key === projectKey || projectKey.startsWith(key))) continue;
+      seen.add(key);
+      const handle = name.startsWith("@")
+        ? name
+        : anchors?.find((anchor) => anchor.kind === "x"
+            && (creditKey(anchor.anchorText) === key || creditKey(anchor.value) === key))?.value;
+      const phrase = match[0].replace(/\s+/g, " ").trim();
+      out.push({
+        name,
+        handle,
+        role: grammar.role(match),
+        kind: "team",
+        evidence: `the project's own page credits "${phrase}"`,
+        source: "site credit scan",
+        sourceUrl,
+      });
+    }
+  }
+  return out.slice(0, 6);
+}
+
+async function fetchPage(url: string, expectedApex: string, purpose: "roster" | "credits" = "roster"): Promise<TeamPage | null> {
+  const op = purpose === "credits" ? "site-credits" : "team-page";
   let response: Response;
   try {
     response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,text/markdown,text/plain" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
   } catch {
-    recordCall("site-fetch", "team-page", 0, "transport_error", "failed");
+    recordCall("site-fetch", op, 0, "transport_error", "failed");
     return null;
   }
   if (!response.ok) {
     recordCall(
       "site-fetch",
-      "team-page",
+      op,
       0,
       `http_${response.status}`,
       response.status === 404 || response.status === 410 ? "partial" : "failed",
@@ -240,33 +347,40 @@ async function fetchPage(url: string, expectedApex: string): Promise<TeamPage | 
   try {
     const finalHost = new URL(finalUrl).hostname.toLowerCase();
     if (finalHost !== expectedApex && !finalHost.endsWith(`.${expectedApex}`)) {
-      recordCall("site-fetch", "team-page", 0, "redirected_offsite", "partial");
+      recordCall("site-fetch", op, 0, "redirected_offsite", "partial");
       return null;
     }
   } catch {
-    recordCall("site-fetch", "team-page", 0, "redirected_offsite", "partial");
+    recordCall("site-fetch", op, 0, "redirected_offsite", "partial");
     return null;
   }
   const ct = response.headers.get("content-type") ?? "";
   if (!/html|markdown|text\/plain/i.test(ct)) {
-    recordCall("site-fetch", "team-page", 0, "unexpected_content_type", "partial");
+    recordCall("site-fetch", op, 0, "unexpected_content_type", "partial");
     return null;
   }
   let raw: string;
   try {
     raw = await response.text();
   } catch {
-    recordCall("site-fetch", "team-page", 0, "response_text_error", "failed");
+    recordCall("site-fetch", op, 0, "response_text_error", "failed");
     return null;
   }
   // Markdown variants are already text; only HTML needs stripping.
   const text = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
-  // A real team page mentions roles; skip thin/404-ish pages.
-  if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) {
-    recordCall("site-fetch", "team-page", 0, "insufficient_team_content", "partial");
+  // A real team page mentions roles; skip thin/404-ish pages. The credit scan
+  // exists precisely for pages with NO role words (the Clutch footer), so its
+  // fetch only requires enough text to scan.
+  if (purpose === "credits") {
+    if (text.length < 40) {
+      recordCall("site-fetch", op, 0, "insufficient_page_content", "partial");
+      return null;
+    }
+  } else if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) {
+    recordCall("site-fetch", op, 0, "insufficient_team_content", "partial");
     return null;
   }
-  recordCall("site-fetch", "team-page", 0, undefined, "succeeded");
+  recordCall("site-fetch", op, 0, undefined, "succeeded");
   return { url: finalUrl, text, html: raw, anchors: profileAnchors(raw) };
 }
 
@@ -460,13 +574,32 @@ export async function fetchTeamPage(domain: string, projectName?: string): Promi
   if (!pages.length && fallbackCandidates.length) {
     pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
   }
-  if (!pages.length) return [];
-  const directTeam = await extractTeamFromPages(pages, projectName);
+  // The homepage never qualifies as a roster page, but its footer is where a
+  // one-person project credits its builder (the Clutch Markets case). Fetch it
+  // for the deterministic credit scan only — it is never fed to the LLM lane.
+  const homePage = await fetchPage(`https://${apex}/`, apex, "credits")
+    ?? await fetchPage(`https://www.${apex}/`, apex, "credits");
+  const apexLabel = apex.split(".")[0];
+  const creditSeen = new Set<string>();
+  const creditTeam = [...pages, ...(homePage ? [homePage] : [])]
+    .flatMap((page) => scanPageTextForCredits(page.text, page.url, projectName, page.anchors))
+    .filter((person) => {
+      const key = (person.handle ?? person.name).replace(/^@/, "").trim().toLowerCase();
+      // A credit naming the site itself ("Built by Clutch") is self-reference.
+      if (!key || key === apexLabel || creditSeen.has(key)) return false;
+      creditSeen.add(key);
+      return true;
+    })
+    .slice(0, 6);
+  if (!pages.length && !creditTeam.length) return [];
+  const directTeam = pages.length ? await extractTeamFromPages(pages, projectName) : [];
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
   const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
-  const forumTeam = await extractTeamFromPages(forumPages, projectName, true);
+  const forumTeam = forumPages.length ? await extractTeamFromPages(forumPages, projectName, true) : [];
   const seen = new Set<string>();
-  return [...directTeam, ...forumTeam].filter((person) => {
+  // Credit hits come LAST so an LLM-extracted roster row for the same person
+  // (usually richer: exact stated role, profile links) wins the dedupe.
+  return [...directTeam, ...forumTeam, ...creditTeam].filter((person) => {
     const key = (person.handle ?? person.name).replace(/^@/, "").trim().toLowerCase();
     if (!key || seen.has(key)) return false;
     seen.add(key);
