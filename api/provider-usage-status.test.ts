@@ -165,7 +165,7 @@ describe("provider usage status attribution", () => {
     }));
   });
 
-  it("records a failed Claude photo attempt after the image was fetched", async () => {
+  it("records a failed Grok photo attempt after the image was fetched", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
         data: { profilePicture: "https://pbs.twimg.com/profile_images/123/profile.jpg" },
@@ -186,7 +186,13 @@ describe("provider usage status attribution", () => {
 
     expect(captured.status).toBe(200);
     expect(attachPanelCost).toHaveBeenCalledWith(ORGANIZATION_ID, VERSION_ID, expect.objectContaining({
-      provider: "claude",
+      provider: "twitterapi",
+      op: "panel:pfp-avatar",
+      calls: 1,
+      status: "succeeded",
+    }));
+    expect(attachPanelCost).toHaveBeenCalledWith(ORGANIZATION_ID, VERSION_ID, expect.objectContaining({
+      provider: "grok",
       op: "panel:pfp-check",
       calls: 1,
       usd: 0,

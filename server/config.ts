@@ -11,8 +11,8 @@ export interface ProviderInfo {
 }
 
 export const PROVIDERS: ProviderInfo[] = [
-  { id: "claude-research", label: "Claude (cited basic-facts research)", env: ["ANTHROPIC_API_KEY"], free: false, feeds: "founders, product, token, launch, governance, audits, repositories, funding, partnerships and traction leads with sources" },
-  { id: "grok", label: "Grok (X + cited web discovery)", env: ["XAI_API_KEY"], free: false, feeds: "testimonial acknowledgment, recent activity, sentiment, portfolio and fund-scale leads" },
+  { id: "claude-research", label: "Claude (optional fallback research)", env: ["ANTHROPIC_API_KEY"], free: false, feeds: "optional cited-research fallback when ARGUS_PROVIDER_FALLBACKS is on" },
+  { id: "grok", label: "Grok (primary LLM + X/web discovery)", env: ["XAI_API_KEY"], free: false, feeds: "analyst scoring, extract, vision, testimonial acknowledgment, recent activity, sentiment, portfolio and fund-scale leads" },
   { id: "twitterapi", label: "twitterapi.io (X follow graph)", env: ["TWITTERAPI_KEY"], free: false, feeds: "follower/following graph, profile, account age" },
   { id: "coingecko", label: "CoinGecko", env: ["COINGECKO_API_KEY"], free: true, feeds: "token price/mcap, call performance (K2)" },
   { id: "cryptorank", label: "CryptoRank", env: ["CRYPTORANK_API_KEY"], free: false, feeds: "market intel: rank, ATH drawdown, dilution, unlock/vesting flags" },
@@ -23,7 +23,8 @@ export const PROVIDERS: ProviderInfo[] = [
   { id: "reddit", label: "Reddit", env: ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"], free: false, feeds: "community FUD / reputation (F5/I5/AG4)" },
   { id: "helius", label: "Helius (Solana)", env: ["HELIUS_API_KEY"], free: false, feeds: "attributed-wallet activity (K4 context)" },
   { id: "bitquery", label: "Bitquery (not yet in core collector)", env: ["BITQUERY_API_KEY"], free: false, feeds: "reserved credential only; does not run or attest core audits" },
-  { id: "analyst", label: "Claude analyst agent", env: ["ANTHROPIC_API_KEY"], free: false, feeds: "messy-to-structured axis scoring + rationale + headline" },
+  { id: "analyst", label: "Grok analyst agent", env: ["XAI_API_KEY"], free: false, feeds: "messy-to-structured axis scoring + rationale + headline" },
+  { id: "openrouter", label: "OpenRouter (optional extract fallback)", env: ["OPENROUTER_API_KEY"], free: false, feeds: "cheap extraction fallback when ARGUS_PROVIDER_FALLBACKS is on" },
 ];
 
 export function hasEnv(keys: string[]): boolean {
@@ -45,17 +46,20 @@ export function providerStatus() {
   }));
 }
 
+export const GROK_ANALYST_MODEL = process.env.ARGUS_GROK_ANALYST_MODEL || process.env.ARGUS_GROK_MODEL || "grok-4-fast";
 export const ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 
 /**
- * Failure-driven provider failover (e.g. Claude analyst dies -> Grok retries
+ * Failure-driven provider failover (e.g. Grok analyst dies -> Claude retries
  * the same call). OFF by default by owner decision: a failed provider must
  * fail VISIBLY (ledger row + on-screen notice), never silently switch the
- * spend to a different metered provider. ARGUS_PROVIDER_FALLBACKS=on restores
- * the old failover behavior.
+ * spend to a different metered provider. ARGUS_PROVIDER_FALLBACKS=on or 1
+ * restores failover onto Anthropic / OpenRouter.
  */
-export const providerFallbacksEnabled = (): boolean =>
-  (process.env.ARGUS_PROVIDER_FALLBACKS || "").trim().toLowerCase() === "on";
+export const providerFallbacksEnabled = (): boolean => {
+  const raw = (process.env.ARGUS_PROVIDER_FALLBACKS || "").trim().toLowerCase();
+  return raw === "on" || raw === "1" || raw === "true";
+};
 /**
  * Basic-facts discovery is search-and-extract, not judgment: it reads result
  * pages and emits JSON rows that ARGUS then re-fetches and verifies itself, so

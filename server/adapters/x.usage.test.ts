@@ -100,19 +100,46 @@ describe("X provider attempt accounting", () => {
     }));
   });
 
-  it("falls through to Claude when every grounded search request is rejected", async () => {
+  it("falls through to Grok when every grounded search request is rejected", async () => {
     vi.stubEnv("SERPER_API_KEY", "rejected-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
-    vi.stubEnv("ARGUS_EXTRACT_MODEL", "claude-haiku-4-5");
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
     delete process.env.OPENROUTER_API_KEY;
-    let anthropicHits = 0;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("serper")) return json({ message: "Unauthorized" }, 403);
-      anthropicHits += 1;
+      if (url.includes("api.anthropic.com")) throw new Error("Claude must not run with fallbacks off");
+      if (url.includes("api.x.ai/v1/chat/completions")) {
+        return json({ choices: [{ message: { content: '["one exact query"]' } }] });
+      }
+      expect(url).toBe("https://api.x.ai/v1/responses");
       return json({
-        content: [{ type: "text", text: anthropicHits === 1 ? '["one exact query"]' : "CLAUDE FALLBACK" }],
+        output_text: "GROK FALLBACK",
+        output: [{ type: "web_search_call" }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const result = await generalWebSearch("system", "user");
+
+    expect(result).toBe("GROK FALLBACK");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("uses Claude web_search only when fallbacks are on and Grok is unset", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
+    delete process.env.XAI_API_KEY;
+    delete process.env.SERPER_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      expect(String(input)).toBe("https://api.anthropic.com/v1/messages");
+      return json({
+        content: [{ type: "text", text: "CLAUDE FALLBACK" }],
         usage: { input_tokens: 10, output_tokens: 5 },
         stop_reason: "end_turn",
       });
@@ -123,7 +150,7 @@ describe("X provider attempt accounting", () => {
     const result = await generalWebSearch("system", "user");
 
     expect(result).toBe("CLAUDE FALLBACK");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("bypasses both cache reads and writes for live Grok canaries", async () => {

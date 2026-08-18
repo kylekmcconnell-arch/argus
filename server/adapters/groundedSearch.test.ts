@@ -42,11 +42,13 @@ describe("groundedSearch OpenRouter routing", () => {
     vi.restoreAllMocks();
   });
 
-  it("routes extraction through OpenRouter (ZDR + usage.include, Bearer auth) with no Anthropic key", async () => {
+  it("routes extraction through OpenRouter only when fallbacks are on and Grok is unset", async () => {
     process.env.SERPER_API_KEY = "serp";
     process.env.OPENROUTER_API_KEY = "or-key";
     process.env.ARGUS_EXTRACT_MODEL = "google/gemini-2.5-flash-lite";
+    process.env.ARGUS_PROVIDER_FALLBACKS = "on";
     delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.XAI_API_KEY;
 
     const calls: { url: string; body: Record<string, unknown>; headers: Record<string, string> }[] = [];
     let openRouterHits = 0;
@@ -74,37 +76,40 @@ describe("groundedSearch OpenRouter routing", () => {
     expect(calls.some((c) => c.url.includes("api.anthropic.com"))).toBe(false);
   });
 
-  it("stays on the native Anthropic path when the extract model is a bare Anthropic id", async () => {
+  it("stays on Grok extract by default even when OpenRouter and Anthropic are configured", async () => {
     process.env.SERPER_API_KEY = "serp";
     process.env.OPENROUTER_API_KEY = "or-key";
-    process.env.ARGUS_EXTRACT_MODEL = "claude-haiku-4-5"; // no slug -> not OpenRouter
+    process.env.ARGUS_EXTRACT_MODEL = "claude-haiku-4-5";
     process.env.ANTHROPIC_API_KEY = "sk-ant";
+    process.env.XAI_API_KEY = "xai";
+    delete process.env.ARGUS_PROVIDER_FALLBACKS;
 
     const urls: string[] = [];
-    let anthropicHits = 0;
+    let grokHits = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       const u = String(url);
       urls.push(u);
       if (u.includes("serper")) return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
-      anthropicHits += 1;
-      const text = anthropicHits === 1 ? '["query one"]' : "ANSWER";
-      return ok({ content: [{ type: "text", text }], usage: { input_tokens: 10, output_tokens: 5 } });
+      grokHits += 1;
+      const content = grokHits === 1 ? '["query one"]' : "ANSWER";
+      return ok({ choices: [{ message: { content } }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
     }));
 
     const result = await withCostLedger(() => groundedSearch("system", "user"));
     expect(result).toBe("ANSWER");
-    expect(urls.some((u) => u.includes("api.anthropic.com"))).toBe(true);
+    expect(urls.some((u) => u.includes("api.x.ai"))).toBe(true);
     expect(urls.some((u) => u.includes("openrouter.ai"))).toBe(false);
+    expect(urls.some((u) => u.includes("api.anthropic.com"))).toBe(false);
   });
 
   it("uses supplied official-site queries without spending a model call generating queries", async () => {
     process.env.SERPER_API_KEY = "serp";
-    process.env.ANTHROPIC_API_KEY = "sk-ant";
+    process.env.XAI_API_KEY = "xai";
+    delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
-    process.env.ARGUS_EXTRACT_MODEL = "claude-haiku-4-5";
 
     const serperQueries: string[] = [];
-    let anthropicHits = 0;
+    let extractHits = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
       const u = String(url);
       if (u.includes("serper")) {
@@ -115,10 +120,10 @@ describe("groundedSearch OpenRouter routing", () => {
           snippet: "Venice announced a $65 million Series A led by Dragonfly at a $1 billion valuation.",
         }] });
       }
-      anthropicHits += 1;
+      extractHits += 1;
       return ok({
-        content: [{ type: "text", text: "EXTRACTED FUNDING" }],
-        usage: { input_tokens: 10, output_tokens: 5 },
+        choices: [{ message: { content: "EXTRACTED FUNDING" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
       });
     }));
 
@@ -134,24 +139,24 @@ describe("groundedSearch OpenRouter routing", () => {
       'site:venice.ai "Venice" funding raised financing',
       'site:venice.ai "Venice" "Series A"',
     ]);
-    expect(anthropicHits).toBe(1);
+    expect(extractHits).toBe(1);
   });
 
   it("records Serper HTTP failures as failed provider attempts", async () => {
     process.env.SERPER_API_KEY = "configured-but-rejected";
-    process.env.ANTHROPIC_API_KEY = "sk-ant";
+    process.env.XAI_API_KEY = "xai";
+    delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
-    process.env.ARGUS_EXTRACT_MODEL = "claude-haiku-4-5";
 
-    let anthropicHits = 0;
+    let extractHits = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (String(url).includes("serper")) {
         return new Response('{"message":"unauthorized"}', { status: 401 });
       }
-      anthropicHits += 1;
+      extractHits += 1;
       return ok({
-        content: [{ type: "text", text: anthropicHits === 1 ? '["query one"]' : "must-not-extract" }],
-        usage: { input_tokens: 10, output_tokens: 5 },
+        choices: [{ message: { content: extractHits === 1 ? '["query one"]' : "must-not-extract" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
       });
     }));
 
@@ -173,24 +178,24 @@ describe("groundedSearch OpenRouter routing", () => {
       meta: expect.stringContaining("http_401:unauthorized"),
     }));
     expect(unavailable).toBe(true);
-    expect(anthropicHits).toBe(1);
+    expect(extractHits).toBe(1);
   });
 
   it("classifies provider credit rejection without copying the response body into the ledger", async () => {
     process.env.SERPER_API_KEY = "configured-but-rejected";
-    process.env.ANTHROPIC_API_KEY = "sk-ant";
+    process.env.XAI_API_KEY = "xai";
+    delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENROUTER_API_KEY;
-    process.env.ARGUS_EXTRACT_MODEL = "claude-haiku-4-5";
 
-    let anthropicHits = 0;
+    let extractHits = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (String(url).includes("serper")) {
         return new Response('{"message":"Not enough credits for customer secret-account-42"}', { status: 400 });
       }
-      anthropicHits += 1;
+      extractHits += 1;
       return ok({
-        content: [{ type: "text", text: anthropicHits === 1 ? '["query one"]' : "must-not-extract" }],
-        usage: { input_tokens: 10, output_tokens: 5 },
+        choices: [{ message: { content: extractHits === 1 ? '["query one"]' : "must-not-extract" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
       });
     }));
 

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { ANALYST_MODEL, env } from "../config";
-import { addClaudeUsage, recordCall } from "../cost";
+import { ANALYST_MODEL, GROK_ANALYST_MODEL, env, providerFallbacksEnabled } from "../config";
+import { addClaudeUsage, addGrokUsage, recordCall } from "../cost";
 import type {
   CollectedEvidence,
   ProfileAuthenticityResult,
@@ -11,6 +11,7 @@ import { SubjectClass } from "../../src/engine";
 import type { CollectContext } from "./types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
 const MAX_IMAGE_BYTES = 750_000;
 const MIN_IMAGE_BYTES = 256;
 const MIN_ACTIONABLE_CONFIDENCE = 0.7;
@@ -177,6 +178,84 @@ function validateVisionInput(value: unknown): Omit<ProfileAuthenticityResult, "p
 }
 
 async function classifyImage(image: TrustedImage): Promise<ReturnType<typeof validateVisionInput>> {
+  const schema = {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              classification: { type: "string", enum: [...CLASSIFICATIONS].filter((value) => value !== "no_photo") },
+              confidence: { type: "number", minimum: 0, maximum: 1 },
+              is_real_person: { type: "boolean" },
+              flag: { type: "boolean" },
+              tells: { type: "array", maxItems: 6, items: { type: "string" } },
+              note: { type: "string" },
+            },
+            required: ["classification", "confidence", "is_real_person", "flag", "tells", "note"],
+          };
+  const system =
+          "You are screening a crypto/tech account's profile image for due diligence. This is visual triage, not identity proof and not reverse-image search. Classify only what is visible. A professional headshot or public figure may be legitimate, so those are review leads rather than fraud findings. Never identify a person by name.";
+  const userText = "Classify the profile image and list concrete visible tells. Use the record_profile_photo tool.";
+
+  const grokKey = env("XAI_API_KEY");
+  if (grokKey) {
+    let response: Response;
+    try {
+      response = await fetch(XAI_CHAT_URL, {
+        method: "POST",
+        headers: { authorization: `Bearer ${grokKey}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          model: GROK_ANALYST_MODEL,
+          max_tokens: 500,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: [
+              { type: "image_url", image_url: { url: `data:${image.mediaType};base64,${image.bytes.toString("base64")}` } },
+              { type: "text", text: userText },
+            ] },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: { name: "record_profile_photo", strict: true, schema },
+          },
+        }),
+        signal: AbortSignal.timeout(25_000),
+      });
+    } catch {
+      addGrokUsage(undefined, 0, "profile-photo-integrity", "failed", "transport_error");
+      response = undefined as unknown as Response;
+    }
+    if (response) {
+      if (!response.ok) {
+        addGrokUsage(undefined, 0, "profile-photo-integrity", "failed", `http_${response.status}`);
+      } else {
+        try {
+          const body = await response.json() as {
+            choices?: Array<{ message?: { content?: unknown } }>;
+            usage?: { prompt_tokens?: number; completion_tokens?: number };
+          };
+          const content = body.choices?.[0]?.message?.content;
+          const parsedRaw = (() => {
+            try { return typeof content === "string" ? JSON.parse(content) : content; }
+            catch { return null; }
+          })();
+          const parsed = validateVisionInput(parsedRaw);
+          addGrokUsage(
+            { input_tokens: body.usage?.prompt_tokens, output_tokens: body.usage?.completion_tokens },
+            0,
+            "profile-photo-integrity",
+            parsed ? "succeeded" : "partial",
+            parsed ? undefined : "invalid_tool_result",
+          );
+          if (parsed) return parsed;
+        } catch {
+          addGrokUsage(undefined, 0, "profile-photo-integrity", "failed", "response_json_error");
+        }
+      }
+    }
+    if (!providerFallbacksEnabled() || !env("ANTHROPIC_API_KEY")) return null;
+  } else if (!providerFallbacksEnabled() || !env("ANTHROPIC_API_KEY")) {
+    return null;
+  }
+
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
   let response: Response;
@@ -191,31 +270,18 @@ async function classifyImage(image: TrustedImage): Promise<ReturnType<typeof val
       body: JSON.stringify({
         model: ANALYST_MODEL,
         max_tokens: 500,
-        system:
-          "You are screening a crypto/tech account's profile image for due diligence. This is visual triage, not identity proof and not reverse-image search. Classify only what is visible. A professional headshot or public figure may be legitimate, so those are review leads rather than fraud findings. Never identify a person by name.",
+        system,
         messages: [{
           role: "user",
           content: [
             { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.bytes.toString("base64") } },
-            { type: "text", text: "Classify the profile image and list concrete visible tells. Use the record_profile_photo tool." },
+            { type: "text", text: userText },
           ],
         }],
         tools: [{
           name: "record_profile_photo",
           description: "Record a bounded visual profile-image integrity assessment.",
-          input_schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              classification: { type: "string", enum: [...CLASSIFICATIONS].filter((value) => value !== "no_photo") },
-              confidence: { type: "number", minimum: 0, maximum: 1 },
-              is_real_person: { type: "boolean" },
-              flag: { type: "boolean" },
-              tells: { type: "array", maxItems: 6, items: { type: "string" } },
-              note: { type: "string" },
-            },
-            required: ["classification", "confidence", "is_real_person", "flag", "tells", "note"],
-          },
+          input_schema: schema,
         }],
         tool_choice: { type: "tool", name: "record_profile_photo" },
       }),
@@ -331,12 +397,13 @@ export async function collectProfilePhoto(ctx: CollectContext): Promise<ProfileP
     return { status: "succeeded", detail: "official profile returned no custom photo" };
   }
 
-  if (!env("ANTHROPIC_API_KEY")) {
+  const visionReady = Boolean(env("XAI_API_KEY") || (providerFallbacksEnabled() && env("ANTHROPIC_API_KEY")));
+  if (!visionReady) {
     ctx.recordCheck?.({
       id: "profile-photo-authenticity",
       status: "unavailable",
       note: "profile-photo integrity screen is unavailable because the vision analyst is not configured",
-      provider: "claude-vision",
+      provider: "grok-vision",
     });
     return { status: "failed", detail: "vision analyst is not configured" };
   }
@@ -369,7 +436,7 @@ export async function collectProfilePhoto(ctx: CollectContext): Promise<ProfileP
       id: "profile-photo-authenticity",
       status: "unavailable",
       note: "vision provider failed or returned an invalid profile-photo result",
-      provider: "claude-vision",
+      provider: env("XAI_API_KEY") ? "grok-vision" : "claude-vision",
     });
     return { status: "failed", detail: "vision result unavailable or invalid" };
   }
@@ -377,7 +444,7 @@ export async function collectProfilePhoto(ctx: CollectContext): Promise<ProfileP
   const conclusive = classified.classification !== "unclear"
     && (classified.confidence ?? 0) >= MIN_ACTIONABLE_CONFIDENCE;
   const result: ProfileAuthenticityResult = {
-    provider: "claude-vision",
+    provider: env("XAI_API_KEY") ? "grok-vision" : "claude-vision",
     capturedAt,
     imageUrl: image.url,
     imageData: `data:${image.mediaType};base64,${image.bytes.toString("base64")}`,
@@ -402,7 +469,7 @@ export async function collectProfilePhoto(ctx: CollectContext): Promise<ProfileP
 
   const artifactRecord = {
     imageContentHash: image.contentHash,
-    model: ANALYST_MODEL,
+    model: env("XAI_API_KEY") ? GROK_ANALYST_MODEL : ANALYST_MODEL,
     classification: result.classification,
     confidence: result.confidence,
     flag: result.flag,
@@ -412,7 +479,7 @@ export async function collectProfilePhoto(ctx: CollectContext): Promise<ProfileP
   const artifactHash = sha256(JSON.stringify(artifactRecord));
   addArtifact(ctx, {
     kind: "profile_photo",
-    provider: "claude-vision",
+    provider: env("XAI_API_KEY") ? "grok-vision" : "claude-vision",
     title: "Profile-photo integrity screen",
     sourceUrl: image.url,
     capturedAt,
@@ -427,7 +494,7 @@ export async function collectProfilePhoto(ctx: CollectContext): Promise<ProfileP
       id: "profile-photo-authenticity",
       status: "unavailable",
       note: `vision result was ${result.classification} at ${Math.round((result.confidence ?? 0) * 100)}% confidence; no clean conclusion recorded`,
-      provider: "claude-vision",
+      provider: env("XAI_API_KEY") ? "grok-vision" : "claude-vision",
       sourceCount: 1,
     });
     return { status: "partial", detail: "vision result was inconclusive" };
@@ -439,7 +506,7 @@ export async function collectProfilePhoto(ctx: CollectContext): Promise<ProfileP
     note: result.flag
       ? `${result.classification.replace(/_/g, " ")} review lead at ${Math.round((result.confidence ?? 0) * 100)}% model confidence; not identity proof`
       : `${result.classification.replace(/_/g, " ")} observed; visual-only screen cannot prove image ownership or identity`,
-    provider: "claude-vision",
+    provider: env("XAI_API_KEY") ? "grok-vision" : "claude-vision",
     sourceCount: 1,
   });
   return { status: "succeeded", detail: `${result.classification} at ${Math.round((result.confidence ?? 0) * 100)}%` };

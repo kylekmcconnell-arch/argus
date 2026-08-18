@@ -4,8 +4,9 @@
 // image host returned by twitterapi.io. It is visual triage, not identity proof
 // or reverse-image search.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { attachPanelCost, claudeUsd, resolvePanelCostVersion } from "./_cache.js";
+import { attachPanelCost, claudeUsd, grokUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
+import { claudeToolInput, claudeVision, grokUsageFromChat, grokVision, parseJsonObject, providerFallbacksEnabled } from "./_llm";
 
 export const config = { maxDuration: 45 };
 
@@ -192,8 +193,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: "valid_handle_required" });
     return;
   }
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) {
+  const xai = process.env.XAI_API_KEY;
+  const anthropic = process.env.ANTHROPIC_API_KEY;
+  if (!xai && !(providerFallbacksEnabled() && anthropic)) {
     res.status(200).json({ available: false, note: "Profile-photo integrity screen unavailable (vision analyst is not configured)." });
     return;
   }
@@ -236,26 +238,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const cost = { calls: 1, usd: 0, meta: "vision", status: "failed" as "succeeded" | "failed" | "partial" };
-  try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model: process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6",
-        max_tokens: 500,
-        system: "Screen this crypto/tech account profile image for visual integrity. This is triage, not identity proof or reverse-image search. Classify only visible properties. A professional headshot or public figure may be legitimate, so those are review leads, never fraud findings. Never identify a person by name.",
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: image.media, data: image.data } },
-            { type: "text", text: "Classify this profile image with the record_profile_photo tool." },
-          ],
-        }],
-        tools: [{
-          name: "record_profile_photo",
-          description: "Record a bounded visual profile-image integrity assessment.",
-          input_schema: {
+  const visionSchema = {
             type: "object",
             additionalProperties: false,
             properties: {
@@ -267,24 +250,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               note: { type: "string" },
             },
             required: ["classification", "confidence", "is_real_person", "flag", "tells", "note"],
-          },
-        }],
-        tool_choice: { type: "tool", name: "record_profile_photo" },
-      }),
-      signal: AbortSignal.timeout(22_000),
-    });
-    if (!response.ok) {
-      res.status(200).json({ available: false, imageUrl: image.url, note: `Vision provider unavailable (${response.status}); no photo conclusion was recorded.` });
-      return;
+          };
+  const visionSystem = "Screen this crypto/tech account profile image for visual integrity. This is triage, not identity proof or reverse-image search. Classify only visible properties. A professional headshot or public figure may be legitimate, so those are review leads, never fraud findings. Never identify a person by name.";
+  const visionText = "Classify this profile image with the record_profile_photo tool.";
+
+  const cost = { calls: 1, usd: 0, meta: "vision", status: "failed" as "succeeded" | "failed" | "partial" };
+  let costProvider: "grok" | "claude" = "grok";
+  try {
+    let result: ReturnType<typeof validateVisionResult> = null;
+    if (xai) {
+      const grok = await grokVision({
+        key: xai,
+        system: visionSystem,
+        text: visionText,
+        mediaType: image.media,
+        imageBase64: image.data,
+        maxTokens: 500,
+        timeoutMs: 22_000,
+        jsonSchema: { name: "record_profile_photo", schema: visionSchema },
+      });
+      if (grok.ok) {
+        costProvider = "grok";
+        cost.usd = grokUsd(grokUsageFromChat(grok.data as { usage?: { prompt_tokens?: number; completion_tokens?: number } }));
+        result = validateVisionResult(parseJsonObject(grok.text));
+        cost.status = result ? "succeeded" : "partial";
+      } else if (!providerFallbacksEnabled() || !anthropic) {
+        res.status(200).json({ available: false, imageUrl: image.url, note: `Vision provider unavailable (${grok.status || "failed"}); no photo conclusion was recorded.` });
+        return;
+      }
     }
-    const body = await response.json() as {
-      content?: Array<{ type?: unknown; name?: unknown; input?: unknown }>;
-      usage?: { input_tokens?: number; output_tokens?: number };
-    };
-    cost.usd = claudeUsd(body.usage);
-    const tool = body.content?.find((item) => item.type === "tool_use" && item.name === "record_profile_photo");
-    const result = validateVisionResult(tool?.input);
-    cost.status = result ? "succeeded" : "partial";
+    if (!result && anthropic && providerFallbacksEnabled()) {
+      costProvider = "claude";
+      const claude = await claudeVision({
+        key: anthropic,
+        system: visionSystem,
+        text: visionText,
+        mediaType: image.media,
+        imageBase64: image.data,
+        maxTokens: 500,
+        timeoutMs: 22_000,
+        tools: [{
+          name: "record_profile_photo",
+          description: "Record a bounded visual profile-image integrity assessment.",
+          input_schema: visionSchema,
+        }],
+        toolChoice: { type: "tool", name: "record_profile_photo" },
+      });
+      if (!claude.ok) {
+        res.status(200).json({ available: false, imageUrl: image.url, note: `Vision provider unavailable (${claude.status || "failed"}); no photo conclusion was recorded.` });
+        return;
+      }
+      const body = claude.data as { usage?: { input_tokens?: number; output_tokens?: number } };
+      cost.usd = claudeUsd(body.usage);
+      result = validateVisionResult(claudeToolInput(claude.data as { content?: Array<{ type?: unknown; name?: unknown; input?: unknown }> }, "record_profile_photo"));
+      cost.status = result ? "succeeded" : "partial";
+    }
     if (!result) {
       res.status(200).json({ available: false, imageUrl: image.url, note: "Vision returned an invalid or incomplete result; no photo conclusion was recorded." });
       return;
@@ -300,7 +320,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({ available: false, imageUrl: image.url, note: "Profile-photo integrity screen failed; no photo conclusion was recorded." });
   } finally {
     await attachPanelCost(auth.organizationId, panelCostVersionId, {
-      provider: "claude",
+      provider: costProvider,
+
       op: "panel:pfp-check",
       ...cost,
       initiatedBy: auth.userId,

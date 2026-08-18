@@ -13,6 +13,7 @@
 //      a human approves/denies in AdminOps. Correct-but-unprovable never auto-
 //      publishes, and it's never silently dropped.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { claudeMessages, grokChat, parseJsonObject, providerFallbacksEnabled } from "./_llm";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {
@@ -418,28 +419,26 @@ async function notifyPending(subject: string, item: Augmentation): Promise<void>
 // to change so it's caught next time. Grounded only in the approved fact — a
 // pipeline improvement suggestion, surfaced to the operator (not auto-applied).
 async function diagnose(subject: string, item: Augmentation): Promise<{ reason: string; fix: string } | null> {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) return null;
+  const xai = process.env.XAI_API_KEY;
+  const anthropic = process.env.ANTHROPIC_API_KEY;
+  if (!xai && !(providerFallbacksEnabled() && anthropic)) return null;
   const fact = `${item.rel ? `a "${item.rel}" relationship to ` : ""}${item.kind ?? item.type}: ${item.label}${item.detail ? ` (${item.detail})` : ""}`;
+  const system = "You are ARGUS, an automated crypto due-diligence engine, improving your OWN pipeline. An analyst just approved a true fact that your automated scan of a subject FAILED to surface. Diagnose it. Reply with ONLY compact JSON {\"reason\":\"...\",\"fix\":\"...\"}: reason = the single most likely reason an automated scan missed this, one sentence; fix = ONE concrete, specific, implementable change to the scan pipeline that would catch this class of thing next time. Name the data source, search, or check to add or adjust in one actionable sentence. No text outside the JSON.";
+  const user = `Subject: ${subject}\nMissed fact (analyst-verified): ${fact}`;
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model: process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6",
-        max_tokens: 400,
-        system: "You are ARGUS, an automated crypto due-diligence engine, improving your OWN pipeline. An analyst just approved a true fact that your automated scan of a subject FAILED to surface. Diagnose it. Reply with ONLY compact JSON {\"reason\":\"...\",\"fix\":\"...\"}: reason = the single most likely reason an automated scan missed this, one sentence; fix = ONE concrete, specific, implementable change to the scan pipeline that would catch this class of thing next time. Name the data source, search, or check to add or adjust in one actionable sentence. No text outside the JSON.",
-        messages: [{ role: "user", content: `Subject: ${subject}\nMissed fact (analyst-verified): ${fact}` }],
-      }),
-      signal: AbortSignal.timeout(22000),
-    });
-    if (!r.ok) return null;
-    const d = (await r.json()) as { content?: { text?: string }[] };
-    const text = (d.content ?? []).map((b) => b.text ?? "").join(" ");
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    const j = JSON.parse(m[0]) as { reason?: string; fix?: string };
-    if (!j.reason && !j.fix) return null;
+    let raw = "";
+    if (xai) {
+      const grok = await grokChat({ key: xai, system, user, maxTokens: 400, timeoutMs: 22000 });
+      if (grok.ok) raw = grok.text;
+      else if (!providerFallbacksEnabled() || !anthropic) return null;
+    }
+    if (!raw && anthropic && providerFallbacksEnabled()) {
+      const claude = await claudeMessages({ key: anthropic, system, user, maxTokens: 400, timeoutMs: 22000 });
+      if (!claude.ok) return null;
+      raw = claude.text;
+    }
+    const j = parseJsonObject(raw);
+    if (!j || (!j.reason && !j.fix)) return null;
     return { reason: String(j.reason ?? "").slice(0, 400), fix: String(j.fix ?? "").slice(0, 400) };
   } catch { return null; }
 }

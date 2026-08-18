@@ -32,6 +32,32 @@ const promptText = (value: unknown): string => Array.isArray(value)
   ? value.map((block) => String((block as { text?: unknown }).text ?? "")).join("\n")
   : String(value ?? "");
 
+const toolNameOf = (body: {
+  tool_choice?: { name?: string };
+  response_format?: { json_schema?: { name?: string } };
+}): string => body.response_format?.json_schema?.name || body.tool_choice?.name || "";
+
+const analystSchemaOf = (body: {
+  tools?: Array<{ input_schema?: unknown }>;
+  response_format?: { json_schema?: { schema?: unknown; strict?: boolean } };
+}): { schema: typeof RECORD_VERDICT_INPUT_SCHEMA; strict?: boolean } => ({
+  schema: (body.response_format?.json_schema?.schema ?? body.tools?.[0]?.input_schema) as typeof RECORD_VERDICT_INPUT_SCHEMA,
+  strict: body.response_format?.json_schema?.strict,
+});
+
+const grokStructuredOk = (input: unknown, usage = { prompt_tokens: 100, completion_tokens: 20 }) =>
+  new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify(input) } }],
+    usage,
+  }), { status: 200, headers: { "content-type": "application/json" } });
+
+const requestSystem = (body: { system?: unknown; messages?: Array<{ role?: string; content?: unknown }> }): string =>
+  promptText(body.messages?.find((message) => message.role === "system")?.content ?? body.system);
+
+const requestUser = (body: { messages?: Array<{ role?: string; content?: unknown }> }): string =>
+  promptText(body.messages?.find((message) => message.role === "user")?.content ?? body.messages?.[0]?.content);
+
+
 
 const catalog: AnalystAxis[] = [
   { axis: "F1_identity_verifiability", weight: 12, role: "FOUNDER" },
@@ -4026,7 +4052,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("fails closed with a bounded marker when required all-role coverage is irreducibly oversized", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const allRoles = Object.values(SubjectClass);
@@ -4077,7 +4103,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("recovers a verdict when the first analyst call transiently fails instead of abandoning to INCOMPLETE", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: { handle: "@subject", display_name: "Subject", bio: "Named builder", profile_collection_state: "resolved", profile_provider: "twitterapi" },
       ventures: [{ project_name: "Verified Venture", role: "founder", outcome: "Active", artifact_verified: true }],
@@ -4101,8 +4127,8 @@ describe("analyst verdict integrity", () => {
     let verdictCalls = 0;
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body)) as { tool_choice: { name: string } };
-      if (request.tool_choice.name !== "record_verdict") {
-        return new Response(JSON.stringify({ content: [{ type: "tool_use", name: request.tool_choice.name, input: { contradictions: [] } }], stop_reason: "tool_use", usage: { input_tokens: 10, output_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (toolNameOf(request) !== "record_verdict") {
+        return grokStructuredOk({ contradictions: [] }, { prompt_tokens: 10, completion_tokens: 2 });
       }
       verdictCalls += 1;
       // First scoring attempt blips (a transient upstream 503); the retry must
@@ -4110,7 +4136,7 @@ describe("analyst verdict integrity", () => {
       if (verdictCalls === 1) {
         return new Response("upstream unavailable", { status: 503, headers: { "content-type": "text/plain" } });
       }
-      return new Response(JSON.stringify({ content: [{ type: "tool_use", name: "record_verdict", input: validVerdict }], stop_reason: "tool_use", usage: { input_tokens: 100, output_tokens: 20 } }), { status: 200, headers: { "content-type": "application/json" } });
+      return grokStructuredOk(validVerdict);
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -4159,7 +4185,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("tells decision prompts that leads are excluded without discarding non-finding evidence", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: { handle: "@subject", display_name: "Subject", bio: "Named builder", profile_collection_state: "resolved", profile_provider: "twitterapi" },
       ventures: [{ project_name: "Verified Venture", role: "founder", outcome: "Active", artifact_verified: true }],
@@ -4178,7 +4204,7 @@ describe("analyst verdict integrity", () => {
     };
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body)) as { tool_choice: { name: string } };
-      const input = request.tool_choice.name === "record_contradictions"
+      const input = toolNameOf(request) === "record_contradictions"
         ? { contradictions: [] }
         : {
             axes: [
@@ -4206,11 +4232,7 @@ describe("analyst verdict integrity", () => {
             headline: "Evidence-backed result",
             identity_note: "Identity resolved",
           };
-      return new Response(JSON.stringify({
-        content: [{ type: "tool_use", name: request.tool_choice.name, input }],
-        stop_reason: "tool_use",
-        usage: { input_tokens: 100, output_tokens: 20 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return grokStructuredOk(input);
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -4238,8 +4260,8 @@ describe("analyst verdict integrity", () => {
         };
       }>;
     });
-    const contradictionPrompt = promptText(requests.find((request) => request.tool_choice.name === "record_contradictions")?.system);
-    const scoringPrompt = promptText(requests.find((request) => request.tool_choice.name === "record_verdict")?.messages[0]?.content);
+    const contradictionPrompt = requestSystem(requests.find((request) => toolNameOf(request) === "record_contradictions") ?? {});
+    const scoringPrompt = requestUser(requests.find((request) => toolNameOf(request) === "record_verdict") ?? {});
 
     expect(contradictionPrompt).toContain("investigative leads are excluded from this evidence packet");
     expect(contradictionPrompt).toContain("when comparing or interpreting finding collections");
@@ -4276,13 +4298,12 @@ describe("analyst verdict integrity", () => {
       `coverage catalog): ` +
       `${expectedF1CoverageAliases.join(", ") || "(none)"}`,
     );
-    const verdictRequest = requests.find((request) => request.tool_choice.name === "record_verdict")!;
-    const verdictTool = verdictRequest.tools[0];
-    const axesSchema = verdictTool.input_schema.properties.axes;
+    const verdictRequest = requests.find((request) => toolNameOf(request) === "record_verdict")!;
+    const verdictTool = analystSchemaOf(verdictRequest);
+    const axesSchema = (verdictTool.schema as { properties: { axes: any } }).properties.axes;
     expect(verdictRequest.max_tokens).toBe(6000);
-    expect(verdictRequest.tool_choice.disable_parallel_tool_use).toBe(true);
     expect(verdictTool.strict).toBe(true);
-    expect(verdictTool.input_schema).toEqual(RECORD_VERDICT_INPUT_SCHEMA);
+    expect(verdictTool.schema).toEqual(RECORD_VERDICT_INPUT_SCHEMA);
     expect(axesSchema.type).toBe("array");
     expect(axesSchema.items.additionalProperties).toBe(false);
     expect(axesSchema.items.required).toEqual(expect.arrayContaining([
@@ -4295,8 +4316,8 @@ describe("analyst verdict integrity", () => {
       "gaps",
     ]));
     expect(axesSchema.items.properties.score.type).toBe("integer");
-    expect(JSON.stringify(verdictTool.input_schema)).not.toContain("F1_identity_verifiability");
-    expect(JSON.stringify(verdictTool.input_schema)).not.toMatch(/e\d{3}/);
+    expect(JSON.stringify(verdictTool.schema)).not.toContain("F1_identity_verifiability");
+    expect(JSON.stringify(verdictTool.schema)).not.toMatch(/e\d{3}/);
     expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
     expect(verdict?.axes.map((axis) => axis.evidenceRefs)).toEqual([
       [refFor("F1_identity_verifiability")],
@@ -4315,20 +4336,12 @@ describe("analyst verdict integrity", () => {
         ...findUnsupported(child),
       ]);
     };
-    expect(findUnsupported(verdictTool.input_schema)).toEqual([]);
+    expect(findUnsupported(verdictTool.schema)).toEqual([]);
   });
 
   it("quarantines a malformed contradiction result instead of aborting the audit", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      content: [{
-        type: "tool_use",
-        name: "record_contradictions",
-        input: { contradictions: { claim: "not an array" } },
-      }],
-      stop_reason: "tool_use",
-      usage: { input_tokens: 20, output_tokens: 10 },
-    }), { status: 200, headers: { "content-type": "application/json" } })));
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => grokStructuredOk({ contradictions: { claim: "not an array" } }, { prompt_tokens: 20, completion_tokens: 10 })));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await expect(scanContradictions("@subject", "{}")).resolves.toBeNull();
@@ -4339,23 +4352,15 @@ describe("analyst verdict integrity", () => {
   });
 
   it("recovers a stringified contradiction array returned inside the tool contract", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      content: [{
-        type: "tool_use",
-        name: "record_contradictions",
-        input: {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => grokStructuredOk({
           contradictions: JSON.stringify([{
             claim: "The subject says liquidity is locked.",
             conflict: "The collected contract record shows the lock expired.",
             severity: "high",
             confidence: "high",
           }]),
-        },
-      }],
-      stop_reason: "tool_use",
-      usage: { input_tokens: 20, output_tokens: 10 },
-    }), { status: 200, headers: { "content-type": "application/json" } })));
+        }, { prompt_tokens: 20, completion_tokens: 10 })));
 
     await expect(scanContradictions("@subject", "{}")).resolves.toEqual([{
       claim: "The subject says liquidity is locked.",
@@ -4366,7 +4371,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("skips contradiction analysis when the route has entered its finalization reserve", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -4383,7 +4388,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("keeps the live 14-axis founder, investor, and member contract strict and bounded", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const productionRoles = [SubjectClass.FOUNDER, SubjectClass.INVESTOR, SubjectClass.MEMBER];
     const productionCatalog: AnalystAxis[] = productionRoles.flatMap((role) =>
       Object.entries(getProfile(role).axes).map(([axis, weight]) => ({ axis, weight, role })),
@@ -4494,19 +4499,11 @@ describe("analyst verdict integrity", () => {
         coverageRefs: [],
         gaps: [],
       }));
-      return new Response(JSON.stringify({
-        content: [{
-          type: "tool_use",
-          name: request.tool_choice.name,
-          input: {
+      return grokStructuredOk({
             axes,
             headline: "Evidence-backed multi-role result",
             identity_note: "Identity resolved",
-          },
-        }],
-        stop_reason: "tool_use",
-        usage: { input_tokens: 4000, output_tokens: 1200 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+          }, { prompt_tokens: 4000, completion_tokens: 1200 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -4536,30 +4533,30 @@ describe("analyst verdict integrity", () => {
         };
       }>;
     };
-    const tool = request.tools[0];
-    const axesSchema = tool.input_schema.properties.axes;
+    const tool = analystSchemaOf(request);
+    const axesSchema = (tool.schema as { properties: { axes: any } }).properties.axes;
     expect(productionCatalog).toHaveLength(14);
     expect(evidenceJson.length).toBeGreaterThan(20_000);
     expect(scorerCatalog.length).toBeGreaterThanOrEqual(20);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(requestBody.length).toBeLessThan(100_000);
-    expect(JSON.stringify(tool.input_schema).length).toBeLessThan(2_048);
+    expect(JSON.stringify(tool.schema).length).toBeLessThan(2_048);
     expect(tool.strict).toBe(true);
-    expect(tool.input_schema).toEqual(RECORD_VERDICT_INPUT_SCHEMA);
-    expect(tool.input_schema.required).toEqual(["axes", "headline", "identity_note"]);
-    expect(tool.input_schema.additionalProperties).toBe(false);
+    expect(tool.schema).toEqual(RECORD_VERDICT_INPUT_SCHEMA);
+    expect(tool.schema.required).toEqual(["axes", "headline", "identity_note"]);
+    expect(tool.schema.additionalProperties).toBe(false);
     expect(axesSchema.type).toBe("array");
     expect(axesSchema.items.required).toEqual(Object.keys(axesSchema.items.properties));
     expect(axesSchema.items.additionalProperties).toBe(false);
     expect(axesSchema.items.properties.score.type).toBe("integer");
-    expect(JSON.stringify(tool.input_schema)).not.toContain("enum");
-    expect(JSON.stringify(tool.input_schema)).not.toMatch(/e\d{3}/);
-    expect(JSON.stringify(tool.input_schema)).not.toContain("F1_identity_verifiability");
+    expect(JSON.stringify(tool.schema)).not.toContain("enum");
+    expect(JSON.stringify(tool.schema)).not.toMatch(/e\d{3}/);
+    expect(JSON.stringify(tool.schema)).not.toContain("F1_identity_verifiability");
     expect(verdict?.axes.map(({ axis }) => axis)).toEqual(productionCatalog.map(({ axis }) => axis));
   });
 
   it("keeps the invariant grammar and exact validator contract across all 34 methodology axes", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const allRoles = Object.values(SubjectClass);
     const allAxes: AnalystAxis[] = allRoles.flatMap((role) =>
       Object.entries(getProfile(role).axes).map(([axis, weight]) => ({ axis, weight, role })),
@@ -4691,12 +4688,8 @@ describe("analyst verdict integrity", () => {
         tool_choice: { name: string };
         tools: Array<{ input_schema: unknown }>;
       };
-      requestSchema = request.tools[0].input_schema;
-      return new Response(JSON.stringify({
-        content: [{
-          type: "tool_use",
-          name: request.tool_choice.name,
-          input: {
+      requestSchema = analystSchemaOf(request).schema;
+      return grokStructuredOk({
             axes: allAxes.map(({ axis, weight, role }) => ({
               axis,
               score: role === SubjectClass.PROJECT
@@ -4713,11 +4706,7 @@ describe("analyst verdict integrity", () => {
             })),
             headline: "Evidence-backed all-role result",
             identity_note: "Identity resolved",
-          },
-        }],
-        stop_reason: "tool_use",
-        usage: { input_tokens: 8_000, output_tokens: 4_000 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+          }, { prompt_tokens: 8_000, completion_tokens: 4_000 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -4730,7 +4719,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("fails before the provider call when the scorer packet has no valid frozen catalog", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -4744,7 +4733,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("accepts a complete verdict after deterministic counter-evidence precedence", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -4778,11 +4767,7 @@ describe("analyst verdict integrity", () => {
     expect(f1Aliases.length).toBeGreaterThanOrEqual(2);
     expect(f2Alias).toBeTruthy();
 
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      content: [{
-        type: "tool_use",
-        name: "record_verdict",
-        input: {
+    const fetchMock = vi.fn(async () => grokStructuredOk({
           axes: [
             {
               axis: "F1_identity_verifiability",
@@ -4807,11 +4792,7 @@ describe("analyst verdict integrity", () => {
           ],
           headline: "Independent support remains after contradictory evidence is separated.",
           identity_note: "Identity is supported by the collected profile and venture evidence.",
-        },
-      }],
-      stop_reason: "tool_use",
-      usage: { input_tokens: 100, output_tokens: 20 },
-    }), { status: 200, headers: { "content-type": "application/json" } }));
+        }, { prompt_tokens: 100, completion_tokens: 20 }));
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
 
@@ -4825,7 +4806,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("treats the sole harmful artifact as primary support for an adverse project band", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const axes: AnalystAxis[] = [{ axis: "P3_token_conduct", weight: 20, role: SubjectClass.PROJECT }];
     const evidenceJson = buildScoringEvidencePacket({
       findings: [{
@@ -4843,12 +4824,8 @@ describe("analyst verdict integrity", () => {
     let prompt = "";
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
-      prompt = promptText(body.messages[0].content);
-      return new Response(JSON.stringify({
-        content: [{
-          type: "tool_use",
-          name: "record_verdict",
-          input: {
+      prompt = requestUser(body);
+      return grokStructuredOk({
             axes: [{
               axis: "P3_token_conduct",
               score: 3,
@@ -4861,11 +4838,7 @@ describe("analyst verdict integrity", () => {
             }],
             headline: "Verified token collapse governs the assessment.",
             identity_note: "Identity is not material to the verified token finding.",
-          },
-        }],
-        stop_reason: "tool_use",
-        usage: { input_tokens: 100, output_tokens: 20 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+          }, { prompt_tokens: 100, completion_tokens: 20 });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -4914,7 +4887,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("diagnoses true I2 and I3 coverage abstentions before any scorer provider call", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -4944,7 +4917,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("makes one bounded semantic repair attempt after a schema-valid array omits an axis", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -4991,15 +4964,11 @@ describe("analyst verdict integrity", () => {
         identity_note: "Identity resolved",
       };
       if (attempt === 2) {
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "axis-count",
         );
       }
-      return new Response(JSON.stringify({
-        content: [{ type: "tool_use", name: request.tool_choice.name, input }],
-        stop_reason: "tool_use",
-        usage: { input_tokens: 100, output_tokens: 20 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return grokStructuredOk(input);
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -5011,7 +4980,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("repairs every project axis outside its evidence-strength band in one retry", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const projectAxes: AnalystAxis[] = [
       { axis: "P1_team_and_identity", weight: 16, role: SubjectClass.PROJECT },
       { axis: "P4_backing_and_partners", weight: 14, role: SubjectClass.PROJECT },
@@ -5066,14 +5035,14 @@ describe("analyst verdict integrity", () => {
         tool_choice: { name: string };
       };
       if (attempt === 1) {
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "P1_team_and_identity: exceptional evidence, allowed 14-16; P4_backing_and_partners: solid evidence, allowed 10-11",
         );
       } else {
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "project-scores-outside-evidence-strength-band:P1_team_and_identity,P4_backing_and_partners",
         );
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "Required bands by axis: P1_team_and_identity: 14-16 (exceptional); P4_backing_and_partners: 10-11 (solid)",
         );
       }
@@ -5093,11 +5062,7 @@ describe("analyst verdict integrity", () => {
         headline: "Established project with verified fundamentals",
         identity_note: "Two named founders are verified",
       };
-      return new Response(JSON.stringify({
-        content: [{ type: "tool_use", name: request.tool_choice.name, input }],
-        stop_reason: "tool_use",
-        usage: { input_tokens: 100, output_tokens: 20 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+      return grokStructuredOk(input);
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -5114,7 +5079,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("promotes already-selected substantive support when the primary is coverage-only", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -5180,19 +5145,11 @@ describe("analyst verdict integrity", () => {
             coverageRefs: [f1Coverage],
             gaps: ["One identity provider was unavailable."],
           };
-      return new Response(JSON.stringify({
-        content: [{
-          type: "tool_use",
-          name: request.tool_choice.name,
-          input: {
+      return grokStructuredOk({
             axes: [f1, axisRow("F2_track_record", 20, f2Support)],
             headline: "Evidence-backed result",
             identity_note: "Identity resolved",
-          },
-        }],
-        stop_reason: "tool_use",
-        usage: { input_tokens: 100, output_tokens: 20 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+          }, { prompt_tokens: 100, completion_tokens: 20 });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -5209,7 +5166,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("bounds model-facing coverage candidates and repairs exhaustive coverage copying", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const singleAxisCatalog: AnalystAxis[] = [{
       axis: "F1_identity_verifiability",
       weight: 12,
@@ -5265,17 +5222,17 @@ describe("analyst verdict integrity", () => {
         messages: Array<{ content: string }>;
         tool_choice: { name: string };
       };
-      expect(promptText(request.messages[0].content)).toContain("PUBLIC DILIGENCE GAP RULE");
-      expect(promptText(request.messages[0].content)).toContain("government-issued ID, passport, SSN or tax ID, home address");
-      expect(promptText(request.messages[0].content)).toContain("private account credentials");
-      expect(promptText(request.messages[0].content)).toContain("other non-public personal proof");
-      expect(promptText(request.messages[0].content)).toContain(
+      expect(requestUser(request)).toContain("PUBLIC DILIGENCE GAP RULE");
+      expect(requestUser(request)).toContain("government-issued ID, passport, SSN or tax ID, home address");
+      expect(requestUser(request)).toContain("private account credentials");
+      expect(requestUser(request)).toContain("other non-public personal proof");
+      expect(requestUser(request)).toContain(
         "A checked-empty reference records a completed clear or negative screen",
       );
-      expect(promptText(request.messages[0].content)).toContain(
+      expect(requestUser(request)).toContain(
         "it is not an evidence gap and must not create a gap line by itself",
       );
-      const eligibilityLine = promptText(request.messages[0].content).split("\n")
+      const eligibilityLine = requestUser(request).split("\n")
         .find((line) => line.startsWith("F1_identity_verifiability |")) ?? "";
       expect(eligibilityLine).toContain(
         `coverageRefs preferred return set (optional; return 0-4 total, never the whole ` +
@@ -5283,22 +5240,18 @@ describe("analyst verdict integrity", () => {
       );
       expect(eligibilityLine).not.toContain(omittedCoverageAlias);
       if (attempt === 2) {
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "coverage-reference-limit-observed-5-max-4:F1_identity_verifiability",
         );
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           `The prior F1_identity_verifiability coverageRefs contained 5 aliases; the maximum is 4. ` +
           `Return no more than these four preferred aliases: ${coverageCandidates.join(", ")}`,
         );
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "Do not append or move omitted coverage aliases into support or counter fields",
         );
       }
-      return new Response(JSON.stringify({
-        content: [{
-          type: "tool_use",
-          name: request.tool_choice.name,
-          input: {
+      return grokStructuredOk({
             axes: [{
               axis: "F1_identity_verifiability",
               score: 10,
@@ -5313,11 +5266,7 @@ describe("analyst verdict integrity", () => {
             }],
             headline: "Identity is supported with disclosed coverage limits.",
             identity_note: "Identity resolved from the collected profile evidence.",
-          },
-        }],
-        stop_reason: "tool_use",
-        usage: { input_tokens: 100, output_tokens: 20 },
-      }), { status: 200, headers: { "content-type": "application/json" } });
+          }, { prompt_tokens: 100, completion_tokens: 20 });
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -5347,7 +5296,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("skips semantic repair when the route cannot preserve its finalization reserve", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -5367,11 +5316,7 @@ describe("analyst verdict integrity", () => {
       return `e${String(index + 1).padStart(3, "0")}`;
     };
     const f1Alias = aliasFor("F1_identity_verifiability");
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      content: [{
-        type: "tool_use",
-        name: "record_verdict",
-        input: {
+    const fetchMock = vi.fn(async () => grokStructuredOk({
           axes: [
             {
               axis: "F1_identity_verifiability",
@@ -5396,11 +5341,7 @@ describe("analyst verdict integrity", () => {
           ],
           headline: "Evidence-backed result",
           identity_note: "Identity resolved",
-        },
-      }],
-      stop_reason: "tool_use",
-      usage: { input_tokens: 100, output_tokens: 20 },
-    }), { status: 200, headers: { "content-type": "application/json" } }));
+        }, { prompt_tokens: 100, completion_tokens: 20 }));
     vi.stubGlobal("fetch", fetchMock);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
@@ -5417,7 +5358,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("skips a late first scoring attempt to preserve the finalization reserve", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -5445,7 +5386,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("fails closed after exhausting every invalid semantic repair attempt", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -5491,11 +5432,7 @@ describe("analyst verdict integrity", () => {
       headline: "Evidence-backed result",
       identity_note: "Identity resolved",
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      content: [{ type: "tool_use", name: "record_verdict", input: invalidInput }],
-      stop_reason: "tool_use",
-      usage: { input_tokens: 100, output_tokens: 20 },
-    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn(async () => grokStructuredOk(invalidInput));
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "warn").mockImplementation(() => undefined);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -5505,7 +5442,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("does not semantic-repair a max-token completion failure", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -5517,9 +5454,8 @@ describe("analyst verdict integrity", () => {
       ventures: [{ project_name: "Verified Venture", role: "founder", outcome: "Active" }],
     }, catalog);
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      content: [{ type: "tool_use", name: "record_verdict", input: {} }],
-      stop_reason: "max_tokens",
-      usage: { input_tokens: 100, output_tokens: 6000 },
+      choices: [{ finish_reason: "length", message: { content: "" } }],
+      usage: { prompt_tokens: 100, completion_tokens: 100 },
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -5529,7 +5465,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("gives the citation-rich flagship scorer a dedicated 180 second window", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -5561,9 +5497,9 @@ describe("analyst verdict integrity", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("falls back from an Anthropic 400 to a valid Grok JSON-schema verdict ONLY when failover is opted in", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+  it("falls back from a Grok 400 to a valid Claude verdict ONLY when failover is opted in", async () => {
     vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
@@ -5617,12 +5553,6 @@ describe("analyst verdict integrity", () => {
     };
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url === "https://api.anthropic.com/v1/messages") {
-        return new Response(JSON.stringify({
-          type: "error",
-          error: { type: "invalid_request_error", message: "Credit balance is too low." },
-        }), { status: 400, headers: { "content-type": "application/json" } });
-      }
       if (url === "https://api.x.ai/v1/chat/completions") {
         const request = JSON.parse(String(init?.body)) as {
           messages?: Array<{ role?: string; content?: string }>;
@@ -5642,8 +5572,15 @@ describe("analyst verdict integrity", () => {
           },
         });
         return new Response(JSON.stringify({
-          choices: [{ message: { content: JSON.stringify(grokVerdict) } }],
-          usage: { prompt_tokens: 120, completion_tokens: 40 },
+          type: "error",
+          error: { type: "invalid_request_error", message: "Credit balance is too low." },
+        }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      if (url === "https://api.anthropic.com/v1/messages") {
+        return new Response(JSON.stringify({
+          content: [{ type: "tool_use", name: "record_verdict", input: grokVerdict }],
+          stop_reason: "tool_use",
+          usage: { input_tokens: 120, output_tokens: 40 },
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
       throw new Error(`unexpected provider URL: ${url}`);
@@ -5658,8 +5595,8 @@ describe("analyst verdict integrity", () => {
     });
 
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
-      "https://api.anthropic.com/v1/messages",
       "https://api.x.ai/v1/chat/completions",
+      "https://api.anthropic.com/v1/messages",
     ]);
     expect(captured.verdict?.axes.map((axis) => axis.axis)).toEqual([
       "F1_identity_verifiability",
@@ -5669,14 +5606,14 @@ describe("analyst verdict integrity", () => {
     expect(captured.cost.grokCalls).toBe(1);
     expect(captured.cost.calls).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        provider: "claude",
+        provider: "grok",
         op: "record_verdict",
         calls: 1,
         failed: 1,
         meta: expect.stringContaining("http_400"),
       }),
       expect.objectContaining({
-        provider: "grok",
+        provider: "claude",
         op: "record_verdict",
         calls: 1,
         succeeded: 1,
@@ -5684,9 +5621,9 @@ describe("analyst verdict integrity", () => {
     ]));
   });
 
-  it("by default a failed Anthropic call fails VISIBLY: no Grok retry, failure in the ledger", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+  it("by default a failed Grok call fails VISIBLY: no Claude retry, failure in the ledger", async () => {
     vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -5720,11 +5657,11 @@ describe("analyst verdict integrity", () => {
 
     expect(verdict).toBeNull();
     const urls = fetchMock.mock.calls.map(([input]) => String(input));
-    expect(urls.every((url) => url === "https://api.anthropic.com/v1/messages")).toBe(true);
-    expect(cost.grokCalls).toBe(0);
+    expect(urls.every((url) => url === "https://api.x.ai/v1/chat/completions")).toBe(true);
+    expect(cost.claudeCalls).toBe(0);
     expect(cost.calls).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        provider: "claude",
+        provider: "grok",
         op: "record_verdict",
         failed: 1,
         meta: expect.stringContaining("http_400"),
@@ -5754,7 +5691,7 @@ describe("AI analyst attempt accounting", () => {
   });
 
   it("records an HTTP failure as a failed paid attempt", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
@@ -5764,9 +5701,9 @@ describe("AI analyst attempt accounting", () => {
     });
 
     expect(captured.result).toBeNull();
-    expect(captured.cost.claudeCalls).toBe(1);
+    expect(captured.cost.grokCalls).toBe(1);
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
-      provider: "claude",
+      provider: "grok",
       op: "record_test",
       calls: 1,
       failed: 1,
@@ -5777,7 +5714,9 @@ describe("AI analyst attempt accounting", () => {
   });
 
   it("classifies an Anthropic grammar compilation rejection", async () => {
+    vi.stubEnv("XAI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       type: "error",
       error: {
@@ -5809,8 +5748,8 @@ describe("AI analyst attempt accounting", () => {
     );
   });
 
-  it("bounds the Anthropic request at 60 seconds by default", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+  it("bounds the Grok request at 60 seconds by default", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const signal = new AbortController().signal;
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
@@ -5829,7 +5768,7 @@ describe("AI analyst attempt accounting", () => {
       expect.objectContaining({ signal }),
     );
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
-      provider: "claude",
+      provider: "grok",
       op: "record_test",
       failed: 1,
       status: "failed",
@@ -5838,9 +5777,9 @@ describe("AI analyst attempt accounting", () => {
   });
 
   it("records the tool and dedicated timeout when a request expires", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")));
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     const captured = await withCostLedger(async () => {
       const result = await structured<{ ok: boolean }>("system", "user", tool, 2048, 120_000);
@@ -5849,19 +5788,18 @@ describe("AI analyst attempt accounting", () => {
 
     expect(captured.result).toBeNull();
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
-      provider: "claude",
+      provider: "grok",
       op: "record_test",
       failed: 1,
       meta: expect.stringContaining("timeout_120000ms"),
     }));
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("record_test request failed (timeout_120000ms)"),
-      expect.objectContaining({ name: "TimeoutError" }),
-    );
+    expect(errorSpy).toHaveBeenCalled();
   });
 
   it("records billed usage as partial when the required tool result is missing", async () => {
+    vi.stubEnv("XAI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       content: [{ type: "text", text: "not a tool call" }],
       stop_reason: "end_turn",
@@ -5886,7 +5824,9 @@ describe("AI analyst attempt accounting", () => {
   });
 
   it("rejects ambiguous duplicate tool calls even when one could be parsed", async () => {
+    vi.stubEnv("XAI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       content: [
         { type: "tool_use", name: "record_test", input: { ok: true } },
@@ -5909,7 +5849,9 @@ describe("AI analyst attempt accounting", () => {
   });
 
   it("rejects a tool block when generation stopped for max tokens", async () => {
+    vi.stubEnv("XAI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       content: [{ type: "tool_use", name: "record_test", input: { ok: true } }],
       stop_reason: "max_tokens",

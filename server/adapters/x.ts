@@ -219,48 +219,39 @@ export async function claudeWebSearch(system: string, user: string, opts?: {
   return text || null;
 }
 
-// Dispatcher for GENERAL-WEB discovery (no X-corpus dependency). Tries Claude
-// web_search first (12x cheaper), falling back to Grok live search only when
-// Claude is unavailable or errors (-> null). A Claude search that runs and finds
-// nothing returns its empty JSON (non-null), so the common empty case does NOT
-// re-pay Grok; the fallback exists only to preserve recall when Claude could not
-// answer at all. ARGUS_GENERAL_WEB_PROVIDER=grok forces the legacy path for
-// a controlled A/B or emergency rollback.
+// Dispatcher for GENERAL-WEB discovery (no X-corpus dependency). Grounded
+// search (Serper + Grok extract) is preferred when provisioned. Otherwise Grok
+// live search is primary. Claude web_search is fallback-only when
+// ARGUS_PROVIDER_FALLBACKS is on. ARGUS_GENERAL_WEB_PROVIDER=grok skips
+// grounded/Claude and goes straight to Grok.
 export async function generalWebSearch(system: string, user: string, opts?: {
   maxToolCalls?: number;
   cacheKey?: string;
   bypassCache?: boolean;
   claimProviderCall?: () => boolean;
 }): Promise<string | null> {
-  if ((env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() !== "grok") {
-    // Ultimate path: decoupled Serper search + page fetch + cheap-model extract
-    // (near-free vs a frontier web_search reading every page in-context).
-    // Default policy: the first PROVISIONED provider owns the lane when it
-    // answers, including a valid empty result. A total provider failure may use
-    // an already-provisioned recovery path; ARGUS_PROVIDER_FALLBACKS=on also
-    // permits optional cascading after non-failure empty results.
-    if (groundedSearchProvisioned()) {
-      let groundedUnavailable = false;
-      const viaGrounded = await groundedSearch(system, user, {
-        cacheKey: opts?.cacheKey,
-        bypassCache: opts?.bypassCache,
-        onProviderUnavailable: () => { groundedUnavailable = true; },
-      });
-      // A valid empty answer stays on its lane. A provider that rejected every
-      // request did not answer, so an already-provisioned fallback may recover
-      // the report even when optional duplicate-provider cascading is off.
-      if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
-    }
-    if (env("ANTHROPIC_API_KEY")) {
-      const viaClaude = await claudeWebSearch(system, user, {
-        maxSearchUses: opts?.maxToolCalls,
-        cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : undefined,
-        bypassCache: opts?.bypassCache,
-      });
-      if (viaClaude || !providerFallbacksEnabled()) return viaClaude;
-    }
+  const forceGrok = (env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() === "grok";
+  if (!forceGrok && groundedSearchProvisioned()) {
+    let groundedUnavailable = false;
+    const viaGrounded = await groundedSearch(system, user, {
+      cacheKey: opts?.cacheKey,
+      bypassCache: opts?.bypassCache,
+      onProviderUnavailable: () => { groundedUnavailable = true; },
+    });
+    if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
   }
-  return env("XAI_API_KEY") ? grokSearch(system, user, opts) : null;
+  if (env("XAI_API_KEY")) {
+    const viaGrok = await grokSearch(system, user, opts);
+    if (viaGrok || !providerFallbacksEnabled() || !env("ANTHROPIC_API_KEY")) return viaGrok;
+  }
+  if (env("ANTHROPIC_API_KEY") && providerFallbacksEnabled()) {
+    return claudeWebSearch(system, user, {
+      maxSearchUses: opts?.maxToolCalls,
+      cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : undefined,
+      bypassCache: opts?.bypassCache,
+    });
+  }
+  return null;
 }
 
 // twitterapi.io throttles hard (429) under bursty use, and occasionally 502/503.

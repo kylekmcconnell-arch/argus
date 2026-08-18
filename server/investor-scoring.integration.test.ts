@@ -137,28 +137,28 @@ describe("investor scoring integration", () => {
       expect(index).toBeGreaterThanOrEqual(0);
       return `e${String(index + 1).padStart(3, "0")}`;
     };
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      content: [{
-        type: "tool_use",
-        name: "record_verdict",
-        input: {
-          axes: investorAxes.map((spec) => ({
-            axis: spec.axis,
-            score: investorBands[spec.axis].maxScore,
-            rationale: `Verified support for ${spec.axis}`,
-            primaryEvidenceRef: aliasFor(spec.axis),
-            additionalEvidenceRefs: [],
-            counterEvidenceRefs: [],
-            coverageRefs: [],
-            gaps: [],
-          })),
-          headline: "Verified investor evidence covers every required axis.",
-          identity_note: "Provider-backed identity resolved to Paradigm.",
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            axes: investorAxes.map((spec) => ({
+              axis: spec.axis,
+              score: investorBands[spec.axis].maxScore,
+              rationale: `Verified support for ${spec.axis}`,
+              primaryEvidenceRef: aliasFor(spec.axis),
+              additionalEvidenceRefs: [],
+              counterEvidenceRefs: [],
+              coverageRefs: [],
+              gaps: [],
+            })),
+            headline: "Verified investor evidence covers every required axis.",
+            identity_note: "Provider-backed identity resolved to Paradigm.",
+          }),
         },
       }],
-      stop_reason: "tool_use",
-      usage: { input_tokens: 100, output_tokens: 50 },
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
     }), { status: 200 })));
 
     const verdict = await analyzeSubject("@paradigm", [SubjectClass.INVESTOR], investorAxes, packet);
@@ -171,6 +171,7 @@ describe("investor scoring integration", () => {
     const packet = await collectedInvestorPacket(false);
     expect(JSON.parse(packet).axisGaps).toContainEqual(expect.objectContaining({ axis: "I3_fund_scale_tier" }));
     const fetchMock = vi.fn();
+    vi.stubEnv("XAI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
     vi.stubGlobal("fetch", fetchMock);
     await expect(analyzeSubject("@paradigm", [SubjectClass.INVESTOR], investorAxes, packet)).resolves.toBeNull();

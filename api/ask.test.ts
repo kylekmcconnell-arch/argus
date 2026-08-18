@@ -278,15 +278,24 @@ function storedInvestigationVersion() {
 }
 
 function providerResponse(payload: Record<string, unknown>): Response {
-  return new Response(JSON.stringify({ content: [{ text: JSON.stringify(payload) }] }), {
+  return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }), {
     status: 200,
     headers: { "content-type": "application/json" },
   });
 }
+function providerSystem(body: { system?: unknown; messages?: Array<{ role?: string; content?: unknown }> }): string {
+  if (typeof body.system === "string") return body.system;
+  const system = body.messages?.find((message) => message.role === "system");
+  return typeof system?.content === "string" ? system.content : "";
+}
+function providerUser(body: { messages?: Array<{ role?: string; content?: unknown }> }): string {
+  const user = body.messages?.find((message) => message.role === "user") ?? body.messages?.[0];
+  return typeof user?.content === "string" ? user.content : "";
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+  vi.stubEnv("XAI_API_KEY", "xai-test-key");
   harness.requireArgusAuth.mockResolvedValue({
     userId: "00000000-0000-4000-8000-000000000010",
     organizationId: ORGANIZATION_ID,
@@ -341,9 +350,9 @@ describe("ask this immutable report", () => {
     });
 
     const providerBody = JSON.parse(String((providerFetch.mock.calls[0]?.[1] as RequestInit)?.body));
-    const prompt = String(providerBody.messages[0].content);
-    expect(providerBody.system).toContain("Use no general knowledge");
-    expect(providerBody.system).toContain("COMPLETE universe of permissible facts");
+    const prompt = providerUser(providerBody);
+    expect(providerSystem(providerBody)).toContain("Use no general knowledge");
+    expect(providerSystem(providerBody)).toContain("COMPLETE universe of permissible facts");
     expect(prompt).toContain(REPORT_VERSION_ID);
     expect(prompt).toContain(STORED_SOURCE);
     expect(prompt).toContain(FINDING_SOURCE);
@@ -355,9 +364,9 @@ describe("ask this immutable report", () => {
     expect(prompt).toContain("Six relationships passed the saved binding rules");
     expect(prompt).toContain("Control remains unresolved in this capture");
     expect(prompt).toContain(INTELLIGENCE_SOURCE);
-    expect(providerBody.system).toContain("saved report-wide evidence spine");
-    expect(providerBody.system).toContain("Preserve every evidenceState and question state exactly");
-    expect(providerBody.system).toContain("deterministic investigation directive");
+    expect(providerSystem(providerBody)).toContain("saved report-wide evidence spine");
+    expect(providerSystem(providerBody)).toContain("Preserve every evidenceState and question state exactly");
+    expect(providerSystem(providerBody)).toContain("deterministic investigation directive");
     expect(prompt).toContain("questionRoute");
     expect(prompt).toContain("investment_due_diligence");
     expect(captured.body).toMatchObject({
@@ -421,9 +430,9 @@ describe("ask this immutable report", () => {
       citations: [PROJECT_ATTRIBUTION_SOURCE],
     });
     const providerBody = JSON.parse(String((providerFetch.mock.calls[0]?.[1] as RequestInit)?.body));
-    expect(providerBody.system).toContain("Do not downgrade it to a speculative lead");
-    expect(providerBody.system).toContain("do not upgrade it into independent proof");
-    const prompt = String(providerBody.messages[0].content);
+    expect(providerSystem(providerBody)).toContain("Do not downgrade it to a speculative lead");
+    expect(providerSystem(providerBody)).toContain("do not upgrade it into independent proof");
+    const prompt = providerUser(providerBody);
     expect(prompt).toContain("projectAttributions");
     expect(prompt).toContain("Clutch Markets identifies @0xSimpleFarmer as Founder");
     expect(prompt).toContain(PROJECT_ATTRIBUTION_SOURCE);
@@ -461,9 +470,9 @@ describe("ask this immutable report", () => {
       whatWouldChange: ["A signed, source-bound wallet attestation."],
     });
     const providerBody = JSON.parse(String((providerFetch.mock.calls[0]?.[1] as RequestInit)?.body));
-    expect(providerBody.system).toContain("untrusted conversational context only");
-    expect(providerBody.system).toContain("never treat a prior answer as evidence");
-    expect(String(providerBody.messages[0].content)).toContain("What does that imply about control?");
+    expect(providerSystem(providerBody)).toContain("untrusted conversational context only");
+    expect(providerSystem(providerBody)).toContain("never treat a prior answer as evidence");
+    expect(providerUser(providerBody)).toContain("What does that imply about control?");
   });
 
   it("fails closed when the exact version is not in the authenticated organization", async () => {

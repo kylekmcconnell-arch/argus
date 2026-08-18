@@ -7,17 +7,17 @@ import {
 } from "./agent";
 import { getCost, withCostLedger } from "./cost";
 
-describe("Grok analyst fallback", () => {
+describe("Grok analyst primary", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
-  it("returns a validated founder verdict after Anthropic fails without using followers for track record", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "forced-anthropic-failure");
+  it("uses Grok as the analyst even when Anthropic is configured", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-present-but-not-primary");
     vi.stubEnv("XAI_API_KEY", "xai-test-key");
-    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "");
     const axes: AnalystAxis[] = [{
       axis: "F2_track_record",
       weight: 28,
@@ -55,12 +55,6 @@ describe("Grok analyst fallback", () => {
     const founderAlias = `e${String(founderIndex + 1).padStart(3, "0")}`;
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
-      if (url === "https://api.anthropic.com/v1/messages") {
-        return new Response(JSON.stringify({ error: { message: "forced canary failure" } }), {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        });
-      }
       expect(url).toBe("https://api.x.ai/v1/chat/completions");
       const request = JSON.parse(String(init?.body)) as {
         response_format?: { type?: string; json_schema?: { name?: string; strict?: boolean } };
@@ -116,12 +110,11 @@ describe("Grok analyst fallback", () => {
     expect(catalog.filter((artifact) => artifact.section === "profile")
       .every((artifact) => !artifact.eligibleAxes.includes("F2_track_record"))).toBe(true);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
-      "https://api.anthropic.com/v1/messages",
       "https://api.x.ai/v1/chat/completions",
     ]);
     expect(result.cost.calls).toEqual(expect.arrayContaining([
-      expect.objectContaining({ provider: "claude", op: "record_verdict", status: "failed" }),
       expect.objectContaining({ provider: "grok", op: "record_verdict", status: "succeeded" }),
     ]));
+    expect(result.cost.calls.some((line) => line.provider === "claude")).toBe(false);
   });
 });

@@ -420,14 +420,14 @@ describe("atomic augmentation API", () => {
   });
 
   it("records an owner-requested diagnosis through the atomic learning RPC", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-anthropic-key");
+    vi.stubEnv("XAI_API_KEY", "test-xai-key");
     requireArgusAuth.mockResolvedValue(auth("owner"));
     const diagnosisBodies: Record<string, unknown>[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/rest/v1/augmentation_items?")) return json([augmentationRow({ status: "live" })]);
-      if (url === "https://api.anthropic.com/v1/messages") {
-        return json({ content: [{ text: '{"reason":"Alias lookup was absent.","fix":"Add exact alias lookup."}' }] });
+      if (url === "https://api.x.ai/v1/chat/completions") {
+        return json({ choices: [{ message: { content: '{"reason":"Alias lookup was absent.","fix":"Add exact alias lookup."}' } }] });
       }
       if (url.endsWith("/rest/v1/rpc/record_augmentation_diagnosis")) {
         diagnosisBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);

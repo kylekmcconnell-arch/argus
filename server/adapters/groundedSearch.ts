@@ -9,15 +9,17 @@
 // Same string|null contract as grokSearch/claudeWebSearch, so callers are
 // unchanged; returns null when unavailable or empty. Callers decide whether
 // policy permits another provider.
-import { env } from "../config";
-import { addClaudeUsage, addOpenRouterUsage, recordSerper } from "../cost";
+import { env, providerFallbacksEnabled } from "../config";
+import { addClaudeUsage, addGrokUsage, addOpenRouterUsage, recordSerper } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
 import { fetchPublicText } from "../publicWeb";
 
 const ANTHROPIC = "https://api.anthropic.com/v1/messages";
 const OPENROUTER = "https://openrouter.ai/api/v1/chat/completions";
 const SERPER = "https://google.serper.dev/search";
-const EXTRACT_MODEL = () => env("ARGUS_EXTRACT_MODEL") || "claude-haiku-4-5";
+const XAI_CHAT = "https://api.x.ai/v1/chat/completions";
+const GROK_EXTRACT_MODEL = () => env("ARGUS_GROK_MODEL") || "grok-4-fast";
+const CLAUDE_EXTRACT_MODEL = () => env("ARGUS_EXTRACT_MODEL") || "claude-haiku-4-5";
 
 // Route the cheap extractor through OpenRouter (any OpenAI-compatible model)
 // only when an OpenRouter key is present AND the configured extract model is an
@@ -25,6 +27,7 @@ const EXTRACT_MODEL = () => env("ARGUS_EXTRACT_MODEL") || "claude-haiku-4-5";
 // bare Anthropic id like "claude-haiku-4-5" keeps the native Anthropic path, so
 // this stays dormant until deliberately configured - same pattern as Serper.
 function openRouterExtractModel(): string | null {
+  if (!providerFallbacksEnabled()) return null;
   const model = env("ARGUS_EXTRACT_MODEL");
   return env("OPENROUTER_API_KEY") && model && model.includes("/") ? model : null;
 }
@@ -105,6 +108,54 @@ async function serperSearch(query: string, key: string): Promise<SerperSearchOut
   }
 }
 
+// One plain xAI chat-completions call. Default cheap extractor: Grok is
+// fast and already metered on the same key as the rest of ARGUS.
+async function callGrokExtract(system: string, user: string, maxTokens: number, op: string): Promise<string | null> {
+  const key = env("XAI_API_KEY");
+  if (!key) return null;
+  const model = GROK_EXTRACT_MODEL();
+  let res: Response;
+  try {
+    res = await fetch(XAI_CHAT, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch (error) {
+    addGrokUsage(undefined, 0, op, "failed", error instanceof Error && error.name === "TimeoutError" ? "timeout_60000ms" : "transport_error");
+    return null;
+  }
+  if (!res.ok) {
+    addGrokUsage(undefined, 0, op, "failed", `http_${res.status}`);
+    return null;
+  }
+  const d = asRec(await res.json().catch(() => ({})));
+  const usage = asRec(d.usage);
+  const choices = Array.isArray(d.choices) ? d.choices.map(asRec) : [];
+  const message = choices.length ? asRec(choices[0].message) : {};
+  const text = typeof message.content === "string"
+    ? message.content
+    : message.content && typeof message.content === "object"
+      ? JSON.stringify(message.content)
+      : "";
+  addGrokUsage(
+    {
+      input_tokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0,
+      output_tokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0,
+    },
+    0,
+    op,
+    text ? "succeeded" : "partial",
+    text ? undefined : "empty_output",
+  );
+  return text || null;
+}
+
 // One plain OpenAI-compatible call through OpenRouter. ZDR is enforced
 // (data_collection: deny) because due-diligence prompts carry real-people PII,
 // and usage.include asks OpenRouter to return the actual charged cost so the
@@ -153,15 +204,23 @@ async function callOpenRouter(system: string, user: string, maxTokens: number, o
   return text || null;
 }
 
-// One plain Claude call (no server tools) on the cheap extraction model. Used
-// for query generation and for the final structured extraction. Routes through
-// OpenRouter when configured (see openRouterExtractModel), else native Anthropic.
+// Cheap extractor. Grok is primary. OpenRouter / Anthropic run only when
+// ARGUS_PROVIDER_FALLBACKS is on (and Grok is unset or already failed).
 async function callExtractModel(system: string, user: string, maxTokens: number, op: string): Promise<string | null> {
+  if (env("XAI_API_KEY")) {
+    const grok = await callGrokExtract(system, user, maxTokens, op);
+    if (grok || !providerFallbacksEnabled()) return grok;
+  }
   const orModel = openRouterExtractModel();
-  if (orModel) return callOpenRouter(system, user, maxTokens, op, orModel);
+  if (orModel) {
+    const routed = await callOpenRouter(system, user, maxTokens, op, orModel);
+    if (routed || !env("ANTHROPIC_API_KEY")) return routed;
+  } else if (!providerFallbacksEnabled()) {
+    return null;
+  }
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
-  const model = EXTRACT_MODEL();
+  const model = CLAUDE_EXTRACT_MODEL();
   let res: Response;
   try {
     res = await fetch(ANTHROPIC, {
@@ -226,7 +285,7 @@ function dedupeByUrl(results: SerperResult[]): SerperResult[] {
 
 /** True when grounded search can actually run (Serper + some extractor). */
 export function groundedSearchProvisioned(): boolean {
-  return Boolean(env("SERPER_API_KEY") && (openRouterExtractModel() || env("ANTHROPIC_API_KEY")));
+  return Boolean(env("SERPER_API_KEY") && (env("XAI_API_KEY") || openRouterExtractModel() || (providerFallbacksEnabled() && env("ANTHROPIC_API_KEY"))));
 }
 
 export async function groundedSearch(
@@ -241,9 +300,9 @@ export async function groundedSearch(
   },
 ): Promise<string | null> {
   const serperKey = env("SERPER_API_KEY");
-  // Needs Serper for search plus SOME extractor: OpenRouter (when a slug model +
-  // key are set) or native Anthropic. Otherwise not provisioned -> caller falls back.
-  if (!serperKey || (!openRouterExtractModel() && !env("ANTHROPIC_API_KEY"))) return null;
+  // Needs Serper plus an extractor. Grok is the default; OpenRouter / Anthropic
+  // are fallback-only.
+  if (!serperKey || (!env("XAI_API_KEY") && !openRouterExtractModel() && !(providerFallbacksEnabled() && env("ANTHROPIC_API_KEY")))) return null;
   const cacheKey = opts?.cacheKey ? `gs:${opts.cacheKey}` : undefined;
   if (cacheKey && !opts?.bypassCache) {
     const hit = await cacheGet(cacheKey);
