@@ -29,6 +29,8 @@ export interface DossierFigure {
   receipt: DossierReceipt | null;
   /** Set when a fact's own sources never bind it to the audited subject. */
   unboundNote: string | null;
+  /** Paid/locked module that has not run. Never a provenance tier. */
+  locked?: boolean;
 }
 
 export interface DossierBeat {
@@ -63,6 +65,8 @@ export interface TeamMember {
    */
   avatarUrl: string | null;
   avatarCapturedAt: string | null;
+  /** True only when a fetched artifact independently verified this person. */
+  independentlyConfirmed: boolean;
 }
 
 export interface Lens {
@@ -207,44 +211,158 @@ function receiptFor(fact: RawFact, unbound: string | null): DossierReceipt | nul
 }
 
 /**
- * A heading is the report's own sentence about this beat, not a tally of it.
- *
- * The check ledger already writes readable prose — "Posting steady (~2.0d gap,
- * last post 12d ago)" — and an earlier pass here discarded all of it in favour
- * of "2 confirmed, 1 still open", which is accurate and communicates nothing. A
- * reader cannot act on a count. Prefer the confirmed check's note, fall back to
- * the open one, and only tally when the report recorded no sentence at all.
+ * A heading is two short sentences built only from recorded counts and states.
+ * Check notes stay in the ledger: quoting them here reprints engine jargon
+ * ("Posting steady (~2.0d gap)") as if it were the report's voice. A tally
+ * like "2 confirmed, 1 still open" is accurate and tells a reader nothing
+ * they can act on. Display name is never a bind key and never appears here.
  */
-function headingFor(checks: RawCheck[], figures: DossierFigure[]): string {
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+function auditedHandle(handle: string): string {
+  const h = handle.trim();
+  if (!h || h === "unknown") return "the subject";
+  return h.startsWith("@") ? h : `@${h}`;
+}
+
+function namedRoleLabel(named: TeamMember[]): { count: number; one: string; many: string } {
+  if (named.length === 1 && /founder/i.test(named[0].role)) {
+    return { count: 1, one: "founder", many: "founders" };
+  }
+  if (named.length > 0 && named.every((m) => /founder/i.test(m.role))) {
+    return { count: named.length, one: "founder", many: "founders" };
+  }
+  return { count: named.length, one: "person", many: "people" };
+}
+
+function unboundHeading(figures: DossierFigure[]): string | null {
   const unbound = figures.filter((f) => f.unboundNote);
-  if (unbound.length) {
-    // Never quote an unbound raised figure or "led by" into the heading.
-    if (unbound.length === 1 && !looksLikeAggregatorFundingValue(unbound[0].value)) {
-      return `${unbound[0].value} belongs to someone else.`;
+  if (!unbound.length) return null;
+  if (unbound.length === 1 && !looksLikeAggregatorFundingValue(unbound[0].value)) {
+    return `${unbound[0].value} belongs to someone else.`;
+  }
+  return `${unbound.length} of ${figures.length} records here name a different subject.`;
+}
+
+function headingFor(
+  beatId: string,
+  figures: DossierFigure[],
+  ctx: {
+    subject: { handle: string; website: string | null };
+    team: TeamMember[];
+    leadCount: number;
+    openCheckCount: number;
+    verdict: { call: string; score: number | null };
+  },
+): string {
+  if (beatId === "subject") {
+    const who = auditedHandle(ctx.subject.handle);
+    const first = who === "the subject"
+      ? "This is the subject we audited."
+      : `This is the ${who} we audited.`;
+    const site = ctx.subject.website ? "The site is bound." : "No official site is bound.";
+    return `${first} ${site}`;
+  }
+
+  if (beatId === "team") {
+    const named = ctx.team.filter((m) => m.firstParty);
+    const confirmed = ctx.team.filter((m) => m.independentlyConfirmed);
+    const role = namedRoleLabel(named);
+    const first = named.length === 0
+      ? "The project named nobody."
+      : `The project named ${plural(role.count, role.one, role.many)}.`;
+    const second = confirmed.length === 0
+      ? (named.length === 1 ? "Nobody else confirmed them." : "Nobody is independently confirmed.")
+      : confirmed.length === 1
+        ? "1 is independently confirmed."
+        : `${confirmed.length} are independently confirmed.`;
+    return `${first} ${second}`;
+  }
+
+  if (beatId === "product") {
+    const products = figures.filter((f) => f.label === "product" && !f.unboundNote);
+    const repos = figures.filter((f) => f.label === "repository" && !f.unboundNote);
+    const parts: string[] = [];
+    if (products.length) parts.push(`${plural(products.length, "product is", "products are")} on file.`);
+    if (repos.length) parts.push(`${plural(repos.length, "repository is", "repositories are")} on file.`);
+    if (parts.length) return parts.join(" ");
+    return unboundHeading(figures) ?? "No product or repository is recorded.";
+  }
+
+  if (beatId === "activity") {
+    const boundFunding = figures.filter((f) => f.label === "funding" && !f.unboundNote);
+    const boundTraction = figures.filter((f) => f.label === "traction" && !f.unboundNote);
+    const boundInvestor = figures.filter((f) => f.label === "investor" && !f.unboundNote);
+    const parts: string[] = [];
+    if (boundTraction.length) {
+      parts.push(`${plural(boundTraction.length, "traction record is", "traction records are")} on file.`);
     }
-    return `${unbound.length} of ${figures.length} records here name a different subject.`;
+    if (boundFunding.length) {
+      parts.push(`${plural(boundFunding.length, "funding record is", "funding records are")} bound to this subject.`);
+    } else {
+      parts.push("No bound funding is on file.");
+    }
+    if (boundInvestor.length) {
+      parts.push(`${plural(boundInvestor.length, "investor is", "investors are")} bound to this subject.`);
+    }
+    return parts.join(" ");
   }
 
-  const noteOf = (c: RawCheck) => str(c.note);
-  const confirmed = checks.filter((c) => str(c.status) === "confirmed" && noteOf(c));
-  const open = checks.filter((c) => ["unknown", "unavailable", "checked-empty"].includes(str(c.status)));
-  const lead = confirmed[0] ?? checks.find(noteOf);
-  if (lead) {
-    const sentence = noteOf(lead).split(" · ")[0].trim();
-    const tidy = /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
-    // Capitalise, because the ledger writes fragments as often as sentences.
-    const shown = tidy.charAt(0).toUpperCase() + tidy.slice(1);
-    const tail = open.length === 1 ? "1 question remains open." : `${open.length} questions remain open.`;
-    return open.length ? `${shown} ${tail}` : shown;
+  if (beatId === "perimeter") {
+    const bound = figures.filter((f) => !f.unboundNote);
+    const unbound = figures.filter((f) => f.unboundNote);
+    if (unbound.length && !bound.length) return unboundHeading(figures) ?? "No legal entity is recorded.";
+    if (bound.length && unbound.length) {
+      return `${plural(bound.length, "record is", "records are")} bound to this subject. ${unbound.length} name a different subject.`;
+    }
+    if (bound.length) return `${plural(bound.length, "record is", "records are")} bound to this subject.`;
+    return "No legal entity is recorded.";
   }
 
-  // No check wrote a sentence, so a tally is the most that can honestly be said.
-  const confirmedCount = checks.filter((c) => str(c.status) === "confirmed").length;
-  if (!checks.length && !figures.length) return "Nothing was recorded for this section.";
-  if (confirmedCount && open.length) return `${confirmedCount} confirmed, ${open.length} still open.`;
-  if (confirmedCount) return `${confirmedCount} check${confirmedCount === 1 ? "" : "s"} confirmed, none open.`;
-  if (open.length) return `${open.length} check${open.length === 1 ? "" : "s"} open, none confirmed.`;
-  return `${figures.length} record${figures.length === 1 ? "" : "s"} on file.`;
+  if (beatId === "coverage") {
+    return `${plural(ctx.leadCount, "lead", "leads")}. ${plural(ctx.openCheckCount, "check still open", "checks still open")}.`;
+  }
+
+  if (beatId === "verdict") {
+    return ctx.verdict.score === null ? ctx.verdict.call : `${ctx.verdict.call} · ${ctx.verdict.score}/100`;
+  }
+
+  return unboundHeading(figures)
+    ?? (figures.length ? `${plural(figures.length, "record is", "records are")} on file.` : "Nothing was recorded for this section.");
+}
+
+
+function collectTeam(payload: Record<string, unknown>): TeamMember[] {
+  // Union collector leads with grounded webTeam rows the leads list may
+  // omit. firstParty is only the durable marker — never inferred from a
+  // display name, a face, or the word "official". Independently confirmed
+  // is artifact_verified, a separate bar from first-party naming.
+  const rows = [
+    ...arr<Record<string, unknown>>(payload.webTeamLeads),
+    ...arr<Record<string, unknown>>(payload.webTeam),
+  ];
+  const seen = new Set<string>();
+  const team: TeamMember[] = [];
+  for (const m of rows) {
+    const name = str(m.name);
+    if (!name) continue;
+    const key = `${name}|${str(m.handle)}|${str(m.role)}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const firstParty = str(m.handleProvenance) === "subject_first_party";
+    team.push({
+      name,
+      role: str(m.role),
+      handle: str(m.handle) || null,
+      firstParty,
+      avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
+      avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
+      independentlyConfirmed: m.artifact_verified === true || m.artifactVerified === true,
+    });
+  }
+  return team;
 }
 
 export function buildDossier(payload: Record<string, unknown>): Dossier {
@@ -268,7 +386,6 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
   const facts = arr<RawFact>(payload.basicFacts);
   const checks = arr<RawCheck>(payload.checkRuns).filter((c) => str(c.status) !== "not-applicable");
   const leads = arr<unknown>(payload.basicFactLeads);
-  const failures = arr<unknown>(payload.providerFailures);
 
   const figuresByBeat = new Map<string, DossierFigure[]>();
   for (const fact of facts) {
@@ -301,12 +418,20 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     figuresByBeat.set(beatId, list);
   }
 
+  const team = collectTeam(payload);
   const claimed = new Set(BEAT_CHECKS.flatMap((b) => b.checks));
+  const leftover = checks.filter((c) => !claimed.has(str(c.checkId)));
+  const openCount = leftover.filter((c) => ["unknown", "unavailable", "checked-empty"].includes(str(c.status))).length;
+  const headingCtx = {
+    subject,
+    team,
+    leadCount: leads.length,
+    openCheckCount: openCount,
+    verdict,
+  };
   const beats: DossierBeat[] = [];
 
   for (const spec of BEAT_CHECKS) {
-    // Ordered by the beat's own priority so the heading quotes the check that
-    // defines the beat, not whichever the payload happened to list first.
     const mine = spec.checks
       .map((id) => checks.find((c) => str(c.checkId) === id))
       .filter((c): c is RawCheck => Boolean(c));
@@ -314,27 +439,22 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     if (!mine.length && !figures.length) continue;
     beats.push({
       id: spec.id, label: spec.label, kicker: spec.kicker,
-      heading: headingFor(mine, figures),
+      heading: headingFor(spec.id, figures, headingCtx),
       figures,
     });
   }
 
-  // Everything the named beats did not claim, plus leads and provider failures.
-  const leftover = checks.filter((c) => !claimed.has(str(c.checkId)));
+  // Everything the named beats did not claim. Headings use lead + open counts
+  // only; leftover check notes stay on the figure, never in the sentence.
   const coverageFigures = figuresByBeat.get("coverage") ?? [];
-  const openCount = leftover.filter((c) => ["unknown", "unavailable", "checked-empty"].includes(str(c.status))).length;
   beats.push({
     id: "coverage", label: "What is unresolved", kicker: "Coverage",
-    heading: [
-      leads.length ? `${leads.length} lead${leads.length === 1 ? "" : "s"}` : "",
-      openCount ? `${openCount} open check${openCount === 1 ? "" : "s"}` : "",
-      failures.length ? `${failures.length} provider${failures.length === 1 ? "" : "s"} that never answered` : "",
-    ].filter(Boolean).join(", ") + "." || "Nothing outstanding.",
+    heading: headingFor("coverage", coverageFigures, headingCtx),
     figures: [
       ...coverageFigures,
       ...leftover.filter((c) => str(c.status) !== "confirmed").map((c): DossierFigure => ({
         label: str(c.label),
-        value: str(c.note) || str(c.status),
+        value: str(c.note) || str(c.status) || EMPTY_VALUE,
         provenance: provenanceForCheckStatus(str(c.status) as never) ?? { tier: "unestablished" },
         receipt: null,
         unboundNote: null,
@@ -344,7 +464,7 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
 
   beats.push({
     id: "verdict", label: "The call", kicker: "Verdict",
-    heading: verdict.score === null ? verdict.call : `${verdict.call} · ${verdict.score}/100`,
+    heading: headingFor("verdict", [], headingCtx),
     figures: [],
   });
 
@@ -397,34 +517,7 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       leads: leads.length,
       failedProviders: arr<{ provider?: unknown }>(payload.providerFailures).map((f) => str(f.provider)).filter(Boolean),
     },
-    team: (() => {
-      // Union collector leads with grounded webTeam rows the leads list may
-      // omit. firstParty is only the durable marker — never inferred from a
-      // display name, a face, or the word "official".
-      const rows = [
-        ...arr<Record<string, unknown>>(payload.webTeamLeads),
-        ...arr<Record<string, unknown>>(payload.webTeam),
-      ];
-      const seen = new Set<string>();
-      const team: TeamMember[] = [];
-      for (const m of rows) {
-        const name = str(m.name);
-        if (!name) continue;
-        const key = `${name}|${str(m.handle)}|${str(m.role)}`.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const firstParty = str(m.handleProvenance) === "subject_first_party";
-        team.push({
-          name,
-          role: str(m.role),
-          handle: str(m.handle) || null,
-          firstParty,
-          avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
-          avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
-        });
-      }
-      return team;
-    })(),
+    team,
     nextActions: arr<Record<string, unknown>>((payload.researchPlan as Record<string, unknown>)?.nextActions)
       .map((a) => ({ rank: num(a.rank) ?? 0, action: str(a.action), whyNow: str(a.whyNow) || null }))
       .filter((a) => a.action).sort((a, b) => a.rank - b.rank),
