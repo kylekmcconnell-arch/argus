@@ -94,6 +94,27 @@ function CoverageGrid({ checks }: { checks: Array<{ state: string; count: number
   );
 }
 
+/** "Go deeper" — the questions this beat left open, in the report's own words. */
+function RabbitHole({ questions }: { questions: string[] }) {
+  const [open, setOpen] = useState(false);
+  if (!questions.length) return null;
+  return (
+    <div className="mt-6 max-w-[54ch]">
+      <button type="button" onClick={() => setOpen(!open)}
+        className="chip tint-signal text-signal-lift normal-case tracking-normal">
+        {open ? "Close" : `Go down this rabbit hole · ${questions.length}`}
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-2 border-l-2 border-signal/40 pl-3.5">
+          {questions.map((q, i) => (
+            <li key={i} className="text-[12.5px] leading-relaxed text-ink-dim">{q}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Figure({ figure }: { figure: DossierFigure }) {
   const [open, setOpen] = useState(false);
   const r = figure.receipt;
@@ -192,6 +213,34 @@ export function DossierPreview() {
                 </div>
               )}
 
+              {b.id === "subject" && d.links.length > 0 && (
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {d.links.map((l) => (
+                    <a key={l.url} href={l.url} target="_blank" rel="noreferrer"
+                      className="chip tint-sourced text-sourced normal-case tracking-normal">
+                      {l.label}
+                    </a>
+                  ))}
+                </div>
+              )}
+
+              {b.id === "activity" && d.pressClaims.length > 0 && (
+                <div className="mt-6 max-w-[54ch]">
+                  <p className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">Claimed coverage</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {d.pressClaims.map((c) => (
+                      <span key={c.outlet} className={`chip normal-case tracking-normal ${c.verified ? "tint-sourced text-sourced" : "tint-unverifiable text-unverifiable"}`}>
+                        {c.outlet}{c.verified ? "" : " · unverified"}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[11px] leading-snug text-ink-faint">
+                    Named in the file as coverage of this subject. No artifact was fetched for any of them,
+                    so the mastheads lend nothing to the score.
+                  </p>
+                </div>
+              )}
+
               {b.id === "subject" && d.timeline.length > 0 && (
                 <div className="mt-7 max-w-[54ch]">
                   <div className="flex items-stretch gap-0">
@@ -246,6 +295,8 @@ export function DossierPreview() {
                   </div>
                 </div>
               )}
+
+              {b.id === "coverage" && <RabbitHole questions={d.openQuestions} />}
 
               {b.id === "verdict" && (
                 <div className="mt-6 max-w-[54ch]">

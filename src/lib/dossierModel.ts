@@ -52,6 +52,8 @@ export interface CoverageStat { state: string; count: number }
 
 export interface TeamMember { name: string; role: string; handle: string | null; firstParty: boolean }
 
+export interface PressClaim { outlet: string; verified: boolean; url: string | null }
+
 export interface Dossier {
   subject: {
     handle: string; name: string; joined: string | null; followers: string | null;
@@ -64,6 +66,9 @@ export interface Dossier {
   coverage: { checks: CoverageStat[]; questionsAnswered: number; questionsTotal: number; leads: number; failedProviders: string[] };
   team: TeamMember[];
   nextActions: Array<{ rank: number; action: string; whyNow: string | null }>;
+  links: Array<{ label: string; url: string }>;
+  pressClaims: PressClaim[];
+  openQuestions: string[];
   cost: { usd: number | null; estimated: boolean } | null;
   beats: DossierBeat[];
 }
@@ -154,38 +159,42 @@ function receiptFor(fact: RawFact, unbound: string | null): DossierReceipt | nul
 }
 
 /**
- * Headings name what is in the file and count what is open. Listing the values a
- * report already contains is reporting; saying what they imply would be
- * characterisation, which this layer must never do.
+ * A heading is the report's own sentence about this beat, not a tally of it.
+ *
+ * The check ledger already writes readable prose — "Posting steady (~2.0d gap,
+ * last post 12d ago)" — and an earlier pass here discarded all of it in favour
+ * of "2 confirmed, 1 still open", which is accurate and communicates nothing. A
+ * reader cannot act on a count. Prefer the confirmed check's note, fall back to
+ * the open one, and only tally when the report recorded no sentence at all.
  */
 function headingFor(checks: RawCheck[], figures: DossierFigure[]): string {
-  const by = (state: string) => checks.filter((c) => str(c.status) === state).length;
-  const confirmed = by("confirmed");
-  const open = by("unknown") + by("unavailable") + by("checked-empty");
   const unbound = figures.filter((f) => f.unboundNote);
-
   if (unbound.length) {
     return unbound.length === 1
       ? `${unbound[0].value} belongs to someone else.`
       : `${unbound.length} of ${figures.length} records here name a different subject.`;
   }
 
-  // Name the file's own values before falling back to a tally.
-  const named = figures.filter((f) => f.value && f.value !== EMPTY_VALUE).map((f) => f.value);
-  if (named.length >= 2) {
-    const list = named.length === 2
-      ? `${named[0]} and ${named[1]}`
-      : `${named.slice(0, 2).join(", ")}, and ${named.length - 2} more`;
-    return open ? `${list}. ${open} question${open === 1 ? "" : "s"} still open.` : `${list}.`;
-  }
-  if (named.length === 1) {
-    return open ? `${named[0]}, and ${open} question${open === 1 ? "" : "s"} still open.` : `${named[0]}.`;
+  const noteOf = (c: RawCheck) => str(c.note);
+  const confirmed = checks.filter((c) => str(c.status) === "confirmed" && noteOf(c));
+  const open = checks.filter((c) => ["unknown", "unavailable", "checked-empty"].includes(str(c.status)));
+  const lead = confirmed[0] ?? checks.find(noteOf);
+  if (lead) {
+    const sentence = noteOf(lead).split(" · ")[0].trim();
+    const tidy = /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+    // Capitalise, because the ledger writes fragments as often as sentences.
+    const shown = tidy.charAt(0).toUpperCase() + tidy.slice(1);
+    const tail = open.length === 1 ? "1 question remains open." : `${open.length} questions remain open.`;
+    return open.length ? `${shown} ${tail}` : shown;
   }
 
-  if (!checks.length) return "Nothing was recorded for this section.";
-  if (confirmed && !open) return `${confirmed} check${confirmed === 1 ? "" : "s"} confirmed, none open.`;
-  if (confirmed && open) return `${confirmed} confirmed, ${open} still open.`;
-  return `${open} check${open === 1 ? "" : "s"} open, none confirmed.`;
+  // No check wrote a sentence, so a tally is the most that can honestly be said.
+  const confirmedCount = checks.filter((c) => str(c.status) === "confirmed").length;
+  if (!checks.length && !figures.length) return "Nothing was recorded for this section.";
+  if (confirmedCount && open.length) return `${confirmedCount} confirmed, ${open.length} still open.`;
+  if (confirmedCount) return `${confirmedCount} check${confirmedCount === 1 ? "" : "s"} confirmed, none open.`;
+  if (open.length) return `${open.length} check${open.length === 1 ? "" : "s"} open, none confirmed.`;
+  return `${figures.length} record${figures.length === 1 ? "" : "s"} on file.`;
 }
 
 export function buildDossier(payload: Record<string, unknown>): Dossier {
@@ -231,7 +240,11 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
   const beats: DossierBeat[] = [];
 
   for (const spec of BEAT_CHECKS) {
-    const mine = checks.filter((c) => spec.checks.includes(str(c.checkId)));
+    // Ordered by the beat's own priority so the heading quotes the check that
+    // defines the beat, not whichever the payload happened to list first.
+    const mine = spec.checks
+      .map((id) => checks.find((c) => str(c.checkId) === id))
+      .filter((c): c is RawCheck => Boolean(c));
     const figures = figuresByBeat.get(spec.id) ?? [];
     if (!mine.length && !figures.length) continue;
     beats.push({
@@ -328,6 +341,27 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     nextActions: arr<Record<string, unknown>>((payload.researchPlan as Record<string, unknown>)?.nextActions)
       .map((a) => ({ rank: num(a.rank) ?? 0, action: str(a.action), whyNow: str(a.whyNow) || null }))
       .filter((a) => a.action).sort((a, b) => a.rank - b.rank),
+    links: [
+      ...(subject.website ? [{ label: "Website", url: subject.website }] : []),
+      ...(subject.handle && subject.handle !== "unknown" ? [{ label: "X", url: `https://x.com/${subject.handle.replace(/^@/, "")}` }] : []),
+      ...arr<RawFact>(payload.basicFacts)
+        .filter((f) => str(f.predicate) === "repository")
+        .map((f) => ({ label: "Repository", url: `https://${str(f.value).replace(/^https?:\/\//, "")}` })),
+    ],
+    // Claimed coverage that no artifact confirms. Naming the outlet without the
+    // caveat would lend a report the credibility of a masthead it never checked.
+    pressClaims: arr<Record<string, unknown>>((payload.evidence as Record<string, unknown>)?.testimonials)
+      .map((t): PressClaim => {
+        const text = `${str(t.claimed_relationship)} ${str(t.notes)}`;
+        const outlet = /bloomberg|forbes|fox business|reuters|coindesk|wsj|cnbc/i.exec(text)?.[0] ?? "";
+        const url = /https?:\/\/[^\s)]+/.exec(text)?.[0] ?? null;
+        return { outlet: outlet ? outlet[0].toUpperCase() + outlet.slice(1) : "", verified: t.artifact_verified === true, url };
+      })
+      .filter((c) => c.outlet),
+    openQuestions: arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown>)?.signals)
+      .filter((sig) => str(sig.kind) === "coverage_gap")
+      .map((sig) => str(sig.finding))
+      .filter(Boolean),
     cost: num((payload.cost as Record<string, unknown>)?.usd) === null ? null : {
       usd: num((payload.cost as Record<string, unknown>).usd),
       estimated: (payload.cost as Record<string, unknown>).estimated === true,
