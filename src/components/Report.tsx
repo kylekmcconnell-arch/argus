@@ -53,6 +53,7 @@ import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
 import { ScoreComposition } from "./ScoreComposition";
+import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { KolReport } from "./KolReport";
@@ -132,54 +133,8 @@ function VerdictPill({ verdict, size = "sm" }: { verdict: string; size?: "sm" | 
   );
 }
 
-function ScoreRing({ score, verdict, size = 86, bands = false }: {
-  score: number | null; verdict: string; size?: number; bands?: boolean;
-}) {
-  const m = verdictMeta(verdict);
-  const r = size / 2 - 6;
-  const c = 2 * Math.PI * r;
-  const pct = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
-  // Published rubric zones on the ring track (FAIL 0-39, CAUTION 40-69,
-  // PASS 70-100); 3px gaps articulate the 40 and 70 thresholds so the score
-  // arc tip visibly lands inside its zone.
-  const zone = (from: number, to: number) => ({
-    strokeDasharray: `${Math.max(0, ((to - from) / 100) * c - 3)} ${c}`,
-    strokeDashoffset: -((from / 100) * c) - 1.5,
-  });
-  return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        {bands ? (
-          <>
-            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-fail)" strokeOpacity="0.22" strokeWidth="4" style={zone(0, 40)} />
-            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-caution)" strokeOpacity="0.22" strokeWidth="4" style={zone(40, 70)} />
-            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-pass)" strokeOpacity="0.25" strokeWidth="4" style={zone(70, 100)} />
-          </>
-        ) : (
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-line)" strokeWidth="4" />
-        )}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          stroke={m.color}
-          strokeWidth="4"
-          strokeLinecap="round"
-          strokeDasharray={c}
-          strokeDashoffset={c * (1 - pct)}
-          style={{ transition: "stroke-dashoffset 0.8s ease-out" }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="mono text-[22px] font-semibold leading-none tabular" style={{ color: m.color }}>
-          {score == null ? "N/A" : score}
-        </span>
-        <span className="mono text-[10px] text-ink-faint">/ 100</span>
-      </div>
-    </div>
-  );
-}
+// ScoreRing moved to src/components/ScoreRing.tsx — the shared idiom all
+// three report surfaces now use.
 
 /** Where a score sits inside its published rubric band, in investor words. */
 function scoreBandPosition(score: number, capApplied?: string | null): string {

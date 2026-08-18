@@ -66,6 +66,8 @@ import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
 import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
+import { ScoreComposition } from "./ScoreComposition";
+import { ScoreRing } from "./ScoreRing";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -1475,11 +1477,19 @@ export function InvestigationReport({
                   />
                 )}
               </div>
-              <p className={`${readiness.status === "ready" ? "mt-4" : "mt-2.5"} text-[13px] leading-relaxed text-ink-dim`}>
-                {readiness.status === "ready"
-                  ? "This score uses the checks that finished. It is not an approval to buy or invest."
-                  : "Based only on finished checks. Do not rely on this score until the required checks finish."}
-              </p>
+              <div className={`${readiness.status === "ready" ? "mt-4" : "mt-2.5"} flex items-center gap-4`}>
+                <ScoreRing
+                  score={token.score}
+                  verdict={token.verdict}
+                  size={104}
+                  bands={readiness.status === "ready"}
+                />
+                <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-ink-dim">
+                  {readiness.status === "ready"
+                    ? "This score uses the checks that finished. It is not an approval to buy or invest."
+                    : "Based only on finished checks. Do not rely on this score until the required checks finish."}
+                </p>
+              </div>
               <div className={`${readiness.status === "ready" ? "mt-auto" : "mt-3"} border-t border-line/70 pt-3`}>
                 <p className="mono text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Score only · not financial advice</p>
                 <ScoreContextStrip
@@ -1596,6 +1606,25 @@ export function InvestigationReport({
               </p>
             </section>
           </div>
+
+          {/* the composition strip: the six weighted token dimensions as
+              readable rows — expand for the why, jump to the checks, or
+              challenge the score. The standard scan-output design. */}
+          {token.axes?.length > 0 && (
+            <ScoreComposition
+              rows={token.axes.map((a) => ({
+                axis: a.key,
+                label: a.label,
+                score: a.score,
+                weight: a.weight,
+                rationale: a.rationale,
+                evidenceHref: "#investigation-methodology" as const,
+              }))}
+              totalScore={token.score}
+              capNote={token.capApplied ? `limited to ${token.score}` : null}
+              challengeAnchor="#investigation-challenge"
+            />
+          )}
 
           {noticedSignals.length > 0 && (
             <section className="panel mt-3 p-4" aria-label="What Argus noticed">
