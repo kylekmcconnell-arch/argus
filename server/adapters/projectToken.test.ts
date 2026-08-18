@@ -713,4 +713,117 @@ describe("token declared on the project's own site", () => {
       `0x${String(i).padStart(2, "0")}${"a".repeat(38)}`).join(" ");
     expect(siteContractCandidates(many).length).toBeLessThanOrEqual(10);
   });
+
+  it("binds the CLUTCH / $STONKBROKER token from a second official first-party domain", async () => {
+    // Live shape: @CLUTCHMARKETS lists clutch.markets (no contract) and
+    // stonkbrokers.cash (vault + token). CoinGecko has no CLUTCH listing,
+    // DexScreener name search cannot identity-bind, and only the token CA
+    // is tradeable. Unique-ID binding stays mandatory: the second URL is
+    // already on the twitterapi profile record, never a search lead.
+    const vault = "0x038a7f4e4e89448ad74e044337c9ac25c11e726b";
+    const token = "0xe934e36a439c94017b64a3fece66af12099abf50";
+    const pool = "0x2222222222222222222222222222222222222222";
+    const { ctx, evidence } = context("@CLUTCHMARKETS", "CLUTCH", "https://clutch.markets/");
+    evidence.profile.official_websites = [
+      "https://clutch.markets/",
+      "https://stonkbrokers.cash/",
+    ];
+    const stonkHtml = `<a href="https://robinhoodchain.blockscout.com/address/${vault}">vault</a>
+      <button>${token}</button>
+      <span>0x0000000000000000000000000000000000000000</span>
+      <span>0xE934E36A439C94017B64A3FECE66AF12099ABF50</span>`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://clutch.markets/") return new Response("<html><p>CLUTCH markets</p></html>", { status: 200 });
+      if (url === "https://stonkbrokers.cash/") return new Response(stonkHtml, { status: 200 });
+      if (url.includes(`/latest/dex/tokens/${vault}`)) return json({ pairs: [] });
+      if (url.includes(`/latest/dex/tokens/${token}`)) return json({
+        pairs: [{
+          chainId: "robinhood",
+          pairAddress: pool,
+          url: `https://dexscreener.com/robinhood/${pool}`,
+          baseToken: { address: token, name: "Stonkbroker", symbol: "STONKBROKER" },
+          quoteToken: { address: "0x1111111111111111111111111111111111111111", symbol: "WETH" },
+          priceUsd: "0.012",
+          liquidity: { usd: 180_000 },
+        }],
+      });
+      if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("bound $STONKBROKER from the project's own site"),
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_domain",
+      symbol: "STONKBROKER",
+      address: token,
+      chain: "robinhood",
+      homepage: "https://stonkbrokers.cash/",
+      sourceUrl: "https://stonkbrokers.cash/",
+      producerSources: {
+        identity: { provider: "official_site", sourceUrl: "https://stonkbrokers.cash/" },
+      },
+    });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+      provider: "site-fetch/dexscreener",
+      note: expect.stringContaining("stonkbrokers.cash"),
+    }));
+  });
+
+  it("binds nothing when two official pages each declare a different tradeable token", async () => {
+    const tokenA = "0xe934e36a439c94017b64a3fece66af12099abf50";
+    const tokenB = "0x038a7f4e4e89448ad74e044337c9ac25c11e726b";
+    const poolA = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const poolB = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const { ctx, evidence } = context("@splitproject", "Split Project", "https://alpha.example/");
+    evidence.profile.official_websites = [
+      "https://alpha.example/",
+      "https://beta.example/",
+    ];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://alpha.example/") return new Response(`<button>${tokenA}</button>`, { status: 200 });
+      if (url === "https://beta.example/") return new Response(`<button>${tokenB}</button>`, { status: 200 });
+      if (url.includes(`/latest/dex/tokens/${tokenA}`)) return json({
+        pairs: [{
+          chainId: "base",
+          pairAddress: poolA,
+          url: `https://dexscreener.com/base/${poolA}`,
+          baseToken: { address: tokenA, name: "Alpha", symbol: "ALPHA" },
+          liquidity: { usd: 80_000 },
+        }],
+      });
+      if (url.includes(`/latest/dex/tokens/${tokenB}`)) return json({
+        pairs: [{
+          chainId: "base",
+          pairAddress: poolB,
+          url: `https://dexscreener.com/base/${poolB}`,
+          baseToken: { address: tokenB, name: "Beta", symbol: "BETA" },
+          liquidity: { usd: 90_000 },
+        }],
+      });
+      if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("no identity-bound project token"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+    }));
+  });
 });

@@ -68,6 +68,30 @@ describe("X provider attempt accounting", () => {
     expect(String(fetchMock.mock.calls[1][0])).toBe("https://x.com/driftprotocol");
   });
 
+  it("keeps every twitterapi website and entity URL, not just the first", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      data: {
+        name: "CLUTCH",
+        followers: 12_000,
+        description: "token at stonkbrokers.cash",
+        entities: {
+          url: { urls: [{ expanded_url: "https://clutch.markets/" }] },
+          description: { urls: [{ expanded_url: "https://stonkbrokers.cash/" }] },
+        },
+      },
+    })));
+
+    const profile = await getProfile("@CLUTCHMARKETS");
+
+    expect(profile).toEqual(expect.objectContaining({
+      handle: "@CLUTCHMARKETS",
+      accountStatus: "active",
+      website: "https://clutch.markets/",
+      officialWebsites: ["https://clutch.markets/", "https://stonkbrokers.cash/"],
+    }));
+  });
+
   it("counts the rejected Grok compatibility call and successful retry", async () => {
     vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const fetchMock = vi.fn()
