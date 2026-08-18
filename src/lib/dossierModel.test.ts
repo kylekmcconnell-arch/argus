@@ -39,7 +39,7 @@ describe("dossier model", () => {
     expect(entity.provenance.tier).toBe("unestablished");
     expect(entity.unboundNote).toContain("sec.gov");
     expect(entity.unboundNote).toContain("none naming this subject");
-    expect(perimeter.heading).toBe("One record here names a different subject.");
+    expect(perimeter.heading).toBe("Dynex Capital, Inc. belongs to someone else.");
   });
 
   it("demotes a fact the ledger called verified when nothing binds it", () => {
