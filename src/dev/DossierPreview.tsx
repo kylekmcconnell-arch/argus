@@ -13,7 +13,7 @@
 // single number would be a claim the evidence does not make.
 import { useEffect, useRef, useState } from "react";
 import { ProvenanceTag } from "../components/ProvenanceTag";
-import { buildDossier, type DossierFigure, type StrengthBand } from "../lib/dossierModel";
+import { buildDossier, type DossierFigure, type StrengthBand, type KeyMeasure } from "../lib/dossierModel";
 import fixture from "./dynexReportFixture.json";
 
 const TINT: Record<string, string> = {
@@ -90,6 +90,71 @@ function CoverageGrid({ checks }: { checks: Array<{ state: string; count: number
           </span>
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Who is reading. The report scores one evidence set but answers four questions. */
+function LensPicker({ lenses }: { lenses: Array<{ id: string; label: string; question: string; findings: string[] }> }) {
+  const [active, setActive] = useState(lenses[0]?.id ?? "");
+  if (!lenses.length) return null;
+  const lens = lenses.find((l) => l.id === active) ?? lenses[0];
+  return (
+    <div className="mt-6 max-w-[54ch]">
+      <p className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">Read this as</p>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {lenses.map((l) => (
+          <button key={l.id} type="button" onClick={() => setActive(l.id)}
+            className={`chip normal-case tracking-normal ${l.id === lens.id ? "tint-signal text-signal-lift" : "tint-neutral text-ink-faint"}`}>
+            {l.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 text-[13px] italic leading-relaxed text-ink-dim">{lens.question}</p>
+      <ul className="mt-2.5 space-y-1.5 border-l-2 border-signal/40 pl-3.5">
+        {lens.findings.slice(0, 4).map((f, i) => (
+          <li key={i} className="text-[12px] leading-relaxed text-ink-dim">{f}</li>
+        ))}
+      </ul>
+      <p className="mono mt-2 text-[10px] text-ink-faint">
+        {lens.findings.length} finding{lens.findings.length === 1 ? "" : "s"} carry into this lens
+      </p>
+    </div>
+  );
+}
+
+/** The frozen measurement ledger, every row, grouped by domain. */
+function MeasureLedger({ measures }: { measures: KeyMeasure[] }) {
+  const [open, setOpen] = useState(false);
+  if (!measures.length) return null;
+  const byDomain = measures.reduce<Record<string, KeyMeasure[]>>((acc, m) => {
+    (acc[m.domain] ??= []).push(m); return acc;
+  }, {});
+  return (
+    <div className="mt-6 max-w-[54ch]">
+      <button type="button" onClick={() => setOpen(!open)}
+        className="chip tint-neutral text-ink-dim normal-case tracking-normal">
+        {open ? "Close the ledger" : `Every measurement · ${measures.length}`}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3">
+          {Object.entries(byDomain).map(([domain, rows]) => (
+            <div key={domain}>
+              <p className="mono text-[10px] uppercase tracking-[0.1em] text-signal-lift">{domain}</p>
+              <div className="mt-1 space-y-0.5">
+                {rows.map((m, i) => (
+                  <div key={i} className="flex items-baseline justify-between gap-3 border-b-hairline border-line/60 py-1">
+                    <span className="min-w-0 text-[11.5px] leading-snug text-ink-dim">{m.label}</span>
+                    <span className="mono shrink-0 text-[11px] text-ink">
+                      {m.value}{m.unit && m.unit !== "text" && m.unit !== "date" ? ` ${m.unit}` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -297,6 +362,8 @@ export function DossierPreview() {
               )}
 
               {b.id === "coverage" && <RabbitHole questions={d.openQuestions} />}
+              {b.id === "coverage" && <MeasureLedger measures={d.measures} />}
+              {b.id === "verdict" && <LensPicker lenses={d.lenses} />}
 
               {b.id === "verdict" && (
                 <div className="mt-6 max-w-[54ch]">

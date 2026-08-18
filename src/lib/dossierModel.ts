@@ -52,6 +52,16 @@ export interface CoverageStat { state: string; count: number }
 
 export interface TeamMember { name: string; role: string; handle: string | null; firstParty: boolean }
 
+export interface Lens {
+  id: string;
+  label: string;
+  question: string;
+  /** Findings this reader should care about, in the report's own words. */
+  findings: string[];
+}
+
+export interface KeyMeasure { label: string; value: string; unit: string; domain: string }
+
 export interface PressClaim { outlet: string; verified: boolean; url: string | null }
 
 export interface Dossier {
@@ -69,6 +79,8 @@ export interface Dossier {
   links: Array<{ label: string; url: string }>;
   pressClaims: PressClaim[];
   openQuestions: string[];
+  lenses: Lens[];
+  measures: KeyMeasure[];
   cost: { usd: number | null; estimated: boolean } | null;
   beats: DossierBeat[];
 }
@@ -358,6 +370,26 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
         return { outlet: outlet ? outlet[0].toUpperCase() + outlet.slice(1) : "", verified: t.artifact_verified === true, url };
       })
       .filter((c) => c.outlet),
+    lenses: (() => {
+      const intel = (payload.intelligence ?? {}) as Record<string, unknown>;
+      const byId = new Map(arr<Record<string, unknown>>(intel.signals).map((sig) => [str(sig.id), str(sig.finding)]));
+      return arr<Record<string, unknown>>(intel.lenses).map((l): Lens => ({
+        id: str(l.id), label: str(l.label), question: str(l.question),
+        findings: arr<unknown>(l.signalIds).map((sid) => byId.get(str(sid)) ?? "").filter(Boolean),
+      })).filter((l) => l.id && l.findings.length);
+    })(),
+    // Every frozen measurement, grouped by domain in the UI. The band minima and
+    // maxima also appear as ranges on the verdict chart; they are kept here too
+    // because this is the measurement ledger, and a ledger that hides rows is a
+    // summary pretending to be a record.
+    measures: arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown>)?.measurements)
+      .map((m): KeyMeasure => ({
+        label: str(m.label),
+        value: String(m.value ?? ""),
+        unit: str(m.unit),
+        domain: str(m.domain) || "other",
+      }))
+      .filter((m) => m.label && m.value),
     openQuestions: arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown>)?.signals)
       .filter((sig) => str(sig.kind) === "coverage_gap")
       .map((sig) => str(sig.finding))

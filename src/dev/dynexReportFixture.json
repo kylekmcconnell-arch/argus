@@ -667,54 +667,366 @@
   "intelligence": {
     "signals": [
       {
+        "id": "intelligence_integrity_gap",
         "kind": "coverage_gap",
         "domain": "identity",
         "finding": "The final integrity gate recorded 2 fail-closed integrity events. Counts include 0 duplicate source IDs, 0 duplicate measurement IDs, 0 duplicate question IDs, 0 duplicate signal IDs, 0 invalid measurements, 2 questions with invalid lineage, 0 questions routed by rejected archetype evidence, 0 invalid signals, and 0 subject-classification rows with invalid sources. No affected record is treated as evidence."
       },
       {
+        "id": "analyst_axis_gap:P1_team_and_identity",
         "kind": "coverage_gap",
         "domain": "team",
         "finding": "The frozen scoring analyst recorded 2 unresolved questions: Is there a public LinkedIn or professional record corroborating the named team members' roles? What are the full legal names and professional backgrounds behind @DynexMoonshots and @proph3ttt? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
       },
       {
+        "id": "analyst_axis_gap:P2_product_substance",
         "kind": "coverage_gap",
         "domain": "product",
         "finding": "The frozen scoring analyst recorded 2 unresolved questions: Is there independent (non-project) technical review or benchmark validating the neuromorphic/quantum computing claims? What is the current usage volume or job throughput on the Dynex Marketplace beyond the initial launch figures? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
       },
       {
+        "id": "analyst_axis_gap:P3_token_conduct",
         "kind": "coverage_gap",
         "domain": "supply",
         "finding": "The frozen scoring analyst recorded 2 unresolved questions: Are there independent market-surveillance reports on DNX trading activity across exchanges? What is the token unlock and vesting schedule for team and investor allocations? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
       },
       {
+        "id": "analyst_axis_gap:P4_backing_and_partners",
         "kind": "coverage_gap",
         "domain": "funding",
         "finding": "The frozen scoring analyst recorded 2 unresolved questions: Are there any named venture backers, exchange listing partners, or enterprise counterparties for Dynex beyond the internally named advisor? Has any independent press corroborated the advisor relationship or additional partnerships? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
       },
       {
+        "id": "analyst_axis_gap:P5_traction_and_liveness",
         "kind": "coverage_gap",
         "domain": "economics",
         "finding": "The frozen scoring analyst recorded 2 unresolved questions: Is there exchange-level trading volume or liquidity data for DNX to corroborate ongoing token activity? What is the current (not launch-period) transaction volume or active user count on the Dynex Marketplace? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
       },
       {
+        "id": "analyst_axis_gap:P6_transparency_integrity",
         "kind": "coverage_gap",
         "domain": "governance",
         "finding": "The frozen scoring analyst recorded 2 unresolved questions: Are governance materials (e.g. DAO structure, voting mechanisms) publicly documented? Is there a published treasury or financial disclosure report beyond the smart contract audit? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
       },
       {
+        "id": "strict_legal_entity_identity",
         "kind": "observation",
         "domain": "legal",
         "finding": "1 strict direct-subject fact is saved: Dynex Capital, Inc.. This supports the evidence base, not a quality or safety conclusion."
       },
       {
+        "id": "strict_product_description",
         "kind": "observation",
         "domain": "product",
         "finding": "1 strict direct-subject fact is saved: Dynex Marketplace. This supports the evidence base, not a quality or safety conclusion."
       },
       {
+        "id": "project_strength_band_summary",
         "kind": "observation",
         "domain": "governance",
         "finding": "P1_team_and_identity: exceptional (14 to 16); P2_product_substance: emerging (10 to 16); P3_token_conduct: emerging (8 to 13); P4_backing_and_partners: emerging (6 to 9); P5_traction_and_liveness: emerging (6 to 9); P6_transparency_integrity: solid (9 to 10). These are deterministic evidence-band constraints from the frozen scorer packet, not new factual findings or investment recommendations."
+      }
+    ],
+    "lenses": [
+      {
+        "id": "investment",
+        "label": "Investment decision",
+        "question": "What could change the underwriting, sizing, entry, or decision to pass?",
+        "signalIds": [
+          "intelligence_integrity_gap",
+          "analyst_axis_gap:P3_token_conduct",
+          "analyst_axis_gap:P5_traction_and_liveness",
+          "analyst_axis_gap:P1_team_and_identity",
+          "analyst_axis_gap:P2_product_substance",
+          "analyst_axis_gap:P4_backing_and_partners",
+          "analyst_axis_gap:P6_transparency_integrity",
+          "strict_legal_entity_identity",
+          "strict_product_description",
+          "project_strength_band_summary"
+        ]
+      },
+      {
+        "id": "alpha_research",
+        "label": "Alpha research",
+        "question": "Which measurable changes, divergences, and scheduled events deserve deeper timing work?",
+        "signalIds": [
+          "intelligence_integrity_gap",
+          "analyst_axis_gap:P3_token_conduct",
+          "analyst_axis_gap:P5_traction_and_liveness",
+          "analyst_axis_gap:P2_product_substance",
+          "analyst_axis_gap:P1_team_and_identity",
+          "analyst_axis_gap:P4_backing_and_partners",
+          "analyst_axis_gap:P6_transparency_integrity",
+          "strict_product_description",
+          "project_strength_band_summary"
+        ]
+      },
+      {
+        "id": "counterparty",
+        "label": "Counterparty diligence",
+        "question": "Can this entity be identified, controlled, secured, and held accountable for an exposure?",
+        "signalIds": [
+          "intelligence_integrity_gap",
+          "analyst_axis_gap:P1_team_and_identity",
+          "analyst_axis_gap:P2_product_substance",
+          "analyst_axis_gap:P3_token_conduct",
+          "analyst_axis_gap:P5_traction_and_liveness",
+          "analyst_axis_gap:P4_backing_and_partners",
+          "analyst_axis_gap:P6_transparency_integrity",
+          "strict_legal_entity_identity",
+          "strict_product_description",
+          "project_strength_band_summary"
+        ]
+      },
+      {
+        "id": "general_diligence",
+        "label": "General diligence",
+        "question": "What does this derived evidence subset establish, report, or leave unresolved?",
+        "signalIds": [
+          "intelligence_integrity_gap",
+          "analyst_axis_gap:P2_product_substance",
+          "analyst_axis_gap:P1_team_and_identity",
+          "analyst_axis_gap:P3_token_conduct",
+          "analyst_axis_gap:P5_traction_and_liveness",
+          "analyst_axis_gap:P4_backing_and_partners",
+          "analyst_axis_gap:P6_transparency_integrity",
+          "strict_product_description",
+          "strict_legal_entity_identity",
+          "project_strength_band_summary"
+        ]
+      }
+    ],
+    "measurements": [
+      {
+        "label": "Material unresolved questions recorded by the scoring analyst",
+        "value": 12,
+        "unit": "count",
+        "domain": "governance",
+        "valueType": "number"
+      },
+      {
+        "label": "Days from the latest observed post to profile capture",
+        "value": 11,
+        "unit": "days",
+        "domain": "chronology",
+        "valueType": "number"
+      },
+      {
+        "label": "Official domain age at RDAP capture",
+        "value": 46,
+        "unit": "months",
+        "domain": "chronology",
+        "valueType": "number"
+      },
+      {
+        "label": "Latest provider-observed post timestamp",
+        "value": "2026-08-04T15:25:01.000Z",
+        "unit": "date",
+        "domain": "chronology",
+        "valueType": "date"
+      },
+      {
+        "label": "Earliest observed account public-surface boundary",
+        "value": "2022-09-18T16:49:14.000Z",
+        "unit": "date",
+        "domain": "chronology",
+        "valueType": "date"
+      },
+      {
+        "label": "Recomputed gap between observed account and domain public-surface boundaries",
+        "value": 0,
+        "unit": "months",
+        "domain": "chronology",
+        "valueType": "number"
+      },
+      {
+        "label": "Latest observed domain public-surface boundary",
+        "value": "2022-09-22T06:37:50.762Z",
+        "unit": "date",
+        "domain": "chronology",
+        "valueType": "date"
+      },
+      {
+        "label": "Bound official domain registration date",
+        "value": "2022-09-22T06:37:50.762Z",
+        "unit": "date",
+        "domain": "chronology",
+        "valueType": "date"
+      },
+      {
+        "label": "Bounded official-site response classification",
+        "value": "live",
+        "unit": "text",
+        "domain": "product",
+        "valueType": "text"
+      },
+      {
+        "label": "P1_team_and_identity deterministic evidence-band maximum",
+        "value": 16,
+        "unit": "count",
+        "domain": "team",
+        "valueType": "number"
+      },
+      {
+        "label": "P2_product_substance deterministic evidence-band maximum",
+        "value": 16,
+        "unit": "count",
+        "domain": "product",
+        "valueType": "number"
+      },
+      {
+        "label": "P3_token_conduct deterministic evidence-band maximum",
+        "value": 13,
+        "unit": "count",
+        "domain": "supply",
+        "valueType": "number"
+      },
+      {
+        "label": "P4_backing_and_partners deterministic evidence-band maximum",
+        "value": 9,
+        "unit": "count",
+        "domain": "funding",
+        "valueType": "number"
+      },
+      {
+        "label": "P5_traction_and_liveness deterministic evidence-band maximum",
+        "value": 9,
+        "unit": "count",
+        "domain": "economics",
+        "valueType": "number"
+      },
+      {
+        "label": "P6_transparency_integrity deterministic evidence-band maximum",
+        "value": 10,
+        "unit": "count",
+        "domain": "governance",
+        "valueType": "number"
+      },
+      {
+        "label": "P1_team_and_identity deterministic evidence-band minimum",
+        "value": 14,
+        "unit": "count",
+        "domain": "team",
+        "valueType": "number"
+      },
+      {
+        "label": "P2_product_substance deterministic evidence-band minimum",
+        "value": 10,
+        "unit": "count",
+        "domain": "product",
+        "valueType": "number"
+      },
+      {
+        "label": "P3_token_conduct deterministic evidence-band minimum",
+        "value": 8,
+        "unit": "count",
+        "domain": "supply",
+        "valueType": "number"
+      },
+      {
+        "label": "P4_backing_and_partners deterministic evidence-band minimum",
+        "value": 6,
+        "unit": "count",
+        "domain": "funding",
+        "valueType": "number"
+      },
+      {
+        "label": "P5_traction_and_liveness deterministic evidence-band minimum",
+        "value": 6,
+        "unit": "count",
+        "domain": "economics",
+        "valueType": "number"
+      },
+      {
+        "label": "P6_transparency_integrity deterministic evidence-band minimum",
+        "value": 9,
+        "unit": "count",
+        "domain": "governance",
+        "valueType": "number"
+      },
+      {
+        "label": "P1_team_and_identity deterministic scorer-packet evidence tier",
+        "value": "exceptional",
+        "unit": "text",
+        "domain": "team",
+        "valueType": "text"
+      },
+      {
+        "label": "P2_product_substance deterministic scorer-packet evidence tier",
+        "value": "emerging",
+        "unit": "text",
+        "domain": "product",
+        "valueType": "text"
+      },
+      {
+        "label": "P3_token_conduct deterministic scorer-packet evidence tier",
+        "value": "emerging",
+        "unit": "text",
+        "domain": "supply",
+        "valueType": "text"
+      },
+      {
+        "label": "P4_backing_and_partners deterministic scorer-packet evidence tier",
+        "value": "emerging",
+        "unit": "text",
+        "domain": "funding",
+        "valueType": "text"
+      },
+      {
+        "label": "P5_traction_and_liveness deterministic scorer-packet evidence tier",
+        "value": "emerging",
+        "unit": "text",
+        "domain": "economics",
+        "valueType": "text"
+      },
+      {
+        "label": "P6_transparency_integrity deterministic scorer-packet evidence tier",
+        "value": "solid",
+        "unit": "text",
+        "domain": "governance",
+        "valueType": "text"
+      },
+      {
+        "label": "claude-vision profile-image screening classification",
+        "value": "logo_or_cartoon",
+        "unit": "text",
+        "domain": "identity",
+        "valueType": "text"
+      },
+      {
+        "label": "claude-vision profile-image screening confidence",
+        "value": 98,
+        "unit": "percent",
+        "domain": "identity",
+        "valueType": "number"
+      },
+      {
+        "label": "claude-vision reported real-person opinion",
+        "value": "false",
+        "unit": "text",
+        "domain": "identity",
+        "valueType": "text"
+      },
+      {
+        "label": "Organization graph contributions assessed",
+        "value": 13,
+        "unit": "count",
+        "domain": "identity",
+        "valueType": "number"
+      },
+      {
+        "label": "Coverage-qualified organization graph contributions",
+        "value": 11,
+        "unit": "count",
+        "domain": "identity",
+        "valueType": "number"
+      },
+      {
+        "label": "Frozen organization-scoped relationship-screen status",
+        "value": "clear",
+        "unit": "text",
+        "domain": "identity",
+        "valueType": "text"
       }
     ]
   }
