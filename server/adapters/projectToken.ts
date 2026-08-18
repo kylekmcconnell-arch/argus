@@ -1066,14 +1066,15 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
   if (query.length < 2 && !seeded) return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
 
   const registryHomepages: string[] = [];
-  let selected: {
+  type SelectedToken = {
     details: JsonRecord;
     identity: NonNullable<ReturnType<typeof verifyIdentity>>;
     contract: ContractIdentity;
-  } | null = null;
+  };
+  let selected: SelectedToken | null = null;
   let search: CoinSearchRow[] | null = null;
   let candidates: CoinSearchRow[] = [];
-  let inspected: Array<{ details: JsonRecord | null; selected: typeof selected }> = [];
+  let inspected: Array<{ details: JsonRecord | null; selected: SelectedToken | null }> = [];
   let detailAttempts = 0;
   let contractLookupFailed = false;
   let seedPairAttempts = 0;
