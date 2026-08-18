@@ -621,6 +621,7 @@ export default function App() {
         inv.token.address,
         inv.projectAccount,
         inv.projectAccountAudit,
+        inv.projectAccountBinding,
       )).status,
       flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
     });

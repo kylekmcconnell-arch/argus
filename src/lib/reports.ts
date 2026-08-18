@@ -60,6 +60,7 @@ export function reportChecks(
       investigation.token.address,
       investigation.projectAccount,
       investigation.projectAccountAudit,
+      investigation.projectAccountBinding,
     );
   }
   if (kind === "person") {

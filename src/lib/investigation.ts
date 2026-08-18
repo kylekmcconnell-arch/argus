@@ -115,6 +115,22 @@ export interface ProjectAccountAuditOutcome {
   note: string;
 }
 
+/**
+ * Recorded account↔token binding, verified from the token side: whether the
+ * scanned contract address is published by the project X account itself (its
+ * bio, or the link-aggregator page the bio points to). This is the alternate
+ * license reconcileInvestigationChecks accepts when the embedded account scan
+ * could not classify the account as a PROJECT (meme brand accounts with a
+ * keyword-free bio and a linktree are the common case).
+ */
+export interface ProjectAccountBinding {
+  handle: string;
+  status: "verified" | "mismatch" | "absent" | "unreadable";
+  via?: "bio" | "linked-page";
+  note: string;
+  checkedAt: string;
+}
+
 export interface Investigation {
   rootRef: string;
   token: TokenDossier;
@@ -129,6 +145,12 @@ export interface Investigation {
    * the project evidence ledger exists or why it could not be produced.
    */
   projectAccountAudit?: ProjectAccountAuditOutcome;
+  /**
+   * Token-side account↔token binding verification. Older frozen
+   * investigations omit this field; crediting then relies solely on the
+   * project scan's own canonical-binding check, exactly as before.
+   */
+  projectAccountBinding?: ProjectAccountBinding | null;
   founders: FounderCandidate[];
   founderNote: string;            // honest founder-identity summary
   deployerTrail: DeployerTrail | null; // who funded the deployer (Solana)
@@ -347,7 +369,35 @@ export function streamInvestigation(
       // ── Hop 3: background the project's X account (ONE paid people-audit, auto) ──
       let projectAccount: Dossier | null = null;
       let projectAccountAudit: ProjectAccountAuditOutcome;
+      let projectAccountBinding: ProjectAccountBinding | null = null;
       if (projectX) {
+        // Verify the account↔token binding from the token side before the
+        // audit: does the account itself publish this CA (bio or linked
+        // page)? Cheap, keyed the same as the threat scanner's authenticity
+        // check, and recorded so check crediting can cite it.
+        try {
+          const bindingHandle = projectX.replace(/^@/, "");
+          const r = await fetch(
+            `/api/x-authenticity?handle=${encodeURIComponent(bindingHandle)}&address=${encodeURIComponent(token.address)}&chain=${encodeURIComponent(token.chain)}`,
+            { signal: AbortSignal.timeout(12000) },
+          );
+          const d = r.ok ? await r.json() as { available?: boolean; status?: string; via?: string; note?: string } : null;
+          if (d?.available && d.status) {
+            projectAccountBinding = {
+              handle: bindingHandle,
+              status: d.status as ProjectAccountBinding["status"],
+              ...(d.via === "bio" || d.via === "linked-page" ? { via: d.via } : {}),
+              note: d.note ?? "",
+              checkedAt: new Date().toISOString(),
+            };
+            h.onStep(milestone(
+              "Official-account binding",
+              projectAccountBinding.note || `Binding check for ${projectX}: ${projectAccountBinding.status}.`,
+              projectAccountBinding.status === "verified" ? "good"
+                : projectAccountBinding.status === "mismatch" ? "bad" : "warn",
+            ));
+          }
+        } catch { /* binding stays unrecorded; crediting falls back to the project scan's own check */ }
         const providers = await probeBackend();
         const analystLive = !!providers?.some((p) => p.id === "analyst" && p.configured);
         if (analystLive) {
@@ -397,7 +447,7 @@ export function streamInvestigation(
       }
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
-      h.onDone({ rootRef: input.ref, token, projectX, siteUrl, recon, projectAccount, projectAccountAudit, founders, founderNote: note, deployerTrail, webTeam });
+      h.onDone({ rootRef: input.ref, token, projectX, siteUrl, recon, projectAccount, projectAccountAudit, projectAccountBinding, founders, founderNote: note, deployerTrail, webTeam });
     } catch (e) {
       if (!aborted) h.onError(String(e));
     }

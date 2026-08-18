@@ -77,6 +77,25 @@ async function bioKeyless(handle: string): Promise<string | null> {
   } catch { return null; }
 }
 
+// Memecoin reality: many legit projects publish the CA on a link-aggregator
+// page (linktree etc.) rather than in the bio text. When the bio has no CA,
+// fetch the aggregator page the bio links and scan it too. Host-allowlisted
+// (never an arbitrary URL) and redirects are not followed, so this cannot be
+// steered at internal or attacker-chosen targets.
+const AGGREGATOR_LINK = /https?:\/\/(?:www\.)?((?:linktr\.ee|beacons\.ai|bio\.link|bio\.site|carrd\.co|linkin\.bio|solo\.to|lynk\.id)\/[A-Za-z0-9._/-]+)/i;
+
+async function linkedPageText(url: string): Promise<string | null> {
+  try {
+    const r = await fetch(url, {
+      headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS-authenticity)", accept: "text/html" },
+      signal: AbortSignal.timeout(8000),
+      redirect: "manual",
+    });
+    if (!r.ok) return null;
+    return (await r.text()).slice(0, 400_000);
+  } catch { return null; }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const handle = String(req.query.handle ?? "").replace(/^@/, "").trim();
   const address = String(req.query.address ?? "").trim();
@@ -99,11 +118,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const matched = casFiltered.includes(want);
   const otherCa = casFiltered.find((c) => c !== want) ?? null;
 
-  const status = matched ? "verified" : otherCa ? "mismatch" : "absent";
-  const note = status === "verified"
+  let status = matched ? "verified" : otherCa ? "mismatch" : "absent";
+  let via: "bio" | "linked-page" = "bio";
+  let note = status === "verified"
     ? `The scanned contract is in @${handle}'s X bio - confirmed the official token.`
     : status === "mismatch"
       ? `@${handle}'s X bio lists a DIFFERENT contract (${otherCa!.slice(0, 10)}…) - the scanned token is NOT the one the project points to. Likely a namesake/impersonation.`
       : `@${handle}'s X bio does not contain this (or any) contract address - could not confirm this is the official token; verify manually.`;
-  res.status(200).json({ available: true, handle, status, bioReadable: true, otherCa, note });
+
+  if (status === "absent") {
+    const aggregator = bio.match(AGGREGATOR_LINK);
+    if (aggregator) {
+      const pageHost = aggregator[1].split("/")[0];
+      const page = await linkedPageText(`https://${aggregator[1]}`);
+      if (page) {
+        const pageCas = (page.match(sol ? SOL_CA : EVM_CA) ?? []).map((c) => (sol ? c : c.toLowerCase()));
+        const pageFiltered = sol ? pageCas.filter((c) => c.length >= 40 || /pump$|bonk$|BAGS$/i.test(c)) : pageCas;
+        if (pageFiltered.includes(want)) {
+          status = "verified";
+          via = "linked-page";
+          note = `The scanned contract is published on @${handle}'s linked page (${pageHost}) - confirmed the official token.`;
+        } else if (pageFiltered.length) {
+          note = `${note} The account's linked page (${pageHost}) lists a different contract; treat the name match with care.`;
+        }
+      }
+    }
+  }
+  res.status(200).json({ available: true, handle, status, bioReadable: true, otherCa, via, note });
 }

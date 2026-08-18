@@ -302,7 +302,13 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
           note: `buy ${safety.buyTax}% · sell ${safety.sellTax}%`,
         }
       : evm
-        ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded }
+        ? (safety.available
+          ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded }
+          // Same signal as the contract-safety row above: no safety provider
+          // covers this chain, so the simulation can never run here. Recording
+          // "unavailable" with the reason keeps the gap honest instead of
+          // presenting an eternally unfinished check.
+          : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unavailable", note: `no simulation provider covers ${chainDisplayName(dossier.chain)}; sell-block behavior cannot be simulated here` })
         : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "not-applicable", note: "Solana: static flags only" },
   );
 
@@ -505,11 +511,18 @@ const INVESTIGATION_CHECK_BRIDGE: readonly {
   { tokenCheckId: "trust-graph-connections", tokenLabel: "Trust-graph reconciliation", projectCheckId: "trust-graph-connections", projectLabel: "Trust-graph connections" },
 ];
 
+export interface ProjectAccountBindingLike {
+  handle?: string | null;
+  status?: string | null;
+  via?: string | null;
+}
+
 export function reconcileInvestigationChecks(
   tokenRows: readonly ScanCheck[],
   tokenAddress: string,
   projectAccount: BoundProjectAccountLike | null | undefined,
   projectAccountAudit?: ProjectAccountAuditOutcomeLike,
+  projectAccountBinding?: ProjectAccountBindingLike | null,
 ): ScanCheck[] {
   const rows = tokenRows.map((row) => ({ ...row }));
   const projectRows = projectAccount?.checkRuns;
@@ -551,12 +564,28 @@ export function reconcileInvestigationChecks(
 
   const binding = projectRows.find((row) =>
     row.checkId === "project-token-identity" || row.label === "Canonical project token");
-  if (!binding) {
-    return annotateOpenBridgeRows(
-      `resolves through ${provenance}, which recorded no canonical-token binding check, so its outcomes cannot be credited to this token`,
-    );
-  }
-  if (binding.status !== "confirmed") {
+  const projectSideConfirmed = binding?.status === "confirmed";
+  // Alternate license, recorded on the investigation itself: the account↔token
+  // binding was verified from the token side (the scanned CA is published by
+  // this same account's own bio or the link-aggregator page its bio points
+  // to). This is the common meme-project case: a keyword-free bio plus a
+  // linktree means the embedded scan cannot classify the account as PROJECT,
+  // so its own canonical-binding check never runs. The same fail-closed
+  // posture holds: only a recorded "verified" for exactly this handle
+  // licenses crediting; anything else refuses precisely as before.
+  const normalizeHandle = (value: unknown) => String(value ?? "").replace(/^@/, "").trim().toLowerCase();
+  const tokenSideVerified = Boolean(
+    projectAccountBinding
+    && projectAccountBinding.status === "verified"
+    && normalizeHandle(projectAccount?.handle)
+    && normalizeHandle(projectAccountBinding.handle) === normalizeHandle(projectAccount?.handle),
+  );
+  if (!projectSideConfirmed && !tokenSideVerified) {
+    if (!binding) {
+      return annotateOpenBridgeRows(
+        `resolves through ${provenance}, which recorded no canonical-token binding check, so its outcomes cannot be credited to this token`,
+      );
+    }
     return annotateOpenBridgeRows(
       `resolves through ${provenance}, but that scan did not confirm this project's canonical token (${binding.note ?? `binding status: ${binding.status}`}), so its outcomes cannot be credited to this token`,
     );
@@ -564,10 +593,15 @@ export function reconcileInvestigationChecks(
   const boundAddress = (projectAccount?.projectToken?.address ?? "").trim().toLowerCase();
   const subjectAddress = (tokenAddress ?? "").trim().toLowerCase();
   if (boundAddress && boundAddress !== subjectAddress) {
+    // A recorded different-token binding is a contradiction, not a gap; no
+    // token-side verification overrides it.
     return annotateOpenBridgeRows(
       `resolves through ${provenance}, but that scan bound a different token contract (${boundAddress.slice(0, 10)}…), so its outcomes cannot be credited to this token`,
     );
   }
+  const creditLicense = projectSideConfirmed
+    ? ""
+    : ` · account↔token binding verified from the token side (${projectAccountBinding?.via === "linked-page" ? "CA published on the account's linked page" : "CA published by the account's X bio"})`;
 
   for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
     const target = rows.find((row) =>
@@ -583,7 +617,7 @@ export function reconcileInvestigationChecks(
       continue;
     }
     target.status = source.status;
-    target.note = `recorded on ${provenance}: ${source.note ?? "completed"}`;
+    target.note = `recorded on ${provenance}${creditLicense}: ${source.note ?? "completed"}`;
     if (source.provider) target.provider = source.provider;
     if (source.completedAt) target.completedAt = source.completedAt;
     if (typeof source.sourceCount === "number") target.sourceCount = source.sourceCount;
