@@ -84,6 +84,21 @@ export function CompositionPreview() {
           62 / 100 · CAUTION · the strip sits directly under the report hero
         </p>
         <ScoreComposition rows={ROWS} totalScore={62} />
+
+        <p className="mt-8 text-[13.5px] text-ink-dim">
+          The same strip in the threat scan's own units: grouped check outcomes, tone-led.
+        </p>
+        <ScoreComposition
+          heading="Where the risk sits"
+          summary="34 risk pts · higher is worse"
+          totalScore={34}
+          challengeAnchor={null}
+          rows={[
+            { axis: "authority", label: "Authority & control", score: 4, weight: 4, tone: "pass", sublabel: "4 checks", countsLine: "4 clean", rationale: "Every applicable check in this group came back clean.", evidenceHref: null },
+            { axis: "holders", label: "Holder structure", score: 1, weight: 2, tone: "caution", sublabel: "2 checks", countsLine: "1 clean · 1 warning", rationale: "Top non-pool holder sits at 31% of supply.", evidenceHref: null },
+            { axis: "code", label: "The code", score: 1, weight: 2, tone: "fail", sublabel: "2 checks", countsLine: "1 clean · 1 flagged", rationale: "A privileged function can rewrite balances after launch.", evidenceHref: null },
+          ]}
+        />
         {/* The console the challenge affordance lands on. The fixture version
             id exists only so the input is live; /api/ask is absent in vite
             dev, so asking returns the network-error line — expected. */}

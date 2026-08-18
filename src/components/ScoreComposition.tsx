@@ -22,8 +22,16 @@ export interface CompositionRow {
   supportCount?: number;
   counterCount?: number;
   questionCount?: number;
-  /** Where "Read the evidence" lands; defaults to #decision-basis-<axis>. */
-  evidenceHref?: `#${string}`;
+  /** Where "Read the evidence" lands; defaults to #decision-basis-<axis>;
+      null hides the link. */
+  evidenceHref?: `#${string}` | null;
+  /** Overrides the ratio-band color/word: a group with one flag reads
+      flagged even when most of its checks are clean. */
+  tone?: "pass" | "caution" | "fail";
+  /** Replaces the "<weight>% of the score" chip (e.g. "6 checks"). */
+  sublabel?: string;
+  /** Replaces the sources/questions counts line under the rationale. */
+  countsLine?: string;
 }
 
 function bandColor(ratio: number): string {
@@ -38,14 +46,26 @@ function bandWord(ratio: number): string {
   return "weak";
 }
 
+const TONE_COLOR: Record<NonNullable<CompositionRow["tone"]>, string> = {
+  pass: "var(--color-pass)",
+  caution: "var(--color-caution)",
+  fail: "var(--color-fail)",
+};
+const TONE_WORD: Record<NonNullable<CompositionRow["tone"]>, string> = {
+  pass: "clear",
+  caution: "warning",
+  fail: "flagged",
+};
+
 function Row({ row, evidenceAnchor, challengeAnchor }: {
   row: CompositionRow;
-  evidenceAnchor: string;
+  evidenceAnchor: string | null;
   challengeAnchor: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const ratio = row.weight > 0 ? Math.max(0, Math.min(1, row.score / row.weight)) : 0;
-  const color = bandColor(ratio);
+  const color = row.tone ? TONE_COLOR[row.tone] : bandColor(ratio);
+  const word = row.tone ? TONE_WORD[row.tone] : bandWord(ratio);
   const support = row.supportCount ?? 0;
   const counter = row.counterCount ?? 0;
   const questions = row.questionCount ?? 0;
@@ -64,13 +84,13 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
             <span className="flex items-baseline gap-2">
               <span className="text-[13.5px] font-medium text-ink">{row.label}</span>
               <span className="mono text-[10px] uppercase tracking-wide text-ink-faint max-sm:hidden">
-                {row.weight}% of the score
+                {row.sublabel ?? `${row.weight}% of the score`}
               </span>
             </span>
             <span className="mono text-[11px] tabular text-ink-dim">
               <span className="font-semibold" style={{ color }}>{row.score}</span>
               <span className="text-ink-faint"> / {row.weight}</span>
-              <span className="ml-2 text-ink-faint">{bandWord(ratio)}</span>
+              <span className="ml-2 text-ink-faint">{word}</span>
             </span>
           </div>
           <div className="mt-2 h-[3px] overflow-hidden rounded-full bg-line" role="presentation">
@@ -96,7 +116,9 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
             {row.rationale && (
               <p className="max-w-[68ch] text-[12.5px] leading-relaxed text-ink-dim">{row.rationale}</p>
             )}
-            {(support > 0 || counter > 0 || questions > 0) && (
+            {row.countsLine ? (
+              <p className="mono mt-2 text-[11px] text-ink-faint">{row.countsLine}</p>
+            ) : (support > 0 || counter > 0 || questions > 0) && (
               <p className="mono mt-2 text-[11px] text-ink-faint">
                 {support} {support === 1 ? "source" : "sources"} reviewed
                 {counter > 0 && <span className="text-caution"> · {counter} {counter === 1 ? "disagrees" : "disagree"}</span>}
@@ -104,12 +126,14 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
               </p>
             )}
             <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5">
-              <a
-                href={evidenceAnchor}
-                className="text-[12.5px] font-medium text-signal-lift underline-offset-2 hover:underline"
-              >
-                Read the evidence ↓
-              </a>
+              {evidenceAnchor && (
+                <a
+                  href={evidenceAnchor}
+                  className="text-[12.5px] font-medium text-signal-lift underline-offset-2 hover:underline"
+                >
+                  Read the evidence ↓
+                </a>
+              )}
               {challengeAnchor && (
                 <button
                   type="button"
@@ -131,24 +155,32 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
   );
 }
 
-export function ScoreComposition({ rows, totalScore, capNote, challengeAnchor = "#ask-report" }: {
+export function ScoreComposition({ rows, totalScore, capNote, challengeAnchor = "#ask-report", heading = "How the score is built", summary }: {
   rows: CompositionRow[];
   totalScore: number | null;
   /** Present when a safety cap limited the total (rows then legitimately sum higher). */
   capNote?: string | null;
   /** Anchor of the ask/add-info flow; null hides the challenge affordance. */
   challengeAnchor?: string | null;
+  /** Strip eyebrow; surfaces with a non-points model say what theirs is. */
+  heading?: string;
+  /** Replaces the "pts earned of" line (null hides it; undefined keeps it). */
+  summary?: string | null;
 }) {
   if (rows.length === 0) return null;
   return (
-    <section className="panel mt-4 overflow-hidden" aria-label="How the score is built">
+    <section className="panel mt-4 overflow-hidden" aria-label={heading}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 pb-1 pt-3.5">
-        <h2 className="eyebrow">How the score is built</h2>
-        {totalScore != null && (
-          <span className="mono text-[11px] tabular text-ink-faint">
-            {rows.reduce((acc, r) => acc + r.score, 0)} pts earned of {rows.reduce((acc, r) => acc + r.weight, 0)}
-            {capNote ? ` · ${capNote}` : ""}
-          </span>
+        <h2 className="eyebrow">{heading}</h2>
+        {summary !== null && (
+          summary !== undefined ? (
+            <span className="mono text-[11px] tabular text-ink-faint">{summary}</span>
+          ) : totalScore != null && (
+            <span className="mono text-[11px] tabular text-ink-faint">
+              {rows.reduce((acc, r) => acc + r.score, 0)} pts earned of {rows.reduce((acc, r) => acc + r.weight, 0)}
+              {capNote ? ` · ${capNote}` : ""}
+            </span>
+          )
         )}
       </div>
       <div className="divide-y divide-line/60">
@@ -156,7 +188,7 @@ export function ScoreComposition({ rows, totalScore, capNote, challengeAnchor = 
           <Row
             key={row.axis}
             row={row}
-            evidenceAnchor={row.evidenceHref ?? `#decision-basis-${row.axis}`}
+            evidenceAnchor={row.evidenceHref === null ? null : row.evidenceHref ?? `#decision-basis-${row.axis}`}
             challengeAnchor={challengeAnchor}
           />
         ))}
