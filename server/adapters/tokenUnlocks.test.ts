@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { getCost, withCostLedger } from "../cost";
 import { collectUpcomingUnlocks } from "./tokenUnlocks";
 
 const jsonResponse = (body: unknown) =>
@@ -56,6 +57,8 @@ const fixtureResponse = (
   if (url.includes("/contracts")) return jsonResponse(options.contracts ?? contractsBody);
   return jsonResponse(options.events ?? eventsBody);
 };
+
+const timeoutError = () => Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
 
 describe("collectUpcomingUnlocks", () => {
   const ENV = { ...process.env };
@@ -338,5 +341,77 @@ describe("collectUpcomingUnlocks", () => {
     expect(out.available).toBe(false);
     if (out.available) throw new Error("expected no-data");
     expect(out.note).toContain("no upcoming unlock events");
+  });
+
+  it("fails currency-contracts with the HTTP status after a non-OK response", async () => {
+    process.env.CRYPTORANK_API_KEY = "cr-key";
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/currencies/map")) return jsonResponse(mapBody);
+      if (String(url).includes("/contracts")) return new Response("nope", { status: 404 });
+      return jsonResponse(completeEventsBody);
+    }));
+
+    const cost = await withCostLedger(async () => {
+      const out = await collectUpcomingUnlocks("Uniswap", "UNI", CANONICAL_TOKEN);
+      expect(out.available).toBe(false);
+      if (out.available) throw new Error("expected unavailable");
+      expect(out.note).toContain("unavailable");
+      return getCost();
+    });
+
+    expect(cost.calls.find((line) => line.op === "currency-contracts")).toMatchObject({
+      status: "failed",
+      meta: expect.stringContaining("http_404"),
+    });
+  });
+
+  it("retries a timed-out contracts call once, then fails as timeout", async () => {
+    process.env.CRYPTORANK_API_KEY = "cr-key";
+    let contractCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/currencies/map")) return jsonResponse(mapBody);
+      if (String(url).includes("/contracts")) {
+        contractCalls += 1;
+        throw timeoutError();
+      }
+      return jsonResponse(completeEventsBody);
+    }));
+
+    const cost = await withCostLedger(async () => {
+      const out = await collectUpcomingUnlocks("Uniswap", "UNI", CANONICAL_TOKEN);
+      expect(out.available).toBe(false);
+      if (out.available) throw new Error("expected unavailable");
+      expect(out.note).toContain("unavailable");
+      return getCost();
+    });
+
+    expect(contractCalls).toBe(2);
+    expect(cost.calls.find((line) => line.op === "currency-contracts")).toMatchObject({
+      status: "failed",
+      meta: expect.stringContaining("timeout"),
+    });
+  });
+
+  it("treats a 2xx contracts response with no canonical join as succeeded no-data, not unavailable", async () => {
+    process.env.CRYPTORANK_API_KEY = "cr-key";
+    const urls: string[] = [];
+    const cost = await withCostLedger(async () => {
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+        urls.push(String(url));
+        return fixtureResponse(String(url), { contracts: { data: [] } });
+      }));
+      const out = await collectUpcomingUnlocks("Uniswap", "UNI", CANONICAL_TOKEN);
+      expect(out.available).toBe(false);
+      if (out.available) throw new Error("expected no-data");
+      expect(out.note).toContain("exact canonical token contract");
+      expect(out.note).not.toContain("unavailable");
+      return getCost();
+    });
+
+    expect(urls.some((url) => url.includes("/vesting/events"))).toBe(false);
+    expect(cost.calls.find((line) => line.op === "currency-contracts")).toMatchObject({
+      status: "succeeded",
+      meta: expect.stringContaining("canonical_contract_missing"),
+    });
   });
 });

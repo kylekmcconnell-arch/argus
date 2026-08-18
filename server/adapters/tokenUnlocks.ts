@@ -12,6 +12,8 @@ import { captureTimestamp } from "../captureTime";
 
 const API_BASE = "https://api.cryptorank.io/v3";
 const FETCH_TIMEOUT_MS = 8_000;
+/** Contracts join is the identity gate; give it a little more time than the map. */
+const CONTRACTS_TIMEOUT_MS = 12_000;
 const MAP_CACHE_KEY = "cryptorank:currency-map:v1";
 
 interface MapEntry { id: number; slug: string; symbol: string | null; name: string }
@@ -170,17 +172,51 @@ function responseIsComplete(payload: unknown, returnedRows: number): boolean {
   return false;
 }
 
-async function boundedJson(url: string, key: string): Promise<unknown | null> {
+type JsonFetchFailure = {
+  kind: "timeout" | "http" | "transport_error" | "response_json_error";
+  status?: number;
+};
+
+type BoundedJsonResult =
+  | { ok: true; value: unknown }
+  | { ok: false; failure: JsonFetchFailure };
+
+function failureMeta(failure: JsonFetchFailure): string {
+  if (failure.kind === "http") return `http_${failure.status ?? 0}`;
+  return failure.kind;
+}
+
+function classifyFetchError(err: unknown): "timeout" | "transport_error" {
+  const row = err && typeof err === "object" ? err as { name?: unknown; message?: unknown } : null;
+  const name = typeof row?.name === "string" ? row.name : "";
+  const message = typeof row?.message === "string" ? row.message : "";
+  if (name === "TimeoutError" || name === "AbortError" || /timeout/i.test(message)) return "timeout";
+  return "transport_error";
+}
+
+function isRetriable(failure: JsonFetchFailure): boolean {
+  if (failure.kind === "timeout") return true;
+  return failure.kind === "http" && typeof failure.status === "number" && failure.status >= 500;
+}
+
+async function fetchJsonOnce(url: string, key: string, timeoutMs: number): Promise<BoundedJsonResult> {
   try {
-    const res = await Promise.race([
-      fetch(url, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) }),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), FETCH_TIMEOUT_MS + 500)),
-    ]);
-    if (!res || !res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
+    const res = await fetch(url, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return { ok: false, failure: { kind: "http", status: res.status } };
+    try {
+      return { ok: true, value: await res.json() };
+    } catch {
+      return { ok: false, failure: { kind: "response_json_error" } };
+    }
+  } catch (err) {
+    return { ok: false, failure: { kind: classifyFetchError(err) } };
   }
+}
+
+async function boundedJson(url: string, key: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<BoundedJsonResult> {
+  const first = await fetchJsonOnce(url, key, timeoutMs);
+  if (first.ok || !isRetriable(first.failure)) return first;
+  return fetchJsonOnce(url, key, timeoutMs);
 }
 
 const dataArray = (payload: unknown): Record<string, unknown>[] => {
@@ -227,11 +263,12 @@ export async function collectUpcomingUnlocks(
     try { entries = JSON.parse(cached) as MapEntry[]; } catch { entries = null; }
   }
   if (!entries) {
-    const payload = await boundedJson(`${API_BASE}/currencies/map`, key);
-    if (!payload) {
-      recordCall("cryptorank", "currency-map", 0, "map_unavailable", "failed");
+    const mapResult = await boundedJson(`${API_BASE}/currencies/map`, key);
+    if (!mapResult.ok) {
+      recordCall("cryptorank", "currency-map", 0, `map_unavailable · ${failureMeta(mapResult.failure)}`, "failed");
       return { available: false, note: "CryptoRank currency map was unavailable." };
     }
+    const payload = mapResult.value;
     entries = dataArray(payload)
       .map((row) => ({
         id: typeof row.id === "number" ? row.id : NaN,
@@ -253,11 +290,12 @@ export async function collectUpcomingUnlocks(
   // lend vesting data to the report only after CryptoRank's own contract map
   // contains exactly one row for the canonical chain and exact address.
   const contractSourceUrl = `${API_BASE}/currencies/${currency.id}/contracts`;
-  const contractsPayload = await boundedJson(contractSourceUrl, key);
-  if (!contractsPayload) {
-    recordCall("cryptorank", "currency-contracts", 0, `${currency.slug} · unavailable`, "failed");
+  const contractsResult = await boundedJson(contractSourceUrl, key, CONTRACTS_TIMEOUT_MS);
+  if (!contractsResult.ok) {
+    recordCall("cryptorank", "currency-contracts", 0, `${currency.slug} · ${failureMeta(contractsResult.failure)}`, "failed");
     return { available: false, note: "CryptoRank contract mapping was unavailable." };
   }
+  const contractsPayload = contractsResult.value;
   const contractRows = dataArray(contractsPayload);
   const addressRows = contractRows
     .map((row) => ({ row, address: contractAddress(row) }))
@@ -294,11 +332,12 @@ export async function collectUpcomingUnlocks(
   recordCall("cryptorank", "currency-contracts", 0, `${currency.slug} · exact_contract_join`, "succeeded");
 
   const eventsSourceUrl = `${API_BASE}/currencies/${currency.id}/vesting/events?filter=upcoming&sortBy=time&sortOrder=asc`;
-  const eventsPayload = await boundedJson(eventsSourceUrl, key);
-  if (!eventsPayload) {
-    recordCall("cryptorank", "vesting-events", 0, `${currency.slug} · unavailable`, "failed");
+  const eventsResult = await boundedJson(eventsSourceUrl, key);
+  if (!eventsResult.ok) {
+    recordCall("cryptorank", "vesting-events", 0, `${currency.slug} · ${failureMeta(eventsResult.failure)}`, "failed");
     return { available: false, note: "CryptoRank vesting events were unavailable." };
   }
+  const eventsPayload = eventsResult.value;
   const eventRows = dataArray(eventsPayload);
   const events = eventRows
     .map((row) => {
