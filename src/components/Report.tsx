@@ -218,9 +218,9 @@ function ProofChipStrip({ chips }: { chips: HeroProofChip[] }) {
 
 function Section({ title, kicker, children }: { title: string; kicker?: string; children: React.ReactNode }) {
   return (
-    <section className="mt-5">
-      <div className="mb-2.5 flex items-baseline gap-2">
-        <h2 className="text-[13.5px] font-semibold tracking-tight text-ink">{title}</h2>
+    <section className="mt-6">
+      <div className="mb-2.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+        <h2 className="display-sm text-[18px] leading-tight text-ink">{title}</h2>
         {kicker && <span className="text-[12.5px] text-ink-faint">{kicker}</span>}
       </div>
       {children}

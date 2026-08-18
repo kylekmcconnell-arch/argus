@@ -18,6 +18,7 @@ import {
   type BasicFactsAudience,
 } from "../lib/basicFactQuestions";
 import { ExpandableText } from "./ExpandableText";
+import { EvidenceTip } from "./EvidenceTip";
 import { ProvenanceTag } from "./ProvenanceTag";
 import { provenanceForBasicFactStatus } from "../lib/provenance";
 
@@ -1012,17 +1013,24 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
             const url = safeHttpUrl(source.url)!;
             const contradicts = source.relation === "contradicts";
             return (
-              <a
+              <EvidenceTip
                 key={`${url}:${sourceIndex}`}
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={source.excerpt || sourceLabel(source, url)}
-                className={`btn-chip min-h-8 max-w-full normal-case tracking-normal ${contradicts ? "tint-avoid" : "tint-signal"}`}
+                excerpt={source.excerpt}
+                sourceName={sourceLabel(source, url)}
+                provider={source.provider}
+                capturedAt={source.capturedAt}
+                contradicts={contradicts}
               >
-                <ArrowSquareOut aria-hidden="true" size={12} weight="bold" className="shrink-0" />
-                <span className="max-w-52 truncate">{contradicts ? "Contradicts: " : ""}{sourceLabel(source, url)}</span>
-              </a>
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`btn-chip min-h-8 max-w-full normal-case tracking-normal ${contradicts ? "tint-avoid" : "tint-signal"}`}
+                >
+                  <ArrowSquareOut aria-hidden="true" size={12} weight="bold" className="shrink-0" />
+                  <span className="max-w-52 truncate">{contradicts ? "Contradicts: " : ""}{sourceLabel(source, url)}</span>
+                </a>
+              </EvidenceTip>
             );
           })}
         </div>
@@ -1238,17 +1246,24 @@ export function BasicFactsPanel({
                         const url = safeHttpUrl(source.url)!;
                         const contradicts = source.relation === "contradicts";
                         return (
-                          <a
+                          <EvidenceTip
                             key={`${url}:${sourceIndex}`}
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={source.excerpt || sourceLabel(source, url)}
-                            className={`btn-chip min-h-8 max-w-full normal-case tracking-normal ${contradicts ? "tint-avoid" : "tint-signal"}`}
+                            excerpt={source.excerpt}
+                            sourceName={sourceLabel(source, url)}
+                            provider={source.provider}
+                            capturedAt={source.capturedAt}
+                            contradicts={contradicts}
                           >
-                            <ArrowSquareOut aria-hidden="true" size={12} weight="bold" className="shrink-0" />
-                            <span className="max-w-52 truncate">{contradicts ? "Contradicts: " : ""}{sourceLabel(source, url)}</span>
-                          </a>
+                            <a
+                              href={url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`btn-chip min-h-8 max-w-full normal-case tracking-normal ${contradicts ? "tint-avoid" : "tint-signal"}`}
+                            >
+                              <ArrowSquareOut aria-hidden="true" size={12} weight="bold" className="shrink-0" />
+                              <span className="max-w-52 truncate">{contradicts ? "Contradicts: " : ""}{sourceLabel(source, url)}</span>
+                            </a>
+                          </EvidenceTip>
                         );
                       })}
                     </div>

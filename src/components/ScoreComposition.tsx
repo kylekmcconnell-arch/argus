@@ -22,6 +22,8 @@ export interface CompositionRow {
   supportCount?: number;
   counterCount?: number;
   questionCount?: number;
+  /** Where "Read the evidence" lands; defaults to #decision-basis-<axis>. */
+  evidenceHref?: `#${string}`;
 }
 
 function bandColor(ratio: number): string {
@@ -154,7 +156,7 @@ export function ScoreComposition({ rows, totalScore, capNote, challengeAnchor = 
           <Row
             key={row.axis}
             row={row}
-            evidenceAnchor={`#decision-basis-${row.axis}`}
+            evidenceAnchor={row.evidenceHref ?? `#decision-basis-${row.axis}`}
             challengeAnchor={challengeAnchor}
           />
         ))}

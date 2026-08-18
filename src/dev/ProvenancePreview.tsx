@@ -4,6 +4,7 @@
 // judged from swatches. Reached at ?design-preview=provenance in dev only.
 import { BasicFactsPanel, type BasicFactView, type BasicFactLeadView } from "../components/BasicFactsPanel";
 import { ProvenanceTag } from "../components/ProvenanceTag";
+import { ProvenancedValue } from "../components/ProvenancedValue";
 
 const src = (title: string, url: string) => [{ url, title, excerpt: "…the relevant passage as fetched and checked…" }];
 
@@ -103,6 +104,35 @@ export function ProvenancePreview() {
             <ProvenanceTag state={{ tier: "sourced" }} />
             <span className="mono text-[11px] text-ink-faint">← where it came from</span>
           </div>
+        </div>
+
+        <div className="panel mt-6 px-4 py-4">
+          <p className="mono text-[11px] uppercase tracking-[0.12em] text-ink-faint">
+            Provenance-dotted values, in running prose
+          </p>
+          <p className="mt-3 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">
+            The treasury holds{" "}
+            <ProvenancedValue
+              tier="sourced"
+              receipt={{
+                passage: "$9.1M stables, $4.2M SOL, $1.5M own token across 3 disclosed multisig wallets.",
+                sourceLabel: "Treasury wallets · onchain",
+                chain: [["Pulled onchain", "08:15"], ["Cross-checked vs explorer", "08:19"], ["Accepted by analyst", "14:02"]],
+              }}
+            >
+              $14.8M
+            </ProvenancedValue>{" "}
+            against a burn of{" "}
+            <ProvenancedValue
+              tier="derived"
+              receipt={{ passage: "Trailing 6-month average from disclosed operating wallet outflows.", sourceLabel: "Derived · operating wallet trace" }}
+            >
+              $310k/month
+            </ProvenancedValue>
+            , while{" "}
+            <ProvenancedValue tier="unestablished">the CFO's prior employer</ProvenancedValue>{" "}
+            has not been evidenced by anyone. Hover or focus any dotted value for its receipt.
+          </p>
         </div>
 
         <div className="mt-8">
