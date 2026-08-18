@@ -41,10 +41,10 @@ const SEMANTIC_TOKENS = ["pass", "caution", "fail", "avoid", "unverifiable"] as 
 // 2026-08-18). Values lifted from Precurion's live CSS where one exists;
 // ink-faint darkened from their #6b6d6d so it stays AA on panel-2.
 const LIGHT_PALETTE = {
-  void: "#f7f7f5",
-  panel: "#ffffff",
+  void: "#f1f0ec",
+  panel: "#fbfaf7",
   "panel-2": "#e9ebe7",
-  sidebar: "#f2f1ec",
+  sidebar: "#edece7",
   line: "#dedfdb",
   "line-2": "#c2c4be",
   "control-line": "#6f716c",

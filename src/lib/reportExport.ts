@@ -390,7 +390,7 @@ function section(title: string, body: string, kicker?: string): string {
 const CSS = `
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
-  body { font: 13px/1.55 "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #141414; background: #f7f7f5; margin: 0; padding: 40px 48px; }
+  body { font: 13px/1.55 "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #141414; background: #f1f0ec; margin: 0; padding: 40px 48px; }
   .mono { font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
   .dim { color: #5d605b; }
   a { color: #047756; text-decoration: none; }
@@ -398,12 +398,12 @@ const CSS = `
   header.masthead .brand { font-weight: 700; letter-spacing: .18em; font-size: 15px; }
   header.masthead .brand .eye { color: #047756; }
   header.masthead .id { color: #5d605b; font-size: 11px; font-family: ui-monospace, monospace; }
-  header.masthead .tag { margin-left: auto; font-size: 10px; letter-spacing: .1em; border: 1px solid #dedfdb; border-radius: 4px; padding: 2px 6px; color: #494b48; background: #fff; }
+  header.masthead .tag { margin-left: auto; font-size: 10px; letter-spacing: .1em; border: 1px solid #dedfdb; border-radius: 4px; padding: 2px 6px; color: #494b48; background: #fbfaf7; }
   .subject h1 { font-family: "Young Serif", Georgia, serif; font-weight: 400; letter-spacing: -.02em; font-size: 26px; margin: 16px 0 4px; }
   .subject h1 .handle { font-size: 13px; color: #5d605b; font-weight: 400; font-family: ui-monospace, monospace; letter-spacing: 0; }
   .subject .bio { margin: 4px 0; color: #494b48; max-width: 46em; }
   .subject .meta, .subject .roles { margin: 3px 0; font-size: 11.5px; color: #5d605b; }
-  .banner { display: flex; gap: 20px; align-items: center; border: 2px solid; border-radius: 8px; padding: 16px 20px; margin: 16px 0; background: #fff; }
+  .banner { display: flex; gap: 20px; align-items: center; border: 2px solid; border-radius: 8px; padding: 16px 20px; margin: 16px 0; background: #fbfaf7; }
   .banner-score { font-size: 36px; font-weight: 700; line-height: 1; font-family: ui-monospace, monospace; }
   .banner-score span { font-size: 13px; color: #9a9c96; }
   .banner-kicker { text-transform: uppercase; letter-spacing: .2em; font-size: 10px; color: #5d605b; }
@@ -416,13 +416,13 @@ const CSS = `
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #5d605b; border-bottom: 1px solid #dedfdb; padding: 5px 8px; }
   td { border-bottom: 1px solid #e8e9e5; padding: 6px 8px; vertical-align: top; }
-  .pill { display: inline-block; border: 1px solid #dedfdb; border-radius: 999px; padding: 0 6px; font-size: 10px; color: #494b48; background: #fff; }
+  .pill { display: inline-block; border: 1px solid #dedfdb; border-radius: 999px; padding: 0 6px; font-size: 10px; color: #494b48; background: #fbfaf7; }
   .note { color: #494b48; }
   ul.contradictions { list-style: none; padding: 0; margin: 0; }
   ul.contradictions li { padding: 6px 0; border-bottom: 1px solid #e8e9e5; }
   .sev { display: inline-block; font-size: 9px; text-transform: uppercase; border-radius: 3px; padding: 1px 5px; margin-right: 6px; }
   .sev-high { background: #f7e6e2; color: #8f1d1d; } .sev-medium { background: #f5ead9; color: #b45309; } .sev-low { background: #e9ebe7; color: #5d605b; }
-  .role-card { border: 1px solid #dedfdb; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; page-break-inside: avoid; background: #fff; }
+  .role-card { border: 1px solid #dedfdb; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; page-break-inside: avoid; background: #fbfaf7; }
   .role-head { display: flex; justify-content: space-between; font-size: 13px; }
   .role-name { font-weight: 600; }
   .role-verdict { font-weight: 600; font-family: ui-monospace, monospace; font-size: 12px; }
@@ -439,7 +439,7 @@ const CSS = `
   .sub { margin-top: 14px; page-break-inside: avoid; }
   .sub h3, .tier h3 { font-size: 12.5px; margin: 0 0 6px; }
   .sub h3 .kicker { font-weight: 400; font-size: 10.5px; color: #9a9c96; }
-  .tier { border: 1px solid #dedfdb; border-radius: 8px; padding: 10px 14px; margin-top: 8px; page-break-inside: avoid; background: #fff; }
+  .tier { border: 1px solid #dedfdb; border-radius: 8px; padding: 10px 14px; margin-top: 8px; page-break-inside: avoid; background: #fbfaf7; }
   .tier ul { margin: 0; padding-left: 18px; }
   .tier li { margin: 3px 0; }
   .tier.t-bad h3 { color: #b3402e; } .tier.t-warn h3 { color: #b45309; } .tier.t-good h3 { color: #12915f; }
@@ -448,7 +448,7 @@ const CSS = `
   .chk { font-family: ui-monospace, monospace; font-size: 11px; white-space: nowrap; }
   .chk-pass { color: #12915f; } .chk-warn { color: #b45309; } .chk-fail { color: #b3402e; } .chk-na { color: #9a9c96; }
   footer { margin-top: 28px; border-top: 1px solid #dedfdb; padding-top: 12px; font-size: 11px; color: #5d605b; }
-  @media print { body { padding: 0; background: #fff; } a { color: #141414; } }
+  @media print { body { padding: 0; background: #fbfaf7; } a { color: #141414; } }
 `;
 
 /* ── the pure serializer ──────────────────────────────────────────── */
