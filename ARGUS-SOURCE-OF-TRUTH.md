@@ -139,16 +139,21 @@ can support that conclusion.
 
 ## Decision experience
 
-The report opens with:
+The report opens with the interactive dossier as the reading document:
+named beats derived by `buildDossier()` from the live payload (identity,
+team, product, perimeter, coverage, verdict). Headings are counts and
+recorded states only. The display name is not a bind key. First-party
+named team is not independently corroborated. Provenance colour is
+source-of-truth, not pass/fail.
 
 1. the source-backed investment case;
 2. what could break the thesis; and
 3. what the investor should verify next.
 
-It then shows the ARGUS edge: verified decision facts, cited decision sources,
-conflicts tested, relationship records, ranked open questions, and an immutable
-evidence snapshot. Provider diagnostics, axes, source excerpts, hashes, and
-methodology remain available beneath that adviser layer.
+Panels, ARGUS EYE, methodology/checks, share, and ScoreComposition remain
+the deep dive beneath that dossier spine. Provider diagnostics, axes,
+source excerpts, hashes, and methodology stay available there. The DEV
+`?design-preview=dossier` harness stays a fixture-only preview.
 
 One governing count controls open questions across the header, summary, report
 rail, persisted report, and public report. Optional vendor failures do not become

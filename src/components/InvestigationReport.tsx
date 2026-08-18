@@ -69,7 +69,8 @@ import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
-import { tokenDimensionChapters } from "../lib/dimensionChapters";
+import { personDimensionChapters, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { DossierReport } from "./DossierReport";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -1633,8 +1634,30 @@ export function InvestigationReport({
             />
           )}
 
-          {/* the reading spine: each weighted dimension as its own chapter,
-              a judgment headline with the recorded facts underneath */}
+          {/* the reading spine: live dossier first; token/person chapters are the deep dive */}
+          <DossierReport
+            payload={{
+              ...(projectAccount ? (projectAccount as unknown as Record<string, unknown>) : {
+                handle: projectX ?? "",
+                display_name: token.name || token.symbol,
+                website: siteUrl,
+                headline: token.headline,
+                avatar_url: token.imageUrl,
+                report: { verdict: token.verdict, score_total: token.score },
+              }),
+              checkRuns: projectAccount?.checkRuns?.length ? projectAccount.checkRuns : diligenceChecks,
+              basicFacts: projectAccount?.basicFacts?.length ? projectAccount.basicFacts : projectBasicFacts,
+              basicFactLeads: projectAccount?.basicFactLeads ?? projectBasicFactLeads,
+              webTeam: groundedProjectTeamMembers,
+              webTeamLeads: projectAccount?.webTeamLeads ?? [],
+            }}
+          />
+          {projectAccount?.projectStrengthBands && (
+            <DimensionChapters
+              chapters={personDimensionChapters(projectAccount.projectStrengthBands)}
+              checksHref="#investigation-methodology"
+            />
+          )}
           <DimensionChapters
             chapters={tokenDimensionChapters(token)}
             checksHref="#investigation-methodology"
@@ -1735,6 +1758,7 @@ export function InvestigationReport({
             sticky={false}
             label="Report story"
             items={[
+              { href: "#dossier", label: "The file", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#report-summary", label: "The short answer", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               ...(projectAccount?.intelligence ? [{ href: "#decision-intelligence" as const, label: "Deep dive", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> }] : []),
               ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),

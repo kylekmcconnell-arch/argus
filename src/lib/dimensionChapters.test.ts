@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tokenDimensionChapters } from "./dimensionChapters";
+import { personDimensionChapters, tokenDimensionChapters } from "./dimensionChapters";
 import type { TokenDossier } from "../token/audit";
 
 const dossier = (): TokenDossier => ({
@@ -80,5 +80,32 @@ describe("tokenDimensionChapters", () => {
     (bare as unknown as { liquidityUsd?: number }).liquidityUsd = undefined;
     const t1 = tokenDimensionChapters(bare).find((c) => c.axis === "T1")!;
     expect(t1.facts.some((f) => f.label === "Liquidity")).toBe(false);
+  });
+});
+
+describe("personDimensionChapters", () => {
+  it("chooses the headline from the recorded strength-band tier", () => {
+    const chapters = personDimensionChapters({
+      P1_team_and_identity: { tier: "solid", minScore: 10, maxScore: 16, reasons: ["Two first-party named operators."] },
+      P5_traction_and_liveness: { tier: "weak", minScore: 2, maxScore: 6, reasons: ["Last post 40 days ago."] },
+    });
+    expect(chapters.find((c) => c.axis === "P1_team_and_identity")).toMatchObject({
+      tone: "pass",
+      headline: "The people behind this are on the record.",
+      lead: "Two first-party named operators.",
+    });
+    expect(chapters.find((c) => c.axis === "P5_traction_and_liveness")).toMatchObject({
+      tone: "fail",
+      headline: "Signs of life remain unresolved.",
+      lead: "Last post 40 days ago.",
+    });
+  });
+
+  it("does not invent a fact the band never recorded", () => {
+    const chapters = personDimensionChapters({
+      P2_product_substance: { tier: "emerging" },
+    });
+    expect(chapters[0].facts.some((f) => f.label === "Recorded range")).toBe(false);
+    expect(chapters[0].lead).toBe("");
   });
 });

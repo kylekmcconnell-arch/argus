@@ -231,9 +231,12 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     website: str(payload.website) || null,
   };
   const report = (payload.report ?? {}) as Record<string, unknown>;
+  // Live AuditReport stores both pairs. The dynex fixture only has
+  // verdict / score_total. Prefer those; fall back to the composite fields
+  // so a production dossier is not UNKNOWN when only the live names exist.
   const verdict = {
-    call: str(report.verdict) || "UNKNOWN",
-    score: num(report.score_total),
+    call: str(report.verdict) || str(report.composite_verdict) || "UNKNOWN",
+    score: num(report.score_total) ?? num(report.governing_score),
     headline: str(payload.headline) || null,
   };
 
@@ -357,23 +360,34 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       leads: leads.length,
       failedProviders: arr<{ provider?: unknown }>(payload.providerFailures).map((f) => str(f.provider)).filter(Boolean),
     },
-    team: arr<Record<string, unknown>>(payload.webTeamLeads).map((m): TeamMember => {
-      // Read the durable marker the collector sets, never re-derive it here.
-      // An earlier draft pattern-matched the source string for "post role-scan"
-      // or "official", which silently missed the following and amplification
-      // lanes the collector also treats as first-party, so real avatars for
-      // those two lanes would have been dropped at render. Two independent
-      // definitions of the same boundary is one definition too many.
-      const firstParty = str(m.handleProvenance) === "subject_first_party";
-      return {
-        name: str(m.name),
-        role: str(m.role),
-        handle: str(m.handle) || null,
-        firstParty,
-        avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
-        avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
-      };
-    }).filter((m) => m.name),
+    team: (() => {
+      // Union collector leads with grounded webTeam rows the leads list may
+      // omit. firstParty is only the durable marker — never inferred from a
+      // display name, a face, or the word "official".
+      const rows = [
+        ...arr<Record<string, unknown>>(payload.webTeamLeads),
+        ...arr<Record<string, unknown>>(payload.webTeam),
+      ];
+      const seen = new Set<string>();
+      const team: TeamMember[] = [];
+      for (const m of rows) {
+        const name = str(m.name);
+        if (!name) continue;
+        const key = `${name}|${str(m.handle)}|${str(m.role)}`.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const firstParty = str(m.handleProvenance) === "subject_first_party";
+        team.push({
+          name,
+          role: str(m.role),
+          handle: str(m.handle) || null,
+          firstParty,
+          avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
+          avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
+        });
+      }
+      return team;
+    })(),
     nextActions: arr<Record<string, unknown>>((payload.researchPlan as Record<string, unknown>)?.nextActions)
       .map((a) => ({ rank: num(a.rank) ?? 0, action: str(a.action), whyNow: str(a.whyNow) || null }))
       .filter((a) => a.action).sort((a, b) => a.rank - b.rank),

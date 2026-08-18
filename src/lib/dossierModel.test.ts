@@ -156,3 +156,54 @@ describe("team enrichment boundary", () => {
     expect(m.avatarCapturedAt).toBeNull();
   });
 });
+
+describe("live report field names", () => {
+  it("reads composite_verdict and governing_score when the fixture pair is absent", () => {
+    const dossier = buildDossier({
+      handle: "@clutchmarkets",
+      display_name: "CLUTCH",
+      website: "https://clutch.markets/",
+      report: { composite_verdict: "CAUTION", governing_score: 61 },
+      basicFacts: [],
+      checkRuns: [],
+      basicFactLeads: [],
+      providerFailures: [],
+    });
+    expect(dossier.verdict.call).toBe("CAUTION");
+    expect(dossier.verdict.score).toBe(61);
+    expect(dossier.beats.find((b) => b.id === "verdict")!.heading).toBe("CAUTION · 61/100");
+  });
+
+  it("unions grounded webTeam without inventing first-party from a face or a name", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [],
+      checkRuns: [],
+      basicFactLeads: [],
+      providerFailures: [],
+      webTeam: [{
+        name: "Official Site Person",
+        role: "Engineer",
+        avatarUrl: "https://example.org/face.jpg",
+        artifact_verified: true,
+        evidence_origin: "deterministic",
+      }],
+    });
+    expect(dossier.team).toHaveLength(1);
+    expect(dossier.team[0].firstParty).toBe(false);
+    expect(dossier.team[0].avatarUrl).toBeNull();
+  });
+
+  it("never hardcodes the Loom fiction line", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [],
+      checkRuns: [],
+      basicFactLeads: [],
+      providerFailures: [],
+    });
+    const text = JSON.stringify(dossier);
+    expect(text).not.toContain("Fourteen people");
+    expect(text).not.toContain("Nine of them proven");
+  });
+});
