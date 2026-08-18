@@ -664,7 +664,7 @@ describe("critical-gap search recovery", () => {
     const grokCalls = fetchMock.mock.calls.filter(([input]) =>
       String(input) === "https://api.x.ai/v1/responses").length;
 
-    expect(result.detail).toContain("Claude fallback");
+    expect(result.detail).toContain("primary claude-web-search");
     expect(primaryRuns.some((run) => run.provider === "claude-web-search" || run.provider === "grok")).toBe(true);
     expect(anthropicCalls).toBeGreaterThan(0);
     expect(grokCalls).toBeGreaterThan(0);
@@ -5538,7 +5538,7 @@ describe("grounded discovery lane", () => {
   it("routes primary discovery through groundedSearch and labels leads grounded", async () => {
     vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
     vi.stubEnv("SERPER_API_KEY", "serper-test-key");
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const grounded = await import("./groundedSearch");
     const spy = vi.spyOn(grounded, "groundedSearch").mockResolvedValue(JSON.stringify({
       facts: [{
@@ -5583,7 +5583,7 @@ describe("grounded discovery lane", () => {
 
   it("reports a configured grounded runtime outage as failed, not unprovisioned", async () => {
     vi.stubEnv("SERPER_API_KEY", "serper-test-key");
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
     const grounded = await import("./groundedSearch");
     const spy = vi.spyOn(grounded, "groundedSearch").mockResolvedValue(null);
     try {

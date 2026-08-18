@@ -4964,7 +4964,7 @@ describe("analyst verdict integrity", () => {
         identity_note: "Identity resolved",
       };
       if (attempt === 2) {
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "axis-count",
         );
       }
@@ -5035,14 +5035,14 @@ describe("analyst verdict integrity", () => {
         tool_choice: { name: string };
       };
       if (attempt === 1) {
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "P1_team_and_identity: exceptional evidence, allowed 14-16; P4_backing_and_partners: solid evidence, allowed 10-11",
         );
       } else {
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "project-scores-outside-evidence-strength-band:P1_team_and_identity,P4_backing_and_partners",
         );
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "Required bands by axis: P1_team_and_identity: 14-16 (exceptional); P4_backing_and_partners: 10-11 (solid)",
         );
       }
@@ -5222,17 +5222,17 @@ describe("analyst verdict integrity", () => {
         messages: Array<{ content: string }>;
         tool_choice: { name: string };
       };
-      expect(promptText(request.messages[0].content)).toContain("PUBLIC DILIGENCE GAP RULE");
-      expect(promptText(request.messages[0].content)).toContain("government-issued ID, passport, SSN or tax ID, home address");
-      expect(promptText(request.messages[0].content)).toContain("private account credentials");
-      expect(promptText(request.messages[0].content)).toContain("other non-public personal proof");
-      expect(promptText(request.messages[0].content)).toContain(
+      expect(requestUser(request)).toContain("PUBLIC DILIGENCE GAP RULE");
+      expect(requestUser(request)).toContain("government-issued ID, passport, SSN or tax ID, home address");
+      expect(requestUser(request)).toContain("private account credentials");
+      expect(requestUser(request)).toContain("other non-public personal proof");
+      expect(requestUser(request)).toContain(
         "A checked-empty reference records a completed clear or negative screen",
       );
-      expect(promptText(request.messages[0].content)).toContain(
+      expect(requestUser(request)).toContain(
         "it is not an evidence gap and must not create a gap line by itself",
       );
-      const eligibilityLine = promptText(request.messages[0].content).split("\n")
+      const eligibilityLine = requestUser(request).split("\n")
         .find((line) => line.startsWith("F1_identity_verifiability |")) ?? "";
       expect(eligibilityLine).toContain(
         `coverageRefs preferred return set (optional; return 0-4 total, never the whole ` +
@@ -5240,14 +5240,14 @@ describe("analyst verdict integrity", () => {
       );
       expect(eligibilityLine).not.toContain(omittedCoverageAlias);
       if (attempt === 2) {
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "coverage-reference-limit-observed-5-max-4:F1_identity_verifiability",
         );
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           `The prior F1_identity_verifiability coverageRefs contained 5 aliases; the maximum is 4. ` +
           `Return no more than these four preferred aliases: ${coverageCandidates.join(", ")}`,
         );
-        expect(promptText(request.messages[0].content)).toContain(
+        expect(requestUser(request)).toContain(
           "Do not append or move omitted coverage aliases into support or counter fields",
         );
       }
@@ -5453,7 +5453,10 @@ describe("analyst verdict integrity", () => {
       },
       ventures: [{ project_name: "Verified Venture", role: "founder", outcome: "Active" }],
     }, catalog);
-    const fetchMock = vi.fn(async () => grokStructuredOk({}));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ finish_reason: "length", message: { content: "" } }],
+      usage: { prompt_tokens: 100, completion_tokens: 100 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "info").mockImplementation(() => undefined);
 
