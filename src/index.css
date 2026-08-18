@@ -73,10 +73,14 @@
    Merging this to main amends DESIGN.md §2 — flag for Kyle's sign-off. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-void: #f7f7f5; /* precurion --surface */
-  --color-panel: #ffffff; /* precurion --surface-raised */
+  /* The ground sits a visible step deeper than the reading surfaces, and the
+     surfaces are not stark white but a much lighter shade of the same warm
+     ground (Enigma, 2026-08-18) — important reading lifts off the page the
+     way precurion.com's document cards do. */
+  --color-void: #f1f0ec; /* warm ground, deeper than the reading surfaces */
+  --color-panel: #fbfaf7; /* the reading surface: near-white warm paper */
   --color-panel-2: #e9ebe7; /* precurion --surface-plate */
-  --color-sidebar: #f2f1ec; /* warm rail, near --surface-canvas #faf7f2 */
+  --color-sidebar: #edece7; /* rail, a step deeper than the ground */
   --color-line: #dedfdb; /* precurion --rule */
   --color-line-2: #c2c4be;
   --color-control-line: #6f716c;
@@ -206,10 +210,12 @@
 :root[data-theme="light"] .panel {
   border-color: color-mix(in oklab, var(--color-line-2) 38%, var(--color-line));
   background: var(--color-panel);
+  /* Precurion's artefact shadow: soft and document-like, so the paper card
+     reads as lifted off the warm ground rather than outlined on it. */
   box-shadow:
     inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
-    0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent),
-    0 16px 36px -30px color-mix(in oklab, var(--color-ink) 26%, transparent);
+    0 1px 2px color-mix(in oklab, var(--color-ink) 5%, transparent),
+    0 14px 34px -14px color-mix(in oklab, var(--color-ink) 14%, transparent);
 }
 
 /* Provenance-dotted value (DESIGN.md 2.1, design-and-ui): a figure whose
