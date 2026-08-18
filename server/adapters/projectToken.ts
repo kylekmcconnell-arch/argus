@@ -1,5 +1,5 @@
 import type { ProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
-import { canonicalOfficialWebsite } from "../../src/lib/fundScaleEvidence";
+import { canonicalOfficialWebsite, type OfficialWebsiteScope } from "../../src/lib/fundScaleEvidence";
 import { readCandle, summarizeCandles, type Candle } from "../../src/lib/priceHistory";
 import { env } from "../config";
 import { captureTimestamp } from "../captureTime";
@@ -608,21 +608,42 @@ async function collectDexProjectToken(
 }
 
 /**
- * Bind the token a project publishes on its OWN verified domain.
- *
- * This is first-party evidence and outranks anything a registry self-reports:
- * the project is stating, on the domain ARGUS already verified belongs to it,
- * which contract is theirs. Every candidate on the page is resolved on-chain
- * and only a single tradeable token may survive, so a page listing a treasury
- * beside its token binds the token, and a page listing several tradeable
- * tokens binds nothing rather than guessing.
+ * Official websites already unique-ID bound to this subject. Never search
+ * leads: only the provider-frozen X profile website, extra twitterapi
+ * website/entity URLs on that same profile record, and first-party official
+ * sites already cited on the evidence (verified official_subject sources).
  */
-async function collectSiteDeclaredToken(
+function officialWebsiteScopes(ctx: CollectContext): OfficialWebsiteScope[] {
+  const seen = new Set<string>();
+  const scopes: OfficialWebsiteScope[] = [];
+  const add = (value: unknown) => {
+    const scope = canonicalOfficialWebsite(value);
+    if (!scope || seen.has(scope.canonicalUrl)) return;
+    seen.add(scope.canonicalUrl);
+    scopes.push(scope);
+  };
+  add(ctx.evidence.profile.website);
+  for (const url of ctx.evidence.profile.official_websites ?? []) add(url);
+  for (const fact of ctx.evidence.basicFacts ?? []) {
+    if (fact.artifact_verified !== true) continue;
+    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
+    for (const source of fact.sources) {
+      if (
+        source.sourceClass !== "official_subject"
+        || source.relation !== "supports"
+        || source.artifactVerified !== true
+      ) continue;
+      add(source.url);
+    }
+  }
+  return scopes;
+}
+
+async function resolveSiteDeclaredOnPage(
   ctx: CollectContext,
-  fetchImpl: typeof fetch = fetch,
+  scope: OfficialWebsiteScope,
+  fetchImpl: typeof fetch,
 ): Promise<{ snapshot: ProjectTokenSnapshot; sourceUrl: string } | null> {
-  const scope = canonicalOfficialWebsite(ctx.evidence.profile.website);
-  if (!scope) return null;
   let html: string;
   let identityCapturedAt: string;
   try {
@@ -726,6 +747,37 @@ async function collectSiteDeclaredToken(
       ...(pairAddress ? { pairAddress } : {}),
     } as ProjectTokenSnapshot,
   };
+}
+
+/**
+ * Bind the token a project publishes on its OWN verified domains.
+ *
+ * Walks every first-party official website already bound to this subject,
+ * not just profile.website. A page with 0 or >1 tradeable tokens is skipped.
+ * The first page that yields exactly one tradeable token wins unless a later
+ * official page declares a different tradeable token (same ambiguity rule
+ * as a single page with two tokens).
+ */
+async function collectSiteDeclaredToken(
+  ctx: CollectContext,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ snapshot: ProjectTokenSnapshot; sourceUrl: string } | null> {
+  const scopes = officialWebsiteScopes(ctx);
+  if (!scopes.length) return null;
+
+  const declared: Array<{ snapshot: ProjectTokenSnapshot; sourceUrl: string }> = [];
+  for (const scope of scopes) {
+    const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl);
+    if (found) declared.push(found);
+  }
+  if (!declared.length) return null;
+  const addresses = new Set(declared.map((row) => row.snapshot.address.toLowerCase()));
+  if (addresses.size !== 1) {
+    recordCall("site-fetch", "token-declaration", 0, "ambiguous_multiple_tokens", "succeeded");
+    return null;
+  }
+  // First official page that declared this unique tradeable token wins.
+  return declared[0];
 }
 
 async function dexPairs(address: string): Promise<JsonRecord[] | null> {

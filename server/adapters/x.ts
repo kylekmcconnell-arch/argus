@@ -307,6 +307,8 @@ export interface XProfile {
   followers?: number;
   createdAt?: string;
   website?: string;
+  /** Every official http(s) URL on this twitterapi profile record (website + entities). */
+  officialWebsites?: string[];
   image?: string; // real X profile photo URL (more reliable than an unavatar guess)
 }
 
@@ -363,15 +365,37 @@ export async function publicXAccountState(
 }
 
 // The project's own website is the biggest un-mined lead on a project account —
-// the team page lives there, not in the tweets. twitterapi returns the bio link
-// under a few shapes; take the first real http(s) one.
+// the team page lives there, not in the tweets. twitterapi returns the bio
+// website and entity URLs under a few shapes. Keep EVERY unique-ID-bound
+// http(s) URL from that same profile record, not just the first: a project
+// can put the company site in the website field and the token site in a
+// bio entity (@CLUTCHMARKETS / clutch.markets vs stonkbrokers.cash).
+function twitterapiOfficialUrls(p: any): string[] {
+  const out: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value === "string" && /^https?:\/\//i.test(value) && !out.includes(value)) {
+      out.push(value);
+    }
+  };
+  const takeEntityUrls = (entities: any) => {
+    for (const bucket of [entities?.url?.urls, entities?.description?.urls]) {
+      if (!Array.isArray(bucket)) continue;
+      for (const entry of bucket) {
+        push(entry?.expanded_url ?? entry?.url);
+      }
+    }
+  };
+  takeEntityUrls(p?.profile_bio?.entities);
+  takeEntityUrls(p?.entities);
+  push(p?.url);
+  push(p?.profile_url);
+  push(p?.website);
+  push(p?.link);
+  return out;
+}
+
 function pickWebsite(p: any): string | undefined {
-  const cands = [
-    p?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url,
-    p?.entities?.url?.urls?.[0]?.expanded_url,
-    p?.url, p?.profile_url, p?.website, p?.link,
-  ].filter((x) => typeof x === "string" && /^https?:\/\//i.test(x));
-  return cands[0];
+  return twitterapiOfficialUrls(p)[0];
 }
 
 export async function getProfile(handle: string): Promise<XProfile | null> {
@@ -409,6 +433,7 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
         followers: p.followers ?? p.followers_count,
         createdAt: p.createdAt ?? p.created_at,
         website: pickWebsite(p),
+        officialWebsites: twitterapiOfficialUrls(p),
         image,
       };
     } catch {
@@ -1993,6 +2018,10 @@ export const xAdapter: Adapter = {
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
       ctx.evidence.profile.website = canonicalPublicProfileWebsite(prof.website)
         ?? ctx.evidence.profile.website;
+      const officialWebsites = (prof.officialWebsites ?? [])
+        .map((url) => canonicalPublicProfileWebsite(url))
+        .filter((url): url is string => Boolean(url));
+      if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);
       if (prof.image) {
         ctx.evidence.profile.avatar_url = prof.image;

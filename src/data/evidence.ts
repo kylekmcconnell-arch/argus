@@ -66,6 +66,13 @@ export interface SubjectProfile {
   avatar_url?: string; // real X profile photo URL, when resolved (else derive from handle)
   avatar_source_state?: "resolved" | "none"; // explicit twitterapi outcome; absence means collection was unavailable
   website?: string;    // independently resolved first-party site, when available
+  /**
+   * Additional official websites unique-ID bound to this same X profile
+   * (twitterapi website + entity URLs from that exact profile record).
+   * Includes the primary `website` when it came from that record. Never
+   * search leads or model-suggested URLs.
+   */
+  official_websites?: string[];
   /** What the profile website actually served when fetched (sitecheck outcome).
    * "live" means a substantial product surface was observed on the domain. */
   site_substance_status?: "live" | "coming_soon" | "unreachable" | "access_blocked" | "unavailable" | "client_rendered";
