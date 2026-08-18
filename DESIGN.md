@@ -7,17 +7,34 @@ visual audit (2026-07-11) found 5 verdict-badge idioms, 5 external-link styles, 
 implementations, 25+ font sizes, three parallel status→color maps, and a broken
 `var(--color-x)14` alpha hack silently rendering nothing in 8 files. One concept, one idiom.
 
-The identity: **a forensic instrument, not a SaaS dashboard.** Graphite-black intelligence room,
-one royal-blue signal, verdicts that read like stamped findings. Density over decoration
+The identity: **a forensic instrument, not a SaaS dashboard.** Density over decoration
 (REPORT-UX-AUDIT.md P2); critical metadata legible at arm's length (P1).
+
+> **AMENDMENT — `design-and-ui` branch, 2026-08-18 (Enigma; awaiting Kyle's
+> sign-off before this merges to main).** The default light theme is retuned
+> to a warm-paper palette after precurion.com — paper surfaces, `#141414`
+> ink, and one deep-green signal (`#047756`) replacing royal blue; caution
+> moves from dusty rose to amber. The display voice moves from wide Archivo
+> to **Young Serif**, with **Geist** as the UI face. Token NAMES, idiom
+> names, and the font ramp are unchanged; only values moved, so every
+> component follows automatically. The graphite intelligence-room theme
+> remains as the explicit dark choice. The contract below is otherwise in
+> force; where this block conflicts with older wording ("graphite-black",
+> "royal-blue", "Archivo drawn wide"), this block wins on the branch.
+> Structure and mechanics guidance in
+> `docs/REPORT-EXPERIENCE-BRIEF-2026-08-17.md` still applies; its §7
+> palette prohibition is what this amendment overrides. Precurion's page
+> *copy* is not adopted — ARGUS speaks in its own words.
 
 ## 1 · Typography
 
-Fonts (loaded in `index.html`):
-- **Archivo** (variable, `wdth` 62–125, `wght` 100–900) — all UI text. The expanded width
-  (`.display` class) is the brand voice: wordmark, page titles, verdict words, hero.
+Fonts (loaded in `index.html`; amended on `design-and-ui`, see above):
+- **Young Serif** — the display voice (`.display` / `.display-sm`), at display
+  sizes only: wordmark, page titles, subject names, verdict words, hero.
+  Restraint is the idiom — the serif never appears in body or UI text.
+- **Geist** — all UI and body text (`--font-sans`).
 - **Geist Mono** — all data: handles, addresses, hashes, scores, timestamps, chips, eyebrows.
-- Sora is removed.
+- Archivo and Sora are removed.
 
 The ramp — the ONLY font sizes allowed (Tailwind arbitrary values, exact px):
 

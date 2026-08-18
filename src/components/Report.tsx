@@ -52,6 +52,7 @@ import { decisionCriticalChecks, isAdverseFinding, personChecks } from "../lib/s
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
+import { ScoreComposition } from "./ScoreComposition";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { KolReport } from "./KolReport";
@@ -3329,6 +3330,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         </section>
 
+        {/* the composition strip: the governing role's weighted dimensions as
+            readable rows — expand for the why, jump to the evidence, or
+            challenge the score */}
+        {presentation.primaryScore && governingAxes.length > 0 && (
+          <ScoreComposition
+            rows={governingAxes.map(([axis, a]) => ({
+              axis,
+              label: diligenceAreaLabel(axis),
+              score: a.score,
+              weight: a.weight,
+              rationale: a.rationale,
+              supportCount: a.evidenceRefs?.length,
+              counterCount: a.counterEvidenceRefs?.length,
+              questionCount: a.gaps?.length,
+            }))}
+            totalScore={report.governing_score}
+            capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
+          />
+        )}
+
         <div className="sticky top-[69px] z-20 mt-5">
           <ReportCanvasSectionNav
             sticky={false}
@@ -4422,8 +4443,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
-          {/* ask-the-report chat — grounded in this person's own evidence */}
-          <div className="min-w-0 lg:col-span-2">
+          {/* ask-the-report chat — grounded in this person's own evidence.
+              Also the landing point for the composition strip's "Challenge
+              this" affordance. */}
+          <div id="ask-report" className="min-w-0 scroll-mt-28 lg:col-span-2">
             <AskReport
               subject={report.handle}
               reportVersionId={evidenceReportVersionId}
