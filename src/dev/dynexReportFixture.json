@@ -1,0 +1,1033 @@
+{
+  "handle": "@dynexcoin",
+  "display_name": "Dynex",
+  "website": "https://dynexcoin.org/",
+  "joined": "Sep 2022",
+  "followers": "39.4K",
+  "headline": "Dynex shows a publicly identifiable team, a live audited product with documented early marketplace revenue, and a verified canonical token, but independent corroboration of partnerships, ongoing usage scale, and market conduct remains limited.",
+  "bio": "Dynex is the world’s only accessible neuromorphic quantum computing cloud for solving real-world problems, at scale. \n$DNX #DePIN #DeSci #PoUW #AI #quantum",
+  "avatar_url": "https://pbs.twimg.com/profile_images/1648647889109827585/JLmTtf5v_400x400.jpg",
+  "last_post_at": "2026-08-04T15:25:01.000Z",
+  "days_since_post": 11,
+  "report": {
+    "verdict": "CAUTION",
+    "score_total": 63
+  },
+  "projectStrengthBands": {
+    "P3_token_conduct": {
+      "tier": "emerging",
+      "reasons": [
+        "no canonical token; conduct scored from verified disclosures",
+        "verified security review"
+      ],
+      "maxScore": 13,
+      "minScore": 8,
+      "anchorArtifactIds": [
+        "art_v1_643bb2b420d766188ef1ab2e515dfafac0c2b60b61f729935b6ae360a3f9e08c"
+      ]
+    },
+    "P1_team_and_identity": {
+      "tier": "exceptional",
+      "reasons": [
+        "1 source-backed leader",
+        "official identity linkage",
+        "operator corroboration"
+      ],
+      "maxScore": 16,
+      "minScore": 14,
+      "anchorArtifactIds": [
+        "art_v1_3feb10d94890d8c4320f63f6c55ce1e3a27b06ee8e2657210ccacf02f59b2b9e",
+        "art_v1_739b68f5d52d49ad324322ce03cd625ae62ca4a11771f0ad2dd7f4d18fd098de",
+        "art_v1_876eca8ce64dc1f4924d686d285a8b78e803b2ab597fa66ca5b8c32bd1301d5d"
+      ]
+    },
+    "P2_product_substance": {
+      "tier": "emerging",
+      "reasons": [
+        "source-backed product operation"
+      ],
+      "maxScore": 16,
+      "minScore": 10,
+      "anchorArtifactIds": [
+        "art_v1_846f888dd6d0aceafcc461679bde79e5e50b850c0b21afbf9bfcc523bc7f75e4",
+        "art_v1_d7ad6dd3d427d655db82232dc733b3d64a27340809e8780cf71a480f77b400ba",
+        "art_v1_643bb2b420d766188ef1ab2e515dfafac0c2b60b61f729935b6ae360a3f9e08c"
+      ]
+    },
+    "P4_backing_and_partners": {
+      "tier": "emerging",
+      "reasons": [
+        "1 named advisor or backer record"
+      ],
+      "maxScore": 9,
+      "minScore": 6,
+      "anchorArtifactIds": [
+        "art_v1_1f157608d336b5f588e5b8a0bc9f9b05c9c79dea58b5e0beea9b9ffd4e37485f"
+      ]
+    },
+    "P5_traction_and_liveness": {
+      "tier": "emerging",
+      "reasons": [
+        "current operating activity"
+      ],
+      "maxScore": 9,
+      "minScore": 6,
+      "anchorArtifactIds": [
+        "art_v1_876eca8ce64dc1f4924d686d285a8b78e803b2ab597fa66ca5b8c32bd1301d5d"
+      ]
+    },
+    "P6_transparency_integrity": {
+      "tier": "solid",
+      "reasons": [
+        "verified legal operator",
+        "verified audit disclosure"
+      ],
+      "maxScore": 10,
+      "minScore": 9,
+      "anchorArtifactIds": [
+        "art_v1_739b68f5d52d49ad324322ce03cd625ae62ca4a11771f0ad2dd7f4d18fd098de",
+        "art_v1_643bb2b420d766188ef1ab2e515dfafac0c2b60b61f729935b6ae360a3f9e08c"
+      ]
+    }
+  },
+  "domainRegistration": {
+    "domain": "dynexcoin.org",
+    "source": "https://rdap.org/domain/dynexcoin.org",
+    "hostname": "dynexcoin.org",
+    "ageMonths": 46,
+    "capturedAt": "2026-08-16T04:51:31.712Z",
+    "registeredAt": "2022-09-22T06:37:50.762Z"
+  },
+  "profileAuthenticity": {
+    "note": "Image is a stylized abstract logo (hexagon/arrow motif), not a photo of a person. Common for crypto/tech project branding rather than a personal profile picture.\" Visual classification does not establish who owns or originally published the image.",
+    "flag": false
+  },
+  "webTeamLeads": [
+    {
+      "name": "Daniela Herrmann",
+      "role": "CEO & Co-Founder",
+      "source": "web/LinkedIn search"
+    },
+    {
+      "name": "Sheldon Inwentash",
+      "role": "advisor",
+      "source": "X content"
+    },
+    {
+      "name": "Y3ti",
+      "role": "head of CTF",
+      "source": "X content"
+    },
+    {
+      "name": "Sumi",
+      "role": "head of CTF",
+      "source": "X content"
+    },
+    {
+      "name": "proph3ttt",
+      "role": "advisor",
+      "handle": "@proph3ttt",
+      "source": "post role-scan"
+    },
+    {
+      "name": "@DynexMoonshots",
+      "role": "co-founder",
+      "handle": "@DynexMoonshots",
+      "source": "post role-scan"
+    }
+  ],
+  "researchPlan": {
+    "nextActions": [
+      {
+        "rank": 1,
+        "action": "Who founded, operates, owns, governs, or practically controls the subject?",
+        "whyNow": "4 decision-critical evidence gaps raised this workstream."
+      },
+      {
+        "rank": 2,
+        "action": "What sanctions, litigation, regulatory, exploit, scam, rug, or integrity evidence is directly attributable?",
+        "whyNow": "3 decision-critical evidence gaps raised this workstream."
+      },
+      {
+        "rank": 3,
+        "action": "What conclusion follows from the admissible evidence, and what remains decision-critical?",
+        "whyNow": "Selected for investment due diligence based on the provider-backed subject role."
+      },
+      {
+        "rank": 4,
+        "action": "What official asset is bound to the subject, and what do liquidity, holders, unlocks, and market history show?",
+        "whyNow": "Selected for investment due diligence based on the provider-backed subject role."
+      },
+      {
+        "rank": 5,
+        "action": "What is the strongest evidence against the emerging thesis, and which claims conflict?",
+        "whyNow": "Selected for investment due diligence based on the provider-backed subject role."
+      }
+    ]
+  },
+  "cost": {
+    "usd": 0.64,
+    "estimated": true
+  },
+  "basicFactQuestionLedger": [
+    {
+      "status": "answered"
+    },
+    {
+      "status": "answered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "answered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "answered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "answered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "unanswered"
+    },
+    {
+      "status": "answered"
+    }
+  ],
+  "basicFacts": [
+    {
+      "predicate": "legal_entity",
+      "value": "Dynex Capital, Inc.",
+      "status": "verified",
+      "sources": [
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/826675/000082667525000118/exhibit10419formofrsuagree.htm",
+          "title": "Form of Restricted Stock Unit Agreement for Non- ...",
+          "excerpt": "This Restricted Stock Unit Award Agreement (this \" Agreement \") is made as of [__________] (the \" Grant Date \"), by Dynex Capital, Inc., a Virginia corporation (the \" Company \"), to [___________], Non-Employee Director of the Company (the \" Participant",
+          "capturedAt": "2026-08-16T04:52:55.451Z",
+          "sourceClass": "regulatory_or_onchain",
+          "artifactVerified": true,
+          "relation": "supports"
+        },
+        {
+          "url": "https://www.sec.gov/Archives/edgar/data/826675/000082667522000006/exhibit10415.htm",
+          "excerpt": "This Restricted Stock Unit Award Agreement (this \" Agreement \") is made as of <<date>> (the \" Grant Date \"), by Dynex Capital, Inc., a Virginia corporation (the \" Company \"), to <<name>>, a Key Employee of the Company (the \" Participant \").",
+          "capturedAt": "2026-08-16T04:52:55.521Z",
+          "sourceClass": "regulatory_or_onchain",
+          "artifactVerified": true,
+          "relation": "supports"
+        }
+      ]
+    },
+    {
+      "predicate": "product",
+      "value": "Dynex Marketplace",
+      "status": "verified",
+      "sources": [
+        {
+          "url": "https://dynexcoin.org/roadmap",
+          "title": "Dynex Roadmap",
+          "excerpt": "Since the official product launch of the Dynex Marketplace on December 13th, revenues of almost 60k DNX had been generated in less than 10 business days.",
+          "capturedAt": "2026-08-16T04:53:22.485Z",
+          "sourceClass": "official_subject",
+          "artifactVerified": true,
+          "relation": "supports"
+        }
+      ]
+    },
+    {
+      "predicate": "official_token",
+      "value": "DNX",
+      "status": "verified",
+      "sources": [
+        {
+          "url": "https://dynexcoin.org/learn/ecosystem",
+          "excerpt": "The DNX Utility Coin : The Dynex coin (DNX) serves as a versatile utility token within the Dynex blockchain ecosystem, facilitating various critical functions.",
+          "capturedAt": "2026-08-16T04:53:22.447Z",
+          "sourceClass": "official_subject",
+          "artifactVerified": true,
+          "relation": "supports"
+        },
+        {
+          "url": "https://dynex.medium.com/dynex-announces-transition-to-institutionalised-security-token-and-entry-into-global-capital-a4754dd58d3a",
+          "title": "Dynex Announces Transition to Institutionalised Security Token and Entry into Global Capital Markets | by Dynex | Medium",
+          "excerpt": "Dynex officially launched its native token, **$DNX**, in September 2022",
+          "capturedAt": "2026-08-16T04:53:26.005Z",
+          "sourceClass": "independent_press",
+          "artifactVerified": true,
+          "relation": "supports"
+        }
+      ]
+    },
+    {
+      "predicate": "audit",
+      "value": "Cyberscope",
+      "status": "verified",
+      "sources": [
+        {
+          "url": "https://dynexcoin.org/learn/tokenomics",
+          "title": "Tokenomics - Dynex",
+          "excerpt": "The most recent audit, conducted by Cyberscope , was successfully completed with no critical or medium-level findings, reaffirming Dynex's commitment to maintaining a robust and secure blockchain ecosystem.. > Cyberscope Online Wallet Audit Results (January 22, 2025, online) > Cyberscope Online Core Audit Results (January 22, 2025, online) > Dynex Core Audit Report (January 22, 2025, PDF) > Dynex Wallet Systems Audit Report (January 22, 2025, PDF).",
+          "capturedAt": "2026-08-16T04:52:55.903Z",
+          "sourceClass": "official_subject",
+          "artifactVerified": true,
+          "relation": "supports"
+        },
+        {
+          "url": "https://www.cyberscope.io/audits/dnx",
+          "excerpt": "Dynex Smart Contract Audit | Cyberscope . Visit our new automated payment gateway. It's fast, secure, and easy to use.",
+          "capturedAt": "2026-08-16T04:53:27.037Z",
+          "sourceClass": "independent_press",
+          "artifactVerified": true,
+          "relation": "supports"
+        }
+      ]
+    },
+    {
+      "predicate": "official_identity",
+      "value": "Dynex",
+      "status": "verified",
+      "sources": [
+        {
+          "url": "https://x.com/dynexcoin",
+          "title": "Official X profile",
+          "excerpt": "Dynex (@dynexcoin): Dynex is the world’s only accessible neuromorphic quantum computing cloud for solving real-world problems, at scale. \n$DNX #DePIN #DeSci #PoUW #AI #quantum",
+          "capturedAt": "2026-08-16T04:51:31.270Z",
+          "sourceClass": "official_subject",
+          "artifactVerified": true,
+          "relation": "supports"
+        }
+      ]
+    },
+    {
+      "predicate": "product",
+      "value": "dynexcoin.org",
+      "status": "verified",
+      "sources": [
+        {
+          "url": "https://dynexcoin.org/",
+          "title": "Official website (dynexcoin.org)",
+          "excerpt": "dynexcoin.org served a live product surface when ARGUS fetched it during this scan of @dynexcoin.",
+          "capturedAt": "2026-08-16T04:51:31.270Z",
+          "sourceClass": "official_subject",
+          "artifactVerified": true,
+          "relation": "supports"
+        }
+      ]
+    },
+    {
+      "predicate": "repository",
+      "value": "github.com/dynexcoin",
+      "status": "verified",
+      "sources": [
+        {
+          "url": "https://github.com/dynexcoin",
+          "title": "Verified GitHub account",
+          "excerpt": "GitHub github.com/dynexcoin (Dynex [DNX]) links back to this X handle.",
+          "capturedAt": "2026-08-16T04:51:31.270Z",
+          "sourceClass": "other_public",
+          "artifactVerified": true,
+          "relation": "supports"
+        }
+      ]
+    }
+  ],
+  "checkRuns": [
+    {
+      "checkId": "identity-resolution",
+      "label": "Identity resolution",
+      "status": "confirmed",
+      "note": "project identity resolved through 2 independently collected team records · GitHub account dynexcoin links back to @dynexcoin",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "profile-photo-authenticity",
+      "label": "Profile-photo integrity",
+      "status": "not-applicable",
+      "note": "not applicable to a project-only brand account",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "code-footprint-github",
+      "label": "Code footprint (GitHub)",
+      "status": "confirmed",
+      "note": "github.com/dynexcoin resolved through its X handle field",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "identity-continuity",
+      "label": "Identity continuity",
+      "status": "checked-empty",
+      "note": "handle-history provider returned no prior handle (provider coverage is partial)",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "affiliations-associates",
+      "label": "Affiliations & associates",
+      "status": "confirmed",
+      "note": "2 team identities backed by a first-party team page or deterministic post scan · 6 claimed relationships checked in the X follow graph · 5 did not follow the subject and remain uncorroborated · resolved GitHub account has no public organization memberships or organization-repo contributions",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "promoted-token-performance",
+      "label": "Promoted-token performance",
+      "status": "not-applicable",
+      "note": "not a KOL",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "project-token-identity",
+      "label": "Canonical project token",
+      "status": "unknown",
+      "note": "no official token identity was bound to this project account",
+      "decisionCritical": true
+    },
+    {
+      "checkId": "project-product-substance",
+      "label": "Product and website substance",
+      "status": "confirmed",
+      "note": "1 core product description was verified from fetched, cited public sources",
+      "decisionCritical": true
+    },
+    {
+      "checkId": "project-team-identity",
+      "label": "Project team identity",
+      "status": "confirmed",
+      "note": "2 project team identities backed by first-party team or account evidence",
+      "decisionCritical": true
+    },
+    {
+      "checkId": "project-leadership-currency",
+      "label": "Named leadership still current",
+      "status": "unknown",
+      "note": "no employment-record currency outcome was recorded for the named leadership",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "project-backing-partners",
+      "label": "Backing and partners",
+      "status": "confirmed",
+      "note": "1 funding, investor, advisor, counterparty, or operating-partner record was verified from fetched public evidence; relationship terms were not inferred beyond those sources",
+      "decisionCritical": true
+    },
+    {
+      "checkId": "project-traction-liveness",
+      "label": "Traction and liveness",
+      "status": "confirmed",
+      "note": "Posting steady (~2.0d gap, last post 12d ago).",
+      "decisionCritical": true
+    },
+    {
+      "checkId": "project-transparency",
+      "label": "Transparency and disclosures",
+      "status": "confirmed",
+      "note": "2 legal, governance, token-economic, repository, or security disclosures were verified against fetched, cited public sources",
+      "decisionCritical": true
+    },
+    {
+      "checkId": "founder-identity-authority",
+      "label": "Verified identity and current authority",
+      "status": "not-applicable",
+      "note": "not a founder",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "founder-company-relationships",
+      "label": "Companies, co-founders, and current roles",
+      "status": "not-applicable",
+      "note": "not a founder",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "founder-track-record",
+      "label": "Track record and outcomes",
+      "status": "not-applicable",
+      "note": "not a founder",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "founder-control-conflicts",
+      "label": "Control and conflicts",
+      "status": "not-applicable",
+      "note": "not a founder",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "founder-legal-regulatory",
+      "label": "Legal and regulatory history",
+      "status": "not-applicable",
+      "note": "not a founder",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "founder-asset-distinction",
+      "label": "Related assets and security/token distinction",
+      "status": "not-applicable",
+      "note": "not a founder",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "founder-repeat-backing",
+      "label": "Repeat backing and re-investment",
+      "status": "not-applicable",
+      "note": "not a founder",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "vc-portfolio-track-record",
+      "label": "Portfolio track record",
+      "status": "not-applicable",
+      "note": "not a fund/investor",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "investor-fund-scale",
+      "label": "Fund scale",
+      "status": "not-applicable",
+      "note": "not a fund/investor",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "news-press",
+      "label": "News & press",
+      "status": "checked-empty",
+      "note": "exact-name and exact-handle crypto press searches returned no matching article",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "adverse-screen",
+      "label": "Adverse, scam, and rug sweep",
+      "status": "unavailable",
+      "note": "the model search returned no readable answer for any of the 1 adverse-screen target, so no rug, scam, or drain search was completed",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "organization-registration",
+      "label": "Organization legal-entity binding",
+      "status": "unknown",
+      "note": "no strict frozen legal_entity fact binds the audited organization to an exact legal entity",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "organization-sanctions",
+      "label": "Organization OFAC sanctions screen",
+      "status": "unknown",
+      "note": "no completed OFAC sanctions screen was frozen for the audited organization's exact legal entity",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "us-legal-history",
+      "label": "US legal history",
+      "status": "not-applicable",
+      "note": "person-name screen does not clear an organization subject",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "ofac-sanctions-name",
+      "label": "OFAC sanctions (name)",
+      "status": "not-applicable",
+      "note": "person-name screen does not clear an organization subject",
+      "decisionCritical": false
+    },
+    {
+      "checkId": "trust-graph-connections",
+      "label": "Trust-graph connections",
+      "status": "checked-empty",
+      "note": "No connection to a prior authoritative ARGUS report was found in the organization graph.",
+      "decisionCritical": true
+    }
+  ],
+  "basicFactLeads": [
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {}
+  ],
+  "providerFailures": [
+    {
+      "provider": "peopledatalabs",
+      "op": "person-enrich:monid"
+    },
+    {
+      "provider": "coingecko",
+      "op": "project-search"
+    }
+  ],
+  "evidence": {
+    "testimonials": [
+      {
+        "claimed_relationship": "Sheldon Inwentash (ThreeD Capital Founder/CEO) partnered to advise Dynex on business development and client acquisition",
+        "notes": "Model-search acknowledgment lead: mention, neutral (https://x.com/ThreeDCap/status/1878881957716828505); independent artifact verification required",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Bloomberg interview coverage of Dynex",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Fox Business interview coverage of Dynex",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Forbes article featuring Dynex Co-Founder Daniela Herrmann's perspective on quantum computing",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Named Dynex one of the Next Big Things in Tech 2024",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Crypto advisor onboarded for MM strategy, narrative management, testimonial campaigns",
+        "notes": "Model-search acknowledgment lead: mention, neutral (https://x.com/EnigmaFund/status/2014417134747533591); independent artifact verification required",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Dynex advisor who spoke at The Bitcoin Conf in Nashville about Dynex",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Observer writer sourced discussing quantum computing timelines referencing Dynex",
+        "artifact_verified": false
+      }
+    ]
+  },
+  "intelligence": {
+    "signals": [
+      {
+        "id": "intelligence_integrity_gap",
+        "kind": "coverage_gap",
+        "domain": "identity",
+        "finding": "The final integrity gate recorded 2 fail-closed integrity events. Counts include 0 duplicate source IDs, 0 duplicate measurement IDs, 0 duplicate question IDs, 0 duplicate signal IDs, 0 invalid measurements, 2 questions with invalid lineage, 0 questions routed by rejected archetype evidence, 0 invalid signals, and 0 subject-classification rows with invalid sources. No affected record is treated as evidence."
+      },
+      {
+        "id": "analyst_axis_gap:P1_team_and_identity",
+        "kind": "coverage_gap",
+        "domain": "team",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Is there a public LinkedIn or professional record corroborating the named team members' roles? What are the full legal names and professional backgrounds behind @DynexMoonshots and @proph3ttt? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "id": "analyst_axis_gap:P2_product_substance",
+        "kind": "coverage_gap",
+        "domain": "product",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Is there independent (non-project) technical review or benchmark validating the neuromorphic/quantum computing claims? What is the current usage volume or job throughput on the Dynex Marketplace beyond the initial launch figures? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "id": "analyst_axis_gap:P3_token_conduct",
+        "kind": "coverage_gap",
+        "domain": "supply",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Are there independent market-surveillance reports on DNX trading activity across exchanges? What is the token unlock and vesting schedule for team and investor allocations? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "id": "analyst_axis_gap:P4_backing_and_partners",
+        "kind": "coverage_gap",
+        "domain": "funding",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Are there any named venture backers, exchange listing partners, or enterprise counterparties for Dynex beyond the internally named advisor? Has any independent press corroborated the advisor relationship or additional partnerships? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "id": "analyst_axis_gap:P5_traction_and_liveness",
+        "kind": "coverage_gap",
+        "domain": "economics",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Is there exchange-level trading volume or liquidity data for DNX to corroborate ongoing token activity? What is the current (not launch-period) transaction volume or active user count on the Dynex Marketplace? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "id": "analyst_axis_gap:P6_transparency_integrity",
+        "kind": "coverage_gap",
+        "domain": "governance",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Are governance materials (e.g. DAO structure, voting mechanisms) publicly documented? Is there a published treasury or financial disclosure report beyond the smart contract audit? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "id": "strict_legal_entity_identity",
+        "kind": "observation",
+        "domain": "legal",
+        "finding": "1 strict direct-subject fact is saved: Dynex Capital, Inc.. This supports the evidence base, not a quality or safety conclusion."
+      },
+      {
+        "id": "strict_product_description",
+        "kind": "observation",
+        "domain": "product",
+        "finding": "1 strict direct-subject fact is saved: Dynex Marketplace. This supports the evidence base, not a quality or safety conclusion."
+      },
+      {
+        "id": "project_strength_band_summary",
+        "kind": "observation",
+        "domain": "governance",
+        "finding": "P1_team_and_identity: exceptional (14 to 16); P2_product_substance: emerging (10 to 16); P3_token_conduct: emerging (8 to 13); P4_backing_and_partners: emerging (6 to 9); P5_traction_and_liveness: emerging (6 to 9); P6_transparency_integrity: solid (9 to 10). These are deterministic evidence-band constraints from the frozen scorer packet, not new factual findings or investment recommendations."
+      }
+    ],
+    "lenses": [
+      {
+        "id": "investment",
+        "label": "Investment decision",
+        "question": "What could change the underwriting, sizing, entry, or decision to pass?",
+        "signalIds": [
+          "intelligence_integrity_gap",
+          "analyst_axis_gap:P3_token_conduct",
+          "analyst_axis_gap:P5_traction_and_liveness",
+          "analyst_axis_gap:P1_team_and_identity",
+          "analyst_axis_gap:P2_product_substance",
+          "analyst_axis_gap:P4_backing_and_partners",
+          "analyst_axis_gap:P6_transparency_integrity",
+          "strict_legal_entity_identity",
+          "strict_product_description",
+          "project_strength_band_summary"
+        ]
+      },
+      {
+        "id": "alpha_research",
+        "label": "Alpha research",
+        "question": "Which measurable changes, divergences, and scheduled events deserve deeper timing work?",
+        "signalIds": [
+          "intelligence_integrity_gap",
+          "analyst_axis_gap:P3_token_conduct",
+          "analyst_axis_gap:P5_traction_and_liveness",
+          "analyst_axis_gap:P2_product_substance",
+          "analyst_axis_gap:P1_team_and_identity",
+          "analyst_axis_gap:P4_backing_and_partners",
+          "analyst_axis_gap:P6_transparency_integrity",
+          "strict_product_description",
+          "project_strength_band_summary"
+        ]
+      },
+      {
+        "id": "counterparty",
+        "label": "Counterparty diligence",
+        "question": "Can this entity be identified, controlled, secured, and held accountable for an exposure?",
+        "signalIds": [
+          "intelligence_integrity_gap",
+          "analyst_axis_gap:P1_team_and_identity",
+          "analyst_axis_gap:P2_product_substance",
+          "analyst_axis_gap:P3_token_conduct",
+          "analyst_axis_gap:P5_traction_and_liveness",
+          "analyst_axis_gap:P4_backing_and_partners",
+          "analyst_axis_gap:P6_transparency_integrity",
+          "strict_legal_entity_identity",
+          "strict_product_description",
+          "project_strength_band_summary"
+        ]
+      },
+      {
+        "id": "general_diligence",
+        "label": "General diligence",
+        "question": "What does this derived evidence subset establish, report, or leave unresolved?",
+        "signalIds": [
+          "intelligence_integrity_gap",
+          "analyst_axis_gap:P2_product_substance",
+          "analyst_axis_gap:P1_team_and_identity",
+          "analyst_axis_gap:P3_token_conduct",
+          "analyst_axis_gap:P5_traction_and_liveness",
+          "analyst_axis_gap:P4_backing_and_partners",
+          "analyst_axis_gap:P6_transparency_integrity",
+          "strict_product_description",
+          "strict_legal_entity_identity",
+          "project_strength_band_summary"
+        ]
+      }
+    ],
+    "measurements": [
+      {
+        "label": "Material unresolved questions recorded by the scoring analyst",
+        "value": 12,
+        "unit": "count",
+        "domain": "governance",
+        "valueType": "number"
+      },
+      {
+        "label": "Days from the latest observed post to profile capture",
+        "value": 11,
+        "unit": "days",
+        "domain": "chronology",
+        "valueType": "number"
+      },
+      {
+        "label": "Official domain age at RDAP capture",
+        "value": 46,
+        "unit": "months",
+        "domain": "chronology",
+        "valueType": "number"
+      },
+      {
+        "label": "Latest provider-observed post timestamp",
+        "value": "2026-08-04T15:25:01.000Z",
+        "unit": "date",
+        "domain": "chronology",
+        "valueType": "date"
+      },
+      {
+        "label": "Earliest observed account public-surface boundary",
+        "value": "2022-09-18T16:49:14.000Z",
+        "unit": "date",
+        "domain": "chronology",
+        "valueType": "date"
+      },
+      {
+        "label": "Recomputed gap between observed account and domain public-surface boundaries",
+        "value": 0,
+        "unit": "months",
+        "domain": "chronology",
+        "valueType": "number"
+      },
+      {
+        "label": "Latest observed domain public-surface boundary",
+        "value": "2022-09-22T06:37:50.762Z",
+        "unit": "date",
+        "domain": "chronology",
+        "valueType": "date"
+      },
+      {
+        "label": "Bound official domain registration date",
+        "value": "2022-09-22T06:37:50.762Z",
+        "unit": "date",
+        "domain": "chronology",
+        "valueType": "date"
+      },
+      {
+        "label": "Bounded official-site response classification",
+        "value": "live",
+        "unit": "text",
+        "domain": "product",
+        "valueType": "text"
+      },
+      {
+        "label": "P1_team_and_identity deterministic evidence-band maximum",
+        "value": 16,
+        "unit": "count",
+        "domain": "team",
+        "valueType": "number"
+      },
+      {
+        "label": "P2_product_substance deterministic evidence-band maximum",
+        "value": 16,
+        "unit": "count",
+        "domain": "product",
+        "valueType": "number"
+      },
+      {
+        "label": "P3_token_conduct deterministic evidence-band maximum",
+        "value": 13,
+        "unit": "count",
+        "domain": "supply",
+        "valueType": "number"
+      },
+      {
+        "label": "P4_backing_and_partners deterministic evidence-band maximum",
+        "value": 9,
+        "unit": "count",
+        "domain": "funding",
+        "valueType": "number"
+      },
+      {
+        "label": "P5_traction_and_liveness deterministic evidence-band maximum",
+        "value": 9,
+        "unit": "count",
+        "domain": "economics",
+        "valueType": "number"
+      },
+      {
+        "label": "P6_transparency_integrity deterministic evidence-band maximum",
+        "value": 10,
+        "unit": "count",
+        "domain": "governance",
+        "valueType": "number"
+      },
+      {
+        "label": "P1_team_and_identity deterministic evidence-band minimum",
+        "value": 14,
+        "unit": "count",
+        "domain": "team",
+        "valueType": "number"
+      },
+      {
+        "label": "P2_product_substance deterministic evidence-band minimum",
+        "value": 10,
+        "unit": "count",
+        "domain": "product",
+        "valueType": "number"
+      },
+      {
+        "label": "P3_token_conduct deterministic evidence-band minimum",
+        "value": 8,
+        "unit": "count",
+        "domain": "supply",
+        "valueType": "number"
+      },
+      {
+        "label": "P4_backing_and_partners deterministic evidence-band minimum",
+        "value": 6,
+        "unit": "count",
+        "domain": "funding",
+        "valueType": "number"
+      },
+      {
+        "label": "P5_traction_and_liveness deterministic evidence-band minimum",
+        "value": 6,
+        "unit": "count",
+        "domain": "economics",
+        "valueType": "number"
+      },
+      {
+        "label": "P6_transparency_integrity deterministic evidence-band minimum",
+        "value": 9,
+        "unit": "count",
+        "domain": "governance",
+        "valueType": "number"
+      },
+      {
+        "label": "P1_team_and_identity deterministic scorer-packet evidence tier",
+        "value": "exceptional",
+        "unit": "text",
+        "domain": "team",
+        "valueType": "text"
+      },
+      {
+        "label": "P2_product_substance deterministic scorer-packet evidence tier",
+        "value": "emerging",
+        "unit": "text",
+        "domain": "product",
+        "valueType": "text"
+      },
+      {
+        "label": "P3_token_conduct deterministic scorer-packet evidence tier",
+        "value": "emerging",
+        "unit": "text",
+        "domain": "supply",
+        "valueType": "text"
+      },
+      {
+        "label": "P4_backing_and_partners deterministic scorer-packet evidence tier",
+        "value": "emerging",
+        "unit": "text",
+        "domain": "funding",
+        "valueType": "text"
+      },
+      {
+        "label": "P5_traction_and_liveness deterministic scorer-packet evidence tier",
+        "value": "emerging",
+        "unit": "text",
+        "domain": "economics",
+        "valueType": "text"
+      },
+      {
+        "label": "P6_transparency_integrity deterministic scorer-packet evidence tier",
+        "value": "solid",
+        "unit": "text",
+        "domain": "governance",
+        "valueType": "text"
+      },
+      {
+        "label": "claude-vision profile-image screening classification",
+        "value": "logo_or_cartoon",
+        "unit": "text",
+        "domain": "identity",
+        "valueType": "text"
+      },
+      {
+        "label": "claude-vision profile-image screening confidence",
+        "value": 98,
+        "unit": "percent",
+        "domain": "identity",
+        "valueType": "number"
+      },
+      {
+        "label": "claude-vision reported real-person opinion",
+        "value": "false",
+        "unit": "text",
+        "domain": "identity",
+        "valueType": "text"
+      },
+      {
+        "label": "Organization graph contributions assessed",
+        "value": 13,
+        "unit": "count",
+        "domain": "identity",
+        "valueType": "number"
+      },
+      {
+        "label": "Coverage-qualified organization graph contributions",
+        "value": 11,
+        "unit": "count",
+        "domain": "identity",
+        "valueType": "number"
+      },
+      {
+        "label": "Frozen organization-scoped relationship-screen status",
+        "value": "clear",
+        "unit": "text",
+        "domain": "identity",
+        "valueType": "text"
+      }
+    ]
+  }
+}
