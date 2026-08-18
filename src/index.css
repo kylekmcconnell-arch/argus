@@ -39,6 +39,12 @@
   --color-avoid: #ef4f72; /* vivid crimson: disqualifying */
   --color-unverifiable: #a98cf5;
 
+  /* Provenance ramp: where a value came from, orthogonal to the verdict
+     palette above (DESIGN.md 2.1). Deliberately off jade and off signal-blue
+     so "sourced" never reads as "confirmed good". */
+  --color-sourced: #1fb8c4; /* cyan-teal: confirmed against an outside artifact */
+  --color-derived: #838fa3; /* slate: ARGUS-calculated from grounded inputs */
+
   --font-sans: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
 }
@@ -76,6 +82,8 @@
   --color-fail: #b32e57;
   --color-avoid: #96143a;
   --color-unverifiable: #6940cc;
+  --color-sourced: #0e7c88;
+  --color-derived: #4d5870;
 
   --shadow:
     0 1px 2px color-mix(in oklab, var(--color-ink) 5%, transparent),
@@ -107,6 +115,8 @@
   --color-fail: #ee7fa4;
   --color-avoid: #f2647f;
   --color-unverifiable: #b49cff;
+  --color-sourced: #3dd6e0;
+  --color-derived: #a3aec2;
   --shadow:
     0 1px 2px color-mix(in oklab, var(--color-eye-pupil) 64%, transparent),
     0 18px 40px -28px color-mix(in oklab, var(--color-eye-pupil) 88%, transparent);
@@ -430,10 +440,12 @@
 .tint-fail         { --tint: var(--color-fail); }
 .tint-signal       { --tint: var(--color-signal); }
 .tint-unverifiable { --tint: var(--color-unverifiable); }
+.tint-sourced      { --tint: var(--color-sourced); }
+.tint-derived      { --tint: var(--color-derived); }
 .tint-neutral      { --tint: var(--color-ink-faint); }
 
 .tint-pass, .tint-caution, .tint-avoid, .tint-fail, .tint-signal,
-.tint-unverifiable, .tint-neutral, .tint-var {
+.tint-unverifiable, .tint-sourced, .tint-derived, .tint-neutral, .tint-var {
   background: color-mix(in oklab, var(--tint) 9%, transparent);
   border-color: color-mix(in oklab, var(--tint) 34%, transparent);
   color: color-mix(in oklab, var(--tint) 76%, var(--color-ink));
@@ -521,6 +533,31 @@
   font-size: 13.5px;
   padding: 5px 12px;
   border-radius: 8px;
+}
+
+/* Provenance tag (DESIGN.md 2.1): a `.chip` that also carries a leading dot
+   mark. Colour (via .tint-sourced/.tint-derived/.tint-unverifiable) answers
+   how grounded a value is; the mark answers what kind of state it is in.
+   `.mark-contested` hollows the dot for a sourced-but-disputed value, the
+   same technique `.verdict-pill.tint-fail` uses to split fail from avoid. */
+.provenance-tag {
+  position: relative;
+  padding-left: 16px;
+}
+.provenance-tag::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+  transform: translateY(-50%);
+}
+.provenance-tag.mark-contested::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
 }
 
 /* ───────────────────────── controls ───────────────────────── */
