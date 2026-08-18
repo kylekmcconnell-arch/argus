@@ -156,10 +156,11 @@ describe("tokenChecks", () => {
     const checks = tokenChecks(dossier());
 
     expect(byLabel(checks, "Operator / funding trace")).toMatchObject({
-      status: "not-applicable",
-      decisionCritical: false,
+      status: "unknown",
+      decisionCritical: true,
     });
-    expect(byLabel(checks, "Operator / funding trace").note).toContain("currently disabled");
+    expect(byLabel(checks, "Operator / funding trace").note).toContain("resolved");
+    expect(byLabel(checks, "Operator / funding trace").note).toContain("completion outcome not recorded");
     expect(byLabel(checks, "Creator wallet details")).toMatchObject({ status: "unknown", decisionCritical: false });
     expect(byLabel(checks, "Known scam code comparison")).toMatchObject({ status: "unknown", decisionCritical: false });
     expect(byLabel(checks, "OFAC sanctions screen")).toMatchObject({ status: "unknown" });
@@ -451,7 +452,7 @@ describe("reconcileInvestigationChecks", () => {
     expect(byLabel(rows, "Documents & audits").status).toBe("confirmed");
     expect(byLabel(rows, "Trust-graph reconciliation").status).toBe("checked-empty");
     // never credited: no recorded source exists for these
-    expect(byLabel(rows, "Operator / funding trace").status).toBe("not-applicable");
+    expect(byLabel(rows, "Operator / funding trace").status).toBe("unknown");
     expect(byLabel(rows, "Creator wallet details").status).toBe("unknown");
   });
 

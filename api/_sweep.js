@@ -323,8 +323,18 @@ async function fetchPriceHistory(address, chain, pairAddress) {
 
 // src/lib/providerCapabilities.ts
 var ENABLED_VALUE = /^(?:1|true|on|enabled)$/i;
+var DISABLED_VALUE = /^(?:0|false|off|disabled)$/i;
 function arkhamProviderEnabled() {
-  return ENABLED_VALUE.test(String(import.meta.env?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim());
+  var raw = String(import.meta.env?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim();
+  if (!raw) return true;
+  if (DISABLED_VALUE.test(raw)) return false;
+  return ENABLED_VALUE.test(raw);
+}
+
+function sameWalletAddress(a, b) {
+  var evm = /^0x[0-9a-fA-F]{40}$/;
+  if (evm.test(a) && evm.test(b)) return a.toLowerCase() === b.toLowerCase();
+  return a === b;
 }
 
 // src/token/scannerEvasion.ts
@@ -1727,7 +1737,7 @@ async function runTokenAudit(input, emit, opts) {
     screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
-    deployer && deployerRiskEnabled ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0),
+    deployer && deployerRiskEnabled && !sameWalletAddress(deployer, address) ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0),
     fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null)
   ]);
   if (deployerRisk?.available && deployerRisk.paths.length) {
