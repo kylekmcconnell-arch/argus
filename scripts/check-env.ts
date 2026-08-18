@@ -27,7 +27,7 @@ console.log(`\n${C.bold}Capabilities${C.reset}`);
 console.log(`  Token + site audits     ${C.green}LIVE${C.reset} ${C.dim}— keyless, always on${C.reset}`);
 console.log(
   `  People / founder audits ${peopleLive ? `${C.green}LIVE${C.reset}` : `${C.yellow}curated${C.reset}`}` +
-    (peopleLive ? "" : `${C.dim} — needs ANTHROPIC_API_KEY${has("analyst") ? "" : " (missing)"} + an X source${xSource ? "" : " (XAI_API_KEY or TWITTERAPI_KEY, missing)"}${C.dim}`) +
+    (peopleLive ? "" : `${C.dim} — needs XAI_API_KEY${has("analyst") ? "" : " (missing)"}${xSource ? "" : " + an X source (XAI_API_KEY or TWITTERAPI_KEY, missing)"}${C.dim}`) +
     C.reset,
 );
 console.log(`  Analyst model           ${C.dim}${process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6"}${C.reset}`);

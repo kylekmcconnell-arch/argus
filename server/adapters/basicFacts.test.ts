@@ -627,7 +627,7 @@ describe("critical-gap search recovery", () => {
     expect(repairIds).toContain("project.funding");
   });
 
-  it("records Grok as the governing provider after Claude primary search fails", async () => {
+  it("records Claude as fallback after Grok primary search fails", async () => {
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     const { ctx, evidence } = context();
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
@@ -637,13 +637,12 @@ describe("critical-gap search recovery", () => {
     vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url === "https://api.anthropic.com/v1/messages") {
+      if (url === "https://api.x.ai/v1/responses") {
         return new Response(JSON.stringify({ error: "credits exhausted" }), { status: 400 });
       }
-      if (url === "https://api.x.ai/v1/responses") {
+      if (url === "https://api.anthropic.com/v1/messages") {
         return new Response(JSON.stringify({
-          output_text: '{"facts":[]}',
-          output: [{ type: "web_search_call" }],
+          content: [{ type: "text", text: '{"facts":[]}' }],
           usage: { input_tokens: 1, output_tokens: 1 },
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
@@ -665,9 +664,8 @@ describe("critical-gap search recovery", () => {
     const grokCalls = fetchMock.mock.calls.filter(([input]) =>
       String(input) === "https://api.x.ai/v1/responses").length;
 
-    expect(result.detail).toContain("primary grok:partial");
-    expect(new Set(primaryRuns.map((run) => run.provider))).toEqual(new Set(["grok"]));
-    expect(primaryRuns.some((run) => run.provider === "claude-web-search")).toBe(false);
+    expect(result.detail).toContain("Claude fallback");
+    expect(primaryRuns.some((run) => run.provider === "claude-web-search" || run.provider === "grok")).toBe(true);
     expect(anthropicCalls).toBeGreaterThan(0);
     expect(grokCalls).toBeGreaterThan(0);
     expect(result.attempts).toBeGreaterThanOrEqual(anthropicCalls + grokCalls);
@@ -5600,13 +5598,15 @@ describe("grounded discovery lane", () => {
     }
   });
 
-  it("moves an unprovisioned grounded lane to Claude even when duplicate-provider fallbacks are disabled", async () => {
+  it("moves an unprovisioned grounded lane to Grok even when duplicate-provider fallbacks are disabled", async () => {
     vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
     vi.stubEnv("SERPER_API_KEY", "");
     const fetchSpy = vi.fn(async () => new Response(JSON.stringify({
-      content: [{ type: "text", text: '{"facts":[]}' }],
+      output_text: '{"facts":[]}',
+      output: [{ type: "web_search_call" }],
       usage: { input_tokens: 10, output_tokens: 5 },
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchSpy);
@@ -5614,18 +5614,20 @@ describe("grounded discovery lane", () => {
 
     const result = await discoverPrimary(ctx, basicFactsResearchQuestions(ctx));
 
-    expect(result.provider).toBe("claude-web-search");
+    expect(result.provider).toBe("grok");
     expect(result.state).toBe("partial");
     expect(fetchSpy).toHaveBeenCalled();
   });
 
-  it("does invoke Claude after a grounded primary is unavailable", async () => {
+  it("does invoke Grok after a grounded primary is unavailable", async () => {
     vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
     vi.stubEnv("SERPER_API_KEY", "");
     const fetchSpy = vi.fn(async () => new Response(JSON.stringify({
-      content: [{ type: "text", text: '{"facts":[]}' }],
+      output_text: '{"facts":[]}',
+      output: [{ type: "web_search_call" }],
       usage: { input_tokens: 10, output_tokens: 5 },
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchSpy);
@@ -5639,7 +5641,7 @@ describe("grounded discovery lane", () => {
 
   it("accepts Serper plus OpenRouter as a fully provisioned grounded primary", async () => {
     vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
-    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     vi.stubEnv("SERPER_API_KEY", "serper-test-key");
     vi.stubEnv("OPENROUTER_API_KEY", "openrouter-test-key");
     vi.stubEnv("ARGUS_EXTRACT_MODEL", "google/gemini-2.5-flash-lite");

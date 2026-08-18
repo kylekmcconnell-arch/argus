@@ -1763,12 +1763,9 @@ export async function discoverPrimary(
   ctx: CollectContext,
   questions: readonly BasicFactsResearchQuestion[],
 ): Promise<BasicFactsDiscoveryResult> {
-  // Discovery is the dominant line item in an audit: it pulls whole search
-  // result sets into model input, and Claude input costs 15x Grok input
-  // ($3/M vs $0.20/M). ARGUS_BASIC_FACTS_PRIMARY=grok runs the same questions
-  // on the cheaper searcher, with Claude still available for repair, so the
-  // cost/recall trade can be measured rather than assumed.
-  // ARGUS_BASIC_FACTS_PRIMARY=grounded routes the same questions through the
+  // Discovery is the dominant line item in an audit. Grok is the default
+  // searcher. Claude runs only when ARGUS_PROVIDER_FALLBACKS is on and Grok
+  // failed or is unset. ARGUS_BASIC_FACTS_PRIMARY=grounded routes the
   // decoupled Serper + fetch + cheap-extract pipeline (low-cost SERP queries,
   // no Sonnet-priced search contexts). A completed empty result still owns
   // the lane. A skipped or failed provider did not answer and falls through to
@@ -1777,30 +1774,35 @@ export async function discoverPrimary(
     const grounded = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
     if (grounded.state !== "skipped" && grounded.state !== "failed") return grounded;
   }
-  if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grok" && env("XAI_API_KEY")) {
-    return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
+  if (env("XAI_API_KEY")) {
+    const grok = await discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
+    const grokOk = grok.state !== "failed" && !(grok.state === "partial" && grok.leads.length === 0);
+    if (grokOk || !providerFallbacksEnabled() || !env("ANTHROPIC_API_KEY")) return grok;
+    const claude = await discoverBasicFactLeadsDetailed(ctx, {}, questions, "primary");
+    return {
+      ...claude,
+      attempts: grok.attempts + claude.attempts,
+      detail: [
+        `Grok primary ${grok.state}: ${grok.detail ?? "no detail"}`,
+        `Claude fallback ${claude.state}: ${claude.detail ?? "no detail"}`,
+      ].join("; "),
+    };
   }
-  if (!env("ANTHROPIC_API_KEY")) return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
-  const claude = await discoverBasicFactLeadsDetailed(ctx, {}, questions, "primary");
-  if (
-    !env("XAI_API_KEY")
-    || (claude.state !== "failed" && !(claude.state === "partial" && claude.leads.length === 0))
-  ) return claude;
-  // Failure-driven Grok retry only when failover is explicitly enabled: the
-  // default is a VISIBLE failed discovery (ledger + on-screen notice), never a
-  // silent switch of the spend to Grok live-search.
-  if (!providerFallbacksEnabled()) return claude;
-  const grok = await discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
-  return {
-    ...grok,
-    // Grok governs this result. Claude's failure stays visible in cost and
-    // incident history without mislabeling Grok-discovered leads as Claude.
-    attempts: claude.attempts + grok.attempts,
-    detail: [
-      `Claude primary ${claude.state}: ${claude.detail ?? "no detail"}`,
-      `Grok fallback ${grok.state}: ${grok.detail ?? "no detail"}`,
-    ].join("; "),
-  };
+  if (env("ANTHROPIC_API_KEY") && providerFallbacksEnabled()) {
+    return discoverBasicFactLeadsDetailed(ctx, {}, questions, "primary");
+  }
+  if (env("ANTHROPIC_API_KEY")) {
+    return {
+      provider: "none",
+      state: "skipped",
+      leads: [],
+      attempts: 0,
+      completedBatches: 0,
+      failedBatches: 0,
+      detail: "claude discovery is fallback-only; set XAI_API_KEY or ARGUS_PROVIDER_FALLBACKS=on",
+    };
+  }
+  return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
 }
 
 async function discoverRepair(
@@ -1816,10 +1818,12 @@ async function discoverRepair(
   // same-engine second pass still recovers gaps the broad primary missed. Grok
   // remains a last-resort fallback only when Claude is unavailable.
   // ARGUS_BASIC_FACTS_REPAIR=grok forces the legacy path for a controlled A/B.
-  if (env("ARGUS_BASIC_FACTS_REPAIR") === "grok" && env("XAI_API_KEY")) {
+  if (env("XAI_API_KEY") && env("ARGUS_BASIC_FACTS_REPAIR") !== "claude") {
     return discoverGrokBasicFactLeadsDetailed(ctx, questions, "repair");
   }
-  if (env("ANTHROPIC_API_KEY")) return discoverBasicFactLeadsDetailed(ctx, {}, questions, "repair");
+  if (env("ANTHROPIC_API_KEY") && providerFallbacksEnabled()) {
+    return discoverBasicFactLeadsDetailed(ctx, {}, questions, "repair");
+  }
   if (env("XAI_API_KEY")) return discoverGrokBasicFactLeadsDetailed(ctx, questions, "repair");
   return { provider: "none", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "no repair search provider configured" };
 }
@@ -4704,9 +4708,9 @@ export async function collectBasicFacts(
     detail: "Searching for foundational facts, then independently fetching and checking every cited passage…",
     source: groundedPrimaryProvisioned
       ? "Serper grounded search · public source verification"
-      : env("ANTHROPIC_API_KEY")
-        ? "Claude web search · public source verification"
-        : "Grok web search · public source verification",
+      : env("XAI_API_KEY")
+        ? "Grok web search · public source verification"
+        : "Claude web search · public source verification",
     tone: "neutral",
   });
 

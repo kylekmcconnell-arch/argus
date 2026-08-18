@@ -64,7 +64,7 @@ claude                                     # log in with your own Claude Pro/Max
 - **Graph:** `src/graph/` is the compounding trust graph (localStorage for now).
 
 ## 4. Keys (what flips things live)
-Minimum for live people-audits: `ANTHROPIC_API_KEY` + one X source
+Minimum for live people-audits: `XAI_API_KEY` (Grok is the analyst)
 (`XAI_API_KEY` or `TWITTERAPI_KEY`). The rest (`PDL_API_KEY`, `GITHUB_TOKEN`,
 `HELIUS_API_KEY`, `COINGECKO_API_KEY`) add depth. See `.env.example` for the full
 list and where to get each. **Never** paste a key into chat, an issue, or a

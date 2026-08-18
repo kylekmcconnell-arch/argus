@@ -3,10 +3,11 @@
 //
 // Classification rules evolve (PROJECT class added, INVESTOR tightened); old
 // audits keep their stale role flags until rescanned. This re-runs ONLY the role
-// classification over each audit's stored headline/summary — one Claude call for
+// classification over each audit's stored headline/summary — one Grok call for
 // the whole batch, seconds instead of a 3-minute audit each. The scores/verdicts
 // are untouched; only the taxonomy filing changes.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { claudeMessages, claudeToolInput, grokChat, parseJsonObject, providerFallbacksEnabled } from "./_llm";
 
 export const config = { maxDuration: 60 };
 
@@ -14,8 +15,12 @@ const ROLES = new Set(["FOUNDER", "PROJECT", "KOL", "INVESTOR", "ADVISOR", "AGEN
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST" }); return; }
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) { res.status(200).json({ available: false, note: "no analyst key" }); return; }
+  const xai = process.env.XAI_API_KEY;
+  const anthropic = process.env.ANTHROPIC_API_KEY;
+  if (!xai && !(providerFallbacksEnabled() && anthropic)) {
+    res.status(200).json({ available: false, note: "no analyst key" });
+    return;
+  }
 
   const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
   const subjects: { ref: string; query: string; summary: string; roles?: string[] }[] = (Array.isArray(body?.subjects) ? body.subjects : [])
@@ -38,40 +43,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .map((s, i) => `${i + 1}. ref=${s.ref} | handle/query: ${s.query}${s.roles?.length ? ` | prior roles (may be wrong): ${s.roles.join(",")}` : ""}\n   summary: ${s.summary || "(none)"}`)
     .join("\n");
 
+  const rolesSchema = {
+    type: "object",
+    properties: {
+      results: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { ref: { type: "string" }, roles: { type: "array", items: { type: "string" } } },
+          required: ["ref", "roles"],
+        },
+      },
+    },
+    required: ["results"],
+  };
+  const userPrompt = `Re-classify these ${subjects.length} audited subjects:\n\n${user}`;
+
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model: process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6",
-        max_tokens: 2500,
+    let input: any;
+    if (xai) {
+      const grok = await grokChat({
+        key: xai,
         system,
-        messages: [{ role: "user", content: `Re-classify these ${subjects.length} audited subjects:\n\n${user}` }],
+        user: userPrompt,
+        maxTokens: 2500,
+        timeoutMs: 50000,
+        jsonSchema: { name: "record_roles", schema: rolesSchema },
+      });
+      if (grok.ok) {
+        const parsed = parseJsonObject(grok.text);
+        input = parsed ?? {};
+      } else if (!providerFallbacksEnabled() || !anthropic) {
+        res.status(200).json({ available: true, results: [], error: `analyst ${grok.status || "failed"}` });
+        return;
+      }
+    }
+    if (input == null && anthropic && providerFallbacksEnabled()) {
+      const claude = await claudeMessages({
+        key: anthropic,
+        system,
+        user: userPrompt,
+        maxTokens: 2500,
+        timeoutMs: 50000,
         tools: [{
           name: "record_roles",
           description: "Record the corrected role set for every subject.",
-          input_schema: {
-            type: "object",
-            properties: {
-              results: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: { ref: { type: "string" }, roles: { type: "array", items: { type: "string" } } },
-                  required: ["ref", "roles"],
-                },
-              },
-            },
-            required: ["results"],
-          },
+          input_schema: rolesSchema,
         }],
-        tool_choice: { type: "tool", name: "record_roles" },
-      }),
-      signal: AbortSignal.timeout(50000),
-    });
-    if (!r.ok) { res.status(200).json({ available: true, results: [], error: `analyst ${r.status}` }); return; }
-    const d = (await r.json()) as any;
-    const input = (d.content ?? []).find((b: any) => b.type === "tool_use")?.input;
+        toolChoice: { type: "tool", name: "record_roles" },
+      });
+      if (!claude.ok) { res.status(200).json({ available: true, results: [], error: `analyst ${claude.status || "failed"}` }); return; }
+      input = claudeToolInput(claude.data as { content?: Array<{ type?: unknown; name?: unknown; input?: unknown }> }, "record_roles");
+    }
+    if (input == null) { res.status(200).json({ available: true, results: [], error: "analyst failed" }); return; }
     const raw: any[] = Array.isArray(input?.results) ? input.results : [];
     const byRef = new Map(subjects.map((s) => [s.ref.toLowerCase(), s]));
     const results = raw

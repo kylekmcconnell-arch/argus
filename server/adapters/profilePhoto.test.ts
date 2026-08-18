@@ -34,8 +34,8 @@ function imageResponse(headers: Record<string, string> = {}) {
 
 function visionResponse(input: Record<string, unknown>) {
   return new Response(JSON.stringify({
-    content: [{ type: "tool_use", name: "record_profile_photo", input }],
-    usage: { input_tokens: 100, output_tokens: 20 },
+    choices: [{ message: { content: JSON.stringify(input) } }],
+    usage: { prompt_tokens: 100, completion_tokens: 20 },
   }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
@@ -47,7 +47,7 @@ describe("frozen profile-photo integrity collector", () => {
   });
 
   it("retains the exact inspected bytes and hashes a conclusive visual result", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("XAI_API_KEY", "test-key");
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(imageResponse())
       .mockResolvedValueOnce(visionResponse({
@@ -75,7 +75,7 @@ describe("frozen profile-photo integrity collector", () => {
     );
     expect(ctx.evidence.sourceArtifacts).toContainEqual(expect.objectContaining({
       kind: "profile_photo",
-      provider: "claude-vision",
+      provider: "grok-vision",
       sourceContentHash: imageHash,
       match: "observed",
       contentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
@@ -87,7 +87,7 @@ describe("frozen profile-photo integrity collector", () => {
   });
 
   it("derives a review lead from the validated classification, never a contradictory model flag", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("XAI_API_KEY", "test-key");
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(imageResponse())
       .mockResolvedValueOnce(visionResponse({
@@ -113,7 +113,7 @@ describe("frozen profile-photo integrity collector", () => {
   });
 
   it("fails closed for low-confidence or unclear model output", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("XAI_API_KEY", "test-key");
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(imageResponse())
       .mockResolvedValueOnce(visionResponse({
@@ -135,7 +135,7 @@ describe("frozen profile-photo integrity collector", () => {
   });
 
   it("does not turn provider or schema failures into a clean conclusion", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("XAI_API_KEY", "test-key");
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(imageResponse())
       .mockResolvedValueOnce(visionResponse({
@@ -200,7 +200,7 @@ describe("frozen profile-photo integrity collector", () => {
   });
 
   it("still screens a resolved person who also has a project role", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+    vi.stubEnv("XAI_API_KEY", "test-key");
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(imageResponse())
       .mockResolvedValueOnce(visionResponse({

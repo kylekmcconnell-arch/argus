@@ -18,6 +18,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 // @ts-ignore - bundled JS sibling
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
+import { claudeMessages, grokChat, parseJsonObject, providerFallbacksEnabled } from "./_llm";
 
 export const config = { maxDuration: 60 };
 
@@ -171,7 +172,7 @@ export function parseReview(text: string): { summary: string; dissent: "cleaner"
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // This panel spends Anthropic budget per call, so it is auth-gated like every
+  // This panel spends Grok (or optional Claude fallback) budget per call, so it is auth-gated like every
   // other paid panel on main (the mechanical scan stays keyless/public). The
   // in-app scanner reaches it through the global authenticated fetch, which
   // attaches the session bearer token automatically; anonymous callers get 401.
@@ -190,8 +191,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const chainid = CHAINID[chain];
   if (!chainid) { res.status(200).json({ ok: false, note: "chain not supported" }); return; }
 
+  const xai = process.env.XAI_API_KEY;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (!anthropicKey) { res.status(200).json({ ok: false, note: "Claude not configured" }); return; }
+  if (!xai && !(providerFallbacksEnabled() && anthropicKey)) {
+    res.status(200).json({ ok: false, note: "Grok not configured" });
+    return;
+  }
 
   const esKey = process.env.ETHERSCAN_API_KEY;
   const bs = BLOCKSCOUT[chain];
@@ -209,17 +214,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const { source, truncated } = clampSource(fetched.source);
 
-  try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": anthropicKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model: process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6",
-        // A cited 2-4 paragraph read of a large contract can run long; 1200 was
-        // truncating the JSON mid-string (the reply never closed the brace, so
-        // parseReview fell back to dumping the raw envelope). Give it headroom.
-        max_tokens: 2000,
-        system:
+  const reviewSystem =
           "You are ARGUS threat-engine contract reader for a token threat scanner: you read the ACTUAL Solidity source of a token and tell a non-technical buyer what the code does to them. Rules: " +
           "(1) Cite specific functions and approximate line numbers for every claim - functions and lines, not vibes. " +
           "(2) Distinguish GUARDED power from OPEN power: a bounded setFee (require <= 10%) or a timelocked owner is not a rug switch; an unbounded one is. Say which. " +
@@ -227,27 +222,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           "(4) If the token has a buy/sell TAX, say what the tax DOES with the money: reflections to holders, buyback-and-burn, auto-liquidity, a marketing/treasury wallet, or the newer pattern of buying real-world assets/stocks to distribute to holders. A tax that funds reflections/buyback/RWA distribution is a legitimate - even attractive - mechanism, not a rug tax; say so. Also note any burn mechanic (manual burn vs auto-burn on transfer) and, if visible, the burn address. " +
           "(5) You may DISSENT from the mechanical scan: if the flags overstate the danger (capabilities that are bounded/renounced/dead code) say the code is CLEANER than the score; if the code hides a trap the flags missed, say it is DARKER. " +
           "(6) Plain English, second person for consequences ('you would not be able to sell'), 2-4 short paragraphs, no headings. End with one plain sentence: is this code a trap, safe, or conditionally safe. " +
-          "Reply with ONLY compact JSON: {\"summary\":\"the 2-4 paragraph read\",\"dissent\":\"cleaner\"|\"darker\"|null}",
-        messages: [{
-          role: "user",
-          content:
+          "Reply with ONLY compact JSON: {\"summary\":\"the 2-4 paragraph read\",\"dissent\":\"cleaner\"|\"darker\"|null}";
+  const reviewUser =
             `Token contract ${fetched.name ?? "(unnamed)"} at ${address} on ${chain}.\n` +
             (fetched.proxyOf ? `NOTE: this is an upgradeable PROXY; the source below is its current implementation (${fetched.readAddress}). The logic can be swapped by whoever controls the upgrade - weigh that.\n` : "") +
             `Mechanical scan: verdict ${mechVerdict || "n/a"}${mechRisk ? ` (${mechRisk}/100 risk points)` : ""}, ` +
             `${danger} danger-pattern hits, ${gated} privileged functions.${truncated ? " NOTE: source truncated at a file boundary." : ""}\n\n` +
-            `Verified source:\n\n${source}`,
-        }],
-      }),
-      signal: AbortSignal.timeout(50000),
-    });
-    if (!r.ok) { res.status(200).json({ ok: false, note: `claude ${r.status}` }); return; }
-    const d = (await r.json()) as any;
-    // NOTE: panel-cost accounting is intentionally skipped here. Main scopes
-    // attachPanelCost to (organizationId, persisted reportVersionId) via an
-    // x-argus-panel-token; the threat scanner's the ARGUS engine read runs on a standalone,
-    // non-persisted surface with no such token. Wiring this endpoint into the
-    // paid-panel/auth model (and thereby gating cost-abuse) is a follow-up.
-    const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
+            `Verified source:\n\n${source}`;
+
+  try {
+    let text = "";
+    if (xai) {
+      const grok = await grokChat({
+        key: xai,
+        system: reviewSystem,
+        user: reviewUser,
+        maxTokens: 2000,
+        timeoutMs: 50000,
+      });
+      if (grok.ok) text = grok.text;
+      else if (!providerFallbacksEnabled() || !anthropicKey) {
+        res.status(200).json({ ok: false, note: `grok ${grok.status || "failed"}` });
+        return;
+      }
+    }
+    if (!text && anthropicKey && providerFallbacksEnabled()) {
+      const claude = await claudeMessages({
+        key: anthropicKey,
+        system: reviewSystem,
+        user: reviewUser,
+        maxTokens: 2000,
+        timeoutMs: 50000,
+      });
+      if (!claude.ok) { res.status(200).json({ ok: false, note: `claude ${claude.status || "failed"}` }); return; }
+      text = claude.text;
+    }
+    if (!text) { res.status(200).json({ ok: false, note: "empty model output" }); return; }
     const review = parseReview(text);
     if (!review) { res.status(200).json({ ok: false, note: "empty model output" }); return; }
     const out = { ...review, name: fetched.name, proxyOf: fetched.proxyOf };
