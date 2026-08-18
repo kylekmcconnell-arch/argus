@@ -128,7 +128,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void }) {
+export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief, shareView = false }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const arkhamEnabled = arkhamProviderEnabled();
   const arkhamDeployer = arkhamEnabled && d.deployer && !sameWalletAddress(d.deployer, d.address) ? d.deployer : null;
   const versionContext = d.versionContext ?? d.viewVersionContext;
@@ -155,7 +155,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     : !privateSession && !persistencePending && !persistenceFailed && !persistenceMissingCapability;
   const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
   const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
-  const canShare = !embeddedFacet && Boolean(
+  const canShare = !embeddedFacet && !shareView && Boolean(
     d.versionContext?.reportVersionId
     || (d.persistence?.state === "persisted" && d.persistence.reportVersionId),
   );
@@ -306,9 +306,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
               </button>
             )}
-            <a href="#token-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
-              <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
-            </a>
+            {!shareView && (
+              <a href="#token-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
+                <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
+              </a>
+            )}
             <button type="button" onClick={() => printReportPdf(d.name || d.symbol)} title="Save this report as a PDF (opens the print dialog)" className="btn-secondary print:hidden flex min-h-10 items-center gap-2 px-3 text-[12.5px]">Export PDF</button>
             {canShare && (
               <button onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
@@ -316,9 +318,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
               </button>
             )}
-            <button onClick={onRescan} title="Run this audit again with current evidence" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
-              <ArrowClockwise size={16} weight="duotone" aria-hidden="true" /> Rescan
-            </button>
+            {!shareView && (
+              <button onClick={onRescan} title="Run this audit again with current evidence" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
+                <ArrowClockwise size={16} weight="duotone" aria-hidden="true" /> Rescan
+              </button>
+            )}
             <button onClick={copyReport} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
               <ClipboardText size={16} weight="duotone" aria-hidden="true" /> {copiedTxt ? "Copied" : "Copy report"}
             </button>
@@ -327,9 +331,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 <Star size={16} weight={watched ? "fill" : "duotone"} aria-hidden="true" /> {watched ? "Watching" : "Watch"}
               </button>
             )}
-            <button onClick={onReset} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
-              <Plus size={16} weight="bold" aria-hidden="true" /> New
-            </button>
+            {!shareView && (
+              <button onClick={onReset} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
+                <Plus size={16} weight="bold" aria-hidden="true" /> New
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -487,9 +493,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           capturedAt={capturedAt}
         />
 
-        <div className="mt-4">
-          <SecondOpinion id="token-challenge" dossier={d} panelCostToken={panelCostToken} onRescan={onRescan} />
-        </div>
+        {!shareView && (
+          <div className="mt-4">
+            <SecondOpinion id="token-challenge" dossier={d} panelCostToken={panelCostToken} onRescan={onRescan} />
+          </div>
+        )}
 
         <div id="token-evidence" className="scroll-mt-28" aria-hidden="true" />
 
@@ -545,7 +553,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           }))}
           totalScore={d.score}
           capNote={d.capApplied ? `limited to ${d.score}` : null}
-          challengeAnchor="#token-challenge"
+          challengeAnchor={shareView ? null : "#token-challenge"}
         />
 
         {/* panels */}
@@ -714,8 +722,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           <MethodologyChecklist id="token-methodology" checks={checks} />
         </div>
 
-        {/* ask-the-report chat — grounded in this token's own evidence */}
-        <div className="mt-3">
+        {/* ask-the-report chat — grounded in this token's own evidence.
+            Absent from the share view. */}
+        {!shareView && <div className="mt-3">
           <AskReport
             subject={`$${d.symbol}`}
             reportVersionId={versionContext?.reportVersionId
@@ -732,7 +741,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             d.projectX ? `project X ${d.projectX}` : "",
             ].filter(Boolean).join(" | ")}
           />
-        </div>
+        </div>}
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
         {showCurrentIntelligence && canMutateWorkspace && (
@@ -752,10 +761,12 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             flags, the AI source read, launch provenance, tokenomics, and the
             auditable checklist - same pipeline as the standalone Threat scan
             surface, cache-shared with it (1h). */}
-        <div className="mt-8 panel p-5">
-          <div className="mb-1 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> Threat scan</div>
-          <EmbeddedThreatScan address={d.address} chain={d.chain} />
-        </div>
+        {!shareView && (
+          <div className="mt-8 panel p-5">
+            <div className="mb-1 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> Threat scan</div>
+            <EmbeddedThreatScan address={d.address} chain={d.chain} />
+          </div>
+        )}
 
         <div className="mt-8 panel p-5">
           <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> How this result was reached</div>

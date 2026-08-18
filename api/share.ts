@@ -158,7 +158,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     res.status(201).json({
-      url: `/api/card?share=${encodeURIComponent(token)}`,
+      // The link opens the full interactive report in the SPA's read-only
+      // share view (no account needed); /api/card?share= still serves the
+      // compact summary card for the same token.
+      url: `/?share=${encodeURIComponent(token)}`,
       expiresAt,
     });
   } catch (error) {

@@ -1651,7 +1651,7 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
   );
 }
 
-export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void }) {
+export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
   const { role } = useArgusAuth();
   const f = dossier;
@@ -2051,7 +2051,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     && (explicitCurrentOverlay || !hasFrozenTrustGraphOutcome);
   const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
   const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
-  const canShare = !embeddedFacet && Boolean(
+  const canShare = !embeddedFacet && !shareView && Boolean(
     f.versionContext?.reportVersionId
     || (f.persistence?.state === "persisted" && f.persistence.reportVersionId),
   );
@@ -3102,7 +3102,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 subjectRef={f.handle || f.display_name}
                 score={presentation.primaryScore ? report.governing_score : null}
               />
-              <CopyTldrButton base={tldrBase} mint={mintShareUrl} />
+              {!shareView && <CopyTldrButton base={tldrBase} mint={mintShareUrl} />}
             </div>
             <div className="min-w-0 flex-1 max-sm:order-1">
               <div className="eyebrow mb-1.5">{plainReportStatusLabel(presentation.resultLabel)}</div>
@@ -3302,6 +3302,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             }))}
             totalScore={report.governing_score}
             capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
+            challengeAnchor={shareView ? null : "#ask-report"}
           />
         )}
 
@@ -4400,13 +4401,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           {/* ask-the-report chat — grounded in this person's own evidence.
               Also the landing point for the composition strip's "Challenge
-              this" affordance. */}
-          <div id="ask-report" className="min-w-0 scroll-mt-28 lg:col-span-2">
-            <AskReport
-              subject={report.handle}
-              reportVersionId={evidenceReportVersionId}
-            />
-          </div>
+              this" affordance. Absent from the share view. */}
+          {!shareView && (
+            <div id="ask-report" className="min-w-0 scroll-mt-28 lg:col-span-2">
+              <AskReport
+                subject={report.handle}
+                reportVersionId={evidenceReportVersionId}
+              />
+            </div>
+          )}
 
           {/* analyst augmentation — add a piece the scan missed (verified
               before publish). The console's "Attach a document" chip lands

@@ -32,6 +32,12 @@ const designPreview = import.meta.env.DEV
 const showArgusEyePreview = designPreview === 'argus-eye'
 const showProvenancePreview = designPreview === 'provenance'
 
+// A share capability opens the read-only report view with no account and no
+// AuthGate: the token is the entire authority, validated server-side.
+const sharedReportToken = new URLSearchParams(window.location.search).get('share')
+// eslint-disable-next-line react-refresh/only-export-components
+const SharedReportView = lazy(() => import('./components/SharedReportView.tsx').then((module) => ({ default: module.SharedReportView })))
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AppErrorBoundary>
@@ -43,6 +49,8 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><DossierPreview /></Suspense>
       ) : designPreview === 'composition' ? (
         <Suspense fallback={null}><CompositionPreview /></Suspense>
+      ) : sharedReportToken ? (
+        <Suspense fallback={null}><SharedReportView token={sharedReportToken} /></Suspense>
       ) : (
         <AuthGate>
           <SessionExpiryNotice />

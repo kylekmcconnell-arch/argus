@@ -703,6 +703,7 @@ export function InvestigationReport({
   onOpenProjectAccount,
   onReAudit,
   onOpenBrief,
+  shareView = false,
 }: {
   inv: Investigation;
   onAudit: (q: string) => void;
@@ -711,6 +712,8 @@ export function InvestigationReport({
   onOpenProjectAccount: () => void;
   onReAudit?: () => void;
   onOpenBrief?: () => void;
+  /** Read-only share capability view: every workspace action is absent. */
+  shareView?: boolean;
 }) {
   const arkhamEnabled = arkhamProviderEnabled();
   const [spent, setSpent] = useState(0);
@@ -743,7 +746,7 @@ export function InvestigationReport({
     : !privateSession && !persistencePending && !persistenceFailed && !persistenceMissingCapability;
   const canRecordCurrentIntelligence = !versionContext && inv.persistence?.state !== "private";
   const canMutateWorkspace = !versionContext && inv.persistence?.state !== "private";
-  const canShare = Boolean(
+  const canShare = !shareView && Boolean(
     versionContext?.reportVersionId
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
@@ -1317,10 +1320,12 @@ export function InvestigationReport({
     <div className="investigation-story relative min-h-full pb-24">
       <header className="report-toolbar sticky top-0 z-30 border-b backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-nowrap items-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3">
-          <button onClick={onReset} className="btn-ghost flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 px-2 text-[12.5px] sm:min-w-0 sm:justify-start sm:px-1">
-            <ArrowLeft size={15} weight="bold" aria-hidden="true" />
-            <span className="max-sm:sr-only">New investigation</span>
-          </button>
+          {!shareView && (
+            <button onClick={onReset} className="btn-ghost flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 px-2 text-[12.5px] sm:min-w-0 sm:justify-start sm:px-1">
+              <ArrowLeft size={15} weight="bold" aria-hidden="true" />
+              <span className="max-sm:sr-only">New investigation</span>
+            </button>
+          )}
           <span className="mono hidden text-[11px] text-ink-faint sm:inline">/ token + project report</span>
           <span className={`chip shrink-0 ${versionContext ? "" : "tint-signal"}`}>
             <span className="sm:hidden">{versionContext ? `v${versionContext.version}` : "live"}</span>
@@ -1332,10 +1337,10 @@ export function InvestigationReport({
                 <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
               </button>
             )}
-            <a href="#investigation-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary hidden min-h-11 items-center justify-center gap-2 px-3 text-[12.5px] font-medium sm:flex">
+            {!shareView && <a href="#investigation-challenge" title="Tell ARGUS what looks wrong or missing in this report" className="btn-secondary hidden min-h-11 items-center justify-center gap-2 px-3 text-[12.5px] font-medium sm:flex">
               <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
-            </a>
-            {onReAudit && (
+            </a>}
+            {!shareView && onReAudit && (
               <button onClick={onReAudit} title="Run this investigation again with current evidence" className="btn-secondary hidden min-h-11 items-center justify-center gap-2 px-3 text-[12.5px] font-medium sm:flex">
                 <ArrowClockwise size={16} weight="duotone" aria-hidden="true" />
                 Rescan
@@ -1356,7 +1361,7 @@ export function InvestigationReport({
                 </button>
               )}
             </div>
-            <details className="group relative sm:hidden">
+            {!shareView && <details className="group relative sm:hidden">
                 <summary
                   aria-label="More report actions"
                   className="btn-secondary flex min-h-11 min-w-11 cursor-pointer list-none items-center justify-center px-2.5 [&::-webkit-details-marker]:hidden"
@@ -1388,7 +1393,7 @@ export function InvestigationReport({
                     </button>
                   )}
                 </div>
-              </details>
+              </details>}
           </div>
         </div>
       </header>
@@ -1622,7 +1627,7 @@ export function InvestigationReport({
               }))}
               totalScore={token.score}
               capNote={token.capApplied ? `limited to ${token.score}` : null}
-              challengeAnchor="#investigation-challenge"
+              challengeAnchor={shareView ? null : "#investigation-challenge"}
             />
           )}
 
@@ -1662,7 +1667,7 @@ export function InvestigationReport({
               <a href="#investigation-methodology" className="text-[12px] font-medium text-signal-lift underline-offset-2 hover:underline">
                 See every check
               </a>
-              {onReAudit && readiness.status !== "ready" && retryCanCloseAGap && (
+              {!shareView && onReAudit && readiness.status !== "ready" && retryCanCloseAGap && (
                 <button type="button" onClick={onReAudit} className="btn-primary min-h-10 px-3 text-[12px] font-medium">
                   <ArrowClockwise size={15} weight="duotone" aria-hidden="true" />
                   Retry required scan
@@ -1727,7 +1732,7 @@ export function InvestigationReport({
               { href: "#investigation-why", label: "Why", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#investigation-challenge", label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
+              ...(!shareView ? [{ href: "#investigation-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
               { href: "#investigation-methodology", label: "Scan details", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
             ]}
           />
@@ -2282,19 +2287,21 @@ export function InvestigationReport({
           </div>
         )}
 
-        <div className="story-chapter report-section scroll-mt-28 mt-7">
-          <ReportSectionHeading
-            index={chapterLabel(challengeChapterNumber, "Challenge")}
-            title="What could change the result"
-            description="Tell ARGUS what looks wrong or missing. We will compare your concern with the evidence saved in this report."
-          />
-          <SecondOpinion
-            id="investigation-challenge"
-            dossier={token}
-            panelCostToken={panelCostToken}
-            onRescan={onReAudit}
-          />
-        </div>
+        {!shareView && (
+          <div className="story-chapter report-section scroll-mt-28 mt-7">
+            <ReportSectionHeading
+              index={chapterLabel(challengeChapterNumber, "Challenge")}
+              title="What could change the result"
+              description="Tell ARGUS what looks wrong or missing. We will compare your concern with the evidence saved in this report."
+            />
+            <SecondOpinion
+              id="investigation-challenge"
+              dossier={token}
+              panelCostToken={panelCostToken}
+              onRescan={onReAudit}
+            />
+          </div>
+        )}
 
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="story-chapter story-chapter-muted report-section mt-7">
@@ -2319,8 +2326,10 @@ export function InvestigationReport({
           </div>
         </div>
 
-        {/* ask-the-report chat — grounded in this investigation's own evidence */}
-        <div className="mt-3">
+        {/* ask-the-report chat — grounded in this investigation's own evidence.
+            Absent from the share view: a link recipient reads the report, they
+            do not interrogate the workspace. */}
+        {!shareView && <div className="mt-3">
           <AskReport
             subject={`$${token.symbol}`}
             reportVersionId={versionContext?.reportVersionId
@@ -2339,7 +2348,7 @@ export function InvestigationReport({
             invGraph ? `graph entities: ${[...new Set(invGraph.nodes.map((n) => String(n.key)))].slice(0, 30).join(", ")}` : "",
             ].filter(Boolean).join(" | ")}
           />
-        </div>
+        </div>}
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
         {showCurrentIntelligence && canMutateWorkspace && (
@@ -2358,10 +2367,12 @@ export function InvestigationReport({
         {/* Full threat scan merged into the investigation: verdict, flags, AI
             source read, launch provenance, tokenomics, checklist - shares the
             1h scan cache with the standalone Threat scan surface. */}
-        <div className="mt-4 panel p-5">
-          <div className="eyebrow mb-1">Threat scan</div>
-          <EmbeddedThreatScan address={token.address} chain={token.chain} />
-        </div>
+        {!shareView && (
+          <div className="mt-4 panel p-5">
+            <div className="eyebrow mb-1">Threat scan</div>
+            <EmbeddedThreatScan address={token.address} chain={token.chain} />
+          </div>
+        )}
 
         <div className="mt-4 panel p-4 text-[12.5px] leading-relaxed text-ink-faint">
           ARGUS checked the token, website, project account, and public team. Open a person to run a deeper review. Names without a verified profile stay unconfirmed.
