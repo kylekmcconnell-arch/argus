@@ -113,3 +113,33 @@ describe("dossier model", () => {
     expect(coverage.heading).toBe("3 leads, 1 open check, 2 providers that never answered.");
   });
 });
+
+describe("team enrichment boundary", () => {
+  const withTeam = (leads: Array<Record<string, unknown>>) => buildDossier({
+    ...subject, basicFacts: [], checkRuns: [], basicFactLeads: [], providerFailures: [],
+    webTeamLeads: leads,
+  });
+
+  it("keeps a face on a person the subject's own account named", () => {
+    const [m] = withTeam([{
+      name: "@DynexMoonshots", role: "co-founder", handle: "@DynexMoonshots",
+      source: "post role-scan", avatarUrl: "https://pbs.twimg.com/x.jpg", avatarCapturedAt: "2026-08-16T04:51:31.270Z",
+    }]).team;
+    expect(m.firstParty).toBe(true);
+    expect(m.avatarUrl).toBe("https://pbs.twimg.com/x.jpg");
+    expect(m.avatarCapturedAt).toBe("2026-08-16T04:51:31.270Z");
+  });
+
+  it("refuses a face on a person found only by web search, even when one is offered", () => {
+    // Attaching a photograph to a handle nobody confirmed is the namesake error
+    // in a more persuasive form: the reader now has a face to trust.
+    const [m] = withTeam([{
+      name: "Daniela Herrmann", role: "CEO & Co-Founder",
+      source: "web/LinkedIn search", avatarUrl: "https://example.org/someone.jpg",
+      avatarCapturedAt: "2026-08-16T04:51:31.270Z",
+    }]).team;
+    expect(m.firstParty).toBe(false);
+    expect(m.avatarUrl).toBeNull();
+    expect(m.avatarCapturedAt).toBeNull();
+  });
+});
