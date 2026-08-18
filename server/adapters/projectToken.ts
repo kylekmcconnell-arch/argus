@@ -73,6 +73,13 @@ interface ContractIdentity {
   chain: string;
 }
 
+/** CoinGecko candidate inspect: official X/domain identity plus a bound contract. */
+interface CoinGeckoInspect {
+  details: JsonRecord;
+  identity: NonNullable<ReturnType<typeof verifyIdentity>>;
+  contract: ContractIdentity;
+}
+
 interface DexPair {
   pairAddress: string;
   chain: string;
@@ -1023,14 +1030,10 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
   const seeded = parseSeededContract(ctx);
   if (query.length < 2 && !seeded) return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
 
-  let selected: {
-    details: JsonRecord;
-    identity: NonNullable<ReturnType<typeof verifyIdentity>>;
-    contract: ContractIdentity;
-  } | null = null;
+  let selected: CoinGeckoInspect | null = null;
   let search: CoinSearchRow[] | null = null;
   let candidates: CoinSearchRow[] = [];
-  let inspected: Array<{ details: JsonRecord | null; selected: typeof selected }> = [];
+  let inspected: Array<{ details: JsonRecord | null; selected: CoinGeckoInspect | null }> = [];
   let detailAttempts = 0;
   let contractLookupFailed = false;
 
