@@ -157,3 +157,92 @@ export function tokenDimensionChapters(d: TokenDossier): DimensionChapter[] {
     };
   });
 }
+
+
+const PERSON_HEADLINES: Record<string, Record<ChapterTone, string>> = {
+  P1_team_and_identity: {
+    pass: "The people behind this are on the record.",
+    caution: "The team is only partly identified.",
+    fail: "Who is behind this is still unresolved.",
+  },
+  P2_product_substance: {
+    pass: "A real product is on the record.",
+    caution: "The product is only partly evidenced.",
+    fail: "What is built is still unresolved.",
+  },
+  P3_token_conduct: {
+    pass: "Token conduct is recorded as clean.",
+    caution: "Token conduct has open questions.",
+    fail: "Token conduct is weak or unrecorded.",
+  },
+  P4_backing_and_partners: {
+    pass: "Backing and partners are on the record.",
+    caution: "Backing is only partly evidenced.",
+    fail: "Backing and partners remain unresolved.",
+  },
+  P5_traction_and_liveness: {
+    pass: "Signs of life are on the record.",
+    caution: "Traction is only partly evidenced.",
+    fail: "Signs of life remain unresolved.",
+  },
+  P6_transparency_integrity: {
+    pass: "Disclosures are on the record.",
+    caution: "Transparency is only partly evidenced.",
+    fail: "Transparency remains unresolved.",
+  },
+};
+
+const PERSON_LABELS: Record<string, string> = {
+  P1_team_and_identity: "Team & identity",
+  P2_product_substance: "Product substance",
+  P3_token_conduct: "Token conduct",
+  P4_backing_and_partners: "Backing & partners",
+  P5_traction_and_liveness: "Traction & liveness",
+  P6_transparency_integrity: "Transparency & integrity",
+};
+
+function personTone(tier: string): ChapterTone {
+  if (tier === "exceptional" || tier === "solid") return "pass";
+  if (tier === "emerging") return "caution";
+  return "fail";
+}
+
+export interface PersonStrengthBandInput {
+  tier?: string;
+  minScore?: number;
+  maxScore?: number;
+  reasons?: string[];
+}
+
+/** Person/project chapters from recorded strength bands. Headline is chosen
+ *  by the recorded tier; the lead is the engine's own reasons. */
+export function personDimensionChapters(
+  bands: Record<string, PersonStrengthBandInput> | undefined,
+): DimensionChapter[] {
+  if (!bands) return [];
+  return Object.entries(bands)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([axis, band]) => {
+      const tier = (band.tier ?? "").trim() || "unknown";
+      const tone = personTone(tier);
+      const label = PERSON_LABELS[axis] ?? axis.replace(/^P\d_/, "").replace(/_/g, " ");
+      const min = band.minScore;
+      const max = band.maxScore;
+      const facts: ChapterFact[] = [];
+      if (min != null && max != null && Number.isFinite(min) && Number.isFinite(max)) {
+        facts.push({ label: "Recorded range", value: `${min}–${max}` });
+      }
+      if (tier && tier !== "unknown") facts.push({ label: "Recorded band", value: tier, tone });
+      return {
+        axis,
+        eyebrow: label,
+        headline: PERSON_HEADLINES[axis]?.[tone]
+          ?? (tone === "pass" ? `${label}: on the record.` : tone === "caution" ? `${label}: mixed.` : `${label}: unresolved.`),
+        score: max ?? min ?? 0,
+        weight: max ?? 0,
+        tone,
+        lead: (band.reasons ?? []).filter(Boolean).join(" "),
+        facts,
+      };
+    });
+}

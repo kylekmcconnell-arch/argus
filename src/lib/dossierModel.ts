@@ -127,7 +127,8 @@ const FACT_BEAT: Record<string, string> = {
 
 interface RawFact {
   predicate?: unknown; value?: unknown; status?: unknown;
-  sources?: Array<{ url?: unknown; title?: unknown; excerpt?: unknown; capturedAt?: unknown; sourceClass?: unknown; artifactVerified?: unknown; relation?: unknown }>;
+  providerProjection?: unknown;
+  sources?: Array<{ url?: unknown; title?: unknown; excerpt?: unknown; capturedAt?: unknown; sourceClass?: unknown; artifactVerified?: unknown; relation?: unknown; provider?: unknown }>;
 }
 interface RawCheck { checkId?: unknown; label?: unknown; status?: unknown; note?: unknown; decisionCritical?: unknown }
 
@@ -142,6 +143,25 @@ const clock = (iso: unknown): string => {
   const m = s.match(/T(\d{2}:\d{2}:\d{2})/);
   return m ? m[1] : s.slice(0, 10);
 };
+
+const sourceHost = (url: string): string => {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
+};
+
+/**
+ * Aggregator pages are namesake indexes (defillama.com/protocol/{name}). A slug
+ * or excerpt that repeats the display name is the Dynex Capital collision, not a
+ * unique-id bind. Funding facts therefore cannot bind through these sources.
+ */
+function isAggregatorSource(s: { url?: unknown; provider?: unknown }): boolean {
+  const provider = str(s.provider);
+  const host = sourceHost(str(s.url));
+  return provider === "defillama" || provider === "monid" || host === "defillama.com";
+}
+
+function looksLikeAggregatorFundingValue(value: string): boolean {
+  return /\$[\d,.]+/.test(value) || /\bled by\b/i.test(value) || /\bpublic funding rounds\b/i.test(value);
+}
 
 /**
  * A fact is bound when at least one supporting source names an identifier that
@@ -158,9 +178,12 @@ function bindingNote(fact: RawFact, subject: { handle: string; name: string; web
   const supporting = arr<NonNullable<RawFact["sources"]>[number]>(fact.sources)
     .filter((s) => str(s.relation) === "" || str(s.relation) === "supports");
   if (!supporting.length) return null;
-  const host = (() => { try { return subject.website ? new URL(subject.website).hostname.replace(/^www\./, "") : "" } catch { return "" } })();
+  const host = sourceHost(subject.website ?? "");
   const needles = [subject.handle.replace(/^@/, ""), host].map((n) => n.toLowerCase()).filter(Boolean);
   const bound = supporting.some((s) => {
+    // Aggregator funding is namesake-indexed. A /protocol/uniswap slug is not
+    // unique-id evidence that the raised figure or "led by" names this subject.
+    if (str(fact.predicate) === "funding" && isAggregatorSource(s)) return false;
     const hay = `${str(s.url)} ${str(s.title)} ${str(s.excerpt)}`.toLowerCase();
     return needles.some((n) => hay.includes(n));
   });
@@ -195,9 +218,11 @@ function receiptFor(fact: RawFact, unbound: string | null): DossierReceipt | nul
 function headingFor(checks: RawCheck[], figures: DossierFigure[]): string {
   const unbound = figures.filter((f) => f.unboundNote);
   if (unbound.length) {
-    return unbound.length === 1
-      ? `${unbound[0].value} belongs to someone else.`
-      : `${unbound.length} of ${figures.length} records here name a different subject.`;
+    // Never quote an unbound raised figure or "led by" into the heading.
+    if (unbound.length === 1 && !looksLikeAggregatorFundingValue(unbound[0].value)) {
+      return `${unbound[0].value} belongs to someone else.`;
+    }
+    return `${unbound.length} of ${figures.length} records here name a different subject.`;
   }
 
   const noteOf = (c: RawCheck) => str(c.note);
@@ -231,9 +256,12 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     website: str(payload.website) || null,
   };
   const report = (payload.report ?? {}) as Record<string, unknown>;
+  // Live AuditReport stores both pairs. The dynex fixture only has
+  // verdict / score_total. Prefer those; fall back to the composite fields
+  // so a production dossier is not UNKNOWN when only the live names exist.
   const verdict = {
-    call: str(report.verdict) || "UNKNOWN",
-    score: num(report.score_total),
+    call: str(report.verdict) || str(report.composite_verdict) || "UNKNOWN",
+    score: num(report.score_total) ?? num(report.governing_score),
     headline: str(payload.headline) || null,
   };
 
@@ -247,6 +275,18 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     const predicate = str(fact.predicate);
     const beatId = FACT_BEAT[predicate] ?? "coverage";
     const unboundNote = bindingNote(fact, subject);
+    // Aggregator/namesake funding that is not unique-id bound must not print as
+    // a raised figure or "led by". Skip the figure; provenance/unboundNote
+    // would still reprint the same sentence if we kept the value.
+    if (
+      predicate === "funding"
+      && unboundNote
+      && (
+        fact.providerProjection === true
+        || arr<NonNullable<RawFact["sources"]>[number]>(fact.sources).some(isAggregatorSource)
+        || looksLikeAggregatorFundingValue(str(fact.value))
+      )
+    ) continue;
     const declared = provenanceForBasicFactStatus(str(fact.status) as never);
     // An unbound fact cannot be sourced regardless of what the ledger declared.
     const provenance: ProvenanceState = unboundNote ? { tier: "unestablished" } : (declared ?? { tier: "derived" });
@@ -357,23 +397,34 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       leads: leads.length,
       failedProviders: arr<{ provider?: unknown }>(payload.providerFailures).map((f) => str(f.provider)).filter(Boolean),
     },
-    team: arr<Record<string, unknown>>(payload.webTeamLeads).map((m): TeamMember => {
-      // Read the durable marker the collector sets, never re-derive it here.
-      // An earlier draft pattern-matched the source string for "post role-scan"
-      // or "official", which silently missed the following and amplification
-      // lanes the collector also treats as first-party, so real avatars for
-      // those two lanes would have been dropped at render. Two independent
-      // definitions of the same boundary is one definition too many.
-      const firstParty = str(m.handleProvenance) === "subject_first_party";
-      return {
-        name: str(m.name),
-        role: str(m.role),
-        handle: str(m.handle) || null,
-        firstParty,
-        avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
-        avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
-      };
-    }).filter((m) => m.name),
+    team: (() => {
+      // Union collector leads with grounded webTeam rows the leads list may
+      // omit. firstParty is only the durable marker — never inferred from a
+      // display name, a face, or the word "official".
+      const rows = [
+        ...arr<Record<string, unknown>>(payload.webTeamLeads),
+        ...arr<Record<string, unknown>>(payload.webTeam),
+      ];
+      const seen = new Set<string>();
+      const team: TeamMember[] = [];
+      for (const m of rows) {
+        const name = str(m.name);
+        if (!name) continue;
+        const key = `${name}|${str(m.handle)}|${str(m.role)}`.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const firstParty = str(m.handleProvenance) === "subject_first_party";
+        team.push({
+          name,
+          role: str(m.role),
+          handle: str(m.handle) || null,
+          firstParty,
+          avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
+          avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
+        });
+      }
+      return team;
+    })(),
     nextActions: arr<Record<string, unknown>>((payload.researchPlan as Record<string, unknown>)?.nextActions)
       .map((a) => ({ rank: num(a.rank) ?? 0, action: str(a.action), whyNow: str(a.whyNow) || null }))
       .filter((a) => a.action).sort((a, b) => a.rank - b.rank),
