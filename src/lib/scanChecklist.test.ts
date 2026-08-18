@@ -416,6 +416,20 @@ describe("token OFAC address screen recording", () => {
     expect(byLabel(checks, "OFAC sanctions screen").note).toContain("1 of 11");
   });
 
+  it("records the buy/sell simulation as unavailable when no safety provider covers the chain", () => {
+    const uncovered = tokenChecks(dossier({
+      chain: "robinhood",
+      safety: safety({ available: false, simChecked: false }),
+    }));
+    const supportedButUnrecorded = tokenChecks(dossier({
+      safety: safety({ simChecked: false }),
+    }));
+
+    expect(byLabel(uncovered, "Buy/sell simulation")).toMatchObject({ status: "unavailable" });
+    expect(byLabel(uncovered, "Buy/sell simulation").note).toContain("Robinhood Chain");
+    expect(byLabel(supportedButUnrecorded, "Buy/sell simulation")).toMatchObject({ status: "unknown" });
+  });
+
   it("records an unreachable list as unavailable instead of silently clean, and legacy dossiers stay unknown", () => {
     const unreachable = tokenChecks(dossier({
       sanctionsScreen: { available: false, checked: 11, sanctioned: [], completedAt: "2026-07-15T16:00:00.000Z" },
@@ -504,6 +518,69 @@ describe("reconcileInvestigationChecks", () => {
     const base = tokenChecks(dossier());
     expect(reconcileInvestigationChecks(base, TOKEN_ADDRESS, null)).toEqual(base);
     expect(reconcileInvestigationChecks(base, TOKEN_ADDRESS, undefined)).toEqual(base);
+  });
+
+  // The meme-project case: a keyword-free bio plus a linktree means the
+  // embedded scan classifies the account as not-a-project, so its own binding
+  // check records not-applicable. The investigation's token-side verification
+  // (the CA published by the account itself) is the alternate license.
+  const notAProjectRows = (): ScanCheck[] => projectRows().map((row) =>
+    row.checkId === "project-token-identity" || row.checkId === "project-transparency"
+      ? { ...row, status: "not-applicable" as CheckStatus, note: "not a project account" }
+      : row);
+
+  it("credits through a token-side verified binding when the account scan could not classify a project", () => {
+    const rows = reconcileInvestigationChecks(
+      tokenChecks(dossier()),
+      TOKEN_ADDRESS,
+      boundAccount({ checkRuns: notAProjectRows() }),
+      undefined,
+      { handle: "askvenice", status: "verified", via: "linked-page" },
+    );
+
+    expect(byLabel(rows, "News & press").status).toBe("confirmed");
+    expect(byLabel(rows, "News & press").note).toContain("binding verified from the token side");
+    expect(byLabel(rows, "News & press").note).toContain("linked page");
+    expect(byLabel(rows, "GitHub forensics").status).toBe("confirmed");
+    expect(byLabel(rows, "Trust-graph reconciliation").status).toBe("checked-empty");
+    // The project-side transparency source recorded not-applicable, which is
+    // not a successful outcome: Documents & audits stays open and honest.
+    expect(byLabel(rows, "Documents & audits").status).toBe("unknown");
+  });
+
+  it("refuses the token-side license for a different handle or a non-verified status", () => {
+    const differentHandle = reconcileInvestigationChecks(
+      tokenChecks(dossier()),
+      TOKEN_ADDRESS,
+      boundAccount({ checkRuns: notAProjectRows() }),
+      undefined,
+      { handle: "someoneelse", status: "verified" },
+    );
+    const merelyAbsent = reconcileInvestigationChecks(
+      tokenChecks(dossier()),
+      TOKEN_ADDRESS,
+      boundAccount({ checkRuns: notAProjectRows() }),
+      undefined,
+      { handle: "askvenice", status: "absent" },
+    );
+
+    for (const rows of [differentHandle, merelyAbsent]) {
+      expect(byLabel(rows, "News & press").status).toBe("unknown");
+      expect(byLabel(rows, "News & press").note).toContain("did not confirm this project's canonical token");
+    }
+  });
+
+  it("keeps a recorded different-token binding as a refusal even with a token-side verification", () => {
+    const rows = reconcileInvestigationChecks(
+      tokenChecks(dossier()),
+      TOKEN_ADDRESS,
+      boundAccount({ checkRuns: notAProjectRows(), address: "0x1111111111111111111111111111111111111111" }),
+      undefined,
+      { handle: "askvenice", status: "verified" },
+    );
+
+    expect(byLabel(rows, "News & press").status).toBe("unknown");
+    expect(byLabel(rows, "News & press").note).toContain("bound a different token contract");
   });
 
   it("stores an explicit unavailable outcome when the embedded project audit fails", () => {

@@ -49,6 +49,7 @@ import {
   ArrowClockwise,
   ArrowLeft,
   Briefcase,
+  CaretDown,
   ChartLineUp,
   ClipboardText,
   Database,
@@ -347,6 +348,51 @@ function money(n?: number): string {
   return "$" + Math.round(n);
 }
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
+
+/* One unfinished check as a collapsible row (the composition-strip idiom):
+   label + status at a glance, the why one click away. Keeps the safety-checks
+   card scannable when several checks share a long crediting explanation. */
+function UnfinishedCheckRow({ check, required }: {
+  check: { checkId?: string; label: string; status: string; note?: string };
+  required: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const statusLabel = check.status === "unavailable" ? "source unavailable" : check.status === "stale" ? "out of date" : "did not finish";
+  const expandable = Boolean(check.note);
+  return (
+    <li>
+      <button
+        type="button"
+        aria-expanded={expandable ? open : undefined}
+        onClick={expandable ? () => setOpen((current) => !current) : undefined}
+        className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 py-2 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal ${expandable ? "cursor-pointer hover:bg-panel-2/40" : "cursor-default"}`}
+      >
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-[12px] font-medium text-ink">{check.label}</span>
+          {required && (
+            <span className="mono rounded border border-current px-1 py-0.5 text-[9px] uppercase tracking-wider" style={{ color: "var(--color-avoid)" }}>required</span>
+          )}
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          <span className="mono text-[10px] uppercase tracking-wider text-ink-faint">{statusLabel}</span>
+          {expandable && (
+            <CaretDown aria-hidden="true" size={11} className={`text-ink-faint transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`} />
+          )}
+        </span>
+      </button>
+      {expandable && (
+        <div
+          className="grid motion-safe:transition-[grid-template-rows] motion-safe:duration-300 motion-safe:ease-out"
+          style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+        >
+          <div className="overflow-hidden">
+            <p className="max-w-[56ch] pb-2 text-[11px] leading-snug text-ink-faint">{check.note}</p>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
 
 function StatusPill({
   label,
@@ -755,6 +801,7 @@ export function InvestigationReport({
     token.address,
     projectAccount,
     inv.projectAccountAudit,
+    inv.projectAccountBinding,
   );
   const readiness = deriveDecisionReadiness(diligenceChecks);
   const clearance = clearanceCoverage(diligenceChecks);
@@ -1490,18 +1537,11 @@ export function InvestigationReport({
                     </summary>
                     <ul className="mt-2 divide-y divide-line/60 border-t border-line/70" aria-label="Checks not finished">
                       {unfinishedCounterChecks.map((check) => (
-                        <li key={check.checkId ?? check.label} className="py-2">
-                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                            <span className="text-[12px] font-medium text-ink">{check.label}</span>
-                            {check.checkId && clearance.openNeverWaive.includes(check.checkId) && (
-                              <span className="mono rounded border border-current px-1 py-0.5 text-[9px] uppercase tracking-wider" style={{ color: "var(--color-avoid)" }}>required</span>
-                            )}
-                            <span className="mono ml-auto text-[10px] uppercase tracking-wider text-ink-faint">
-                              {check.status === "unavailable" ? "source unavailable" : check.status === "stale" ? "out of date" : "did not finish"}
-                            </span>
-                          </div>
-                          {check.note && <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">{check.note}</p>}
-                        </li>
+                        <UnfinishedCheckRow
+                          key={check.checkId ?? check.label}
+                          check={check}
+                          required={Boolean(check.checkId && clearance.openNeverWaive.includes(check.checkId))}
+                        />
                       ))}
                     </ul>
                   </details>
