@@ -60,7 +60,7 @@ const FACTS: BasicFactView[] = [
 const LEADS: BasicFactLeadView[] = [
   {
     predicate: "prior_exit",
-    value: "Possible prior exit, 2016 — named in a single secondary summary, never fetched",
+    value: "Possible prior exit, 2016. Named in a single secondary summary, never fetched",
     sources: src("search result, unfetched", "https://example.org/secondary"),
   } as BasicFactLeadView,
 ];
@@ -73,7 +73,7 @@ export function ProvenancePreview() {
         <h1 className="display mt-1 text-[24px] text-ink">Provenance ramp</h1>
         <p className="mt-2 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">
           Colour answers how grounded a value is. The mark answers what kind of state it is in.
-          Neither answers whether the news is good — that stays with the verdict palette.
+          Neither answers whether the news is good. That stays with the verdict palette.
         </p>
 
         <div className="panel mt-6 px-4 py-4">
