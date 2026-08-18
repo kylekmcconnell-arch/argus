@@ -6681,6 +6681,12 @@ function assembleDossier(ev, live) {
     if (!hasNode(ekey)) graph.nodes.push({ type: "Identity", subtype: "Email", key: ekey, label: email });
     graph.edges.push({ src: subjectKey, dst: ekey, type: "IDENTITY_EMAIL" });
   }
+  const gh = ev.profile.githubAssessment;
+  if (gh) {
+    const gkey = `github:${gh.login.toLowerCase()}`;
+    if (!hasNode(gkey)) graph.nodes.push({ type: "Identity", subtype: "GitHub", key: gkey, label: `github.com/${gh.login}` });
+    graph.edges.push({ src: subjectKey, dst: gkey, type: "IDENTITY_GITHUB" });
+  }
   const rawLaunches = ev.operatorLaunches;
   const operatorLaunches = rawLaunches && (rawLaunches.launches.length > 0 || rawLaunches.claimedProjects.length > 0) ? {
     ...rawLaunches,
@@ -6882,6 +6888,7 @@ function assembleDossier(ev, live) {
         providerRuns: entry.providerRuns.map((run) => ({ ...run }))
       }))
     } : {},
+    ...ev.profile.githubAssessment ? { githubAssessment: ev.profile.githubAssessment } : {},
     report,
     graph,
     founderSummary: ev.roles.includes("FOUNDER" /* FOUNDER */) ? a.founderSummary() : void 0,
@@ -10459,6 +10466,31 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
   return validated;
 }
 
+// src/lib/projectTokenLeg.ts
+var EVM_CA = /0x[a-fA-F0-9]{40}/;
+var SOL_WORD = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/;
+function tokenFromBio(bio) {
+  const b = bio ?? "";
+  const evm = b.match(EVM_CA)?.[0];
+  if (evm) return { address: evm, via: "evm", source: "the contract in the subject's own bio" };
+  const sol = b.match(SOL_WORD)?.[1];
+  if (sol) return { address: sol, via: "solana", source: "the contract in the subject's own bio" };
+  return null;
+}
+function tokenFromPromotions(promos) {
+  for (const p of promos ?? []) {
+    const a = (p.contract_address ?? "").trim();
+    if (!a) continue;
+    const chain = (p.chain ?? "").toLowerCase();
+    const via = chain === "solana" ? "solana" : chain ? "evm" : /^0x[a-fA-F0-9]{40}$/.test(a) ? "evm" : "solana";
+    if (via === "evm" && !/^0x[a-fA-F0-9]{40}$/.test(a)) continue;
+    if (via === "solana" && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a)) continue;
+    const tick = (p.ticker ?? "").replace(/^\$+/, "");
+    return { address: a, via, source: `a claimed promotion${tick ? ` ($${tick})` : ""}` };
+  }
+  return null;
+}
+
 // src/lib/providerCapabilities.ts
 var ENABLED_VALUE = /^(?:1|true|on|enabled)$/i;
 function arkhamProviderEnabled() {
@@ -13028,6 +13060,106 @@ async function discoverOperatorsFromFollowings(subjectHandle, subjectName3) {
   }
   return out.slice(0, 6);
 }
+function amplifiedAuthorsFromTimeline(payload, subjectHandle) {
+  const root = asRecord2(payload) ?? {};
+  const data = asRecord2(root.data);
+  const rows = data?.tweets ?? root.tweets ?? (Array.isArray(root.data) ? root.data : []);
+  const subject = subjectHandle.replace(/^@/, "").toLowerCase();
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const tweet = asRecord2(row);
+    for (const key of ["retweeted_tweet", "retweeted_status", "quoted_tweet", "quoted_status"]) {
+      const inner = asRecord2(tweet[key]);
+      const authorRec = asRecord2(inner.author);
+      const author = Object.keys(authorRec).length ? authorRec : asRecord2(inner.user);
+      const userName = typeof author.userName === "string" ? author.userName : typeof author.screen_name === "string" ? author.screen_name : "";
+      if (!userName || userName.toLowerCase() === subject || seen.has(userName.toLowerCase())) continue;
+      seen.add(userName.toLowerCase());
+      out.push({
+        handle: userName,
+        name: typeof author.name === "string" && author.name.trim() ? author.name.trim() : void 0,
+        bio: typeof author.description === "string" ? author.description : void 0
+      });
+    }
+  }
+  return out.slice(0, 12);
+}
+var MAX_AMPLIFIED_PROFILE_FETCHES = 8;
+async function discoverOperatorsFromAmplified(subjectHandle, subjectName3) {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return [];
+  const handle = subjectHandle.replace(/^@/, "");
+  const page = await lastTweetsFirstPage(handle, key);
+  if (!page) return [];
+  const authors = amplifiedAuthorsFromTimeline(page, handle);
+  const out = [];
+  let fetches = 0;
+  for (const author of authors) {
+    let bio = author.bio;
+    let name = author.name;
+    if (bio === void 0 && fetches < MAX_AMPLIFIED_PROFILE_FETCHES) {
+      fetches += 1;
+      const profile = await getProfile2(author.handle);
+      bio = profile?.bio ?? "";
+      name = name ?? profile?.name;
+    }
+    if (!bio) continue;
+    const claim = operatorClaimInBio(bio, handle, subjectName3);
+    if (!claim) continue;
+    out.push({
+      name: name?.trim() || `@${author.handle}`,
+      handle: `@${author.handle}`,
+      role: claim.role,
+      kind: "team",
+      evidence: `the official account retweeted/quoted @${author.handle}, whose own X bio states "${claim.phrase}"`,
+      source: "operator attribution (amplified + bio claim)",
+      sourceUrl: `https://x.com/${author.handle}`,
+      projects: otherProjectsInBio(bio, handle)
+    });
+  }
+  return out.slice(0, 6);
+}
+async function findRoleClaimants(subjectHandle, subjectName3, domain) {
+  const h = subjectHandle.replace(/^@/, "");
+  const nameVariant = subjectName3?.trim() && subjectName3.trim().toLowerCase() !== h.toLowerCase() ? subjectName3.trim() : "";
+  const domainVariant = domain?.trim() ? domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : "";
+  const queries = [
+    `"founder of @${h}"`,
+    `"cofounder of @${h}"`,
+    `"co-founder of @${h}"`,
+    `"CEO of @${h}"`,
+    `"CEO at @${h}"`,
+    `"@${h} team"`,
+    `"Founder @${h}"`,
+    ...nameVariant ? [`"founder of ${nameVariant}"`, `"${nameVariant} founder"`, `"${nameVariant} team"`] : [],
+    ...domainVariant ? [`"founder of ${domainVariant}"`] : []
+  ];
+  const system = `You are a forensic OSINT researcher with live web and X search. The subject is a crypto/tech project's X account. Find the PEOPLE the public record credits with leading it: founders, cofounders, CEO/CTO/COO, core team. Work the REVERSE direction: run the exact quoted searches given below on X AND on the general web (Google-style), and read what AI-answer search summaries say about who founded the project. Pay special attention to X BIOS: accounts whose own bio contains phrases like 'Founder @project' are first-party role claims. Also check the project site's credits (footers often say 'Built by X'), press, and LinkedIn. Include ONLY people with a real, quotable public claim tying them to THIS exact project (match the handle/name/domain; never a same-named project). For each person quote the claim VERBATIM in evidence and say where it lives (X bio, post URL, page). Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"founder|cofounder|ceo|cto|team","kind":"team","evidence":""}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
+  const text2 = await generalWebSearch(
+    system,
+    `Project X account: @${h}${nameVariant ? ` (${nameVariant})` : ""}${domainVariant ? `, website ${domainVariant}` : ""}. Who does the public record say founded or leads it? Run these exact searches on X and the web, then verify each hit: ${queries.join(", ")}.`,
+    { maxToolCalls: 6, cacheKey: `reverse-role:${h}` }
+  );
+  return parseTeamJSON(text2, h, "reverse role-phrase search");
+}
+async function confirmClaimantBios(candidates, subjectHandle, subjectName3, cap = 5) {
+  const subject = subjectHandle.replace(/^@/, "");
+  const confirmed = /* @__PURE__ */ new Map();
+  const handles = [...new Set(
+    candidates.map((c) => (c.handle ?? "").replace(/^@/, "")).filter((h) => h && h.toLowerCase() !== subject.toLowerCase())
+  )].slice(0, cap);
+  for (const h of handles) {
+    try {
+      const profile = await getProfile2(`@${h}`);
+      if (!profile?.bio) continue;
+      const claim = operatorClaimInBio(profile.bio, subject, subjectName3);
+      if (claim) confirmed.set(h.toLowerCase(), claim);
+    } catch {
+    }
+  }
+  return confirmed;
+}
 function scanPostsForRoles(posts, projectName2) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
@@ -13424,18 +13556,118 @@ function bindProfileAnchor(name, html, anchors, kind) {
 function htmlToText(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 }
-async function fetchPage(url, expectedApex) {
+var CREDIT_ROLES = {
+  built: "builder",
+  founded: "founder",
+  created: "creator",
+  developed: "developer",
+  made: "creator"
+};
+var CREDIT_NAME = "(@[A-Za-z0-9_]{2,30}|[A-Za-z0-9][\\w.'-]{1,29}(?:\\s+[A-Za-z0-9][\\w.'-]{1,29}){0,2})";
+var CREDIT_GRAMMARS = [
+  // "built by X", "founded by X", "created with ❤ by X"
+  {
+    pattern: new RegExp(`\\b(built|founded|created|developed|made)(?:\\s+with\\s+\\S{1,16})?\\s+by\\s+${CREDIT_NAME}`, "gi"),
+    role: (match) => CREDIT_ROLES[match[1].toLowerCase()] ?? "team"
+  },
+  // "Founder: X", "Co-founders: X"
+  {
+    pattern: new RegExp(`\\b(co-?founders?|founders?)\\s*[::]\\s*${CREDIT_NAME}`, "gi"),
+    role: (match) => /^co/i.test(match[1]) ? "cofounder" : "founder"
+  },
+  // "a X production"
+  {
+    pattern: new RegExp(`\\ban?\\s+${CREDIT_NAME}\\s+production\\b`, "gi"),
+    role: () => "creator"
+  }
+];
+var NON_PERSON_CREDITS = /* @__PURE__ */ new Set([
+  "the",
+  "a",
+  "an",
+  "our",
+  "us",
+  "we",
+  "you",
+  "team",
+  "community",
+  "fans",
+  "ai",
+  "webflow",
+  "framer",
+  "wix",
+  "squarespace",
+  "wordpress",
+  "shopify",
+  "vercel",
+  "netlify",
+  "gitbook",
+  "notion",
+  "carrd",
+  "canva",
+  "gamma",
+  "figma",
+  "react",
+  "nextjs",
+  "next.js",
+  "bubble",
+  "durable",
+  "lovable",
+  "bolt",
+  "v0",
+  "replit",
+  "cursor",
+  "claude",
+  "chatgpt"
+]);
+var creditKey = (value) => value.toLowerCase().replace(/^@/, "").replace(/[^a-z0-9]/g, "");
+function scanPageTextForCredits(text2, sourceUrl, projectName2, anchors) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const corpus = text2.replace(/\s+/g, " ").slice(0, 4e4);
+  const projectKey = projectName2?.trim() ? creditKey(projectName2) : "";
+  for (const grammar of CREDIT_GRAMMARS) {
+    for (const match of corpus.matchAll(grammar.pattern)) {
+      const captured = match[match.length - 1].trim();
+      const words = [];
+      for (const word of captured.split(/\s+/)) {
+        if (!/^[@0-9A-Z]/.test(word) || NON_PERSON_CREDITS.has(word.toLowerCase())) break;
+        words.push(word);
+      }
+      if (!words.length) continue;
+      const name = words.join(" ").replace(/[.,;:]+$/, "");
+      const key = creditKey(name);
+      if (!key || NON_PERSON_CREDITS.has(name.toLowerCase()) || seen.has(key)) continue;
+      if (projectKey && (key === projectKey || projectKey.startsWith(key))) continue;
+      seen.add(key);
+      const handle = name.startsWith("@") ? name : anchors?.find((anchor) => anchor.kind === "x" && (creditKey(anchor.anchorText) === key || creditKey(anchor.value) === key))?.value;
+      const phrase = match[0].replace(/\s+/g, " ").trim();
+      out.push({
+        name,
+        handle,
+        role: grammar.role(match),
+        kind: "team",
+        evidence: `the project's own page credits "${phrase}"`,
+        source: "site credit scan",
+        sourceUrl
+      });
+    }
+  }
+  return out.slice(0, 6);
+}
+async function fetchPage(url, expectedApex, purpose = "roster") {
+  const op = purpose === "credits" ? "site-credits" : "team-page";
   let response;
   try {
     response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,text/markdown,text/plain" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
   } catch {
-    recordCall("site-fetch", "team-page", 0, "transport_error", "failed");
+    recordCall("site-fetch", op, 0, "transport_error", "failed");
     return null;
   }
   if (!response.ok) {
     recordCall(
       "site-fetch",
-      "team-page",
+      op,
       0,
       `http_${response.status}`,
       response.status === 404 || response.status === 410 ? "partial" : "failed"
@@ -13446,31 +13678,36 @@ async function fetchPage(url, expectedApex) {
   try {
     const finalHost = new URL(finalUrl).hostname.toLowerCase();
     if (finalHost !== expectedApex && !finalHost.endsWith(`.${expectedApex}`)) {
-      recordCall("site-fetch", "team-page", 0, "redirected_offsite", "partial");
+      recordCall("site-fetch", op, 0, "redirected_offsite", "partial");
       return null;
     }
   } catch {
-    recordCall("site-fetch", "team-page", 0, "redirected_offsite", "partial");
+    recordCall("site-fetch", op, 0, "redirected_offsite", "partial");
     return null;
   }
   const ct = response.headers.get("content-type") ?? "";
   if (!/html|markdown|text\/plain/i.test(ct)) {
-    recordCall("site-fetch", "team-page", 0, "unexpected_content_type", "partial");
+    recordCall("site-fetch", op, 0, "unexpected_content_type", "partial");
     return null;
   }
   let raw;
   try {
     raw = await response.text();
   } catch {
-    recordCall("site-fetch", "team-page", 0, "response_text_error", "failed");
+    recordCall("site-fetch", op, 0, "response_text_error", "failed");
     return null;
   }
   const text2 = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
-  if (text2.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text2)) {
-    recordCall("site-fetch", "team-page", 0, "insufficient_team_content", "partial");
+  if (purpose === "credits") {
+    if (text2.length < 40) {
+      recordCall("site-fetch", op, 0, "insufficient_page_content", "partial");
+      return null;
+    }
+  } else if (text2.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text2)) {
+    recordCall("site-fetch", op, 0, "insufficient_team_content", "partial");
     return null;
   }
-  recordCall("site-fetch", "team-page", 0, void 0, "succeeded");
+  recordCall("site-fetch", op, 0, void 0, "succeeded");
   return { url: finalUrl, text: text2, html: raw, anchors: profileAnchors(raw) };
 }
 var roleEvidencePattern = (role) => {
@@ -13618,13 +13855,22 @@ async function fetchTeamPage(domain, projectName2) {
   if (!pages.length && fallbackCandidates.length) {
     pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex)))).filter(Boolean);
   }
-  if (!pages.length) return [];
-  const directTeam = await extractTeamFromPages(pages, projectName2);
+  const homePage = await fetchPage(`https://${apex}/`, apex, "credits") ?? await fetchPage(`https://www.${apex}/`, apex, "credits");
+  const apexLabel = apex.split(".")[0];
+  const creditSeen = /* @__PURE__ */ new Set();
+  const creditTeam = [...pages, ...homePage ? [homePage] : []].flatMap((page) => scanPageTextForCredits(page.text, page.url, projectName2, page.anchors)).filter((person) => {
+    const key = (person.handle ?? person.name).replace(/^@/, "").trim().toLowerCase();
+    if (!key || key === apexLabel || creditSeen.has(key)) return false;
+    creditSeen.add(key);
+    return true;
+  }).slice(0, 6);
+  if (!pages.length && !creditTeam.length) return [];
+  const directTeam = pages.length ? await extractTeamFromPages(pages, projectName2) : [];
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
   const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex)))).filter(Boolean);
-  const forumTeam = await extractTeamFromPages(forumPages, projectName2, true);
+  const forumTeam = forumPages.length ? await extractTeamFromPages(forumPages, projectName2, true) : [];
   const seen = /* @__PURE__ */ new Set();
-  return [...directTeam, ...forumTeam].filter((person) => {
+  return [...directTeam, ...forumTeam, ...creditTeam].filter((person) => {
     const key = (person.handle ?? person.name).replace(/^@/, "").trim().toLowerCase();
     if (!key || seen.has(key)) return false;
     seen.add(key);
@@ -15561,6 +15807,409 @@ var peopledatalabsAdapter = {
   }
 };
 
+// server/adapters/profilePhoto.ts
+import { createHash as createHash4 } from "node:crypto";
+var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
+var MAX_IMAGE_BYTES = 75e4;
+var MIN_IMAGE_BYTES = 256;
+var MIN_ACTIONABLE_CONFIDENCE = 0.7;
+var REDIRECT_STATUSES = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
+var IMAGE_TYPES = /* @__PURE__ */ new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+var CLASSIFICATIONS = /* @__PURE__ */ new Set([
+  "real_candid",
+  "studio_or_stock",
+  "ai_generated",
+  "celebrity_or_public_figure",
+  "logo_or_cartoon",
+  "no_photo",
+  "unclear"
+]);
+var REVIEW_LEADS = /* @__PURE__ */ new Set([
+  "studio_or_stock",
+  "ai_generated",
+  "celebrity_or_public_figure"
+]);
+var sha256 = (value) => createHash4("sha256").update(value).digest("hex");
+function safeOfficialAvatarUrl(raw) {
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    const allowedHost = host === "pbs.twimg.com" || host === "abs.twimg.com" || host.endsWith(".twimg.com");
+    if (url.protocol !== "https:" || !allowedHost || url.username || url.password || url.port && url.port !== "443") return null;
+    url.hash = "";
+    return url;
+  } catch {
+    return null;
+  }
+}
+async function readBoundedImage(response) {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) return null;
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (; ; ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_IMAGE_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(Buffer.from(value));
+  }
+  if (total < MIN_IMAGE_BYTES) return null;
+  return Buffer.concat(chunks, total);
+}
+function matchesImageSignature(bytes, mediaType) {
+  if (mediaType === "image/jpeg") return bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  if (mediaType === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (mediaType === "image/gif") return bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a";
+  if (mediaType === "image/webp") return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
+  return false;
+}
+async function fetchTrustedProfileImage(rawUrl) {
+  let url = safeOfficialAvatarUrl(rawUrl);
+  if (!url) {
+    recordCall("x-avatar", "image-fetch", 0, "unsafe_or_untrusted_url", "failed");
+    return null;
+  }
+  for (let redirect = 0; redirect <= 3; redirect += 1) {
+    let response;
+    try {
+      response = await fetch(url, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(7e3),
+        headers: { "user-agent": "argus-osint/1.0" }
+      });
+    } catch {
+      recordCall("x-avatar", "image-fetch", 0, "transport_error", "failed");
+      return null;
+    }
+    if (REDIRECT_STATUSES.has(response.status)) {
+      const location = response.headers.get("location");
+      let next;
+      try {
+        next = location ? safeOfficialAvatarUrl(new URL(location, url).toString()) : null;
+      } catch {
+        next = null;
+      }
+      if (!next || redirect === 3) {
+        recordCall("x-avatar", "image-fetch", 0, "unsafe_or_excessive_redirect", "failed");
+        return null;
+      }
+      url = next;
+      continue;
+    }
+    if (!response.ok) {
+      recordCall("x-avatar", "image-fetch", 0, `http_${response.status}`, "failed");
+      return null;
+    }
+    const mediaType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (!IMAGE_TYPES.has(mediaType)) {
+      recordCall("x-avatar", "image-fetch", 0, "unsupported_content_type", "failed");
+      return null;
+    }
+    const bytes = await readBoundedImage(response);
+    if (!bytes || !matchesImageSignature(bytes, mediaType)) {
+      recordCall("x-avatar", "image-fetch", 0, "empty_oversized_or_invalid_image", "failed");
+      return null;
+    }
+    recordCall("x-avatar", "image-fetch", 0, `${bytes.length} bytes`, "succeeded");
+    return { bytes, mediaType, url: url.toString(), contentHash: sha256(bytes) };
+  }
+  return null;
+}
+function validateVisionInput(value) {
+  if (!value || typeof value !== "object") return null;
+  const raw = value;
+  if (typeof raw.classification !== "string" || !CLASSIFICATIONS.has(raw.classification)) return null;
+  if (typeof raw.confidence !== "number" || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1) return null;
+  if (typeof raw.is_real_person !== "boolean" || typeof raw.flag !== "boolean") return null;
+  if (typeof raw.note !== "string" || !raw.note.trim()) return null;
+  if (!Array.isArray(raw.tells) || raw.tells.some((tell) => typeof tell !== "string")) return null;
+  const classification = raw.classification;
+  return {
+    classification,
+    confidence: raw.confidence,
+    isRealPerson: raw.is_real_person,
+    // Classification drives the product signal; a contradictory model boolean
+    // cannot silently clear or manufacture a finding.
+    flag: REVIEW_LEADS.has(classification),
+    tells: raw.tells.map((tell) => String(tell).trim().slice(0, 120)).filter(Boolean).slice(0, 6),
+    note: raw.note.trim().slice(0, 500)
+  };
+}
+async function classifyImage(image) {
+  const key = env("ANTHROPIC_API_KEY");
+  if (!key) return null;
+  let response;
+  try {
+    response = await fetch(ANTHROPIC_URL2, {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: ANALYST_MODEL,
+        max_tokens: 500,
+        system: "You are screening a crypto/tech account's profile image for due diligence. This is visual triage, not identity proof and not reverse-image search. Classify only what is visible. A professional headshot or public figure may be legitimate, so those are review leads rather than fraud findings. Never identify a person by name.",
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.bytes.toString("base64") } },
+            { type: "text", text: "Classify the profile image and list concrete visible tells. Use the record_profile_photo tool." }
+          ]
+        }],
+        tools: [{
+          name: "record_profile_photo",
+          description: "Record a bounded visual profile-image integrity assessment.",
+          input_schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              classification: { type: "string", enum: [...CLASSIFICATIONS].filter((value) => value !== "no_photo") },
+              confidence: { type: "number", minimum: 0, maximum: 1 },
+              is_real_person: { type: "boolean" },
+              flag: { type: "boolean" },
+              tells: { type: "array", maxItems: 6, items: { type: "string" } },
+              note: { type: "string" }
+            },
+            required: ["classification", "confidence", "is_real_person", "flag", "tells", "note"]
+          }
+        }],
+        tool_choice: { type: "tool", name: "record_profile_photo" }
+      }),
+      signal: AbortSignal.timeout(25e3)
+    });
+  } catch {
+    addClaudeUsage(void 0, "profile-photo-integrity", "failed", "transport_error");
+    return null;
+  }
+  if (!response.ok) {
+    addClaudeUsage(void 0, "profile-photo-integrity", "failed", `http_${response.status}`);
+    return null;
+  }
+  let body;
+  try {
+    body = await response.json();
+  } catch {
+    addClaudeUsage(void 0, "profile-photo-integrity", "failed", "response_json_error");
+    return null;
+  }
+  const tool = body.content?.find((item) => item.type === "tool_use" && item.name === "record_profile_photo");
+  const parsed = validateVisionInput(tool?.input);
+  addClaudeUsage(
+    body.usage,
+    "profile-photo-integrity",
+    parsed ? "succeeded" : "partial",
+    parsed ? void 0 : "invalid_tool_result"
+  );
+  return parsed;
+}
+function addArtifact(ctx, artifact) {
+  const exists = ctx.evidence.sourceArtifacts.some(
+    (candidate) => candidate.kind === artifact.kind && candidate.contentHash === artifact.contentHash
+  );
+  if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
+}
+function isOrganizationProfile(evidence) {
+  const resolvedPersonName = evidence.profile.resolved_name?.trim() ?? "";
+  const hasResolvedPerson = (evidence.profile.identity_confidence === "Confirmed" || evidence.profile.identity_confidence === "Probable") && resolvedPersonName.split(/\s+/).filter(Boolean).length >= 2;
+  if (hasResolvedPerson) return false;
+  const hasProjectIdentity = evidence.projectToken?.verified === true || evidence.roles.includes("PROJECT" /* PROJECT */);
+  const collectiveOrganizationBio = /\b(?:we|our|firm|fund|company|team|agency)\b/i.test(evidence.profile.bio);
+  const hasOrganizationRole = evidence.roles.includes("AGENCY" /* AGENCY */) || evidence.roles.includes("INVESTOR" /* INVESTOR */);
+  return hasProjectIdentity || Boolean(evidence.profile.website) && hasOrganizationRole && collectiveOrganizationBio;
+}
+async function collectProfilePhoto(ctx) {
+  const capturedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const profileUrl = `https://x.com/${encodeURIComponent(ctx.handle.replace(/^@/, ""))}`;
+  if (isOrganizationProfile(ctx.evidence)) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "not-applicable",
+      note: "company or project account; a logo or brand image is expected, so no human-face integrity screen applies",
+      provider: "argus-subject-router"
+    });
+    return {
+      status: "succeeded",
+      detail: "company or project account; human profile-photo screen not applicable"
+    };
+  }
+  if (ctx.evidence.profile.avatar_source_state === "none") {
+    const result2 = {
+      provider: "twitterapi",
+      capturedAt,
+      classification: "no_photo",
+      flag: false,
+      tells: [],
+      note: "The official X profile response contained no custom profile image. This is not proof of deception or identity."
+    };
+    ctx.evidence.profileAuthenticity = result2;
+    addArtifact(ctx, {
+      kind: "profile_photo",
+      provider: "twitterapi",
+      title: "Official X profile-photo presence screen",
+      sourceUrl: profileUrl,
+      capturedAt,
+      contentHash: sha256(JSON.stringify(result2)),
+      excerpt: result2.note,
+      match: "screened_clear"
+    });
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "checked-empty",
+      note: "official X profile response contained no custom photo; visual ownership/reuse was not testable",
+      provider: "twitterapi.io"
+    });
+    return { status: "succeeded", detail: "official profile returned no custom photo" };
+  }
+  if (!env("ANTHROPIC_API_KEY")) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: "profile-photo integrity screen is unavailable because the vision analyst is not configured",
+      provider: "claude-vision"
+    });
+    return { status: "failed", detail: "vision analyst is not configured" };
+  }
+  const avatarUrl = ctx.evidence.profile.avatar_url;
+  if (!avatarUrl) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: "official X avatar source was not resolved; no photo conclusion was recorded",
+      provider: "twitterapi.io"
+    });
+    return { status: "failed", detail: "official avatar source unavailable" };
+  }
+  const image = await fetchTrustedProfileImage(avatarUrl);
+  if (!image) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: "official X avatar bytes could not be fetched safely; no photo conclusion was recorded",
+      provider: "x-avatar"
+    });
+    return { status: "failed", detail: "trusted avatar fetch failed" };
+  }
+  const classified = await classifyImage(image);
+  if (!classified) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: "vision provider failed or returned an invalid profile-photo result",
+      provider: "claude-vision"
+    });
+    return { status: "failed", detail: "vision result unavailable or invalid" };
+  }
+  const conclusive = classified.classification !== "unclear" && (classified.confidence ?? 0) >= MIN_ACTIONABLE_CONFIDENCE;
+  const result = {
+    provider: "claude-vision",
+    capturedAt,
+    imageUrl: image.url,
+    imageData: `data:${image.mediaType};base64,${image.bytes.toString("base64")}`,
+    mediaType: image.mediaType,
+    imageContentHash: image.contentHash,
+    ...classified,
+    flag: conclusive && classified.flag,
+    note: [
+      classified.note,
+      classified.classification === "real_candid" ? "A visually plausible personal photo does not prove ownership or identity." : classified.classification === "studio_or_stock" ? "A professional headshot can be legitimate; treat this only as a review lead." : classified.classification === "celebrity_or_public_figure" ? "A public figure may legitimately use their own image; verify identity before drawing a conclusion." : classified.classification === "ai_generated" ? "This is a vision-model lead and requires human or reverse-image verification." : "Visual classification does not establish who owns or originally published the image."
+    ].join(" ").slice(0, 700)
+  };
+  ctx.evidence.profileAuthenticity = result;
+  const artifactRecord = {
+    imageContentHash: image.contentHash,
+    model: ANALYST_MODEL,
+    classification: result.classification,
+    confidence: result.confidence,
+    flag: result.flag,
+    tells: result.tells,
+    note: result.note
+  };
+  const artifactHash3 = sha256(JSON.stringify(artifactRecord));
+  addArtifact(ctx, {
+    kind: "profile_photo",
+    provider: "claude-vision",
+    title: "Profile-photo integrity screen",
+    sourceUrl: image.url,
+    capturedAt,
+    contentHash: artifactHash3,
+    sourceContentHash: image.contentHash,
+    excerpt: `${result.classification.replace(/_/g, " ")} \xB7 ${result.note}`,
+    match: conclusive && result.flag ? "risk_signal" : conclusive ? "observed" : "candidate"
+  });
+  if (!conclusive) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: `vision result was ${result.classification} at ${Math.round((result.confidence ?? 0) * 100)}% confidence; no clean conclusion recorded`,
+      provider: "claude-vision",
+      sourceCount: 1
+    });
+    return { status: "partial", detail: "vision result was inconclusive" };
+  }
+  ctx.recordCheck?.({
+    id: "profile-photo-authenticity",
+    status: result.flag ? "finding" : "checked-empty",
+    note: result.flag ? `${result.classification.replace(/_/g, " ")} review lead at ${Math.round((result.confidence ?? 0) * 100)}% model confidence; not identity proof` : `${result.classification.replace(/_/g, " ")} observed; visual-only screen cannot prove image ownership or identity`,
+    provider: "claude-vision",
+    sourceCount: 1
+  });
+  return { status: "succeeded", detail: `${result.classification} at ${Math.round((result.confidence ?? 0) * 100)}%` };
+}
+
+// server/adapters/teamEnrichment.ts
+var MAX_ENRICHED_MEMBERS = 15;
+async function enrichOne(member) {
+  const profile = await getProfile2(member.handle);
+  if (!profile) return false;
+  member.accountStatus = profile.accountStatus;
+  member.followers = profile.followers;
+  member.enrichmentProvider = "twitterapi";
+  member.enrichmentSourceUrl = profile.statusSourceUrl;
+  if (!profile.image) return true;
+  const image = await fetchTrustedProfileImage(profile.image);
+  if (!image) return true;
+  member.avatarUrl = image.url;
+  member.avatarContentHash = image.contentHash;
+  member.avatarCapturedAt = profile.statusCapturedAt;
+  return true;
+}
+async function enrichFirstPartyTeamAvatars(ctx) {
+  const webTeam = ctx.evidence.webTeam ?? [];
+  const targets = webTeam.filter((member) => member.handle && member.handleProvenance === "subject_first_party" && !member.avatarUrl).slice(0, MAX_ENRICHED_MEMBERS);
+  if (!targets.length) return;
+  let enriched = 0;
+  for (const member of targets) {
+    try {
+      if (await enrichOne(member)) enriched++;
+    } catch (error) {
+      ctx.emit({
+        phase: "P1 \xB7 Team",
+        label: "Team enrichment error",
+        detail: `${member.name}${member.handle ? ` (${member.handle})` : ""}: ${String(error)}`,
+        source: "twitterapi.io",
+        tone: "warn"
+      });
+    }
+  }
+  if (enriched) {
+    ctx.emit({
+      phase: "P1 \xB7 Team",
+      label: "Team member photos",
+      detail: `Enriched ${enriched} of ${targets.length} team handle${targets.length === 1 ? "" : "s"} the subject account itself bound (its own posts, following, or amplification) with a profile photo, follower count, and account status.`,
+      source: "twitterapi.io",
+      tone: "good"
+    });
+  }
+}
+
 // server/adapters/dexscreener.ts
 var BASE2 = "https://api.dexscreener.com";
 var MAX_PROMO_LOOKUPS = 8;
@@ -16296,6 +16945,84 @@ async function githubAffiliations(login, key) {
   }
   return [...out.values()].slice(0, 10);
 }
+var MAX_TEAM = 5;
+var LEADER_RE = /founder|cofounder|co-?founder|ceo|cto|coo|president|chief|head of|\blead\b/i;
+var yearsSince = (fromIso, toMs) => {
+  const t = Date.parse(fromIso);
+  return Number.isFinite(t) ? (toMs - t) / (365.25 * 864e5) : void 0;
+};
+function buildClaimChecks(bio, a) {
+  const checks = [];
+  const b = bio ?? "";
+  const ym = b.match(/\b(?:since|est\.?|building since|from)\s*'?(\d{4})\b/i) ?? b.match(/\bsince\s*'?(\d{2})\b/i);
+  if (ym && a.createdAt) {
+    let claimedYear = parseInt(ym[1], 10);
+    if (claimedYear < 100) claimedYear += 2e3;
+    const createdYear = new Date(a.createdAt).getFullYear();
+    if (Number.isFinite(createdYear)) {
+      if (claimedYear >= createdYear - 1) {
+        checks.push({ claim: `Bio implies presence since ${claimedYear}`, observation: `GitHub account created ${createdYear} - consistent`, grade: "consistent" });
+      } else {
+        checks.push({ claim: `Bio implies presence since ${claimedYear}`, observation: `but the GitHub account was only created in ${createdYear}`, grade: "context" });
+      }
+    }
+  }
+  if (/founder|co-?founder|builder|\bbuild|\bdev\b|developer|engineer|\bship|core contributor|hacker|programmer/i.test(b)) {
+    const total = a.originalCount + a.forkCount;
+    const claim = "Bio presents a builder/founder persona";
+    if (total === 0) {
+      checks.push({ claim, observation: "GitHub account has no public repositories", grade: "unsupported" });
+    } else if (a.originalCount === 0) {
+      checks.push({ claim, observation: `all ${total} public repos are forks - no original repositories`, grade: "contradicted" });
+    } else if (a.forkRatio >= 0.8) {
+      checks.push({ claim, observation: `${a.forkCount} of ${total} repos are forks; ${a.originalCount} original with ${a.totalStarsOnOriginals}\u2605`, grade: "unsupported" });
+    } else {
+      checks.push({ claim, observation: `${a.originalCount} original repos (${a.totalStarsOnOriginals}\u2605)`, grade: "consistent" });
+    }
+  }
+  return checks;
+}
+async function assessGithub(match, key, bio, opts) {
+  const login = match.login;
+  const perPage = opts?.maxRepos ?? 30;
+  const u = await ghJson(`/users/${encodeURIComponent(login)}`, key);
+  if (!u) return null;
+  const repos = await ghJson(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=owner&per_page=${perPage}`, key) ?? [];
+  const originals = repos.filter((r) => !r.fork);
+  const forks = repos.filter((r) => r.fork);
+  const total = repos.length;
+  const forkRatio = total ? forks.length / total : 0;
+  const totalStarsOnOriginals = originals.reduce((s, r) => s + (r.stargazers_count ?? 0), 0);
+  const langTally = /* @__PURE__ */ new Map();
+  for (const r of originals) if (r.language) langTally.set(r.language, (langTally.get(r.language) ?? 0) + 1);
+  const topLanguages = [...langTally.entries()].map(([language, repos2]) => ({ language, repos: repos2 })).sort((a, b) => b.repos - a.repos).slice(0, 6);
+  const notableRepos = [...originals].sort((a, b) => (b.stargazers_count ?? 0) - (a.stargazers_count ?? 0)).slice(0, 5).map((r) => ({ name: r.name, stars: r.stargazers_count ?? 0, language: r.language, lastPush: r.pushed_at, fork: false, url: r.html_url }));
+  const nowMs = Date.now();
+  const pushes = repos.map((r) => r.pushed_at ? Date.parse(r.pushed_at) : NaN).filter((t) => Number.isFinite(t));
+  const lastMs = pushes.length ? Math.max(...pushes) : void 0;
+  const ageY = u.created_at ? yearsSince(u.created_at, nowMs) : void 0;
+  const base = {
+    createdAt: u.created_at,
+    accountAgeYears: ageY != null ? Math.round(ageY * 10) / 10 : void 0,
+    originalCount: originals.length,
+    forkCount: forks.length,
+    forkRatio: Math.round(forkRatio * 100) / 100,
+    totalStarsOnOriginals
+  };
+  const summary = `github.com/${login}: ${ageY != null ? `~${Math.round(ageY)}y old, ` : ""}${originals.length} original + ${forks.length} fork repos${totalStarsOnOriginals ? `, ${totalStarsOnOriginals}\u2605 on originals` : ""}${topLanguages.length ? ` (${topLanguages.slice(0, 3).map((l) => l.language).join(", ")})` : ""}.`;
+  return {
+    login,
+    confidence: match.confidence === "gold" ? "gold" : "weak",
+    ...base,
+    publicRepos: u.public_repos ?? total,
+    topLanguages,
+    notableRepos,
+    lastActivity: lastMs ? new Date(lastMs).toISOString() : void 0,
+    daysSinceActivity: lastMs ? Math.round((nowMs - lastMs) / 864e5) : void 0,
+    claimChecks: buildClaimChecks(bio, base),
+    summary
+  };
+}
 var githubAdapter = {
   id: "github",
   label: "GitHub forensics",
@@ -16357,6 +17084,32 @@ var githubAdapter = {
       sourceCount: 1
     });
     ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub confirmed", detail: `github.com/${match.login} links back to ${ctx.handle} (twitter_username match).`, source: "github", tone: "good" });
+    const assessment = await assessGithub(match, key, ctx.evidence.profile.bio);
+    if (assessment) {
+      ctx.evidence.profile.githubAssessment = assessment;
+      ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub assessment", detail: assessment.summary, source: "github", tone: assessment.forkRatio > 0.8 || assessment.originalCount === 0 ? "warn" : "neutral" });
+      for (const c of assessment.claimChecks) {
+        if (c.grade === "contradicted" || c.grade === "unsupported") {
+          ctx.emit({ phase: "P1 \xB7 Identity", label: "Bio vs GitHub", detail: `${c.claim} - ${c.observation}.`, source: "github", tone: "warn" });
+        }
+      }
+    }
+    if (ctx.evidence.roles.includes("PROJECT" /* PROJECT */)) {
+      const leaders = (ctx.evidence.webTeam ?? []).filter((m) => m.handle && LEADER_RE.test(m.role ?? "")).slice(0, MAX_TEAM);
+      let assessed = 0;
+      for (const m of leaders) {
+        const tm = await resolveGithub(m.handle, m.name, key);
+        if (tm?.confidence !== "gold") continue;
+        const ta = await assessGithub(tm, key, "", { maxRepos: 15 });
+        if (ta) {
+          m.github = ta;
+          assessed++;
+        }
+      }
+      if (leaders.length) {
+        ctx.emit({ phase: "P1 \xB7 Identity", label: "Team GitHubs", detail: assessed ? `${assessed} of ${leaders.length} leader X handle(s) linked to a GitHub (twitter_username match) and assessed.` : "No leader X handle linked back to a GitHub account.", source: "github", tone: assessed ? "good" : "neutral" });
+      }
+    }
     const affs = await githubAffiliations(match.login, key);
     if (!affs.length) {
       ctx.recordCheck?.({
@@ -16606,7 +17359,7 @@ var onchainAdapter = {
 };
 
 // server/adapters/basicFacts.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 import { isIP as isIP2 } from "node:net";
 
 // src/lib/projectLeadRelevance.ts
@@ -16799,7 +17552,7 @@ function hydrateOfficialProjectIdentityFromFacts(evidence, facts = evidence.basi
 }
 
 // server/adapters/basicFacts.ts
-var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
+var ANTHROPIC_URL3 = "https://api.anthropic.com/v1/messages";
 var PRIMARY_SEARCH_USES_PER_BATCH = 2;
 var REPAIR_SEARCH_USES = 2;
 var DISCOVERY_BATCH_CONCURRENCY = 3;
@@ -17796,7 +18549,7 @@ function claudeRequestBody(prompt, assistantContent, maxSearchUses = PRIMARY_SEA
 async function callClaudeSearch(prompt, request, assistantContent, maxSearchUses = PRIMARY_SEARCH_USES_PER_BATCH) {
   let response;
   try {
-    response = await request(ANTHROPIC_URL2, {
+    response = await request(ANTHROPIC_URL3, {
       method: "POST",
       headers: {
         "x-api-key": env("ANTHROPIC_API_KEY") ?? "",
@@ -17934,7 +18687,7 @@ async function discoverBasicFactLeadsDetailed(ctx, dependencies = {}, questions 
       questionIds: batchQuestions.map((question) => question.id),
       questionSpecific
     };
-    const questionFingerprint = createHash4("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
+    const questionFingerprint = createHash5("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
     const cacheKey = `basic-facts:${RESEARCH_CACHE_VERSION}:claude:${audience}:${phase}:${key}:${questionFingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
     const cached = await cacheRead(cacheKey);
     if (cached) {
@@ -18032,7 +18785,7 @@ async function discoverGrokBasicFactLeadsDetailed(ctx, questions, phase, options
       questionIds: batchQuestions.map((question) => question.id),
       questionSpecific
     };
-    const fingerprint = createHash4("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
+    const fingerprint = createHash5("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
     let attempts = 0;
     const text2 = await grokSearch(
       "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
@@ -18090,7 +18843,7 @@ async function discoverGroundedBasicFactLeadsDetailed(ctx, questions, phase) {
       questionIds: batchQuestions.map((question) => question.id),
       questionSpecific
     };
-    const fingerprint = createHash4("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
+    const fingerprint = createHash5("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
     const text2 = await groundedSearch(
       "You are ARGUS's basic-facts research scout. Answer only from the provided sources, cite their exact URLs, and return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
       discoveryPrompt(ctx, batchQuestions, phase),
@@ -19088,7 +19841,7 @@ function directPersonLegalIdentityIsBound(passage, aliases, officialCounterparty
 function factId(subjectKey, predicate, value, legalIdentity = "") {
   const normalizedValue = canonicalBasicFactComparisonValue(predicate, searchable(value));
   const identity = `${subjectKey.toLowerCase()}::${predicate}::${normalizedValue}${legalIdentity ? `::${legalIdentity}` : ""}`;
-  return `basic_v1_${createHash4("sha256").update(identity).digest("hex")}`;
+  return `basic_v1_${createHash5("sha256").update(identity).digest("hex")}`;
 }
 var TOKEN_ENTITY_LEGAL_SUFFIX = "(?:global|group|holding|holdings|co|company|corp|corporation|inc|incorporated|limited|llc|ltd|plc)";
 var CAPTURED_TOKEN_ENTITY = "([^,.!?;]{1,100}?)(?=\\s+(?:and|but|that|which|while|who)\\b|[,.;:!?)]|$)";
@@ -19718,7 +20471,7 @@ async function fetchSecExchangeRegistry() {
     host: "www.sec.gov",
     contentType: response.headers.get("content-type") ?? "application/json",
     text: text2,
-    contentHash: createHash4("sha256").update(text2).digest("hex"),
+    contentHash: createHash5("sha256").update(text2).digest("hex"),
     capturedAt: captureTimestamp()
   };
 }
@@ -20618,7 +21371,7 @@ var aggregateStatus2 = (attempts) => {
   if (attempts.every((attempt) => attempt.status === "failed")) return "failed";
   return "partial";
 };
-var sha256 = async (value) => {
+var sha2562 = async (value) => {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
@@ -20929,7 +21682,7 @@ async function loadOfacNames(fetcher, cache) {
         return {
           names: names2,
           attempts: [],
-          indexHash: await sha256([...names2].sort().join("\n"))
+          indexHash: await sha2562([...names2].sort().join("\n"))
         };
       }
     }
@@ -20976,7 +21729,7 @@ async function loadOfacNames(fetcher, cache) {
   return {
     names: validIndex ? names : /* @__PURE__ */ new Set(),
     attempts: [attempt],
-    ...validIndex ? { indexHash: await sha256([...names].sort().join("\n")) } : {}
+    ...validIndex ? { indexHash: await sha2562([...names].sort().join("\n")) } : {}
   };
 }
 async function loadOfacEntityNames(fetcher, cache) {
@@ -20988,7 +21741,7 @@ async function loadOfacEntityNames(fetcher, cache) {
         return {
           names,
           attempts: [],
-          indexHash: await sha256([...names].sort().join("\n"))
+          indexHash: await sha2562([...names].sort().join("\n"))
         };
       }
     }
@@ -21036,7 +21789,7 @@ async function loadOfacEntityNames(fetcher, cache) {
   return {
     names: validIndex ? entityNames : /* @__PURE__ */ new Set(),
     attempts: [attempt],
-    ...validIndex ? { indexHash: await sha256([...entityNames].sort().join("\n")) } : {}
+    ...validIndex ? { indexHash: await sha2562([...entityNames].sort().join("\n")) } : {}
   };
 }
 async function collectOfacName(rawName, options = {}) {
@@ -21194,363 +21947,6 @@ async function collectInternationalSanctions(rawName, options = {}) {
     attempts,
     status: aggregateStatus3(attempts)
   };
-}
-
-// server/adapters/profilePhoto.ts
-import { createHash as createHash5 } from "node:crypto";
-var ANTHROPIC_URL3 = "https://api.anthropic.com/v1/messages";
-var MAX_IMAGE_BYTES = 75e4;
-var MIN_IMAGE_BYTES = 256;
-var MIN_ACTIONABLE_CONFIDENCE = 0.7;
-var REDIRECT_STATUSES = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
-var IMAGE_TYPES = /* @__PURE__ */ new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
-var CLASSIFICATIONS = /* @__PURE__ */ new Set([
-  "real_candid",
-  "studio_or_stock",
-  "ai_generated",
-  "celebrity_or_public_figure",
-  "logo_or_cartoon",
-  "no_photo",
-  "unclear"
-]);
-var REVIEW_LEADS = /* @__PURE__ */ new Set([
-  "studio_or_stock",
-  "ai_generated",
-  "celebrity_or_public_figure"
-]);
-var sha2562 = (value) => createHash5("sha256").update(value).digest("hex");
-function safeOfficialAvatarUrl(raw) {
-  try {
-    const url = new URL(raw);
-    const host = url.hostname.toLowerCase();
-    const allowedHost = host === "pbs.twimg.com" || host === "abs.twimg.com" || host.endsWith(".twimg.com");
-    if (url.protocol !== "https:" || !allowedHost || url.username || url.password || url.port && url.port !== "443") return null;
-    url.hash = "";
-    return url;
-  } catch {
-    return null;
-  }
-}
-async function readBoundedImage(response) {
-  const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) return null;
-  if (!response.body) return null;
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  for (; ; ) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_IMAGE_BYTES) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(Buffer.from(value));
-  }
-  if (total < MIN_IMAGE_BYTES) return null;
-  return Buffer.concat(chunks, total);
-}
-function matchesImageSignature(bytes, mediaType) {
-  if (mediaType === "image/jpeg") return bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
-  if (mediaType === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
-  if (mediaType === "image/gif") return bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a";
-  if (mediaType === "image/webp") return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
-  return false;
-}
-async function fetchTrustedProfileImage(rawUrl) {
-  let url = safeOfficialAvatarUrl(rawUrl);
-  if (!url) {
-    recordCall("x-avatar", "image-fetch", 0, "unsafe_or_untrusted_url", "failed");
-    return null;
-  }
-  for (let redirect = 0; redirect <= 3; redirect += 1) {
-    let response;
-    try {
-      response = await fetch(url, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(7e3),
-        headers: { "user-agent": "argus-osint/1.0" }
-      });
-    } catch {
-      recordCall("x-avatar", "image-fetch", 0, "transport_error", "failed");
-      return null;
-    }
-    if (REDIRECT_STATUSES.has(response.status)) {
-      const location = response.headers.get("location");
-      let next;
-      try {
-        next = location ? safeOfficialAvatarUrl(new URL(location, url).toString()) : null;
-      } catch {
-        next = null;
-      }
-      if (!next || redirect === 3) {
-        recordCall("x-avatar", "image-fetch", 0, "unsafe_or_excessive_redirect", "failed");
-        return null;
-      }
-      url = next;
-      continue;
-    }
-    if (!response.ok) {
-      recordCall("x-avatar", "image-fetch", 0, `http_${response.status}`, "failed");
-      return null;
-    }
-    const mediaType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (!IMAGE_TYPES.has(mediaType)) {
-      recordCall("x-avatar", "image-fetch", 0, "unsupported_content_type", "failed");
-      return null;
-    }
-    const bytes = await readBoundedImage(response);
-    if (!bytes || !matchesImageSignature(bytes, mediaType)) {
-      recordCall("x-avatar", "image-fetch", 0, "empty_oversized_or_invalid_image", "failed");
-      return null;
-    }
-    recordCall("x-avatar", "image-fetch", 0, `${bytes.length} bytes`, "succeeded");
-    return { bytes, mediaType, url: url.toString(), contentHash: sha2562(bytes) };
-  }
-  return null;
-}
-function validateVisionInput(value) {
-  if (!value || typeof value !== "object") return null;
-  const raw = value;
-  if (typeof raw.classification !== "string" || !CLASSIFICATIONS.has(raw.classification)) return null;
-  if (typeof raw.confidence !== "number" || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1) return null;
-  if (typeof raw.is_real_person !== "boolean" || typeof raw.flag !== "boolean") return null;
-  if (typeof raw.note !== "string" || !raw.note.trim()) return null;
-  if (!Array.isArray(raw.tells) || raw.tells.some((tell) => typeof tell !== "string")) return null;
-  const classification = raw.classification;
-  return {
-    classification,
-    confidence: raw.confidence,
-    isRealPerson: raw.is_real_person,
-    // Classification drives the product signal; a contradictory model boolean
-    // cannot silently clear or manufacture a finding.
-    flag: REVIEW_LEADS.has(classification),
-    tells: raw.tells.map((tell) => String(tell).trim().slice(0, 120)).filter(Boolean).slice(0, 6),
-    note: raw.note.trim().slice(0, 500)
-  };
-}
-async function classifyImage(image) {
-  const key = env("ANTHROPIC_API_KEY");
-  if (!key) return null;
-  let response;
-  try {
-    response = await fetch(ANTHROPIC_URL3, {
-      method: "POST",
-      headers: {
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model: ANALYST_MODEL,
-        max_tokens: 500,
-        system: "You are screening a crypto/tech account's profile image for due diligence. This is visual triage, not identity proof and not reverse-image search. Classify only what is visible. A professional headshot or public figure may be legitimate, so those are review leads rather than fraud findings. Never identify a person by name.",
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.bytes.toString("base64") } },
-            { type: "text", text: "Classify the profile image and list concrete visible tells. Use the record_profile_photo tool." }
-          ]
-        }],
-        tools: [{
-          name: "record_profile_photo",
-          description: "Record a bounded visual profile-image integrity assessment.",
-          input_schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              classification: { type: "string", enum: [...CLASSIFICATIONS].filter((value) => value !== "no_photo") },
-              confidence: { type: "number", minimum: 0, maximum: 1 },
-              is_real_person: { type: "boolean" },
-              flag: { type: "boolean" },
-              tells: { type: "array", maxItems: 6, items: { type: "string" } },
-              note: { type: "string" }
-            },
-            required: ["classification", "confidence", "is_real_person", "flag", "tells", "note"]
-          }
-        }],
-        tool_choice: { type: "tool", name: "record_profile_photo" }
-      }),
-      signal: AbortSignal.timeout(25e3)
-    });
-  } catch {
-    addClaudeUsage(void 0, "profile-photo-integrity", "failed", "transport_error");
-    return null;
-  }
-  if (!response.ok) {
-    addClaudeUsage(void 0, "profile-photo-integrity", "failed", `http_${response.status}`);
-    return null;
-  }
-  let body;
-  try {
-    body = await response.json();
-  } catch {
-    addClaudeUsage(void 0, "profile-photo-integrity", "failed", "response_json_error");
-    return null;
-  }
-  const tool = body.content?.find((item) => item.type === "tool_use" && item.name === "record_profile_photo");
-  const parsed = validateVisionInput(tool?.input);
-  addClaudeUsage(
-    body.usage,
-    "profile-photo-integrity",
-    parsed ? "succeeded" : "partial",
-    parsed ? void 0 : "invalid_tool_result"
-  );
-  return parsed;
-}
-function addArtifact(ctx, artifact) {
-  const exists = ctx.evidence.sourceArtifacts.some(
-    (candidate) => candidate.kind === artifact.kind && candidate.contentHash === artifact.contentHash
-  );
-  if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
-}
-function isOrganizationProfile(evidence) {
-  const resolvedPersonName = evidence.profile.resolved_name?.trim() ?? "";
-  const hasResolvedPerson = (evidence.profile.identity_confidence === "Confirmed" || evidence.profile.identity_confidence === "Probable") && resolvedPersonName.split(/\s+/).filter(Boolean).length >= 2;
-  if (hasResolvedPerson) return false;
-  const hasProjectIdentity = evidence.projectToken?.verified === true || evidence.roles.includes("PROJECT" /* PROJECT */);
-  const collectiveOrganizationBio = /\b(?:we|our|firm|fund|company|team|agency)\b/i.test(evidence.profile.bio);
-  const hasOrganizationRole = evidence.roles.includes("AGENCY" /* AGENCY */) || evidence.roles.includes("INVESTOR" /* INVESTOR */);
-  return hasProjectIdentity || Boolean(evidence.profile.website) && hasOrganizationRole && collectiveOrganizationBio;
-}
-async function collectProfilePhoto(ctx) {
-  const capturedAt = (/* @__PURE__ */ new Date()).toISOString();
-  const profileUrl = `https://x.com/${encodeURIComponent(ctx.handle.replace(/^@/, ""))}`;
-  if (isOrganizationProfile(ctx.evidence)) {
-    ctx.recordCheck?.({
-      id: "profile-photo-authenticity",
-      status: "not-applicable",
-      note: "company or project account; a logo or brand image is expected, so no human-face integrity screen applies",
-      provider: "argus-subject-router"
-    });
-    return {
-      status: "succeeded",
-      detail: "company or project account; human profile-photo screen not applicable"
-    };
-  }
-  if (ctx.evidence.profile.avatar_source_state === "none") {
-    const result2 = {
-      provider: "twitterapi",
-      capturedAt,
-      classification: "no_photo",
-      flag: false,
-      tells: [],
-      note: "The official X profile response contained no custom profile image. This is not proof of deception or identity."
-    };
-    ctx.evidence.profileAuthenticity = result2;
-    addArtifact(ctx, {
-      kind: "profile_photo",
-      provider: "twitterapi",
-      title: "Official X profile-photo presence screen",
-      sourceUrl: profileUrl,
-      capturedAt,
-      contentHash: sha2562(JSON.stringify(result2)),
-      excerpt: result2.note,
-      match: "screened_clear"
-    });
-    ctx.recordCheck?.({
-      id: "profile-photo-authenticity",
-      status: "checked-empty",
-      note: "official X profile response contained no custom photo; visual ownership/reuse was not testable",
-      provider: "twitterapi.io"
-    });
-    return { status: "succeeded", detail: "official profile returned no custom photo" };
-  }
-  if (!env("ANTHROPIC_API_KEY")) {
-    ctx.recordCheck?.({
-      id: "profile-photo-authenticity",
-      status: "unavailable",
-      note: "profile-photo integrity screen is unavailable because the vision analyst is not configured",
-      provider: "claude-vision"
-    });
-    return { status: "failed", detail: "vision analyst is not configured" };
-  }
-  const avatarUrl = ctx.evidence.profile.avatar_url;
-  if (!avatarUrl) {
-    ctx.recordCheck?.({
-      id: "profile-photo-authenticity",
-      status: "unavailable",
-      note: "official X avatar source was not resolved; no photo conclusion was recorded",
-      provider: "twitterapi.io"
-    });
-    return { status: "failed", detail: "official avatar source unavailable" };
-  }
-  const image = await fetchTrustedProfileImage(avatarUrl);
-  if (!image) {
-    ctx.recordCheck?.({
-      id: "profile-photo-authenticity",
-      status: "unavailable",
-      note: "official X avatar bytes could not be fetched safely; no photo conclusion was recorded",
-      provider: "x-avatar"
-    });
-    return { status: "failed", detail: "trusted avatar fetch failed" };
-  }
-  const classified = await classifyImage(image);
-  if (!classified) {
-    ctx.recordCheck?.({
-      id: "profile-photo-authenticity",
-      status: "unavailable",
-      note: "vision provider failed or returned an invalid profile-photo result",
-      provider: "claude-vision"
-    });
-    return { status: "failed", detail: "vision result unavailable or invalid" };
-  }
-  const conclusive = classified.classification !== "unclear" && (classified.confidence ?? 0) >= MIN_ACTIONABLE_CONFIDENCE;
-  const result = {
-    provider: "claude-vision",
-    capturedAt,
-    imageUrl: image.url,
-    imageData: `data:${image.mediaType};base64,${image.bytes.toString("base64")}`,
-    mediaType: image.mediaType,
-    imageContentHash: image.contentHash,
-    ...classified,
-    flag: conclusive && classified.flag,
-    note: [
-      classified.note,
-      classified.classification === "real_candid" ? "A visually plausible personal photo does not prove ownership or identity." : classified.classification === "studio_or_stock" ? "A professional headshot can be legitimate; treat this only as a review lead." : classified.classification === "celebrity_or_public_figure" ? "A public figure may legitimately use their own image; verify identity before drawing a conclusion." : classified.classification === "ai_generated" ? "This is a vision-model lead and requires human or reverse-image verification." : "Visual classification does not establish who owns or originally published the image."
-    ].join(" ").slice(0, 700)
-  };
-  ctx.evidence.profileAuthenticity = result;
-  const artifactRecord = {
-    imageContentHash: image.contentHash,
-    model: ANALYST_MODEL,
-    classification: result.classification,
-    confidence: result.confidence,
-    flag: result.flag,
-    tells: result.tells,
-    note: result.note
-  };
-  const artifactHash3 = sha2562(JSON.stringify(artifactRecord));
-  addArtifact(ctx, {
-    kind: "profile_photo",
-    provider: "claude-vision",
-    title: "Profile-photo integrity screen",
-    sourceUrl: image.url,
-    capturedAt,
-    contentHash: artifactHash3,
-    sourceContentHash: image.contentHash,
-    excerpt: `${result.classification.replace(/_/g, " ")} \xB7 ${result.note}`,
-    match: conclusive && result.flag ? "risk_signal" : conclusive ? "observed" : "candidate"
-  });
-  if (!conclusive) {
-    ctx.recordCheck?.({
-      id: "profile-photo-authenticity",
-      status: "unavailable",
-      note: `vision result was ${result.classification} at ${Math.round((result.confidence ?? 0) * 100)}% confidence; no clean conclusion recorded`,
-      provider: "claude-vision",
-      sourceCount: 1
-    });
-    return { status: "partial", detail: "vision result was inconclusive" };
-  }
-  ctx.recordCheck?.({
-    id: "profile-photo-authenticity",
-    status: result.flag ? "finding" : "checked-empty",
-    note: result.flag ? `${result.classification.replace(/_/g, " ")} review lead at ${Math.round((result.confidence ?? 0) * 100)}% model confidence; not identity proof` : `${result.classification.replace(/_/g, " ")} observed; visual-only screen cannot prove image ownership or identity`,
-    provider: "claude-vision",
-    sourceCount: 1
-  });
-  return { status: "succeeded", detail: `${result.classification} at ${Math.round((result.confidence ?? 0) * 100)}%` };
 }
 
 // server/adapters/offchain.ts
@@ -24606,6 +25002,24 @@ var finiteNumber2 = (value) => {
 var cleanText = (value) => typeof value === "string" ? value.trim() : "";
 var normalized3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 var projectName = (value) => value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*/)[0]?.trim() || value.trim();
+var GENERIC_NAME_SUFFIX = /^(?:finance|protocol|labs?|network|official|app|exchange|capital|fund|foundation|dao|token|coin|money|cash|club|world|games?|inu)$/i;
+function tokenSearchQueries(raw) {
+  const primary = projectName(raw);
+  const queries = [];
+  const push = (candidate) => {
+    const trimmed = candidate.trim();
+    if (trimmed.length >= 2 && !queries.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) {
+      queries.push(trimmed);
+    }
+  };
+  push(primary);
+  const words = primary.split(/\s+/);
+  while (words.length > 1 && GENERIC_NAME_SUFFIX.test(words[words.length - 1])) {
+    words.pop();
+    push(words.join(" "));
+  }
+  return queries;
+}
 var normalizeHandle2 = (value) => value.trim().replace(/^@/, "").toLowerCase();
 var sameAddress = (left, right) => left.toLowerCase() === right.toLowerCase();
 var coingeckoConfig = () => {
@@ -25224,8 +25638,32 @@ async function collectProjectTokenIdentity(ctx) {
   }));
   const selected = inspected.find((candidate) => candidate.selected !== null)?.selected ?? null;
   if (!selected?.identity) {
-    const dexFallback = await collectDexProjectToken(ctx, query);
-    const attempts = 1 + detailAttempts + dexFallback.attempts;
+    const dexQueries = tokenSearchQueries(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
+    let dexFallback = await collectDexProjectToken(ctx, dexQueries[0] ?? query);
+    let dexAttempts = dexFallback.attempts;
+    let dexSearchEverFailed = dexFallback.state === "failed";
+    const dexNameMatches = new Set(dexFallback.state === "empty" ? dexFallback.nameMatches ?? [] : []);
+    let dexNameMatchCount = dexFallback.state === "empty" ? dexFallback.nameMatchCount ?? 0 : 0;
+    for (const fallbackQuery of dexQueries.slice(1)) {
+      if (dexFallback.state === "matched") break;
+      const retry = await collectDexProjectToken(ctx, fallbackQuery);
+      dexAttempts += retry.attempts;
+      if (retry.state === "failed") dexSearchEverFailed = true;
+      if (retry.state === "empty") {
+        for (const match of retry.nameMatches ?? []) dexNameMatches.add(match);
+        dexNameMatchCount = Math.max(dexNameMatchCount, retry.nameMatchCount ?? 0);
+      }
+      if (retry.state === "matched") dexFallback = retry;
+    }
+    if (dexFallback.state !== "matched" && dexNameMatches.size) {
+      dexFallback = {
+        ...dexFallback,
+        state: "empty",
+        nameMatches: [...dexNameMatches].slice(0, 3),
+        nameMatchCount: Math.max(dexNameMatchCount, dexNameMatches.size)
+      };
+    }
+    const attempts = 1 + detailAttempts + dexAttempts;
     if (dexFallback.state === "matched" && dexFallback.snapshot) {
       const snapshot2 = dexFallback.snapshot;
       ctx.evidence.projectToken = snapshot2;
@@ -25277,15 +25715,21 @@ async function collectProjectTokenIdentity(ctx) {
       return { state: "executed", detail: `bound $${declared.snapshot.symbol} from the project's own site`, attempts: attempts + 1 };
     }
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
-    if (!search || coinDetailsUnavailable || dexFallback.state === "failed") {
+    if (!search || coinDetailsUnavailable || dexSearchEverFailed) {
       const gaps = [
         !search ? "CoinGecko search failed" : null,
         coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
-        dexFallback.state === "failed" ? dexFallback.detail : null
+        dexSearchEverFailed ? "DexScreener project search failed" : null
       ].filter((part) => Boolean(part));
+      ctx.recordCheck?.({
+        id: "project-token-identity",
+        status: "unavailable",
+        note: `token-identity registries could not be fully read on this scan (${gaps.join("; ")}); this is a provider gap, not an assessed result, and a rescan can close it`,
+        provider: "coingecko/dexscreener"
+      });
       return {
         state: "partial",
-        detail: `${gaps.join("; ")}; no canonical-token null was recorded`,
+        detail: `${gaps.join("; ")}; recorded as an unavailable token-identity outcome`,
         attempts
       };
     }
@@ -26526,7 +26970,9 @@ var COLLISION_PRONE_PROJECT_FACTS = /* @__PURE__ */ new Set([
   "funding",
   "investor",
   "product",
-  "public_security"
+  "public_security",
+  "legal_entity",
+  "legal_regulatory_event"
 ]);
 function subjectFor(evidence) {
   return {
@@ -26607,6 +27053,22 @@ function enforceProjectFactCoherence(evidence) {
   return { checked, rejected };
 }
 
+// src/lib/retry.ts
+async function retryFetch(input, init, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(input, init);
+      if (res.ok || res.status !== 429 && res.status < 500) return res;
+      lastErr = new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      lastErr = e;
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 300 * 2 ** i));
+  }
+  throw lastErr;
+}
+
 // src/token/sources.ts
 var GOPLUS_CHAIN = {
   ethereum: "1",
@@ -26684,7 +27146,7 @@ async function blockscoutHolders(chain, address, fetchImpl = fetch) {
 }
 async function dexByTokenResult(address) {
   try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
       signal: AbortSignal.timeout(8e3)
     });
     if (!res.ok) return { ok: false, pairs: [] };
@@ -26722,10 +27184,10 @@ var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitge
 async function coingeckoToken(chain, address) {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
+    const res = await retryFetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
       signal: AbortSignal.timeout(8e3)
     });
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
+    if (res.status === 404) return { listed: false, id: null, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null, categories: [] };
     if (!res.ok) return null;
     const d = await res.json();
     const tickers = d.tickers ?? [];
@@ -26747,6 +27209,7 @@ async function coingeckoToken(chain, address) {
     } : null;
     return {
       listed: true,
+      id: typeof d.id === "string" && d.id ? d.id : null,
       rank: d.market_cap_rank ?? null,
       mcapUsd: d.market_data?.market_cap?.usd ?? null,
       marketCount: markets.size,
@@ -26756,6 +27219,7 @@ async function coingeckoToken(chain, address) {
       twitter,
       image,
       description: cleanBlurb(d.description?.en),
+      categories: (d.categories ?? []).filter((c) => typeof c === "string" && c.trim().length > 0).slice(0, 12),
       ath
     };
   } catch {
@@ -26764,7 +27228,7 @@ async function coingeckoToken(chain, address) {
 }
 async function dexByPairResult(chain, pair) {
   try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
+    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
       signal: AbortSignal.timeout(8e3)
     });
     if (!res.ok) return { ok: false, pair: null };
@@ -26791,7 +27255,7 @@ function pickPair(pairs, wantAddress) {
 }
 async function honeypotIs(chainId, address) {
   try {
-    const res = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
+    const res = await retryFetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
     if (!res.ok) return null;
     const d = await res.json();
     return {
@@ -26807,7 +27271,7 @@ async function honeypotIs(chainId, address) {
 }
 async function goplusSolana(mint) {
   try {
-    const res = await fetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
+    const res = await retryFetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
     if (!res.ok) return null;
     const d = await res.json();
     const row = d.result?.[mint] ?? (d.result ? Object.values(d.result)[0] : void 0);
@@ -26896,7 +27360,7 @@ async function rugcheckReport(mint, fetchImpl = fetch) {
 async function goplus(chainId, address) {
   const once = async () => {
     try {
-      const res = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
+      const res = await retryFetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
       if (!res.ok) return null;
       const d = await res.json();
       return d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : void 0) ?? null;
@@ -28899,6 +29363,9 @@ function coalesceTeamMembersByHandle(members) {
     const preferred = teamEvidenceRank(member) > teamEvidenceRank(existing) ? member : existing;
     const secondary = preferred === existing ? member : existing;
     const merged = { ...preferred };
+    if (secondary.handleProvenance === "subject_first_party" && merged.handleProvenance !== "subject_first_party") {
+      merged.handleProvenance = "subject_first_party";
+    }
     if (!merged.handle && secondary.handle) merged.handle = secondary.handle;
     if (!merged.linkedin && secondary.linkedin) merged.linkedin = secondary.linkedin;
     if ((!merged.projects || !merged.projects.length) && secondary.projects?.length) {
@@ -29344,7 +29811,19 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     // claims they build it. For a fresh launchpad project with no team page,
     // no press and no listing, this is often the only first-party operator
     // evidence that exists (and it is two crossing signals, not a guess).
-    discoverOperatorsFromFollowings(ctx.handle, ctx.evidence.profile.display_name)
+    discoverOperatorsFromFollowings(ctx.handle, ctx.evidence.profile.display_name),
+    // Same doctrine over the OTHER first-party edge: accounts this account
+    // retweets/quote-posts whose own bio claims they run it. Catches the
+    // founder the follow scan misses (no follow edge, or beyond its page
+    // budget) — e.g. a project account amplifying its founder's posts while
+    // the founder's bio says "Founder @project".
+    discoverOperatorsFromAmplified(ctx.handle, ctx.evidence.profile.display_name),
+    // Reverse role-phrase search: who does the PUBLIC RECORD say founded or
+    // leads this project? Runs quoted queries ("founder of @y", "cofounder of
+    // @y", "CEO at @y", "@y team", name/domain variants) across X and the web,
+    // where the project's own surfaces never name anyone but the founder's
+    // bio, a press piece, or an AI answer does.
+    findRoleClaimants(ctx.handle, ctx.evidence.profile.display_name, domain)
   ]);
   const claims = await claimsPromise;
   if (claims) {
@@ -29404,7 +29883,12 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"}. Role candidates remain non-governing until independently verified.`, source: "AI analyst", tone: "neutral" });
   }
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
-  const [bySubject, people, siteTeam, pageTeam, operatorTeam] = await discoveryPromise;
+  const [bySubject, people, siteTeam, pageTeam, operatorTeam, amplifiedTeam, reverseTeam] = await discoveryPromise;
+  const reverseBioClaims = reverseTeam.length ? await confirmClaimantBios(reverseTeam, ctx.handle, ctx.evidence.profile.display_name) : /* @__PURE__ */ new Map();
+  if (reverseBioClaims.size) {
+    const quoted = [...reverseBioClaims.entries()].map(([h, claim]) => `@${h} ("${claim.phrase}")`).join(", ");
+    ctx.emit({ phase: "P1 \xB7 Team", label: "Role claim in live bio", detail: `Reverse role-phrase search surfaced ${reverseBioClaims.size} candidate${reverseBioClaims.size === 1 ? "" : "s"} whose current X bio carries the claim first-party: ${quoted}.`, source: "reverse role search + bio fetch", tone: "good" });
+  }
   const postRoleTeam = scanPostsForRoles(posts, ctx.evidence.profile.display_name);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   const norm3 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
@@ -29417,13 +29901,18 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     if (name) byName.set(name, member);
   }
   const teamCandidates = [
+    // Website/team-page discovery, however deterministic the page fetch
+    // itself is, is not the subject account's OWN X activity, so it never
+    // carries the first-party handle marker the avatar/follower enrichment
+    // collector gates on.
     ...pageTeam.map((member) => ({
       ...member,
       evidence_origin: domain ? "deterministic" : "model_lead",
       artifact_verified: !!domain,
       provider: domain ? "team-page" : "team-page-candidate",
       identity_link_evidence_origin: domain ? "deterministic" : "model_lead",
-      projects_evidence_origin: domain ? "deterministic" : "model_lead"
+      projects_evidence_origin: domain ? "deterministic" : "model_lead",
+      handleProvenance: void 0
     })),
     ...siteTeam.map((member) => ({
       ...member,
@@ -29431,7 +29920,8 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       artifact_verified: false,
       provider: "grok",
       identity_link_evidence_origin: "model_lead",
-      projects_evidence_origin: "model_lead"
+      projects_evidence_origin: "model_lead",
+      handleProvenance: void 0
     })),
     ...people.map((member) => ({
       ...member,
@@ -29439,7 +29929,8 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       artifact_verified: false,
       provider: "grok",
       identity_link_evidence_origin: "model_lead",
-      projects_evidence_origin: "model_lead"
+      projects_evidence_origin: "model_lead",
+      handleProvenance: void 0
     })),
     ...postRoleTeam.map((member) => ({
       ...member,
@@ -29447,7 +29938,8 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       artifact_verified: true,
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic",
-      projects_evidence_origin: "deterministic"
+      projects_evidence_origin: "deterministic",
+      handleProvenance: member.handle ? "subject_first_party" : void 0
     })),
     // Both halves are first-party provider records: the subject's own
     // following edge and the candidate's own profile text. The handle IS the
@@ -29459,8 +29951,41 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       artifact_verified: true,
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic",
-      projects_evidence_origin: "model_lead"
-    }))
+      projects_evidence_origin: "model_lead",
+      handleProvenance: member.handle ? "subject_first_party" : void 0
+    })),
+    // Same two crossing first-party signals as the followings lane, over the
+    // amplification edge (the subject's own timeline retweeted/quoted the
+    // claimant, and the claimant's own bio states the role).
+    ...amplifiedTeam.map((member) => ({
+      ...member,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic",
+      projects_evidence_origin: "model_lead",
+      handleProvenance: member.handle ? "subject_first_party" : void 0
+    })),
+    // Reverse-search leads stay model leads (one-sided until the subject's own
+    // edges vouch — the deterministic lanes above own that call and win the
+    // merge), but a live-bio-confirmed claim upgrades the identity link and
+    // swaps the model's paraphrase for the fetched artifact's own words.
+    ...reverseTeam.map((member) => {
+      const claim = member.handle ? reverseBioClaims.get(member.handle.replace(/^@/, "").toLowerCase()) : void 0;
+      return {
+        ...member,
+        ...claim ? {
+          role: claim.role,
+          evidence: `their current X bio states "${claim.phrase}"`
+        } : {},
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        provider: "reverse-role-search",
+        identity_link_evidence_origin: claim ? "deterministic" : "model_lead",
+        projects_evidence_origin: "model_lead",
+        handleProvenance: void 0
+      };
+    })
   ];
   for (const t of teamCandidates) {
     const h = t.handle ? norm3(t.handle) : "";
@@ -29493,6 +30018,9 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       if (t.identity_link_evidence_origin === "deterministic" && t.handle && norm3(t.handle) === norm3(existing.handle) && existing.identity_link_evidence_origin !== "deterministic") {
         existing.identity_link_evidence_origin = "deterministic";
       }
+      if (t.handleProvenance === "subject_first_party" && t.handle && norm3(t.handle) === norm3(existing.handle) && existing.handleProvenance !== "subject_first_party") {
+        existing.handleProvenance = "subject_first_party";
+      }
       continue;
     }
     const rec = {
@@ -29508,7 +30036,8 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       artifact_verified: t.artifact_verified,
       provider: t.provider,
       identity_link_evidence_origin: t.identity_link_evidence_origin,
-      projects_evidence_origin: t.projects_evidence_origin
+      projects_evidence_origin: t.projects_evidence_origin,
+      handleProvenance: t.handleProvenance
     };
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
@@ -29555,7 +30084,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     }
   }
   const subj = norm3(ctx.handle);
-  const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || operatorTeam.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm3(t.handle) === subj);
+  const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || operatorTeam.length > 0 || amplifiedTeam.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm3(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
     for (const member of webTeam) {
@@ -29590,6 +30119,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   if (coalescedTeam.length !== webTeam.length) {
     webTeam.splice(0, webTeam.length, ...coalescedTeam);
   }
+  await enrichFirstPartyTeamAvatars(ctx);
   if (webTeam.length) {
     const groundedTeam = webTeam.filter((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
     ctx.emit(groundedTeam.length ? {
@@ -31195,6 +31725,20 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     recordOfficialXAccountStatusFinding(evidence);
     await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);
+  }
+  try {
+    const tokenCand = tokenFromBio(evidence.profile.bio) ?? tokenFromPromotions(evidence.promotions);
+    if (tokenCand) {
+      emit({
+        phase: "ARGUS \xB7 Threat",
+        label: "Project token resolved",
+        detail: `${tokenCand.address.slice(0, 10)}\u2026 (${tokenCand.via}) via ${tokenCand.source} - the token threat scan runs in parallel with the rest of this audit.`,
+        source: "argus",
+        tone: "neutral",
+        token: tokenCand
+      });
+    }
+  } catch {
   }
   let researchPlan = buildResearchPlan(evidence, options?.intent ?? "investment_due_diligence");
   evidence.researchPlan = researchPlan;
