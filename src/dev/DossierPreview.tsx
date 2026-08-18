@@ -321,16 +321,32 @@ export function DossierPreview() {
               )}
 
               {b.id === "team" && d.team.length > 0 && (
-                <div className="mt-6 grid max-w-[56ch] grid-cols-2 gap-2.5">
+                <div className="mt-6 max-w-[56ch]">
+                  <p className="mono mb-2 text-[10px] uppercase tracking-[0.12em] text-ink-faint">
+                    {d.team.filter((m) => m.firstParty).length} named by the subject · {d.team.filter((m) => !m.firstParty).length} found only by search
+                  </p>
+                <div className="grid grid-cols-2 gap-2.5">
                   {d.team.map((m) => (
-                    <div key={m.name} className={`panel-inset px-3 py-2.5 ${m.firstParty ? "border-l-2 border-sourced" : "border-l-2 border-unverifiable/50"}`}>
-                      <p className="text-[13px] font-medium text-ink">{m.name}</p>
-                      <p className="mt-0.5 text-[11.5px] text-ink-dim">{m.role}</p>
-                      <p className={`mono mt-1.5 text-[10px] ${m.firstParty ? "text-sourced" : "text-unverifiable"}`}>
-                        {m.firstParty ? "named by the account itself" : "web search only"}
-                      </p>
+                    <div key={m.name} className={`panel-inset flex items-start gap-2.5 px-3 py-2.5 ${m.firstParty ? "border-l-2 border-sourced" : "border-l-2 border-unverifiable/50"}`}>
+                      {m.avatarUrl ? (
+                        <img src={m.avatarUrl} alt="" width={32} height={32}
+                          className="h-8 w-8 shrink-0 rounded-full border border-line object-cover" />
+                      ) : (
+                        <span aria-hidden="true"
+                          className={`mono flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[11px] ${m.firstParty ? "border-sourced/40 text-sourced" : "border-unverifiable/40 text-unverifiable"}`}>
+                          {m.name.replace(/^@/, "").charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                      <div className="min-w-0">
+                        <p className="truncate text-[13px] font-medium text-ink">{m.name}</p>
+                        <p className="mt-0.5 text-[11.5px] leading-snug text-ink-dim">{m.role}</p>
+                        <p className={`mono mt-1.5 text-[10px] ${m.firstParty ? "text-sourced" : "text-unverifiable"}`}>
+                          {m.firstParty ? "named by the account itself" : "web search only"}
+                        </p>
+                      </div>
                     </div>
                   ))}
+                </div>
                 </div>
               )}
 

@@ -50,7 +50,20 @@ export interface StrengthBand {
 
 export interface CoverageStat { state: string; count: number }
 
-export interface TeamMember { name: string; role: string; handle: string | null; firstParty: boolean }
+export interface TeamMember {
+  name: string;
+  role: string;
+  handle: string | null;
+  /** True only when the subject's own account named this person. */
+  firstParty: boolean;
+  /**
+   * Present only for a first-party named person. A face attached to a handle
+   * nobody confirmed is the namesake error wearing a photograph, so an
+   * unconfirmed member stays deliberately bare even if an image is available.
+   */
+  avatarUrl: string | null;
+  avatarCapturedAt: string | null;
+}
 
 export interface Lens {
   id: string;
@@ -344,12 +357,18 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       leads: leads.length,
       failedProviders: arr<{ provider?: unknown }>(payload.providerFailures).map((f) => str(f.provider)).filter(Boolean),
     },
-    team: arr<Record<string, unknown>>(payload.webTeamLeads).map((m) => ({
-      name: str(m.name), role: str(m.role),
-      handle: str(m.handle) || null,
+    team: arr<Record<string, unknown>>(payload.webTeamLeads).map((m): TeamMember => {
       // A role the official account itself stated is first-party; a web search is not.
-      firstParty: /post role-scan|official/i.test(str(m.source)),
-    })).filter((m) => m.name),
+      const firstParty = /post role-scan|official/i.test(str(m.source));
+      return {
+        name: str(m.name),
+        role: str(m.role),
+        handle: str(m.handle) || null,
+        firstParty,
+        avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
+        avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
+      };
+    }).filter((m) => m.name),
     nextActions: arr<Record<string, unknown>>((payload.researchPlan as Record<string, unknown>)?.nextActions)
       .map((a) => ({ rank: num(a.rank) ?? 0, action: str(a.action), whyNow: str(a.whyNow) || null }))
       .filter((a) => a.action).sort((a, b) => a.rank - b.rank),
