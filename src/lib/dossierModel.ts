@@ -358,8 +358,13 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       failedProviders: arr<{ provider?: unknown }>(payload.providerFailures).map((f) => str(f.provider)).filter(Boolean),
     },
     team: arr<Record<string, unknown>>(payload.webTeamLeads).map((m): TeamMember => {
-      // A role the official account itself stated is first-party; a web search is not.
-      const firstParty = /post role-scan|official/i.test(str(m.source));
+      // Read the durable marker the collector sets, never re-derive it here.
+      // An earlier draft pattern-matched the source string for "post role-scan"
+      // or "official", which silently missed the following and amplification
+      // lanes the collector also treats as first-party, so real avatars for
+      // those two lanes would have been dropped at render. Two independent
+      // definitions of the same boundary is one definition too many.
+      const firstParty = str(m.handleProvenance) === "subject_first_party";
       return {
         name: str(m.name),
         role: str(m.role),

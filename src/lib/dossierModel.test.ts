@@ -123,11 +123,24 @@ describe("team enrichment boundary", () => {
   it("keeps a face on a person the subject's own account named", () => {
     const [m] = withTeam([{
       name: "@DynexMoonshots", role: "co-founder", handle: "@DynexMoonshots",
-      source: "post role-scan", avatarUrl: "https://pbs.twimg.com/x.jpg", avatarCapturedAt: "2026-08-16T04:51:31.270Z",
+      handleProvenance: "subject_first_party",
+      avatarUrl: "https://pbs.twimg.com/x.jpg", avatarCapturedAt: "2026-08-16T04:51:31.270Z",
     }]).team;
     expect(m.firstParty).toBe(true);
     expect(m.avatarUrl).toBe("https://pbs.twimg.com/x.jpg");
     expect(m.avatarCapturedAt).toBe("2026-08-16T04:51:31.270Z");
+  });
+
+  it("recognises a handle bound through the following or amplification lane", () => {
+    // The collector marks these first-party too. An earlier draft matched the
+    // source string for "post role-scan" and would have dropped their avatars.
+    const [m] = withTeam([{
+      name: "@proph3ttt", role: "advisor", handle: "@proph3ttt",
+      handleProvenance: "subject_first_party", source: "amplification edge",
+      avatarUrl: "https://pbs.twimg.com/y.jpg", avatarCapturedAt: "2026-08-16T04:51:31.270Z",
+    }]).team;
+    expect(m.firstParty).toBe(true);
+    expect(m.avatarUrl).toBe("https://pbs.twimg.com/y.jpg");
   });
 
   it("refuses a face on a person found only by web search, even when one is offered", () => {
