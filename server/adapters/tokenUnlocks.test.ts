@@ -354,6 +354,7 @@ describe("collectUpcomingUnlocks", () => {
     const cost = await withCostLedger(async () => {
       const out = await collectUpcomingUnlocks("Uniswap", "UNI", CANONICAL_TOKEN);
       expect(out.available).toBe(false);
+      if (out.available) throw new Error("expected unavailable");
       expect(out.note).toContain("unavailable");
       return getCost();
     });
@@ -379,6 +380,7 @@ describe("collectUpcomingUnlocks", () => {
     const cost = await withCostLedger(async () => {
       const out = await collectUpcomingUnlocks("Uniswap", "UNI", CANONICAL_TOKEN);
       expect(out.available).toBe(false);
+      if (out.available) throw new Error("expected unavailable");
       expect(out.note).toContain("unavailable");
       return getCost();
     });
@@ -400,6 +402,7 @@ describe("collectUpcomingUnlocks", () => {
       }));
       const out = await collectUpcomingUnlocks("Uniswap", "UNI", CANONICAL_TOKEN);
       expect(out.available).toBe(false);
+      if (out.available) throw new Error("expected no-data");
       expect(out.note).toContain("exact canonical token contract");
       expect(out.note).not.toContain("unavailable");
       return getCost();
