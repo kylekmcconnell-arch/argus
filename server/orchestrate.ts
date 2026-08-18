@@ -3098,6 +3098,8 @@ interface RunAuditOptions {
   organizationId?: string;
   analystDeadlineAt?: number;
   intent?: ResearchIntent;
+  tokenAddress?: string;
+  tokenChain?: string;
 }
 
 /**
@@ -3259,6 +3261,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     evidence,
     emit,
     recordCheck: (observation) => checkTracker.record(observation),
+    ...(options?.tokenAddress && options?.tokenChain
+      ? { tokenAddress: options.tokenAddress, tokenChain: options.tokenChain }
+      : {}),
   };
 
   const organizationSafetyPass = async (): Promise<void> => {

@@ -413,7 +413,7 @@ export function streamInvestigation(
               onStep: (s) => { if (!aborted) h.onStep(s); },
               onDone: (d) => resolve({ dossier: d, error: null }),
               onError: (error) => resolve({ dossier: null, error }),
-            }, opts?.intent);
+            }, opts?.intent, { tokenAddress: token.address, tokenChain: token.chain });
           });
           projectAccount = projectAuditResult.dossier;
           projectAccountAudit = projectAccount

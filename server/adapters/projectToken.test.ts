@@ -827,3 +827,53 @@ describe("token declared on the project's own site", () => {
     }));
   });
 });
+
+
+const STONKBROKER = "0xe934e36A439C94017B64a3FecE66AF12099aBF50";
+const STONKBROKER_LC = STONKBROKER.toLowerCase();
+
+describe("investigation contract lookup", () => {
+  it("binds from the investigation CA on robinhood even when the CLUTCH search is empty", async () => {
+    // Contract-first: the investigation already holds $STONKBROKER. CoinGecko
+    // search for "CLUTCH" is empty and must stay unused as a name fallback —
+    // DexScreener's "Clutch Markets" hit is a different Robinhood token.
+    const { ctx, evidence } = context("@ClutchMarkets", "CLUTCH", "https://clutch.markets");
+    ctx.tokenAddress = STONKBROKER;
+    ctx.tokenChain = "robinhood";
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/coins/robinhood/contract/")) {
+        expect(url.toLowerCase()).toContain(STONKBROKER_LC);
+        return json({
+          id: "stonkbroker",
+          name: "StonkBroker",
+          symbol: "stonkbroker",
+          asset_platform_id: "robinhood",
+          market_cap_rank: 628,
+          last_updated: "2026-08-18T16:00:00.000Z",
+          platforms: { robinhood: STONKBROKER },
+          links: { twitter_screen_name: "ClutchMarkets", homepage: ["https://stonkbrokers.cash/"] },
+          market_data: { current_price: { usd: 0.12 }, market_cap: { usd: 1_200_000 } },
+        });
+      }
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("official_x"),
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      symbol: "STONKBROKER",
+      address: STONKBROKER,
+      chain: "robinhood",
+      officialX: "@ClutchMarkets",
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/search?"))).toBe(false);
+  });
+});

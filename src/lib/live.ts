@@ -58,6 +58,7 @@ export function streamAudit(
   priv: boolean,
   h: LiveHandlers,
   intent: ResearchIntent = "investment_due_diligence",
+  seed?: { tokenAddress?: string; tokenChain?: string },
 ): () => void {
   const ctrl = new AbortController();
   let settled = false;
@@ -79,7 +80,13 @@ export function streamAudit(
 
   (async () => {
     try {
-      const res = await fetch(`/api/audit?handle=${encodeURIComponent(handle)}&intent=${encodeURIComponent(intent)}${priv ? "&private=1" : ""}`, {
+      const params = new URLSearchParams({ handle, intent });
+      if (priv) params.set("private", "1");
+      if (seed?.tokenAddress && seed?.tokenChain) {
+        params.set("address", seed.tokenAddress);
+        params.set("chain", seed.tokenChain);
+      }
+      const res = await fetch(`/api/audit?${params.toString()}`, {
         signal: ctrl.signal,
         headers: { accept: "text/event-stream" },
       });

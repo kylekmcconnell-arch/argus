@@ -28,7 +28,13 @@ const PLATFORM_CHAIN: Record<string, string> = {
   "polygon-pos": "polygon",
   "optimistic-ethereum": "optimism",
   avalanche: "avalanche",
+  robinhood: "robinhood",
 };
+
+/** Reverse of PLATFORM_CHAIN: investigation chain id → CoinGecko platform id. */
+const CHAIN_PLATFORM: Record<string, string> = Object.fromEntries(
+  Object.entries(PLATFORM_CHAIN).map(([platform, chain]) => [chain, platform]),
+);
 
 const GECKOTERMINAL_NETWORK: Record<string, string> = {
   solana: "solana",
@@ -127,6 +133,10 @@ const projectName = (value: string): string =>
 // Widen the SEARCH net only - every candidate still has to bridge the exact
 // audited X account and official domain, so recall can grow without any new
 // false-bind risk.
+// Intentionally omits "markets": DexScreener's search for "Clutch Markets"
+// already hits a different Robinhood token ($clutch / ClutchMarkets), and
+// stripping the suffix would bind the wrong contract. Recall widens only
+// through unique-id surfaces (investigation CA, official X, owned domain).
 const GENERIC_NAME_SUFFIX = /^(?:finance|protocol|labs?|network|official|app|exchange|capital|fund|foundation|dao|token|coin|money|cash|club|world|games?|inu)$/i;
 export function tokenSearchQueries(raw: string): string[] {
   const primary = projectName(raw);
@@ -264,6 +274,56 @@ async function coinDetails(id: string): Promise<JsonRecord | null> {
   return payload;
 }
 
+/**
+ * CoinGecko `GET /coins/{platform}/contract/{address}`. An investigation that
+ * already holds the CA does not need a name search — and must not apply the
+ * ≥500 name-overlap filter, which would drop $STONKBROKER against "CLUTCH".
+ */
+async function coinByContract(platform: string, address: string): Promise<
+  { state: "ok"; details: JsonRecord } | { state: "empty" } | { state: "failed" }
+> {
+  const { base, headers, tier } = coingeckoConfig();
+  const url = `${base}/coins/${encodeURIComponent(platform)}/contract/${encodeURIComponent(address)}`;
+  let response: Response;
+  try {
+    response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+  } catch {
+    recordCall("coingecko", "project-contract", 0, `${tier} · transport_error`, "failed");
+    return { state: "failed" };
+  }
+  if (response.status === 404) {
+    recordCall("coingecko", "project-contract", 0, `${tier} · not_listed`, "succeeded");
+    return { state: "empty" };
+  }
+  if (!response.ok) {
+    recordCall("coingecko", "project-contract", 0, `${tier} · http_${response.status}`, "failed");
+    return { state: "failed" };
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    recordCall("coingecko", "project-contract", 0, `${tier} · response_json_error`, "failed");
+    return { state: "failed" };
+  }
+  if (!isRecord(payload) || !cleanText(payload.id)) {
+    recordCall("coingecko", "project-contract", 0, `${tier} · result_shape_error`, "partial");
+    return { state: "failed" };
+  }
+  recordCall("coingecko", "project-contract", 0, `${tier} · ${cleanText(payload.id)}`, "succeeded");
+  return { state: "ok", details: payload };
+}
+
+function parseSeededContract(ctx: CollectContext): { address: string; chain: string; platform: string } | null {
+  const address = cleanText(ctx.tokenAddress);
+  const chain = cleanText(ctx.tokenChain).toLowerCase();
+  if (!address || !chain) return null;
+  const platform = CHAIN_PLATFORM[chain];
+  if (!platform) return null;
+  const addressValid = chain === "solana" ? SOLANA_ADDRESS.test(address) : EVM_ADDRESS.test(address);
+  return addressValid ? { address, chain, platform } : null;
+}
+
 const validContract = (platform: string, value: unknown): string | null => {
   const address = cleanText(value);
   if (!address) return null;
@@ -284,6 +344,7 @@ function canonicalContract(details: JsonRecord): ContractIdentity | null {
     "polygon-pos",
     "optimistic-ethereum",
     "avalanche",
+    "robinhood",
   ].filter(Boolean))];
   for (const platform of order) {
     const address = validContract(platform, platforms[platform]);
@@ -959,22 +1020,54 @@ function historyCoverageNote(history: ProjectTokenSnapshot["history"]): string {
 
 export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<AdapterRunResult> {
   const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
-  if (query.length < 2) return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
+  const seeded = parseSeededContract(ctx);
+  if (query.length < 2 && !seeded) return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
 
-  const search = await coinSearch(query);
-  const candidates = search ? rankedCandidates(query, search) : [];
-  const detailAttempts = candidates.length;
-  const inspected = await Promise.all(candidates.map(async (candidate) => {
-    const details = await coinDetails(candidate.id);
-    if (!details) return { details: null, selected: null };
-    const identity = verifyIdentity(ctx, details);
-    const contract = canonicalContract(details);
-    return {
-      details,
-      selected: identity && contract ? { details, identity, contract } : null,
-    };
-  }));
-  const selected = inspected.find((candidate) => candidate.selected !== null)?.selected ?? null;
+  let selected: {
+    details: JsonRecord;
+    identity: NonNullable<ReturnType<typeof verifyIdentity>>;
+    contract: ContractIdentity;
+  } | null = null;
+  let search: CoinSearchRow[] | null = null;
+  let candidates: CoinSearchRow[] = [];
+  let inspected: Array<{ details: JsonRecord | null; selected: typeof selected }> = [];
+  let detailAttempts = 0;
+  let contractLookupFailed = false;
+
+  if (seeded) {
+    // Contract-first: the investigation already named this CA. Do not apply
+    // the name-overlap ≥500 filter — $STONKBROKER does not look like "CLUTCH".
+    const looked = await coinByContract(seeded.platform, seeded.address);
+    detailAttempts += 1;
+    if (looked.state === "failed") contractLookupFailed = true;
+    if (looked.state === "ok") {
+      const identity = verifyIdentity(ctx, looked.details);
+      const listed = canonicalContract(looked.details);
+      const contract = listed && sameAddress(listed.address, seeded.address)
+        ? listed
+        : identity
+          ? { address: seeded.address, chain: seeded.chain }
+          : listed;
+      if (identity && contract) selected = { details: looked.details, identity, contract };
+    }
+  }
+
+  if (!selected && query.length >= 2) {
+    search = await coinSearch(query);
+    candidates = search ? rankedCandidates(query, search) : [];
+    detailAttempts += candidates.length;
+    inspected = await Promise.all(candidates.map(async (candidate) => {
+      const details = await coinDetails(candidate.id);
+      if (!details) return { details: null, selected: null };
+      const identity = verifyIdentity(ctx, details);
+      const contract = canonicalContract(details);
+      return {
+        details,
+        selected: identity && contract ? { details, identity, contract } : null,
+      };
+    }));
+    selected = inspected.find((candidate) => candidate.selected !== null)?.selected ?? null;
+  }
   if (!selected?.identity) {
     // CoinGecko is not a complete token universe. New and chain-native assets
     // often trade on a DEX before they are listed there, so a CoinGecko miss
@@ -1068,9 +1161,10 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     }
 
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
-    if (!search || coinDetailsUnavailable || dexSearchEverFailed) {
+    if (!search || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
       const gaps = [
-        !search ? "CoinGecko search failed" : null,
+        contractLookupFailed ? "CoinGecko contract lookup failed" : null,
+        query.length >= 2 && !search ? "CoinGecko search failed" : null,
         coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
         dexSearchEverFailed ? "DexScreener project search failed" : null,
       ].filter((part): part is string => Boolean(part));
