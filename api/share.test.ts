@@ -107,7 +107,7 @@ describe("exact immutable report sharing", () => {
     expect(inserted.token_hash).toEqual(expect.stringMatching(/^[0-9a-f]{64}$/));
     expect(captured.statusCode).toBe(201);
     expect(captured.body).toMatchObject({
-      url: expect.stringMatching(/^\/api\/card\?share=/),
+      url: expect.stringMatching(/^\/\?share=/),
       expiresAt: "2026-08-10T12:00:00.000Z",
     });
   });

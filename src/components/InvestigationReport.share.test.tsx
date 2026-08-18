@@ -106,7 +106,7 @@ function investigation(overrides: Partial<Investigation> = {}): Investigation {
 let container: HTMLDivElement;
 let root: Root;
 
-function render(inv: Investigation, onReAudit?: () => void, onOpenBrief?: () => void) {
+function render(inv: Investigation, onReAudit?: () => void, onOpenBrief?: () => void, shareView?: boolean) {
   act(() => {
     root.render(
       <InvestigationReport
@@ -117,6 +117,7 @@ function render(inv: Investigation, onReAudit?: () => void, onOpenBrief?: () => 
         onOpenProjectAccount={() => {}}
         onReAudit={onReAudit}
         onOpenBrief={onOpenBrief}
+        shareView={shareView}
       />,
     );
   });
@@ -756,7 +757,7 @@ describe("investigation exact sharing", () => {
   it("shares the exact immutable investigation version being reviewed", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ url: "/api/card?share=opaque" }),
+      json: async () => ({ url: "/?share=opaque" }),
     });
     vi.stubGlobal("fetch", fetchMock);
     render(investigation({
@@ -786,13 +787,48 @@ describe("investigation exact sharing", () => {
       ref: address,
       reportVersionId,
     });
-    expect(harness.clipboard).toHaveBeenCalledWith("http://localhost:3000/api/card?share=opaque");
+    expect(harness.clipboard).toHaveBeenCalledWith("http://localhost:3000/?share=opaque");
+  });
+
+  it("share view removes every workspace action but keeps the report readable", () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      investigation({
+        versionContext: {
+          caseId: "00000000-0000-4000-8000-000000000144",
+          reportVersionId,
+          version: 3,
+          completenessState: "complete",
+          attestationState: "server_collected",
+          methodologyVersion: "test-v1",
+          createdAt: "2026-07-10T12:00:00.000Z",
+          checks: [],
+        },
+      }),
+      () => {},
+      undefined,
+      true,
+    );
+
+    const buttonLabels = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .map((button) => button.textContent?.trim() ?? "");
+    expect(buttonLabels.some((label) => label === "Share")).toBe(false);
+    expect(buttonLabels.some((label) => label.includes("Rescan"))).toBe(false);
+    expect(buttonLabels.some((label) => label.includes("Watch"))).toBe(false);
+    expect(container.querySelector('a[href="#investigation-challenge"]')).toBeNull();
+    expect(container.textContent).not.toContain("Ask about this report");
+    expect(container.textContent).not.toContain("What could change the result");
+    // The reading surfaces stay: the report body and the PDF export.
+    expect(buttonLabels.some((label) => label === "Export PDF")).toBe(true);
+    // The embedded threat scan is absent, so no live fetch fires from it.
+    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("threat"))).toBe(true);
   });
 
   it("copy tldr mints a share link and pastes it under the verdict lines", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ url: "/api/card?share=opaque" }),
+      json: async () => ({ url: "/?share=opaque" }),
     });
     vi.stubGlobal("fetch", fetchMock);
     render(investigation({
@@ -826,7 +862,7 @@ describe("investigation exact sharing", () => {
     const lines = pasted.split("\n");
     expect(lines[0]).toContain("ARGUS · $ARG investigation · risk score PASS 88/100 · safety checks READY TO REVIEW");
     expect(lines).toContain("Investigation share test");
-    expect(lines[lines.length - 1]).toBe("http://localhost:3000/api/card?share=opaque");
+    expect(lines[lines.length - 1]).toBe("http://localhost:3000/?share=opaque");
   });
 
   it("separates project-attributed roles from independent team support and unrelated people leads", () => {

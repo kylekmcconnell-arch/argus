@@ -325,16 +325,10 @@ async function fetchPriceHistory(address, chain, pairAddress) {
 var ENABLED_VALUE = /^(?:1|true|on|enabled)$/i;
 var DISABLED_VALUE = /^(?:0|false|off|disabled)$/i;
 function arkhamProviderEnabled() {
-  var raw = String(import.meta.env?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim();
+  const raw = String(import.meta.env?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim();
   if (!raw) return true;
   if (DISABLED_VALUE.test(raw)) return false;
   return ENABLED_VALUE.test(raw);
-}
-
-function sameWalletAddress(a, b) {
-  var evm = /^0x[0-9a-fA-F]{40}$/;
-  if (evm.test(a) && evm.test(b)) return a.toLowerCase() === b.toLowerCase();
-  return a === b;
 }
 
 // src/token/scannerEvasion.ts
@@ -1072,6 +1066,11 @@ function deployerRoleLabel(attribution, form = "title") {
   const base = proven ? "Deployer" : "Creator or authority";
   return form === "wallet" ? `${base} wallet` : base;
 }
+var EVM_ADDRESS3 = /^0x[0-9a-fA-F]{40}$/;
+function sameWalletAddress(a, b) {
+  if (EVM_ADDRESS3.test(a) && EVM_ADDRESS3.test(b)) return a.toLowerCase() === b.toLowerCase();
+  return a === b;
+}
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
 async function screenDeployerRisk(address, fetchImpl = fetch) {
   if (!arkhamProviderEnabled()) return void 0;
@@ -1737,6 +1736,7 @@ async function runTokenAudit(input, emit, opts) {
     screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
+    // Contract-as-wallet gate: do not Arkham-risk the token mint/CA as if it were a team wallet.
     deployer && deployerRiskEnabled && !sameWalletAddress(deployer, address) ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0),
     fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null)
   ]);
@@ -1899,12 +1899,12 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
 }
 
 // src/lib/subjectRef.ts
-var EVM_ADDRESS3 = /^0x[0-9a-f]{40}$/i;
+var EVM_ADDRESS4 = /^0x[0-9a-f]{40}$/i;
 var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 function normalizeSubjectRef(value) {
   const clean = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
   if (SOLANA_ADDRESS3.test(clean)) return clean;
-  if (EVM_ADDRESS3.test(clean)) return clean.toLowerCase();
+  if (EVM_ADDRESS4.test(clean)) return clean.toLowerCase();
   return clean.toLowerCase();
 }
 
@@ -1980,7 +1980,7 @@ function tokenChecks(dossier) {
       label: "Buy/sell simulation",
       status: safety.honeypot || safety.cannotSellAll ? "finding" : "confirmed",
       note: `buy ${safety.buyTax}% \xB7 sell ${safety.sellTax}%`
-    } : evm ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "not-applicable", note: "Solana: static flags only" }
+    } : evm ? safety.available ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unavailable", note: `no simulation provider covers ${chainDisplayName(dossier.chain)}; sell-block behavior cannot be simulated here` } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "not-applicable", note: "Solana: static flags only" }
   );
   const holderCount = safety.holderCount || dossier.topHolders.length;
   const topHolderPct = safety.topHolderPct ?? dossier.topHolders[0]?.percent ?? null;
@@ -2085,7 +2085,7 @@ var INVESTIGATION_CHECK_BRIDGE = [
   { tokenCheckId: "documents-audits", tokenLabel: "Documents & audits", projectCheckId: "project-transparency", projectLabel: "Transparency and disclosures" },
   { tokenCheckId: "trust-graph-connections", tokenLabel: "Trust-graph reconciliation", projectCheckId: "trust-graph-connections", projectLabel: "Trust-graph connections" }
 ];
-function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount, projectAccountAudit) {
+function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount, projectAccountAudit, projectAccountBinding) {
   const rows = tokenRows.map((row) => ({ ...row }));
   const projectRows = projectAccount?.checkRuns;
   if (!projectRows || !projectRows.length) {
@@ -2112,12 +2112,17 @@ function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount, p
     return rows;
   };
   const binding = projectRows.find((row) => row.checkId === "project-token-identity" || row.label === "Canonical project token");
-  if (!binding) {
-    return annotateOpenBridgeRows(
-      `resolves through ${provenance}, which recorded no canonical-token binding check, so its outcomes cannot be credited to this token`
-    );
-  }
-  if (binding.status !== "confirmed") {
+  const projectSideConfirmed = binding?.status === "confirmed";
+  const normalizeHandle = (value) => String(value ?? "").replace(/^@/, "").trim().toLowerCase();
+  const tokenSideVerified = Boolean(
+    projectAccountBinding && projectAccountBinding.status === "verified" && normalizeHandle(projectAccount?.handle) && normalizeHandle(projectAccountBinding.handle) === normalizeHandle(projectAccount?.handle)
+  );
+  if (!projectSideConfirmed && !tokenSideVerified) {
+    if (!binding) {
+      return annotateOpenBridgeRows(
+        `resolves through ${provenance}, which recorded no canonical-token binding check, so its outcomes cannot be credited to this token`
+      );
+    }
     return annotateOpenBridgeRows(
       `resolves through ${provenance}, but that scan did not confirm this project's canonical token (${binding.note ?? `binding status: ${binding.status}`}), so its outcomes cannot be credited to this token`
     );
@@ -2129,6 +2134,7 @@ function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount, p
       `resolves through ${provenance}, but that scan bound a different token contract (${boundAddress.slice(0, 10)}\u2026), so its outcomes cannot be credited to this token`
     );
   }
+  const creditLicense = projectSideConfirmed ? "" : ` \xB7 account\u2194token binding verified from the token side (${projectAccountBinding?.via === "linked-page" ? "CA published on the account's linked page" : "CA published by the account's X bio"})`;
   for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
     const target = rows.find((row) => row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
     if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
@@ -2139,7 +2145,7 @@ function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount, p
       continue;
     }
     target.status = source.status;
-    target.note = `recorded on ${provenance}: ${source.note ?? "completed"}`;
+    target.note = `recorded on ${provenance}${creditLicense}: ${source.note ?? "completed"}`;
     if (source.provider) target.provider = source.provider;
     if (source.completedAt) target.completedAt = source.completedAt;
     if (typeof source.sourceCount === "number") target.sourceCount = source.sourceCount;
@@ -2188,7 +2194,8 @@ function reportChecks(kind, payload) {
       base,
       investigation.token.address,
       investigation.projectAccount,
-      investigation.projectAccountAudit
+      investigation.projectAccountAudit,
+      investigation.projectAccountBinding
     );
   }
   if (kind === "person") {

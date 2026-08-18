@@ -5,6 +5,7 @@ const PUBLIC_API_PATHS = new Set([
   "/api/v1/openapi.json",
   "/api/card",
   "/api/og",
+  "/api/shared-report",
   "/api/signin",
 ]);
 // Vercel cron paths. These carry no Supabase session (the scheduler is not a
