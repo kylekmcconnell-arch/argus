@@ -49,6 +49,7 @@ import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
+import { ScoreRing } from "./ScoreRing";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -60,25 +61,7 @@ function money(n?: number): string {
   return "$" + n.toFixed(2);
 }
 
-function Ring({ score, verdict, color, size = 96 }: { score: number | null; verdict: string; color?: string; size?: number }) {
-  const m = verdictMeta(verdict);
-  const ringColor = color ?? m.color;
-  const r = size / 2 - 6;
-  const c = 2 * Math.PI * r;
-  const pct = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
-  return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-line)" strokeWidth="4" />
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={ringColor} strokeWidth="4" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: "stroke-dashoffset 0.8s ease-out" }} />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="mono text-[24px] font-semibold leading-none tabular" style={{ color: ringColor }}>{score ?? "N/A"}</span>
-        <span className="mono text-[10px] text-ink-faint">/ 100</span>
-      </div>
-    </div>
-  );
-}
+// The ring lives in src/components/ScoreRing.tsx now — the shared idiom.
 
 function Check({ label, ok, value, na }: { label: string; ok: boolean; value?: string; na?: boolean }) {
   const color = na ? "var(--color-ink-faint)" : ok ? "var(--color-pass)" : "var(--color-avoid)";
@@ -420,7 +403,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         <div className="panel tint-var tint-strong relative mt-4 overflow-hidden soft-shadow" style={{ "--tint": presentationColor } as React.CSSProperties}>
           <div className="relative flex flex-wrap items-start gap-6 p-6 pb-5">
             <div className="shrink-0 text-center">
-              <Ring score={presentation.primaryScore ? d.score : null} verdict={presentedVerdict} color={presentationColor} />
+              <ScoreRing score={presentation.primaryScore ? d.score : null} verdict={presentedVerdict} color={presentationColor} size={96} bands={Boolean(presentation.primaryScore)} />
               <div className="mono mt-1.5 text-[11px] uppercase tracking-wider text-ink-dim">
                 {presentation.scoreLabel?.toLowerCase() ?? "score withheld"}
               </div>
