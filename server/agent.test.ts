@@ -40,8 +40,8 @@ const toolNameOf = (body: {
 const analystSchemaOf = (body: {
   tools?: Array<{ input_schema?: unknown }>;
   response_format?: { json_schema?: { schema?: unknown; strict?: boolean } };
-}): { schema: unknown; strict?: boolean } => ({
-  schema: body.response_format?.json_schema?.schema ?? body.tools?.[0]?.input_schema,
+}): { schema: typeof RECORD_VERDICT_INPUT_SCHEMA; strict?: boolean } => ({
+  schema: (body.response_format?.json_schema?.schema ?? body.tools?.[0]?.input_schema) as typeof RECORD_VERDICT_INPUT_SCHEMA,
   strict: body.response_format?.json_schema?.strict,
 });
 

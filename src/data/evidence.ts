@@ -549,7 +549,7 @@ export interface CompanyEnrichmentSnapshot {
 // that the named person is the audited subject.
 export interface SourceArtifact {
   kind: "press" | "legal_case" | "sanctions_screen" | "profile_photo" | "trust_graph" | "portfolio_relationship" | "fund_scale";
-  provider: "google-news" | "courtlistener" | "opensanctions" | "claude-vision" | "twitterapi" | "argus-graph" | "portfolio-web" | "fund-scale-web";
+  provider: "google-news" | "courtlistener" | "opensanctions" | "claude-vision" | "grok-vision" | "twitterapi" | "argus-graph" | "portfolio-web" | "fund-scale-web";
   title: string;
   /** External source when one exists. Internal frozen evidence may be hash-only. */
   sourceUrl?: string;
@@ -633,7 +633,7 @@ export type ProfilePhotoClassification =
 
 /** Frozen result from the exact profile-image bytes inspected before scoring. */
 export interface ProfileAuthenticityResult {
-  provider: "claude-vision" | "twitterapi";
+  provider: "claude-vision" | "grok-vision" | "twitterapi";
   capturedAt: string;
   imageUrl?: string;
   /** Exact bytes inspected, retained with the immutable report for replay. */
