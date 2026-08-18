@@ -11,7 +11,7 @@
 // - Provenance colours are source-of-truth, not pass/fail.
 import { useEffect, useRef, useState } from "react";
 import { ProvenanceTag } from "./ProvenanceTag";
-import { buildDossier, type Dossier, type DossierFigure, type StrengthBand, type KeyMeasure } from "../lib/dossierModel";
+import { buildDossier, type Dossier, type DossierFigure, type DossierSourceRow, type StrengthBand, type KeyMeasure } from "../lib/dossierModel";
 
 const TINT: Record<string, string> = {
   sourced: "text-sourced", derived: "text-derived", unestablished: "text-unverifiable",
@@ -221,7 +221,16 @@ function Figure({ figure }: { figure: DossierFigure }) {
         <div className="panel absolute right-0 bottom-full z-30 mb-2 w-[330px] px-3.5 py-3 text-left shadow-lg">
           <p className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">Provenance</p>
           <p className="mt-2 text-[12.5px] italic leading-relaxed text-ink-dim">“{r.passage}”</p>
-          <p className="mono mt-2 break-all text-[11px] text-ink-faint">{r.sourceLabel}</p>
+          {(r.sources.length > 0 ? r.sources : [{ url: r.url, sourceLabel: r.sourceLabel, passage: r.passage, capturedAt: null }]).map((s) => (
+            <div key={s.url} className="mt-2">
+              <a href={s.url} target="_blank" rel="noreferrer" className="link-ext mono break-all text-[11px]">
+                {s.sourceLabel}
+              </a>
+              {s.passage && s.passage !== r.passage && (
+                <p className="mt-1 text-[12.5px] italic leading-relaxed text-ink-dim">“{s.passage}”</p>
+              )}
+            </div>
+          ))}
           <div className="mt-2.5 border-t border-line pt-2">
             {r.chain.map(([what, when]) => (
               <div key={what} className="mt-1 flex items-baseline justify-between gap-3">
@@ -241,6 +250,53 @@ function Stat({ n, k }: { n: string; k: string }) {
     <div>
       <p className="mono text-[15px] leading-none text-derived">{n}</p>
       <p className="mt-1 text-[11px] leading-snug text-ink-faint">{k}</p>
+    </div>
+  );
+}
+
+
+/** Recorded documents, weighted by how many dossier figures cite them. */
+function SourcesTable({ rows }: { rows: DossierSourceRow[] }) {
+  const [open, setOpen] = useState<string | null>(null);
+  if (!rows.length) return null;
+  return (
+    <div className="mt-6 max-w-[54ch]">
+      <div className="divide-y divide-line/60">
+        {rows.map((row) => {
+          const expanded = open === row.url;
+          const ink = row.established ? "text-ink" : "text-unverifiable";
+          const dim = row.established ? "text-ink-dim" : "text-unverifiable";
+          return (
+            <div key={row.url}>
+              <button type="button" onClick={() => setOpen(expanded ? null : row.url)}
+                aria-expanded={expanded}
+                className="flex w-full items-baseline justify-between gap-3 py-2 text-left">
+                <span className={`mono min-w-0 truncate text-[11px] ${ink}`}>{row.label}</span>
+                <span className="flex shrink-0 items-baseline gap-3">
+                  <span className={`mono text-[11px] ${dim}`}>
+                    {row.factsCited} {row.factsCited === 1 ? "fact" : "facts"}
+                  </span>
+                  {row.lastCaptured && (
+                    <span className="mono text-[11px] text-ink-faint">{row.lastCaptured}</span>
+                  )}
+                </span>
+              </button>
+              {expanded && (
+                <div className="pb-2.5">
+                  <ul className="space-y-1">
+                    {row.citedLabels.map((label, i) => (
+                      <li key={`${label}-${i}`} className={`text-[12.5px] leading-relaxed ${dim}`}>{label}</li>
+                    ))}
+                  </ul>
+                  <a href={row.url} target="_blank" rel="noreferrer" className="link-ext mono mt-2 inline-block text-[11px]">
+                    Open source
+                  </a>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -516,6 +572,23 @@ export function DossierReport({
               )}
             </section>
           ))}
+          {d.sources.length > 0 && (
+            <section
+              id="dossier-sources"
+              data-beat="sources"
+              data-screen-label="Sources"
+              data-settled="true"
+              className={`dossier-block flex ${beatMinH} scroll-mt-28 flex-col justify-center ${theatrical ? "py-10" : "story-chapter report-section mt-7 py-6"}`}
+            >
+              <p className="mono text-[10px] uppercase tracking-[0.14em] text-signal-lift">Sources</p>
+              <h2 className={`mt-3 max-w-[20ch] text-ink display ${theatrical ? "text-[32px] leading-[1.14]" : "text-[18px] leading-snug"}`}>
+                {d.sources.length === 1
+                  ? `1 recorded source. ${d.sources[0].factsCited} ${d.sources[0].factsCited === 1 ? "fact" : "facts"} cited.`
+                  : `${d.sources.length} recorded sources. ${d.sources.reduce((n, s) => n + s.factsCited, 0)} facts cited.`}
+              </h2>
+              <SourcesTable rows={d.sources} />
+            </section>
+          )}
           {theatrical && <div className="h-[28vh]" />}
         </div>
 

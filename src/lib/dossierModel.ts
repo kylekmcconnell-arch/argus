@@ -14,12 +14,34 @@ import {
   type ProvenanceState,
 } from "./provenance";
 
+export interface DossierReceiptSource {
+  url: string;
+  sourceLabel: string;
+  passage: string;
+  /** ISO timestamp if the record has one. Never invented. */
+  capturedAt: string | null;
+}
+
 export interface DossierReceipt {
   passage: string;
   sourceLabel: string;
   url: string;
-  /** [what happened, when] — "never" marks a step the record does not contain. */
+  /** [what happened, when] — "never" is a bind state, not a clock. */
   chain: Array<[string, string]>;
+  /** Every supporting source, bound document first. */
+  sources: DossierReceiptSource[];
+}
+
+export interface DossierSourceRow {
+  url: string;
+  /** hostname · class */
+  label: string;
+  factsCited: number;
+  /** Display clock from the latest recorded capturedAt, or null. */
+  lastCaptured: string | null;
+  citedLabels: string[];
+  /** False when every citing figure is unbound. */
+  established: boolean;
 }
 
 export interface DossierFigure {
@@ -100,6 +122,8 @@ export interface Dossier {
   measures: KeyMeasure[];
   cost: { usd: number | null; estimated: boolean } | null;
   beats: DossierBeat[];
+  /** Recorded documents only, sorted by how many dossier figures cite them. */
+  sources: DossierSourceRow[];
 }
 
 const AXIS_LABELS: Record<string, string> = {
@@ -178,36 +202,141 @@ function looksLikeAggregatorFundingValue(value: string): boolean {
  * the SEC filings as bound. Retrieval proves a page says a sentence; only a
  * unique identifier proves the sentence is about this subject.
  */
-function bindingNote(fact: RawFact, subject: { handle: string; name: string; website: string | null }): string | null {
-  const supporting = arr<NonNullable<RawFact["sources"]>[number]>(fact.sources)
-    .filter((s) => str(s.relation) === "" || str(s.relation) === "supports");
-  if (!supporting.length) return null;
+type RawSource = NonNullable<RawFact["sources"]>[number];
+
+function supportingSources(fact: RawFact): RawSource[] {
+  return arr<RawSource>(fact.sources).filter((s) => {
+    const rel = str(s.relation);
+    return (rel === "" || rel === "supports") && Boolean(str(s.url));
+  });
+}
+
+function sourceBindsToSubject(
+  s: RawSource,
+  fact: RawFact,
+  subject: { handle: string; website: string | null },
+): boolean {
+  // Aggregator funding is namesake-indexed. A /protocol/uniswap slug is not
+  // unique-id evidence that the raised figure or "led by" names this subject.
+  if (str(fact.predicate) === "funding" && isAggregatorSource(s)) return false;
   const host = sourceHost(subject.website ?? "");
   const needles = [subject.handle.replace(/^@/, ""), host].map((n) => n.toLowerCase()).filter(Boolean);
-  const bound = supporting.some((s) => {
-    // Aggregator funding is namesake-indexed. A /protocol/uniswap slug is not
-    // unique-id evidence that the raised figure or "led by" names this subject.
-    if (str(fact.predicate) === "funding" && isAggregatorSource(s)) return false;
-    const hay = `${str(s.url)} ${str(s.title)} ${str(s.excerpt)}`.toLowerCase();
-    return needles.some((n) => hay.includes(n));
-  });
+  const hay = `${str(s.url)} ${str(s.title)} ${str(s.excerpt)}`.toLowerCase();
+  return needles.some((n) => hay.includes(n));
+}
+
+function sourceLabelOf(s: RawSource): string {
+  return `${sourceHost(str(s.url)) || "source"} · ${str(s.sourceClass) || "unclassified"}`;
+}
+
+function sourceDocumentKey(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    const path = u.pathname.replace(/\/$/, "") || "/";
+    return `${host}${path}`;
+  } catch {
+    return url;
+  }
+}
+
+function bindingNote(fact: RawFact, subject: { handle: string; name: string; website: string | null }): string | null {
+  const supporting = supportingSources(fact);
+  if (!supporting.length) return null;
+  const bound = supporting.some((s) => sourceBindsToSubject(s, fact, subject));
   if (bound) return null;
-  const hosts = [...new Set(supporting.map((s) => { try { return new URL(str(s.url)).hostname.replace(/^www\./, "") } catch { return "" } }).filter(Boolean))];
+  const hosts = [...new Set(supporting.map((s) => sourceHost(str(s.url))).filter(Boolean))];
   return `${supporting.length} source${supporting.length === 1 ? "" : "s"} on ${hosts.join(", ") || "an external host"}, none naming this subject`;
 }
 
-function receiptFor(fact: RawFact, unbound: string | null): DossierReceipt | null {
-  const s = arr<NonNullable<RawFact["sources"]>[number]>(fact.sources)[0];
-  if (!s || !str(s.url)) return null;
-  const chain: Array<[string, string]> = [["Fetched and hashed", clock(s.capturedAt)]];
-  if (s.artifactVerified === true) chain.push(["Artifact verified", clock(s.capturedAt)]);
-  chain.push(["Bound to this subject", unbound ? "never" : clock(s.capturedAt)]);
+function receiptFor(
+  fact: RawFact,
+  unbound: string | null,
+  subject: { handle: string; website: string | null },
+): DossierReceipt | null {
+  const supporting = supportingSources(fact);
+  if (!supporting.length) return null;
+  const ordered = [...supporting].sort((a, b) => {
+    const av = sourceBindsToSubject(a, fact, subject) ? 0 : 1;
+    const bv = sourceBindsToSubject(b, fact, subject) ? 0 : 1;
+    return av - bv;
+  });
+  const primary = ordered[0];
+  const chain: Array<[string, string]> = [];
+  const fetched = clock(primary.capturedAt);
+  if (fetched) chain.push(["Fetched", fetched]);
+  // Bind state is recorded, not a second copy of capturedAt.
+  chain.push(["Bound to this subject", unbound ? "never" : "recorded"]);
   return {
-    passage: str(s.excerpt) || "No passage was recorded for this source.",
-    sourceLabel: `${(() => { try { return new URL(str(s.url)).hostname.replace(/^www\./, "") } catch { return "source" } })()} · ${str(s.sourceClass) || "unclassified"}`,
-    url: str(s.url),
+    passage: str(primary.excerpt) || "No passage was recorded for this source.",
+    sourceLabel: sourceLabelOf(primary),
+    url: str(primary.url),
     chain,
+    sources: ordered.map((s) => ({
+      url: str(s.url),
+      sourceLabel: sourceLabelOf(s),
+      passage: str(s.excerpt) || "No passage was recorded for this source.",
+      capturedAt: str(s.capturedAt) || null,
+    })),
   };
+}
+
+function collectSourceRows(figures: DossierFigure[]): DossierSourceRow[] {
+  type Acc = {
+    url: string;
+    className: string;
+    citedLabels: string[];
+    latestIso: string | null;
+    established: boolean;
+  };
+  const groups = new Map<string, Acc>();
+  for (const fig of figures) {
+    const rec = fig.receipt;
+    if (!rec) continue;
+    const listed = rec.sources.length > 0
+      ? rec.sources
+      : [{ url: rec.url, sourceLabel: rec.sourceLabel, passage: rec.passage, capturedAt: null }];
+    const seen = new Set<string>();
+    for (const s of listed) {
+      if (!s.url) continue;
+      const key = sourceDocumentKey(s.url);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const cls = s.sourceLabel.includes(" · ")
+        ? s.sourceLabel.split(" · ").slice(1).join(" · ")
+        : "unclassified";
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          url: s.url,
+          className: cls,
+          citedLabels: [fig.label],
+          latestIso: s.capturedAt,
+          established: !fig.unboundNote,
+        });
+        continue;
+      }
+      existing.citedLabels.push(fig.label);
+      if (s.capturedAt && (!existing.latestIso || s.capturedAt > existing.latestIso)) {
+        existing.latestIso = s.capturedAt;
+        existing.url = s.url;
+      }
+      if (!fig.unboundNote) existing.established = true;
+    }
+  }
+  return [...groups.values()]
+    .map((g) => {
+      const display = g.latestIso ? clock(g.latestIso) : "";
+      return {
+        url: g.url,
+        label: `${sourceHost(g.url) || "source"} · ${g.className}`,
+        factsCited: g.citedLabels.length,
+        lastCaptured: display || null,
+        citedLabels: g.citedLabels,
+        established: g.established,
+      };
+    })
+    .sort((a, b) => b.factsCited - a.factsCited || a.label.localeCompare(b.label));
 }
 
 /**
@@ -412,7 +541,7 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       label: predicate.replace(/_/g, " "),
       value: str(fact.value) || EMPTY_VALUE,
       provenance,
-      receipt: receiptFor(fact, unboundNote),
+      receipt: receiptFor(fact, unboundNote, subject),
       unboundNote,
     });
     figuresByBeat.set(beatId, list);
@@ -567,5 +696,6 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       estimated: (payload.cost as Record<string, unknown>).estimated === true,
     },
     beats,
+    sources: collectSourceRows(beats.flatMap((b) => b.figures)),
   };
 }
