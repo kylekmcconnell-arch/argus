@@ -191,6 +191,55 @@ describe("provider-backed project routing", () => {
     ]);
   });
 
+  it("carries the first-party handle marker forward through a coalesce, never backward", () => {
+    // A team-page row (higher evidence rank, no marker) collides with a
+    // post-role-scan row for the same handle (lower rank, but the subject's
+    // OWN posts named them). The merged row must still read as first-party —
+    // the enrichment gate would otherwise silently lose the two real handles.
+    const merged = coalesceTeamMembersByHandle([
+      {
+        name: "Prophett",
+        handle: "@proph3ttt",
+        role: "Founder",
+        source: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "team-page",
+        identity_link_evidence_origin: "deterministic",
+      },
+      {
+        name: "Prophett",
+        handle: "@proph3ttt",
+        role: "Founder",
+        source: "post role-scan",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "twitterapi",
+        identity_link_evidence_origin: "deterministic",
+        handleProvenance: "subject_first_party",
+      },
+    ]);
+    expect(merged).toEqual([
+      expect.objectContaining({ handle: "@proph3ttt", handleProvenance: "subject_first_party" }),
+    ]);
+  });
+
+  it("leaves a search-only handle without the first-party marker after a coalesce", () => {
+    const merged = coalesceTeamMembersByHandle([
+      {
+        name: "Grok Lead",
+        handle: "@someone",
+        role: "Advisor",
+        source: "Web identity search",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        provider: "grok",
+        identity_link_evidence_origin: "model_lead",
+      },
+    ]);
+    expect(merged[0].handleProvenance).toBeUndefined();
+  });
+
   it("routes @world_xyz to the PROJECT methodology and requests every PROJECT axis", () => {
     const evidence = resolvedProjectProfile("the solana prediction market");
     const roles = providerBackedRoles(evidence);

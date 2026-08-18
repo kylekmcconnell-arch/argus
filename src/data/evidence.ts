@@ -855,6 +855,26 @@ export interface WebTeamMember {
   /** Tracks separately when a verified roster row received model-found identity links. */
   identity_link_evidence_origin?: EvidenceOrigin;
   projects_evidence_origin?: EvidenceOrigin;
+  /**
+   * Set only at the moment this member's handle is bound from the subject
+   * account's OWN posts, following edge, or amplification edge (never the
+   * website/team-page or a search lead). Deliberately separate from
+   * `identity_link_evidence_origin`: the "account doesn't vouch for its team"
+   * path flattens that field to `model_lead` for every member, first-party or
+   * not, so a gate keyed on it could be silently erased. This marker survives
+   * that flattening and is the only thing the avatar/follower enrichment
+   * collector gates on.
+   */
+  handleProvenance?: "subject_first_party";
+  /** Trusted-fetch X avatar for a first-party-bound member only; never a bare offered URL. */
+  avatarUrl?: string;
+  /** sha256 of the fetched avatar image bytes. */
+  avatarContentHash?: string;
+  avatarCapturedAt?: string;
+  followers?: number;
+  accountStatus?: "active" | "suspended" | "unavailable";
+  enrichmentProvider?: string;
+  enrichmentSourceUrl?: string;
 }
 
 export interface VentureTeamInput {
