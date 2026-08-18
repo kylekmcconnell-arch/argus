@@ -68,6 +68,8 @@ import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
+import { DimensionChapters } from "./DimensionChapters";
+import { tokenDimensionChapters } from "../lib/dimensionChapters";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -1623,13 +1625,20 @@ export function InvestigationReport({
                 score: a.score,
                 weight: a.weight,
                 rationale: a.rationale,
-                evidenceHref: "#investigation-methodology" as const,
+                evidenceHref: `#dimension-${a.key}` as const,
               }))}
               totalScore={token.score}
               capNote={token.capApplied ? `limited to ${token.score}` : null}
               challengeAnchor={shareView ? null : "#investigation-challenge"}
             />
           )}
+
+          {/* the reading spine: each weighted dimension as its own chapter,
+              a judgment headline with the recorded facts underneath */}
+          <DimensionChapters
+            chapters={tokenDimensionChapters(token)}
+            checksHref="#investigation-methodology"
+          />
 
           {noticedSignals.length > 0 && (
             <section className="panel mt-3 p-4" aria-label="What Argus noticed">

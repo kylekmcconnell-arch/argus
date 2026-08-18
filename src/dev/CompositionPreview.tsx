@@ -1,5 +1,32 @@
 import { ScoreComposition } from "../components/ScoreComposition";
 import { AskReport } from "../components/AskReport";
+import { DimensionChapters } from "../components/DimensionChapters";
+import { tokenDimensionChapters } from "../lib/dimensionChapters";
+import type { TokenDossier } from "../token/audit";
+
+const CHAPTER_FIXTURE = {
+  chain: "robinhood",
+  liquidityUsd: 114_100,
+  mcap: 2_000_000,
+  ageDays: 12,
+  insiderPct: 14,
+  bundleCount: 6,
+  bundleRisk: "medium",
+  safety: {
+    available: true, simChecked: false, honeypot: false, cannotSellAll: false,
+    mintable: false, freezable: false, ownerRenounced: true, openSource: true,
+    buyTax: 0, sellTax: 0, holderCount: 4872, topHolderPct: 12,
+    lpLocked: false, lpBurnedPct: 100, lpLockedPct: 0, lpTopUnlockedEoaPct: 0,
+  },
+  cg: { cexCount: 0, rank: 2103 },
+  axes: [
+    { key: "T1", label: "Liquidity & lock", score: 22, weight: 24, rationale: "The launch pool's LP tokens were burned in full; the principal cannot be pulled." },
+    { key: "T2", label: "Contract safety", score: 20, weight: 26, rationale: "No owner powers found, but no simulation provider covers Robinhood Chain, so sell behavior is unsimulated." },
+    { key: "T4", label: "Holder distribution", score: 9, weight: 16, rationale: "Top non-pool wallet holds 12%; insider network net 14% of supply." },
+    { key: "T5", label: "Trading authenticity", score: 5, weight: 12, rationale: "6 bundled buys landed in the launch block; the rest of the tape reads organic." },
+    { key: "T6", label: "Maturity & presence", score: 4, weight: 10, rationale: "12 days old, no centralized listings yet, registry rank #2103." },
+  ],
+} as unknown as TokenDossier;
 
 /* Dev-only harness for the composition strip (?design-preview=composition).
    Representative rows shaped like a governing FOUNDER role's axes; values
@@ -84,6 +111,11 @@ export function CompositionPreview() {
           62 / 100 · CAUTION · the strip sits directly under the report hero
         </p>
         <ScoreComposition rows={ROWS} totalScore={62} />
+
+        <p className="mt-8 text-[13.5px] text-ink-dim">
+          The reading spine: each dimension as a chapter with its judgment headline and fact ledger.
+        </p>
+        <DimensionChapters chapters={tokenDimensionChapters(CHAPTER_FIXTURE)} checksHref="#top" />
 
         <p className="mt-8 text-[13.5px] text-ink-dim">
           The same strip in the threat scan's own units: grouped check outcomes, tone-led.

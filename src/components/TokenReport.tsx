@@ -50,6 +50,8 @@ import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLangua
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
+import { DimensionChapters } from "./DimensionChapters";
+import { tokenDimensionChapters } from "../lib/dimensionChapters";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -549,12 +551,15 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             score: a.score,
             weight: a.weight,
             rationale: a.rationale,
-            evidenceHref: "#token-methodology" as const,
+            evidenceHref: `#dimension-${a.key}` as const,
           }))}
           totalScore={d.score}
           capNote={d.capApplied ? `limited to ${d.score}` : null}
           challengeAnchor={shareView ? null : "#token-challenge"}
         />
+
+        {/* the reading spine: each weighted dimension as its own chapter */}
+        <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
 
         {/* panels */}
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
