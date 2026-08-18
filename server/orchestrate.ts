@@ -38,6 +38,7 @@ import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
 import { collectDomainRegistration, deriveLaunchWindow } from "./adapters/domainAge";
 import { checkLeaderDepartures, type LeaderDepartureCheck } from "./adapters/peopledatalabs";
+import { enrichFirstPartyTeamAvatars } from "./adapters/teamEnrichment";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
@@ -358,6 +359,13 @@ export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): 
     const preferred = teamEvidenceRank(member) > teamEvidenceRank(existing) ? member : existing;
     const secondary = preferred === existing ? member : existing;
     const merged: WebTeamMember = { ...preferred };
+    // Same "only ever turns ON" rule as the assembly merge above: a person
+    // the subject's own posts/following/amplification bound stays
+    // first-party even when the higher-ranked row for this coalesce came
+    // from a different lane (e.g. a team page) that never carried the marker.
+    if (secondary.handleProvenance === "subject_first_party" && merged.handleProvenance !== "subject_first_party") {
+      merged.handleProvenance = "subject_first_party";
+    }
     if (!merged.handle && secondary.handle) merged.handle = secondary.handle;
     if (!merged.linkedin && secondary.linkedin) merged.linkedin = secondary.linkedin;
     if ((!merged.projects || !merged.projects.length) && secondary.projects?.length) {
@@ -1122,6 +1130,10 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     if (name) byName.set(name, member);
   }
   const teamCandidates = [
+    // Website/team-page discovery, however deterministic the page fetch
+    // itself is, is not the subject account's OWN X activity, so it never
+    // carries the first-party handle marker the avatar/follower enrichment
+    // collector gates on.
     ...pageTeam.map((member) => ({
       ...member,
       evidence_origin: domain ? "deterministic" as const : "model_lead" as const,
@@ -1129,6 +1141,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       provider: domain ? "team-page" : "team-page-candidate",
       identity_link_evidence_origin: domain ? "deterministic" as const : "model_lead" as const,
       projects_evidence_origin: domain ? "deterministic" as const : "model_lead" as const,
+      handleProvenance: undefined as "subject_first_party" | undefined,
     })),
     ...siteTeam.map((member) => ({
       ...member,
@@ -1137,6 +1150,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       provider: "grok",
       identity_link_evidence_origin: "model_lead" as const,
       projects_evidence_origin: "model_lead" as const,
+      handleProvenance: undefined as "subject_first_party" | undefined,
     })),
     ...people.map((member) => ({
       ...member,
@@ -1145,6 +1159,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       provider: "grok",
       identity_link_evidence_origin: "model_lead" as const,
       projects_evidence_origin: "model_lead" as const,
+      handleProvenance: undefined as "subject_first_party" | undefined,
     })),
     ...postRoleTeam.map((member) => ({
       ...member,
@@ -1153,6 +1168,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "deterministic" as const,
+      handleProvenance: member.handle ? "subject_first_party" as const : undefined,
     })),
     // Both halves are first-party provider records: the subject's own
     // following edge and the candidate's own profile text. The handle IS the
@@ -1165,6 +1181,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
+      handleProvenance: member.handle ? "subject_first_party" as const : undefined,
     })),
     // Same two crossing first-party signals as the followings lane, over the
     // amplification edge (the subject's own timeline retweeted/quoted the
@@ -1176,6 +1193,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
+      handleProvenance: member.handle ? "subject_first_party" as const : undefined,
     })),
     // Reverse-search leads stay model leads (one-sided until the subject's own
     // edges vouch — the deterministic lanes above own that call and win the
@@ -1194,6 +1212,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         provider: "reverse-role-search",
         identity_link_evidence_origin: claim ? "deterministic" as const : "model_lead" as const,
         projects_evidence_origin: "model_lead" as const,
+        handleProvenance: undefined as "subject_first_party" | undefined,
       };
     }),
   ];
@@ -1241,6 +1260,17 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       ) {
         existing.identity_link_evidence_origin = "deterministic";
       }
+      // The marker only ever turns ON: a handle first surfaced by a search
+      // lane and later independently confirmed by the subject's own posts/
+      // following/amplification edge stays first-party even though it wasn't
+      // on arrival. It never turns off — no later lane can revoke it.
+      if (
+        t.handleProvenance === "subject_first_party"
+        && t.handle && norm(t.handle) === norm(existing.handle)
+        && existing.handleProvenance !== "subject_first_party"
+      ) {
+        existing.handleProvenance = "subject_first_party";
+      }
       continue;
     }
     const rec = {
@@ -1257,6 +1287,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       provider: t.provider,
       identity_link_evidence_origin: t.identity_link_evidence_origin,
       projects_evidence_origin: t.projects_evidence_origin,
+      handleProvenance: t.handleProvenance,
     };
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
@@ -1379,6 +1410,12 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   if (coalescedTeam.length !== webTeam.length) {
     webTeam.splice(0, webTeam.length, ...coalescedTeam);
   }
+  // A face, follower count, and account status only for a member whose handle
+  // the subject account itself bound (its own posts, following, or
+  // amplification edge) — never a team-page or search-discovered handle. See
+  // handleProvenance on WebTeamMember for why this is a durable marker rather
+  // than a gate on evidence_origin.
+  await enrichFirstPartyTeamAvatars(ctx);
   if (webTeam.length) {
     const groundedTeam = webTeam.filter((member) =>
       member.artifact_verified === true && member.evidence_origin !== "model_lead");

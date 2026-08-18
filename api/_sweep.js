@@ -732,6 +732,22 @@ async function checkForClones(input, options = {}) {
   };
 }
 
+// src/lib/retry.ts
+async function retryFetch(input, init, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(input, init);
+      if (res.ok || res.status !== 429 && res.status < 500) return res;
+      lastErr = new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      lastErr = e;
+    }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 300 * 2 ** i));
+  }
+  throw lastErr;
+}
+
 // src/token/sources.ts
 var GOPLUS_CHAIN = {
   ethereum: "1",
@@ -809,7 +825,7 @@ async function blockscoutHolders(chain, address, fetchImpl = fetch) {
 }
 async function dexByTokenResult(address) {
   try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
       signal: AbortSignal.timeout(8e3)
     });
     if (!res.ok) return { ok: false, pairs: [] };
@@ -847,10 +863,10 @@ var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitge
 async function coingeckoToken(chain, address) {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
+    const res = await retryFetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`, {
       signal: AbortSignal.timeout(8e3)
     });
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
+    if (res.status === 404) return { listed: false, id: null, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null, categories: [] };
     if (!res.ok) return null;
     const d = await res.json();
     const tickers = d.tickers ?? [];
@@ -872,6 +888,7 @@ async function coingeckoToken(chain, address) {
     } : null;
     return {
       listed: true,
+      id: typeof d.id === "string" && d.id ? d.id : null,
       rank: d.market_cap_rank ?? null,
       mcapUsd: d.market_data?.market_cap?.usd ?? null,
       marketCount: markets.size,
@@ -881,6 +898,7 @@ async function coingeckoToken(chain, address) {
       twitter,
       image,
       description: cleanBlurb(d.description?.en),
+      categories: (d.categories ?? []).filter((c) => typeof c === "string" && c.trim().length > 0).slice(0, 12),
       ath
     };
   } catch {
@@ -889,7 +907,7 @@ async function coingeckoToken(chain, address) {
 }
 async function dexByPairResult(chain, pair) {
   try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
+    const res = await retryFetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
       signal: AbortSignal.timeout(8e3)
     });
     if (!res.ok) return { ok: false, pair: null };
@@ -916,7 +934,7 @@ function pickPair(pairs, wantAddress) {
 }
 async function honeypotIs(chainId, address) {
   try {
-    const res = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
+    const res = await retryFetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
     if (!res.ok) return null;
     const d = await res.json();
     return {
@@ -932,7 +950,7 @@ async function honeypotIs(chainId, address) {
 }
 async function goplusSolana(mint) {
   try {
-    const res = await fetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
+    const res = await retryFetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
     if (!res.ok) return null;
     const d = await res.json();
     const row = d.result?.[mint] ?? (d.result ? Object.values(d.result)[0] : void 0);
@@ -1021,7 +1039,7 @@ async function rugcheckReport(mint, fetchImpl = fetch) {
 async function goplus(chainId, address) {
   const once = async () => {
     try {
-      const res = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
+      const res = await retryFetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
       if (!res.ok) return null;
       const d = await res.json();
       return d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : void 0) ?? null;
@@ -2073,18 +2091,43 @@ function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount, p
     }
     return rows;
   }
-  const binding = projectRows.find((row) => row.checkId === "project-token-identity" || row.label === "Canonical project token");
-  if (!binding || binding.status !== "confirmed") return rows;
-  const boundAddress = (projectAccount?.projectToken?.address ?? "").trim().toLowerCase();
-  const subjectAddress = (tokenAddress ?? "").trim().toLowerCase();
-  if (boundAddress && boundAddress !== subjectAddress) return rows;
   const handle = (projectAccount?.handle ?? "").trim();
   const provenance = handle ? `the bound project account scan (${handle})` : "the bound project account scan";
+  const annotateOpenBridgeRows = (reason) => {
+    for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
+      const target = rows.find((row) => row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
+      if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
+      target.note = reason;
+    }
+    return rows;
+  };
+  const binding = projectRows.find((row) => row.checkId === "project-token-identity" || row.label === "Canonical project token");
+  if (!binding) {
+    return annotateOpenBridgeRows(
+      `resolves through ${provenance}, which recorded no canonical-token binding check, so its outcomes cannot be credited to this token`
+    );
+  }
+  if (binding.status !== "confirmed") {
+    return annotateOpenBridgeRows(
+      `resolves through ${provenance}, but that scan did not confirm this project's canonical token (${binding.note ?? `binding status: ${binding.status}`}), so its outcomes cannot be credited to this token`
+    );
+  }
+  const boundAddress = (projectAccount?.projectToken?.address ?? "").trim().toLowerCase();
+  const subjectAddress = (tokenAddress ?? "").trim().toLowerCase();
+  if (boundAddress && boundAddress !== subjectAddress) {
+    return annotateOpenBridgeRows(
+      `resolves through ${provenance}, but that scan bound a different token contract (${boundAddress.slice(0, 10)}\u2026), so its outcomes cannot be credited to this token`
+    );
+  }
   for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
     const target = rows.find((row) => row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
     if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
     const source = projectRows.find((row) => row.checkId === bridge.projectCheckId || row.label === bridge.projectLabel);
-    if (!source || !SUCCESSFUL.has(source.status)) continue;
+    if (!source) continue;
+    if (!SUCCESSFUL.has(source.status)) {
+      target.note = `resolves through ${provenance}, where it also did not finish (${source.status}${source.note ? `: ${source.note}` : ""})`;
+      continue;
+    }
     target.status = source.status;
     target.note = `recorded on ${provenance}: ${source.note ?? "completed"}`;
     if (source.provider) target.provider = source.provider;
