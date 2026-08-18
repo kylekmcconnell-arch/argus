@@ -1,4 +1,5 @@
 import { ScoreComposition } from "../components/ScoreComposition";
+import { AskReport } from "../components/AskReport";
 
 /* Dev-only harness for the composition strip (?design-preview=composition).
    Representative rows shaped like a governing FOUNDER role's axes; values
@@ -82,7 +83,13 @@ export function CompositionPreview() {
         <p className="mt-1 text-[13.5px] text-ink-dim">
           62 / 100 · CAUTION · the strip sits directly under the report hero
         </p>
-        <ScoreComposition rows={ROWS} totalScore={62} challengeAnchor={null} />
+        <ScoreComposition rows={ROWS} totalScore={62} />
+        {/* The console the challenge affordance lands on. The fixture version
+            id exists only so the input is live; /api/ask is absent in vite
+            dev, so asking returns the network-error line — expected. */}
+        <div id="ask-report" className="mt-5 scroll-mt-8">
+          <AskReport subject="@auricprotocol" reportVersionId="00000000-0000-4000-8000-000000000000" />
+        </div>
       </div>
     </div>
   );

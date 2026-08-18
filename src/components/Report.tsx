@@ -4453,9 +4453,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             />
           </div>
 
-          {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
+          {/* analyst augmentation — add a piece the scan missed (verified
+              before publish). The console's "Attach a document" chip lands
+              here. */}
           {showCurrentIntelligence && canMutateWorkspace && (
-            <div className="min-w-0 lg:col-span-2">
+            <div id="add-info" className="min-w-0 scroll-mt-28 lg:col-span-2">
               <AddInfo subject={report.handle} subjectKind="person" canonicalRef={report.handle} subjectGraphKey={report.handle} />
             </div>
           )}

@@ -45,6 +45,14 @@
   --color-sourced: #1fb8c4; /* cyan-teal: confirmed against an outside artifact */
   --color-derived: #838fa3; /* slate: ARGUS-calculated from grounded inputs */
 
+  /* The console: the ask/challenge surface. Deliberately dark in BOTH themes
+     (like --color-eye-pupil) — a terminal window into the file. */
+  --color-console: #17181b;
+  --color-console-line: #303236;
+  --color-console-ink: #e9e8e4;
+  --color-console-ink-dim: #9d9e9a;
+  --color-console-accent: #4fd1a5; /* signal green lifted for the dark ground */
+
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-serif: "Young Serif", Georgia, serif;
   --font-mono: "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
@@ -202,6 +210,51 @@
     inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
     0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent),
     0 16px 36px -30px color-mix(in oklab, var(--color-ink) 26%, transparent);
+}
+
+/* The console sheet: the ask/challenge surface (design-and-ui). One idiom,
+   deliberately dark in both themes — a terminal window into the file. */
+.console-sheet {
+  background: var(--color-console);
+  color: var(--color-console-ink);
+}
+.console-sheet .console-input {
+  background: color-mix(in oklab, var(--color-console-ink) 7%, transparent);
+  border: 1px solid var(--color-console-line);
+  border-radius: 7px;
+  color: var(--color-console-ink);
+  transition: border-color 0.15s;
+}
+.console-sheet .console-input:focus-within {
+  border-color: var(--color-console-accent);
+}
+.console-sheet .console-input input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--color-console-ink);
+  font-family: var(--font-mono);
+}
+.console-sheet .console-input input::placeholder {
+  color: color-mix(in oklab, var(--color-console-ink-dim) 80%, transparent);
+}
+.console-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-console-ink-dim);
+  background: color-mix(in oklab, var(--color-console-ink) 7%, transparent);
+  border: 1px solid var(--color-console-line);
+  border-radius: 9999px;
+  padding: 5px 11px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.console-chip:hover,
+.console-chip:focus-visible {
+  color: var(--color-console-ink);
+  border-color: var(--color-console-accent);
 }
 
 /* Investigation hero: three equal decision lanes. Risk, readiness, and market

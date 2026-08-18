@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { CaretDown } from "@phosphor-icons/react";
+import { requestChallenge } from "../lib/challenge";
 
 /* The composition strip: how the headline score is built, one row per
    weighted dimension, directly under the report hero. Each row is a bar an
@@ -108,13 +109,17 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
                 Read the evidence ↓
               </a>
               {challengeAnchor && (
-                <a
-                  href={challengeAnchor}
-                  className="text-[12.5px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
+                <button
+                  type="button"
+                  onClick={() => requestChallenge(
+                    `${row.label} · scored ${row.score}/${row.weight}`,
+                    challengeAnchor.replace(/^#/, ""),
+                  )}
+                  className="cursor-pointer text-[12.5px] text-ink-faint underline-offset-2 hover:text-ink hover:underline"
                   title="Push back on this score: ask the report, point it at something it missed, or add a document"
                 >
                   Challenge this
-                </a>
+                </button>
               )}
             </div>
           </div>
