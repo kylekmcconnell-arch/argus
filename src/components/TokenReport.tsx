@@ -4,7 +4,7 @@ import { TrustGraph } from "./TrustGraph";
 import { verdictMeta } from "../lib/verdict";
 import { printReportPdf } from "../lib/printPdf";
 import { isWatched, toggleWatch } from "../lib/watchlist";
-import { deployerRoleLabel, type TokenDossier } from "../token/audit";
+import { deployerRoleLabel, sameWalletAddress, type TokenDossier } from "../token/audit";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { EmbeddedThreatScan } from "./ThreatScanPage";
 import { OnChainForensics } from "./OnChainForensics";
@@ -163,6 +163,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 
 export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void }) {
   const arkhamEnabled = arkhamProviderEnabled();
+  const arkhamDeployer = arkhamEnabled && d.deployer && !sameWalletAddress(d.deployer, d.address) ? d.deployer : null;
   const versionContext = d.versionContext ?? d.viewVersionContext;
   const embeddedFacet = Boolean(d.viewVersionContext || d.viewPersistence);
   const livePersistence = d.viewPersistence ?? d.persistence;
@@ -538,10 +539,10 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-4">
             <OnChainForensics token={d} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
-            {arkhamEnabled && d.deployer && <div className="mt-3"><MoneyFlowStory address={d.deployer} chain={d.chain} panelCostToken={panelCostToken} roleLabel={deployerLabel} /></div>}
-            {arkhamEnabled && d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} /></div>}
-            {arkhamEnabled && d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} panelCostToken={panelCostToken} /></div>}
-            {arkhamEnabled && d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} panelCostToken={panelCostToken} /></div>}
+            {arkhamDeployer && <div className="mt-3"><MoneyFlowStory address={arkhamDeployer} chain={d.chain} panelCostToken={panelCostToken} roleLabel={deployerLabel} /></div>}
+            {arkhamDeployer && <div className="mt-3"><Counterparties address={arkhamDeployer} subject={`$${d.symbol}`} chain={d.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} /></div>}
+            {arkhamDeployer && <div className="mt-3"><RiskPaths address={arkhamDeployer} panelCostToken={panelCostToken} /></div>}
+            {arkhamDeployer && <div className="mt-3"><Holdings address={arkhamDeployer} symbol={d.symbol} panelCostToken={panelCostToken} /></div>}
           </div>
         )}
 

@@ -228,6 +228,14 @@ export interface DeployerRiskOutcome {
 }
 export type ScreenDeployerRiskFn = (address: string) => Promise<DeployerRiskOutcome | undefined>;
 
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+/** Same-address compare: EVM checksum-insensitive; otherwise exact string. */
+export function sameWalletAddress(a: string, b: string): boolean {
+  if (EVM_ADDRESS.test(a) && EVM_ADDRESS.test(b)) return a.toLowerCase() === b.toLowerCase();
+  return a === b;
+}
+
 // Concerning-funding categories. Arkham's risk briefing only returns sources
 // that contribute to a risk score, so any returned path is already an exposure;
 // these split the tone (hard vs soft) for the surfaced finding.
@@ -1110,7 +1118,8 @@ async function runTokenAudit(
     screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
     // Best-effort enrichment: a deployer-risk failure must never break a scan
     // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
-    deployer && deployerRiskEnabled
+    // Contract-as-wallet gate: do not Arkham-risk the token mint/CA as if it were a team wallet.
+    deployer && deployerRiskEnabled && !sameWalletAddress(deployer, address)
       ? deployerRiskFn(deployer).catch(() => undefined)
       : Promise.resolve(undefined),
     fetchPriceHistory(address, chain, pair.pairAddress).catch(() => null),

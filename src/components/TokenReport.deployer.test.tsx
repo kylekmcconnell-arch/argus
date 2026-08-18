@@ -159,6 +159,19 @@ describe("solana deployer surfacing", () => {
     expect(rowText("Deployer")).toBe("");
   });
 
+  it("does not mount deployer Arkham panels when the deployer is the token mint", () => {
+    const mint = "5NHPWfmaUi19A5sjR3rCx1X2HuGYrasoTF9RmxCspump";
+    render(dossier({
+      address: mint,
+      deployer: mint,
+      deployerAttribution: { address: mint, source: "helius", method: "mint feePayer", kind: "deployer" },
+    }));
+
+    for (const panel of ["money-flow", "counterparties", "risk-paths", "holdings"]) {
+      expect(harness.livePanel.mock.calls.find(([name]) => name === panel)).toBeUndefined();
+    }
+  });
+
   it("reports measured Solana creator holdings instead of hiding the row", () => {
     render(dossier({
       deployer: "BpH4h6pdVCcdTH7EvHMVK6YcrJPykPx9wJYPzYSbD2cX",
