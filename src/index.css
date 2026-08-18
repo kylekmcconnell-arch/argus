@@ -1101,4 +1101,13 @@ summary {
 @media print {
   .dossier-report .dossier-pinned { position: static !important; height: auto !important; }
   .dossier-report .sticky { position: static !important; height: auto !important; }
+  .dossier-preview .dossier-block,
+  .dossier-report .dossier-block,
+  .dossier-preview .dossier-block[data-settled="false"],
+  .dossier-report .dossier-block[data-settled="false"] {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    transition: none;
+  }
 }

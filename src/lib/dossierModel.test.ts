@@ -69,6 +69,7 @@ describe("dossier model", () => {
     const product = dossier.beats.find((b) => b.id === "product")!;
     expect(product.figures.map((f) => f.provenance.tier)).toEqual(["sourced", "sourced"]);
     expect(product.figures.every((f) => f.unboundNote === null)).toBe(true);
+    expect(product.heading).toBe("1 product is on file. 1 repository is on file.");
   });
 
   it("records a missing binding step as 'never' in the chain of custody", () => {
@@ -98,7 +99,7 @@ describe("dossier model", () => {
       basicFactLeads: [], providerFailures: [],
     });
     // not-applicable is excluded entirely; it is not an open question.
-    expect(dossier.beats.find((b) => b.id === "product")!.heading).toBe("2 confirmed, 1 still open.");
+    expect(dossier.beats.find((b) => b.id === "product")!.heading).toBe("No product or repository is recorded.");
   });
 
   it("summarises unresolved coverage from leads, open checks and dead providers", () => {
@@ -110,7 +111,7 @@ describe("dossier model", () => {
       providerFailures: [{}, {}],
     });
     const coverage = dossier.beats.find((b) => b.id === "coverage")!;
-    expect(coverage.heading).toBe("3 leads, 1 open check, 2 providers that never answered.");
+    expect(coverage.heading).toBe("3 leads. 1 check still open.");
   });
 
   it("does not print unbound aggregator funding as a raised figure or led-by", () => {
@@ -153,8 +154,25 @@ describe("dossier model", () => {
     expect(text).not.toContain("$11.0M");
     const activity = dossier.beats.find((b) => b.id === "activity");
     expect(activity?.figures.some((f) => f.label === "funding" && f.value === "Series B")).toBe(true);
+    expect(activity?.heading).toBe("No bound funding is on file.");
+    expect(activity?.heading).not.toMatch(/BlackRock|led by|\$11/);
   });
 });
+
+
+  it("treats a conflicted bound fact as sourced and contested", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [{
+        predicate: "product", value: "Dynex Marketplace", status: "conflicted",
+        sources: [source("https://dynexcoin.org/roadmap", "Since the launch of the Dynex Marketplace…")],
+      }],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    const fig = dossier.beats.find((b) => b.id === "product")!.figures[0];
+    expect(fig.provenance).toEqual({ tier: "sourced", contested: true });
+    expect(fig.unboundNote).toBeNull();
+  });
 
 describe("team enrichment boundary", () => {
   const withTeam = (leads: Array<Record<string, unknown>>) => buildDossier({
@@ -169,6 +187,7 @@ describe("team enrichment boundary", () => {
       avatarUrl: "https://pbs.twimg.com/x.jpg", avatarCapturedAt: "2026-08-16T04:51:31.270Z",
     }]).team;
     expect(m.firstParty).toBe(true);
+    expect(m.independentlyConfirmed).toBe(false);
     expect(m.avatarUrl).toBe("https://pbs.twimg.com/x.jpg");
     expect(m.avatarCapturedAt).toBe("2026-08-16T04:51:31.270Z");
   });
@@ -194,6 +213,7 @@ describe("team enrichment boundary", () => {
       avatarCapturedAt: "2026-08-16T04:51:31.270Z",
     }]).team;
     expect(m.firstParty).toBe(false);
+    expect(m.independentlyConfirmed).toBe(false);
     expect(m.avatarUrl).toBeNull();
     expect(m.avatarCapturedAt).toBeNull();
   });
@@ -233,6 +253,7 @@ describe("live report field names", () => {
     });
     expect(dossier.team).toHaveLength(1);
     expect(dossier.team[0].firstParty).toBe(false);
+    expect(dossier.team[0].independentlyConfirmed).toBe(true);
     expect(dossier.team[0].avatarUrl).toBeNull();
   });
 
@@ -247,5 +268,89 @@ describe("live report field names", () => {
     const text = JSON.stringify(dossier);
     expect(text).not.toContain("Fourteen people");
     expect(text).not.toContain("Nine of them proven");
+  });
+});
+
+describe("count-true headings", () => {
+  it("names the audited handle and whether an official site is bound", () => {
+    const bound = buildDossier({
+      handle: "@alice",
+      display_name: "Alice Project",
+      website: "https://alice.example/",
+      report: { verdict: "PASS", score_total: 70 },
+      basicFacts: [],
+      checkRuns: [{ checkId: "identity-resolution", label: "Identity", status: "confirmed", note: "Posting steady (~2.0d gap, last post 12d ago)" }],
+      basicFactLeads: [],
+      providerFailures: [],
+    });
+    expect(bound.beats.find((b) => b.id === "subject")!.heading).toBe("This is the @alice we audited. The site is bound.");
+    expect(bound.beats.find((b) => b.id === "subject")!.heading).not.toContain("Posting steady");
+    expect(bound.beats.find((b) => b.id === "subject")!.heading).not.toContain("Alice Project");
+
+    const unbound = buildDossier({
+      handle: "@alice",
+      display_name: "Alice Project",
+      website: null,
+      report: { verdict: "PASS", score_total: 70 },
+      basicFacts: [],
+      checkRuns: [{ checkId: "identity-resolution", label: "Identity", status: "confirmed" }],
+      basicFactLeads: [],
+      providerFailures: [],
+    });
+    expect(unbound.beats.find((b) => b.id === "subject")!.heading).toBe("This is the @alice we audited. No official site is bound.");
+  });
+
+  it("splits first-party naming from independent confirmation on the team beat", () => {
+    const oneNamed = buildDossier({
+      handle: "@alice",
+      display_name: "Alice Project",
+      website: "https://alice.example/",
+      report: { verdict: "CAUTION", score_total: 50 },
+      basicFacts: [],
+      checkRuns: [{ checkId: "project-team-identity", label: "Team", status: "confirmed", note: "Two people named on the official site." }],
+      basicFactLeads: [],
+      providerFailures: [],
+      webTeamLeads: [{
+        name: "Ada", role: "founder", handle: "@ada",
+        handleProvenance: "subject_first_party",
+      }],
+    });
+    expect(oneNamed.beats.find((b) => b.id === "team")!.heading).toBe("The project named 1 founder. Nobody else confirmed them.");
+    expect(oneNamed.beats.find((b) => b.id === "team")!.heading).not.toContain("Two people named");
+
+    const mixed = buildDossier({
+      handle: "@alice",
+      display_name: "Alice Project",
+      website: "https://alice.example/",
+      report: { verdict: "CAUTION", score_total: 50 },
+      basicFacts: [],
+      checkRuns: [{ checkId: "project-team-identity", label: "Team", status: "confirmed" }],
+      basicFactLeads: [],
+      providerFailures: [],
+      webTeamLeads: [
+        { name: "Ada", role: "engineer", handle: "@ada", handleProvenance: "subject_first_party" },
+        { name: "Bea", role: "engineer", handle: "@bea", handleProvenance: "subject_first_party" },
+        { name: "Cara", role: "engineer", handle: "@cara", handleProvenance: "subject_first_party", artifact_verified: true },
+      ],
+    });
+    expect(mixed.beats.find((b) => b.id === "team")!.heading).toBe("The project named 3 people. 1 is independently confirmed.");
+    expect(JSON.stringify(mixed)).not.toContain("Fourteen people");
+    expect(JSON.stringify(mixed)).not.toContain("Nine of them proven");
+  });
+
+  it("keeps the recorded verdict call and does not invent a thesis", () => {
+    const dossier = buildDossier({
+      handle: "@alice",
+      display_name: "Alice Project",
+      website: null,
+      headline: "A Grok forensic thesis about the operator graph.",
+      report: { verdict: "CAUTION", score_total: 61 },
+      basicFacts: [],
+      checkRuns: [],
+      basicFactLeads: [],
+      providerFailures: [],
+    });
+    expect(dossier.beats.find((b) => b.id === "verdict")!.heading).toBe("CAUTION · 61/100");
+    expect(dossier.beats.find((b) => b.id === "verdict")!.heading).not.toContain("operator graph");
   });
 });

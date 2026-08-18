@@ -21,19 +21,27 @@ const TIER_TINT: Record<string, string> = {
   emerging: "var(--color-derived)", weak: "var(--color-unverifiable)",
 };
 
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 function useReducedMotion() {
-  const [r, setR] = useState(false);
+  const [r, setR] = useState(prefersReducedMotion);
   useEffect(() => {
-    if (typeof window.matchMedia !== "function") {
-      setR(true);
-      return;
-    }
+    if (typeof window.matchMedia !== "function") return;
     const q = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const on = () => setR(q.matches); on();
+    const on = () => setR(q.matches);
+    on();
     q.addEventListener("change", on);
     return () => q.removeEventListener("change", on);
   }, []);
   return r;
+}
+
+function figureTint(figure: DossierFigure): string {
+  if (figure.locked) return "text-ink-faint";
+  return TINT[figure.provenance.tier] ?? "text-ink";
 }
 
 function hostOf(url: string): string {
@@ -66,7 +74,7 @@ export function BandChart({ bands, only }: { bands: StrengthBand[]; only?: strin
             />
           </div>
           {only && b.reasons.length > 0 && (
-            <p className="mt-1 text-[10.5px] leading-snug text-ink-faint">{b.reasons.join(" · ")}</p>
+            <p className="mt-1 text-[11px] leading-snug text-ink-faint">{b.reasons.join(" · ")}</p>
           )}
         </div>
       ))}
@@ -118,10 +126,10 @@ function LensPicker({ lenses }: { lenses: Dossier["lenses"] }) {
           </button>
         ))}
       </div>
-      <p className="mt-3 text-[13px] italic leading-relaxed text-ink-dim">{lens.question}</p>
+      <p className="mt-3 text-[13.5px] italic leading-relaxed text-ink-dim">{lens.question}</p>
       <ul className="mt-2.5 space-y-1.5 border-l-2 border-signal/40 pl-3.5">
         {lens.findings.slice(0, 4).map((f, i) => (
-          <li key={i} className="text-[12px] leading-relaxed text-ink-dim">{f}</li>
+          <li key={i} className="text-[12.5px] leading-relaxed text-ink-dim">{f}</li>
         ))}
       </ul>
       <p className="mono mt-2 text-[10px] text-ink-faint">
@@ -152,7 +160,7 @@ function MeasureLedger({ measures }: { measures: KeyMeasure[] }) {
               <div className="mt-1 space-y-0.5">
                 {rows.map((m, i) => (
                   <div key={i} className="flex items-baseline justify-between gap-3 border-b-hairline border-line/60 py-1">
-                    <span className="min-w-0 text-[11.5px] leading-snug text-ink-dim">{m.label}</span>
+                    <span className="min-w-0 text-[11px] leading-snug text-ink-dim">{m.label}</span>
                     <span className="mono shrink-0 text-[11px] text-ink">
                       {m.value}{m.unit && m.unit !== "text" && m.unit !== "date" ? ` ${m.unit}` : ""}
                     </span>
@@ -191,26 +199,34 @@ function RabbitHole({ questions }: { questions: string[] }) {
 function Figure({ figure }: { figure: DossierFigure }) {
   const [open, setOpen] = useState(false);
   const r = figure.receipt;
+  const locked = figure.locked === true;
   return (
     <div className="relative">
       <div className="flex items-baseline justify-between gap-3">
         <span className="mono shrink-0 text-[10px] uppercase tracking-[0.1em] text-ink-faint">{figure.label}</span>
-        <button type="button" onClick={() => r && setOpen(!open)} aria-expanded={r ? open : undefined}
-          className={`mono min-w-0 truncate text-right text-[12px] ${TINT[figure.provenance.tier]} ${r ? "cursor-pointer underline decoration-dotted underline-offset-4" : "cursor-default"}`}>
-          {figure.value}
-        </button>
+        <span className="flex min-w-0 items-center justify-end gap-1.5">
+          {locked ? (
+            <span className="chip tint-neutral text-ink-faint normal-case tracking-normal">Not run</span>
+          ) : (
+            <ProvenanceTag state={figure.provenance} />
+          )}
+          <button type="button" onClick={() => r && !locked && setOpen(!open)} aria-expanded={r && !locked ? open : undefined}
+            className={`mono min-w-0 truncate text-right text-[12.5px] ${figureTint(figure)} ${r && !locked ? "cursor-pointer underline decoration-dotted underline-offset-4" : "cursor-default"}`}>
+            {figure.value}
+          </button>
+        </span>
       </div>
-      {figure.unboundNote && <p className="mt-0.5 text-right text-[10.5px] leading-snug text-unverifiable">{figure.unboundNote}</p>}
+      {figure.unboundNote && <p className="mt-0.5 text-right text-[11px] leading-snug text-unverifiable">{figure.unboundNote}</p>}
       {open && r && (
         <div className="panel absolute right-0 bottom-full z-30 mb-2 w-[330px] px-3.5 py-3 text-left shadow-lg">
           <p className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">Provenance</p>
-          <p className="mt-2 text-[12px] italic leading-relaxed text-ink-dim">“{r.passage}”</p>
-          <p className="mono mt-2 break-all text-[10.5px] text-ink-faint">{r.sourceLabel}</p>
+          <p className="mt-2 text-[12.5px] italic leading-relaxed text-ink-dim">“{r.passage}”</p>
+          <p className="mono mt-2 break-all text-[11px] text-ink-faint">{r.sourceLabel}</p>
           <div className="mt-2.5 border-t border-line pt-2">
             {r.chain.map(([what, when]) => (
               <div key={what} className="mt-1 flex items-baseline justify-between gap-3">
-                <span className={`text-[11.5px] ${when === "never" ? "text-unverifiable" : "text-ink-dim"}`}>{what}</span>
-                <span className={`mono text-[10.5px] ${when === "never" ? "text-unverifiable" : "text-ink-faint"}`}>{when}</span>
+                <span className={`text-[11px] ${when === "never" ? "text-unverifiable" : "text-ink-dim"}`}>{what}</span>
+                <span className={`mono text-[11px] ${when === "never" ? "text-unverifiable" : "text-ink-faint"}`}>{when}</span>
               </div>
             ))}
           </div>
@@ -223,8 +239,8 @@ function Figure({ figure }: { figure: DossierFigure }) {
 function Stat({ n, k }: { n: string; k: string }) {
   return (
     <div>
-      <p className="mono text-[22px] leading-none text-ink">{n}</p>
-      <p className="mt-1 text-[10.5px] leading-snug text-ink-faint">{k}</p>
+      <p className="mono text-[15px] leading-none text-derived">{n}</p>
+      <p className="mt-1 text-[11px] leading-snug text-ink-faint">{k}</p>
     </div>
   );
 }
@@ -246,7 +262,7 @@ function PerimeterFromRecord({ figures, links }: {
       {boundHosts.length > 0 && (
         <div className="panel-inset border-l-2 border-sourced px-3.5 py-3">
           <p className="mono text-[10px] uppercase tracking-[0.1em] text-sourced">Sources that name this subject</p>
-          <p className="mono mt-1.5 text-[12px] text-ink-dim">{boundHosts.join(" · ")}</p>
+          <p className="mono mt-1.5 text-[12.5px] text-ink-dim">{boundHosts.join(" · ")}</p>
         </div>
       )}
       {unbound.map((f, i) => {
@@ -254,7 +270,7 @@ function PerimeterFromRecord({ figures, links }: {
         return (
           <div key={`${f.label}-${i}`} className="panel-inset border-l-2 border-unverifiable px-3.5 py-3">
             <p className="mono text-[10px] uppercase tracking-[0.1em] text-unverifiable">Sources that do not name this subject</p>
-            <p className="mono mt-1.5 text-[12px] text-ink-dim">
+            <p className="mono mt-1.5 text-[12.5px] text-ink-dim">
               {f.value}{hosts.length ? ` · ${hosts.join(" · ")}` : ""}
             </p>
             {f.unboundNote && (
@@ -280,31 +296,56 @@ export function DossierReport({
 }) {
   const d = buildDossier(payload);
   const beats = d.beats;
-  const [cur, setCur] = useState(beats[0]?.id ?? "");
+  const beatIds = beats.map((b) => b.id);
+  const beatKey = beatIds.join("|");
   const reduced = useReducedMotion();
   const refs = useRef<Record<string, HTMLElement | null>>({});
+  const [settledIds, setSettledIds] = useState<string[]>(() => (
+    prefersReducedMotion() ? beatIds : beatIds.slice(0, 1)
+  ));
+  const [cur, setCur] = useState(beats[0]?.id ?? "");
 
   useEffect(() => {
-    const pick = () => {
-      const c = window.innerHeight / 2;
-      let best: string | null = null, bd = Infinity;
-      for (const [beatId, el] of Object.entries(refs.current)) {
-        if (!el) continue;
-        const r = el.getBoundingClientRect();
-        const dist = Math.abs(r.top + r.height / 2 - c);
-        if (dist < bd) { bd = dist; best = beatId; }
-      }
-      if (best) setCur(best);
-    };
-    pick();
-    window.addEventListener("scroll", pick, { passive: true });
-    window.addEventListener("resize", pick, { passive: true });
-    return () => { window.removeEventListener("scroll", pick); window.removeEventListener("resize", pick); };
-  }, []);
+    const ids = beatKey.split("|").filter(Boolean);
+    if (reduced || typeof IntersectionObserver !== "function") {
+      setSettledIds(ids);
+      setCur(ids[0] ?? "");
+      return;
+    }
 
+    const settleUpTo = (id: string) => {
+      const idx = ids.indexOf(id);
+      if (idx < 0) return;
+      setSettledIds((prev) => {
+        const merged = new Set([...prev, ...ids.slice(0, idx + 1)]);
+        return ids.filter((x) => merged.has(x));
+      });
+      setCur(id);
+    };
+
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const id = (entry.target as HTMLElement).dataset.beat;
+        if (id) settleUpTo(id);
+      }
+    }, { threshold: 0.2, rootMargin: "0px 0px -8% 0px" });
+
+    for (const id of ids) {
+      const el = refs.current[id];
+      if (el) io.observe(el);
+    }
+
+    const hash = window.location.hash.replace(/^#/, "");
+    if (hash.startsWith("dossier-")) settleUpTo(hash.slice("dossier-".length));
+
+    return () => io.disconnect();
+  }, [beatKey, reduced]);
+
+  const settled = (id: string) => reduced || settledIds.includes(id);
   const upto = Math.max(0, beats.findIndex((b) => b.id === cur));
-  const on = (i: number) => reduced || !theatrical || i <= upto;
   const perimeter = beats.find((b) => b.id === "perimeter");
+  const subjectHeading = beats.find((b) => b.id === "subject")?.heading ?? null;
   const beatMinH = theatrical ? "min-h-[82vh]" : "";
 
   return (
@@ -334,11 +375,12 @@ export function DossierReport({
               id={`dossier-${b.id}`}
               data-beat={b.id}
               data-screen-label={b.label}
+              data-settled={settled(b.id) ? "true" : "false"}
               ref={(el) => { refs.current[b.id] = el; }}
-              className={`flex ${beatMinH} scroll-mt-28 flex-col justify-center ${theatrical ? "py-10" : "story-chapter report-section mt-7 py-6 first:mt-0"}`}
+              className={`dossier-block flex ${beatMinH} scroll-mt-28 flex-col justify-center ${theatrical ? "py-10" : "story-chapter report-section mt-7 py-6 first:mt-0"}`}
             >
               <p className="mono text-[10px] uppercase tracking-[0.14em] text-signal-lift">{b.kicker}</p>
-              <h2 className={`mt-3 max-w-[20ch] text-ink ${theatrical ? "display text-[32px] leading-[1.14]" : "story-chapter-title"}`}>
+              <h2 className={`mt-3 max-w-[20ch] text-ink display ${theatrical ? "text-[32px] leading-[1.14]" : "text-[18px] leading-snug"}`}>
                 {b.heading}
               </h2>
 
@@ -391,8 +433,8 @@ export function DossierReport({
                     {d.timeline.map((t, i) => (
                       <div key={t.label} className={`flex-1 border-l-2 pl-3 ${i === d.timeline.length - 1 ? "border-signal" : "border-line"}`}>
                         <p className="mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{t.label}</p>
-                        <p className="mono mt-1 text-[13px] text-ink">{t.when}</p>
-                        {t.detail && <p className="mt-0.5 text-[10.5px] leading-snug text-ink-faint">{t.detail}</p>}
+                        <p className="mono mt-1 text-[13.5px] text-ink">{t.when}</p>
+                        {t.detail && <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">{t.detail}</p>}
                       </div>
                     ))}
                   </div>
@@ -417,8 +459,8 @@ export function DossierReport({
                           </span>
                         )}
                         <div className="min-w-0">
-                          <p className="truncate text-[13px] font-medium text-ink">{m.name}</p>
-                          <p className="mt-0.5 text-[11.5px] leading-snug text-ink-dim">{m.role}</p>
+                          <p className="truncate text-[13.5px] font-medium text-ink">{m.name}</p>
+                          <p className="mt-0.5 text-[11px] leading-snug text-ink-dim">{m.role}</p>
                           <p className={`mono mt-1.5 text-[10px] ${m.firstParty ? "text-sourced" : "text-unverifiable"}`}>
                             {m.firstParty ? "named by the account itself" : "web search only"}
                           </p>
@@ -452,7 +494,7 @@ export function DossierReport({
 
               {b.id === "verdict" && (
                 <div className="mt-6 max-w-[54ch]">
-                  {d.verdict.headline && <p className="text-[13.5px] leading-relaxed text-ink-dim">{d.verdict.headline}</p>}
+                  {subjectHeading && <p className="text-[13.5px] leading-relaxed text-ink-dim">{subjectHeading}</p>}
                   <div className="mt-6"><BandChart bands={d.strengthBands} /></div>
                   {d.nextActions.length > 0 && (
                     <div className="mt-7">
@@ -463,7 +505,7 @@ export function DossierReport({
                             <span className="mono shrink-0 text-[11px] text-signal-lift">{a.rank}</span>
                             <span className="min-w-0">
                               <span className="block text-[12.5px] leading-snug text-ink-dim">{a.action}</span>
-                              {a.whyNow && <span className="mt-0.5 block text-[10.5px] text-ink-faint">{a.whyNow}</span>}
+                              {a.whyNow && <span className="mt-0.5 block text-[11px] text-ink-faint">{a.whyNow}</span>}
                             </span>
                           </li>
                         ))}
@@ -482,7 +524,7 @@ export function DossierReport({
             <div className="panel flex h-full flex-col overflow-hidden">
               <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
                 <span className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">The file</span>
-                <span className="mono text-[10px] text-ink-faint">{upto + 1} / {beats.length}</span>
+                <span className="mono text-[10px] text-ink-faint">{(reduced ? beats.length : Math.max(settledIds.length, 1))} / {beats.length}</span>
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -492,18 +534,18 @@ export function DossierReport({
                       className="h-10 w-10 shrink-0 rounded-lg border border-line object-cover" />
                   )}
                   <div className="min-w-0">
-                    <h3 className="display truncate text-[20px] text-ink">{d.subject.name}</h3>
-                    <p className="mono truncate text-[10.5px] text-ink-faint">
+                    <h3 className="display truncate text-[18px] text-ink">{d.subject.name}</h3>
+                    <p className="mono truncate text-[11px] text-ink-faint">
                       {d.subject.handle}{d.subject.followers ? ` · ${d.subject.followers}` : ""}
                     </p>
                   </div>
                 </div>
 
-                {beats.filter((b) => b.id !== "verdict").map((b, i) => (
-                  <div key={b.id} data-cs={b.id} data-settled={on(i) ? "true" : "false"} className="dossier-block">
+                {beats.filter((b) => b.id !== "verdict").map((b) => (
+                  <div key={b.id} data-cs={b.id} data-settled={settled(b.id) ? "true" : "false"} className="dossier-block">
                     <div className="mt-4 border-t border-line pt-3.5">
                       <p className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">{b.label}</p>
-                      <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">{b.heading}</p>
+                      <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{b.heading}</p>
                       {b.figures.length > 0 && (
                         <div className="mt-2 space-y-1.5">
                           {b.figures.slice(0, 4).map((f, n) => <Figure key={`${f.label}-${n}`} figure={f} />)}
@@ -514,13 +556,14 @@ export function DossierReport({
                   </div>
                 ))}
 
-                <div data-cs="verdict" data-settled={on(beats.length - 1) ? "true" : "false"} className="dossier-block">
+                <div data-cs="verdict" data-settled={settled("verdict") ? "true" : "false"} className="dossier-block">
                   <div className="mt-4 border-t border-line pt-3.5">
                     <p className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">Verdict</p>
                     <div className="mt-2 flex items-baseline gap-2.5">
-                      <span className="display text-[30px] text-ink">{d.verdict.call}</span>
+                      <span className="display text-[32px] text-ink">{d.verdict.call}</span>
                       {d.verdict.score !== null && <span className="mono text-[15px] text-ink-dim">{d.verdict.score}/100</span>}
                     </div>
+                    {subjectHeading && <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{subjectHeading}</p>}
                     <div className="mt-3"><BandChart bands={d.strengthBands} /></div>
                   </div>
                 </div>
