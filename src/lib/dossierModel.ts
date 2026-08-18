@@ -127,7 +127,8 @@ const FACT_BEAT: Record<string, string> = {
 
 interface RawFact {
   predicate?: unknown; value?: unknown; status?: unknown;
-  sources?: Array<{ url?: unknown; title?: unknown; excerpt?: unknown; capturedAt?: unknown; sourceClass?: unknown; artifactVerified?: unknown; relation?: unknown }>;
+  providerProjection?: unknown;
+  sources?: Array<{ url?: unknown; title?: unknown; excerpt?: unknown; capturedAt?: unknown; sourceClass?: unknown; artifactVerified?: unknown; relation?: unknown; provider?: unknown }>;
 }
 interface RawCheck { checkId?: unknown; label?: unknown; status?: unknown; note?: unknown; decisionCritical?: unknown }
 
@@ -142,6 +143,25 @@ const clock = (iso: unknown): string => {
   const m = s.match(/T(\d{2}:\d{2}:\d{2})/);
   return m ? m[1] : s.slice(0, 10);
 };
+
+const sourceHost = (url: string): string => {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
+};
+
+/**
+ * Aggregator pages are namesake indexes (defillama.com/protocol/{name}). A slug
+ * or excerpt that repeats the display name is the Dynex Capital collision, not a
+ * unique-id bind. Funding facts therefore cannot bind through these sources.
+ */
+function isAggregatorSource(s: { url?: unknown; provider?: unknown }): boolean {
+  const provider = str(s.provider);
+  const host = sourceHost(str(s.url));
+  return provider === "defillama" || provider === "monid" || host === "defillama.com";
+}
+
+function looksLikeAggregatorFundingValue(value: string): boolean {
+  return /\$[\d,.]+/.test(value) || /\bled by\b/i.test(value) || /\bpublic funding rounds\b/i.test(value);
+}
 
 /**
  * A fact is bound when at least one supporting source names an identifier that
@@ -158,9 +178,12 @@ function bindingNote(fact: RawFact, subject: { handle: string; name: string; web
   const supporting = arr<NonNullable<RawFact["sources"]>[number]>(fact.sources)
     .filter((s) => str(s.relation) === "" || str(s.relation) === "supports");
   if (!supporting.length) return null;
-  const host = (() => { try { return subject.website ? new URL(subject.website).hostname.replace(/^www\./, "") : "" } catch { return "" } })();
+  const host = sourceHost(subject.website ?? "");
   const needles = [subject.handle.replace(/^@/, ""), host].map((n) => n.toLowerCase()).filter(Boolean);
   const bound = supporting.some((s) => {
+    // Aggregator funding is namesake-indexed. A /protocol/uniswap slug is not
+    // unique-id evidence that the raised figure or "led by" names this subject.
+    if (str(fact.predicate) === "funding" && isAggregatorSource(s)) return false;
     const hay = `${str(s.url)} ${str(s.title)} ${str(s.excerpt)}`.toLowerCase();
     return needles.some((n) => hay.includes(n));
   });
@@ -195,9 +218,11 @@ function receiptFor(fact: RawFact, unbound: string | null): DossierReceipt | nul
 function headingFor(checks: RawCheck[], figures: DossierFigure[]): string {
   const unbound = figures.filter((f) => f.unboundNote);
   if (unbound.length) {
-    return unbound.length === 1
-      ? `${unbound[0].value} belongs to someone else.`
-      : `${unbound.length} of ${figures.length} records here name a different subject.`;
+    // Never quote an unbound raised figure or "led by" into the heading.
+    if (unbound.length === 1 && !looksLikeAggregatorFundingValue(unbound[0].value)) {
+      return `${unbound[0].value} belongs to someone else.`;
+    }
+    return `${unbound.length} of ${figures.length} records here name a different subject.`;
   }
 
   const noteOf = (c: RawCheck) => str(c.note);
@@ -250,6 +275,18 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     const predicate = str(fact.predicate);
     const beatId = FACT_BEAT[predicate] ?? "coverage";
     const unboundNote = bindingNote(fact, subject);
+    // Aggregator/namesake funding that is not unique-id bound must not print as
+    // a raised figure or "led by". Skip the figure; provenance/unboundNote
+    // would still reprint the same sentence if we kept the value.
+    if (
+      predicate === "funding"
+      && unboundNote
+      && (
+        fact.providerProjection === true
+        || arr<NonNullable<RawFact["sources"]>[number]>(fact.sources).some(isAggregatorSource)
+        || looksLikeAggregatorFundingValue(str(fact.value))
+      )
+    ) continue;
     const declared = provenanceForBasicFactStatus(str(fact.status) as never);
     // An unbound fact cannot be sourced regardless of what the ledger declared.
     const provenance: ProvenanceState = unboundNote ? { tier: "unestablished" } : (declared ?? { tier: "derived" });

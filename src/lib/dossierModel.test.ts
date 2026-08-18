@@ -112,6 +112,48 @@ describe("dossier model", () => {
     const coverage = dossier.beats.find((b) => b.id === "coverage")!;
     expect(coverage.heading).toBe("3 leads, 1 open check, 2 providers that never answered.");
   });
+
+  it("does not print unbound aggregator funding as a raised figure or led-by", () => {
+    // Display name is not a bind key. A DeFiLlama /protocol/{name} slug is the
+    // same namesake collision as Dynex Capital on the SEC filings: it must not
+    // become a raised figure or a "led by" on this subject.
+    const dossier = buildDossier({
+      handle: "@satoshi_builds",
+      display_name: "Uniswap",
+      website: null,
+      report: { verdict: "PASS", score_total: 80 },
+      basicFacts: [{
+        predicate: "funding", value: "Series B", status: "corroborated",
+        sources: [{
+          url: "https://news.example/2022/10/13/uniswap-series-b",
+          title: "Uniswap Labs Raises $165M in Polychain Capital-Led Round",
+          excerpt: "Uniswap Labs raised $165 million in a Series B led by Polychain Capital.",
+          relation: "supports", sourceClass: "independent_press", artifactVerified: true,
+          capturedAt: "2026-07-23T19:43:00.102Z",
+        }],
+      }, {
+        predicate: "funding",
+        value: "2 public funding rounds · $11.0M raised · led by BlackRock",
+        status: "verified",
+        providerProjection: true,
+        sources: [{
+          url: "https://defillama.com/protocol/uniswap",
+          title: "DeFiLlama funding record",
+          excerpt: "Uniswap raised $11.0M across 2 public funding rounds, led by BlackRock.",
+          provider: "defillama",
+          relation: "supports", sourceClass: "other_public", artifactVerified: true,
+          capturedAt: "2026-07-23T19:43:00.102Z",
+        }],
+      }],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    const text = JSON.stringify(dossier);
+    expect(text).not.toContain("BlackRock");
+    expect(text).not.toContain("2 public funding rounds");
+    expect(text).not.toContain("$11.0M");
+    const activity = dossier.beats.find((b) => b.id === "activity");
+    expect(activity?.figures.some((f) => f.label === "funding" && f.value === "Series B")).toBe(true);
+  });
 });
 
 describe("team enrichment boundary", () => {
