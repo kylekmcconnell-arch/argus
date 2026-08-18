@@ -951,3 +951,41 @@ summary {
   thead { display: table-header-group; }
   h1, h2, h3 { break-after: avoid; }
 }
+
+/* ───────── dev-only: interactive dossier prototype (?design-preview=dossier) ─────────
+   Reveal is attribute-driven, not transition-driven: IntersectionObserver flips
+   [data-settled] and the block draws itself in. Under reduced motion every block
+   is written immediately with no animation at all — not a faster animation. */
+.dossier-preview .dossier-block {
+  opacity: 0;
+  transform: translateY(6px);
+  filter: blur(1px);
+  transition: opacity 460ms cubic-bezier(0.22, 1, 0.36, 1),
+              transform 460ms cubic-bezier(0.22, 1, 0.36, 1),
+              filter 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dossier-preview .dossier-block[data-settled="true"] {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+/* the rule above a freshly written block draws left-to-right */
+.dossier-preview .dossier-block[data-settled="true"] > div > p:first-child {
+  animation: ps-uncover 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes ps-uncover {
+  from { clip-path: inset(0 100% 0 0); }
+  to   { clip-path: inset(0 0 0 0); }
+}
+.dossier-preview.reduced .dossier-block,
+.dossier-preview.reduced .dossier-block[data-settled="false"] {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  transition: none;
+}
+.dossier-preview.reduced .dossier-block > div > p:first-child { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .dossier-preview .dossier-block { opacity: 1; transform: none; filter: none; transition: none; }
+  .dossier-preview .dossier-block > div > p:first-child { animation: none; }
+}
