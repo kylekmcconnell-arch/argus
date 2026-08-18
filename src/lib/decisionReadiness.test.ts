@@ -263,6 +263,7 @@ describe("investigation token readiness end to end", () => {
       },
       cg: { listed: true, rank: 120, mcapUsd: 520_000_000, marketCount: 60, cexCount: 42, cexNames: [], homepage: null, twitter: null, image: null, description: null },
       sanctionsScreen: { available: true, checked: 11, listSize: 700, sanctioned: [], completedAt: "2026-07-15T16:00:00.000Z" },
+      deployerRisk: { available: true, paths: [], completedAt: "2026-07-16T00:00:00.000Z" },
     };
     const projectAccount = {
       handle: "@askvenice",
@@ -280,14 +281,14 @@ describe("investigation token readiness end to end", () => {
     const rows = reconcileInvestigationChecks(tokenChecks(dossier as any), "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf", projectAccount);
     const readiness = deriveDecisionReadiness(rows);
 
-    expect(readiness.applicable).toBe(10);
-    expect(readiness.successful).toBe(10);
+    expect(readiness.applicable).toBe(11);
+    expect(readiness.successful).toBe(11);
     expect(readiness.status).toBe("ready");
 
     // Without the reconciliation the same scan is stuck below the provisional
     // floor: the historical "5 of 13" defect.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const unreconciled = deriveDecisionReadiness(tokenChecks({ ...dossier, sanctionsScreen: undefined } as any));
+    const unreconciled = deriveDecisionReadiness(tokenChecks({ ...dossier, sanctionsScreen: undefined, deployerRisk: undefined } as any));
     expect(unreconciled.successful).toBe(5);
     expect(unreconciled.status).toBe("incomplete");
   });
