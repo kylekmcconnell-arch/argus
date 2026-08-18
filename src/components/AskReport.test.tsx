@@ -67,6 +67,47 @@ describe("AskReport", () => {
     expect(container.querySelector('a[href="https://example.com/source"]')).not.toBeNull();
   });
 
+  it("opens with the disputed context on a challenge event and tags the question", async () => {
+    const providerFetch = vi.fn().mockResolvedValue({ json: async () => ({ answer: "ok" }) });
+    vi.stubGlobal("fetch", providerFetch);
+    act(() => {
+      root.render(
+        <AskReport
+          subject="@alice"
+          reportVersionId="1d4b3030-de29-4633-a281-beb9672c4a00"
+        />,
+      );
+    });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("argus:challenge", {
+        detail: { context: "Team & identity · scored 14/25" },
+      }));
+    });
+
+    // The console opened itself and shows what is being challenged.
+    expect(container.querySelector('button[aria-expanded="true"]')).not.toBeNull();
+    expect(container.textContent).toContain("Team & identity · scored 14/25");
+
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Question about this report"]');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(document.activeElement).toBe(input);
+    act(() => setInputValue(input!, "The advisor role was disclosed in March."));
+    const askButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Ask");
+    await act(async () => { askButton?.click(); await Promise.resolve(); });
+
+    const requestBody = JSON.parse(String((providerFetch.mock.calls[0]?.[1] as RequestInit)?.body));
+    expect(requestBody.question).toBe(
+      "[Challenging: Team & identity · scored 14/25] The advisor role was disclosed in March.",
+    );
+
+    // Clearing the context returns the console to plain ask mode.
+    const clearButton = container.querySelector<HTMLButtonElement>('button[aria-label="Clear challenge context"]');
+    act(() => clearButton?.click());
+    expect(container.textContent).not.toContain("Team & identity · scored 14/25");
+  });
+
   it("keeps chat inert when no immutable version is available", () => {
     const providerFetch = vi.fn();
     vi.stubGlobal("fetch", providerFetch);

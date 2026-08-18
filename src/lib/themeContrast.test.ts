@@ -31,32 +31,34 @@ function contrast(foreground: string, background: string): number {
 const dark = css.slice(css.indexOf("@theme {"), css.indexOf(":root {"));
 const lightStart = css.indexOf('\n:root[data-theme="light"] {') + 1;
 const light = css.slice(lightStart, css.indexOf("@layer base", lightStart));
-const lightSidebarStart = css.indexOf('\n:root[data-theme="light"] .app-sidebar,') + 1;
-const lightSidebar = css.slice(lightSidebarStart, css.indexOf("@layer base", lightSidebarStart));
 
 const DARK_SURFACES = ["void", "panel", "panel-2", "sidebar"] as const;
+const LIGHT_SURFACES = ["void", "panel", "panel-2", "sidebar"] as const;
 const TEXT_TOKENS = ["ink", "ink-dim", "ink-faint", "signal-lift"] as const;
 const SEMANTIC_TOKENS = ["pass", "caution", "fail", "avoid", "unverifiable"] as const;
 
+// design-and-ui: the warm-paper palette after precurion.com (Enigma,
+// 2026-08-18). Values lifted from Precurion's live CSS where one exists;
+// ink-faint darkened from their #6b6d6d so it stays AA on panel-2.
 const LIGHT_PALETTE = {
-  void: "#f5f7fa",
+  void: "#f7f7f5",
   panel: "#ffffff",
-  "panel-2": "#eef2f6",
-  sidebar: "#f2f5f9",
-  line: "#d6dde6",
-  "line-2": "#aeb9c8",
-  "control-line": "#66758a",
-  ink: "#0f1728",
-  "ink-dim": "#3e4b61",
-  "ink-faint": "#596980",
-  signal: "#1769e0",
-  "signal-dim": "#1157bd",
-  "signal-lift": "#1458bd",
-  "accent-tint": "#e7f0fe",
-  pass: "#1a9c63",
-  caution: "#a4526c",
-  fail: "#b32e57",
-  avoid: "#96143a",
+  "panel-2": "#e9ebe7",
+  sidebar: "#f2f1ec",
+  line: "#dedfdb",
+  "line-2": "#c2c4be",
+  "control-line": "#6f716c",
+  ink: "#141414",
+  "ink-dim": "#494b48",
+  "ink-faint": "#616360",
+  signal: "#047756",
+  "signal-dim": "#03614a",
+  "signal-lift": "#03614a",
+  "accent-tint": "#e8efe9",
+  pass: "#12915f",
+  caution: "#b45309",
+  fail: "#b3402e",
+  avoid: "#8f1d1d",
   unverifiable: "#6940cc",
 } as const;
 
@@ -69,10 +71,10 @@ const SEMANTIC_PALETTES = {
     unverifiable: "#a98cf5",
   },
   light: {
-    pass: "#1a9c63",
-    caution: "#a4526c",
-    fail: "#b32e57",
-    avoid: "#96143a",
+    pass: "#12915f",
+    caution: "#b45309",
+    fail: "#b3402e",
+    avoid: "#8f1d1d",
     unverifiable: "#6940cc",
   },
 } as const;
@@ -114,16 +116,15 @@ describe("ARGUS theme contrast", () => {
     }
   });
 
-  it("keeps the light-mode midnight navigation readable on every rail surface", () => {
+  it("keeps every light text token at WCAG AA across every base surface", () => {
     for (const foregroundName of TEXT_TOKENS) {
-      for (const backgroundName of ["sidebar", "panel", "panel-2"] as const) {
+      for (const backgroundName of LIGHT_SURFACES) {
         expect(
-          contrast(token(lightSidebar, foregroundName), token(lightSidebar, backgroundName)),
-          `${foregroundName} on light-mode sidebar ${backgroundName}`,
+          contrast(token(light, foregroundName), token(light, backgroundName)),
+          `${foregroundName} on light ${backgroundName}`,
         ).toBeGreaterThanOrEqual(4.5);
       }
     }
-    expect(contrast(token(lightSidebar, "control-line"), token(lightSidebar, "panel"))).toBeGreaterThanOrEqual(3);
   });
 
   it.each([

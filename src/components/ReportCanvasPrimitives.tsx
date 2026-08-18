@@ -111,7 +111,7 @@ export function ReportCanvasNarrativeSection({
           <ToneIcon tone={tone} />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 id={id ? `${id}-title` : undefined} className="text-[18px] font-semibold tracking-tight text-ink">
+          <h2 id={id ? `${id}-title` : undefined} className="display-sm text-[18px] leading-tight text-ink">
             {title}
           </h2>
           {description && <p className="mt-1 text-[12.5px] leading-relaxed text-ink-faint">{description}</p>}

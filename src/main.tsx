@@ -15,6 +15,8 @@ const ArgusEyePreview = lazy(() => import('./dev/ArgusEyePreview.tsx').then((mod
 const ProvenancePreview = lazy(() => import('./dev/ProvenancePreview.tsx').then((module) => ({ default: module.ProvenancePreview })))
 // eslint-disable-next-line react-refresh/only-export-components
 const DossierPreview = lazy(() => import('./dev/DossierPreview.tsx').then((module) => ({ default: module.DossierPreview })))
+// eslint-disable-next-line react-refresh/only-export-components
+const CompositionPreview = lazy(() => import('./dev/CompositionPreview.tsx').then((module) => ({ default: module.CompositionPreview })))
 
 // Observe 401s from ARGUS API routes so an expired session is stated once
 // instead of surfacing as a page of quietly dead panels.
@@ -39,6 +41,8 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><ProvenancePreview /></Suspense>
       ) : designPreview === 'dossier' ? (
         <Suspense fallback={null}><DossierPreview /></Suspense>
+      ) : designPreview === 'composition' ? (
+        <Suspense fallback={null}><CompositionPreview /></Suspense>
       ) : (
         <AuthGate>
           <SessionExpiryNotice />

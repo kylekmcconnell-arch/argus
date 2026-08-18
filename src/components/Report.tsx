@@ -52,6 +52,7 @@ import { decisionCriticalChecks, isAdverseFinding, personChecks } from "../lib/s
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
+import { ScoreComposition } from "./ScoreComposition";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { KolReport } from "./KolReport";
@@ -217,9 +218,9 @@ function ProofChipStrip({ chips }: { chips: HeroProofChip[] }) {
 
 function Section({ title, kicker, children }: { title: string; kicker?: string; children: React.ReactNode }) {
   return (
-    <section className="mt-5">
-      <div className="mb-2.5 flex items-baseline gap-2">
-        <h2 className="text-[13.5px] font-semibold tracking-tight text-ink">{title}</h2>
+    <section className="mt-6">
+      <div className="mb-2.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+        <h2 className="display-sm text-[18px] leading-tight text-ink">{title}</h2>
         {kicker && <span className="text-[12.5px] text-ink-faint">{kicker}</span>}
       </div>
       {children}
@@ -3329,6 +3330,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         </section>
 
+        {/* the composition strip: the governing role's weighted dimensions as
+            readable rows — expand for the why, jump to the evidence, or
+            challenge the score */}
+        {presentation.primaryScore && governingAxes.length > 0 && (
+          <ScoreComposition
+            rows={governingAxes.map(([axis, a]) => ({
+              axis,
+              label: diligenceAreaLabel(axis),
+              score: a.score,
+              weight: a.weight,
+              rationale: a.rationale,
+              supportCount: a.evidenceRefs?.length,
+              counterCount: a.counterEvidenceRefs?.length,
+              questionCount: a.gaps?.length,
+            }))}
+            totalScore={report.governing_score}
+            capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
+          />
+        )}
+
         <div className="sticky top-[69px] z-20 mt-5">
           <ReportCanvasSectionNav
             sticky={false}
@@ -4422,17 +4443,21 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
-          {/* ask-the-report chat — grounded in this person's own evidence */}
-          <div className="min-w-0 lg:col-span-2">
+          {/* ask-the-report chat — grounded in this person's own evidence.
+              Also the landing point for the composition strip's "Challenge
+              this" affordance. */}
+          <div id="ask-report" className="min-w-0 scroll-mt-28 lg:col-span-2">
             <AskReport
               subject={report.handle}
               reportVersionId={evidenceReportVersionId}
             />
           </div>
 
-          {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
+          {/* analyst augmentation — add a piece the scan missed (verified
+              before publish). The console's "Attach a document" chip lands
+              here. */}
           {showCurrentIntelligence && canMutateWorkspace && (
-            <div className="min-w-0 lg:col-span-2">
+            <div id="add-info" className="min-w-0 scroll-mt-28 lg:col-span-2">
               <AddInfo subject={report.handle} subjectKind="person" canonicalRef={report.handle} subjectGraphKey={report.handle} />
             </div>
           )}

@@ -45,7 +45,16 @@
   --color-sourced: #1fb8c4; /* cyan-teal: confirmed against an outside artifact */
   --color-derived: #838fa3; /* slate: ARGUS-calculated from grounded inputs */
 
-  --font-sans: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* The console: the ask/challenge surface. Deliberately dark in BOTH themes
+     (like --color-eye-pupil) — a terminal window into the file. */
+  --color-console: #17181b;
+  --color-console-line: #303236;
+  --color-console-ink: #e9e8e4;
+  --color-console-ink-dim: #9d9e9a;
+  --color-console-accent: #4fd1a5; /* signal green lifted for the dark ground */
+
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "Young Serif", Georgia, serif;
   --font-mono: "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
 }
 
@@ -57,33 +66,37 @@
   --select: color-mix(in oklab, var(--color-signal-lift) 30%, transparent);
 }
 
-/* LIGHT mode — the product default. */
+/* LIGHT mode — the product default.
+   design-and-ui branch (2026-08-18, Enigma's direction): warm-paper palette
+   after precurion.com, values lifted verbatim from its live CSS where one
+   exists. Cool blue-greys are gone; the single signal is Precurion's green.
+   Merging this to main amends DESIGN.md §2 — flag for Kyle's sign-off. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-void: #f5f7fa;
-  --color-panel: #ffffff;
-  --color-panel-2: #eef2f6;
-  --color-sidebar: #f2f5f9;
-  --color-line: #d6dde6;
-  --color-line-2: #aeb9c8;
-  --color-control-line: #66758a;
-  --color-ink: #0f1728;
-  --color-ink-dim: #3e4b61;
-  --color-ink-faint: #596980;
+  --color-void: #f7f7f5; /* precurion --surface */
+  --color-panel: #ffffff; /* precurion --surface-raised */
+  --color-panel-2: #e9ebe7; /* precurion --surface-plate */
+  --color-sidebar: #f2f1ec; /* warm rail, near --surface-canvas #faf7f2 */
+  --color-line: #dedfdb; /* precurion --rule */
+  --color-line-2: #c2c4be;
+  --color-control-line: #6f716c;
+  --color-ink: #141414; /* precurion --ink */
+  --color-ink-dim: #494b48;
+  --color-ink-faint: #616360; /* precurion --grey #6b6d6d, darkened for AA on panel-2 */
 
-  --color-signal: #1769e0;
-  --color-signal-dim: #1157bd;
-  --color-signal-lift: #1458bd;
-  --color-accent-tint: #e7f0fe;
-  --color-eye-pupil: #0f1728;
+  --color-signal: #047756; /* precurion --green */
+  --color-signal-dim: #03614a; /* precurion --green-pressed */
+  --color-signal-lift: #03614a;
+  --color-accent-tint: #e8efe9;
+  --color-eye-pupil: #141414;
 
-  --color-pass: #1a9c63;
-  --color-caution: #a4526c;
-  --color-fail: #b32e57;
-  --color-avoid: #96143a;
+  --color-pass: #12915f; /* one step brighter than signal so fills read */
+  --color-caution: #b45309; /* precurion --provenance-missing amber */
+  --color-fail: #b3402e;
+  --color-avoid: #8f1d1d;
   --color-unverifiable: #6940cc;
-  --color-sourced: #0e7c88;
-  --color-derived: #4d5870;
+  --color-sourced: #22666e; /* toward precurion --teal #244c52 */
+  --color-derived: #5d605b; /* warm slate; #8b8d8d fails AA at chip sizes */
 
   --shadow:
     0 1px 2px color-mix(in oklab, var(--color-ink) 5%, transparent),
@@ -91,36 +104,11 @@
   --select: color-mix(in oklab, var(--color-signal) 18%, transparent);
 }
 
-/* Light mode keeps the report bright while the persistent navigation becomes
-   a midnight command rail. Scoped tokens let existing component idioms retain
-   their contrast and behavior without introducing one-off sidebar colors. */
-:root[data-theme="light"] .app-sidebar,
-:root[data-theme="light"] .app-mobile-header {
-  --color-sidebar: #0d1726;
-  --color-panel: #12233a;
-  --color-panel-2: #172a43;
-  --color-line: #2a3a50;
-  --color-line-2: #5a6f8b;
-  --color-control-line: #71829b;
-  --color-ink: #f7f9fc;
-  --color-ink-dim: #c5d0df;
-  --color-ink-faint: #91a1b6;
-  --color-signal: #1769e0;
-  --color-signal-dim: #1157bd;
-  --color-signal-lift: #68b1ff;
-  --color-accent-tint: #153a66;
-  --color-eye-pupil: #0d1726;
-  --color-pass: #45d18d;
-  --color-caution: #e79cb4;
-  --color-fail: #ee7fa4;
-  --color-avoid: #f2647f;
-  --color-unverifiable: #b49cff;
-  --color-sourced: #3dd6e0;
-  --color-derived: #a3aec2;
-  --shadow:
-    0 1px 2px color-mix(in oklab, var(--color-eye-pupil) 64%, transparent),
-    0 18px 40px -28px color-mix(in oklab, var(--color-eye-pupil) 88%, transparent);
-}
+/* Light mode's navigation rail was previously a midnight override; the
+   warm-paper direction keeps the chrome light so the whole surface reads as
+   one document (precurion.com's rail is paper, not ink). The rail inherits
+   the light tokens; only its ground is nudged a step warmer via
+   --color-sidebar above. */
 
 @layer base {
   * {
@@ -161,24 +149,19 @@
 @layer components {
 /* ───────────────────────── typography ───────────────────────── */
 
-/* The brand voice: Archivo drawn wide. Only at display sizes — wordmark,
-   32/44px subject names, hero questions, verdict words (verdict words are
-   always uppercase). */
+/* The brand voice: Young Serif, used sparingly — wordmark, 32/44px subject
+   names, hero questions, verdict words. Precurion's restraint is the point:
+   the serif appears at display sizes only, never in body or UI text. */
 .display {
-  font-family: var(--font-sans);
-  font-variation-settings: "wdth" 125;
-  font-stretch: 125%;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.03em;
 }
-/* Gentler width for 18–24px mixed-case page titles (full-width reads stretched
-   below ~32px). */
+/* 18–24px mixed-case page titles share the serif at a gentler tracking. */
 .display-sm {
-  font-family: var(--font-sans);
-  font-variation-settings: "wdth" 110;
-  font-stretch: 110%;
-  font-weight: 620;
-  letter-spacing: -0.01em;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
 }
 
 .mono {
@@ -203,7 +186,7 @@
    ledger-style — borderless zones + hairline dividers — not nested boxes. */
 
 .panel {
-  border-radius: 12px;
+  border-radius: 8px; /* precurion --radius-card */
   border: 1px solid color-mix(in oklab, var(--color-line) 72%, transparent);
   background: linear-gradient(
     180deg,
@@ -227,6 +210,115 @@
     inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
     0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent),
     0 16px 36px -30px color-mix(in oklab, var(--color-ink) 26%, transparent);
+}
+
+/* Provenance-dotted value (DESIGN.md 2.1, design-and-ui): a figure whose
+   underline says where it came from. The receipt (passage, source, chain of
+   custody) opens on hover or keyboard focus; without a receipt the underline
+   still carries the tier via its tint and a plain title. */
+.prov-value {
+  border-bottom: 1px dotted var(--tint, var(--color-derived));
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.prov-value-rich {
+  cursor: help;
+  outline: none;
+}
+.prov-value-rich:hover,
+.prov-value-rich:focus-visible {
+  border-bottom-style: solid;
+}
+.prov-pop {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  z-index: 40;
+  left: 50%;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%) translateY(4px);
+  width: min(320px, 84vw);
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  white-space: normal;
+  font-family: var(--font-sans);
+  font-weight: 400;
+  box-shadow: var(--shadow);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.prov-value-rich:hover .prov-pop,
+.prov-value-rich:focus .prov-pop,
+.prov-value-rich:focus-within .prov-pop {
+  visibility: visible;
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .prov-pop {
+    transition: none;
+  }
+}
+/* The same receipt popover, hung off a source chip instead of a value. */
+.evidence-tip {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+.evidence-tip:hover .prov-pop,
+.evidence-tip:focus-within .prov-pop {
+  visibility: visible;
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* The console sheet: the ask/challenge surface (design-and-ui). One idiom,
+   deliberately dark in both themes — a terminal window into the file. */
+.console-sheet {
+  background: var(--color-console);
+  color: var(--color-console-ink);
+}
+.console-sheet .console-input {
+  background: color-mix(in oklab, var(--color-console-ink) 7%, transparent);
+  border: 1px solid var(--color-console-line);
+  border-radius: 7px;
+  color: var(--color-console-ink);
+  transition: border-color 0.15s;
+}
+.console-sheet .console-input:focus-within {
+  border-color: var(--color-console-accent);
+}
+.console-sheet .console-input input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--color-console-ink);
+  font-family: var(--font-mono);
+}
+.console-sheet .console-input input::placeholder {
+  color: color-mix(in oklab, var(--color-console-ink-dim) 80%, transparent);
+}
+.console-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-console-ink-dim);
+  background: color-mix(in oklab, var(--color-console-ink) 7%, transparent);
+  border: 1px solid var(--color-console-line);
+  border-radius: 9999px;
+  padding: 5px 11px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.console-chip:hover,
+.console-chip:focus-visible {
+  color: var(--color-console-ink);
+  border-color: var(--color-console-accent);
 }
 
 /* Investigation hero: three equal decision lanes. Risk, readiness, and market
@@ -280,6 +372,9 @@
   background: color-mix(in oklab, var(--color-panel-2) 42%, transparent);
 }
 .story-chapter-title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
   font-size: clamp(1.5rem, 2.5vw, 2rem);
   line-height: 1.12;
 }

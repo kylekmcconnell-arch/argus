@@ -19,15 +19,16 @@ const esc = (s: unknown): string =>
 
 // Concrete hex for each verdict band (the app uses CSS vars that don't survive
 // export). Falls back to a neutral grey for anything unmapped.
+// Values follow the warm-paper light palette in src/index.css (design-and-ui).
 const VERDICT_HEX: Record<string, string> = {
-  PASS: "#16a34a",
-  CAUTION: "#d97706",
-  FAIL: "#ea580c",
-  AVOID: "#dc2626",
-  UNVERIFIABLE_IDENTITY: "#7c3aed",
-  INCOMPLETE: "#6b7280",
+  PASS: "#12915f",
+  CAUTION: "#b45309",
+  FAIL: "#b3402e",
+  AVOID: "#8f1d1d",
+  UNVERIFIABLE_IDENTITY: "#6940cc",
+  INCOMPLETE: "#616360",
 };
-const verdictHex = (v: string) => VERDICT_HEX[v] ?? "#6b7280";
+const verdictHex = (v: string) => VERDICT_HEX[v] ?? "#616360";
 const verdictLabel = (v: string) => (v === "UNVERIFIABLE_IDENTITY" ? "UNVERIFIABLE" : v);
 
 const roleLabel = (r: string) => ROLE_META[r as SubjectClass]?.label ?? r;
@@ -241,11 +242,11 @@ function founderBlock(d: Dossier): string {
 // memory, and the transparent checklist. When the leg was skipped or failed,
 // the threatNote states why - a gap is reported as a gap.
 const THREAT_HEX: Record<string, string> = {
-  SAFE: "#16a34a",
-  CAUTION: "#d97706",
-  DANGER: "#dc2626",
-  RUG: "#dc2626",
-  UNKNOWN: "#6b7280",
+  SAFE: "#12915f",
+  CAUTION: "#b45309",
+  DANGER: "#b3402e",
+  RUG: "#8f1d1d",
+  UNKNOWN: "#616360",
 };
 
 const usd = (n?: number | null): string =>
@@ -381,67 +382,73 @@ function section(title: string, body: string, kicker?: string): string {
 
 /* ── document CSS ─────────────────────────────────────────────────── */
 
+/* Warm-paper document after the design-and-ui identity. The exported file is
+   self-contained, so the display serif rides its own stack ("Young Serif"
+   when installed, Georgia otherwise — Georgia is the token fallback in
+   src/index.css too); webfonts are not fetched because the PDF path prints
+   120ms after load. Screen shows the paper ground; print stays white. */
 const CSS = `
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
-  body { font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #18181b; background: #fff; margin: 0; padding: 40px 48px; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .dim { color: #71717a; }
-  a { color: #2563eb; text-decoration: none; }
-  header.masthead { display: flex; align-items: baseline; gap: 10px; border-bottom: 2px solid #18181b; padding-bottom: 10px; margin-bottom: 8px; }
+  body { font: 13px/1.55 "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: #141414; background: #f7f7f5; margin: 0; padding: 40px 48px; }
+  .mono { font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .dim { color: #5d605b; }
+  a { color: #047756; text-decoration: none; }
+  header.masthead { display: flex; align-items: baseline; gap: 10px; border-bottom: 2px solid #141414; padding-bottom: 10px; margin-bottom: 8px; }
   header.masthead .brand { font-weight: 700; letter-spacing: .18em; font-size: 15px; }
-  header.masthead .id { color: #71717a; font-size: 11px; font-family: ui-monospace, monospace; }
-  header.masthead .tag { margin-left: auto; font-size: 10px; letter-spacing: .1em; border: 1px solid #d4d4d8; border-radius: 4px; padding: 2px 6px; color: #52525b; }
-  .subject h1 { font-size: 21px; margin: 14px 0 4px; }
-  .subject h1 .handle { font-size: 13px; color: #71717a; font-weight: 400; font-family: ui-monospace, monospace; }
-  .subject .bio { margin: 4px 0; color: #3f3f46; max-width: 46em; }
-  .subject .meta, .subject .roles { margin: 3px 0; font-size: 11.5px; color: #71717a; }
-  .banner { display: flex; gap: 20px; align-items: center; border: 2px solid; border-radius: 12px; padding: 16px 20px; margin: 16px 0; }
+  header.masthead .brand .eye { color: #047756; }
+  header.masthead .id { color: #5d605b; font-size: 11px; font-family: ui-monospace, monospace; }
+  header.masthead .tag { margin-left: auto; font-size: 10px; letter-spacing: .1em; border: 1px solid #dedfdb; border-radius: 4px; padding: 2px 6px; color: #494b48; background: #fff; }
+  .subject h1 { font-family: "Young Serif", Georgia, serif; font-weight: 400; letter-spacing: -.02em; font-size: 26px; margin: 16px 0 4px; }
+  .subject h1 .handle { font-size: 13px; color: #5d605b; font-weight: 400; font-family: ui-monospace, monospace; letter-spacing: 0; }
+  .subject .bio { margin: 4px 0; color: #494b48; max-width: 46em; }
+  .subject .meta, .subject .roles { margin: 3px 0; font-size: 11.5px; color: #5d605b; }
+  .banner { display: flex; gap: 20px; align-items: center; border: 2px solid; border-radius: 8px; padding: 16px 20px; margin: 16px 0; background: #fff; }
   .banner-score { font-size: 36px; font-weight: 700; line-height: 1; font-family: ui-monospace, monospace; }
-  .banner-score span { font-size: 13px; color: #a1a1aa; }
-  .banner-kicker { text-transform: uppercase; letter-spacing: .2em; font-size: 10px; color: #71717a; }
-  .banner-verdict { font-size: 24px; font-weight: 700; margin-top: 2px; }
-  .banner .headline { margin: 8px 0 0; color: #3f3f46; max-width: 46em; }
-  .cap, .cap-line { color: #dc2626; font-size: 12px; margin-top: 8px; }
+  .banner-score span { font-size: 13px; color: #9a9c96; }
+  .banner-kicker { text-transform: uppercase; letter-spacing: .2em; font-size: 10px; color: #5d605b; }
+  .banner-verdict { font-family: "Young Serif", Georgia, serif; font-weight: 400; font-size: 24px; margin-top: 2px; }
+  .banner .headline { margin: 8px 0 0; color: #494b48; max-width: 46em; }
+  .cap, .cap-line { color: #8f1d1d; font-size: 12px; margin-top: 8px; }
   section { margin: 20px 0; page-break-inside: avoid; }
-  h2 { font-size: 14px; border-bottom: 1px solid #e4e4e7; padding-bottom: 5px; margin: 0 0 10px; }
-  h2 .kicker { font-weight: 400; font-size: 11px; color: #a1a1aa; }
+  h2 { font-family: "Young Serif", Georgia, serif; font-weight: 400; letter-spacing: -.01em; font-size: 16px; border-bottom: 1px solid #dedfdb; padding-bottom: 5px; margin: 0 0 10px; }
+  h2 .kicker { font-family: "Geist", -apple-system, sans-serif; font-weight: 400; font-size: 11px; color: #9a9c96; letter-spacing: 0; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #71717a; border-bottom: 1px solid #e4e4e7; padding: 5px 8px; }
-  td { border-bottom: 1px solid #f4f4f5; padding: 6px 8px; vertical-align: top; }
-  .pill { display: inline-block; border: 1px solid #d4d4d8; border-radius: 4px; padding: 0 5px; font-size: 10px; color: #52525b; }
-  .note { color: #3f3f46; }
+  th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #5d605b; border-bottom: 1px solid #dedfdb; padding: 5px 8px; }
+  td { border-bottom: 1px solid #e8e9e5; padding: 6px 8px; vertical-align: top; }
+  .pill { display: inline-block; border: 1px solid #dedfdb; border-radius: 999px; padding: 0 6px; font-size: 10px; color: #494b48; background: #fff; }
+  .note { color: #494b48; }
   ul.contradictions { list-style: none; padding: 0; margin: 0; }
-  ul.contradictions li { padding: 6px 0; border-bottom: 1px solid #f4f4f5; }
+  ul.contradictions li { padding: 6px 0; border-bottom: 1px solid #e8e9e5; }
   .sev { display: inline-block; font-size: 9px; text-transform: uppercase; border-radius: 3px; padding: 1px 5px; margin-right: 6px; }
-  .sev-high { background: #fee2e2; color: #dc2626; } .sev-medium { background: #fef3c7; color: #d97706; } .sev-low { background: #f4f4f5; color: #71717a; }
-  .role-card { border: 1px solid #e4e4e7; border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; page-break-inside: avoid; }
+  .sev-high { background: #f7e6e2; color: #8f1d1d; } .sev-medium { background: #f5ead9; color: #b45309; } .sev-low { background: #e9ebe7; color: #5d605b; }
+  .role-card { border: 1px solid #dedfdb; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; page-break-inside: avoid; background: #fff; }
   .role-head { display: flex; justify-content: space-between; font-size: 13px; }
   .role-name { font-weight: 600; }
   .role-verdict { font-weight: 600; font-family: ui-monospace, monospace; font-size: 12px; }
   .axis { margin-top: 8px; }
-  .axis-head { display: flex; justify-content: space-between; font-size: 12px; color: #3f3f46; }
-  .bar { height: 5px; background: #f4f4f5; border-radius: 3px; overflow: hidden; margin-top: 3px; }
+  .axis-head { display: flex; justify-content: space-between; font-size: 12px; color: #494b48; }
+  .bar { height: 5px; background: #e9ebe7; border-radius: 3px; overflow: hidden; margin-top: 3px; }
   .bar-fill { height: 100%; border-radius: 3px; }
-  .axis-note { font-size: 11px; color: #71717a; margin: 3px 0 0; }
+  .axis-note { font-size: 11px; color: #5d605b; margin: 3px 0 0; }
   ul.findings { list-style: none; padding: 0; margin: 0; }
-  .finding { border-left: 3px solid #e4e4e7; padding: 4px 0 4px 12px; margin-bottom: 10px; }
-  .finding.pos { border-color: #16a34a; } .finding.neg { border-color: #dc2626; }
+  .finding { border-left: 3px solid #dedfdb; padding: 4px 0 4px 12px; margin-bottom: 10px; }
+  .finding.pos { border-color: #12915f; } .finding.neg { border-color: #b3402e; }
   .finding .claim { margin: 0; }
-  .finding-meta { margin: 4px 0 0; font-size: 11px; color: #71717a; }
+  .finding-meta { margin: 4px 0 0; font-size: 11px; color: #5d605b; }
   .sub { margin-top: 14px; page-break-inside: avoid; }
   .sub h3, .tier h3 { font-size: 12.5px; margin: 0 0 6px; }
-  .sub h3 .kicker { font-weight: 400; font-size: 10.5px; color: #a1a1aa; }
-  .tier { border: 1px solid #e4e4e7; border-radius: 10px; padding: 10px 14px; margin-top: 8px; page-break-inside: avoid; }
+  .sub h3 .kicker { font-weight: 400; font-size: 10.5px; color: #9a9c96; }
+  .tier { border: 1px solid #dedfdb; border-radius: 8px; padding: 10px 14px; margin-top: 8px; page-break-inside: avoid; background: #fff; }
   .tier ul { margin: 0; padding-left: 18px; }
   .tier li { margin: 3px 0; }
-  .tier.t-bad h3 { color: #dc2626; } .tier.t-warn h3 { color: #d97706; } .tier.t-good h3 { color: #16a34a; }
-  .codeflag.sev-band-critical, .codeflag.sev-band-high { border-color: #dc2626; }
-  .codeflag.sev-band-medium { border-color: #d97706; }
+  .tier.t-bad h3 { color: #b3402e; } .tier.t-warn h3 { color: #b45309; } .tier.t-good h3 { color: #12915f; }
+  .codeflag.sev-band-critical, .codeflag.sev-band-high { border-color: #b3402e; }
+  .codeflag.sev-band-medium { border-color: #b45309; }
   .chk { font-family: ui-monospace, monospace; font-size: 11px; white-space: nowrap; }
-  .chk-pass { color: #16a34a; } .chk-warn { color: #d97706; } .chk-fail { color: #dc2626; } .chk-na { color: #a1a1aa; }
-  footer { margin-top: 28px; border-top: 1px solid #e4e4e7; padding-top: 12px; font-size: 11px; color: #71717a; }
-  @media print { body { padding: 0; } a { color: #18181b; } }
+  .chk-pass { color: #12915f; } .chk-warn { color: #b45309; } .chk-fail { color: #b3402e; } .chk-na { color: #9a9c96; }
+  footer { margin-top: 28px; border-top: 1px solid #dedfdb; padding-top: 12px; font-size: 11px; color: #5d605b; }
+  @media print { body { padding: 0; background: #fff; } a { color: #141414; } }
 `;
 
 /* ── the pure serializer ──────────────────────────────────────────── */
@@ -473,7 +480,7 @@ ${printScript}
 </head>
 <body>
   <header class="masthead">
-    <span class="brand">ARGUS</span>
+    <span class="brand"><span class="eye">◉</span> ARGUS</span>
     <span class="id">/ ${esc(r.audit_id)}</span>
     <span class="tag">${d.live ? "LIVE" : "CURATED"} · PRINCIPAL AUDIT</span>
   </header>

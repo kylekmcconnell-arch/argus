@@ -48,6 +48,7 @@ import {
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
+import { ScoreComposition } from "./ScoreComposition";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -75,23 +76,6 @@ function Ring({ score, verdict, color, size = 96 }: { score: number | null; verd
         <span className="mono text-[24px] font-semibold leading-none tabular" style={{ color: ringColor }}>{score ?? "N/A"}</span>
         <span className="mono text-[10px] text-ink-faint">/ 100</span>
       </div>
-    </div>
-  );
-}
-
-function Bar({ a, color }: { a: TokenDossier["axes"][number]; color: string }) {
-  const ratio = a.weight ? a.score / a.weight : 0;
-  const weak = ratio < 0.45;
-  return (
-    <div className="py-2">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-[12.5px] text-ink-dim">{a.label}</span>
-        <span className="mono shrink-0 text-[11px] tabular text-ink-faint">{a.score}<span className="text-ink-faint/60">/{a.weight}</span></span>
-      </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-line">
-        <div className="h-full rounded-full" style={{ background: weak ? "var(--color-caution)" : color, width: `${ratio * 100}%`, transition: "width 0.7s ease-out" }} />
-      </div>
-      {a.rationale && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-faint">{a.rationale}</p>}
     </div>
   );
 }
@@ -565,17 +549,21 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         )}
 
-        {/* axes */}
-        <section className="mt-5">
-          <div className="mb-2.5 text-[13.5px] font-semibold tracking-tight text-ink">Score breakdown</div>
-          <div className="panel px-4 py-1 divide-y divide-line/60">
-            {d.axes.map((a) => <Bar key={a.key} a={a} color={presentationColor} />)}
-            <div className="flex items-center justify-between py-2.5 text-[11px] text-ink-faint">
-              <span>Total score</span>
-              <span className="mono">= {d.score}{d.capApplied ? " (limited)" : ""}</span>
-            </div>
-          </div>
-        </section>
+        {/* axes — the composition strip: expand a row for the why, jump to
+            the checks, or challenge the score */}
+        <ScoreComposition
+          rows={d.axes.map((a) => ({
+            axis: a.key,
+            label: a.label,
+            score: a.score,
+            weight: a.weight,
+            rationale: a.rationale,
+            evidenceHref: "#token-methodology" as const,
+          }))}
+          totalScore={d.score}
+          capNote={d.capApplied ? `limited to ${d.score}` : null}
+          challengeAnchor="#token-challenge"
+        />
 
         {/* panels */}
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
