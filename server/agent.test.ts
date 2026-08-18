@@ -4503,8 +4503,7 @@ describe("analyst verdict integrity", () => {
             axes,
             headline: "Evidence-backed multi-role result",
             identity_note: "Identity resolved",
-          },
-        }, { prompt_tokens: 4000, completion_tokens: 1200 });
+          }, { prompt_tokens: 4000, completion_tokens: 1200 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
