@@ -82,8 +82,11 @@ describe("dossier model", () => {
       checkRuns: [], basicFactLeads: [], providerFailures: [],
     });
     const chain = dossier.beats.find((b) => b.id === "perimeter")!.figures[0].receipt!.chain;
-    expect(chain).toContainEqual(["Bound to this subject", "never"]);
-    expect(chain).toContainEqual(["Artifact verified", "04:52:55"]);
+    expect(chain).toEqual([
+      ["Fetched", "04:52:55"],
+      ["Bound to this subject", "never"],
+    ]);
+    expect(chain.filter(([, when]) => when === "04:52:55")).toHaveLength(1);
   });
 
   it("states counts rather than characterising what open checks mean", () => {
@@ -352,5 +355,97 @@ describe("count-true headings", () => {
     });
     expect(dossier.beats.find((b) => b.id === "verdict")!.heading).toBe("CAUTION · 61/100");
     expect(dossier.beats.find((b) => b.id === "verdict")!.heading).not.toContain("operator graph");
+  });
+});
+
+describe("dossier sources and receipts", () => {
+  it("emits source rows with citation counts from two facts on one URL and one on another", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [
+        { predicate: "product", value: "Dynex Marketplace", status: "verified",
+          sources: [source("https://dynexcoin.org/docs", "Since the launch of the Dynex Marketplace…")] },
+        { predicate: "repository", value: "github.com/dynexcoin", status: "verified",
+          sources: [source("https://dynexcoin.org/docs?utm=preview", "Repository listed on the same document.")] },
+        { predicate: "traction", value: "posts daily", status: "verified",
+          sources: [source("https://x.com/dynexcoin/status/1", "The @dynexcoin account posts daily.")] },
+      ],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    expect(dossier.sources).toHaveLength(2);
+    expect(dossier.sources[0]).toMatchObject({
+      label: "dynexcoin.org · regulatory_or_onchain",
+      factsCited: 2,
+      lastCaptured: "04:52:55",
+      citedLabels: ["product", "repository"],
+      established: true,
+    });
+    expect(dossier.sources[1]).toMatchObject({
+      label: "x.com · regulatory_or_onchain",
+      factsCited: 1,
+      citedLabels: ["traction"],
+      established: true,
+    });
+    expect(dossier.sources.map((s) => s.url).every((url) => url.startsWith("http"))).toBe(true);
+  });
+
+  it("keeps one Fetched clock and records bind state without inventing custody times", () => {
+    const bound = buildDossier({
+      ...subject,
+      basicFacts: [{
+        predicate: "product", value: "Dynex Marketplace", status: "verified",
+        sources: [source("https://dynexcoin.org/roadmap", "Since the launch of the Dynex Marketplace…")],
+      }],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    expect(bound.beats.find((b) => b.id === "product")!.figures[0].receipt!.chain).toEqual([
+      ["Fetched", "04:52:55"],
+      ["Bound to this subject", "recorded"],
+    ]);
+  });
+
+  it("lists every supporting source on the receipt, bound document first", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [{
+        predicate: "product", value: "Dynex Marketplace", status: "verified",
+        sources: [
+          source("https://www.sec.gov/Archives/edgar/data/826675/a.htm", "Unrelated filing."),
+          source("https://dynexcoin.org/roadmap", "Since the launch of the Dynex Marketplace…"),
+        ],
+      }],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    const receipt = dossier.beats.find((b) => b.id === "product")!.figures[0].receipt!;
+    expect(receipt.sources).toHaveLength(2);
+    expect(receipt.url).toBe("https://dynexcoin.org/roadmap");
+    expect(receipt.sources[0].url).toBe("https://dynexcoin.org/roadmap");
+    expect(receipt.sources[1].url).toBe("https://www.sec.gov/Archives/edgar/data/826675/a.htm");
+  });
+
+  it("does not invent a source row for skipped aggregator funding", () => {
+    const dossier = buildDossier({
+      handle: "@satoshi_builds",
+      display_name: "Uniswap",
+      website: null,
+      report: { verdict: "PASS", score_total: 80 },
+      basicFacts: [{
+        predicate: "funding",
+        value: "2 public funding rounds · $11.0M raised · led by BlackRock",
+        status: "verified",
+        providerProjection: true,
+        sources: [{
+          url: "https://defillama.com/protocol/uniswap",
+          title: "DeFiLlama funding record",
+          excerpt: "Uniswap raised $11.0M across 2 public funding rounds, led by BlackRock.",
+          provider: "defillama",
+          relation: "supports", sourceClass: "other_public", artifactVerified: true,
+          capturedAt: "2026-07-23T19:43:00.102Z",
+        }],
+      }],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    expect(JSON.stringify(dossier)).not.toContain("BlackRock");
+    expect(dossier.sources).toEqual([]);
   });
 });

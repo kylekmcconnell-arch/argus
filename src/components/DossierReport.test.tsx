@@ -146,4 +146,101 @@ describe("DossierReport", () => {
     expect(container.textContent).toContain("Unestablished");
     expect(container.textContent).not.toContain("Not run");
   });
+
+  it("renders a sources table after the beats and expands to the cited labels", () => {
+    render({
+      handle: "@alice",
+      display_name: "Alice",
+      website: "https://alice.example/",
+      report: { verdict: "PASS", score_total: 70 },
+      basicFacts: [
+        {
+          predicate: "product", value: "Alice Market", status: "verified",
+          sources: [{
+            url: "https://alice.example/docs",
+            excerpt: "Alice Market on alice.example",
+            relation: "supports", artifactVerified: true,
+            capturedAt: "2026-08-18T12:00:00.000Z", sourceClass: "first_party",
+          }],
+        },
+        {
+          predicate: "repository", value: "github.com/alice", status: "verified",
+          sources: [{
+            url: "https://alice.example/docs#repo",
+            excerpt: "Repository on the same document",
+            relation: "supports", artifactVerified: true,
+            capturedAt: "2026-08-18T13:00:00.000Z", sourceClass: "first_party",
+          }],
+        },
+        {
+          predicate: "traction", value: "posts daily", status: "verified",
+          sources: [{
+            url: "https://x.com/alice/status/1",
+            excerpt: "@alice posts daily",
+            relation: "supports", artifactVerified: true,
+            capturedAt: "2026-08-18T11:00:00.000Z", sourceClass: "social",
+          }],
+        },
+      ],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    expect(container.querySelector("#dossier-sources")).not.toBeNull();
+    expect(container.textContent).toContain("2 recorded sources. 3 facts cited.");
+    expect(container.textContent).toContain("alice.example · first_party");
+    expect(container.textContent).toContain("2 facts");
+    expect(container.textContent).toContain("x.com · social");
+    expect(container.textContent).toContain("1 fact");
+    expect(container.textContent).toContain("13:00:00");
+    const row = [...container.querySelectorAll("button")].find((el) => el.textContent?.includes("alice.example · first_party"));
+    expect(row).toBeTruthy();
+    act(() => { row!.click(); });
+    expect(container.textContent).toContain("product");
+    expect(container.textContent).toContain("repository");
+    const outbound = container.querySelector('a[href="https://alice.example/docs#repo"]')
+      ?? container.querySelector('a[href="https://alice.example/docs"]');
+    expect(outbound).not.toBeNull();
+    expect(outbound?.className).toContain("link-ext");
+  });
+
+  it("makes the stored receipt URL a real link in the figure drawer", () => {
+    render(livePayload());
+    const entity = [...container.querySelectorAll("button")].find((el) => el.textContent === "Clutch Auto Repair LLC");
+    expect(entity).toBeTruthy();
+    act(() => { entity!.click(); });
+    const link = container.querySelector('a[href="https://www.sec.gov/Archives/edgar/data/1/a.htm"]');
+    expect(link).not.toBeNull();
+    expect(link?.className).toContain("link-ext");
+    expect(link?.textContent).toContain("sec.gov");
+    expect(container.textContent).toContain("Fetched");
+    expect(container.textContent).toContain("Bound to this subject");
+    expect(container.textContent).toContain("never");
+    expect(container.textContent).not.toContain("Accepted by a person");
+    expect(container.textContent).not.toContain("Artifact verified");
+  });
+
+  it("keeps unbound aggregator funding off the sources table", () => {
+    render({
+      handle: "@satoshi_builds",
+      display_name: "Uniswap",
+      website: null,
+      report: { verdict: "PASS", score_total: 80 },
+      basicFacts: [{
+        predicate: "funding",
+        value: "2 public funding rounds · $11.0M raised · led by BlackRock",
+        status: "verified",
+        providerProjection: true,
+        sources: [{
+          url: "https://defillama.com/protocol/uniswap",
+          excerpt: "Uniswap raised $11.0M across 2 public funding rounds, led by BlackRock.",
+          provider: "defillama",
+          relation: "supports", sourceClass: "other_public", artifactVerified: true,
+          capturedAt: "2026-07-23T19:43:00.102Z",
+        }],
+      }],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    expect(container.textContent).not.toContain("BlackRock");
+    expect(container.textContent).not.toContain("led by");
+    expect(container.querySelector("#dossier-sources")).toBeNull();
+  });
 });
