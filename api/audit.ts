@@ -298,6 +298,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       stage: "collection-start",
       elapsedMs: collectionStartedAt - requestStartedAt,
     }));
+    const tokenAddress = typeof req.query.address === "string" ? req.query.address.trim() : "";
+    const tokenChain = typeof req.query.chain === "string" ? req.query.chain.trim().toLowerCase() : "";
+    const tokenSymbol = typeof req.query.symbol === "string" ? req.query.symbol.trim() : "";
+    const seededContract = tokenAddress
+      && tokenChain
+      && (/^0x[a-fA-F0-9]{40}$/.test(tokenAddress) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tokenAddress))
+      ? { tokenAddress, tokenChain, ...(tokenSymbol ? { tokenSymbol } : {}) }
+      : {};
     const dossier = await runAudit(handle, emit, {
       organizationId: auth.organizationId,
       intent: typeof req.query.intent === "string" && RESEARCH_INTENTS.has(req.query.intent as ResearchIntent)
@@ -306,6 +314,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       analystDeadlineAt: requestStartedAt
         + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
         - ANALYST_FINALIZATION_RESERVE_MS,
+      ...seededContract,
     }) as ServerDossier | null;
     console.info("[audit-route-runtime]", JSON.stringify({
       stage: "collection-complete",

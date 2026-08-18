@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import { getCost, withCostLedger } from "../cost";
 import type { CollectContext } from "./types";
-import { collectProjectTokenIdentity, siteContractCandidates } from "./projectToken";
+import { collectProjectTokenIdentity, PLATFORM_CHAIN, siteContractCandidates } from "./projectToken";
 
 const SOLANA_TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const OTHER_TOKEN = "So11111111111111111111111111111111111111112";
@@ -827,3 +827,145 @@ describe("token declared on the project's own site", () => {
     }));
   });
 });
+
+const STONKBROKER = "0xe934e36A439C94017B64a3FecE66AF12099aBF50";
+const STONKBROKER_LC = STONKBROKER.toLowerCase();
+const STONKBROKER_VAULT = "0x038a7f4e4e89448ad74e044337c9ac25c11e726b";
+const STONKBROKER_HTML = `<a href="https://robinhoodchain.blockscout.com/address/${STONKBROKER_VAULT}">vault</a>
+      <button>${STONKBROKER_LC}</button>
+      <span>0x0000000000000000000000000000000000000000</span>
+      <span>0xE934E36A439C94017B64A3FECE66AF12099ABF50</span>`;
+
+describe("investigation contract bind", () => {
+  it("treats robinhood as a canonical CoinGecko platform chain", () => {
+    expect(PLATFORM_CHAIN.robinhood).toBe("robinhood");
+  });
+
+  it("binds $STONKBROKER from the robinhood CA even when the CLUTCH name search is empty", async () => {
+    // Contract-first: the investigation already holds $STONKBROKER. CoinGecko
+    // search for "CLUTCH" is empty (and must stay unused as a name fallback —
+    // DexScreener's "Clutch Markets" hit is a different Robinhood token).
+    const { ctx, evidence } = context("@ClutchMarkets", "CLUTCH", "https://clutch.markets");
+    ctx.tokenAddress = STONKBROKER;
+    ctx.tokenChain = "robinhood";
+    ctx.tokenSymbol = "STONKBROKER";
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/coins/robinhood/contract/")) {
+        expect(url.toLowerCase()).toContain(STONKBROKER_LC);
+        return json({
+          id: "stonkbroker",
+          name: "StonkBroker",
+          symbol: "stonkbroker",
+          asset_platform_id: "robinhood",
+          market_cap_rank: 628,
+          last_updated: "2026-08-18T16:00:00.000Z",
+          platforms: { robinhood: STONKBROKER },
+          links: { twitter_screen_name: "ClutchMarkets", homepage: ["https://stonkbrokers.cash/"] },
+          market_data: { current_price: { usd: 0.12 }, market_cap: { usd: 1_200_000 } },
+        });
+      }
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("official_x"),
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      symbol: "STONKBROKER",
+      address: STONKBROKER,
+      chain: "robinhood",
+      officialX: "@ClutchMarkets",
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/search?"))).toBe(false);
+  });
+
+  it("treats a DexScreener homepage as official when official X already equals the audited handle", async () => {
+    const { ctx, evidence } = context("@ClutchMarkets", "CLUTCH", "https://clutch.markets/");
+    ctx.tokenAddress = STONKBROKER;
+    ctx.tokenChain = "robinhood";
+    ctx.tokenSymbol = "STONKBROKER";
+    const pool = "0x2222222222222222222222222222222222222222";
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/coins/robinhood/contract/")) return json({}, 404);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url.toLowerCase().includes(`/latest/dex/tokens/${STONKBROKER_LC}`)) {
+        return json({
+          pairs: [{
+            chainId: "robinhood",
+            pairAddress: pool,
+            url: `https://dexscreener.com/robinhood/${pool}`,
+            baseToken: { address: STONKBROKER, name: "StonkBroker", symbol: "STONKBROKER" },
+            info: {
+              websites: [{ url: "https://stonkbrokers.cash/" }],
+              socials: [{ type: "twitter", url: "https://x.com/ClutchMarkets" }],
+            },
+            liquidity: { usd: 80_000 },
+          }],
+        });
+      }
+      if (url === "https://clutch.markets/") return new Response("<html><p>CLUTCH markets</p></html>", { status: 200 });
+      if (url === "https://stonkbrokers.cash/") return new Response(STONKBROKER_HTML, { status: 200 });
+      if (url.includes(`/latest/dex/tokens/${STONKBROKER_VAULT}`)) return json({ pairs: [] });
+      if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("bound $STONKBROKER from the project's own site"),
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_domain",
+      symbol: "STONKBROKER",
+      address: STONKBROKER_LC,
+      chain: "robinhood",
+      homepage: "https://stonkbrokers.cash/",
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input) === "https://stonkbrokers.cash/")).toBe(true);
+  });
+
+  it("does not treat an unverified DexScreener search homepage as official", async () => {
+    const { ctx, evidence } = context("@ClutchMarkets", "CLUTCH", "https://clutch.markets/");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) {
+        return json({
+          pairs: [{
+            chainId: "robinhood",
+            pairAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            url: "https://dexscreener.com/robinhood/clutch",
+            baseToken: { address: "0x1111111111111111111111111111111111111111", name: "Clutch Markets", symbol: "CLUTCH" },
+            info: {
+              websites: [{ url: "https://unverified-lead.example/" }],
+              socials: [{ type: "twitter", url: "https://x.com/SomeOtherClutch" }],
+            },
+            liquidity: { usd: 90_000 },
+          }],
+        });
+      }
+      if (url === "https://clutch.markets/") return new Response("<html><p>CLUTCH markets</p></html>", { status: 200 });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("no identity-bound project token"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("unverified-lead.example"))).toBe(false);
+  });
+});
+

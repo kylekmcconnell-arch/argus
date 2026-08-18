@@ -138,6 +138,28 @@ describe("person audit input guard", () => {
     );
   });
 
+  it("passes the investigation contract into the embedded project scan", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(runAudit).mockResolvedValue(null);
+    const { res } = response();
+
+    await handler(request("CLUTCHMARKETS", {
+      address: "0xe934e36A439C94017B64a3FecE66AF12099aBF50",
+      chain: "robinhood",
+      symbol: "STONKBROKER",
+    }), res);
+
+    expect(runAudit).toHaveBeenCalledWith(
+      "CLUTCHMARKETS",
+      expect.any(Function),
+      expect.objectContaining({
+        tokenAddress: "0xe934e36A439C94017B64a3FecE66AF12099aBF50",
+        tokenChain: "robinhood",
+        tokenSymbol: "STONKBROKER",
+      }),
+    );
+  });
+
   it("passes only an allowlisted research intent to the director", async () => {
     vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
     vi.mocked(runAudit).mockResolvedValue(null);
