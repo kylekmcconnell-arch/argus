@@ -625,5 +625,97 @@
       "provider": "coingecko",
       "op": "project-search"
     }
-  ]
+  ],
+  "evidence": {
+    "testimonials": [
+      {
+        "claimed_relationship": "Sheldon Inwentash (ThreeD Capital Founder/CEO) partnered to advise Dynex on business development and client acquisition",
+        "notes": "Model-search acknowledgment lead: mention, neutral (https://x.com/ThreeDCap/status/1878881957716828505); independent artifact verification required",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Bloomberg interview coverage of Dynex",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Fox Business interview coverage of Dynex",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Forbes article featuring Dynex Co-Founder Daniela Herrmann's perspective on quantum computing",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Named Dynex one of the Next Big Things in Tech 2024",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Crypto advisor onboarded for MM strategy, narrative management, testimonial campaigns",
+        "notes": "Model-search acknowledgment lead: mention, neutral (https://x.com/EnigmaFund/status/2014417134747533591); independent artifact verification required",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Dynex advisor who spoke at The Bitcoin Conf in Nashville about Dynex",
+        "artifact_verified": false
+      },
+      {
+        "claimed_relationship": "Observer writer sourced discussing quantum computing timelines referencing Dynex",
+        "artifact_verified": false
+      }
+    ]
+  },
+  "intelligence": {
+    "signals": [
+      {
+        "kind": "coverage_gap",
+        "domain": "identity",
+        "finding": "The final integrity gate recorded 2 fail-closed integrity events. Counts include 0 duplicate source IDs, 0 duplicate measurement IDs, 0 duplicate question IDs, 0 duplicate signal IDs, 0 invalid measurements, 2 questions with invalid lineage, 0 questions routed by rejected archetype evidence, 0 invalid signals, and 0 subject-classification rows with invalid sources. No affected record is treated as evidence."
+      },
+      {
+        "kind": "coverage_gap",
+        "domain": "team",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Is there a public LinkedIn or professional record corroborating the named team members' roles? What are the full legal names and professional backgrounds behind @DynexMoonshots and @proph3ttt? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "kind": "coverage_gap",
+        "domain": "product",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Is there independent (non-project) technical review or benchmark validating the neuromorphic/quantum computing claims? What is the current usage volume or job throughput on the Dynex Marketplace beyond the initial launch figures? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "kind": "coverage_gap",
+        "domain": "supply",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Are there independent market-surveillance reports on DNX trading activity across exchanges? What is the token unlock and vesting schedule for team and investor allocations? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "kind": "coverage_gap",
+        "domain": "funding",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Are there any named venture backers, exchange listing partners, or enterprise counterparties for Dynex beyond the internally named advisor? Has any independent press corroborated the advisor relationship or additional partnerships? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "kind": "coverage_gap",
+        "domain": "economics",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Is there exchange-level trading volume or liquidity data for DNX to corroborate ongoing token activity? What is the current (not launch-period) transaction volume or active user count on the Dynex Marketplace? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "kind": "coverage_gap",
+        "domain": "governance",
+        "finding": "The frozen scoring analyst recorded 2 unresolved questions: Are governance materials (e.g. DAO structure, voting mechanisms) publicly documented? Is there a published treasury or financial disclosure report beyond the smart contract audit? This is an analyst-attributed gap list, not evidence that the missing condition is adverse."
+      },
+      {
+        "kind": "observation",
+        "domain": "legal",
+        "finding": "1 strict direct-subject fact is saved: Dynex Capital, Inc.. This supports the evidence base, not a quality or safety conclusion."
+      },
+      {
+        "kind": "observation",
+        "domain": "product",
+        "finding": "1 strict direct-subject fact is saved: Dynex Marketplace. This supports the evidence base, not a quality or safety conclusion."
+      },
+      {
+        "kind": "observation",
+        "domain": "governance",
+        "finding": "P1_team_and_identity: exceptional (14 to 16); P2_product_substance: emerging (10 to 16); P3_token_conduct: emerging (8 to 13); P4_backing_and_partners: emerging (6 to 9); P5_traction_and_liveness: emerging (6 to 9); P6_transparency_integrity: solid (9 to 10). These are deterministic evidence-band constraints from the frozen scorer packet, not new factual findings or investment recommendations."
+      }
+    ]
+  }
 }
