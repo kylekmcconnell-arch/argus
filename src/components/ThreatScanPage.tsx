@@ -20,6 +20,7 @@ import { behindLedger } from "../threat/behindledger";
 import { receiptStats, sharedReceiptStats } from "../threat/receipts";
 import { ThreatReceipts } from "./ThreatReceipts";
 import { MarketStructurePanel } from "./MarketStructure";
+import { ScoreComposition, type CompositionRow } from "./ScoreComposition";
 
 const VERDICT_META: Record<ThreatVerdict, { color: string; blurb: string }> = {
   SAFE: { color: "var(--color-pass)", blurb: "no mechanical red flags" },
@@ -66,7 +67,7 @@ function Tier({ title, items, tone }: { title: string; items: string[]; tone: "b
   const color = tone === "bad" ? "var(--color-avoid)" : tone === "warn" ? "var(--color-caution)" : "var(--color-pass)";
   const glyph = tone === "bad" ? "✗" : tone === "warn" ? "⚠" : "✓";
   return (
-    <div className="rounded-xl border border-line p-4">
+    <div className="panel p-4">
       <div className="mono text-[10.5px] uppercase tracking-widest" style={{ color }}>{title}</div>
       <ul className="mt-2 space-y-1.5">
         {items.map((t, i) => (
@@ -92,6 +93,48 @@ function CodeFlagRow({ f }: { f: CodeFlag }) {
       {f.excerpt && <pre className="mono mt-1 overflow-x-auto rounded bg-line/40 px-2 py-1 text-[10.5px] leading-relaxed text-ink-faint">{f.excerpt}</pre>}
     </div>
   );
+}
+
+/* The composition strip needs dimensions, and the threat scan's honest ones
+   are its check groups: recorded outcomes per category, never invented
+   weights. score/weight are clean-vs-applicable counts; the tone override
+   makes one flag read as flagged even in a mostly-clean group. */
+const THREAT_COMPOSITION_GROUPS: { category: ThreatCheck["category"]; label: string }[] = [
+  { category: "authority", label: "Authority & control" },
+  { category: "honeypot", label: "Tradeability" },
+  { category: "liquidity", label: "Liquidity & lock" },
+  { category: "holders", label: "Holder structure" },
+  { category: "market", label: "Market conduct" },
+  { category: "deployer", label: "Deployer history" },
+  { category: "code", label: "The code" },
+];
+
+export function threatCompositionRows(checks: ThreatCheck[]): CompositionRow[] {
+  return THREAT_COMPOSITION_GROUPS.flatMap(({ category, label }) => {
+    const applicable = checks.filter((c) => c.category === category && c.status !== "na");
+    if (!applicable.length) return [];
+    const clean = applicable.filter((c) => c.status === "pass");
+    const warns = applicable.filter((c) => c.status === "warn");
+    const fails = applicable.filter((c) => c.status === "fail");
+    const issues = [...fails, ...warns];
+    return [{
+      axis: category,
+      label,
+      score: clean.length,
+      weight: applicable.length,
+      tone: fails.length ? "fail" as const : warns.length ? "caution" as const : "pass" as const,
+      sublabel: `${applicable.length} ${applicable.length === 1 ? "check" : "checks"}`,
+      rationale: issues.length
+        ? issues.map((c) => c.detail).filter(Boolean).join(" · ")
+        : "Every applicable check in this group came back clean.",
+      countsLine: [
+        `${clean.length} clean`,
+        warns.length ? `${warns.length} ${warns.length === 1 ? "warning" : "warnings"}` : "",
+        fails.length ? `${fails.length} flagged` : "",
+      ].filter(Boolean).join(" · "),
+      evidenceHref: "#threat-checklist" as const,
+    }];
+  });
 }
 
 function CheckGrid({ checks }: { checks: ThreatCheck[] }) {
@@ -130,10 +173,10 @@ function InsiderClusters({ scan }: { scan: ThreatScan }) {
     });
   };
   return (
-    <div className="mt-4 rounded-xl border border-line p-4">
+    <div className="mt-4 panel p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-[14px] font-semibold text-ink">Creator & insider clusters</h2>
+          <h2 className="display-sm text-[18px] leading-tight text-ink">Creator & insider clusters</h2>
           <p className="mt-0.5 text-[11.5px] text-ink-faint">Which of the "separate" top holders are secretly one hand - proven from the funding graph.</p>
         </div>
         {state === "idle" && (
@@ -183,10 +226,10 @@ function BuyerCohort({ scan }: { scan: ThreatScan }) {
   const chip = (label: string, o?: { n: number; pct: number }, tone?: string) =>
     o && o.n > 0 ? <span className="mono rounded border px-2 py-0.5 text-[11px]" style={{ borderColor: tone ?? "var(--color-line)", color: tone ?? "var(--color-ink-dim)" }}>{label} {o.n} · {o.pct.toFixed(0)}%</span> : null;
   return (
-    <div className="mt-4 rounded-xl border border-line p-4">
+    <div className="mt-4 panel p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-[14px] font-semibold text-ink">Buyer intelligence</h2>
+          <h2 className="display-sm text-[18px] leading-tight text-ink">Buyer intelligence</h2>
           <p className="mt-0.5 text-[11.5px] text-ink-faint">The top holders' shared bags, their wallet age &amp; funding mix, and their track record from our own prior scans.</p>
         </div>
         {state === "idle" && (
@@ -283,10 +326,10 @@ function BehindLedger({ scan }: { scan: ThreatScan }) {
       ].filter((s) => s.pct >= 0.5)
     : [];
   return (
-    <div className="mt-4 rounded-xl border border-line p-4">
+    <div className="mt-4 panel p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-[14px] font-semibold text-ink">Behind the Ledger</h2>
+          <h2 className="display-sm text-[18px] leading-tight text-ink">Behind the Ledger</h2>
           <p className="mt-0.5 text-[11.5px] text-ink-faint">An in-depth analysis of all farming activity, launch selling, pre-sale and insider vault allocations, trader churn, and more.</p>
         </div>
       </div>
@@ -418,8 +461,8 @@ function LaunchPanel({ launch }: { launch: NonNullable<ThreatScan["deep"]["launc
   const cf = launch.creatorFees;
   const cfGood = cf && (cf.usage === "lp-add" || cf.usage === "buyback-burn" || cf.usage === "buyback");
   return (
-    <div className="mt-4 rounded-xl border border-line p-4">
-      <h2 className="text-[14px] font-semibold text-ink">Launch</h2>
+    <div className="mt-4 panel p-4">
+      <h2 className="display-sm text-[18px] leading-tight text-ink">Launch</h2>
       <p className="mt-0.5 text-[11.5px] text-ink-faint">How this token came to market - the venue's mechanics decide what "locked liquidity" even means here.</p>
       <div className="mt-2">
         {row("Venue", launch.kind === "fair-launch"
@@ -459,8 +502,8 @@ function shortWallet(a: string) { return a.length > 12 ? `${a.slice(0, 6)}…${a
 function SitePanel({ s }: { s: NonNullable<ThreatScan["deep"]["site"]> }) {
   const c = s.worst === "malicious" ? "var(--color-avoid)" : s.worst === "suspicious" ? "var(--color-caution)" : "var(--color-ink-dim)";
   return (
-    <div className="mt-4 rounded-xl border p-4" style={{ borderColor: s.worst === "malicious" ? "var(--color-avoid)" : "var(--color-line)" }}>
-      <h2 className="text-[14px] font-semibold text-ink">Linked site &amp; socials</h2>
+    <div className="mt-4 panel p-4" style={{ borderColor: s.worst === "malicious" ? "var(--color-avoid)" : "var(--color-line)" }}>
+      <h2 className="display-sm text-[18px] leading-tight text-ink">Linked site &amp; socials</h2>
       <p className="mt-0.5 text-[11.5px] text-ink-faint">Where the token points you off-chain - checked against Google Safe Browsing, GoPlus, the URLhaus malware feed, and drainer-signature heuristics.</p>
       <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
         <span className="mono rounded border px-2 py-0.5" style={{ borderColor: c, color: c }}>{s.worst === "clean" ? "SITE CLEAN" : s.worst.toUpperCase()}</span>
@@ -489,8 +532,8 @@ function SellStructurePanel({ s, chain }: { s: NonNullable<ThreatScan["deep"]["s
   const flagged = s.topSellers.filter((x) => x.flags.length > 0);
   const rows = (flagged.length ? flagged : s.topSellers).slice(0, 8);
   return (
-    <div className="mt-4 rounded-xl border border-line p-4">
-      <h2 className="text-[14px] font-semibold text-ink">Sell structure</h2>
+    <div className="mt-4 panel p-4">
+      <h2 className="display-sm text-[18px] leading-tight text-ink">Sell structure</h2>
       <p className="mt-0.5 text-[11.5px] text-ink-faint">Who has actually been selling - and whether they are the deployer, wallets it seeded, or launch-block snipers cashing out.</p>
       {/* Recent 24h trade tape (GeckoTerminal) - the direct "who's selling now" view. */}
       {s.recentTape && (
@@ -551,8 +594,8 @@ function Tokenomics({ tk, lpOverride }: { tk: ThreatScan["tokenomics"]; lpOverri
     </div>
   );
   return (
-    <div className="mt-4 rounded-xl border border-line p-4">
-      <h2 className="text-[14px] font-semibold text-ink">Tokenomics</h2>
+    <div className="mt-4 panel p-4">
+      <h2 className="display-sm text-[18px] leading-tight text-ink">Tokenomics</h2>
       <p className="mt-0.5 text-[11.5px] text-ink-faint">Pools and reward contracts separated from holders; LP lock read at the launchpad level; what the tax does; and burns.</p>
       <div className="mt-2">
         {row("Liquidity", lpOverride
@@ -601,12 +644,13 @@ function Report({ scan }: { scan: ThreatScan }) {
   const rs = useLedgerStats();
   return (
     <div className="mx-auto max-w-3xl px-4 pb-16">
-      {/* header */}
-      <div className="flex items-center gap-5 py-6">
+      {/* header — the standard scan-output hero: panel, serif subject, ring */}
+      <div className="panel mt-6 flex items-start gap-5 p-5 max-sm:flex-col">
         <RiskRing risk={call.risk} verdict={call.verdict} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <h1 className="text-[22px] font-semibold text-ink">${scan.symbol}</h1>
+          <div className="eyebrow">Threat scan · {scan.chain}</div>
+          <div className="mt-1.5 flex items-baseline gap-2.5">
+            <h1 className="display text-[32px] leading-none text-ink max-sm:text-[24px]">${scan.symbol}</h1>
             <span className="truncate text-[13px] text-ink-faint">{scan.name}</span>
             <span className="ml-auto flex shrink-0 gap-2">
               {/* Browser print-to-PDF: the print stylesheet strips the app chrome
@@ -638,17 +682,27 @@ function Report({ scan }: { scan: ThreatScan }) {
         </div>
       </div>
 
+      {/* the composition strip, in the risk model's own units: grouped check
+          outcomes, never invented weights. Expand a row for what tripped. */}
+      <ScoreComposition
+        rows={threatCompositionRows(checks)}
+        totalScore={call.risk}
+        heading="Where the risk sits"
+        summary={`${call.risk} risk pts · higher is worse`}
+        challengeAnchor={null}
+      />
+
       {/* three tiers */}
-      <div className="space-y-3">
+      <div className="mt-4 space-y-3">
         <Tier title={`Flags · ${call.flags.length}`} items={call.flags} tone="bad" />
         <Tier title={`Warnings · ${call.warnings.length}`} items={call.warnings} tone="warn" />
         <Tier title={`Positives · ${call.positives.length}`} items={call.positives} tone="good" />
       </div>
 
       {/* code read */}
-      <div className="mt-6 rounded-xl border border-line p-4">
+      <div className="mt-6 panel p-4">
         <div className="flex items-baseline justify-between">
-          <h2 className="text-[14px] font-semibold text-ink">The code, read</h2>
+          <h2 className="display-sm text-[18px] leading-tight text-ink">The code, read</h2>
           <span className="mono text-[10.5px] text-ink-faint">
             {code.verified
               ? `${code.contractName ?? "contract"} · ${code.stats?.functions ?? 0} fns · ${code.stats?.gatedFunctions ?? 0} privileged · via ${code.origin}`
@@ -691,9 +745,9 @@ function Report({ scan }: { scan: ThreatScan }) {
 
       {/* migration */}
       {scan.deep.migration?.migrated && (
-        <div className="mt-4 rounded-xl border p-4" style={{ borderColor: "var(--color-caution)" }}>
+        <div className="mt-4 panel p-4" style={{ borderColor: "var(--color-caution)" }}>
           <div className="flex items-baseline justify-between">
-            <h2 className="text-[14px] font-semibold text-ink">Migrate.fun migration</h2>
+            <h2 className="display-sm text-[18px] leading-tight text-ink">Migrate.fun migration</h2>
             <span className="mono text-[10.5px] text-ink-faint">{scan.deep.migration.projects.map((p) => p.projectId).join(", ")}</span>
           </div>
           <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">{scan.deep.migration.note}</p>
@@ -705,9 +759,9 @@ function Report({ scan }: { scan: ThreatScan }) {
 
       {/* cross-chain / OFT */}
       {scan.deep.xchain?.isOft && (
-        <div className="mt-4 rounded-xl border border-line p-4">
+        <div className="mt-4 panel p-4">
           <div className="flex items-baseline justify-between">
-            <h2 className="text-[14px] font-semibold text-ink">Cross-chain (LayerZero OFT)</h2>
+            <h2 className="display-sm text-[18px] leading-tight text-ink">Cross-chain (LayerZero OFT)</h2>
             <span className="mono text-[10.5px] text-ink-faint">{scan.deep.xchain.isAdapter ? "lockbox adapter" : "native OFT"} · {scan.deep.xchain.resolvedLegs > 1 ? `${money(scan.deep.xchain.totalLiquidityUsd)} total` : ""}</span>
           </div>
           <p className="mt-0.5 text-[11.5px] text-ink-faint">One asset bridged across chains - mesh proven from on-chain peers, not name-matching. Single-chain liquidity understates the real depth.</p>
@@ -724,9 +778,9 @@ function Report({ scan }: { scan: ThreatScan }) {
 
       {/* deployer */}
       {(deployer.address || deployer.serialHoneypoter) && (
-        <div className="mt-4 rounded-xl border border-line p-4">
+        <div className="mt-4 panel p-4">
           <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-[14px] font-semibold text-ink">Deployer</h2>
+            <h2 className="display-sm text-[18px] leading-tight text-ink">Deployer</h2>
             {d.safety.creatorPercent > 0 && (
               <span className="mono text-[11px]" style={{ color: d.safety.creatorPercent >= 15 ? "var(--color-avoid)" : d.safety.creatorPercent >= 5 ? "var(--color-caution)" : "var(--color-ink-faint)" }}>
                 creator holds {d.safety.creatorPercent.toFixed(1)}% of supply
@@ -765,8 +819,8 @@ function Report({ scan }: { scan: ThreatScan }) {
       <BehindLedger scan={scan} />
 
       {/* checklist */}
-      <div className="mt-4 rounded-xl border border-line p-4">
-        <h2 className="text-[14px] font-semibold text-ink">Everything we checked</h2>
+      <div id="threat-checklist" className="mt-4 scroll-mt-28 panel p-4">
+        <h2 className="display-sm text-[18px] leading-tight text-ink">Everything we checked</h2>
         <p className="mt-0.5 text-[11.5px] text-ink-faint">The full checklist, including the checks that came back clean or could not run - a scan you can audit.</p>
         <div className="mt-2"><CheckGrid checks={checks} /></div>
       </div>
