@@ -15,7 +15,7 @@ const USER = "Extract every wallet address, ENS/.sol name, and @handle visible."
 function cluesFromText(text: string): string[] {
   const parsed = parseJsonObject(text);
   const raw = parsed?.clues;
-  return Array.isArray(raw) ? raw.filter((c): c is string => typeof c === "string" && c.trim()).slice(0, 12) : [];
+  return Array.isArray(raw) ? raw.filter((c): c is string => typeof c === "string" && Boolean(c.trim())).slice(0, 12) : [];
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
