@@ -5,12 +5,30 @@
 // predates the domain by years, both say something a single date cannot.
 //
 // rdap.org is a REDIRECTOR to the authoritative registry, so the request must
-// follow redirects; without that every lookup fails. The registry answers about
-// registrable domains only, so the hostname is reduced to one before the query
-// and kept alongside the answer for display.
+// follow redirects; without that every lookup fails. Its bootstrap is also
+// flaky from some egress (hangs with no bytes), so a known TLD is queried at
+// the registry first and rdap.org is only the fallback. The registry answers
+// about registrable domains only, so the hostname is reduced to one before the
+// query and kept alongside the answer for display.
 import { recordCall } from "../cost";
 
 const RDAP_BASE = "https://rdap.org/domain/";
+
+/**
+ * Authoritative RDAP servers by TLD. rdap.org just 302-redirects here, and
+ * that hop is what hangs; hitting the registry directly is the same answer
+ * without the bootstrap. Inlined from api/project-intel.ts rather than
+ * imported across the api/ boundary.
+ */
+const RDAP_HOSTS: Record<string, string> = {
+  com: "https://rdap.verisign.com/com/v1/domain/",
+  net: "https://rdap.verisign.com/net/v1/domain/",
+  org: "https://rdap.publicinterestregistry.org/rdap/domain/",
+  io: "https://rdap.identitydigital.services/rdap/domain/",
+  xyz: "https://rdap.centralnic.com/xyz/domain/",
+  app: "https://www.registry.google/rdap/domain/",
+  dev: "https://www.registry.google/rdap/domain/",
+};
 
 export interface DomainRegistration {
   /** The registrable domain the registry actually answered about. */
@@ -154,6 +172,24 @@ export function registrationEventDate(events: unknown): string | null {
   return dates[0] ?? null;
 }
 
+function rdapUrls(domain: string): string[] {
+  const encoded = encodeURIComponent(domain);
+  const tld = domain.split(".").pop() ?? "";
+  const registry = RDAP_HOSTS[tld];
+  const bootstrap = `${RDAP_BASE}${encoded}`;
+  // Authoritative registry first when the TLD is known; rdap.org is the
+  // bootstrap fallback so a hanging redirector cannot strand the lookup.
+  return registry ? [`${registry}${encoded}`, bootstrap] : [bootstrap];
+}
+
+function classifyFetchError(err: unknown): "timeout" | "transport_error" {
+  const row = err && typeof err === "object" ? err as { name?: unknown; message?: unknown } : null;
+  const name = typeof row?.name === "string" ? row.name : "";
+  const message = typeof row?.message === "string" ? row.message : "";
+  if (name === "TimeoutError" || name === "AbortError" || /timeout/i.test(message)) return "timeout";
+  return "transport_error";
+}
+
 export async function collectDomainRegistration(
   website: string | null | undefined,
   fetchImpl: typeof fetch = fetch,
@@ -173,61 +209,75 @@ export async function collectDomainRegistration(
   if (!domain) {
     return { available: false, reason: "no_domain", note: "no official domain to age" };
   }
-  let response: Response;
-  try {
-    response = await fetchImpl(`${RDAP_BASE}${encodeURIComponent(domain)}`, {
-      redirect: "follow",
-      headers: { accept: "application/rdap+json, application/json" },
-      signal: AbortSignal.timeout(9000),
-    });
-  } catch {
-    recordCall("rdap", "domain-age", 0, "transport_error", "failed");
-    return { available: false, reason: "unavailable", note: "RDAP was unreachable" };
-  }
-  if (response.status === 404) {
-    // The registry has no record: an answer, not an outage.
-    recordCall("rdap", "domain-age", 0, "no_record_404", "succeeded");
-    return { available: false, reason: "not_found", note: `no RDAP record for ${domain}` };
-  }
-  if (response.status === 400) {
-    // A registry rejects what it cannot answer: an out-of-scope name or a TLD
-    // it does not serve. That is a question RDAP declines, not a provider
-    // outage, and reporting it as one puts a false red alert on the report.
-    recordCall("rdap", "domain-age", 0, "not_applicable_400", "succeeded");
+
+  const failures: string[] = [];
+  let lastNote = "RDAP was unreachable";
+
+  for (const url of rdapUrls(domain)) {
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        redirect: "follow",
+        headers: { accept: "application/rdap+json, application/json" },
+        signal: AbortSignal.timeout(9000),
+      });
+    } catch (err) {
+      const reason = classifyFetchError(err);
+      failures.push(reason);
+      lastNote = reason === "timeout" ? "RDAP timed out" : "RDAP was unreachable";
+      continue;
+    }
+    if (response.status === 404) {
+      // The registry has no record: an answer, not an outage.
+      recordCall("rdap", "domain-age", 0, "no_record_404", "succeeded");
+      return { available: false, reason: "not_found", note: `no RDAP record for ${domain}` };
+    }
+    if (response.status === 400) {
+      // A registry rejects what it cannot answer: an out-of-scope name or a TLD
+      // it does not serve. That is a question RDAP declines, not a provider
+      // outage, and reporting it as one puts a false red alert on the report.
+      recordCall("rdap", "domain-age", 0, "not_applicable_400", "succeeded");
+      return {
+        available: false,
+        reason: "not_applicable",
+        note: `RDAP does not serve ${domain} (rejected the query as out of scope), so no registration date exists to read`,
+      };
+    }
+    if (!response.ok) {
+      failures.push(`http_${response.status}`);
+      lastNote = `RDAP returned http_${response.status}`;
+      continue;
+    }
+    let body: { events?: unknown };
+    try {
+      body = await response.json() as { events?: unknown };
+    } catch {
+      failures.push("response_json_error");
+      lastNote = "RDAP response was unreadable";
+      continue;
+    }
+    const registeredAt = registrationEventDate(body?.events);
+    if (!registeredAt) {
+      recordCall("rdap", "domain-age", 0, "no_registration_event", "partial");
+      return { available: false, reason: "not_found", note: `RDAP record for ${domain} states no registration date` };
+    }
+    recordCall("rdap", "domain-age", 0, undefined, "succeeded");
     return {
-      available: false,
-      reason: "not_applicable",
-      note: `RDAP does not serve ${domain} (rejected the query as out of scope), so no registration date exists to read`,
+      available: true,
+      value: {
+        domain,
+        hostname: scope.hostname,
+        registeredAt,
+        ageMonths: monthsBetween(registeredAt, now),
+        source: url,
+        capturedAt: now.toISOString(),
+      },
     };
   }
-  if (!response.ok) {
-    recordCall("rdap", "domain-age", 0, `http_${response.status}`, "failed");
-    return { available: false, reason: "unavailable", note: `RDAP returned http_${response.status}` };
-  }
-  let body: { events?: unknown };
-  try {
-    body = await response.json() as { events?: unknown };
-  } catch {
-    recordCall("rdap", "domain-age", 0, "response_json_error", "failed");
-    return { available: false, reason: "unavailable", note: "RDAP response was unreadable" };
-  }
-  const registeredAt = registrationEventDate(body?.events);
-  if (!registeredAt) {
-    recordCall("rdap", "domain-age", 0, "no_registration_event", "partial");
-    return { available: false, reason: "not_found", note: `RDAP record for ${domain} states no registration date` };
-  }
-  recordCall("rdap", "domain-age", 0, undefined, "succeeded");
-  return {
-    available: true,
-    value: {
-      domain,
-      hostname: scope.hostname,
-      registeredAt,
-      ageMonths: monthsBetween(registeredAt, now),
-      source: `${RDAP_BASE}${domain}`,
-      capturedAt: now.toISOString(),
-    },
-  };
+
+  const meta = [...new Set(failures)].join(" · ") || "transport_error";
+  recordCall("rdap", "domain-age", 0, meta, "failed");
+  return { available: false, reason: "unavailable", note: lastNote };
 }
 
 export interface LaunchWindow {

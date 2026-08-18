@@ -14,6 +14,8 @@ const rdap = (events: Array<{ eventAction: string; eventDate: string }>) => ({
   json: async () => ({ events }),
 }) as Response;
 
+const timeoutError = () => Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+
 describe("registrationEventDate", () => {
   it("takes the registration event and ignores transfers and expirations", () => {
     // The shape venice.ai actually returns.
@@ -90,10 +92,56 @@ describe("collectDomainRegistration", () => {
     );
 
     // Live RDAP answers app.uniswap.org with 400 and uniswap.org with 200.
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://rdap.org/domain/uniswap.org");
+    // .org hits PIR first; rdap.org remains the bootstrap fallback.
+    const requested = String(fetchMock.mock.calls[0]?.[0]);
+    expect([
+      "https://rdap.publicinterestregistry.org/rdap/domain/uniswap.org",
+      "https://rdap.org/domain/uniswap.org",
+    ]).toContain(requested);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: "follow" });
     expect(outcome).toMatchObject({
       available: true,
       value: { domain: "uniswap.org", hostname: "app.uniswap.org", registeredAt: "2018-11-26T05:33:07.549Z" },
+    });
+  });
+
+  it("still ages a domain when rdap.org hangs and the TLD registry answers", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(init).toMatchObject({ redirect: "follow" });
+      const href = String(url);
+      if (href.includes("rdap.org")) throw timeoutError();
+      if (href.includes("rdap.publicinterestregistry.org/rdap/domain/dynexcoin.org")) {
+        return rdap([{ eventAction: "registration", eventDate: "2021-09-07T00:00:00Z" }]);
+      }
+      throw new Error(`unexpected url ${href}`);
+    });
+    const outcome = await collectDomainRegistration(
+      "https://dynexcoin.org",
+      fetchMock as unknown as typeof fetch,
+      new Date("2026-08-17T00:00:00Z"),
+    );
+
+    expect(outcome).toMatchObject({
+      available: true,
+      value: { domain: "dynexcoin.org", registeredAt: "2021-09-07T00:00:00Z" },
+    });
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("rdap.publicinterestregistry.org"))).toBe(true);
+  });
+
+  it("records timeout rather than a generic transport error when every RDAP hop times out", async () => {
+    const cost = await withCostLedger(async () => {
+      const outcome = await collectDomainRegistration(
+        "https://dynexcoin.org",
+        (async () => { throw timeoutError(); }) as unknown as typeof fetch,
+      );
+      expect(outcome).toMatchObject({ available: false, reason: "unavailable" });
+      expect((outcome as { note: string }).note).toMatch(/timed out/i);
+      return getCost();
+    });
+
+    expect(cost.calls.find((line) => line.provider === "rdap")).toMatchObject({
+      status: "failed",
+      meta: "timeout",
     });
   });
 
