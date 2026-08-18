@@ -11,6 +11,10 @@ import { installPrintTheme } from './lib/printTheme.ts'
 // Development-only visual harness. It is lazy so the fixture never rejoins the production report chunk.
 // eslint-disable-next-line react-refresh/only-export-components
 const ArgusEyePreview = lazy(() => import('./dev/ArgusEyePreview.tsx').then((module) => ({ default: module.ArgusEyePreview })))
+// eslint-disable-next-line react-refresh/only-export-components
+const ProvenancePreview = lazy(() => import('./dev/ProvenancePreview.tsx').then((module) => ({ default: module.ProvenancePreview })))
+// eslint-disable-next-line react-refresh/only-export-components
+const DossierPreview = lazy(() => import('./dev/DossierPreview.tsx').then((module) => ({ default: module.DossierPreview })))
 
 // Observe 401s from ARGUS API routes so an expired session is stated once
 // instead of surfacing as a page of quietly dead panels.
@@ -20,14 +24,21 @@ installSessionExpiryWatch(window)
 // on-screen choice, restoring it after the print pass.
 installPrintTheme(window)
 
-const showArgusEyePreview = import.meta.env.DEV
-  && new URLSearchParams(window.location.search).get('design-preview') === 'argus-eye'
+const designPreview = import.meta.env.DEV
+  ? new URLSearchParams(window.location.search).get('design-preview')
+  : null
+const showArgusEyePreview = designPreview === 'argus-eye'
+const showProvenancePreview = designPreview === 'provenance'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AppErrorBoundary>
       {showArgusEyePreview ? (
         <Suspense fallback={null}><ArgusEyePreview /></Suspense>
+      ) : showProvenancePreview ? (
+        <Suspense fallback={null}><ProvenancePreview /></Suspense>
+      ) : designPreview === 'dossier' ? (
+        <Suspense fallback={null}><DossierPreview /></Suspense>
       ) : (
         <AuthGate>
           <SessionExpiryNotice />
