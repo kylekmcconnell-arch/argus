@@ -140,3 +140,58 @@ describe("project fact coherence firewall", () => {
     expect(evidence.basicFacts).toEqual([providerFact]);
   });
 });
+
+describe("registry-shaped namesake collisions", () => {
+  // Regression for the @dynexcoin report (version 7c51822f, captured 2026-08-16),
+  // which published `legal_entity: "Dynex Capital, Inc."` as VERIFIED on four SEC
+  // EDGAR filings for CIK 826675 — a Virginia mortgage REIT that shares only the
+  // word "Dynex" with the audited neuromorphic-computing project. Not one filing
+  // mentions DNX, dynexcoin.org, or neuromorphic computing. The report's own
+  // identity note conceded the relationship was "not itself independently
+  // confirmed ... beyond shared naming" while the fact ledger still said verified.
+  const filing = (path: string, excerpt: string) => ({
+    url: `https://www.sec.gov/Archives/edgar/data/826675/${path}`,
+    title: "Form of Restricted Stock Unit Agreement",
+    excerpt,
+  });
+
+  it("refuses an unbound legal entity taken from a same-name registry filing", () => {
+    const evidence = emptyEvidence("@dynexcoin");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile.display_name = "Dynex";
+    evidence.profile.website = "https://dynexcoin.org/";
+    evidence.basicFacts = [
+      fact("dynex-capital", "legal_entity", "Dynex Capital, Inc.", [
+        filing("000082667525000118/exhibit10419formofrsuagree.htm",
+          "This Restricted Stock Unit Award Agreement is made by Dynex Capital, Inc., a Virginia corporation, to a Non-Employee Director of the Company."),
+        filing("000082667522000006/exhibit10415.htm",
+          "This Restricted Stock Unit Award Agreement is made by Dynex Capital, Inc., a Virginia corporation, to a Key Employee of the Company."),
+      ]),
+    ];
+
+    const result = enforceProjectFactCoherence(evidence);
+
+    expect(result.rejected.map((entry) => entry.factId)).toContain("dynex-capital");
+    expect(result.rejected[0]?.reason).toBe("no_identity_bound_support");
+    expect(evidence.basicFacts).toHaveLength(0);
+  });
+
+  it("keeps a legal entity whose filing names the project's own domain", () => {
+    const evidence = emptyEvidence("@dynexcoin");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile.display_name = "Dynex";
+    evidence.profile.website = "https://dynexcoin.org/";
+    evidence.basicFacts = [
+      fact("bound-entity", "legal_entity", "Dynex Developments Ltd", [{
+        url: "https://dynexcoin.org/legal/imprint",
+        title: "Imprint",
+        excerpt: "Dynex Developments Ltd operates dynexcoin.org and issues the DNX token.",
+      }]),
+    ];
+
+    const result = enforceProjectFactCoherence(evidence);
+
+    expect(result.rejected).toHaveLength(0);
+    expect(evidence.basicFacts.map((entry) => entry.factId)).toEqual(["bound-entity"]);
+  });
+});

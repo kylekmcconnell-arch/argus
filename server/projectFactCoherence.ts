@@ -2,6 +2,13 @@ import { SubjectClass } from "../src/engine";
 import type { BasicFact, BasicFactPredicate, CollectedEvidence } from "../src/data/evidence";
 import { projectLeadIsRelevant } from "../src/lib/projectLeadRelevance";
 
+// Registry-shaped predicates belong here as much as people-shaped ones. A
+// corporate registry or filings archive will answer a bare display name with a
+// different company that happens to share it, and the passage is authentic, so
+// retrieval verification passes and the fact reaches `verified` unbound. That
+// is what ARGUS-SOURCE-OF-TRUTH.md forbids when it says an exact-name legal
+// match stays an identity-review lead until the source binds the record to the
+// investigated identity.
 const COLLISION_PRONE_PROJECT_FACTS = new Set<BasicFactPredicate>([
   "official_identity",
   "founder",
@@ -10,6 +17,8 @@ const COLLISION_PRONE_PROJECT_FACTS = new Set<BasicFactPredicate>([
   "investor",
   "product",
   "public_security",
+  "legal_entity",
+  "legal_regulatory_event",
 ]);
 
 export interface ProjectFactCoherenceRejection {
