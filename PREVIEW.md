@@ -9,3 +9,5 @@ This branch is the staging lane for Argus report upgrades.
 Rebuild after Preview env was enabled.
 
 Rebuild after Preview server auth env.
+
+Rebuild after ARGUS_SIGNIN_EMAIL_LIMIT=10 on Preview.
