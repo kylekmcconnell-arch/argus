@@ -13,6 +13,7 @@ import {
   provenanceForCheckStatus,
   type ProvenanceState,
 } from "./provenance";
+import { boundTokenUniqueIds, uniqueIdHeading } from "./tokenNativeSpine";
 
 export interface DossierReceiptSource {
   url: string;
@@ -559,6 +560,55 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     verdict,
   };
   const beats: DossierBeat[] = [];
+
+  const rawToken = payload.projectToken && typeof payload.projectToken === "object" && !Array.isArray(payload.projectToken)
+    ? payload.projectToken as Record<string, unknown>
+    : null;
+  if (rawToken?.verified === true) {
+    const identitySource = rawToken.producerSources && typeof rawToken.producerSources === "object"
+      ? (rawToken.producerSources as Record<string, unknown>).identity as Record<string, unknown> | undefined
+      : undefined;
+    const sourceUrl = str(identitySource?.sourceUrl) || str(rawToken.sourceUrl);
+    const capturedAt = str(identitySource?.capturedAt) || str(rawToken.capturedAt);
+    const uniqueIdRows = boundTokenUniqueIds({
+      verified: true,
+      address: str(rawToken.address) || null,
+      chain: str(rawToken.chain) || null,
+      coingeckoId: str(rawToken.coingeckoId) || null,
+      officialX: str(rawToken.officialX) || null,
+      officialSite: str(rawToken.homepage) || null,
+    }, { requireVerified: true });
+    if (uniqueIdRows.length) {
+      const receipt: DossierReceipt | null = sourceUrl ? {
+        passage: "No passage was recorded for this source.",
+        sourceLabel: `${sourceHost(sourceUrl) || "source"} · official_token`,
+        url: sourceUrl,
+        chain: [
+          ...(clock(capturedAt) ? [["Fetched", clock(capturedAt)] as [string, string]] : []),
+          ["Bound to this subject", "recorded"],
+        ],
+        sources: [{
+          url: sourceUrl,
+          sourceLabel: `${sourceHost(sourceUrl) || "source"} · official_token`,
+          passage: "No passage was recorded for this source.",
+          capturedAt: capturedAt || null,
+        }],
+      } : null;
+      beats.push({
+        id: "unique-ids",
+        label: "Bound unique-ids",
+        kicker: "Unique-ids",
+        heading: uniqueIdHeading(uniqueIdRows.length),
+        figures: uniqueIdRows.map((row) => ({
+          label: row.label,
+          value: row.value,
+          provenance: row.provenance,
+          receipt,
+          unboundNote: null,
+        })),
+      });
+    }
+  }
 
   for (const spec of BEAT_CHECKS) {
     const mine = spec.checks

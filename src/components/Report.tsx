@@ -55,6 +55,8 @@ import { AddInfo } from "./AddInfo";
 import { ScoreComposition } from "./ScoreComposition";
 import { DimensionChapters } from "./DimensionChapters";
 import { personDimensionChapters } from "../lib/dimensionChapters";
+import { uniqueIdsFromProjectToken } from "../lib/tokenNativeSpine";
+import { BoundUniqueIds } from "./BoundUniqueIds";
 import { DossierReport } from "./DossierReport";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
@@ -3288,9 +3290,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         </section>
 
+        {f.projectToken?.verified === true && (
+          <BoundUniqueIds rows={uniqueIdsFromProjectToken(f.projectToken)} />
+        )}
+
         {/* the composition strip: the governing role's weighted dimensions as
             readable rows — expand for the why, jump to the evidence, or
-            challenge the score */}
+            challenge the score. This is the account strip. It is never
+            blended with the launched-product token score. */}
         {presentation.primaryScore && governingAxes.length > 0 && (
           <ScoreComposition
             rows={governingAxes.map(([axis, a]) => ({
@@ -3334,6 +3341,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   .filter((fact) => fact.status === "verified" || fact.status === "corroborated")
                   .map((fact) => fact.predicate)).size,
               }] : []),
+              ...(f.projectToken?.verified === true ? [{ href: "#token-unique-ids" as const, label: "Unique-ids", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
               ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
               { href: "#decision-basis", label: "Why this score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
               { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },

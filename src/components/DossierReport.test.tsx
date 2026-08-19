@@ -243,4 +243,32 @@ describe("DossierReport", () => {
     expect(container.textContent).not.toContain("led by");
     expect(container.querySelector("#dossier-sources")).toBeNull();
   });
+
+  it("leads a bound-token dossier with launched-product unique-ids, not the company handle", () => {
+    render({
+      ...livePayload(),
+      projectToken: {
+        verified: true,
+        verification: "official_x",
+        name: "STONKBROKER",
+        symbol: "STONKBROKER",
+        coingeckoId: "stonkbroker",
+        address: "0xe934e36a439c94017b64a3fece66af12099abf50",
+        chain: "robinhood",
+        officialX: "ClutchMarkets",
+        homepage: "https://stonkbroker.example/",
+        sourceUrl: "https://www.coingecko.com/en/coins/stonkbroker",
+        capturedAt: "2026-08-19T12:00:00.000Z",
+      },
+    });
+    const uniqueIds = container.querySelector("#dossier-unique-ids");
+    const subject = container.querySelector("#dossier-subject");
+    expect(uniqueIds).not.toBeNull();
+    expect(uniqueIds?.textContent).toContain("5 bound unique-ids.");
+    expect(uniqueIds?.textContent).toContain("0xe934e36a439c94017b64a3fece66af12099abf50");
+    expect(uniqueIds?.textContent).toContain("@ClutchMarkets");
+    expect(uniqueIds?.textContent).not.toContain("@clutchmarkets");
+    expect(subject?.textContent).toContain("@clutchmarkets");
+    expect(container.textContent).not.toContain("Fourteen people");
+  });
 });
