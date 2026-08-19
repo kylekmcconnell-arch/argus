@@ -361,7 +361,8 @@ export async function checkSiteSubstance(domain: string): Promise<SiteSubstance 
       }
       if (js.truncated) bundleReadCapped = true;
     }
-    const metaNote = meta ? ` ("${meta.slice(0, 80)}")` : "";
+    const quote = (title || meta).slice(0, 80);
+    const quoteNote = quote ? ` ("${quote}")` : "";
     return {
       url: page.url,
       status: "client_rendered",
@@ -371,8 +372,8 @@ export async function checkSiteSubstance(domain: string): Promise<SiteSubstance 
         // never harden into "the bundle declares nothing", which is the shape a
         // silent miss would take once it reaches the report.
         : bundleReadCapped
-          ? `client-rendered app; static read could not confirm a product surface${metaNote}; its script bundles were read only up to ${BUNDLE_READ_CAP_LABEL}, so no coming-soon marker was reached rather than shown to be absent`
-          : `client-rendered app; static read could not confirm a product surface${metaNote}`,
+          ? `client-rendered app; static read could not confirm a product surface${quoteNote}; its script bundles were read only up to ${BUNDLE_READ_CAP_LABEL}, so no coming-soon marker was reached rather than shown to be absent`
+          : `client-rendered app; static read could not confirm a product surface${quoteNote}`,
     };
   }
 

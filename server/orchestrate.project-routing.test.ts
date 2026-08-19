@@ -393,6 +393,60 @@ describe("provider-backed project routing", () => {
     expect(roles).not.toContain(SubjectClass.PROJECT);
   });
 
+  it("routes a keyword-free brand account to PROJECT from a bound Grok orientation even without a live-site mark", () => {
+    // The @multihopper case: slogan bio with no protocol/platform keyword, so
+    // classifier + live-site fallback (needs site_substance_status === "live")
+    // both miss. Bound Grok orientation is the last-resort unique-id bind.
+    const evidence = emptyEvidence("@multihopper");
+    evidence.profile.bio = "SWIFT 2.0 for digital assets. Programmable, non-custodial routing…";
+    evidence.profile.website = "https://multihopper.com";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-19T12:00:00.000Z";
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "Non-custodial onchain asset routing infrastructure.",
+      audience: "teams moving digital assets",
+      boundHandle: "@multihopper",
+      boundDomain: "multihopper.com",
+      sourceUrls: ["https://x.com/multihopper", "https://multihopper.com/"],
+    };
+    expect(providerBackedRoles(evidence)).toContain(SubjectClass.PROJECT);
+  });
+
+  it("keeps orientation-PROJECT unroutable when the domain did not bind", () => {
+    const evidence = emptyEvidence("@multihopper");
+    evidence.profile.bio = "SWIFT 2.0 for digital assets. Programmable, non-custodial routing…";
+    evidence.profile.website = "https://multihopper.com";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-19T12:00:00.000Z";
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "Non-custodial onchain asset routing infrastructure.",
+      audience: "",
+      boundHandle: "@multihopper",
+      boundDomain: null,
+      sourceUrls: ["https://x.com/multihopper"],
+    };
+    expect(providerBackedRoles(evidence)).toEqual([]);
+  });
+
+  it("never lets orientation PROJECT override a bio-classified role", () => {
+    const evidence = resolvedProjectProfile("Daily alpha calls", "https://world.xyz/");
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "A trading-signal product.",
+      audience: "",
+      boundHandle: "@world_xyz",
+      boundDomain: "world.xyz",
+      sourceUrls: ["https://world.xyz/"],
+    };
+    const roles = providerBackedRoles(evidence);
+    expect(roles).toContain(SubjectClass.KOL);
+    expect(roles).not.toContain(SubjectClass.PROJECT);
+  });
+
   it("does not route a non-verified token candidate by name alone", () => {
     const evidence = resolvedProjectProfile("Just use crypto", null);
     evidence.projectToken = {

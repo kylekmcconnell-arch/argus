@@ -42,6 +42,7 @@ import { enrichFirstPartyTeamAvatars } from "./adapters/teamEnrichment";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
+import { orientSubjectWithGrok, orientationHandleBound } from "./subjectOrientation";
 import { personChecks } from "../src/lib/scanChecklist";
 import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
 import { isOrganizationAccount } from "../src/lib/investorSubject";
@@ -812,11 +813,13 @@ export function applySiteSubstanceOutcome(
   }
 }
 
-async function collectProjectSiteSubstance(ctx: CollectContext, domain: string): Promise<void> {
-  if (!domain) return;
+async function collectProjectSiteSubstance(ctx: CollectContext, domain: string): Promise<SiteSubstance | null> {
+  if (!domain) return null;
   const site = await checkSiteSubstance(domain).catch(() => null);
-  if (!site) return;
+  if (!site) return null;
+  if (site.detail.trim()) siteSubstanceExcerptByEvidence.set(ctx.evidence, site.detail);
   applySiteSubstanceOutcome(ctx, domain, site);
+  return site;
 }
 
 // The bare-domain grab from bio TEXT (distinct from the profile's website
@@ -897,7 +900,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // the corpus posts; site liveness), so this prelude costs one slow provider,
   // not the sum. Results are applied in the original order below so every
   // evidence merge stays identical to the serial pipeline.
-  const [hist, { corpus, foundWallets }, registration] = await Promise.all([
+  const [hist, { corpus, foundWallets }, registration, siteSubstance] = await Promise.all([
     handleHistory(ctx.handle),
     (async () => {
       const corpus = await collectCorpus(ctx.handle);
@@ -959,6 +962,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     }
     ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
   }
+  await maybeOrientSubject(ctx, siteSubstance?.detail);
 
   // Find-wallet: a self-disclosed wallet (a 0x address or ENS/basename/.sol name)
   // in the bio/posts. The richer corpus surfaces more contract/URL mentions.
@@ -1645,6 +1649,31 @@ export function axisCatalog(roles: SubjectClass[]) {
   return out;
 }
 
+const siteSubstanceExcerptByEvidence = new WeakMap<CollectedEvidence, string>();
+
+async function maybeOrientSubject(ctx: CollectContext, siteExcerpt?: string): Promise<void> {
+  const prior = ctx.evidence.subjectOrientation;
+  if (prior && prior.kind !== "UNKNOWN") return;
+  if (providerBackedRoles(ctx.evidence).length > 0) return;
+  const excerpt = (siteExcerpt ?? siteSubstanceExcerptByEvidence.get(ctx.evidence) ?? "").trim() || undefined;
+  const orientation = await orientSubjectWithGrok(ctx.evidence, { siteExcerpt: excerpt });
+  if (!orientation) return;
+  ctx.evidence.subjectOrientation = orientation;
+  if (orientation.kind !== "UNKNOWN" && orientation.what.trim()) {
+    ctx.evidence.profile.identity_note = orientation.what;
+  }
+  if (orientation.what.trim()) {
+    ctx.emit({
+      phase: "Director",
+      label: `Orientation: ${orientation.what}`,
+      detail: orientation.what,
+      source: "grok-orientation",
+      tone: "neutral",
+    });
+  }
+  ctx.evidence.roles = providerBackedRoles(ctx.evidence);
+}
+
 /**
  * Select methodologies only from collector-owned evidence. A PROJECT label is
  * intentionally stricter than a generic bio keyword: the current X profile
@@ -1765,6 +1794,21 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     && canonicalOfficialWebsite(evidence.profile.website) !== null
     && evidence.profile.site_substance_status === "live") {
     roles.add(SubjectClass.PROJECT);
+  }
+  // Grok orientation last-resort: same empty-role gate as the live-site
+  // fallback, so a bio-classified KOL/founder is never overwritten. PROJECT
+  // needs a bound official domain; FOUNDER/INVESTOR need only the twitterapi
+  // handle. UNKNOWN never adds a role. site_substance_status is not required.
+  if (roles.size === 0 && evidence.subjectOrientation && evidence.subjectOrientation.kind !== "UNKNOWN"
+    && orientationHandleBound(evidence)) {
+    const kind = evidence.subjectOrientation.kind;
+    if (kind === "PROJECT" && evidence.subjectOrientation.boundDomain) {
+      roles.add(SubjectClass.PROJECT);
+    } else if (kind === "FOUNDER") {
+      roles.add(SubjectClass.FOUNDER);
+    } else if (kind === "INVESTOR") {
+      roles.add(SubjectClass.INVESTOR);
+    }
   }
   return [...roles];
 }
@@ -3818,7 +3862,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       tone: "warn",
     });
   }
-  const rolesAfterBasicFacts = providerBackedRoles(evidence);
+  let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   // AFTER the roles are updated, never before. The hydration bails unless
   // evidence.roles already carries PROJECT, and the sparse or suspended
@@ -3851,6 +3895,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const siteHost = new URL(officialWebsiteAfterBasicFacts).hostname.replace(/^www\./, "");
     evidence.roles = rolesAfterBasicFacts;
     await collectProjectSiteSubstance(ctx, siteHost);
+  }
+  if (rolesAfterBasicFacts.length === 0) {
+    await maybeOrientSubject(ctx);
+    rolesAfterBasicFacts = providerBackedRoles(evidence);
+    evidence.roles = rolesAfterBasicFacts;
   }
   if (fixture || (recoveredProjectSite && !evidence.projectToken?.verified)) {
     await projectTokenPass();

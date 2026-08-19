@@ -914,9 +914,21 @@ export interface LaunchWindowSnapshot {
   summary: string;
 }
 
+/** Grok first-pass read of the bound X profile + official site. Display name is never a bind key. */
+export interface SubjectOrientation {
+  kind: "PROJECT" | "FOUNDER" | "INVESTOR" | "UNKNOWN";
+  what: string;          // one sentence, only from bound artifacts
+  audience: string;      // who it is for, or ""
+  boundHandle: string;   // exact audited handle
+  boundDomain: string | null;
+  sourceUrls: string[];  // bound URLs actually used
+}
+
 export interface CollectedEvidence {
   profile: SubjectProfile;
   roles: SubjectClass[];
+  /** Bound-artifact orientation; never a display-name guess. */
+  subjectOrientation?: SubjectOrientation;
   ventures: Venture[];
   testimonials: Testimonial[];
   advised: AdvisedProject[];
