@@ -1110,7 +1110,23 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // and evidence quote, while subject-side vouching still comes only from the
   // account's own edges (follow, amplification, its posts, its site).
   const mentionLeads = orientationMentionLeads(ctx.evidence.subjectOrientation);
-  const roleLeads = [...mentionLeads, ...reverseTeam];
+  // Re-read Grok's quoted live-X snippets with the official-X role scanner.
+  // Leads only: this is not the twitterapi corpus, so unique-id confirm still
+  // has to run. No hardcoded handles.
+  const quotedMentionTeam = officialXNamedTeam(
+    mentionLeads.map((lead) => lead.evidence),
+    ctx.evidence.profile.display_name,
+    ctx.handle,
+  ).flatMap((member) => member.handle ? [{
+    name: member.name,
+    handle: member.handle,
+    role: member.role,
+    kind: "team" as const,
+    evidence: member.evidence ?? "",
+    source: "orientation-live-x",
+    sourceUrl: member.sourceUrl,
+  }] : []);
+  const roleLeads = [...mentionLeads, ...quotedMentionTeam, ...reverseTeam];
   const reverseBioClaims = roleLeads.length
     ? await confirmClaimantBios(roleLeads, ctx.handle, ctx.evidence.profile.display_name)
     : new Map<string, { role: string; phrase: string }>();
@@ -1135,7 +1151,8 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   const officialOrgs = officialXNamedOrgs(namedCorpus).filter((org) => norm(org.handle) && norm(org.handle) !== norm(ctx.handle));
   const orgKeys = new Set(officialOrgs.map((org) => norm(org.handle)));
   // Official twitterapi corpus naming @handles as founder/co-founder/team.
-  // Unique-id is the handle. Independent of Serper.
+  // Unique-id is the handle. Independent of Serper. Orientation mentions are
+  // NOT folded into this deterministic scan; they join findRoleClaimants above.
   const postRoleTeam = officialXNamedTeam(namedCorpus, ctx.evidence.profile.display_name, ctx.handle)
     .filter((member) => {
       const h = norm(member.handle);

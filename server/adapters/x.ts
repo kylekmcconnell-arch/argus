@@ -56,9 +56,17 @@ export async function grokSearch(system: string, user: string, opts?: {
   bypassCache?: boolean;
   /** Shared physical-call budget used by bounded multi-question repair. */
   claimProviderCall?: () => boolean;
+  /** Override the default web_search + x_search pair (orientation binds these). */
+  tools?: Array<Record<string, unknown>>;
+  /** Cost-ledger op. Defaults to live-search. */
+  op?: string;
+  timeoutMs?: number;
 }): Promise<string | null> {
   const key = env("XAI_API_KEY");
   if (!key) return null;
+  const op = opts?.op ?? "live-search";
+  const tools = opts?.tools ?? [{ type: "web_search" }, { type: "x_search" }];
+  const timeoutMs = opts?.timeoutMs ?? 45_000;
   // 24h read-through cache: a subject's team/affiliations don't change
   // hour-to-hour, and live search is the dominant spend. Keyed by the CALLER's
   // stable subject key (never the raw prompt — prompts embed volatile posts).
@@ -81,7 +89,7 @@ export async function grokSearch(system: string, user: string, opts?: {
     // ceiling the audit continues on everything already collected rather than
     // silently running up the bill.
     if (grokSpendUsd() >= GROK_AUDIT_SPEND_CEILING_USD) {
-      addGrokUsage(undefined, 0, "live-search", "partial", "audit_spend_ceiling");
+      addGrokUsage(undefined, 0, op, "partial", "audit_spend_ceiling");
       return { status: null, text: null, budgetExhausted: true };
     }
     let res: Response;
@@ -92,24 +100,24 @@ export async function grokSearch(system: string, user: string, opts?: {
         body: JSON.stringify({
           model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
           input: [{ role: "system", content: system }, { role: "user", content: user }],
-          tools: [{ type: "web_search" }, { type: "x_search" }],
+          tools,
           ...(withCap ? { max_tool_calls: opts?.maxToolCalls ?? 3 } : {}),
         }),
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
-      addGrokUsage(undefined, 0, "live-search", "failed", "transport_error");
+      addGrokUsage(undefined, 0, op, "failed", "transport_error");
       return { status: null, text: null };
     }
     if (!res.ok) {
-      addGrokUsage(undefined, 0, "live-search", "failed", `http_${res.status}`);
+      addGrokUsage(undefined, 0, op, "failed", `http_${res.status}`);
       return { status: res.status, text: null };
     }
 
     let d: JsonRecord;
     try { d = asRecord(await res.json()); }
     catch {
-      addGrokUsage(undefined, 0, "live-search", "failed", "response_json_error");
+      addGrokUsage(undefined, 0, op, "failed", "response_json_error");
       return { status: res.status, text: null };
     }
     const output = Array.isArray(d.output) ? d.output.map(asRecord) : [];
@@ -131,7 +139,7 @@ export async function grokSearch(system: string, user: string, opts?: {
     addGrokUsage(
       usage,
       toolCalls,
-      "live-search",
+      op,
       text ? "succeeded" : "partial",
       text ? undefined : "empty_output",
     );

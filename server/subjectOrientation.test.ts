@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CollectedEvidence, SubjectOrientation } from "../src/data/evidence";
+import { getCost, withCostLedger } from "./cost";
+import { officialXNamedTeam } from "./adapters/x";
 import {
   buildOrientationPacket,
   orientationHandleBound,
   orientationMentionLeads,
+  orientationSearchTools,
   orientSubjectWithGrok,
   parseOrientation,
   type OrientationPacket,
@@ -190,6 +193,18 @@ describe("parseOrientation bind rules", () => {
   });
 });
 
+describe("orientationSearchTools", () => {
+  it("binds x_search to this handle and web_search to the packet host only", () => {
+    expect(orientationSearchTools(packet())).toEqual([
+      { type: "x_search", allowed_x_handles: ["multihopper"] },
+      { type: "web_search", allowed_domains: ["multihopper.com"] },
+    ]);
+    expect(orientationSearchTools(packet({ websiteHost: null }))).toEqual([
+      { type: "x_search", allowed_x_handles: ["multihopper"] },
+    ]);
+  });
+});
+
 describe("orientationMentionLeads", () => {
   it("turns quoted mentions into reverse-role-shaped leads without auto-binding", () => {
     const leads = orientationMentionLeads(grokProject({
@@ -206,6 +221,14 @@ describe("orientationMentionLeads", () => {
       source: "orientation-live-x",
       sourceUrl: "https://x.com/alice",
     }]);
+    const scanned = officialXNamedTeam(
+      leads.map((lead) => lead.evidence),
+      undefined,
+      "@multihopper",
+    );
+    expect(scanned.map((row) => row.handle)).toEqual(["@alice"]);
+    expect(scanned[0]).toEqual(expect.objectContaining({ handle: "@alice", role: "co-founder" }));
+    expect(scanned[0].artifact_verified).toBe(true);
   });
 });
 
@@ -266,13 +289,17 @@ describe("orientSubjectWithGrok", () => {
       if (url.includes("api.x.ai/v1/chat/completions")) throw new Error("orientation must not use tool-less grokChat");
       expect(url).toBe("https://api.x.ai/v1/responses");
       const body = JSON.parse(String(init?.body ?? "{}")) as {
-        tools?: Array<{ type?: string }>;
+        tools?: Array<{ type?: string; allowed_x_handles?: string[]; allowed_domains?: string[] }>;
         max_tool_calls?: number;
         input?: Array<{ content?: string }>;
       };
-      expect(body.tools).toEqual([{ type: "web_search" }, { type: "x_search" }]);
+      expect(body.tools).toEqual([
+        { type: "x_search", allowed_x_handles: ["multihopper"] },
+        { type: "web_search", allowed_domains: ["multihopper.com"] },
+      ]);
       expect(body.max_tool_calls).toBe(3);
       expect(JSON.stringify(body.input)).toContain("x_search that exact handle only");
+      expect(JSON.stringify(body.input)).toContain("MAY x_search the exact packet @handle");
       expect(JSON.stringify(body.input)).not.toContain("You may only use the packet");
       return json({
         output_text: JSON.stringify({
@@ -289,11 +316,14 @@ describe("orientSubjectWithGrok", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-    const oriented = await orientSubjectWithGrok(stubEvidence(), {
-      siteExcerpt: `live site: "${MULTIHOPPER_TITLE}"`,
+    const captured = await withCostLedger(async () => {
+      const oriented = await orientSubjectWithGrok(stubEvidence(), {
+        siteExcerpt: `live site: "${MULTIHOPPER_TITLE}"`,
+      });
+      return { oriented, cost: getCost() };
     });
 
-    expect(oriented).toEqual(expect.objectContaining({
+    expect(captured.oriented).toEqual(expect.objectContaining({
       kind: "PROJECT",
       boundHandle: "@multihopper",
       boundDomain: "multihopper.com",
@@ -301,8 +331,44 @@ describe("orientSubjectWithGrok", () => {
         { handle: "@alice", roleHint: "co-founder", quote: "Welcome co-founder @alice to the team." },
       ],
     }));
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "grok",
+      op: "subject-orientation",
+      succeeded: 1,
+    }));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("api.anthropic.com"))).toBe(false);
+  });
+
+  it("omits web_search when the packet has no official host", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { tools?: unknown };
+      expect(body.tools).toEqual([{ type: "x_search", allowed_x_handles: ["multihopper"] }]);
+      return json({
+        output_text: JSON.stringify({
+          kind: "FOUNDER",
+          what: "A builder named on the bound account.",
+          audience: "",
+          boundHandle: "@multihopper",
+          boundDomain: null,
+          sourceUrls: ["https://x.com/multihopper"],
+        }),
+        output: [{ type: "x_search_call" }],
+        usage: { input_tokens: 8, output_tokens: 8 },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const evidence = stubEvidence();
+    delete evidence.profile.website;
+    const oriented = await orientSubjectWithGrok(evidence);
+    expect(oriented).toEqual(expect.objectContaining({
+      kind: "FOUNDER",
+      boundHandle: "@multihopper",
+      boundDomain: null,
+    }));
   });
 
   it("still drops a hallucinated domain from the live-X path", async () => {

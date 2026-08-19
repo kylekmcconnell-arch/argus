@@ -124,6 +124,39 @@ describe("X provider attempt accounting", () => {
     }));
   });
 
+  it("forwards caller-supplied search tools and cost op", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    const fetchMock = vi.fn().mockResolvedValue(json({
+      output_text: "bound",
+      output: [{ type: "x_search_call" }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const captured = await withCostLedger(async () => {
+      const result = await grokSearch("system", "user", {
+        tools: [{ type: "x_search", allowed_x_handles: ["multihopper"] }],
+        op: "subject-orientation",
+        maxToolCalls: 3,
+      });
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBe("bound");
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body)) as {
+      tools?: unknown;
+      max_tool_calls?: number;
+    };
+    expect(body.tools).toEqual([{ type: "x_search", allowed_x_handles: ["multihopper"] }]);
+    expect(body.max_tool_calls).toBe(3);
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "grok",
+      op: "subject-orientation",
+      succeeded: 1,
+    }));
+  });
+
   it("falls through to Grok when every grounded search request is rejected", async () => {
     vi.stubEnv("SERPER_API_KEY", "rejected-key");
     vi.stubEnv("XAI_API_KEY", "xai-test-key");

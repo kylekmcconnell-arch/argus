@@ -60,26 +60,25 @@ const ORIENTATION_SCHEMA: Record<string, unknown> = {
           roleHint: { type: "string" },
           quote: { type: "string" },
         },
-        required: ["handle", "roleHint", "quote"],
+        required: ["handle", "quote"],
       },
     },
   },
-  required: ["kind", "what", "audience", "boundHandle", "boundDomain", "sourceUrls", "mentionedHandles"],
+  required: ["kind", "what", "audience", "boundHandle", "boundDomain", "sourceUrls"],
 };
 
 const ORIENTATION_SYSTEM = [
-  "You have the bound twitterapi packet for this exact subject.",
-  "You MAY x_search that exact @handle and fetch the official site host from the packet.",
-  "Do not open-web fish other domains or invent handles.",
+  "You MAY x_search the exact packet @handle and web_search only the packet official site host.",
+  "Do not search other handles or domains. Do not use unconstrained world knowledge.",
   "Answer: What is this? Who is it for? Is it a product/protocol/company brand (PROJECT), a person who founds or builds (FOUNDER), a capital allocator (INVESTOR), or unknown (UNKNOWN)?",
   "One-sentence what from the packet plus live X of THIS handle. audience is who it is for, or \"\".",
-  "Quote @handles only when they appear in the packet artifacts or in live x_search of THIS subject. Never from a display name alone.",
-  "Do not invent a token, contract address, or legal name.",
-  "Do not treat display name as identity. The bind keys are the twitterapi handle and the official website host in the packet.",
+  "Quote @handles only when they appear in the packet or in those live results. Never from a display name alone.",
+  "Do not invent a token, contract address, domain, handle, or legal name.",
+  "Do not treat display name as identity. The bind keys are the twitterapi handle and the official website host in the packet. Name is a label only.",
   "If live X contradicts the packet bind, trust the packet bind keys and treat extra names as quoted mentions only.",
   "Return boundHandle as the exact packet handle. Return boundDomain only when it is the packet website host; otherwise null.",
-  "sourceUrls must be packet URLs you actually used.",
-  "mentionedHandles: @handles that appear in official posts or live x_search of THIS subject, each with a verbatim quote from that artifact and optional roleHint. Never display-name-only. Empty array if none.",
+  "sourceUrls must be packet URLs or live results from THIS handle / official host that you actually used.",
+  "Optional mentionedHandles: {handle, roleHint?, quote}[] as leads only. Each handle must appear verbatim in quote. Empty array if none.",
   "Return only the orientation JSON.",
 ].join(" ");
 
@@ -246,6 +245,15 @@ export function orientationMentionLeads(orientation: SubjectOrientation | null |
   });
 }
 
+/** Responses API tools: live X of THIS handle; web_search only for the packet host. */
+export function orientationSearchTools(packet: OrientationPacket): Array<Record<string, unknown>> {
+  const handle = normalizeHandle(packet.handle);
+  const tools: Array<Record<string, unknown>> = [];
+  if (handle) tools.push({ type: "x_search", allowed_x_handles: [handle] });
+  if (packet.websiteHost) tools.push({ type: "web_search", allowed_domains: [packet.websiteHost] });
+  return tools;
+}
+
 export function buildOrientationPacket(
   evidence: CollectedEvidence,
   siteExcerpt?: string,
@@ -360,11 +368,14 @@ export async function orientSubjectWithGrok(
     return parseOrientation(result.text, packet);
   }
 
-  if (!key) return null;
+  const search = options?.search ?? (key ? grokSearch : null);
+  if (!search) return null;
 
-  const search = options?.search ?? grokSearch;
   const text = await search(ORIENTATION_SYSTEM, liveSearchUser(packet), {
     maxToolCalls: ORIENTATION_MAX_TOOL_CALLS,
+    tools: orientationSearchTools(packet),
+    op: "subject-orientation",
+    timeoutMs: ORIENTATION_TIMEOUT_MS,
     cacheKey: `subject-orientation:${normalizeHandle(packet.handle)}`,
   });
   if (!text) return null;
