@@ -411,6 +411,8 @@ export async function groundedSearch(
     queries?: readonly string[];
     /** Optional single Serper /news POST (same 1-credit tier as /search). Skip when empty. */
     newsQuery?: string;
+    /** Organic (+ news) hits after URL dedupe. Callers extract corroborating URLs from these; never invent them. */
+    onOrganicResults?: (results: ReadonlyArray<{ title: string; url: string; snippet: string }>) => void;
     /** Called only when every physical search attempt failed, never for a valid empty result. */
     onProviderUnavailable?: () => void;
   },
@@ -467,6 +469,7 @@ export async function groundedSearch(
   }
   if (failed.length && succeeded.length === 0) opts?.onProviderUnavailable?.();
   const results = dedupeByUrl(searched.flatMap((outcome) => outcome.results)).slice(0, MAX_RESULTS);
+  opts?.onOrganicResults?.(results);
   if (!results.length) return null;
 
   const fetchWithTimeout = async (url: string): Promise<{ url: string; text: string } | null> => {

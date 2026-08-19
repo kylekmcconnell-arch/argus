@@ -32,7 +32,7 @@ import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cos
 import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
-import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
@@ -1113,13 +1113,30 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   const roleLeads = [...mentionLeads, ...reverseTeam];
   const reverseBioClaims = roleLeads.length
     ? await confirmClaimantBios(roleLeads, ctx.handle, ctx.evidence.profile.display_name)
-    : new Map<string, { role: string; phrase: string }>();
+    : new Map<string, { role: string; phrase: string; bio?: string; name?: string }>();
   if (reverseBioClaims.size) {
     const quoted = [...reverseBioClaims.entries()]
       .map(([h, claim]) => `@${h} ("${claim.phrase}")`)
       .join(", ");
     ctx.emit({ phase: "P1 · Team", label: "Role claim in live bio", detail: `Live-bio confirmation surfaced ${reverseBioClaims.size} candidate${reverseBioClaims.size === 1 ? "" : "s"} whose current X bio carries the claim first-party: ${quoted}.`, source: "reverse role search + orientation + bio fetch", tone: "good" });
   }
+
+  // Temporary Serper LinkedIn/press follow-up: UNIQUE-ID CONFIRMED founders only
+  // (live bio claim for THIS project handle). Unverified leads, orgs, the
+  // subject handle, and display-name-only rows are never searched. Cap 3.
+  const followupConfirmed = new Map(reverseBioClaims);
+  for (const member of reverseBioTwitter.team) {
+    const key = (member.handle ?? "").replace(/^@/, "").toLowerCase();
+    if (!key || followupConfirmed.has(key)) continue;
+    followupConfirmed.set(key, {
+      role: member.role,
+      phrase: member.evidence ?? member.role,
+      name: member.name,
+    });
+  }
+  const founderFollowup = followupConfirmed.size
+    ? await serperConfirmedFounderFollowup(followupConfirmed, ctx.handle, ctx.evidence.profile.display_name)
+    : new Map<string, { linkedin?: string; pressUrls: string[] }>();
 
   // Auto-pivot team: merge everyone found across the website search, the account's
   // own X content, and a deterministic post role-word scan (founder/CEO/CTO...).
@@ -1340,6 +1357,28 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
     if (n) byName.set(n, rec);
+  }
+
+  // Corroboration only: copy linkedin.com/in URLs extracted from Serper organic
+  // onto already unique-id-bound founders. Never create rows, never bind by
+  // LinkedIn, never change identity_link_evidence_origin.
+  let linkedinCorroborated = 0;
+  for (const [handle, hit] of founderFollowup) {
+    const existing = byHandle.get(handle);
+    if (!existing || existing.kind === "org" || !hit.linkedin) continue;
+    if (!existing.linkedin) {
+      existing.linkedin = hit.linkedin;
+      linkedinCorroborated += 1;
+    }
+  }
+  if (linkedinCorroborated) {
+    ctx.emit({
+      phase: "P1 · Team",
+      label: "Founder LinkedIn corroboration",
+      detail: `Serper organic added LinkedIn profile URLs for ${linkedinCorroborated} unique-id-confirmed founder${linkedinCorroborated === 1 ? "" : "s"} (corroboration, not a bind key).`,
+      source: "serper founder follow-up",
+      tone: "good",
+    });
   }
 
   // Linked orgs/funds/incubators named next to org language in founder or
