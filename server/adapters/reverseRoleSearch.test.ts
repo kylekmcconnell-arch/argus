@@ -5,13 +5,21 @@ import {
   confirmClaimantBios,
   discoverOperatorsFromAmplified,
   findRoleClaimants,
+  discoverReverseBioFromTwitterapi,
+  linkedOrgsFromBioText,
   operatorClaimInBio,
+  projectRoleClaimInBio,
+  resetReverseBioMemo,
+  reverseBioTeamAsWebMembers,
+  reverseBioOrgsAsWebMembers,
+  scanPostsForRoles,
 } from "./x";
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   clearLastTweetsMemo();
+  resetReverseBioMemo();
 });
 
 // The Clutch Markets case: the project account named no team anywhere, but it
@@ -176,6 +184,8 @@ describe("findRoleClaimants", () => {
   it("returns [] when no search provider is configured", async () => {
     vi.stubEnv("ARGUS_GENERAL_WEB_PROVIDER", "grok");
     vi.stubEnv("XAI_API_KEY", "");
+    vi.stubEnv("TWITTERAPI_KEY", "");
+    vi.stubEnv("SERPER_API_KEY", "");
     expect(await findRoleClaimants("@clutchmarkets")).toEqual([]);
   });
 });
@@ -202,5 +212,178 @@ describe("confirmClaimantBios", () => {
 
     expect([...confirmed.keys()]).toEqual(["oxsimplefarmer"]);
     expect(confirmed.get("oxsimplefarmer")!.phrase).toContain("Founder @clutchmarkets");
+  });
+});
+
+describe("projectRoleClaimInBio · handle is the unique id", () => {
+  it("reads a comma-separated co-founder / COO bio against the project handle", () => {
+    const claim = projectRoleClaimInBio("Co-founder, COO @projecthandle", "@projecthandle");
+    expect(claim).not.toBeNull();
+    expect(claim!.phrase).toContain("@projecthandle");
+    expect(/co-?founder|coo/i.test(claim!.role)).toBe(true);
+  });
+
+  it("does not bind a display name without the @handle", () => {
+    expect(projectRoleClaimInBio("Co-founder, COO ProjectHandle", "@projecthandle")).toBeNull();
+  });
+});
+
+describe("discoverReverseBioFromTwitterapi · serper-independent keep", () => {
+  it("keeps a twitterapi bio claimant when search is down and drops a random mention", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    vi.stubEnv("ARGUS_GENERAL_WEB_PROVIDER", "serper");
+    vi.stubEnv("SERPER_API_KEY", "");
+    const fetchMock = vi.fn(async (input?: unknown) => {
+      const url = String(input);
+      if (url.includes("/twitter/tweet/advanced_search") || url.includes("/twitter/user/mentions")) {
+        return new Response(JSON.stringify({
+          tweets: [
+            { text: "building with @projecthandle", author: { userName: "alice", name: "Alice", description: "Co-founder, COO @projecthandle" } },
+            { text: "love @projecthandle", author: { userName: "randomfan", name: "Fan", description: "just a fan of the feed" } },
+          ],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/twitter/user/followings") || url.includes("/twitter/user/followers")) {
+        return new Response(JSON.stringify({ followings: [], followers: [] }), { status: 200 });
+      }
+      if (url.includes("/twitter/user/info")) {
+        const bio = url.includes("alice") ? "Co-founder, COO @projecthandle" : "just a fan of the feed";
+        const name = url.includes("alice") ? "Alice" : "Fan";
+        return new Response(JSON.stringify({ data: { name, description: bio, followers: 1 } }), { status: 200 });
+      }
+      return new Response("{}", { status: 503 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const found = await discoverReverseBioFromTwitterapi("@projecthandle");
+    expect(found.team.map((m) => m.handle)).toEqual(["@alice"]);
+    expect(found.team[0]).toMatchObject({
+      handle: "@alice",
+      source: "reverse-bio twitterapi",
+      sourceUrl: "https://x.com/alice",
+    });
+    expect(found.team.map((m) => m.handle)).not.toContain("@randomfan");
+  });
+
+  it("classifies linked fund/incubator handles as orgs, not people", () => {
+    const orgs = linkedOrgsFromBioText(
+      "Co-founder, COO @projecthandle | incubated by @somefundvc",
+      "@projecthandle",
+      new Set(["alice"]),
+    );
+    expect(orgs.map((o) => o.handle)).toEqual(["@somefundvc"]);
+    expect(orgs[0].role).toMatch(/fund|incubator|vc|team-behind/);
+  });
+});
+
+function twitterapiStub(input?: unknown) {
+  const url = String(input);
+  if (url.includes("/twitter/tweet/advanced_search") || url.includes("/twitter/user/mentions")) {
+    return new Response(JSON.stringify({
+      tweets: [
+        { text: "shipping", author: { userName: "alice", name: "Alice", description: "Co-founder, COO @projecthandle | @SomeOrg" } },
+        { text: "love @projecthandle", author: { userName: "bob", name: "Bob", description: "just mentioning @projecthandle in passing" } },
+      ],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }
+  if (url.includes("/twitter/user/followings") || url.includes("/twitter/user/followers")) {
+    return new Response(JSON.stringify({ followings: [], followers: [] }), { status: 200 });
+  }
+  if (url.includes("/twitter/user/info")) {
+    if (/userName=SomeOrg/i.test(url) || /userName=someorg/i.test(url)) {
+      return new Response(JSON.stringify({
+        data: { name: "Some Org", description: "early-stage fund backing builders", followers: 10, profilePicture: "https://pbs.twimg.com/profile_images/some_normal.jpg" },
+      }), { status: 200 });
+    }
+    if (/userName=alice/i.test(url)) {
+      return new Response(JSON.stringify({
+        data: { name: "Alice", description: "Co-founder, COO @projecthandle | @SomeOrg", followers: 2, profilePicture: "https://pbs.twimg.com/profile_images/alice_normal.jpg" },
+      }), { status: 200 });
+    }
+    if (/userName=bob/i.test(url)) {
+      return new Response(JSON.stringify({
+        data: { name: "Bob", description: "just mentioning @projecthandle in passing", followers: 1 },
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ data: { name: "x", description: "", followers: 0 } }), { status: 200 });
+  }
+  return new Response("{}", { status: 503 });
+}
+
+describe("reverse-bio keep path · @alice @bob @SomeOrg @projecthandle", () => {
+  it("finds @alice via twitterapi when Serper is down and official posts name nobody", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    vi.stubEnv("ARGUS_GENERAL_WEB_PROVIDER", "serper");
+    vi.stubEnv("SERPER_API_KEY", "");
+    vi.stubEnv("XAI_API_KEY", "");
+    vi.stubGlobal("fetch", vi.fn(twitterapiStub));
+
+    expect(scanPostsForRoles([], "Project Handle")).toEqual([]);
+    const found = await discoverReverseBioFromTwitterapi("@projecthandle");
+    expect(found.team.map((m) => m.handle)).toEqual(["@alice"]);
+    expect(found.team[0]).toMatchObject({
+      handle: "@alice",
+      name: "Alice",
+      source: "reverse-bio twitterapi",
+      sourceUrl: "https://x.com/alice",
+    });
+    expect(found.team.map((m) => m.handle)).not.toContain("@bob");
+
+    const viaSearch = await findRoleClaimants("@projecthandle", "Project Handle");
+    expect(viaSearch.map((m) => m.handle)).toEqual(["@alice"]);
+    expect(viaSearch[0].source).toBe("reverse-bio twitterapi");
+  });
+
+  it("binds @SomeOrg from that bio as a fund org, never as a person", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    vi.stubGlobal("fetch", vi.fn(twitterapiStub));
+
+    const found = await discoverReverseBioFromTwitterapi("@projecthandle");
+    expect(found.team.map((m) => m.handle)).toEqual(["@alice"]);
+    expect(found.orgs.map((o) => o.handle.toLowerCase())).toEqual(["@someorg"]);
+    expect(found.orgs[0].role).toBe("fund");
+
+    const people = reverseBioTeamAsWebMembers(found.team);
+    const orgs = reverseBioOrgsAsWebMembers(found.orgs);
+    expect(people[0]).toMatchObject({
+      handle: "@alice",
+      kind: "person",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      handleProvenance: "subject_first_party",
+      provider: "twitterapi",
+    });
+    expect(orgs[0]).toMatchObject({
+      handle: "@SomeOrg",
+      kind: "org",
+      role: "fund",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      handleProvenance: "subject_first_party",
+    });
+  });
+
+  it("does not bind a display-name-only bio or a random @mention without role language", async () => {
+    expect(projectRoleClaimInBio("Co-founder, COO of Project Handle", "@projecthandle")).toBeNull();
+    expect(projectRoleClaimInBio("just mentioning @projecthandle in passing", "@projecthandle")).toBeNull();
+    expect(projectRoleClaimInBio("we built @projecthandle", "@projecthandle")).not.toBeNull();
+
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    vi.stubGlobal("fetch", vi.fn(async (input?: unknown) => {
+      const url = String(input);
+      if (url.includes("/twitter/user/info") && /userName=alice/i.test(url)) {
+        return new Response(JSON.stringify({
+          data: { name: "Alice", description: "Co-founder, COO of Project Handle", followers: 1 },
+        }), { status: 200 });
+      }
+      return twitterapiStub(input);
+    }));
+
+    const confirmed = await confirmClaimantBios(
+      [{ name: "Alice", handle: "@alice", role: "co-founder", kind: "team" }],
+      "@projecthandle",
+      "Project Handle",
+    );
+    expect([...confirmed.keys()]).toEqual([]);
   });
 });

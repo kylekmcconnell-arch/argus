@@ -842,6 +842,8 @@ export interface WebTeamMember {
   name: string;
   handle?: string;
   role: string;
+  /** Person vs linked fund/incubator/VC. Unique-id is still the handle. */
+  kind?: "person" | "org";
   linkedin?: string;
   evidence?: string;
   source: string; // where it came from: web/LinkedIn search, post role-scan, X content

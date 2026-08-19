@@ -42,6 +42,16 @@ describe("operatorClaimInBio", () => {
     expect(operatorClaimInBio("building @otherproject", "@linkrbot")).toBeNull();
     expect(operatorClaimInBio("", "@linkrbot")).toBeNull();
   });
+
+  it("binds COO / CEO / we-built language next to the subject handle", () => {
+    expect(["coo", "co-founder"]).toContain(operatorClaimInBio("Co-founder, COO @acme · @orghandle fund", "@acme")?.role);
+    expect(operatorClaimInBio("COO @acme", "@acme")?.role).toBe("coo");
+    expect(operatorClaimInBio("CEO @acme", "@acme")?.role).toBe("ceo");
+    expect(operatorClaimInBio("we built @acme with friends", "@acme")?.role).toBe("founder");
+    expect(operatorClaimInBio("I built @acme", "@acme")?.role).toBe("founder");
+    // Building remains operator — do not treat the substring "built" as founder.
+    expect(operatorClaimInBio("Building @linkrbot | @uapenfts", "@linkrbot")?.role).toBe("operator");
+  });
 });
 
 describe("discoverOperatorsFromFollowings", () => {
