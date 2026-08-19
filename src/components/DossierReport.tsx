@@ -527,6 +527,12 @@ export function DossierReport({
                 </div>
               )}
 
+              {b.id === "unique-ids" && b.figures.length > 0 && (
+                <div className="mt-6 max-w-[54ch] space-y-2">
+                  {b.figures.map((f, n) => <Figure key={`${f.label}-${n}`} figure={f} />)}
+                </div>
+              )}
+
               {b.id === "perimeter" && (
                 <PerimeterFromRecord figures={b.figures} links={d.links} />
               )}
@@ -621,7 +627,9 @@ export function DossierReport({
                       <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{b.heading}</p>
                       {b.figures.length > 0 && (
                         <div className="mt-2 space-y-1.5">
-                          {b.figures.slice(0, 4).map((f, n) => <Figure key={`${f.label}-${n}`} figure={f} />)}
+                          {(b.id === "unique-ids" ? b.figures : b.figures.slice(0, 4)).map((f, n) => (
+                            <Figure key={`${f.label}-${n}`} figure={f} />
+                          ))}
                         </div>
                       )}
                       {b.id === "coverage" && <div className="mt-3"><CoverageGrid checks={d.coverage.checks} /></div>}

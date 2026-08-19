@@ -183,6 +183,7 @@ describe("token report supplemental evidence boundary", () => {
     const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
       .map((link) => link.getAttribute("href"));
     expect(hrefs).toEqual([
+      "#token-unique-ids",
       "#report-summary",
       "#report-risks",
       "#token-evidence",
@@ -193,6 +194,8 @@ describe("token report supplemental evidence boundary", () => {
       expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
     }
 
+    expect(container.querySelector("#token-unique-ids")?.textContent).toContain("2 bound unique-ids.");
+    expect(container.querySelector("#token-unique-ids")?.textContent).toContain("0x0000000000000000000000000000000000000001");
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).toContain("Finished checks");
     expect(container.textContent).toContain("Check next");

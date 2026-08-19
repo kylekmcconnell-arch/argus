@@ -449,3 +449,67 @@ describe("dossier sources and receipts", () => {
     expect(dossier.sources).toEqual([]);
   });
 });
+
+describe("token-native unique-id beat", () => {
+  it("leads with bound launched-product ids and does not use the company handle", () => {
+    const dossier = buildDossier({
+      handle: "@clutchmarkets",
+      display_name: "CLUTCH",
+      website: "https://clutch.markets/",
+      report: { composite_verdict: "CAUTION", governing_score: 61 },
+      projectToken: {
+        verified: true,
+        verification: "official_x",
+        name: "STONKBROKER",
+        symbol: "STONKBROKER",
+        coingeckoId: "stonkbroker",
+        address: "0xe934e36a439c94017b64a3fece66af12099abf50",
+        chain: "robinhood",
+        officialX: "ClutchMarkets",
+        homepage: "https://stonkbroker.example/",
+        sourceUrl: "https://www.coingecko.com/en/coins/stonkbroker",
+        capturedAt: "2026-08-19T12:00:00.000Z",
+      },
+      basicFacts: [],
+      checkRuns: [{ checkId: "identity-resolution", label: "Identity", status: "confirmed" }],
+      basicFactLeads: [],
+      providerFailures: [],
+    });
+    expect(dossier.beats[0]).toMatchObject({
+      id: "unique-ids",
+      label: "Bound unique-ids",
+      heading: "5 bound unique-ids.",
+    });
+    expect(dossier.beats[0].figures.map((f) => [f.label, f.value])).toEqual([
+      ["Contract address", "0xe934e36a439c94017b64a3fece66af12099abf50"],
+      ["Chain", "robinhood"],
+      ["CoinGecko id", "stonkbroker"],
+      ["Official X", "@ClutchMarkets"],
+      ["Official site", "stonkbroker.example"],
+    ]);
+    expect(dossier.beats[0].heading).not.toContain("CLUTCH");
+    expect(dossier.beats[0].figures.some((f) => f.value === "@clutchmarkets")).toBe(false);
+    expect(dossier.beats.find((b) => b.id === "subject")?.heading).toContain("@clutchmarkets");
+  });
+
+  it("does not invent a unique-id beat when the token is unbound", () => {
+    const dossier = buildDossier({
+      handle: "@clutchmarkets",
+      display_name: "CLUTCH",
+      website: "https://clutch.markets/",
+      report: { verdict: "CAUTION", score_total: 61 },
+      projectToken: {
+        verified: false,
+        address: "0xe934e36a439c94017b64a3fece66af12099abf50",
+        chain: "robinhood",
+        coingeckoId: "stonkbroker",
+      },
+      basicFacts: [],
+      checkRuns: [],
+      basicFactLeads: [],
+      providerFailures: [],
+    });
+    expect(dossier.beats.some((b) => b.id === "unique-ids")).toBe(false);
+    expect(JSON.stringify(dossier.beats[0])).not.toContain("0xe934e36a439c94017b64a3fece66af12099abf50");
+  });
+});

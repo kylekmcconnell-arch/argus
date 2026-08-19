@@ -647,6 +647,7 @@ describe("investigation exact sharing", () => {
     const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
       .map((link) => link.getAttribute("href"));
     expect(hrefs).toEqual([
+      "#token-unique-ids",
       "#report-summary",
       "#investigation-why",
       "#investigation-visuals",
@@ -985,5 +986,90 @@ describe("investigation exact sharing", () => {
       [address, undefined],
       "signed-panel-capability",
     );
+  });
+
+  it("leads a bound-token investigation with unique-ids then token chapters, two honest strips", () => {
+    render(investigation({
+      token: {
+        ...token(),
+        address: "0xe934e36a439c94017b64a3fece66af12099abf50",
+        chain: "robinhood",
+        symbol: "STONKBROKER",
+        name: "STONKBROKER",
+        projectX: "ClutchMarkets",
+        cg: { id: "stonkbroker", twitter: "ClutchMarkets", homepage: "https://stonkbroker.example/", listed: true, rank: 2103, mcapUsd: 2_000_000, marketCount: 1, cexCount: 0, cexNames: [], image: null, description: null },
+        axes: [
+          { key: "T5", label: "Trading authenticity", score: 5, weight: 12, rationale: "Recorded tape." },
+          { key: "T1", label: "Liquidity & lock", score: 20, weight: 24, rationale: "LP burned." },
+        ],
+      },
+      projectAccount: {
+        handle: "@clutchmarkets",
+        display_name: "CLUTCH",
+        avatar: "",
+        bio: "",
+        followers: "0",
+        joined: "",
+        identity_note: "",
+        headline: "Project account",
+        live: true,
+        notableFollowers: [],
+        contradictions: [],
+        projectToken: {
+          verified: true,
+          verification: "official_x",
+          name: "STONKBROKER",
+          symbol: "STONKBROKER",
+          coingeckoId: "stonkbroker",
+          rank: 2103,
+          address: "0xe934e36a439c94017b64a3fece66af12099abf50",
+          chain: "robinhood",
+          homepage: "https://stonkbroker.example/",
+          officialX: "ClutchMarkets",
+          sourceUrl: "https://www.coingecko.com/en/coins/stonkbroker",
+          capturedAt: "2026-08-19T12:00:00.000Z",
+        },
+        projectStrengthBands: {
+          P1_team_and_identity: { tier: "solid", minScore: 10, maxScore: 16, reasons: ["Two first-party named operators."] },
+        },
+        report: {
+          composite_verdict: "CAUTION",
+          governing_score: 61,
+          governing_role: "PROJECT",
+          identity_confidence: "Confirmed",
+          roles: ["PROJECT"],
+          role_reports: [{
+            role: "PROJECT",
+            score_total: 61,
+            axes: {
+              P1_team_and_identity: { score: 14, weight: 25, rationale: "Two first-party named operators." },
+            },
+          }],
+        },
+        evidence: { ventures: [], testimonials: [], advised: [], associates: [], wallets: [], promotions: [] },
+        graph: { nodes: [], edges: [] },
+        webTeam: [],
+        basicFacts: [],
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+    }));
+
+    const text = container.textContent ?? "";
+    const uniqueIdsAt = text.indexOf("Bound unique-ids");
+    const onchainAt = text.indexOf("Onchain health");
+    const teamChapterAt = text.indexOf("The people behind this are on the record.");
+    const accountStripAt = text.indexOf("The project account · @clutchmarkets");
+    const tokenStripAt = text.indexOf("The token · its own 100");
+    expect(uniqueIdsAt).toBeGreaterThan(-1);
+    expect(text).toContain("5 bound unique-ids.");
+    expect(text).toContain("0xe934e36a439c94017b64a3fece66af12099abf50");
+    expect(text).toContain("@ClutchMarkets");
+    expect(onchainAt).toBeGreaterThan(uniqueIdsAt);
+    expect(teamChapterAt).toBeGreaterThan(onchainAt);
+    expect(accountStripAt).toBeGreaterThan(-1);
+    expect(tokenStripAt).toBeGreaterThan(accountStripAt);
+    expect(text).toContain("Every dimension. Two honest scores.");
+    expect(text).not.toContain("Fourteen people");
+    const uniqueIdsSection = container.querySelector("#token-unique-ids")?.textContent ?? "";
+    expect(uniqueIdsSection).not.toContain("@clutchmarkets");
   });
 });

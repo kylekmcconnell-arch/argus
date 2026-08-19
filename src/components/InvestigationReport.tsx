@@ -71,6 +71,8 @@ import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { VerdictHero } from "./VerdictHero";
 import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { uniqueIdsForInvestigation } from "../lib/tokenNativeSpine";
+import { BoundUniqueIds } from "./BoundUniqueIds";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -1470,6 +1472,15 @@ export function InvestigationReport({
             links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
           />
 
+          <BoundUniqueIds
+            rows={uniqueIdsForInvestigation({
+              token,
+              projectToken: projectAccount?.projectToken?.verified === true
+                ? projectAccount.projectToken
+                : null,
+            })}
+          />
+
           {/* the editorial opening, earned: only a decision-ready report gets
               the Auric File hero. A not-ready report keeps leading with the
               readiness gate in the card grid below. */}
@@ -1673,16 +1684,16 @@ export function InvestigationReport({
               the dossier-beats layout here; it stays available as the
               standalone sharing format). */}
           <div className="af-doc">
+          <DimensionChapters
+            chapters={tokenDimensionChapters(token)}
+            checksHref="#investigation-methodology"
+          />
           {projectAccount?.projectStrengthBands && (
             <DimensionChapters
               chapters={personDimensionChapters(projectAccount.projectStrengthBands)}
               checksHref="#investigation-methodology"
             />
           )}
-          <DimensionChapters
-            chapters={tokenDimensionChapters(token)}
-            checksHref="#investigation-methodology"
-          />
           </div>
 
           {noticedSignals.length > 0 && (
@@ -1780,6 +1791,7 @@ export function InvestigationReport({
             sticky={false}
             label="Report story"
             items={[
+              { href: "#token-unique-ids" as const, label: "Unique-ids", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
               ...(token.axes?.length ? [{ href: "#composition" as const, label: "The composition", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> }] : []),
               { href: "#report-summary", label: "The short answer", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               ...(projectAccount?.intelligence ? [{ href: "#decision-intelligence" as const, label: "Deep dive", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> }] : []),

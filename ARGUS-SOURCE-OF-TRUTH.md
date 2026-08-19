@@ -146,6 +146,16 @@ recorded states only. The display name is not a bind key. First-party
 named team is not independently corroborated. Provenance colour is
 source-of-truth, not pass/fail.
 
+When a project token is verified, TokenReport, the investigation report,
+and the dossier lead with bound launched-product unique-ids (contract
+address, chain, CoinGecko id, official X, official site) and then the
+token chapters already named (Onchain health, The holders, The token,
+Code & security, The liquidity, Maturity & presence). Missing ids stay
+missing. The company or account score stays a separate strip. Founder,
+company, and launched-product unique-ids are not collapsed. Company
+titles are not transferred onto the token, and founder scores are not
+transferred onto the company handle.
+
 1. the source-backed investment case;
 2. what could break the thesis; and
 3. what the investor should verify next.

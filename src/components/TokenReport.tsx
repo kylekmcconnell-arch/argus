@@ -40,6 +40,7 @@ import {
   ClipboardText,
   Database,
   Graph,
+  IdentificationBadge,
   Plus,
   ShareNetwork,
   ShieldWarning,
@@ -52,6 +53,8 @@ import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { uniqueIdsFromTokenDossier } from "../lib/tokenNativeSpine";
+import { BoundUniqueIds } from "./BoundUniqueIds";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -406,6 +409,32 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
         <ReportDisclaimer className="mt-2 max-w-3xl" />
 
+        <BoundUniqueIds rows={uniqueIdsFromTokenDossier(d)} />
+
+        {/* the composition, then the token chapters. Unique-ids lead; the
+            account score never blends into this number. */}
+        <section id="composition" className="af-doc mt-10 scroll-mt-28">
+          <p className="af-sec-label">The composition</p>
+          <h2 className="af-h2 mt-3">{compositionHeadline(d.axes.length)}</h2>
+          <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
+        <ScoreComposition
+          rows={orderByPlainAxis(d.axes.map((a) => ({
+            axis: a.key,
+            label: plainAxisLabel(a.key, a.label),
+            score: a.score,
+            weight: a.weight,
+            rationale: a.rationale,
+            evidenceHref: `#dimension-${a.key}` as const,
+          })))}
+          totalScore={d.score}
+          capNote={d.capApplied ? `limited to ${d.score}` : null}
+          challengeAnchor={shareView ? null : "#token-challenge"}
+        />
+        </section>
+        <div className="af-doc">
+          <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
+        </div>
+
         {/* Decision layer: model output and evidence completeness are separate.
             A thinly-supported PASS must never read like an investment-ready clearance. */}
         <div className="panel tint-var tint-strong relative mt-4 overflow-hidden soft-shadow" style={{ "--tint": presentationColor } as React.CSSProperties}>
@@ -471,6 +500,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           <ReportCanvasSectionNav
             sticky={false}
             items={[
+              { href: "#token-unique-ids", label: "Unique-ids", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
+              ...(d.axes?.length ? [{ href: "#composition" as const, label: "The composition", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> }] : []),
               { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#report-risks", label: "Risks", icon: <ChartDonut size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#token-evidence", label: "Sources", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
@@ -542,32 +573,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified by a supported collector on <span className="capitalize">{d.chain}</span>. Those axes are scored conservatively; this report cannot claim that path is complete.
           </div>
         )}
-
-        {/* the composition: the file's table of contents, Auric File framing */}
-        <section id="composition" className="af-doc mt-10 scroll-mt-28">
-          <p className="af-sec-label">The composition</p>
-          <h2 className="af-h2 mt-3">{compositionHeadline(d.axes.length)}</h2>
-          <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
-        <ScoreComposition
-          rows={orderByPlainAxis(d.axes.map((a) => ({
-            axis: a.key,
-            label: plainAxisLabel(a.key, a.label),
-            score: a.score,
-            weight: a.weight,
-            rationale: a.rationale,
-            evidenceHref: `#dimension-${a.key}` as const,
-          })))}
-          totalScore={d.score}
-          capNote={d.capApplied ? `limited to ${d.score}` : null}
-          challengeAnchor={shareView ? null : "#token-challenge"}
-        />
-
-        </section>
-
-        {/* the reading spine: each weighted dimension as its own chapter */}
-        <div className="af-doc">
-          <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
-        </div>
 
         {/* panels */}
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
