@@ -1,10 +1,11 @@
 import type { DimensionChapter } from "../lib/dimensionChapters";
 
-/* The chapters the composition strip points into: one per weighted
-   dimension, in the standard scan-output voice. A serif judgment headline
-   with the score math beside it, the engine's rationale as the lead, and a
-   hairline fact ledger of what drove the score. Anchors are
-   #dimension-<axis> so the strip's "Read the evidence" lands here. */
+/* The chapters the composition strip points into, in the Auric File's exact
+   section anatomy: an OPEN hairline-ruled section (never a box), the mono
+   eyebrow, the big clamp-responsive serif judgment headline, the score math
+   at the baseline right, the lead prose, the hairline fact ledger, and the
+   back-to-composition pill. Anchors are #dimension-<axis> so the strip's
+   "Read the evidence" lands here. */
 
 const TONE_COLOR: Record<DimensionChapter["tone"], string> = {
   pass: "var(--color-pass)",
@@ -26,32 +27,28 @@ export function DimensionChapters({ chapters, checksHref, compositionHref = "#co
         <section
           key={chapter.axis}
           id={`dimension-${chapter.axis}`}
-          className="report-section story-chapter mt-7 scroll-mt-28"
+          className="af-sec scroll-mt-28"
           aria-label={chapter.eyebrow}
         >
-          <header className="report-section-heading">
-            <div>
-              <p className="eyebrow">{chapter.eyebrow}</p>
-              <h2 className="story-chapter-title mt-1 text-ink">{chapter.headline}</h2>
+          <div className="af-sec-head">
+            <div className="min-w-0">
+              <p className="af-sec-label">{chapter.eyebrow}</p>
+              <h2 className="af-h2 mt-2.5">{chapter.headline}</h2>
             </div>
-            <div className="mono shrink-0 self-end whitespace-nowrap pb-1 text-[11px] text-ink-faint">
-              <span className="text-[22px] font-medium tabular" style={{ color: TONE_COLOR[chapter.tone] }}>
-                {chapter.score}
-              </span>
-              {" "}/ {chapter.weight} pts
+            <div className="af-sec-score">
+              <span className="af-n" style={{ color: TONE_COLOR[chapter.tone] }}>{chapter.score}</span>
+              <span>/ {chapter.weight} pts</span>
             </div>
-          </header>
-          {chapter.lead && (
-            <p className="mt-3 max-w-[68ch] text-[13.5px] leading-relaxed text-ink-dim">{chapter.lead}</p>
-          )}
+          </div>
+          {chapter.lead && <p className="af-prose">{chapter.lead}</p>}
           {chapter.facts.length > 0 && (
-            <dl className="mt-3 max-w-xl">
+            <dl className="af-kv">
               {chapter.facts.map((fact) => (
-                <div key={fact.label} className="flex items-baseline justify-between gap-6 border-b border-line/60 py-2 first:border-t first:border-t-line">
-                  <dt className="text-[13px] text-ink-dim">{fact.label}</dt>
+                <div key={fact.label} className="af-kv-row">
+                  <dt className="af-kv-k">{fact.label}</dt>
                   <dd
-                    className="mono text-[12px] font-medium tabular"
-                    style={fact.tone ? { color: TONE_COLOR[fact.tone] } : undefined}
+                    className="af-kv-v"
+                    style={{ color: fact.tone ? TONE_COLOR[fact.tone] : "var(--color-ink)" }}
                   >
                     {fact.value}
                   </dd>
@@ -59,16 +56,11 @@ export function DimensionChapters({ chapters, checksHref, compositionHref = "#co
               ))}
             </dl>
           )}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <a
-              href={compositionHref}
-              className="mono inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-4 py-2 text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink-dim transition hover:border-signal hover:text-ink"
-            >
-              ↑ Back to composition
-            </a>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <a className="af-back" href={compositionHref}>↑ Back to composition</a>
             <a
               href={checksHref}
-              className="mono text-[10.5px] font-medium uppercase tracking-wider text-signal-lift underline-offset-2 hover:underline"
+              className="mono mt-[30px] text-[10.5px] font-medium uppercase tracking-wider text-signal-lift underline-offset-2 hover:underline"
             >
               All checks ↓
             </a>

@@ -80,10 +80,10 @@ function CaseColumn({ id, title, tone, items, emptyCopy, pushNote, challengeAnch
           {items.map((item, index) => {
             const label = plainDecisionText(item.label);
             return (
-              <li key={`${title}-${index}`} className="border-b border-line/60 py-3 pl-5 text-[13.5px] leading-relaxed text-ink" style={{ position: "relative" }}>
+              <li key={`${title}-${index}`} className="border-b border-line/60 py-3 pl-5 text-[15px] leading-relaxed text-ink" style={{ position: "relative" }}>
                 <span aria-hidden="true" className="absolute left-0 top-3" style={{ color: headerColor }}>–</span>
                 {label}
-                {item.detail && <span className="mt-0.5 block text-[12px] leading-snug text-ink-faint">{plainDecisionText(item.detail)}</span>}
+                {item.detail && <span className="mt-0.5 block text-[12.5px] leading-snug text-ink-faint">{plainDecisionText(item.detail)}</span>}
                 {pushable && (
                   <button
                     type="button"
