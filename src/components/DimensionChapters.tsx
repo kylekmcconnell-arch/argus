@@ -12,10 +12,12 @@ const TONE_COLOR: Record<DimensionChapter["tone"], string> = {
   fail: "var(--color-fail)",
 };
 
-export function DimensionChapters({ chapters, checksHref }: {
+export function DimensionChapters({ chapters, checksHref, compositionHref = "#composition" }: {
   chapters: DimensionChapter[];
   /** Where "All checks" points (the methodology checklist anchor). */
   checksHref: `#${string}`;
+  /** Where "Back to composition" returns (the strip's anchor). */
+  compositionHref?: `#${string}`;
 }) {
   if (!chapters.length) return null;
   return (
@@ -57,12 +59,20 @@ export function DimensionChapters({ chapters, checksHref }: {
               ))}
             </dl>
           )}
-          <a
-            href={checksHref}
-            className="mono mt-3 inline-block text-[10.5px] font-medium uppercase tracking-wider text-signal-lift underline-offset-2 hover:underline"
-          >
-            All checks ↓
-          </a>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <a
+              href={compositionHref}
+              className="mono inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-4 py-2 text-[10.5px] font-medium uppercase tracking-[0.12em] text-ink-dim transition hover:border-signal hover:text-ink"
+            >
+              ↑ Back to composition
+            </a>
+            <a
+              href={checksHref}
+              className="mono text-[10.5px] font-medium uppercase tracking-wider text-signal-lift underline-offset-2 hover:underline"
+            >
+              All checks ↓
+            </a>
+          </div>
         </section>
       ))}
     </div>

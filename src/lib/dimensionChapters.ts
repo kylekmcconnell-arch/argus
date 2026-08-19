@@ -28,6 +28,15 @@ export interface DimensionChapter {
   facts: ChapterFact[];
 }
 
+const COUNT_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+
+/** "Six" for 6; digits beyond twelve. For the composition headline. */
+export const countWord = (n: number): string => COUNT_WORDS[n] ?? String(n);
+
+/** "Six dimensions. One number." with the singular handled. */
+export const compositionHeadline = (n: number): string =>
+  `${countWord(n)} ${n === 1 ? "dimension" : "dimensions"}. One number.`;
+
 const money = (n?: number | null): string | null => {
   if (n == null || !Number.isFinite(n)) return null;
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
