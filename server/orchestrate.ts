@@ -42,7 +42,7 @@ import { enrichFirstPartyTeamAvatars } from "./adapters/teamEnrichment";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
-import { orientSubjectWithGrok, orientationHandleBound, orientationMentionLeads } from "./subjectOrientation";
+import { handlesMatch, orientSubjectWithGrok, orientationHandleBound, orientationMentionLeads, projectOrientationBound } from "./subjectOrientation";
 import { personChecks } from "../src/lib/scanChecklist";
 import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
 import { isOrganizationAccount } from "../src/lib/investorSubject";
@@ -1304,6 +1304,8 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     const h = t.handle ? norm(t.handle) : "";
     const n = norm(t.name);
     if (!h && !n) continue;
+    // Never list the audited subject handle as founder (or any role) of itself.
+    if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
     if (existing) {
       if (!existing.handle && t.handle) {
@@ -1840,6 +1842,9 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   const roles = new Set<SubjectClass>();
   let bioPrimaryProjectVerified = false;
   let investorBeyondBio = false;
+  // Unique-id: a PROJECT-bound handle is the brand/protocol account. Display
+  // name never binds a person. Founder facts describe some OTHER handle.
+  const projectBound = projectOrientationBound(evidence);
   // The bio is the first-party self-description, but an empty bio is not an
   // absent subject: the account's own posts are the same kind of evidence from
   // the same provider, so they classify when the bio says nothing.
@@ -1858,13 +1863,18 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
       && classification.subject_class === SubjectClass.PROJECT
       && classification.scores[SubjectClass.PROJECT] > classification.scores[SubjectClass.INVESTOR];
     profileRoles.forEach((role) => {
+      // classifySubject(bio) founder/CEO/"building" language describes a person.
+      // It must not put FOUNDER methodology on a PROJECT-bound brand handle.
+      if (role === SubjectClass.FOUNDER && projectBound) return;
       if (role !== SubjectClass.PROJECT || projectProfileVerified) roles.add(role);
     });
   }
   for (const venture of evidence.ventures) {
     if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;
     const role = (venture.role ?? "").toLowerCase();
-    if (/founder|co-?founder|\bceo\b|\bcto\b|creator|owner/.test(role)) roles.add(SubjectClass.FOUNDER);
+    if (/founder|co-?founder|\bceo\b|\bcto\b|creator|owner/.test(role)) {
+      if (!projectBound) roles.add(SubjectClass.FOUNDER);
+    }
     else if (/advisor|adviser|board/.test(role)) roles.add(SubjectClass.ADVISOR);
     // Specific capital-allocation titles are checked before generic employment
     // words so Investment Director and Portfolio Manager do not collapse into
@@ -1891,7 +1901,8 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     if (fact.artifact_verified !== true) continue;
     if (fact.status !== "verified" && fact.status !== "corroborated") continue;
     if (!organizationSubject && personIdentityBound && (fact.predicate === "founder" || fact.predicate === "founded" || fact.predicate === "executive")) {
-      roles.add(SubjectClass.FOUNDER);
+      // A verified founder fact is about a person, not this PROJECT-bound handle.
+      if (!projectBound) roles.add(SubjectClass.FOUNDER);
     }
     if (
       !organizationSubject
@@ -1964,6 +1975,14 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     } else if (kind === "INVESTOR") {
       roles.add(SubjectClass.INVESTOR);
     }
+  }
+  // PROJECT-bound unique-id is final for this handle: it is the brand account,
+  // never also the founder person. Personal orientation FOUNDER stays FOUNDER.
+  // Other bio-classified methodologies (KOL / INVESTOR) still govern.
+  if (projectBound) {
+    roles.delete(SubjectClass.FOUNDER);
+    const other = [...roles].filter((role) => role !== SubjectClass.PROJECT);
+    if (other.length === 0) roles.add(SubjectClass.PROJECT);
   }
   return [...roles];
 }
@@ -2105,6 +2124,8 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
   const people = facts.filter((fact) => fact.predicate === "founder" || fact.predicate === "executive");
   for (const fact of people) {
     const citedHandle = citedPersonHandle(fact);
+    if (handlesMatch(fact.value, ctx.handle)) continue;
+    if (citedHandle && handlesMatch(citedHandle, ctx.handle)) continue;
     const existing = roster.find((member) =>
       norm(member.name) === norm(fact.value)
       || Boolean(citedHandle && member.handle && normHandle(member.handle) === citedHandle));

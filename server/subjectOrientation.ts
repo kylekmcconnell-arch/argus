@@ -5,7 +5,7 @@
 
 import { grokChat } from "../api/_llm";
 import { env } from "./config";
-import type { CollectedEvidence, SubjectOrientation } from "../src/data/evidence";
+import type { CollectedEvidence, LaunchedProductLead, SubjectOrientation } from "../src/data/evidence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
 import { grokSearch } from "./adapters/x";
 
@@ -63,8 +63,28 @@ const ORIENTATION_SCHEMA: Record<string, unknown> = {
         required: ["handle", "roleHint", "quote"],
       },
     },
+    relatedFounderHandle: { type: ["string", "null"] },
+    relatedCompanyHandle: { type: ["string", "null"] },
+    relatedCompanyDomain: { type: ["string", "null"] },
+    launchedProducts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          handle: { type: "string" },
+          domain: { type: "string" },
+          tokenTicker: { type: "string" },
+        },
+      },
+    },
   },
-  required: ["kind", "what", "audience", "boundHandle", "boundDomain", "sourceUrls", "mentionedHandles"],
+  required: [
+    "kind", "what", "audience", "boundHandle", "boundDomain", "sourceUrls",
+    "mentionedHandles", "relatedFounderHandle", "relatedCompanyHandle",
+    "relatedCompanyDomain", "launchedProducts",
+  ],
 };
 
 const ORIENTATION_SYSTEM = [
@@ -80,6 +100,10 @@ const ORIENTATION_SYSTEM = [
   "Return boundHandle as the exact packet handle. Return boundDomain only when it is the packet website host; otherwise null.",
   "sourceUrls must be packet URLs you actually used.",
   "mentionedHandles: @handles that appear in official posts or live x_search of THIS subject, each with a verbatim quote from that artifact and optional roleHint. Never display-name-only. Empty array if none.",
+  "Keep founder person, company/project brand, and launched product as separate unique-ids. Display name never binds.",
+  "relatedFounderHandle: another @handle seen on official X/site as founder of THIS subject, or null. Never the subject handle.",
+  "relatedCompanyHandle / relatedCompanyDomain: if THIS subject is a person, the company they founded, or null. When kind is PROJECT, relatedCompanyHandle must not equal the subject handle.",
+  "launchedProducts: products or tokens the COMPANY launched that are not aliases of this subject. Each may have name, handle, domain, tokenTicker. Do not invent domains. Do not reuse the subject's handle or official domain as the product identity.",
   "Return only the orientation JSON.",
 ].join(" ");
 
@@ -192,6 +216,76 @@ function parseMentionedHandles(
   return out.length ? out : undefined;
 }
 
+const TICKER_MAX = 10;
+
+function parseRelatedHandle(raw: unknown, subjectHandle: string, dropIfSubject: boolean): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!looksLikeHandle(trimmed)) return null;
+  const key = normalizeHandle(trimmed);
+  if (!key) return null;
+  if (dropIfSubject && key === normalizeHandle(subjectHandle)) return null;
+  return `@${key}`;
+}
+
+function parseRelatedDomain(raw: unknown, packet: OrientationPacket): string | null {
+  const domain = normalizeDomain(typeof raw === "string" ? raw : null);
+  if (!domain) return null;
+  // Invented: named a host that is not the packet official site.
+  if (domain !== packet.websiteHost) return null;
+  return domain;
+}
+
+function parseTokenTicker(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const ticker = raw.trim().replace(/^\$/, "").toUpperCase();
+  if (!/^[A-Z][A-Z0-9]{1,9}$/.test(ticker) || ticker.length > TICKER_MAX) return undefined;
+  return ticker;
+}
+
+function parseLaunchedProducts(
+  raw: unknown,
+  packet: OrientationPacket,
+): LaunchedProductLead[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const subject = normalizeHandle(packet.handle);
+  const out: LaunchedProductLead[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    const name = typeof rec.name === "string" ? rec.name.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    const handleRaw = typeof rec.handle === "string" ? rec.handle.trim() : "";
+    const handle = looksLikeHandle(handleRaw) ? normalizeHandle(handleRaw) : "";
+    // Subject handle cannot be the launched product.
+    if (handle && handle === subject) continue;
+    const namedDomain = normalizeDomain(typeof rec.domain === "string" ? rec.domain : null);
+    const tokenTicker = parseTokenTicker(rec.tokenTicker);
+    const productHandle = handle ? `@${handle}` : undefined;
+    // Packet official domain is the subject's identity — never a product id.
+    // A different well-formed host is a related lead (not a subject bind).
+    // A row whose only unique-id is an invented/subject domain is dropped
+    // and does not UNKNOWN the subject.
+    const productDomain = namedDomain && namedDomain !== packet.websiteHost
+      ? namedDomain
+      : undefined;
+    if (!name && !productHandle && !tokenTicker && !productDomain) continue;
+    if (!productHandle && !tokenTicker && !name && productDomain) continue;
+    const key = (productHandle || productDomain || tokenTicker || name).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const lead: LaunchedProductLead = {};
+    if (name) lead.name = name;
+    if (productHandle) lead.handle = productHandle;
+    if (productDomain) lead.domain = productDomain;
+    if (tokenTicker) lead.tokenTicker = tokenTicker;
+    if (!lead.handle && !lead.domain && !lead.tokenTicker && !lead.name) continue;
+    out.push(lead);
+    if (out.length >= 6) break;
+  }
+  return out.length ? out : undefined;
+}
+
 function unknownOrientation(
   packet: OrientationPacket,
   what: string,
@@ -222,6 +316,14 @@ export function orientationHandleBound(evidence: CollectedEvidence): boolean {
     && handlesMatch(orientation.boundHandle, evidence.profile.handle);
 }
 
+/** Brand-account unique-id: PROJECT kind + twitterapi handle bind + official domain. */
+export function projectOrientationBound(evidence: CollectedEvidence): boolean {
+  const orientation = evidence.subjectOrientation;
+  return orientation?.kind === "PROJECT"
+    && Boolean(orientation.boundDomain)
+    && orientationHandleBound(evidence);
+}
+
 /** Reverse-role-shaped leads. Unique-id confirmation still required downstream. */
 export function orientationMentionLeads(orientation: SubjectOrientation | null | undefined): Array<{
   name: string;
@@ -232,7 +334,7 @@ export function orientationMentionLeads(orientation: SubjectOrientation | null |
   source: string;
   sourceUrl: string;
 }> {
-  return (orientation?.mentionedHandles ?? []).map((mention) => {
+  const leads = (orientation?.mentionedHandles ?? []).map((mention) => {
     const handle = mention.handle.startsWith("@") ? mention.handle : `@${mention.handle}`;
     return {
       name: handle,
@@ -244,6 +346,23 @@ export function orientationMentionLeads(orientation: SubjectOrientation | null |
       sourceUrl: `https://x.com/${normalizeHandle(handle)}`,
     };
   });
+  const founder = orientation?.relatedFounderHandle;
+  if (founder && looksLikeHandle(founder)) {
+    const handle = founder.startsWith("@") ? founder : `@${founder}`;
+    const key = normalizeHandle(handle);
+    if (key && !leads.some((lead) => normalizeHandle(lead.handle) === key)) {
+      leads.push({
+        name: handle,
+        handle,
+        role: "founder",
+        kind: "team" as const,
+        evidence: "named as founder of this subject on official X or site",
+        source: "orientation-live-x",
+        sourceUrl: `https://x.com/${key}`,
+      });
+    }
+  }
+  return leads;
 }
 
 export function buildOrientationPacket(
@@ -295,8 +414,17 @@ export function parseOrientation(raw: unknown, packet: OrientationPacket): Subje
   const claimedHandle = typeof obj.boundHandle === "string" ? obj.boundHandle.trim() : "";
   const namedDomain = normalizeDomain(typeof obj.boundDomain === "string" ? obj.boundDomain : null);
   const mentionedHandles = parseMentionedHandles(obj.mentionedHandles, packet);
+  const relatedFounderHandle = parseRelatedHandle(obj.relatedFounderHandle, packet.handle, true);
+  const relatedCompanyHandle = parseRelatedHandle(
+    obj.relatedCompanyHandle,
+    packet.handle,
+    kindRaw === "PROJECT",
+  );
+  const relatedCompanyDomain = parseRelatedDomain(obj.relatedCompanyDomain, packet);
+  const launchedProducts = parseLaunchedProducts(obj.launchedProducts, packet);
 
-  // A domain Grok named that is not the packet website is a hallucination.
+  // A domain Grok named as THIS subject's bind that is not the packet website
+  // is a hallucination. Related-row invented domains never UNKNOWN the subject.
   if (namedDomain && namedDomain !== packet.websiteHost) {
     return unknownOrientation(packet, what, audience, sourceUrls, mentionedHandles);
   }
@@ -323,6 +451,10 @@ export function parseOrientation(raw: unknown, packet: OrientationPacket): Subje
     boundDomain: domainBound ? packet.websiteHost : null,
     sourceUrls,
     ...(mentionedHandles?.length ? { mentionedHandles } : {}),
+    ...(relatedFounderHandle ? { relatedFounderHandle } : {}),
+    ...(relatedCompanyHandle ? { relatedCompanyHandle } : {}),
+    ...(relatedCompanyDomain ? { relatedCompanyDomain } : {}),
+    ...(launchedProducts?.length ? { launchedProducts } : {}),
   };
 }
 

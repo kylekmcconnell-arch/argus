@@ -188,6 +188,42 @@ describe("parseOrientation bind rules", () => {
       { handle: "@alice", roleHint: "co-founder", quote: "Welcome co-founder @alice to the team." },
     ]);
   });
+
+  it("drops a relatedFounderHandle that equals the subject handle", () => {
+    const parsed = parseOrientation({
+      ...grokProject(),
+      relatedFounderHandle: "@multihopper",
+      relatedCompanyHandle: "@multihopper",
+    }, packet());
+    expect(parsed?.kind).toBe("PROJECT");
+    expect(parsed?.relatedFounderHandle).toBeUndefined();
+    expect(parsed?.relatedCompanyHandle).toBeUndefined();
+  });
+
+  it("does not let a launched product domain overwrite subject boundDomain", () => {
+    const parsed = parseOrientation({
+      ...grokProject(),
+      launchedProducts: [
+        { name: "Launched Product", handle: "@launchedproduct", domain: "launched-product.example" },
+      ],
+    }, packet());
+    expect(parsed?.kind).toBe("PROJECT");
+    expect(parsed?.boundDomain).toBe("multihopper.com");
+    expect(parsed?.launchedProducts).toEqual([
+      { name: "Launched Product", handle: "@launchedproduct", domain: "launched-product.example" },
+    ]);
+  });
+
+  it("drops an invented domain on a related product without UNKNOWNing the subject", () => {
+    const parsed = parseOrientation({
+      ...grokProject(),
+      launchedProducts: [{ domain: "uniswap.org" }],
+    }, packet());
+    expect(parsed?.kind).toBe("PROJECT");
+    expect(parsed?.boundHandle).toBe("@multihopper");
+    expect(parsed?.boundDomain).toBe("multihopper.com");
+    expect(parsed?.launchedProducts).toBeUndefined();
+  });
 });
 
 describe("orientationMentionLeads", () => {
@@ -203,6 +239,21 @@ describe("orientationMentionLeads", () => {
       role: "co-founder",
       kind: "team",
       evidence: "Welcome co-founder @alice to the team.",
+      source: "orientation-live-x",
+      sourceUrl: "https://x.com/alice",
+    }]);
+  });
+
+  it("exposes a related founder handle as a confirm-later team lead", () => {
+    const leads = orientationMentionLeads(grokProject({
+      relatedFounderHandle: "@alice",
+    }));
+    expect(leads).toEqual([{
+      name: "@alice",
+      handle: "@alice",
+      role: "founder",
+      kind: "team",
+      evidence: "named as founder of this subject on official X or site",
       source: "orientation-live-x",
       sourceUrl: "https://x.com/alice",
     }]);
@@ -231,6 +282,34 @@ describe("orientSubjectWithGrok", () => {
       kind: "PROJECT",
       boundHandle: "@multihopper",
       boundDomain: "multihopper.com",
+    }));
+  });
+
+  it("parses a mocked Grok PROJECT graph with a different founder and launched product", async () => {
+    const evidence = stubEvidence();
+    const oriented = await orientSubjectWithGrok(evidence, {
+      siteExcerpt: `live site: "${MULTIHOPPER_TITLE}"`,
+      chat: async () => ({
+        ok: true,
+        status: 200,
+        data: {},
+        text: JSON.stringify({
+          ...grokProject(),
+          relatedFounderHandle: "@alice",
+          launchedProducts: [
+            { name: "Launched Product", handle: "@launchedproduct", domain: "launched-product.example" },
+          ],
+        }),
+      }),
+    });
+    expect(oriented).toEqual(expect.objectContaining({
+      kind: "PROJECT",
+      boundHandle: "@multihopper",
+      boundDomain: "multihopper.com",
+      relatedFounderHandle: "@alice",
+      launchedProducts: [
+        { name: "Launched Product", handle: "@launchedproduct", domain: "launched-product.example" },
+      ],
     }));
   });
 
