@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import { getCost, withCostLedger } from "../cost";
 import type { CollectContext } from "./types";
-import { collectProjectTokenIdentity, PLATFORM_CHAIN, siteContractCandidates } from "./projectToken";
+import { collectProjectTokenIdentity, launchedProductSearchQueries, PLATFORM_CHAIN, projectRegistrySearchQueries, siteContractCandidates } from "./projectToken";
 
 const SOLANA_TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const OTHER_TOKEN = "So11111111111111111111111111111111111111112";
@@ -836,6 +836,7 @@ const STONKBROKER_HTML = `<a href="https://robinhoodchain.blockscout.com/address
       <span>0x0000000000000000000000000000000000000000</span>
       <span>0xE934E36A439C94017B64A3FECE66AF12099ABF50</span>`;
 
+
 describe("investigation contract bind", () => {
   it("treats robinhood as a canonical CoinGecko platform chain", () => {
     expect(PLATFORM_CHAIN.robinhood).toBe("robinhood");
@@ -966,6 +967,115 @@ describe("investigation contract bind", () => {
     });
     expect(evidence.projectToken).toBeUndefined();
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("unverified-lead.example"))).toBe(false);
+  });
+});
+
+describe("launched-product CoinGecko recall", () => {
+  it("builds registry queries from launched product ticker and name, not only CLUTCH", () => {
+    expect(launchedProductSearchQueries([
+      { name: "StonkBrokers", tokenTicker: "$STONKBROKER", domain: "stonkbrokers.cash" },
+    ])).toEqual(["STONKBROKER", "StonkBrokers"]);
+    expect(projectRegistrySearchQueries("CLUTCH", [
+      { name: "StonkBrokers", tokenTicker: "STONKBROKER" },
+    ])).toEqual(["CLUTCH", "STONKBROKER", "StonkBrokers"]);
+  });
+
+  it("binds $STONKBROKER from CoinGecko when the company name search is empty and official X matches", async () => {
+    const { ctx, evidence } = context("@ClutchMarkets", "CLUTCH", "https://clutch.markets/");
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "Clutch Markets launched StonkBrokers",
+      audience: "",
+      boundHandle: "clutchmarkets",
+      boundDomain: "clutch.markets",
+      sourceUrls: ["https://clutch.markets/"],
+      launchedProducts: [{ name: "StonkBrokers", tokenTicker: "STONKBROKER", domain: "stonkbrokers.cash" }],
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search?")) {
+        const query = decodeURIComponent((url.split("query=")[1] ?? "").split("&")[0] ?? "");
+        if (query.toLowerCase() === "clutch") return json({ coins: [] });
+        if (query.toLowerCase() === "stonkbroker" || query.toLowerCase() === "stonkbrokers") {
+          return json({ coins: [{ id: "stonkbroker", name: "StonkBroker", symbol: "STONKBROKER", market_cap_rank: 576 }] });
+        }
+        throw new Error(`unexpected search ${query}`);
+      }
+      if (url.includes("/coins/stonkbroker?")) {
+        return json({
+          id: "stonkbroker",
+          name: "StonkBroker",
+          symbol: "stonkbroker",
+          asset_platform_id: "robinhood",
+          market_cap_rank: 576,
+          last_updated: "2026-08-19T20:00:00.000Z",
+          platforms: { robinhood: STONKBROKER },
+          links: { twitter_screen_name: "ClutchMarkets", homepage: ["https://stonkbrokers.cash/marketplace"] },
+          market_data: { current_price: { usd: 0.017 }, market_cap: { usd: 27_000_000 } },
+        });
+      }
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("official_x"),
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      symbol: "STONKBROKER",
+      coingeckoId: "stonkbroker",
+      address: STONKBROKER,
+      chain: "robinhood",
+      officialX: "@ClutchMarkets",
+    });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+    }));
+  });
+
+  it("does not bind a launched-product CoinGecko hit whose official X is someone else", async () => {
+    const { ctx, evidence } = context("@ClutchMarkets", "CLUTCH", "https://clutch.markets/");
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "lab",
+      audience: "",
+      boundHandle: "clutchmarkets",
+      boundDomain: "clutch.markets",
+      sourceUrls: ["https://clutch.markets/"],
+      launchedProducts: [{ name: "StonkBrokers", tokenTicker: "STONKBROKER" }],
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        return json({ coins: [{ id: "stonkbroker", name: "StonkBroker", symbol: "STONKBROKER", market_cap_rank: 576 }] });
+      }
+      if (url.includes("/coins/stonkbroker?")) {
+        return json({
+          id: "stonkbroker",
+          name: "StonkBroker",
+          symbol: "stonkbroker",
+          asset_platform_id: "robinhood",
+          platforms: { robinhood: STONKBROKER },
+          links: { twitter_screen_name: "SomeOtherDesk", homepage: ["https://unrelated.example/"] },
+          market_data: { current_price: { usd: 0.017 } },
+        });
+      }
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      if (url === "https://clutch.markets/") return new Response("<html><p>CLUTCH markets</p></html>", { status: 200 });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("no identity-bound project token"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
   });
 });
 

@@ -156,6 +156,39 @@ export function tokenSearchQueries(raw: string): string[] {
   return queries;
 }
 
+const MAX_LAUNCHED_PRODUCT_QUERIES = 4;
+
+/** CoinGecko / DexScreener queries from first-pass launched products, not the company display name. */
+export function launchedProductSearchQueries(
+  products: ReadonlyArray<{ name?: string; tokenTicker?: string }> | undefined,
+): string[] {
+  if (!products?.length) return [];
+  const queries: string[] = [];
+  const push = (candidate: string) => {
+    const trimmed = candidate.trim().replace(/^\$+/, "");
+    if (trimmed.length < 3) return;
+    if (queries.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) return;
+    queries.push(trimmed);
+  };
+  for (const product of products.slice(0, 3)) {
+    if (product.tokenTicker) push(product.tokenTicker);
+    if (product.name) push(product.name);
+    if (queries.length >= MAX_LAUNCHED_PRODUCT_QUERIES) break;
+  }
+  return queries.slice(0, MAX_LAUNCHED_PRODUCT_QUERIES);
+}
+
+export function projectRegistrySearchQueries(
+  displayName: string,
+  products?: ReadonlyArray<{ name?: string; tokenTicker?: string }>,
+): string[] {
+  const queries = tokenSearchQueries(displayName);
+  for (const extra of launchedProductSearchQueries(products)) {
+    if (!queries.some((existing) => existing.toLowerCase() === extra.toLowerCase())) queries.push(extra);
+  }
+  return queries;
+}
+
 const normalizeHandle = (value: string): string => value.trim().replace(/^@/, "").toLowerCase();
 
 const sameAddress = (left: string, right: string): boolean => left.toLowerCase() === right.toLowerCase();
@@ -1062,8 +1095,12 @@ function historyCoverageNote(history: ProjectTokenSnapshot["history"]): string {
 
 export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<AdapterRunResult> {
   const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
+  const registryQueries = projectRegistrySearchQueries(
+    ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""),
+    ctx.evidence.subjectOrientation?.launchedProducts,
+  );
   const seeded = parseSeededContract(ctx);
-  if (query.length < 2 && !seeded) return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
+  if (!registryQueries.length && !seeded) return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
 
   const registryHomepages: string[] = [];
   type SelectedToken = {
@@ -1105,9 +1142,21 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     }
   }
 
-  if (!selected && query.length >= 2) {
-    search = await coinSearch(query);
-    candidates = search ? rankedCandidates(query, search) : [];
+  if (!selected && registryQueries.length) {
+    const seenIds = new Set<string>();
+    let anySearchCompleted = false;
+    for (const registryQuery of registryQueries) {
+      const rows = await coinSearch(registryQuery);
+      if (rows === null) continue;
+      anySearchCompleted = true;
+      search = rows;
+      for (const row of rankedCandidates(registryQuery, rows)) {
+        if (seenIds.has(row.id)) continue;
+        seenIds.add(row.id);
+        candidates.push(row);
+      }
+    }
+    if (!anySearchCompleted) search = null;
     detailAttempts += candidates.length;
     inspected = await Promise.all(candidates.map(async (candidate) => {
       const details = await coinDetails(candidate.id);
@@ -1133,9 +1182,7 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     // an identity-bound match: DexScreener's search for "Greenwood Finance"
     // does not return the token named "Greenwood" at all. Only recall widens;
     // the identity gate is unchanged.
-    const dexQueries = query.length >= 2
-      ? tokenSearchQueries(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""))
-      : [];
+    const dexQueries = registryQueries;
     let dexFallback: DexFallbackResult = {
       state: "empty",
       attempts: 0,
@@ -1221,10 +1268,10 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     }
 
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
-    if ((query.length >= 2 && !search) || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
+    if ((registryQueries.length > 0 && !search) || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
       const gaps = [
         contractLookupFailed ? "CoinGecko contract lookup failed" : null,
-        query.length >= 2 && !search ? "CoinGecko search failed" : null,
+        registryQueries.length > 0 && !search ? "CoinGecko search failed" : null,
         coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
         dexSearchEverFailed ? "DexScreener project search failed" : null,
       ].filter((part): part is string => Boolean(part));
