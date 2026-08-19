@@ -32,7 +32,7 @@ import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cos
 import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
-import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
@@ -1024,6 +1024,10 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // where the project's own surfaces never name anyone but the founder's
     // bio, a press piece, or an AI answer does.
     findRoleClaimants(ctx.handle, ctx.evidence.profile.display_name, domain),
+    // twitterapi reverse-bio: mentions / followings / followers / tweet search
+    // for H, then live bios. Official posts often never name anyone. This lane
+    // does not consult Serper/Grok, so founder finding survives web-search down.
+    discoverReverseBioFromTwitterapi(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.bio),
   ]);
 
   const claims = await claimsPromise;
@@ -1098,7 +1102,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // is where the team page actually lives — mine it like Site recon would.
   // discoverAffiliations now covers the reverse-mention angle too (was a second
   // Grok search call — merged to halve intake search spend).
-  const [bySubject, people, siteTeam, pageTeam, operatorTeam, amplifiedTeam, reverseTeam] = await discoveryPromise;
+  const [bySubject, people, siteTeam, pageTeam, operatorTeam, amplifiedTeam, reverseTeam, reverseBioTwitter] = await discoveryPromise;
 
   // Reverse-search leads are model output until the claimed person's LIVE bio
   // is fetched and really carries the claim. A confirmed bio is a first-party
@@ -1119,13 +1123,22 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // own X content, and a deterministic post role-word scan (founder/CEO/CTO...).
   // Named-only people are KEPT here (a real name + role is signal even with no
   // handle to audit) — this is what a plain handle audit used to drop.
-  const postRoleTeam = scanPostsForRoles(posts, ctx.evidence.profile.display_name);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   // MERGE duplicates instead of dropping them: the team page gives the
   // authoritative name+role but no links; Grok gives the same person WITH their
   // @handle/LinkedIn. Keep the first occurrence and fill its missing fields from
   // later duplicates, so a page-roster name still gets its identity links.
   const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
+  const namedCorpus = [...posts, ...corpus.teamSignalPosts];
+  const officialOrgs = officialXNamedOrgs(namedCorpus).filter((org) => norm(org.handle) && norm(org.handle) !== norm(ctx.handle));
+  const orgKeys = new Set(officialOrgs.map((org) => norm(org.handle)));
+  // Official twitterapi corpus naming @handles as founder/co-founder/team.
+  // Unique-id is the handle. Independent of Serper.
+  const postRoleTeam = officialXNamedTeam(namedCorpus, ctx.evidence.profile.display_name, ctx.handle)
+    .filter((member) => {
+      const h = norm(member.handle);
+      return !!h && h !== norm(ctx.handle) && !orgKeys.has(h);
+    });
   const byHandle = new Map<string, (typeof webTeam)[number]>();
   const byName = new Map<string, (typeof webTeam)[number]>();
   // Provider-backed management rows may already be present before the website
@@ -1209,20 +1222,42 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // swaps the model's paraphrase for the fetched artifact's own words.
     ...reverseTeam.map((member) => {
       const claim = member.handle ? reverseBioClaims.get(member.handle.replace(/^@/, "").toLowerCase()) : undefined;
-      return {
-        ...member,
-        ...(claim ? {
+      const handle = member.handle?.replace(/^@/, "");
+      if (claim && handle) {
+        return {
+          ...member,
           role: claim.role,
           evidence: `their current X bio states "${claim.phrase}"`,
-        } : {}),
+          sourceUrl: member.sourceUrl ?? `https://x.com/${handle}`,
+          evidence_origin: "deterministic" as const,
+          artifact_verified: true,
+          provider: "twitterapi",
+          identity_link_evidence_origin: "deterministic" as const,
+          projects_evidence_origin: "model_lead" as const,
+          handleProvenance: "subject_first_party" as const,
+        };
+      }
+      return {
+        ...member,
         evidence_origin: "model_lead" as const,
         artifact_verified: false,
         provider: "reverse-role-search",
-        identity_link_evidence_origin: claim ? "deterministic" as const : "model_lead" as const,
+        identity_link_evidence_origin: "model_lead" as const,
         projects_evidence_origin: "model_lead" as const,
         handleProvenance: undefined as "subject_first_party" | undefined,
       };
     }),
+    // Reverse-bio twitterapi: the claimant's own bio @-mentions this subject
+    // next to founder/COO/CEO/"we built @H" language. Handle is the unique id.
+    ...reverseBioTwitter.team.map((member) => ({
+      ...member,
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic" as const,
+      projects_evidence_origin: "model_lead" as const,
+      handleProvenance: member.handle ? "subject_first_party" as const : undefined,
+    })),
   ];
   for (const t of teamCandidates) {
     const h = t.handle ? norm(t.handle) : "";
@@ -1285,6 +1320,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       name: t.name,
       handle: t.handle,
       role: t.role,
+      kind: "kind" in t && (t.kind === "org" || t.kind === "person") ? t.kind : "person" as const,
       linkedin: t.linkedin,
       evidence: t.evidence,
       source: t.source ?? "X content",
@@ -1300,6 +1336,58 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
     if (n) byName.set(n, rec);
+  }
+
+  // Linked orgs/funds/incubators named next to org language in founder or
+  // project bios. They are associates, never founder people (a fund on webTeam
+  // would inflate P1 namedLeaderCount).
+  const linkedOrgs = [...officialOrgs, ...reverseBioTwitter.orgs];
+  if (linkedOrgs.length) {
+    const haveAssoc = new Set(ctx.evidence.associates.map((a) => a.associate_handle.replace(/^@/, "").toLowerCase()));
+    const personKeys = new Set(webTeam.map((m) => (m.handle ?? "").replace(/^@/, "").toLowerCase()).filter(Boolean));
+    const addedOrgs: string[] = [];
+    for (const org of linkedOrgs) {
+      const key = org.handle.replace(/^@/, "").toLowerCase();
+      if (!key || key === norm(ctx.handle) || haveAssoc.has(key) || personKeys.has(key)) continue;
+      haveAssoc.add(key);
+      if (!byHandle.has(key)) {
+        const orgRow = {
+          name: org.name,
+          handle: org.handle,
+          role: org.role,
+          kind: "org" as const,
+          evidence: org.evidence,
+          source: org.source,
+          sourceUrl: org.sourceUrl,
+          evidence_origin: "deterministic" as const,
+          artifact_verified: true,
+          provider: "twitterapi",
+          identity_link_evidence_origin: "deterministic" as const,
+          handleProvenance: "subject_first_party" as const,
+        };
+        webTeam.push(orgRow);
+        byHandle.set(key, orgRow);
+      }
+      ctx.evidence.associates.push({
+        associate_handle: org.handle,
+        relation: org.role,
+        notes: org.evidence,
+        evidence_url: org.sourceUrl,
+        provider: "twitterapi",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      });
+      addedOrgs.push(org.handle);
+    }
+    if (addedOrgs.length) {
+      ctx.emit({
+        phase: "P1 · Team",
+        label: "Linked orgs",
+        detail: `Bound ${addedOrgs.length} org/fund/incubator handle${addedOrgs.length === 1 ? "" : "s"} from official posts or founder/project bios: ${addedOrgs.slice(0, 6).join(", ")}.`,
+        source: "twitterapi",
+        tone: "good",
+      });
+    }
   }
 
   // PRIOR LAUNCHES: a launchpad token's risk lives in the operator's history,
@@ -1379,10 +1467,14 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     || postRoleTeam.length > 0
     || operatorTeam.length > 0
     || amplifiedTeam.length > 0
+    || reverseBioTwitter.team.length > 0
     || webTeam.some((t) => t.artifact_verified === true && norm(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
     for (const member of webTeam) {
+      // Reverse-bio / follow / amplify first-party handles must survive even
+      // when the official account never named anyone and no domain is bound.
+      if (member.handleProvenance === "subject_first_party") continue;
       member.evidence_origin = "model_lead";
       member.artifact_verified = false;
       member.identity_link_evidence_origin = "model_lead";
@@ -1453,7 +1545,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // Only directly fetched first-party team pages and deterministic role scans
     // can raise identity confidence. Grok web/X results remain useful leads in
     // the roster, but cannot confirm the very identity it was asked to discover.
-    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam].filter((candidate) =>
+    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam, ...reverseBioTwitter.team, ...operatorTeam, ...amplifiedTeam].filter((candidate) =>
       webTeam.some((member) =>
         (!!candidate.handle && norm(candidate.handle) === norm(member.handle)) ||
         (!!candidate.name && norm(candidate.name) === norm(member.name)),

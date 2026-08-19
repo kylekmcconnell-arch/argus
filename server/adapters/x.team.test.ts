@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scanPostsForRoles } from "./x";
+import { officialXNamedOrgs, officialXNamedTeam, scanPostsForRoles } from "./x";
 
 describe("deterministic project-team post scan", () => {
   it("binds a founder role to the adjacent person handle", () => {
@@ -56,5 +56,82 @@ describe("deterministic project-team post scan", () => {
 
     expect(people.map(({ handle }) => handle)).toEqual(["@weremeow", "@sssionggg"]);
     expect(people.every(({ role }) => role === "team member")).toBe(true);
+  });
+
+  it("binds every handle in a project-owned plural co-founder list and stops at a colon", () => {
+    const people = scanPostsForRoles([
+      "Joining our co-founders@alice_founder and@bob_builder:@guestcorp is in the room.",
+    ], "Project");
+    expect(people.map(({ handle }) => handle)).toEqual(["@alice_founder", "@bob_builder"]);
+    expect(people.every(({ role }) => /co-?founders?/.test(role))).toBe(true);
+    expect(people.map(({ handle }) => handle)).not.toContain("@guestcorp");
+  });
+
+  it("binds a comma-joined plural Co-Founders list and does not take a guest after the clause", () => {
+    const people = scanPostsForRoles([
+      "We see two of our Co-Founders,@alice_founder and@bob_builder, holding a cheque!",
+    ], "Project");
+    expect(people.map(({ handle }) => handle)).toEqual(["@alice_founder", "@bob_builder"]);
+    expect(people.every(({ kind }) => kind === "team")).toBe(true);
+  });
+
+  it("does not bind a display name without a handle", () => {
+    expect(scanPostsForRoles([
+      "Joining our co-founders Alice and Bob: guest appearance tonight.",
+    ], "Project")).toEqual([]);
+  });
+});
+
+describe("official corpus names handles as team or linked orgs", () => {
+  // Motivating incident: a project account named co-founders by @handle in its
+  // own timeline, Serper was rejected, and extra checks paused on a lineage
+  // save error. Finder must bind from twitterapi posts alone.
+
+  it("binds co-founders named only by @handle on the official account", () => {
+    const team = officialXNamedTeam([
+      "Proud to introduce co-founders @alice and @bob.",
+    ], "ExampleProject", "@exampleproj");
+    expect(team.map((m) => m.handle).sort()).toEqual(["@alice", "@bob"]);
+    expect(team.every((m) => m.handleProvenance === "subject_first_party")).toBe(true);
+    expect(team.every((m) => m.provider === "twitterapi")).toBe(true);
+    expect(team.every((m) => m.artifact_verified === true)).toBe(true);
+    expect(team.every((m) => m.name === m.handle)).toBe(true);
+  });
+
+  it("binds from official posts without Serper or a project display name", () => {
+    const team = officialXNamedTeam(["Meet co-founder @alice."], undefined, "@exampleproj");
+    expect(team).toEqual([
+      expect.objectContaining({
+        handle: "@alice",
+        name: "@alice",
+        role: "co-founder",
+        handleProvenance: "subject_first_party",
+        provider: "twitterapi",
+      }),
+    ]);
+  });
+
+  it("binds an incubator/team-behind/backed-by handle as an org, not a person", () => {
+    const posts = [
+      "Incubated by @SomeOrg.",
+      "The team behind this is @SomeOrg.",
+      "Backed by @SomeOrg.",
+    ];
+    const orgs = officialXNamedOrgs(posts);
+    expect(orgs.some((o) => o.handle === "@SomeOrg" && o.role === "incubator")).toBe(true);
+    const team = officialXNamedTeam(posts, "ExampleProject");
+    expect(team.some((m) => (m.handle ?? "").toLowerCase() === "someorg")).toBe(false);
+  });
+
+  it("does not bind an unrelated @mention as team", () => {
+    expect(officialXNamedTeam([
+      "Thanks @alice for the shoutout, shipping next week.",
+    ], "ExampleProject")).toEqual([]);
+  });
+
+  it("does not bind a display name without an @handle", () => {
+    expect(officialXNamedTeam([
+      "Proud to introduce co-founders Alice and Bob.",
+    ], "ExampleProject")).toEqual([]);
   });
 });
