@@ -410,8 +410,13 @@ describe("provider-backed project routing", () => {
       boundHandle: "@multihopper",
       boundDomain: "multihopper.com",
       sourceUrls: ["https://x.com/multihopper", "https://multihopper.com/"],
+      mentionedHandles: [
+        { handle: "@alice", roleHint: "co-founder", quote: "Welcome co-founder @alice to the team." },
+      ],
     };
-    expect(providerBackedRoles(evidence)).toContain(SubjectClass.PROJECT);
+    const roles = providerBackedRoles(evidence);
+    expect(roles).toContain(SubjectClass.PROJECT);
+    expect(roles).not.toContain(SubjectClass.FOUNDER);
   });
 
   it("keeps orientation-PROJECT unroutable when the domain did not bind", () => {

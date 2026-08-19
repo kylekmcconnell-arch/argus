@@ -924,6 +924,12 @@ export interface SubjectOrientation {
   boundHandle: string;   // exact audited handle
   boundDomain: string | null;
   sourceUrls: string[];  // bound URLs actually used
+  /**
+   * @handles quoted in official posts or live x_search of THIS subject.
+   * Never display-name-only. Never a bind key — later collectors still need
+   * unique-id confirmation (bio or official post).
+   */
+  mentionedHandles?: Array<{ handle: string; roleHint?: string; quote: string }>;
 }
 
 export interface CollectedEvidence {

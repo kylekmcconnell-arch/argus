@@ -1,29 +1,32 @@
-// First-pass subject orientation. Grok reads ONLY the bound X handle + the
-// official site that belongs to that profile, then answers: what is this, who
-// is it for, and is it a product brand, a person, a capital allocator, or
-// unknown. Display name is never a bind key. A hallucinated domain is dropped
-// to UNKNOWN. This is the last-resort classifier for keyword-free bios.
+// First-pass subject orientation. Grok reads the bound twitterapi packet and
+// MAY x_search that exact @handle (and fetch the packet website host only).
+// Display name is never a bind key. A hallucinated domain is dropped to
+// UNKNOWN. This is the last-resort classifier for keyword-free bios.
 
-import {
-  grokChat,
-  claudeMessages,
-  grokUsageFromChat,
-} from "../api/_llm";
-import { env, providerFallbacksEnabled } from "./config";
-import { addClaudeUsage, addGrokUsage } from "./cost";
+import { grokChat } from "../api/_llm";
+import { env } from "./config";
 import type { CollectedEvidence, SubjectOrientation } from "../src/data/evidence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
+import { grokSearch } from "./adapters/x";
 
-const RECENT_ACTIVITY_CAP = 12;
-const RECENT_ACTIVITY_ITEM_CHARS = 280;
+const RECENT_ACTIVITY_CAP = 24;
+const RECENT_ACTIVITY_ITEM_CHARS = 500;
+const SELF_POST_SAMPLE_CHARS = 6000;
 const WHAT_MAX_CHARS = 240;
-const ORIENTATION_TIMEOUT_MS = 20_000;
-const ORIENTATION_MAX_TOKENS = 400;
+const QUOTE_MAX_CHARS = 280;
+const MENTIONED_HANDLE_CAP = 8;
+const ORIENTATION_TIMEOUT_MS = 45_000;
+const ORIENTATION_MAX_TOKENS = 800;
+const ORIENTATION_MAX_TOOL_CALLS = 3;
 
 export interface OrientationPacket {
   handle: string;
+  /** Display name as a label only. Never a bind key. */
+  profileName: string | null;
   profileResolved: boolean;
   profileProvider: string | null;
+  followers: string | null;
+  createdAt: string | null;
   bio: string;
   selfPostSample: string;
   recentActivity: string[];
@@ -35,6 +38,7 @@ export interface OrientationPacket {
 }
 
 export type OrientationChat = typeof grokChat;
+export type OrientationSearch = typeof grokSearch;
 
 const ORIENTATION_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -46,18 +50,37 @@ const ORIENTATION_SCHEMA: Record<string, unknown> = {
     boundHandle: { type: "string" },
     boundDomain: { type: ["string", "null"] },
     sourceUrls: { type: "array", items: { type: "string" } },
+    mentionedHandles: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          handle: { type: "string" },
+          roleHint: { type: "string" },
+          quote: { type: "string" },
+        },
+        required: ["handle", "roleHint", "quote"],
+      },
+    },
   },
-  required: ["kind", "what", "audience", "boundHandle", "boundDomain", "sourceUrls"],
+  required: ["kind", "what", "audience", "boundHandle", "boundDomain", "sourceUrls", "mentionedHandles"],
 };
 
 const ORIENTATION_SYSTEM = [
-  "You may only use the packet. Do not use world knowledge.",
+  "You have the bound twitterapi packet for this exact subject.",
+  "You MAY x_search that exact @handle and fetch the official site host from the packet.",
+  "Do not open-web fish other domains or invent handles.",
   "Answer: What is this? Who is it for? Is it a product/protocol/company brand (PROJECT), a person who founds or builds (FOUNDER), a capital allocator (INVESTOR), or unknown (UNKNOWN)?",
-  "One-sentence what, only from bound artifacts. audience is who it is for, or \"\".",
+  "One-sentence what from the packet plus live X of THIS handle. audience is who it is for, or \"\".",
+  "Quote @handles only when they appear in the packet artifacts or in live x_search of THIS subject. Never from a display name alone.",
   "Do not invent a token, contract address, or legal name.",
   "Do not treat display name as identity. The bind keys are the twitterapi handle and the official website host in the packet.",
+  "If live X contradicts the packet bind, trust the packet bind keys and treat extra names as quoted mentions only.",
   "Return boundHandle as the exact packet handle. Return boundDomain only when it is the packet website host; otherwise null.",
   "sourceUrls must be packet URLs you actually used.",
+  "mentionedHandles: @handles that appear in official posts or live x_search of THIS subject, each with a verbatim quote from that artifact and optional roleHint. Never display-name-only. Empty array if none.",
+  "Return only the orientation JSON.",
 ].join(" ");
 
 export function normalizeHandle(value: string): string {
@@ -132,11 +155,49 @@ function boundSourceUrls(claimed: unknown, packet: OrientationPacket): string[] 
   return kept.length ? [...new Set(kept)] : [...packet.sourceUrls];
 }
 
+function displayLabel(value: string | undefined): string | null {
+  const trimmed = (value ?? "").trim();
+  return trimmed && trimmed !== "N/A" ? trimmed : null;
+}
+
+function parseMentionedHandles(
+  raw: unknown,
+  packet: OrientationPacket,
+): NonNullable<SubjectOrientation["mentionedHandles"]> | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const subject = normalizeHandle(packet.handle);
+  const seen = new Set<string>();
+  const out: NonNullable<SubjectOrientation["mentionedHandles"]> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    const handleRaw = typeof rec.handle === "string" ? rec.handle.trim() : "";
+    if (!looksLikeHandle(handleRaw)) continue;
+    const key = normalizeHandle(handleRaw);
+    if (!key || key === subject || seen.has(key)) continue;
+    const quote = typeof rec.quote === "string" ? rec.quote.replace(/\s+/g, " ").trim() : "";
+    if (!quote) continue;
+    // Unique-id is the @handle. A display-name-only mention, or an invented
+    // handle paired with an unrelated quote, is dropped.
+    if (!new RegExp(`@${key}\\b`, "i").test(quote)) continue;
+    const roleHint = typeof rec.roleHint === "string" ? rec.roleHint.replace(/\s+/g, " ").trim().slice(0, 40) : "";
+    seen.add(key);
+    out.push({
+      handle: `@${key}`,
+      ...(roleHint ? { roleHint } : {}),
+      quote: quote.slice(0, QUOTE_MAX_CHARS),
+    });
+    if (out.length >= MENTIONED_HANDLE_CAP) break;
+  }
+  return out.length ? out : undefined;
+}
+
 function unknownOrientation(
   packet: OrientationPacket,
   what: string,
   audience: string,
   sourceUrls: string[],
+  mentionedHandles?: SubjectOrientation["mentionedHandles"],
 ): SubjectOrientation {
   return {
     kind: "UNKNOWN",
@@ -145,6 +206,7 @@ function unknownOrientation(
     boundHandle: packet.handle,
     boundDomain: null,
     sourceUrls,
+    ...(mentionedHandles?.length ? { mentionedHandles } : {}),
   };
 }
 
@@ -160,6 +222,30 @@ export function orientationHandleBound(evidence: CollectedEvidence): boolean {
     && handlesMatch(orientation.boundHandle, evidence.profile.handle);
 }
 
+/** Reverse-role-shaped leads. Unique-id confirmation still required downstream. */
+export function orientationMentionLeads(orientation: SubjectOrientation | null | undefined): Array<{
+  name: string;
+  handle: string;
+  role: string;
+  kind: "team";
+  evidence: string;
+  source: string;
+  sourceUrl: string;
+}> {
+  return (orientation?.mentionedHandles ?? []).map((mention) => {
+    const handle = mention.handle.startsWith("@") ? mention.handle : `@${mention.handle}`;
+    return {
+      name: handle,
+      handle,
+      role: mention.roleHint || "team",
+      kind: "team" as const,
+      evidence: mention.quote,
+      source: "orientation-live-x",
+      sourceUrl: `https://x.com/${normalizeHandle(handle)}`,
+    };
+  });
+}
+
 export function buildOrientationPacket(
   evidence: CollectedEvidence,
   siteExcerpt?: string,
@@ -170,6 +256,9 @@ export function buildOrientationPacket(
   const websiteUrl = official?.canonicalUrl ?? publicUrl;
   const websiteHost = official?.domain ?? null;
   const excerpt = (siteExcerpt ?? "").trim() || null;
+  const recentActivity = (evidence.recentActivity ?? [])
+    .slice(0, RECENT_ACTIVITY_CAP)
+    .map((text) => text.slice(0, RECENT_ACTIVITY_ITEM_CHARS));
   const sourceUrls: string[] = [];
   if (twitterapiHandleResolved(evidence) && normalizeHandle(handle)) {
     sourceUrls.push(xProfileUrl(handle));
@@ -177,13 +266,14 @@ export function buildOrientationPacket(
   if (websiteUrl) sourceUrls.push(websiteUrl);
   return {
     handle,
+    profileName: displayLabel(evidence.profile.display_name),
     profileResolved: evidence.profile.profile_collection_state === "resolved",
     profileProvider: evidence.profile.profile_provider ?? null,
+    followers: displayLabel(evidence.profile.followers),
+    createdAt: displayLabel(evidence.profile.account_created_at) ?? displayLabel(evidence.profile.joined),
     bio: evidence.profile.bio ?? "",
-    selfPostSample: (evidence.profile.self_post_sample ?? "").slice(0, 2000),
-    recentActivity: (evidence.recentActivity ?? [])
-      .slice(0, RECENT_ACTIVITY_CAP)
-      .map((text) => text.slice(0, RECENT_ACTIVITY_ITEM_CHARS)),
+    selfPostSample: (evidence.profile.self_post_sample || recentActivity.join(" \n ")).slice(0, SELF_POST_SAMPLE_CHARS),
+    recentActivity,
     websiteUrl,
     websiteHost,
     websiteTitle: titleFromExcerpt(excerpt ?? undefined),
@@ -204,10 +294,11 @@ export function parseOrientation(raw: unknown, packet: OrientationPacket): Subje
   const sourceUrls = boundSourceUrls(obj.sourceUrls, packet);
   const claimedHandle = typeof obj.boundHandle === "string" ? obj.boundHandle.trim() : "";
   const namedDomain = normalizeDomain(typeof obj.boundDomain === "string" ? obj.boundDomain : null);
+  const mentionedHandles = parseMentionedHandles(obj.mentionedHandles, packet);
 
   // A domain Grok named that is not the packet website is a hallucination.
   if (namedDomain && namedDomain !== packet.websiteHost) {
-    return unknownOrientation(packet, what, audience, sourceUrls);
+    return unknownOrientation(packet, what, audience, sourceUrls, mentionedHandles);
   }
 
   const handleBound = packet.profileResolved
@@ -216,13 +307,13 @@ export function parseOrientation(raw: unknown, packet: OrientationPacket): Subje
   const domainBound = Boolean(namedDomain && packet.websiteHost && namedDomain === packet.websiteHost);
 
   if (kindRaw === "UNKNOWN") {
-    return unknownOrientation(packet, what, audience, sourceUrls);
+    return unknownOrientation(packet, what, audience, sourceUrls, mentionedHandles);
   }
   if (!handleBound) {
-    return unknownOrientation(packet, what, audience, sourceUrls);
+    return unknownOrientation(packet, what, audience, sourceUrls, mentionedHandles);
   }
   if (kindRaw === "PROJECT" && !domainBound) {
-    return unknownOrientation(packet, what, audience, sourceUrls);
+    return unknownOrientation(packet, what, audience, sourceUrls, mentionedHandles);
   }
   return {
     kind: kindRaw,
@@ -231,56 +322,51 @@ export function parseOrientation(raw: unknown, packet: OrientationPacket): Subje
     boundHandle: packet.handle,
     boundDomain: domainBound ? packet.websiteHost : null,
     sourceUrls,
+    ...(mentionedHandles?.length ? { mentionedHandles } : {}),
   };
 }
 
-async function orientWithClaude(packet: OrientationPacket): Promise<SubjectOrientation | null> {
-  const key = env("ANTHROPIC_API_KEY");
-  if (!key) return null;
-  const result = await claudeMessages({
-    key,
-    system: ORIENTATION_SYSTEM,
-    user: JSON.stringify(packet),
-    maxTokens: ORIENTATION_MAX_TOKENS,
-    timeoutMs: ORIENTATION_TIMEOUT_MS,
-  });
-  if (!result.ok) {
-    addClaudeUsage(undefined, "subject-orientation", "failed", `http_${result.status}`);
-    return null;
-  }
-  const usage = (result.data as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
-  addClaudeUsage(usage, "subject-orientation", "succeeded");
-  return parseOrientation(result.text, packet);
+function liveSearchUser(packet: OrientationPacket): string {
+  const hostRule = packet.websiteHost
+    ? `You may fetch or web_search only the official host ${packet.websiteHost}. No open-web fishing.`
+    : "No official site host in the packet; do not web_search other domains.";
+  return [
+    `Bound packet for ${packet.handle}. x_search that exact handle only.`,
+    hostRule,
+    "Do not invent handles, domains, tokens, contract addresses, or legal names.",
+    JSON.stringify(packet),
+  ].join("\n");
 }
 
 export async function orientSubjectWithGrok(
   evidence: CollectedEvidence,
-  options?: { siteExcerpt?: string; chat?: OrientationChat },
+  options?: { siteExcerpt?: string; chat?: OrientationChat; search?: OrientationSearch },
 ): Promise<SubjectOrientation | null> {
   const packet = buildOrientationPacket(evidence, options?.siteExcerpt);
   const chat = options?.chat;
   const key = env("XAI_API_KEY");
-  if (!chat && !key) {
-    if (!providerFallbacksEnabled()) return null;
-    return orientWithClaude(packet);
+
+  // Packet-only test double. Production always uses Responses API + x_search.
+  if (chat) {
+    const result = await chat({
+      key: key || "test",
+      system: ORIENTATION_SYSTEM,
+      user: JSON.stringify(packet),
+      maxTokens: ORIENTATION_MAX_TOKENS,
+      timeoutMs: ORIENTATION_TIMEOUT_MS,
+      jsonSchema: { name: "subject_orientation", schema: ORIENTATION_SCHEMA },
+    });
+    if (!result.ok) return null;
+    return parseOrientation(result.text, packet);
   }
-  const result = await (chat ?? grokChat)({
-    key: key || "test",
-    system: ORIENTATION_SYSTEM,
-    user: JSON.stringify(packet),
-    maxTokens: ORIENTATION_MAX_TOKENS,
-    timeoutMs: ORIENTATION_TIMEOUT_MS,
-    jsonSchema: { name: "subject_orientation", schema: ORIENTATION_SCHEMA },
+
+  if (!key) return null;
+
+  const search = options?.search ?? grokSearch;
+  const text = await search(ORIENTATION_SYSTEM, liveSearchUser(packet), {
+    maxToolCalls: ORIENTATION_MAX_TOOL_CALLS,
+    cacheKey: `subject-orientation:${normalizeHandle(packet.handle)}`,
   });
-  if (!chat) {
-    if (!result.ok) {
-      addGrokUsage(undefined, 0, "subject-orientation", "failed", `http_${result.status}`);
-      if (providerFallbacksEnabled()) return orientWithClaude(packet);
-      return null;
-    }
-    addGrokUsage(grokUsageFromChat(result.data as { usage?: { prompt_tokens?: number; completion_tokens?: number } }), 0, "subject-orientation", "succeeded");
-  } else if (!result.ok) {
-    return null;
-  }
-  return parseOrientation(result.text, packet);
+  if (!text) return null;
+  return parseOrientation(text, packet);
 }

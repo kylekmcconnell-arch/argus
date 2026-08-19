@@ -42,7 +42,7 @@ import { enrichFirstPartyTeamAvatars } from "./adapters/teamEnrichment";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
-import { orientSubjectWithGrok, orientationHandleBound } from "./subjectOrientation";
+import { orientSubjectWithGrok, orientationHandleBound, orientationMentionLeads } from "./subjectOrientation";
 import { personChecks } from "../src/lib/scanChecklist";
 import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
 import { isOrganizationAccount } from "../src/lib/investorSubject";
@@ -958,7 +958,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // Freeze a bounded sample so routing can classify from first-party content
     // instead of abandoning the subject for lack of a bio string.
     if (!ctx.evidence.profile.bio.trim()) {
-      ctx.evidence.profile.self_post_sample = posts.slice(0, 12).join(" \n ").slice(0, 2000);
+      ctx.evidence.profile.self_post_sample = posts.slice(0, 24).join(" \n ").slice(0, 6000);
     }
     ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
   }
@@ -1109,14 +1109,16 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // artifact from the claimant's side; it upgrades the lead's identity link
   // and evidence quote, while subject-side vouching still comes only from the
   // account's own edges (follow, amplification, its posts, its site).
-  const reverseBioClaims = reverseTeam.length
-    ? await confirmClaimantBios(reverseTeam, ctx.handle, ctx.evidence.profile.display_name)
+  const mentionLeads = orientationMentionLeads(ctx.evidence.subjectOrientation);
+  const roleLeads = [...mentionLeads, ...reverseTeam];
+  const reverseBioClaims = roleLeads.length
+    ? await confirmClaimantBios(roleLeads, ctx.handle, ctx.evidence.profile.display_name)
     : new Map<string, { role: string; phrase: string }>();
   if (reverseBioClaims.size) {
     const quoted = [...reverseBioClaims.entries()]
       .map(([h, claim]) => `@${h} ("${claim.phrase}")`)
       .join(", ");
-    ctx.emit({ phase: "P1 · Team", label: "Role claim in live bio", detail: `Reverse role-phrase search surfaced ${reverseBioClaims.size} candidate${reverseBioClaims.size === 1 ? "" : "s"} whose current X bio carries the claim first-party: ${quoted}.`, source: "reverse role search + bio fetch", tone: "good" });
+    ctx.emit({ phase: "P1 · Team", label: "Role claim in live bio", detail: `Live-bio confirmation surfaced ${reverseBioClaims.size} candidate${reverseBioClaims.size === 1 ? "" : "s"} whose current X bio carries the claim first-party: ${quoted}.`, source: "reverse role search + orientation + bio fetch", tone: "good" });
   }
 
   // Auto-pivot team: merge everyone found across the website search, the account's
@@ -1220,7 +1222,9 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // edges vouch — the deterministic lanes above own that call and win the
     // merge), but a live-bio-confirmed claim upgrades the identity link and
     // swaps the model's paraphrase for the fetched artifact's own words.
-    ...reverseTeam.map((member) => {
+    // Orientation mentionedHandles are the same class of lead: quoted from
+    // official posts or live x_search of THIS subject, never auto-bound.
+    ...[...mentionLeads, ...reverseTeam].map((member) => {
       const claim = member.handle ? reverseBioClaims.get(member.handle.replace(/^@/, "").toLowerCase()) : undefined;
       const handle = member.handle?.replace(/^@/, "");
       if (claim && handle) {
@@ -1241,7 +1245,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         ...member,
         evidence_origin: "model_lead" as const,
         artifact_verified: false,
-        provider: "reverse-role-search",
+        provider: member.source === "orientation-live-x" ? "orientation-live-x" : "reverse-role-search",
         identity_link_evidence_origin: "model_lead" as const,
         projects_evidence_origin: "model_lead" as const,
         handleProvenance: undefined as "subject_first_party" | undefined,
