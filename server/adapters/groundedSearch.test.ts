@@ -436,4 +436,97 @@ describe("groundedSearch Serper query quality", () => {
     expect(dumped).not.toContain("SERPER_API_KEY");
     expect(dumped).not.toContain("X-API-KEY");
   });
+
+  it("posts all 8 caller-supplied queries and still slices generateQueries to 5", async () => {
+    provision();
+    const supplied = Array.from({ length: 10 }, (_, i) => `official supplied query ${i + 1}`);
+    const webQs: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const u = String(url);
+      if (u.includes("google.serper.dev")) {
+        webQs.push(String((JSON.parse(init.body) as { q?: unknown }).q ?? ""));
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    await groundedSearch("system", "user", { queries: supplied });
+    expect(webQs).toEqual(supplied.slice(0, 8));
+
+    webQs.length = 0;
+    let extractHits = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const u = String(url);
+      if (u.includes("google.serper.dev")) {
+        webQs.push(String((JSON.parse(init.body) as { q?: unknown }).q ?? ""));
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      extractHits += 1;
+      const content = extractHits === 1
+        ? JSON.stringify(Array.from({ length: 8 }, (_, i) => `invented query ${i + 1}`))
+        : "ANSWER";
+      return ok({
+        choices: [{ message: { content } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    await groundedSearch("system", "user");
+    expect(webQs).toHaveLength(5);
+    expect(webQs.every((q) => q.startsWith("invented query"))).toBe(true);
+  });
+
+  it("POSTs one /news query when newsQuery is supplied and merges those hits into extract", async () => {
+    provision();
+    const urls: string[] = [];
+    const newsBodies: { q?: string; num?: number }[] = [];
+    let extractUser = "";
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes("google.serper.dev/news")) {
+        newsBodies.push(JSON.parse(init.body) as { q?: string; num?: number });
+        return ok({ news: [{ title: "News founder item", link: "https://news.example/a", snippet: "team announced" }] });
+      }
+      if (u.includes("google.serper.dev/search")) {
+        return ok({ organic: [{ title: "Web item", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      const body = JSON.parse(init.body) as { messages?: Array<{ content?: string }> };
+      extractUser = String(body.messages?.[1]?.content ?? body.messages?.[0]?.content ?? "");
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    const result = await groundedSearch("system", "user", {
+      queries: ["ordinary google query about a project"],
+      newsQuery: '"Example Brand" founder OR team',
+    });
+    expect(result).toBe("ANSWER");
+    expect(newsBodies).toEqual([{ q: '"Example Brand" founder OR team', num: 10 }]);
+    expect(urls.filter((u) => u.includes("/news")).length).toBe(1);
+    expect(extractUser).toContain("News founder item");
+    expect(extractUser).toContain("https://news.example/a");
+  });
+
+  it("skips /news when newsQuery is empty or sanitizes to null", async () => {
+    provision();
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      urls.push(String(url));
+      if (String(url).includes("serper")) {
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    await groundedSearch("system", "user", {
+      queries: ["ordinary google query about a project"],
+      newsQuery: '"unmatched',
+    });
+    expect(urls.some((u) => u.includes("/news"))).toBe(false);
+  });
 });

@@ -17,6 +17,9 @@ import { fetchPublicText } from "../publicWeb";
 const ANTHROPIC = "https://api.anthropic.com/v1/messages";
 const OPENROUTER = "https://openrouter.ai/api/v1/chat/completions";
 const SERPER = "https://google.serper.dev/search";
+const SERPER_NEWS = "https://google.serper.dev/news";
+const MAX_SUPPLIED_QUERIES = 8;
+const MAX_GENERATED_QUERIES = 5;
 const XAI_CHAT = "https://api.x.ai/v1/chat/completions";
 const GROK_EXTRACT_MODEL = () => env("ARGUS_GROK_MODEL") || "grok-4-fast";
 const CLAUDE_EXTRACT_MODEL = () => env("ARGUS_EXTRACT_MODEL") || "claude-haiku-4-5";
@@ -175,6 +178,39 @@ async function serperSearch(query: string, key: string): Promise<SerperSearchOut
           title: typeof o.title === "string" ? o.title : "",
           url: typeof o.link === "string" ? o.link : "",
           snippet: typeof o.snippet === "string" ? o.snippet : "",
+        }))
+        .filter((r) => /^https?:\/\//.test(r.url)),
+    };
+  } catch (error) {
+    const detail = error instanceof Error && error.name === "TimeoutError"
+      ? "timeout_15000ms"
+      : "transport_or_parse_error";
+    return { results: [], status: "failed", detail };
+  }
+}
+
+async function serperNews(query: string, key: string): Promise<SerperSearchOutcome> {
+  try {
+    const res = await fetch(SERPER_NEWS, {
+      method: "POST",
+      headers: { "X-API-KEY": key, "content-type": "application/json" },
+      body: JSON.stringify({ q: query, num: 10 }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      const detail = safeSerperFailure(res.status, await res.text().catch(() => ""));
+      console.warn("[serper-news] request rejected", { status: res.status, reason: detail.split(":")[1], queryChars: query.length });
+      return { results: [], status: "failed", detail };
+    }
+    const d = asRec(await res.json());
+    const news = Array.isArray(d.news) ? d.news.map(asRec) : [];
+    return {
+      status: "succeeded",
+      results: news
+        .map((o) => ({
+          title: typeof o.title === "string" ? o.title : "",
+          url: typeof o.link === "string" ? o.link : typeof o.url === "string" ? o.url : "",
+          snippet: typeof o.snippet === "string" ? o.snippet : typeof o.date === "string" ? o.date : "",
         }))
         .filter((r) => /^https?:\/\//.test(r.url)),
     };
@@ -373,6 +409,8 @@ export async function groundedSearch(
     cacheKey?: string;
     bypassCache?: boolean;
     queries?: readonly string[];
+    /** Optional single Serper /news POST (same 1-credit tier as /search). Skip when empty. */
+    newsQuery?: string;
     /** Called only when every physical search attempt failed, never for a valid empty result. */
     onProviderUnavailable?: () => void;
   },
@@ -400,10 +438,17 @@ export async function groundedSearch(
     const generated = await generateQueries(system, user);
     raw = generated.length ? generated : fallbackQueriesFromUser(user);
   }
-  const queries = sanitizeQueryList(raw).slice(0, 5);
+  // Caller-supplied queries may use the useful cap (8). LLM-invented queries
+  // stay at 5 so generateQueries junk cannot explode spend or scan latency.
+  const queryCap = opts?.queries ? MAX_SUPPLIED_QUERIES : MAX_GENERATED_QUERIES;
+  const queries = sanitizeQueryList(raw).slice(0, queryCap);
   if (!queries.length) return null;
 
-  const searched = await Promise.all(queries.map((q) => serperSearch(q, serperKey)));
+  const newsQ = opts?.newsQuery ? sanitizeSerperQuery(opts.newsQuery) : null;
+  const searched = await Promise.all([
+    ...queries.map((q) => serperSearch(q, serperKey)),
+    ...(newsQ ? [serperNews(newsQ, serperKey)] : []),
+  ]);
   const succeeded = searched.filter((outcome) => outcome.status === "succeeded");
   const failed = searched.filter((outcome) => outcome.status === "failed");
   if (succeeded.length) {

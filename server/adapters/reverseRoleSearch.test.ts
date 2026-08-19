@@ -14,6 +14,7 @@ import {
   resetReverseBioMemo,
   reverseBioTeamAsWebMembers,
   reverseBioOrgsAsWebMembers,
+  roleClaimantSerperPlan,
   scanPostsForRoles,
 } from "./x";
 
@@ -191,23 +192,26 @@ describe("findRoleClaimants", () => {
     expect(await findRoleClaimants("@clutchmarkets")).toEqual([]);
   });
 
-  it("posts the quoted founder queries to Serper when provisioned, not an LLM-invented @handle string", async () => {
+  it("posts more than 5 quoted + official-site queries to Serper, including site: team, when a domain is passed", async () => {
     vi.stubEnv("SERPER_API_KEY", "serp");
     vi.stubEnv("XAI_API_KEY", "xai");
     vi.stubEnv("TWITTERAPI_KEY", "");
     vi.stubEnv("ARGUS_GENERAL_WEB_PROVIDER", "");
-    const serperQueries: string[] = [];
+    const webQueries: string[] = [];
+    const newsQueries: string[] = [];
     const serperNums: number[] = [];
     let xaiHits = 0;
     vi.stubGlobal("fetch", vi.fn(async (url?: unknown, init?: RequestInit) => {
       const u = String(url);
-      if (u.includes("serper")) {
+      if (u.includes("google.serper.dev")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as { q?: string; num?: number };
-        serperQueries.push(String(body.q ?? ""));
+        if (u.includes("/news")) newsQueries.push(String(body.q ?? ""));
+        else webQueries.push(String(body.q ?? ""));
         serperNums.push(Number(body.num));
-        return new Response(JSON.stringify({
-          organic: [{ title: "Founder bio", link: "https://ex.com/a", snippet: "Founder @clutchmarkets" }],
-        }), { status: 200, headers: { "content-type": "application/json" } });
+        const hits = [{ title: "Founder bio", link: "https://ex.com/a", snippet: "Founder @clutchmarkets" }];
+        return new Response(JSON.stringify(u.includes("/news") ? { news: hits } : { organic: hits }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
       }
       if (u.includes("api.x.ai")) {
         xaiHits += 1;
@@ -233,18 +237,42 @@ describe("findRoleClaimants", () => {
 
     const team = await findRoleClaimants("@clutchmarkets", "CLUTCH", "clutch.markets");
 
-    expect(serperQueries).toEqual([
-      '"founder of @clutchmarkets"',
-      '"co-founder of @clutchmarkets"',
-      '"CEO of @clutchmarkets"',
-      '"@clutchmarkets team"',
-      '"founder of CLUTCH"',
-    ]);
+    expect(webQueries.length).toBeGreaterThan(5);
+    expect(webQueries.length).toBeLessThanOrEqual(8);
+    expect(webQueries).toContain('"founder of @clutchmarkets"');
+    expect(webQueries).toContain('"co-founder of @clutchmarkets"');
+    expect(webQueries).toContain('"CEO of @clutchmarkets"');
+    expect(webQueries).toContain('"@clutchmarkets team"');
+    expect(webQueries).toContain("site:clutch.markets team");
+    expect(webQueries).toContain("site:clutch.markets founder");
+    expect(webQueries).toContain("site:clutch.markets about");
+    expect(webQueries).toContain('site:linkedin.com "CLUTCH" founder');
+    expect(webQueries.some((q) => q === "@clutchmarkets founder CEO team" || q.startsWith("@clutchmarkets "))).toBe(false);
+    expect(webQueries.some((q) => q.startsWith("@") && !q.startsWith('"'))).toBe(false);
+    expect(newsQueries).toEqual(['"CLUTCH" founder OR team']);
     expect(serperNums.every((n) => n === 10)).toBe(true);
-    expect(serperQueries.some((q) => q === "@clutchmarkets founder CEO team" || q.startsWith("@clutchmarkets "))).toBe(false);
     expect(xaiHits).toBe(1);
     expect(team).toHaveLength(1);
     expect(team[0]).toMatchObject({ handle: "@OxSimpleFarmer", role: "founder", source: "reverse role-phrase search" });
+  });
+});
+
+describe("roleClaimantSerperPlan", () => {
+  it("builds official-site and LinkedIn queries from the bound handle/name/domain, never a twitter-style @handle dump", () => {
+    const plan = roleClaimantSerperPlan("@examplebrand", "Example Brand", "https://www.examplebrand.io/about");
+    expect(plan.queries[0]).toBe('"founder of @examplebrand"');
+    expect(plan.queries).toContain("site:examplebrand.io team");
+    expect(plan.queries).toContain('site:linkedin.com "Example Brand" founder');
+    expect(plan.queries).toContain('"Example Brand" founder LinkedIn');
+    expect(plan.queries.some((q) => q === "@examplebrand founder CEO team")).toBe(false);
+    expect(plan.newsQuery).toBe('"Example Brand" founder OR team');
+  });
+
+  it("skips news and name/LinkedIn extras when no project name is supplied", () => {
+    const plan = roleClaimantSerperPlan("@examplebrand", undefined, "examplebrand.io");
+    expect(plan.newsQuery).toBeUndefined();
+    expect(plan.queries).toContain("site:examplebrand.io team");
+    expect(plan.queries.some((q) => /linkedin/i.test(q))).toBe(false);
   });
 });
 

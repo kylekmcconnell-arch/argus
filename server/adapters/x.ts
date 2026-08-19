@@ -230,6 +230,7 @@ export async function generalWebSearch(system: string, user: string, opts?: {
   bypassCache?: boolean;
   claimProviderCall?: () => boolean;
   queries?: readonly string[];
+  newsQuery?: string;
 }): Promise<string | null> {
   const forceGrok = (env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() === "grok";
   if (!forceGrok && groundedSearchProvisioned()) {
@@ -238,6 +239,7 @@ export async function generalWebSearch(system: string, user: string, opts?: {
       cacheKey: opts?.cacheKey,
       bypassCache: opts?.bypassCache,
       queries: opts?.queries,
+      newsQuery: opts?.newsQuery,
       onProviderUnavailable: () => { groundedUnavailable = true; },
     });
     if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
@@ -1456,7 +1458,16 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT. Do NOT downgrade a founder to advisor. " +
     "For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal. This exposes serial founders and cross-project ties. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for \"built by\", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site-v2:${clean || projectName}` });
+  const project = (projectName ?? "").replace(/"/g, "").trim();
+  const officialSiteQueries = [
+    ...(clean ? [`site:${clean} team`, `site:${clean} founder`, `site:${clean} about`] : []),
+    ...(clean && project ? [`site:linkedin.com "${project}" founder`] : []),
+    ...(project ? [`"${project}" founder LinkedIn`, `"${project}" cofounder`] : []),
+  ];
+  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for \"built by\", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, {
+    cacheKey: `team-site-v2:${clean || projectName}`,
+    queries: officialSiteQueries.length ? officialSiteQueries : undefined,
+  });
   return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 
@@ -1777,6 +1788,61 @@ export async function discoverOperatorsFromAmplified(
   return out.slice(0, 6);
 }
 
+/** Hostname for official-site Google queries. Empty when no unique-id-bound domain. */
+export function officialSearchHost(domain?: string): string {
+  const raw = (domain ?? "").trim();
+  if (!raw) return "";
+  try {
+    const url = raw.includes("://") ? new URL(raw) : new URL(`https://${raw}`);
+    return url.hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return raw.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./i, "").toLowerCase();
+  }
+}
+
+/**
+ * Deterministic Serper queries for reverse-role search. Quoted founder phrases
+ * first, then Google-only official-site / LinkedIn queries Grok x_search cannot
+ * replace. groundedSearch keeps the first 8 after sanitize. Optional /news is
+ * separate (1 credit) and skipped when no project name exists.
+ */
+export function roleClaimantSerperPlan(
+  subjectHandle: string,
+  subjectName?: string,
+  domain?: string,
+): { queries: string[]; newsQuery?: string } {
+  const h = subjectHandle.replace(/^@/, "");
+  const projectName = (subjectName ?? "").replace(/"/g, "").trim();
+  const nameDistinct = projectName && projectName.toLowerCase() !== h.toLowerCase() ? projectName : "";
+  const host = officialSearchHost(domain);
+
+  const quoted = [
+    `"founder of @${h}"`,
+    `"co-founder of @${h}"`,
+    `"CEO of @${h}"`,
+    `"@${h} team"`,
+    `"cofounder of @${h}"`,
+    `"CEO at @${h}"`,
+    `"Founder @${h}"`,
+    ...(nameDistinct ? [`"founder of ${nameDistinct}"`, `"${nameDistinct} founder"`, `"${nameDistinct} team"`] : []),
+    ...(host ? [`"founder of ${host}"`] : []),
+  ];
+  const googleOnly: string[] = [];
+  if (host) {
+    googleOnly.push(`site:${host} team`, `site:${host} founder`, `site:${host} about`);
+  }
+  if (host && projectName) {
+    googleOnly.push(`site:linkedin.com "${projectName}" founder`);
+  }
+  if (projectName) {
+    googleOnly.push(`"${projectName}" founder LinkedIn`, `"${projectName}" cofounder`);
+  }
+  return {
+    queries: [...quoted.slice(0, 4), ...googleOnly, ...quoted.slice(4)],
+    newsQuery: projectName ? `"${projectName}" founder OR team` : undefined,
+  };
+}
+
 /**
  * REVERSE ROLE-PHRASE SEARCH: instead of asking who the project names, ask who
  * the public record says LEADS the project. People state this in exactly a few
@@ -1794,6 +1860,7 @@ export async function findRoleClaimants(
   domain?: string,
 ): Promise<TeamMember[]> {
   const h = subjectHandle.replace(/^@/, "");
+  const plan = roleClaimantSerperPlan(subjectHandle, subjectName, domain);
   const nameVariant = subjectName?.trim() && subjectName.trim().toLowerCase() !== h.toLowerCase()
     ? subjectName.trim()
     : "";
@@ -1804,15 +1871,7 @@ export async function findRoleClaimants(
     ...(nameVariant ? [`"founder of ${nameVariant}"`, `"${nameVariant} founder"`, `"${nameVariant} team"`] : []),
     ...(domainVariant ? [`"founder of ${domainVariant}"`] : []),
   ];
-  // groundedSearch slices to 5. Spend those credits on the highest-value
-  // quoted searches (founder / co-founder / CEO / team, then the name variant).
-  const serperQueries = [
-    `"founder of @${h}"`,
-    `"co-founder of @${h}"`,
-    `"CEO of @${h}"`,
-    `"@${h} team"`,
-    ...(nameVariant ? [`"founder of ${nameVariant}"`] : [`"Founder @${h}"`]),
-  ];
+  const serperQueries = plan.queries;
   const system =
     "You are a forensic OSINT researcher with live web and X search. The subject is a crypto/tech project's X account. Find the PEOPLE the public record credits with leading it: founders, cofounders, CEO/CTO/COO, core team. " +
     "Work the REVERSE direction: run the exact quoted searches given below on X AND on the general web (Google-style), and read what AI-answer search summaries say about who founded the project. " +
@@ -1822,7 +1881,7 @@ export async function findRoleClaimants(
   const text = await generalWebSearch(
     system,
     `Project X account: @${h}${nameVariant ? ` (${nameVariant})` : ""}${domainVariant ? `, website ${domainVariant}` : ""}. Who does the public record say founded or leads it? Run these exact searches on X and the web, then verify each hit: ${queries.join(", ")}.`,
-    { maxToolCalls: 6, cacheKey: `reverse-role:${h}`, queries: serperQueries },
+    { maxToolCalls: 6, cacheKey: `reverse-role:${h}`, queries: serperQueries, newsQuery: plan.newsQuery },
   ).catch(() => null);
   const twitterBio = await discoverReverseBioFromTwitterapi(subjectHandle, subjectName);
   const fromWeb = parseTeamJSON(text, h, "reverse role-phrase search");
