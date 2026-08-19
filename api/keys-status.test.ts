@@ -5,6 +5,9 @@ interface ProviderRow {
   label: string;
   powers: string;
   configured: boolean;
+  source?: string;
+  tier?: string;
+  purchases?: Array<{ usd: number; credits: number; pack: string; active: boolean }>;
 }
 
 interface KeylessRow {
@@ -77,5 +80,28 @@ describe("provider registry truth", () => {
     await handler({} as never, second.response as never);
     expect(second.captured.body?.providers.find((provider) => provider.label === "Supabase"))
       .toMatchObject({ configured: true });
+  });
+
+  it("lists Serper with the purchase ledger and never live-probes credits", async () => {
+    vi.stubEnv("SERPER_API_KEY", "configured");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { captured, response } = responseHarness();
+
+    await handler({} as never, response as never);
+
+    expect(captured.body?.providers.find((provider) => provider.label === "Serper (grounded search)")).toMatchObject({
+      configured: true,
+      powers: expect.stringContaining("grounded web search"),
+      source: "serper.dev",
+      tier: "paid",
+      purchases: [expect.objectContaining({
+        usd: 50,
+        credits: 50000,
+        pack: "Starter",
+        active: true,
+      })],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

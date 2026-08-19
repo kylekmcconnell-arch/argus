@@ -24,6 +24,7 @@ const VIEWER_GET_PATHS = new Set([
   "/api/changelog",
   "/api/keys-status",
   "/api/provider-usage",
+  "/api/serper-credits",
   "/api/alerts",
   "/api/augment",
   // Keyless read-only lookup of a public OFAC SDN address list. Runs inline on
