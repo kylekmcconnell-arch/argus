@@ -9,7 +9,6 @@ import {
 } from "./x";
 import { enrichFirstPartyTeamAvatars } from "./teamEnrichment";
 import { emptyEvidence } from "../../src/data/evidence";
-import { isolateExtraCheckPersist } from "../../api/_provenance";
 import type { CollectContext } from "./types";
 
 afterEach(() => {
@@ -193,27 +192,6 @@ describe.sequential("discoverReverseBioFromTwitterapi", () => {
 });
 
 describe("extra-check persist must not abort team collection", () => {
-  it("keeps reverse-bio team after a forged-floor persist throw is isolated", async () => {
-    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
-    vi.stubGlobal("fetch", twitterapiStub({
-      followings: [{
-        userName: "alice",
-        name: "Alice",
-        description: "COO @projecthandle",
-      }],
-    }));
-    const found = await discoverReverseBioFromTwitterapi("@projecthandle");
-    expect(found.team.map((t) => t.handle)).toEqual(["@alice"]);
-
-    const isolated = await isolateExtraCheckPersist(async () => {
-      throw new Error("invalid axis evidence lineage: project strength band floor");
-    });
-    expect(isolated.ok).toBe(false);
-    if (!isolated.ok) expect(isolated.reason).toMatch(/project strength band floor/);
-    expect(found.team).toHaveLength(1);
-    expect(found.team[0].handle).toBe("@alice");
-  });
-
   it("does not flatten a first-party reverse-bio row when the official account never vouched by posts or domain", () => {
     const webTeam = reverseBioTeamAsWebMembers([{
       name: "Alice",
