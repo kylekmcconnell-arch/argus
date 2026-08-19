@@ -917,6 +917,14 @@ export interface LaunchWindowSnapshot {
 }
 
 /** Grok first-pass read of the bound X profile + official site. Display name is never a bind key. */
+/** Product/token the COMPANY launched. Separate unique-id from the subject. */
+export interface LaunchedProductLead {
+  name?: string;
+  handle?: string;
+  domain?: string;
+  tokenTicker?: string;
+}
+
 export interface SubjectOrientation {
   kind: "PROJECT" | "FOUNDER" | "INVESTOR" | "UNKNOWN";
   what: string;          // one sentence, only from bound artifacts
@@ -930,6 +938,17 @@ export interface SubjectOrientation {
    * unique-id confirmation (bio or official post).
    */
   mentionedHandles?: Array<{ handle: string; roleHint?: string; quote: string }>;
+  /**
+   * Another @handle Grok saw on official X/site as founder of THIS subject.
+   * Orientation lead only — confirmClaimantBios / live twitterapi bio must
+   * still confirm founder-of-this-project before team bind.
+   */
+  relatedFounderHandle?: string | null;
+  /** If the subject is a person, the company they founded. */
+  relatedCompanyHandle?: string | null;
+  relatedCompanyDomain?: string | null;
+  /** Products/tokens the company launched; never aliases of the subject. */
+  launchedProducts?: LaunchedProductLead[];
 }
 
 export interface CollectedEvidence {

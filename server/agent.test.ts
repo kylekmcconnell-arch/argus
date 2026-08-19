@@ -209,6 +209,9 @@ describe("analyst verdict integrity", () => {
     expect(FOUNDER_SCORING_POLICY).toContain("Follower count, posting cadence, profile biography, fame, and X follow relationships never establish a founder role or track record");
     expect(FOUNDER_SCORING_POLICY).toContain("A personal GitHub account is optional and its absence cannot negate a verified live product");
     expect(FOUNDER_SCORING_POLICY).toContain("Social follows, mutual follows, and generic affiliations are network context, not repeat backing");
+    expect(FOUNDER_SCORING_POLICY).toContain("do not transfer the company title onto the protocol, token, or DAO");
+    expect(FOUNDER_SCORING_POLICY).toContain("Do not transfer the founder's person score onto the company account");
+    expect(FOUNDER_SCORING_POLICY).toContain("A launched product or token bound by contract address or official domain is related, not the company subject");
   });
 
   it("derives exceptional evidence bands for established projects without using fame or artifact counts", () => {
