@@ -1122,20 +1122,14 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   }
 
   // Temporary Serper LinkedIn/press follow-up: UNIQUE-ID CONFIRMED founders only
-  // (live bio claim for THIS project handle). Unverified leads, orgs, the
-  // subject handle, and display-name-only rows are never searched. Cap 3.
-  const followupConfirmed = new Map(reverseBioClaims);
-  for (const member of reverseBioTwitter.team) {
-    const key = (member.handle ?? "").replace(/^@/, "").toLowerCase();
-    if (!key || followupConfirmed.has(key)) continue;
-    followupConfirmed.set(key, {
-      role: member.role,
-      phrase: member.evidence ?? member.role,
-      name: member.name,
-    });
-  }
-  const founderFollowup = followupConfirmed.size
-    ? await serperConfirmedFounderFollowup(followupConfirmed, ctx.handle, ctx.evidence.profile.display_name)
+  // (live bio claim for THIS project handle via confirmClaimantBios). Do not
+  // fold reverseBioTwitter.team in: that lane also keeps tweet-only /
+  // operatorClaimInBio rows, which would sneak unverified leads into Serper
+  // and would stuff TeamMember.evidence into ConfirmedClaimant.phrase.
+  // Unverified leads, orgs, the subject handle, and display-name-only rows
+  // are never searched. Cap 3 people, 2 queries each.
+  const founderFollowup = reverseBioClaims.size
+    ? await serperConfirmedFounderFollowup(reverseBioClaims, ctx.handle, ctx.evidence.profile.display_name)
     : new Map<string, { linkedin?: string; pressUrls: string[] }>();
 
   // Auto-pivot team: merge everyone found across the website search, the account's
