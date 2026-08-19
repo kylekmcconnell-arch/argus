@@ -5,7 +5,7 @@ import { addOpenRouterUsage, getCost, withCostLedger } from "../cost";
 // extractor endpoint (no real page fetches to reason about).
 vi.mock("../publicWeb", () => ({ fetchPublicText: vi.fn(async () => null) }));
 
-import { groundedSearch } from "./groundedSearch";
+import { groundedSearch, sanitizeSerperQuery } from "./groundedSearch";
 
 const ok = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
@@ -206,5 +206,234 @@ describe("groundedSearch OpenRouter routing", () => {
     const line = cost.calls.find((entry) => entry.provider === "serper");
     expect(line?.meta).toContain("http_400:credits_or_quota");
     expect(line?.meta).not.toContain("secret-account-42");
+  });
+});
+
+
+describe("sanitizeSerperQuery", () => {
+  it("rewrites the 29-char leading @handle class and leaves ordinary Google q alone", () => {
+    const invented = "@multihopper founder CEO team";
+    expect(invented.length).toBe(29);
+    const rewritten = sanitizeSerperQuery(invented);
+    expect(rewritten).not.toBe(invented);
+    expect(rewritten).toBe("site:x.com/multihopper founder CEO team");
+    expect(rewritten?.startsWith("@")).toBe(false);
+
+    expect(sanitizeSerperQuery("@alicehandle")).toBe("site:x.com/alicehandle");
+    expect(sanitizeSerperQuery('"@alicehandle"')).toBe("site:x.com/alicehandle");
+    expect(sanitizeSerperQuery("from:@alicehandle")).toBe("site:x.com/alicehandle");
+    expect(sanitizeSerperQuery("site:twitter.com/@alicehandle")).toBe("site:x.com/alicehandle");
+
+    expect(sanitizeSerperQuery('site:venice.ai "Venice" funding raised financing')).toBe(
+      'site:venice.ai "Venice" funding raised financing',
+    );
+    expect(sanitizeSerperQuery('"founder of @alicehandle"')).toBe('"founder of @alicehandle"');
+    expect(sanitizeSerperQuery('"@alicehandle team"')).toBe('"@alicehandle team"');
+    expect(sanitizeSerperQuery("site:examplebrand.io")).toBe("site:examplebrand.io");
+  });
+
+  it("skips only empty or still-illegal q", () => {
+    expect(sanitizeSerperQuery("")).toBeNull();
+    expect(sanitizeSerperQuery("   ")).toBeNull();
+    expect(sanitizeSerperQuery('"founder of')).toBeNull();
+    expect(sanitizeSerperQuery("site:")).toBeNull();
+    expect(sanitizeSerperQuery("@")).toBeNull();
+    expect(sanitizeSerperQuery("founder OR")).toBeNull();
+  });
+});
+
+describe("groundedSearch Serper query quality", () => {
+  const ENV = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ENV };
+    vi.restoreAllMocks();
+  });
+
+  function provision() {
+    process.env.SERPER_API_KEY = "serp";
+    process.env.XAI_API_KEY = "xai";
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+  }
+
+  it("does not POST the 29-char @handle invention as-is; posts rewritten q with num 10", async () => {
+    provision();
+    const invented = "@multihopper founder CEO team";
+    expect(invented.length).toBe(29);
+    const bodies: { q?: string; num?: number }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        bodies.push(JSON.parse(init.body) as { q?: string; num?: number });
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+    }));
+
+    const result = await groundedSearch("system", "user", {
+      queries: [invented, 'site:venice.ai "Venice" funding'],
+    });
+    expect(result).toBe("ANSWER");
+    expect(bodies.map((b) => b.q)).toEqual([
+      "site:x.com/multihopper founder CEO team",
+      'site:venice.ai "Venice" funding',
+    ]);
+    expect(bodies.every((b) => b.num === 10)).toBe(true);
+    expect(bodies.some((b) => b.q === invented)).toBe(false);
+  });
+
+  it("does not POST a query sanitize returns null for, but still searches the rest", async () => {
+    provision();
+    const bodies: { q?: string; num?: number }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        bodies.push(JSON.parse(init.body) as { q?: string; num?: number });
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+    }));
+
+    let unavailable = false;
+    const result = await groundedSearch("system", "user", {
+      queries: ["   ", '"unmatched', "ordinary google query about a project"],
+      onProviderUnavailable: () => { unavailable = true; },
+    });
+    expect(result).toBe("ANSWER");
+    expect(unavailable).toBe(false);
+    expect(bodies).toEqual([{ q: "ordinary google query about a project", num: 10 }]);
+  });
+
+  it("dedupes sanitized queries casefold+whitespace before fetch", async () => {
+    provision();
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        bodies.push(String((JSON.parse(init.body) as { q?: unknown }).q ?? ""));
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+
+    await groundedSearch("system", "user", {
+      queries: ["OpenAI funding", "  openai   funding  ", "OPENAI funding"],
+    });
+    expect(bodies).toEqual(["OpenAI funding"]);
+  });
+
+  it("does not mark the provider unavailable when one query 400s invalid_request and another 200s", async () => {
+    provision();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        const q = String((JSON.parse(init.body) as { q?: unknown }).q ?? "");
+        if (q.includes("rejected-shape")) {
+          return new Response('{"message":"Invalid query parameter"}', { status: 400 });
+        }
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+    }));
+
+    let unavailable = false;
+    const captured = await withCostLedger(async () => {
+      const result = await groundedSearch("system", "user", {
+        queries: ["ordinary good query", "rejected-shape query"],
+        onProviderUnavailable: () => { unavailable = true; },
+      });
+      return { result, cost: getCost() };
+    });
+    expect(captured.result).toBe("ANSWER");
+    expect(unavailable).toBe(false);
+    const line = captured.cost.calls.find((entry) => entry.provider === "serper");
+    expect(line?.failed).toBeGreaterThan(0);
+    expect(line?.succeeded).toBeGreaterThan(0);
+    expect(line?.meta).toContain("http_400:invalid_request");
+  });
+
+  it("keeps credits_or_quota classification and still marks unavailable when every attempt fails that way", async () => {
+    provision();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"Not enough credits for customer secret-account-42"}', { status: 400 });
+      }
+      return ok({
+        choices: [{ message: { content: "must-not-extract" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+
+    let unavailable = false;
+    const cost = await withCostLedger(async () => {
+      await groundedSearch("system", "user", {
+        queries: ["ordinary google query about a project"],
+        onProviderUnavailable: () => { unavailable = true; },
+      });
+      return getCost();
+    });
+    const line = cost.calls.find((entry) => entry.provider === "serper");
+    expect(line?.meta).toContain("http_400:credits_or_quota");
+    expect(line?.meta).not.toContain("secret-account-42");
+    expect(unavailable).toBe(true);
+  });
+
+  it("falls back to subject tokens in the user string when generateQueries returns nothing", async () => {
+    provision();
+    const bodies: string[] = [];
+    let extractHits = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        bodies.push(String((JSON.parse(init.body) as { q?: unknown }).q ?? ""));
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      extractHits += 1;
+      const content = extractHits === 1 ? "not-a-json-array" : "ANSWER";
+      return ok({
+        choices: [{ message: { content } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+    }));
+
+    const result = await groundedSearch(
+      "system",
+      'Project X account: @alicehandle (Example Brand), website examplebrand.io. Who founded it?',
+    );
+    expect(result).toBe("ANSWER");
+    expect(bodies).toContain("site:x.com/alicehandle");
+    expect(bodies).toContain("site:examplebrand.io");
+    expect(bodies.some((q) => /founder CEO team/i.test(q))).toBe(false);
+    expect(bodies.some((q) => q.startsWith("@"))).toBe(false);
+  });
+
+  it("never logs q or the API key on a skipped or rejected search", async () => {
+    provision();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"Invalid query parameter"}', { status: 400 });
+      }
+      return ok({
+        choices: [{ message: { content: "must-not-extract" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+
+    await groundedSearch("system", "user", {
+      queries: ['"unmatched', "ordinary google query about a project"],
+    });
+    const dumped = JSON.stringify(warn.mock.calls);
+    expect(dumped).not.toContain("ordinary google query about a project");
+    expect(dumped).not.toContain('"unmatched');
+    expect(dumped).not.toContain("SERPER_API_KEY");
+    expect(dumped).not.toContain("X-API-KEY");
   });
 });

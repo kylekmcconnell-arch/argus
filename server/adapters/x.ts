@@ -229,6 +229,7 @@ export async function generalWebSearch(system: string, user: string, opts?: {
   cacheKey?: string;
   bypassCache?: boolean;
   claimProviderCall?: () => boolean;
+  queries?: readonly string[];
 }): Promise<string | null> {
   const forceGrok = (env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() === "grok";
   if (!forceGrok && groundedSearchProvisioned()) {
@@ -236,6 +237,7 @@ export async function generalWebSearch(system: string, user: string, opts?: {
     const viaGrounded = await groundedSearch(system, user, {
       cacheKey: opts?.cacheKey,
       bypassCache: opts?.bypassCache,
+      queries: opts?.queries,
       onProviderUnavailable: () => { groundedUnavailable = true; },
     });
     if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
@@ -1802,6 +1804,15 @@ export async function findRoleClaimants(
     ...(nameVariant ? [`"founder of ${nameVariant}"`, `"${nameVariant} founder"`, `"${nameVariant} team"`] : []),
     ...(domainVariant ? [`"founder of ${domainVariant}"`] : []),
   ];
+  // groundedSearch slices to 5. Spend those credits on the highest-value
+  // quoted searches (founder / co-founder / CEO / team, then the name variant).
+  const serperQueries = [
+    `"founder of @${h}"`,
+    `"co-founder of @${h}"`,
+    `"CEO of @${h}"`,
+    `"@${h} team"`,
+    ...(nameVariant ? [`"founder of ${nameVariant}"`] : [`"Founder @${h}"`]),
+  ];
   const system =
     "You are a forensic OSINT researcher with live web and X search. The subject is a crypto/tech project's X account. Find the PEOPLE the public record credits with leading it: founders, cofounders, CEO/CTO/COO, core team. " +
     "Work the REVERSE direction: run the exact quoted searches given below on X AND on the general web (Google-style), and read what AI-answer search summaries say about who founded the project. " +
@@ -1811,7 +1822,7 @@ export async function findRoleClaimants(
   const text = await generalWebSearch(
     system,
     `Project X account: @${h}${nameVariant ? ` (${nameVariant})` : ""}${domainVariant ? `, website ${domainVariant}` : ""}. Who does the public record say founded or leads it? Run these exact searches on X and the web, then verify each hit: ${queries.join(", ")}.`,
-    { maxToolCalls: 6, cacheKey: `reverse-role:${h}` },
+    { maxToolCalls: 6, cacheKey: `reverse-role:${h}`, queries: serperQueries },
   ).catch(() => null);
   const twitterBio = await discoverReverseBioFromTwitterapi(subjectHandle, subjectName);
   const fromWeb = parseTeamJSON(text, h, "reverse role-phrase search");

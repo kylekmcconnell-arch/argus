@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../publicWeb", () => ({ fetchPublicText: vi.fn(async () => null) }));
 import {
   amplifiedAuthorsFromTimeline,
   clearLastTweetsMemo,
@@ -187,6 +189,62 @@ describe("findRoleClaimants", () => {
     vi.stubEnv("TWITTERAPI_KEY", "");
     vi.stubEnv("SERPER_API_KEY", "");
     expect(await findRoleClaimants("@clutchmarkets")).toEqual([]);
+  });
+
+  it("posts the quoted founder queries to Serper when provisioned, not an LLM-invented @handle string", async () => {
+    vi.stubEnv("SERPER_API_KEY", "serp");
+    vi.stubEnv("XAI_API_KEY", "xai");
+    vi.stubEnv("TWITTERAPI_KEY", "");
+    vi.stubEnv("ARGUS_GENERAL_WEB_PROVIDER", "");
+    const serperQueries: string[] = [];
+    const serperNums: number[] = [];
+    let xaiHits = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url?: unknown, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("serper")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { q?: string; num?: number };
+        serperQueries.push(String(body.q ?? ""));
+        serperNums.push(Number(body.num));
+        return new Response(JSON.stringify({
+          organic: [{ title: "Founder bio", link: "https://ex.com/a", snippet: "Founder @clutchmarkets" }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (u.includes("api.x.ai")) {
+        xaiHits += 1;
+        return new Response(JSON.stringify({
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                people: [{
+                  name: "SimpleFarmer",
+                  handle: "@OxSimpleFarmer",
+                  role: "founder",
+                  kind: "team",
+                  evidence: "X bio: Founder @clutchmarkets",
+                }],
+              }),
+            },
+          }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("{}", { status: 404 });
+    }));
+
+    const team = await findRoleClaimants("@clutchmarkets", "CLUTCH", "clutch.markets");
+
+    expect(serperQueries).toEqual([
+      '"founder of @clutchmarkets"',
+      '"co-founder of @clutchmarkets"',
+      '"CEO of @clutchmarkets"',
+      '"@clutchmarkets team"',
+      '"founder of CLUTCH"',
+    ]);
+    expect(serperNums.every((n) => n === 10)).toBe(true);
+    expect(serperQueries.some((q) => q === "@clutchmarkets founder CEO team" || q.startsWith("@clutchmarkets "))).toBe(false);
+    expect(xaiHits).toBe(1);
+    expect(team).toHaveLength(1);
+    expect(team[0]).toMatchObject({ handle: "@OxSimpleFarmer", role: "founder", source: "reverse role-phrase search" });
   });
 });
 
