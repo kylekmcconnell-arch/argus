@@ -49,6 +49,84 @@ interface SerperSearchOutcome {
   detail?: string;
 }
 
+// Google's practical q ceiling. Oversized bodies 400 as invalid_request.
+const MAX_SERPER_QUERY_CHARS = 2048;
+
+/**
+ * Turn a candidate Serper `q` into a Google-legal query, or null to skip.
+ * Twitter-style `@handle` tokens (the 29-char "@handle founder CEO team" class)
+ * are rewritten to `site:x.com/handle` plus remaining terms rather than dropped.
+ * Skip only when the result is still empty or illegal. Never log `q`.
+ */
+export function sanitizeSerperQuery(q: string): string | null {
+  let s = q.trim();
+  if (!s) return null;
+  if (s.length > MAX_SERPER_QUERY_CHARS) return null;
+  if ((s.match(/"/g)?.length ?? 0) % 2 === 1) return null;
+
+  // Bare handle, optionally quoted: @alice or "@alice".
+  const bare = s.match(/^"?@([A-Za-z0-9_]{1,30})"?$/);
+  if (bare) return `site:x.com/${bare[1]}`;
+
+  // Twitter-only operators are not valid Google q.
+  s = s.replace(/\b(?:filter|min_faves|min_retweets|min_replies):[^\s]*/gi, " ");
+  s = s.replace(/\bfrom:@?([A-Za-z0-9_]{1,30})\b/gi, "site:x.com/$1");
+  s = s.replace(/\bsite:(?:www\.)?(?:twitter\.com|x\.com)\/@([A-Za-z0-9_]{1,30})/gi, "site:x.com/$1");
+
+  // Leading unquoted @handle token — rewrite, do not drop a useful search.
+  if (!s.startsWith('"')) {
+    s = s.replace(/^@([A-Za-z0-9_]{1,30})(?=\s|$)/, "site:x.com/$1");
+  }
+
+  s = s.replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  // A leftover Twitter-style token we could not rewrite is not a legal q.
+  if (/^@/.test(s) && !s.startsWith('"')) return null;
+  if (/^(?:OR|AND)\b|\b(?:OR|AND)$/i.test(s)) return null;
+  if (/(?:^|\s)(?:site|filetype):\s*(?:$|[)"']|\b(?:OR|AND)\b)/i.test(s)) return null;
+
+  const residual = s
+    .replace(/\b(?:site|filetype|intitle|inurl|intext|ext):[^\s]*/gi, " ")
+    .replace(/\b(?:OR|AND|NOT)\b/gi, " ")
+    .replace(/[()"+-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!residual && !/\b(?:site|filetype):[^\s]+/i.test(s)) return null;
+  return s;
+}
+
+function sanitizeQueryList(queries: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const q of queries) {
+    const chars = q.trim().length;
+    const s = sanitizeSerperQuery(q);
+    if (!s) {
+      if (chars) console.warn("[serper-search] skipped invalid query", { queryChars: chars });
+      continue;
+    }
+    const key = s.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+/** Last-resort queries from the user string itself. No invented role phrases. */
+function fallbackQueriesFromUser(user: string): string[] {
+  const candidates: string[] = [];
+  for (const m of user.matchAll(/"([^"]{2,80})"/g)) candidates.push(`"${m[1]}"`);
+  for (const m of user.matchAll(/(^|[^\w])@([A-Za-z0-9_]{1,30})/g)) candidates.push(`site:x.com/${m[2]}`);
+  for (const m of user.matchAll(/\b((?:[a-z0-9-]+\.)+[a-z]{2,24})\b/gi)) {
+    const host = m[1].replace(/^www\./i, "").toLowerCase();
+    if (/^(?:x\.com|twitter\.com|t\.co|github\.com|linkedin\.com|youtube\.com|youtu\.be|google\.com|facebook\.com|instagram\.com)$/i.test(host)) continue;
+    candidates.push(`site:${host}`);
+  }
+  return sanitizeQueryList(candidates);
+}
+
+
 function safeSerperFailure(status: number, raw: string): string {
   let message = "";
   try {
@@ -77,7 +155,7 @@ async function serperSearch(query: string, key: string): Promise<SerperSearchOut
     const res = await fetch(SERPER, {
       method: "POST",
       headers: { "X-API-KEY": key, "content-type": "application/json" },
-      body: JSON.stringify({ q: query, num: 8 }),
+      body: JSON.stringify({ q: query, num: 10 }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
@@ -255,7 +333,7 @@ async function callExtractModel(system: string, user: string, maxTokens: number,
 
 async function generateQueries(system: string, user: string): Promise<string[]> {
   const text = await callExtractModel(
-    "You turn a research task into effective Google search queries. Output ONLY a JSON array of query strings.",
+    "You turn a research task into effective Google search queries. Output ONLY a JSON array of query strings. Use ordinary Google syntax: quoted phrases, site:example.com, names. Never emit a query that starts with @handle, Twitter-only operators (from:, filter:, min_faves), or site:twitter.com/@handle.",
     `A due-diligence collector needs to answer this task with web evidence.\n\nTASK SYSTEM: ${system}\n\nTASK REQUEST: ${user}\n\nOutput 3 to 5 precise Google search queries that will surface the exact pages needed (names, companies, filings, press). Return ONLY a compact JSON array, e.g. ["query one","query two"].`,
     400,
     "grounded-queries",
@@ -313,8 +391,16 @@ export async function groundedSearch(
   // asking a model to rediscover obvious search syntax such as an official
   // company's own funding announcements, while retaining the same Serper,
   // source-fetch, and grounded extraction boundaries.
-  const queries = opts?.queries?.map((query) => query.trim()).filter(Boolean).slice(0, 5)
-    ?? await generateQueries(system, user);
+  // Caller-supplied queries win. If the model invents nothing, still search
+  // obvious subject tokens from the user string — never a hardcoded role phrase.
+  let raw: readonly string[];
+  if (opts?.queries) {
+    raw = opts.queries;
+  } else {
+    const generated = await generateQueries(system, user);
+    raw = generated.length ? generated : fallbackQueriesFromUser(user);
+  }
+  const queries = sanitizeQueryList(raw).slice(0, 5);
   if (!queries.length) return null;
 
   const searched = await Promise.all(queries.map((q) => serperSearch(q, serperKey)));
