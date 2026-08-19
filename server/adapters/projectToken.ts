@@ -1,4 +1,4 @@
-import type { ProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
+import type { LaunchedProductLead, ProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
 import { canonicalOfficialWebsite, type OfficialWebsiteScope } from "../../src/lib/fundScaleEvidence";
 import { readCandle, summarizeCandles, type Candle } from "../../src/lib/priceHistory";
 import { env } from "../config";
@@ -160,7 +160,7 @@ const MAX_LAUNCHED_PRODUCT_QUERIES = 4;
 
 /** CoinGecko / DexScreener queries from first-pass launched products, not the company display name. */
 export function launchedProductSearchQueries(
-  products: ReadonlyArray<{ name?: string; tokenTicker?: string }> | undefined,
+  products: ReadonlyArray<LaunchedProductLead> | undefined,
 ): string[] {
   if (!products?.length) return [];
   const queries: string[] = [];
@@ -180,7 +180,7 @@ export function launchedProductSearchQueries(
 
 export function projectRegistrySearchQueries(
   displayName: string,
-  products?: ReadonlyArray<{ name?: string; tokenTicker?: string }>,
+  products?: ReadonlyArray<LaunchedProductLead>,
 ): string[] {
   const queries = tokenSearchQueries(displayName);
   for (const extra of launchedProductSearchQueries(products)) {
