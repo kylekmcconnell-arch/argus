@@ -885,6 +885,24 @@ export function mergeDiscoveredAffiliations(
   return pending;
 }
 
+
+/**
+ * Serper LinkedIn/press follow-up is for unique-id confirmed founders only.
+ * discoverReverseBioFromTwitterapi puts two kinds of people on `.team`:
+ * live-bio unique-id confirms (`their current X bio states "..."`) and
+ * tweet-only rows (bio @-mentions the project; role came from a tweet).
+ * Tweet-only people stay on the report team but must not spend Serper.
+ */
+export function uniqueIdConfirmedForFounderFollowup(
+  member: Pick<TeamMember, "handle" | "evidence">,
+  subjectHandle: string,
+): boolean {
+  const key = (member.handle ?? "").replace(/^@/, "").toLowerCase();
+  const subject = subjectHandle.replace(/^@/, "").toLowerCase();
+  if (!key || key === subject) return false;
+  return /their current X bio states/.test(member.evidence ?? "");
+}
+
 // Cold handle: resolve the profile, pull recent posts, and extract self-claims
 // so the verification adapters have something to check. Without this an unknown
 // subject has no ventures/endorsements/advisory seats to verify.
@@ -1123,11 +1141,13 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
 
   // Temporary Serper LinkedIn/press follow-up: UNIQUE-ID CONFIRMED founders only
   // (live bio claim for THIS project handle). Unverified leads, orgs, the
-  // subject handle, and display-name-only rows are never searched. Cap 3.
+  // subject handle, display-name-only rows, and tweet-only reverse-bio members
+  // are never searched. Cap 3. confirmClaimantBios entries stay as they are.
   const followupConfirmed = new Map(reverseBioClaims);
   for (const member of reverseBioTwitter.team) {
+    if (!uniqueIdConfirmedForFounderFollowup(member, ctx.handle)) continue;
     const key = (member.handle ?? "").replace(/^@/, "").toLowerCase();
-    if (!key || followupConfirmed.has(key)) continue;
+    if (followupConfirmed.has(key)) continue;
     followupConfirmed.set(key, {
       role: member.role,
       phrase: member.evidence ?? member.role,
