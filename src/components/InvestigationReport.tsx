@@ -69,7 +69,7 @@ import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
-import { personDimensionChapters, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { compositionHeadline, personDimensionChapters, tokenDimensionChapters } from "../lib/dimensionChapters";
 import { DossierReport } from "./DossierReport";
 import {
   BasicFactsPanel,
@@ -1615,10 +1615,12 @@ export function InvestigationReport({
             </section>
           </div>
 
-          {/* the composition strip: the six weighted token dimensions as
-              readable rows — expand for the why, jump to the checks, or
-              challenge the score. The standard scan-output design. */}
+          {/* the composition: the file's table of contents, Auric File framing */}
           {token.axes?.length > 0 && (
+            <section id="composition" className="mt-7 scroll-mt-28">
+              <p className="eyebrow">The composition</p>
+              <h2 className="story-chapter-title mt-1 text-ink">{compositionHeadline(token.axes.length)}</h2>
+              <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
             <ScoreComposition
               rows={token.axes.map((a) => ({
                 axis: a.key,
@@ -1632,6 +1634,7 @@ export function InvestigationReport({
               capNote={token.capApplied ? `limited to ${token.score}` : null}
               challengeAnchor={shareView ? null : "#investigation-challenge"}
             />
+            </section>
           )}
 
           {/* the reading spine: live dossier first; token/person chapters are the deep dive */}

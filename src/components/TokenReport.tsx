@@ -51,7 +51,7 @@ import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
-import { tokenDimensionChapters } from "../lib/dimensionChapters";
+import { compositionHeadline, tokenDimensionChapters } from "../lib/dimensionChapters";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -489,6 +489,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           nextSteps={nextStepItems}
           verified={verifiedItems}
           openQuestions={openQuestionItems}
+          challengeAnchorId={shareView ? null : "token-challenge"}
           coveragePercent={readiness.coveragePercent}
           successful={readiness.successful}
           applicable={readiness.applicable}
@@ -542,8 +543,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         )}
 
-        {/* axes — the composition strip: expand a row for the why, jump to
-            the checks, or challenge the score */}
+        {/* the composition: the file's table of contents, Auric File framing */}
+        <section id="composition" className="mt-7 scroll-mt-28">
+          <p className="eyebrow">The composition</p>
+          <h2 className="story-chapter-title mt-1 text-ink">{compositionHeadline(d.axes.length)}</h2>
+          <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
         <ScoreComposition
           rows={d.axes.map((a) => ({
             axis: a.key,
@@ -557,6 +561,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           capNote={d.capApplied ? `limited to ${d.score}` : null}
           challengeAnchor={shareView ? null : "#token-challenge"}
         />
+
+        </section>
 
         {/* the reading spine: each weighted dimension as its own chapter */}
         <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />

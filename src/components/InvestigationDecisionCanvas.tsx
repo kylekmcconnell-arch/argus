@@ -5,6 +5,7 @@ import {
   type ReportCanvasNarrativeItem,
 } from "./ReportCanvasPrimitives";
 import { plainLanguageSummary } from "../lib/plainLanguage";
+import { requestChallenge } from "../lib/challenge";
 import type { VerdictArgument } from "../lib/reportInsights";
 import type { DecisionLensId } from "../intelligence/types";
 import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief";
@@ -43,6 +44,64 @@ function plainDecisionText(value: string): string {
     .replace(/completion outcome not recorded/gi, "This check did not finish.")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/* The case grid, in the storytelling voice: two open columns under mono
+   colored headers, hairline rows with a dash marker. This is written for a
+   human deciding, not a machine parsing. Items in the pushable column carry
+   "Challenge · add what we're missing", which opens the ask console seeded
+   with that exact concern. */
+function CaseColumn({ id, title, tone, items, emptyCopy, pushNote, challengeAnchorId }: {
+  id?: string;
+  title: string;
+  tone: ReportCanvasTone;
+  items: DecisionCanvasItem[];
+  emptyCopy: string;
+  pushNote?: boolean;
+  challengeAnchorId?: string | null;
+}) {
+  const headerColor = tone === "pass" ? "var(--color-pass)"
+    : tone === "caution" ? "var(--color-caution)"
+      : tone === "avoid" ? "var(--color-avoid)"
+        : tone === "signal" ? "var(--color-signal)"
+          : "var(--color-ink-faint)";
+  const pushable = Boolean(pushNote && challengeAnchorId);
+  return (
+    <section id={id} className="min-w-0 scroll-mt-28">
+      <h3
+        className="mono border-b border-line pb-2.5 text-[11px] font-medium uppercase tracking-[0.16em]"
+        style={{ color: headerColor }}
+      >
+        {title}
+        {pushable && <span className="text-ink-faint"> · click to push</span>}
+      </h3>
+      {items.length ? (
+        <ul aria-label={title}>
+          {items.map((item, index) => {
+            const label = plainDecisionText(item.label);
+            return (
+              <li key={`${title}-${index}`} className="border-b border-line/60 py-3 pl-5 text-[13.5px] leading-relaxed text-ink" style={{ position: "relative" }}>
+                <span aria-hidden="true" className="absolute left-0 top-3" style={{ color: headerColor }}>–</span>
+                {label}
+                {item.detail && <span className="mt-0.5 block text-[12px] leading-snug text-ink-faint">{plainDecisionText(item.detail)}</span>}
+                {pushable && (
+                  <button
+                    type="button"
+                    onClick={() => requestChallenge(label, challengeAnchorId!)}
+                    className="mono mt-1.5 block cursor-pointer text-[10px] font-medium uppercase tracking-[0.12em] text-caution opacity-80 transition hover:opacity-100"
+                  >
+                    Challenge · add what we&#39;re missing ›
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="mt-3 text-[12.5px] leading-relaxed text-ink-faint">{emptyCopy}</p>
+      )}
+    </section>
+  );
 }
 
 function narrativeItems(prefix: string, items: DecisionCanvasItem[], href?: `#${string}`): ReportCanvasNarrativeItem[] {
@@ -120,6 +179,7 @@ export function InvestigationDecisionCanvas({
   onDecisionLensChange,
   evidenceHref = "#token-evidence",
   methodologyHref = "#token-methodology",
+  challengeAnchorId = null,
 }: {
   verdictLabel: string;
   favorable: boolean;
@@ -139,6 +199,8 @@ export function InvestigationDecisionCanvas({
   capturedAt?: string | undefined;
   evidenceHref?: `#${string}`;
   methodologyHref?: `#${string}`;
+  /** Anchor id of the ask console; null hides the per-item challenge push. */
+  challengeAnchorId?: string | null;
 }) {
   const verdictItems = favorable ? supports : concerns;
   const countervailingItems = favorable ? concerns : supports;
@@ -169,39 +231,41 @@ export function InvestigationDecisionCanvas({
           </div>
         )}
         <div className="grid lg:grid-cols-[minmax(0,1fr)_19rem]">
-          <div className="px-5">
-            <ReportCanvasNarrativeSection
-              title={favorable ? "What supports this result" : "Main concerns"}
-              description={favorable
-                ? "The strongest facts and checks behind the result."
-                : "The risks and failed checks behind the result."}
-              tone={favorable ? verdictTone : "avoid"}
-              items={narrativeItems("verdict", verdictItems, evidenceHref)}
-              emptyCopy={favorable
-                ? "No sourced support is recorded yet. Read the open questions before using this result."
-                : "No recorded risk explains this result. Read the evidence before relying on it."}
-            />
-            <ReportCanvasNarrativeSection
-              id="report-risks"
-              title={favorable ? "Main concerns" : "What looks credible"}
-              description={favorable
-                ? "Risks and open questions that could change the result."
-                : "Positive evidence that gives the result context."}
-              tone={favorable ? "avoid" : "pass"}
-              items={narrativeItems("counterweight", countervailingItems, evidenceHref)}
-              emptyCopy={favorable
-                ? "No risk or major unanswered question is recorded in this saved report."
-                : "No sourced positive finding is recorded in this saved report."}
-            />
-            {context.length > 0 && (
-              <ReportCanvasNarrativeSection
-                id="report-important-context"
-                title="Important context"
-                description="Relevant saved observations that are neither support nor an adverse finding."
-                tone="neutral"
-                items={narrativeItems("context", context, evidenceHref)}
-                emptyCopy=""
+          <div className="px-5 py-5">
+            <div className="grid gap-x-10 gap-y-8 md:grid-cols-2">
+              <CaseColumn
+                title={favorable ? "What supports this result" : "Main concerns"}
+                tone={favorable ? verdictTone : "avoid"}
+                items={verdictItems}
+                emptyCopy={favorable
+                  ? "No sourced support is recorded yet. Read the open questions before using this result."
+                  : "No recorded risk explains this result. Read the evidence before relying on it."}
+                pushNote={!favorable}
+                challengeAnchorId={challengeAnchorId}
               />
+              <CaseColumn
+                id="report-risks"
+                title={favorable ? "Main concerns" : "What looks credible"}
+                tone={favorable ? "caution" : "pass"}
+                items={countervailingItems}
+                emptyCopy={favorable
+                  ? "No risk or major unanswered question is recorded in this saved report."
+                  : "No sourced positive finding is recorded in this saved report."}
+                pushNote={favorable}
+                challengeAnchorId={challengeAnchorId}
+              />
+            </div>
+            {context.length > 0 && (
+              <div className="mt-6">
+                <ReportCanvasNarrativeSection
+                  id="report-important-context"
+                  title="Important context"
+                  description="Relevant saved observations that are neither support nor an adverse finding."
+                  tone="neutral"
+                  items={narrativeItems("context", context, evidenceHref)}
+                  emptyCopy=""
+                />
+              </div>
             )}
           </div>
 
