@@ -4,7 +4,26 @@ import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 // Peace-of-mind view for Kyle + Enigma: which API keys are plugged in, what each
 // powers, where to top up, and live usage where the provider exposes it. Keyed
 // and keyless sources render as identical rows so the whole stack reads uniformly.
-type Provider = { label: string; powers: string; source: string; tier: string; configured: boolean; usage?: string; disabled?: boolean };
+type LedgerPurchase = {
+  purchasedAt: string;
+  usd: number;
+  credits: number;
+  pack: string;
+  expiresAt: string;
+  active?: boolean;
+};
+type Provider = { label: string; powers: string; source: string; tier: string; configured: boolean; usage?: string; disabled?: boolean; purchases?: LedgerPurchase[] };
+type SerperCredits = {
+  configured: boolean;
+  remaining: number | null;
+  remainingSource: "serper" | "estimated" | "unavailable";
+  remainingEstimate: number | null;
+  usedSinceLatestPurchase: number | null;
+  dashboardUrl: string;
+  purchases: LedgerPurchase[];
+  error?: string;
+};
+const SERPER_LABEL = "Serper (grounded search)";
 type UsageEvent = {
   id: string;
   reportVersionId: string;
@@ -36,6 +55,7 @@ const PROVIDER_ALIASES: Record<string, string[]> = {
   "Claude (Anthropic)": ["claude", "anthropic", "claudevision"],
   "Grok (xAI)": ["grok", "xai"],
   "twitterapi.io": ["twitterapi", "twitterapiio"],
+  "Serper (grounded search)": ["serper", "groundedsearch"],
   "Helius (Solana)": ["helius"],
   GitHub: ["github"],
   "People Data Labs": ["peopledatalabs", "pdl"],
@@ -116,9 +136,31 @@ function providerHealth(provider: Provider, latest?: UsageEvent): ProviderHealth
   return { label: "Not configured", tone: "tint-avoid", context: "Required coverage is unavailable until this is configured." };
 }
 
-function ProviderRow({ provider, latest }: { provider: Provider; latest?: UsageEvent }) {
+function ProviderRow({
+  provider,
+  latest,
+  serperCredits,
+  serperCreditsLoading,
+  serperCreditsError,
+  onCheckSerperCredits,
+}: {
+  provider: Provider;
+  latest?: UsageEvent;
+  serperCredits?: SerperCredits | null;
+  serperCreditsLoading?: boolean;
+  serperCreditsError?: string;
+  onCheckSerperCredits?: () => void;
+}) {
   const health = providerHealth(provider, latest);
+  const isSerper = provider.label === SERPER_LABEL && !!onCheckSerperCredits;
+  const lastPurchase = latestLedgerPurchase(provider.purchases);
   return (
+    <div
+      onClick={isSerper ? (event) => {
+        if ((event.target as HTMLElement).closest("a, button")) return;
+        onCheckSerperCredits?.();
+      } : undefined}
+    >
     <div className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.3fr)_minmax(200px,0.9fr)] md:gap-4">
       <div className="min-w-0">
         <span className="text-[13.5px] font-medium text-ink">{provider.label}</span>
@@ -132,7 +174,52 @@ function ProviderRow({ provider, latest }: { provider: Provider; latest?: UsageE
         </div>
         <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">{health.context}</p>
         {provider.usage && <p className="mono mt-1 text-[11px] text-signal-lift">{provider.usage}</p>}
+        {lastPurchase && (
+          <p className="mono mt-1 text-[11px] text-ink-faint">
+            Last top-up {formatLedgerDate(lastPurchase.purchasedAt)} · {formatPackUsd(lastPurchase.usd)} / {formatCreditCount(lastPurchase.credits)} credits
+          </p>
+        )}
+        {isSerper && (
+          <button type="button" className="mt-1 text-[11px] text-signal-lift underline-offset-2 hover:underline" onClick={() => onCheckSerperCredits?.()}>
+            {serperCreditsLoading ? "Checking credits…" : "Check credits"}
+          </button>
+        )}
       </div>
+    </div>
+    {isSerper && (serperCreditsLoading || serperCreditsError || serperCredits) && (
+      <div className="border-t border-line/40 bg-void/20 px-4 py-3">
+        {serperCreditsLoading && <p className="text-[12.5px] text-ink-faint">Checking credits…</p>}
+        {serperCreditsError && <p className="text-[12.5px] text-caution" role="alert">{serperCreditsError}</p>}
+        {serperCredits && !serperCreditsLoading && (
+          <>
+            <p className="text-[12.5px] text-ink">
+              {serperCredits.remaining !== null
+                ? `Remaining: ${formatCreditCount(serperCredits.remaining)}`
+                : serperCredits.remainingEstimate !== null
+                  ? `Remaining estimate: ${formatCreditCount(serperCredits.remainingEstimate)}`
+                  : "Remaining credits unavailable"}
+            </p>
+            <p className="mt-0.5 text-[11px] text-ink-faint">
+              Source: {serperCredits.remainingSource}
+              {serperCredits.usedSinceLatestPurchase !== null
+                ? ` · ${formatCreditCount(serperCredits.usedSinceLatestPurchase)} used since latest purchase`
+                : ""}
+            </p>
+            <p className="eyebrow mt-2">Purchase history</p>
+            {serperCredits.purchases.map((purchase) => (
+              <p key={`${purchase.purchasedAt}-${purchase.pack}`} className="mt-1 text-[12.5px] text-ink-dim">
+                {formatLedgerDate(purchase.purchasedAt)} · {purchase.pack} · {formatPackUsd(purchase.usd)} / {formatCreditCount(purchase.credits)} credits
+                {" · expires "}{formatLedgerDate(purchase.expiresAt)}
+                {purchase.active ? " · active" : " · expired"}
+              </p>
+            ))}
+            <a href={serperCredits.dashboardUrl || "https://serper.dev/dashboard"} target="_blank" rel="noreferrer" className="link-ext mono mt-2 inline-block text-[11px]">
+              serper.dev/dashboard
+            </a>
+          </>
+        )}
+      </div>
+    )}
     </div>
   );
 }
@@ -161,6 +248,35 @@ function formatUsd(value: number): string {
   return `$${value.toFixed(4)}`;
 }
 
+function formatLedgerDate(value: string): string {
+  const day = value.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    const [year, month, date] = day.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, date)).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+  }
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Cancun" });
+}
+
+function formatCreditCount(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
+function formatPackUsd(value: number): string {
+  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+}
+
+function latestLedgerPurchase(purchases?: LedgerPurchase[]): LedgerPurchase | undefined {
+  if (!purchases?.length) return undefined;
+  return purchases.slice().sort((a, b) => Date.parse(b.purchasedAt) - Date.parse(a.purchasedAt))[0];
+}
+
 function eventCost(event: UsageEvent): string {
   if (event.usd > 0) return formatUsd(event.usd);
   const meta = event.meta?.toLowerCase() ?? "";
@@ -175,6 +291,29 @@ export function ProvidersPage() {
   const [dataError, setDataError] = useState("");
   const [usage, setUsage] = useState<UsageFeed | null>(null);
   const [usageError, setUsageError] = useState("");
+  const [serperCredits, setSerperCredits] = useState<SerperCredits | null>(null);
+  const [serperCreditsLoading, setSerperCreditsLoading] = useState(false);
+  const [serperCreditsError, setSerperCreditsError] = useState("");
+  const checkSerperCredits = () => {
+    setSerperCreditsLoading(true);
+    setSerperCreditsError("");
+    fetch("/api/serper-credits")
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({})) as Partial<SerperCredits> & { message?: string };
+        if (!response.ok || !Array.isArray(body.purchases)) {
+          throw new Error(body.message || body.error || "Serper credits are unavailable.");
+        }
+        return body as SerperCredits;
+      })
+      .then((next) => {
+        setSerperCredits(next);
+        setSerperCreditsError("");
+      })
+      .catch((error) => {
+        setSerperCreditsError(error instanceof Error ? error.message : "Serper credits are unavailable.");
+      })
+      .finally(() => setSerperCreditsLoading(false));
+  };
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/keys-status", { signal: controller.signal })
@@ -281,6 +420,10 @@ export function ProvidersPage() {
             key={provider.label}
             provider={provider}
             latest={usage ? latestProviderEvent(provider, usage.events) : undefined}
+            serperCredits={serperCredits}
+            serperCreditsLoading={serperCreditsLoading}
+            serperCreditsError={serperCreditsError}
+            onCheckSerperCredits={checkSerperCredits}
           />
         ))}
 
@@ -298,6 +441,10 @@ export function ProvidersPage() {
             key={provider.label}
             provider={provider}
             latest={usage ? latestProviderEvent(provider, usage.events) : undefined}
+            serperCredits={serperCredits}
+            serperCreditsLoading={serperCreditsLoading}
+            serperCreditsError={serperCreditsError}
+            onCheckSerperCredits={checkSerperCredits}
           />
         ))}
       </div>

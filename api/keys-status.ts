@@ -5,6 +5,7 @@
 // only CONFIGURED/NOT — never a secret value. Real dollar balances aren't
 // API-exposed for most providers, so this shows plugged-in-or-not + usage.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { listSerperPurchases } from "../server/serperPurchases.js";
 
 export const config = { maxDuration: 15 };
 
@@ -15,6 +16,7 @@ const PROVIDERS: Prov[] = [
   { key: "ANTHROPIC_API_KEY", label: "Claude (Anthropic)", powers: "Optional fallback LLM when ARGUS_PROVIDER_FALLBACKS is on", source: "console.anthropic.com", tier: "optional" },
   { key: "OPENROUTER_API_KEY", label: "OpenRouter", powers: "Optional cheap-extract fallback when ARGUS_PROVIDER_FALLBACKS is on", source: "openrouter.ai", tier: "optional" },
   { key: "TWITTERAPI_KEY", label: "twitterapi.io", powers: "X profile, posts, follower/following graph", source: "twitterapi.io", tier: "paid" },
+  { key: "SERPER_API_KEY", label: "Serper (grounded search)", powers: "grounded web search for reverse-bio / extra checks", source: "serper.dev", tier: "paid" },
   { key: "HELIUS_API_KEY", label: "Helius (Solana)", powers: "Core: attributed-wallet activity. Supplemental: deployer, funding, mint, and serial-launch traces", source: "dashboard.helius.dev", tier: "paid" },
   { key: "GITHUB_TOKEN", label: "GitHub", powers: "Org/repos + commit-author forensics", source: "github.com/settings/tokens", tier: "paid", live: "github" },
   { key: "PDL_API_KEY", label: "People Data Labs", powers: "Professional identity records", source: "dashboard.peopledatalabs.com", tier: "paid" },
@@ -82,6 +84,8 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       tier: p.tier,
       configured,
       usage: p.live === "github" && configured && ghUsage ? `${ghUsage.remaining}/${ghUsage.limit} calls left · resets ${ghUsage.resetsIn}` : undefined,
+      // Compact purchase ledger for Serper only — never a live credit probe.
+      ...(p.key === "SERPER_API_KEY" ? { purchases: listSerperPurchases() } : {}),
     };
   });
 
