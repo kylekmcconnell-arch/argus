@@ -53,6 +53,9 @@ import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
 import { ScoreComposition } from "./ScoreComposition";
+import { DimensionChapters } from "./DimensionChapters";
+import { personDimensionChapters } from "../lib/dimensionChapters";
+import { DossierReport } from "./DossierReport";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
@@ -3299,6 +3302,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               supportCount: a.evidenceRefs?.length,
               counterCount: a.counterEvidenceRefs?.length,
               questionCount: a.gaps?.length,
+              evidenceHref: f.projectStrengthBands ? `#dimension-${axis}` as const : undefined,
             }))}
             totalScore={report.governing_score}
             capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
@@ -3306,10 +3310,19 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           />
         )}
 
+        <DossierReport payload={f as unknown as Record<string, unknown>} />
+        {f.projectStrengthBands && (
+          <DimensionChapters
+            chapters={personDimensionChapters(f.projectStrengthBands)}
+            checksHref="#scan-methodology"
+          />
+        )}
+
         <div className="sticky top-[69px] z-20 mt-5">
           <ReportCanvasSectionNav
             sticky={false}
             items={[
+              { href: "#dossier", label: "The file", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
               { href: "#decision-summary", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
               ...(f.intelligence ? [{ href: "#decision-intelligence" as const, label: "Deep dive", icon: <MagnifyingGlassPlus aria-hidden="true" size={15} weight="bold" />, count: f.intelligence.signals.length }] : []),
               ...(f.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> }] : []),

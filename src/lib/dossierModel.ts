@@ -14,12 +14,34 @@ import {
   type ProvenanceState,
 } from "./provenance";
 
+export interface DossierReceiptSource {
+  url: string;
+  sourceLabel: string;
+  passage: string;
+  /** ISO timestamp if the record has one. Never invented. */
+  capturedAt: string | null;
+}
+
 export interface DossierReceipt {
   passage: string;
   sourceLabel: string;
   url: string;
-  /** [what happened, when] — "never" marks a step the record does not contain. */
+  /** [what happened, when] — "never" is a bind state, not a clock. */
   chain: Array<[string, string]>;
+  /** Every supporting source, bound document first. */
+  sources: DossierReceiptSource[];
+}
+
+export interface DossierSourceRow {
+  url: string;
+  /** hostname · class */
+  label: string;
+  factsCited: number;
+  /** Display clock from the latest recorded capturedAt, or null. */
+  lastCaptured: string | null;
+  citedLabels: string[];
+  /** False when every citing figure is unbound. */
+  established: boolean;
 }
 
 export interface DossierFigure {
@@ -29,6 +51,8 @@ export interface DossierFigure {
   receipt: DossierReceipt | null;
   /** Set when a fact's own sources never bind it to the audited subject. */
   unboundNote: string | null;
+  /** Paid/locked module that has not run. Never a provenance tier. */
+  locked?: boolean;
 }
 
 export interface DossierBeat {
@@ -63,6 +87,8 @@ export interface TeamMember {
    */
   avatarUrl: string | null;
   avatarCapturedAt: string | null;
+  /** True only when a fetched artifact independently verified this person. */
+  independentlyConfirmed: boolean;
 }
 
 export interface Lens {
@@ -96,6 +122,8 @@ export interface Dossier {
   measures: KeyMeasure[];
   cost: { usd: number | null; estimated: boolean } | null;
   beats: DossierBeat[];
+  /** Recorded documents only, sorted by how many dossier figures cite them. */
+  sources: DossierSourceRow[];
 }
 
 const AXIS_LABELS: Record<string, string> = {
@@ -127,7 +155,8 @@ const FACT_BEAT: Record<string, string> = {
 
 interface RawFact {
   predicate?: unknown; value?: unknown; status?: unknown;
-  sources?: Array<{ url?: unknown; title?: unknown; excerpt?: unknown; capturedAt?: unknown; sourceClass?: unknown; artifactVerified?: unknown; relation?: unknown }>;
+  providerProjection?: unknown;
+  sources?: Array<{ url?: unknown; title?: unknown; excerpt?: unknown; capturedAt?: unknown; sourceClass?: unknown; artifactVerified?: unknown; relation?: unknown; provider?: unknown }>;
 }
 interface RawCheck { checkId?: unknown; label?: unknown; status?: unknown; note?: unknown; decisionCritical?: unknown }
 
@@ -143,6 +172,25 @@ const clock = (iso: unknown): string => {
   return m ? m[1] : s.slice(0, 10);
 };
 
+const sourceHost = (url: string): string => {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
+};
+
+/**
+ * Aggregator pages are namesake indexes (defillama.com/protocol/{name}). A slug
+ * or excerpt that repeats the display name is the Dynex Capital collision, not a
+ * unique-id bind. Funding facts therefore cannot bind through these sources.
+ */
+function isAggregatorSource(s: { url?: unknown; provider?: unknown }): boolean {
+  const provider = str(s.provider);
+  const host = sourceHost(str(s.url));
+  return provider === "defillama" || provider === "monid" || host === "defillama.com";
+}
+
+function looksLikeAggregatorFundingValue(value: string): boolean {
+  return /\$[\d,.]+/.test(value) || /\bled by\b/i.test(value) || /\bpublic funding rounds\b/i.test(value);
+}
+
 /**
  * A fact is bound when at least one supporting source names an identifier that
  * is unique to the subject — its handle or its own site host.
@@ -154,72 +202,296 @@ const clock = (iso: unknown): string => {
  * the SEC filings as bound. Retrieval proves a page says a sentence; only a
  * unique identifier proves the sentence is about this subject.
  */
-function bindingNote(fact: RawFact, subject: { handle: string; name: string; website: string | null }): string | null {
-  const supporting = arr<NonNullable<RawFact["sources"]>[number]>(fact.sources)
-    .filter((s) => str(s.relation) === "" || str(s.relation) === "supports");
-  if (!supporting.length) return null;
-  const host = (() => { try { return subject.website ? new URL(subject.website).hostname.replace(/^www\./, "") : "" } catch { return "" } })();
-  const needles = [subject.handle.replace(/^@/, ""), host].map((n) => n.toLowerCase()).filter(Boolean);
-  const bound = supporting.some((s) => {
-    const hay = `${str(s.url)} ${str(s.title)} ${str(s.excerpt)}`.toLowerCase();
-    return needles.some((n) => hay.includes(n));
+type RawSource = NonNullable<RawFact["sources"]>[number];
+
+function supportingSources(fact: RawFact): RawSource[] {
+  return arr<RawSource>(fact.sources).filter((s) => {
+    const rel = str(s.relation);
+    return (rel === "" || rel === "supports") && Boolean(str(s.url));
   });
+}
+
+function sourceBindsToSubject(
+  s: RawSource,
+  fact: RawFact,
+  subject: { handle: string; website: string | null },
+): boolean {
+  // Aggregator funding is namesake-indexed. A /protocol/uniswap slug is not
+  // unique-id evidence that the raised figure or "led by" names this subject.
+  if (str(fact.predicate) === "funding" && isAggregatorSource(s)) return false;
+  const host = sourceHost(subject.website ?? "");
+  const needles = [subject.handle.replace(/^@/, ""), host].map((n) => n.toLowerCase()).filter(Boolean);
+  const hay = `${str(s.url)} ${str(s.title)} ${str(s.excerpt)}`.toLowerCase();
+  return needles.some((n) => hay.includes(n));
+}
+
+function sourceLabelOf(s: RawSource): string {
+  return `${sourceHost(str(s.url)) || "source"} · ${str(s.sourceClass) || "unclassified"}`;
+}
+
+function sourceDocumentKey(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "");
+    const path = u.pathname.replace(/\/$/, "") || "/";
+    return `${host}${path}`;
+  } catch {
+    return url;
+  }
+}
+
+function bindingNote(fact: RawFact, subject: { handle: string; name: string; website: string | null }): string | null {
+  const supporting = supportingSources(fact);
+  if (!supporting.length) return null;
+  const bound = supporting.some((s) => sourceBindsToSubject(s, fact, subject));
   if (bound) return null;
-  const hosts = [...new Set(supporting.map((s) => { try { return new URL(str(s.url)).hostname.replace(/^www\./, "") } catch { return "" } }).filter(Boolean))];
+  const hosts = [...new Set(supporting.map((s) => sourceHost(str(s.url))).filter(Boolean))];
   return `${supporting.length} source${supporting.length === 1 ? "" : "s"} on ${hosts.join(", ") || "an external host"}, none naming this subject`;
 }
 
-function receiptFor(fact: RawFact, unbound: string | null): DossierReceipt | null {
-  const s = arr<NonNullable<RawFact["sources"]>[number]>(fact.sources)[0];
-  if (!s || !str(s.url)) return null;
-  const chain: Array<[string, string]> = [["Fetched and hashed", clock(s.capturedAt)]];
-  if (s.artifactVerified === true) chain.push(["Artifact verified", clock(s.capturedAt)]);
-  chain.push(["Bound to this subject", unbound ? "never" : clock(s.capturedAt)]);
+function receiptFor(
+  fact: RawFact,
+  unbound: string | null,
+  subject: { handle: string; website: string | null },
+): DossierReceipt | null {
+  const supporting = supportingSources(fact);
+  if (!supporting.length) return null;
+  const ordered = [...supporting].sort((a, b) => {
+    const av = sourceBindsToSubject(a, fact, subject) ? 0 : 1;
+    const bv = sourceBindsToSubject(b, fact, subject) ? 0 : 1;
+    return av - bv;
+  });
+  const primary = ordered[0];
+  const chain: Array<[string, string]> = [];
+  const fetched = clock(primary.capturedAt);
+  if (fetched) chain.push(["Fetched", fetched]);
+  // Bind state is recorded, not a second copy of capturedAt.
+  chain.push(["Bound to this subject", unbound ? "never" : "recorded"]);
   return {
-    passage: str(s.excerpt) || "No passage was recorded for this source.",
-    sourceLabel: `${(() => { try { return new URL(str(s.url)).hostname.replace(/^www\./, "") } catch { return "source" } })()} · ${str(s.sourceClass) || "unclassified"}`,
-    url: str(s.url),
+    passage: str(primary.excerpt) || "No passage was recorded for this source.",
+    sourceLabel: sourceLabelOf(primary),
+    url: str(primary.url),
     chain,
+    sources: ordered.map((s) => ({
+      url: str(s.url),
+      sourceLabel: sourceLabelOf(s),
+      passage: str(s.excerpt) || "No passage was recorded for this source.",
+      capturedAt: str(s.capturedAt) || null,
+    })),
   };
 }
 
+function collectSourceRows(figures: DossierFigure[]): DossierSourceRow[] {
+  type Acc = {
+    url: string;
+    className: string;
+    citedLabels: string[];
+    latestIso: string | null;
+    established: boolean;
+  };
+  const groups = new Map<string, Acc>();
+  for (const fig of figures) {
+    const rec = fig.receipt;
+    if (!rec) continue;
+    const listed = rec.sources.length > 0
+      ? rec.sources
+      : [{ url: rec.url, sourceLabel: rec.sourceLabel, passage: rec.passage, capturedAt: null }];
+    const seen = new Set<string>();
+    for (const s of listed) {
+      if (!s.url) continue;
+      const key = sourceDocumentKey(s.url);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const cls = s.sourceLabel.includes(" · ")
+        ? s.sourceLabel.split(" · ").slice(1).join(" · ")
+        : "unclassified";
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          url: s.url,
+          className: cls,
+          citedLabels: [fig.label],
+          latestIso: s.capturedAt,
+          established: !fig.unboundNote,
+        });
+        continue;
+      }
+      existing.citedLabels.push(fig.label);
+      if (s.capturedAt && (!existing.latestIso || s.capturedAt > existing.latestIso)) {
+        existing.latestIso = s.capturedAt;
+        existing.url = s.url;
+      }
+      if (!fig.unboundNote) existing.established = true;
+    }
+  }
+  return [...groups.values()]
+    .map((g) => {
+      const display = g.latestIso ? clock(g.latestIso) : "";
+      return {
+        url: g.url,
+        label: `${sourceHost(g.url) || "source"} · ${g.className}`,
+        factsCited: g.citedLabels.length,
+        lastCaptured: display || null,
+        citedLabels: g.citedLabels,
+        established: g.established,
+      };
+    })
+    .sort((a, b) => b.factsCited - a.factsCited || a.label.localeCompare(b.label));
+}
+
 /**
- * A heading is the report's own sentence about this beat, not a tally of it.
- *
- * The check ledger already writes readable prose — "Posting steady (~2.0d gap,
- * last post 12d ago)" — and an earlier pass here discarded all of it in favour
- * of "2 confirmed, 1 still open", which is accurate and communicates nothing. A
- * reader cannot act on a count. Prefer the confirmed check's note, fall back to
- * the open one, and only tally when the report recorded no sentence at all.
+ * A heading is two short sentences built only from recorded counts and states.
+ * Check notes stay in the ledger: quoting them here reprints engine jargon
+ * ("Posting steady (~2.0d gap)") as if it were the report's voice. A tally
+ * like "2 confirmed, 1 still open" is accurate and tells a reader nothing
+ * they can act on. Display name is never a bind key and never appears here.
  */
-function headingFor(checks: RawCheck[], figures: DossierFigure[]): string {
+function plural(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+function auditedHandle(handle: string): string {
+  const h = handle.trim();
+  if (!h || h === "unknown") return "the subject";
+  return h.startsWith("@") ? h : `@${h}`;
+}
+
+function namedRoleLabel(named: TeamMember[]): { count: number; one: string; many: string } {
+  if (named.length === 1 && /founder/i.test(named[0].role)) {
+    return { count: 1, one: "founder", many: "founders" };
+  }
+  if (named.length > 0 && named.every((m) => /founder/i.test(m.role))) {
+    return { count: named.length, one: "founder", many: "founders" };
+  }
+  return { count: named.length, one: "person", many: "people" };
+}
+
+function unboundHeading(figures: DossierFigure[]): string | null {
   const unbound = figures.filter((f) => f.unboundNote);
-  if (unbound.length) {
-    return unbound.length === 1
-      ? `${unbound[0].value} belongs to someone else.`
-      : `${unbound.length} of ${figures.length} records here name a different subject.`;
+  if (!unbound.length) return null;
+  if (unbound.length === 1 && !looksLikeAggregatorFundingValue(unbound[0].value)) {
+    return `${unbound[0].value} belongs to someone else.`;
+  }
+  return `${unbound.length} of ${figures.length} records here name a different subject.`;
+}
+
+function headingFor(
+  beatId: string,
+  figures: DossierFigure[],
+  ctx: {
+    subject: { handle: string; website: string | null };
+    team: TeamMember[];
+    leadCount: number;
+    openCheckCount: number;
+    verdict: { call: string; score: number | null };
+  },
+): string {
+  if (beatId === "subject") {
+    const who = auditedHandle(ctx.subject.handle);
+    const first = who === "the subject"
+      ? "This is the subject we audited."
+      : `This is the ${who} we audited.`;
+    const site = ctx.subject.website ? "The site is bound." : "No official site is bound.";
+    return `${first} ${site}`;
   }
 
-  const noteOf = (c: RawCheck) => str(c.note);
-  const confirmed = checks.filter((c) => str(c.status) === "confirmed" && noteOf(c));
-  const open = checks.filter((c) => ["unknown", "unavailable", "checked-empty"].includes(str(c.status)));
-  const lead = confirmed[0] ?? checks.find(noteOf);
-  if (lead) {
-    const sentence = noteOf(lead).split(" · ")[0].trim();
-    const tidy = /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
-    // Capitalise, because the ledger writes fragments as often as sentences.
-    const shown = tidy.charAt(0).toUpperCase() + tidy.slice(1);
-    const tail = open.length === 1 ? "1 question remains open." : `${open.length} questions remain open.`;
-    return open.length ? `${shown} ${tail}` : shown;
+  if (beatId === "team") {
+    const named = ctx.team.filter((m) => m.firstParty);
+    const confirmed = ctx.team.filter((m) => m.independentlyConfirmed);
+    const role = namedRoleLabel(named);
+    const first = named.length === 0
+      ? "The project named nobody."
+      : `The project named ${plural(role.count, role.one, role.many)}.`;
+    const second = confirmed.length === 0
+      ? (named.length === 1 ? "Nobody else confirmed them." : "Nobody is independently confirmed.")
+      : confirmed.length === 1
+        ? "1 is independently confirmed."
+        : `${confirmed.length} are independently confirmed.`;
+    return `${first} ${second}`;
   }
 
-  // No check wrote a sentence, so a tally is the most that can honestly be said.
-  const confirmedCount = checks.filter((c) => str(c.status) === "confirmed").length;
-  if (!checks.length && !figures.length) return "Nothing was recorded for this section.";
-  if (confirmedCount && open.length) return `${confirmedCount} confirmed, ${open.length} still open.`;
-  if (confirmedCount) return `${confirmedCount} check${confirmedCount === 1 ? "" : "s"} confirmed, none open.`;
-  if (open.length) return `${open.length} check${open.length === 1 ? "" : "s"} open, none confirmed.`;
-  return `${figures.length} record${figures.length === 1 ? "" : "s"} on file.`;
+  if (beatId === "product") {
+    const products = figures.filter((f) => f.label === "product" && !f.unboundNote);
+    const repos = figures.filter((f) => f.label === "repository" && !f.unboundNote);
+    const parts: string[] = [];
+    if (products.length) parts.push(`${plural(products.length, "product is", "products are")} on file.`);
+    if (repos.length) parts.push(`${plural(repos.length, "repository is", "repositories are")} on file.`);
+    if (parts.length) return parts.join(" ");
+    return unboundHeading(figures) ?? "No product or repository is recorded.";
+  }
+
+  if (beatId === "activity") {
+    const boundFunding = figures.filter((f) => f.label === "funding" && !f.unboundNote);
+    const boundTraction = figures.filter((f) => f.label === "traction" && !f.unboundNote);
+    const boundInvestor = figures.filter((f) => f.label === "investor" && !f.unboundNote);
+    const parts: string[] = [];
+    if (boundTraction.length) {
+      parts.push(`${plural(boundTraction.length, "traction record is", "traction records are")} on file.`);
+    }
+    if (boundFunding.length) {
+      parts.push(`${plural(boundFunding.length, "funding record is", "funding records are")} bound to this subject.`);
+    } else {
+      parts.push("No bound funding is on file.");
+    }
+    if (boundInvestor.length) {
+      parts.push(`${plural(boundInvestor.length, "investor is", "investors are")} bound to this subject.`);
+    }
+    return parts.join(" ");
+  }
+
+  if (beatId === "perimeter") {
+    const bound = figures.filter((f) => !f.unboundNote);
+    const unbound = figures.filter((f) => f.unboundNote);
+    if (unbound.length && !bound.length) return unboundHeading(figures) ?? "No legal entity is recorded.";
+    if (bound.length && unbound.length) {
+      return `${plural(bound.length, "record is", "records are")} bound to this subject. ${unbound.length} name a different subject.`;
+    }
+    if (bound.length) return `${plural(bound.length, "record is", "records are")} bound to this subject.`;
+    return "No legal entity is recorded.";
+  }
+
+  if (beatId === "coverage") {
+    return `${plural(ctx.leadCount, "lead", "leads")}. ${plural(ctx.openCheckCount, "check still open", "checks still open")}.`;
+  }
+
+  if (beatId === "verdict") {
+    return ctx.verdict.score === null ? ctx.verdict.call : `${ctx.verdict.call} · ${ctx.verdict.score}/100`;
+  }
+
+  return unboundHeading(figures)
+    ?? (figures.length ? `${plural(figures.length, "record is", "records are")} on file.` : "Nothing was recorded for this section.");
+}
+
+
+function collectTeam(payload: Record<string, unknown>): TeamMember[] {
+  // Union collector leads with grounded webTeam rows the leads list may
+  // omit. firstParty is only the durable marker — never inferred from a
+  // display name, a face, or the word "official". Independently confirmed
+  // is artifact_verified, a separate bar from first-party naming.
+  const rows = [
+    ...arr<Record<string, unknown>>(payload.webTeamLeads),
+    ...arr<Record<string, unknown>>(payload.webTeam),
+  ];
+  const seen = new Set<string>();
+  const team: TeamMember[] = [];
+  for (const m of rows) {
+    const name = str(m.name);
+    if (!name) continue;
+    const key = `${name}|${str(m.handle)}|${str(m.role)}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const firstParty = str(m.handleProvenance) === "subject_first_party";
+    team.push({
+      name,
+      role: str(m.role),
+      handle: str(m.handle) || null,
+      firstParty,
+      avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
+      avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
+      independentlyConfirmed: m.artifact_verified === true || m.artifactVerified === true,
+    });
+  }
+  return team;
 }
 
 export function buildDossier(payload: Record<string, unknown>): Dossier {
@@ -231,22 +503,36 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     website: str(payload.website) || null,
   };
   const report = (payload.report ?? {}) as Record<string, unknown>;
+  // Live AuditReport stores both pairs. The dynex fixture only has
+  // verdict / score_total. Prefer those; fall back to the composite fields
+  // so a production dossier is not UNKNOWN when only the live names exist.
   const verdict = {
-    call: str(report.verdict) || "UNKNOWN",
-    score: num(report.score_total),
+    call: str(report.verdict) || str(report.composite_verdict) || "UNKNOWN",
+    score: num(report.score_total) ?? num(report.governing_score),
     headline: str(payload.headline) || null,
   };
 
   const facts = arr<RawFact>(payload.basicFacts);
   const checks = arr<RawCheck>(payload.checkRuns).filter((c) => str(c.status) !== "not-applicable");
   const leads = arr<unknown>(payload.basicFactLeads);
-  const failures = arr<unknown>(payload.providerFailures);
 
   const figuresByBeat = new Map<string, DossierFigure[]>();
   for (const fact of facts) {
     const predicate = str(fact.predicate);
     const beatId = FACT_BEAT[predicate] ?? "coverage";
     const unboundNote = bindingNote(fact, subject);
+    // Aggregator/namesake funding that is not unique-id bound must not print as
+    // a raised figure or "led by". Skip the figure; provenance/unboundNote
+    // would still reprint the same sentence if we kept the value.
+    if (
+      predicate === "funding"
+      && unboundNote
+      && (
+        fact.providerProjection === true
+        || arr<NonNullable<RawFact["sources"]>[number]>(fact.sources).some(isAggregatorSource)
+        || looksLikeAggregatorFundingValue(str(fact.value))
+      )
+    ) continue;
     const declared = provenanceForBasicFactStatus(str(fact.status) as never);
     // An unbound fact cannot be sourced regardless of what the ledger declared.
     const provenance: ProvenanceState = unboundNote ? { tier: "unestablished" } : (declared ?? { tier: "derived" });
@@ -255,18 +541,26 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       label: predicate.replace(/_/g, " "),
       value: str(fact.value) || EMPTY_VALUE,
       provenance,
-      receipt: receiptFor(fact, unboundNote),
+      receipt: receiptFor(fact, unboundNote, subject),
       unboundNote,
     });
     figuresByBeat.set(beatId, list);
   }
 
+  const team = collectTeam(payload);
   const claimed = new Set(BEAT_CHECKS.flatMap((b) => b.checks));
+  const leftover = checks.filter((c) => !claimed.has(str(c.checkId)));
+  const openCount = leftover.filter((c) => ["unknown", "unavailable", "checked-empty"].includes(str(c.status))).length;
+  const headingCtx = {
+    subject,
+    team,
+    leadCount: leads.length,
+    openCheckCount: openCount,
+    verdict,
+  };
   const beats: DossierBeat[] = [];
 
   for (const spec of BEAT_CHECKS) {
-    // Ordered by the beat's own priority so the heading quotes the check that
-    // defines the beat, not whichever the payload happened to list first.
     const mine = spec.checks
       .map((id) => checks.find((c) => str(c.checkId) === id))
       .filter((c): c is RawCheck => Boolean(c));
@@ -274,27 +568,22 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     if (!mine.length && !figures.length) continue;
     beats.push({
       id: spec.id, label: spec.label, kicker: spec.kicker,
-      heading: headingFor(mine, figures),
+      heading: headingFor(spec.id, figures, headingCtx),
       figures,
     });
   }
 
-  // Everything the named beats did not claim, plus leads and provider failures.
-  const leftover = checks.filter((c) => !claimed.has(str(c.checkId)));
+  // Everything the named beats did not claim. Headings use lead + open counts
+  // only; leftover check notes stay on the figure, never in the sentence.
   const coverageFigures = figuresByBeat.get("coverage") ?? [];
-  const openCount = leftover.filter((c) => ["unknown", "unavailable", "checked-empty"].includes(str(c.status))).length;
   beats.push({
     id: "coverage", label: "What is unresolved", kicker: "Coverage",
-    heading: [
-      leads.length ? `${leads.length} lead${leads.length === 1 ? "" : "s"}` : "",
-      openCount ? `${openCount} open check${openCount === 1 ? "" : "s"}` : "",
-      failures.length ? `${failures.length} provider${failures.length === 1 ? "" : "s"} that never answered` : "",
-    ].filter(Boolean).join(", ") + "." || "Nothing outstanding.",
+    heading: headingFor("coverage", coverageFigures, headingCtx),
     figures: [
       ...coverageFigures,
       ...leftover.filter((c) => str(c.status) !== "confirmed").map((c): DossierFigure => ({
         label: str(c.label),
-        value: str(c.note) || str(c.status),
+        value: str(c.note) || str(c.status) || EMPTY_VALUE,
         provenance: provenanceForCheckStatus(str(c.status) as never) ?? { tier: "unestablished" },
         receipt: null,
         unboundNote: null,
@@ -304,7 +593,7 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
 
   beats.push({
     id: "verdict", label: "The call", kicker: "Verdict",
-    heading: verdict.score === null ? verdict.call : `${verdict.call} · ${verdict.score}/100`,
+    heading: headingFor("verdict", [], headingCtx),
     figures: [],
   });
 
@@ -357,23 +646,7 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       leads: leads.length,
       failedProviders: arr<{ provider?: unknown }>(payload.providerFailures).map((f) => str(f.provider)).filter(Boolean),
     },
-    team: arr<Record<string, unknown>>(payload.webTeamLeads).map((m): TeamMember => {
-      // Read the durable marker the collector sets, never re-derive it here.
-      // An earlier draft pattern-matched the source string for "post role-scan"
-      // or "official", which silently missed the following and amplification
-      // lanes the collector also treats as first-party, so real avatars for
-      // those two lanes would have been dropped at render. Two independent
-      // definitions of the same boundary is one definition too many.
-      const firstParty = str(m.handleProvenance) === "subject_first_party";
-      return {
-        name: str(m.name),
-        role: str(m.role),
-        handle: str(m.handle) || null,
-        firstParty,
-        avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
-        avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
-      };
-    }).filter((m) => m.name),
+    team,
     nextActions: arr<Record<string, unknown>>((payload.researchPlan as Record<string, unknown>)?.nextActions)
       .map((a) => ({ rank: num(a.rank) ?? 0, action: str(a.action), whyNow: str(a.whyNow) || null }))
       .filter((a) => a.action).sort((a, b) => a.rank - b.rank),
@@ -423,5 +696,6 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       estimated: (payload.cost as Record<string, unknown>).estimated === true,
     },
     beats,
+    sources: collectSourceRows(beats.flatMap((b) => b.figures)),
   };
 }

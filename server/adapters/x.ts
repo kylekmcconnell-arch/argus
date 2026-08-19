@@ -219,48 +219,39 @@ export async function claudeWebSearch(system: string, user: string, opts?: {
   return text || null;
 }
 
-// Dispatcher for GENERAL-WEB discovery (no X-corpus dependency). Tries Claude
-// web_search first (12x cheaper), falling back to Grok live search only when
-// Claude is unavailable or errors (-> null). A Claude search that runs and finds
-// nothing returns its empty JSON (non-null), so the common empty case does NOT
-// re-pay Grok; the fallback exists only to preserve recall when Claude could not
-// answer at all. ARGUS_GENERAL_WEB_PROVIDER=grok forces the legacy path for
-// a controlled A/B or emergency rollback.
+// Dispatcher for GENERAL-WEB discovery (no X-corpus dependency). Grounded
+// search (Serper + Grok extract) is preferred when provisioned. Otherwise Grok
+// live search is primary. Claude web_search is fallback-only when
+// ARGUS_PROVIDER_FALLBACKS is on. ARGUS_GENERAL_WEB_PROVIDER=grok skips
+// grounded/Claude and goes straight to Grok.
 export async function generalWebSearch(system: string, user: string, opts?: {
   maxToolCalls?: number;
   cacheKey?: string;
   bypassCache?: boolean;
   claimProviderCall?: () => boolean;
 }): Promise<string | null> {
-  if ((env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() !== "grok") {
-    // Ultimate path: decoupled Serper search + page fetch + cheap-model extract
-    // (near-free vs a frontier web_search reading every page in-context).
-    // Default policy: the first PROVISIONED provider owns the lane when it
-    // answers, including a valid empty result. A total provider failure may use
-    // an already-provisioned recovery path; ARGUS_PROVIDER_FALLBACKS=on also
-    // permits optional cascading after non-failure empty results.
-    if (groundedSearchProvisioned()) {
-      let groundedUnavailable = false;
-      const viaGrounded = await groundedSearch(system, user, {
-        cacheKey: opts?.cacheKey,
-        bypassCache: opts?.bypassCache,
-        onProviderUnavailable: () => { groundedUnavailable = true; },
-      });
-      // A valid empty answer stays on its lane. A provider that rejected every
-      // request did not answer, so an already-provisioned fallback may recover
-      // the report even when optional duplicate-provider cascading is off.
-      if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
-    }
-    if (env("ANTHROPIC_API_KEY")) {
-      const viaClaude = await claudeWebSearch(system, user, {
-        maxSearchUses: opts?.maxToolCalls,
-        cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : undefined,
-        bypassCache: opts?.bypassCache,
-      });
-      if (viaClaude || !providerFallbacksEnabled()) return viaClaude;
-    }
+  const forceGrok = (env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() === "grok";
+  if (!forceGrok && groundedSearchProvisioned()) {
+    let groundedUnavailable = false;
+    const viaGrounded = await groundedSearch(system, user, {
+      cacheKey: opts?.cacheKey,
+      bypassCache: opts?.bypassCache,
+      onProviderUnavailable: () => { groundedUnavailable = true; },
+    });
+    if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
   }
-  return env("XAI_API_KEY") ? grokSearch(system, user, opts) : null;
+  if (env("XAI_API_KEY")) {
+    const viaGrok = await grokSearch(system, user, opts);
+    if (viaGrok || !providerFallbacksEnabled() || !env("ANTHROPIC_API_KEY")) return viaGrok;
+  }
+  if (env("ANTHROPIC_API_KEY") && providerFallbacksEnabled()) {
+    return claudeWebSearch(system, user, {
+      maxSearchUses: opts?.maxToolCalls,
+      cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : undefined,
+      bypassCache: opts?.bypassCache,
+    });
+  }
+  return null;
 }
 
 // twitterapi.io throttles hard (429) under bursty use, and occasionally 502/503.
@@ -316,6 +307,8 @@ export interface XProfile {
   followers?: number;
   createdAt?: string;
   website?: string;
+  /** Every official http(s) URL on this twitterapi profile record (website + entities). */
+  officialWebsites?: string[];
   image?: string; // real X profile photo URL (more reliable than an unavatar guess)
 }
 
@@ -372,15 +365,37 @@ export async function publicXAccountState(
 }
 
 // The project's own website is the biggest un-mined lead on a project account —
-// the team page lives there, not in the tweets. twitterapi returns the bio link
-// under a few shapes; take the first real http(s) one.
+// the team page lives there, not in the tweets. twitterapi returns the bio
+// website and entity URLs under a few shapes. Keep EVERY unique-ID-bound
+// http(s) URL from that same profile record, not just the first: a project
+// can put the company site in the website field and the token site in a
+// bio entity (@CLUTCHMARKETS / clutch.markets vs stonkbrokers.cash).
+function twitterapiOfficialUrls(p: any): string[] {
+  const out: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value === "string" && /^https?:\/\//i.test(value) && !out.includes(value)) {
+      out.push(value);
+    }
+  };
+  const takeEntityUrls = (entities: any) => {
+    for (const bucket of [entities?.url?.urls, entities?.description?.urls]) {
+      if (!Array.isArray(bucket)) continue;
+      for (const entry of bucket) {
+        push(entry?.expanded_url ?? entry?.url);
+      }
+    }
+  };
+  takeEntityUrls(p?.profile_bio?.entities);
+  takeEntityUrls(p?.entities);
+  push(p?.url);
+  push(p?.profile_url);
+  push(p?.website);
+  push(p?.link);
+  return out;
+}
+
 function pickWebsite(p: any): string | undefined {
-  const cands = [
-    p?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url,
-    p?.entities?.url?.urls?.[0]?.expanded_url,
-    p?.url, p?.profile_url, p?.website, p?.link,
-  ].filter((x) => typeof x === "string" && /^https?:\/\//i.test(x));
-  return cands[0];
+  return twitterapiOfficialUrls(p)[0];
 }
 
 export async function getProfile(handle: string): Promise<XProfile | null> {
@@ -418,6 +433,7 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
         followers: p.followers ?? p.followers_count,
         createdAt: p.createdAt ?? p.created_at,
         website: pickWebsite(p),
+        officialWebsites: twitterapiOfficialUrls(p),
         image,
       };
     } catch {
@@ -2002,6 +2018,10 @@ export const xAdapter: Adapter = {
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
       ctx.evidence.profile.website = canonicalPublicProfileWebsite(prof.website)
         ?? ctx.evidence.profile.website;
+      const officialWebsites = (prof.officialWebsites ?? [])
+        .map((url) => canonicalPublicProfileWebsite(url))
+        .filter((url): url is string => Boolean(url));
+      if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);
       if (prof.image) {
         ctx.evidence.profile.avatar_url = prof.image;

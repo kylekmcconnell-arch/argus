@@ -69,7 +69,7 @@ provider live. The report badge shows **LIVE** only when real collection happene
 fixture's *claims* against fresh data (e.g., does the named endorser actually
 follow the subject right now).
 
-The Claude analyst (`ANTHROPIC_API_KEY`) scores each axis with a rationale from
+The Grok analyst (`XAI_API_KEY`) scores each axis with a rationale from
 the collected evidence; the engine still owns caps, banding and the composite
 verdict. See `.env.example` for every key.
 

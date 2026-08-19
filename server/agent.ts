@@ -4,7 +4,7 @@
 // same JSON schema and every result passes the same deterministic validators.
 
 import { createHash } from "node:crypto";
-import { ANALYST_MODEL, env, providerFallbacksEnabled } from "./config";
+import { ANALYST_MODEL, GROK_ANALYST_MODEL, env, providerFallbacksEnabled } from "./config";
 import { addClaudeUsage, addGrokUsage } from "./cost";
 import type {
   AxisEvidenceRecord,
@@ -59,18 +59,17 @@ export async function structured<T>(
   onFailure?: (reason: string) => void,
 ): Promise<T | null> {
   const deadlineAt = Date.now() + Math.max(0, timeoutMs);
-  const claude = env("ANTHROPIC_API_KEY")
-    ? await structuredClaude<T>(system, user, tool, maxTokens, timeoutMs, onFailure)
+  const grok = env("XAI_API_KEY")
+    ? await structuredGrok<T>(system, user, tool, maxTokens, timeoutMs, onFailure)
     : null;
-  if (claude !== null || !env("XAI_API_KEY")) return claude;
-  // A Claude FAILURE only retries on Grok when failover is explicitly enabled:
-  // by default a dead provider fails visibly instead of silently moving the
-  // spend to a different metered provider. With no Anthropic key at all, Grok
-  // is the configured primary, not a fallback.
-  if (env("ANTHROPIC_API_KEY") && !providerFallbacksEnabled()) return null;
+  if (grok !== null) return grok;
+  // Claude is fallback-only: Grok is the analyst even when ANTHROPIC_API_KEY
+  // is set. A Grok failure (or missing XAI key) retries on Claude only when
+  // failover is explicitly enabled.
+  if (!env("ANTHROPIC_API_KEY") || !providerFallbacksEnabled()) return grok;
   const remainingMs = Math.max(0, deadlineAt - Date.now());
   if (remainingMs < 1) return null;
-  return structuredGrok<T>(system, user, tool, maxTokens, remainingMs, onFailure);
+  return structuredClaude<T>(system, user, tool, maxTokens, remainingMs, onFailure);
 }
 
 // Calls the Anthropic Messages API and forces a single tool call, returning the
@@ -212,7 +211,7 @@ async function structuredClaude<T>(
   return (block?.input as T) ?? null;
 }
 
-/** xAI structured-output fallback for scoring, contradiction, and intake tools.
+/** xAI structured-output primary for scoring, contradiction, and intake tools.
  * It receives the same schema and evidence packet, then passes through every
  * existing deterministic validator before any result can affect a report. */
 async function structuredGrok<T>(
@@ -227,7 +226,7 @@ async function structuredGrok<T>(
   if (!key) return null;
   const startedAt = Date.now();
   const requestBody = JSON.stringify({
-    model: env("ARGUS_GROK_ANALYST_MODEL") || env("ARGUS_GROK_MODEL") || "grok-4-fast",
+    model: GROK_ANALYST_MODEL,
     max_tokens: maxTokens,
     messages: [
       { role: "system", content: `${system}\n\nReturn exactly one ${tool.name} object. ${tool.description}` },

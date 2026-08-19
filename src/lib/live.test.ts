@@ -78,6 +78,40 @@ describe("audit SSE liveness", () => {
     );
   });
 
+  it("forwards the investigation contract into the embedded project scan", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: done\ndata: {"handle":"@CLUTCHMARKETS","report":{}}\n\n'));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    streamAudit(
+      "@CLUTCHMARKETS",
+      true,
+      { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() },
+      "investment_due_diligence",
+      {
+        tokenAddress: "0xe934e36A439C94017B64a3FecE66AF12099aBF50",
+        tokenChain: "robinhood",
+        tokenSymbol: "STONKBROKER",
+      },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    const url = String(fetchMock.mock.calls[0]?.[0]);
+    expect(url).toContain("handle=%40CLUTCHMARKETS");
+    expect(url).toContain("address=0xe934e36A439C94017B64a3FecE66AF12099aBF50");
+    expect(url).toContain("chain=robinhood");
+    expect(url).toContain("symbol=STONKBROKER");
+    expect(url).toContain("private=1");
+  });
+
   it("aborts and reports a genuinely inactive stream", async () => {
     const body = new ReadableStream<Uint8Array>({ start() {} });
     let requestSignal: AbortSignal | undefined;

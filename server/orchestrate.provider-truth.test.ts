@@ -202,8 +202,32 @@ describe("orchestrator provider execution truth", () => {
 
   it("reports a coverage-preflight abstention separately from an invalid analyst response", async () => {
     vi.stubEnv("PDL_API_KEY", "pdl-key");
-    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
+    vi.stubEnv("XAI_API_KEY", "xai-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
     const emitted: Array<{ phase: string; label: string; detail: string }> = [];
+    const structuredInput = (name: string, prompt: string) => {
+      const partialAxis = prompt.match(/Axes to score[\s\S]*?-\s+([A-Z]{1,3}\d+_[a-z0-9_]+)/)?.[1] ?? "I1_identity_legitimacy";
+      const primaryEvidenceRef = prompt.match(new RegExp(`${partialAxis} \\| substantive aliases[\\s\\S]*?:\\s*(e\\d+)`))?.[1] ?? "e001";
+      const score = Number(prompt.match(new RegExp(`${partialAxis}: [^.;]+ required (\\d+)-(\\d+)`))?.[2] ?? 1);
+      if (name === "record_contradictions") return { contradictions: [] };
+      if (name === "record_verdict") {
+        return {
+          axes: [{
+            axis: partialAxis,
+            score,
+            rationale: "The supported identity evidence was assessed without inferring missing portfolio or fund-scale facts.",
+            primaryEvidenceRef,
+            additionalEvidenceRefs: [],
+            counterEvidenceRefs: [],
+            coverageRefs: [],
+            gaps: [],
+          }],
+          headline: "A partial evidence-backed assessment is available.",
+          identity_note: "The collected identity evidence was assessed within its verified scope.",
+        };
+      }
+      return {};
+    };
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("api.peopledatalabs.com")) {
@@ -222,35 +246,23 @@ describe("orchestrator provider execution truth", () => {
           },
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
-      if (url.includes("api.anthropic.com")) {
-        const request = JSON.parse(String(init?.body)) as { tool_choice?: { name?: string }; messages?: unknown };
-        const name = request.tool_choice?.name ?? "unknown";
-        const prompt = JSON.stringify(request.messages ?? []);
-        const partialAxis = prompt.match(/Axes to score[\s\S]*?-\s+([A-Z]{1,3}\d+_[a-z0-9_]+)/)?.[1] ?? "I1_identity_legitimacy";
-        const primaryEvidenceRef = prompt.match(new RegExp(`${partialAxis} \\| substantive aliases[\\s\\S]*?:\\s*(e\\d+)`))?.[1] ?? "e001";
-        const score = Number(prompt.match(new RegExp(`${partialAxis}: [^.;]+ required (\\d+)-(\\d+)`))?.[2] ?? 1);
-        const toolInput = name === "record_contradictions"
-          ? { contradictions: [] }
-          : name === "record_verdict"
-            ? {
-                axes: [{
-                  axis: partialAxis,
-                  score,
-                  rationale: "The supported identity evidence was assessed without inferring missing portfolio or fund-scale facts.",
-                  primaryEvidenceRef,
-                  additionalEvidenceRefs: [],
-                  counterEvidenceRefs: [],
-                  coverageRefs: [],
-                  gaps: [],
-                }],
-                headline: "A partial evidence-backed assessment is available.",
-                identity_note: "The collected identity evidence was assessed within its verified scope.",
-              }
-            : {};
+      if (url.includes("api.x.ai/v1/responses")) {
         return new Response(JSON.stringify({
-          content: [{ type: "tool_use", name, input: toolInput }],
-          stop_reason: "tool_use",
-          usage: { input_tokens: 100, output_tokens: 20 },
+          output_text: '{"facts":[]}',
+          output: [{ type: "web_search_call" }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("api.x.ai/v1/chat/completions")) {
+        const request = JSON.parse(String(init?.body)) as {
+          messages?: Array<{ role?: string; content?: unknown }>;
+          response_format?: { json_schema?: { name?: string } };
+        };
+        const name = request.response_format?.json_schema?.name ?? "unknown";
+        const prompt = JSON.stringify(request.messages ?? []);
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(structuredInput(name, prompt)) } }],
+          usage: { prompt_tokens: 100, completion_tokens: 20 },
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response("provider unavailable", { status: 503 });
@@ -260,24 +272,24 @@ describe("orchestrator provider execution truth", () => {
     const pending = runAudit("@nova_capital", (step) => emitted.push(step));
     await vi.runAllTimersAsync();
     const dossier = await pending;
-    const anthropicTools = fetchMock.mock.calls.flatMap(([input, init]) => {
-      if (!String(input).includes("api.anthropic.com")) return [];
-      const request = JSON.parse(String(init?.body)) as { tool_choice?: { name?: string } };
-      return request.tool_choice?.name ? [request.tool_choice.name] : [];
+    const grokTools = fetchMock.mock.calls.flatMap(([input, init]) => {
+      if (!String(input).includes("api.x.ai/v1/chat/completions")) return [];
+      const request = JSON.parse(String(init?.body)) as { response_format?: { json_schema?: { name?: string } } };
+      return request.response_format?.json_schema?.name ? [request.response_format.json_schema.name] : [];
     });
-    const anthropicBodies = fetchMock.mock.calls.flatMap(([input, init]) =>
-      String(input).includes("api.anthropic.com") ? [String(init?.body ?? "")] : [],
+    const grokBodies = fetchMock.mock.calls.flatMap(([input, init]) =>
+      String(input).includes("api.x.ai") ? [String(init?.body ?? "")] : [],
     );
     const analystRun = dossier?.providerSnapshot?.runs.find((run) => run.id === "ai-analyst");
 
-    expect(anthropicBodies.some((body) =>
+    expect(grokBodies.some((body) =>
       body.includes("Which investments are explicitly attributed to this person"),
     )).toBe(true);
-    expect(anthropicBodies.some((body) =>
+    expect(grokBodies.some((body) =>
       body.includes("Which portfolio companies are explicitly claimed by this exact organization"),
     )).toBe(false);
-    expect(anthropicTools).toContain("record_contradictions");
-    expect(anthropicTools).toContain("record_verdict");
+    expect(grokTools).toContain("record_contradictions");
+    expect(grokTools).toContain("record_verdict");
     expect(dossier?.report.composite_verdict).toBe("INCOMPLETE");
     expect(dossier?.headline).toContain("Partial assessment: ARGUS scored 1 of 5 decision areas");
     expect(Object.keys(dossier?.report.role_reports[0]?.axes ?? {})).toEqual(["I1_identity_legitimacy"]);

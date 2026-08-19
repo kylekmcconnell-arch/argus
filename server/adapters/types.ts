@@ -60,6 +60,14 @@ export interface CollectContext {
   evidence: CollectedEvidence;
   emit: Emit;
   recordCheck?: (observation: CheckObservation) => void;
+  /**
+   * Investigation-supplied contract. A nested project-account audit already
+   * knows which token started the case; without this the collector searches
+   * by display name and can miss (or worse, name-match) the wrong coin.
+   */
+  tokenAddress?: string;
+  tokenChain?: string;
+  tokenSymbol?: string;
 }
 
 export interface AdapterRunResult {

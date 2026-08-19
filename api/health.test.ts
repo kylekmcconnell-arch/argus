@@ -62,7 +62,7 @@ describe("provider readiness", () => {
       extraction: {
         groundedSearchActive: true,
         extractModel: "google/gemini-2.5-flash-lite",
-        extractProvider: "anthropic",
+        extractProvider: "grok",
       },
       knowledgeBase: { reuse: false },
     });
@@ -70,11 +70,13 @@ describe("provider readiness", () => {
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
-  it("reports OpenRouter routing and knowledge-base reuse when configured", () => {
+  it("reports OpenRouter routing and knowledge-base reuse when fallbacks are on", () => {
+    vi.stubEnv("XAI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
     vi.stubEnv("SERPER_API_KEY", "serper-key");
     vi.stubEnv("OPENROUTER_API_KEY", "or-key");
     vi.stubEnv("ARGUS_EXTRACT_MODEL", "google/gemini-2.5-flash-lite");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     vi.stubEnv("CRYPTORANK_API_KEY", "cr-key");
     vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
     const { res, captured } = response();
@@ -93,15 +95,15 @@ describe("provider readiness", () => {
       extraction: { extractProvider: "openrouter", groundedSearchActive: true },
       knowledgeBase: { reuse: true },
       models: {
-        analyst: "claude-sonnet-4-6 (default)",
-        discovery: "claude-sonnet-4-6 (default) (follows analyst)",
-        discoveryRoute: "claude-web-search (default)",
+        analyst: "grok-4-fast (default)",
+        discovery: "grok-4-fast (default) (follows analyst)",
+        discoveryRoute: "grok-web-search (default)",
       },
     });
   });
 
   it("reports model-tier env flips so a cost change verifies without a paid audit", () => {
-    vi.stubEnv("ARGUS_ANALYST_MODEL", "claude-sonnet-5");
+    vi.stubEnv("ARGUS_GROK_ANALYST_MODEL", "grok-4");
     vi.stubEnv("ARGUS_DISCOVERY_MODEL", "claude-haiku-4-5");
     vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
     const { res, captured } = response();
@@ -109,7 +111,7 @@ describe("provider readiness", () => {
     handler({ method: "GET" } as never, res as never);
 
     expect(captured.body).toMatchObject({
-      models: { analyst: "claude-sonnet-5", discovery: "claude-haiku-4-5", discoveryRoute: "grounded" },
+      models: { analyst: "grok-4", discovery: "claude-haiku-4-5", discoveryRoute: "grounded" },
     });
   });
 

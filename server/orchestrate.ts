@@ -624,6 +624,10 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
     ctx.evidence.profile.bio = prof.bio ?? "";
     const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? undefined;
     ctx.evidence.profile.website = profileWebsite;
+    const officialWebsites = (prof.officialWebsites ?? [])
+      .map((url) => canonicalPublicProfileWebsite(url))
+      .filter((url): url is string => Boolean(url));
+    if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
     // A link aggregator is a pointer, not a website: left as-is it kills
     // PROJECT routing, official-site verification, and token binding for the
     // whole run. Dereference it deterministically (hub must link this exact
@@ -3094,6 +3098,9 @@ interface RunAuditOptions {
   organizationId?: string;
   analystDeadlineAt?: number;
   intent?: ResearchIntent;
+  tokenAddress?: string;
+  tokenChain?: string;
+  tokenSymbol?: string;
 }
 
 /**
@@ -3255,6 +3262,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     evidence,
     emit,
     recordCheck: (observation) => checkTracker.record(observation),
+    ...(options?.tokenAddress && options?.tokenChain
+      ? {
+          tokenAddress: options.tokenAddress,
+          tokenChain: options.tokenChain,
+          ...(options.tokenSymbol ? { tokenSymbol: options.tokenSymbol } : {}),
+        }
+      : {}),
   };
 
   const organizationSafetyPass = async (): Promise<void> => {

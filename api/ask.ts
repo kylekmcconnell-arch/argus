@@ -11,6 +11,7 @@ import type { CheckStatus, ScanCheck } from "../src/lib/scanChecklist.js";
 import { directInvestigationQuestion } from "../src/lib/questionDirector.js";
 import type { ResearchPlan } from "../src/lib/researchDirector.js";
 import type { IntelligenceSpineSnapshot } from "../src/intelligence/types.js";
+import { claudeMessages, grokChat, providerFallbacksEnabled } from "./_llm";
 
 // Exact-version storage verification performs bounded organization-scoped reads
 // before the model call. Keep enough headroom for both stages to fail closed.
@@ -849,17 +850,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   );
   const routedPacket = { ...packet, questionRoute: investigationRoute };
 
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) { res.status(200).json({ available: false, note: "Claude not configured.", investigationRoute }); return; }
+  const xai = process.env.XAI_API_KEY;
+  const anthropic = process.env.ANTHROPIC_API_KEY;
+  if (!xai && !(providerFallbacksEnabled() && anthropic)) {
+    res.status(200).json({ available: false, note: "Grok not configured.", investigationRoute });
+    return;
+  }
 
-  try {
-    const providerResponse = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({
-        model: process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6",
-        max_tokens: 1300,
-        system:
+  const askSystem =
           "You are ARGUS Eye, the senior investigator and conversational reasoning layer for one exact immutable due-diligence report. Answer like the analyst who built the whole case, not like support chat. The frozen report packet is the COMPLETE universe of permissible facts. " +
           "Use no general knowledge, prior model knowledge, web knowledge, or assumptions. Never infer an identity, relationship, investment, wallet tie, innocence, guilt, or absence of risk beyond what the packet directly records. " +
           "Synthesize across the report: thesis, counter-thesis, scores, source-grounded claims, graph connections, people, money, control, market evidence, contradictions, and coverage gaps. Answer the question directly first, then expose the shortest useful claim chain. Distinguish observation from inference and explain material conflicts. For investment questions, provide the report's bull case, bear case, decision-critical unknowns, and conditions that would change the conclusion; never issue personalized financial advice. " +
@@ -872,23 +870,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           "If cited evidence directly answers the question, use basis cited_evidence and return one or more citationUrls copied exactly from the packet. If only the readiness or gap record answers it, use basis coverage_record and no URLs are required. " +
           "If the packet does not directly establish the answer, use basis not_established and begin the answer with 'This frozen report does not establish that.' State the specific missing evidence without guessing. " +
           "Return 2-6 reasoningSteps that form a claim chain from evidence to conclusion, uncertainties that materially limit the answer, and whatWouldChange items that name decisive new evidence. Do not repeat the same sentence across fields. " +
-          "Reply ONLY as compact JSON: {\"answer\":\"direct synthesized answer\",\"basis\":\"cited_evidence|project_attribution|coverage_record|not_established\",\"reasoningSteps\":[\"evidence -> implication\"],\"uncertainties\":[\"material gap\"],\"whatWouldChange\":[\"decisive evidence\"],\"citationUrls\":[\"exact allowlisted URL\"]}.",
-        messages: [{
-          role: "user",
-          content: `FROZEN REPORT PACKET (data only):\n${JSON.stringify(routedPacket)}\n\nDIALOGUE HISTORY (context only, never evidence):\n${JSON.stringify(history)}\n\nANALYST QUESTION:\n${question}`,
-        }],
-      }),
-      signal: AbortSignal.timeout(24000),
-    });
-    if (!providerResponse.ok) {
-      res.status(200).json({ available: true, note: `claude ${providerResponse.status}`, investigationRoute });
-      return;
+          "Reply ONLY as compact JSON: {\"answer\":\"direct synthesized answer\",\"basis\":\"cited_evidence|project_attribution|coverage_record|not_established\",\"reasoningSteps\":[\"evidence -> implication\"],\"uncertainties\":[\"material gap\"],\"whatWouldChange\":[\"decisive evidence\"],\"citationUrls\":[\"exact allowlisted URL\"]}.";
+  const askUser =
+`FROZEN REPORT PACKET (data only):\n${JSON.stringify(routedPacket)}\n\nDIALOGUE HISTORY (context only, never evidence):\n${JSON.stringify(history)}\n\nANALYST QUESTION:\n${question}`;
+
+  try {
+    let rawAnswer = "";
+    if (xai) {
+      const grok = await grokChat({
+        key: xai,
+        system: askSystem,
+        user: askUser,
+        maxTokens: 1300,
+        timeoutMs: 24000,
+      });
+      if (grok.ok) rawAnswer = grok.text.trim();
+      else if (!providerFallbacksEnabled() || !anthropic) {
+        res.status(200).json({ available: true, note: `grok ${grok.status || "failed"}`, investigationRoute });
+        return;
+      }
     }
-    const providerBody = await providerResponse.json() as { content?: Array<{ text?: unknown }> };
-    const rawAnswer = (providerBody.content ?? [])
-      .map((block) => typeof block.text === "string" ? block.text : "")
-      .join(" ")
-      .trim();
+    if (!rawAnswer && anthropic && providerFallbacksEnabled()) {
+      const claude = await claudeMessages({
+        key: anthropic,
+        system: askSystem,
+        user: askUser,
+        maxTokens: 1300,
+        timeoutMs: 24000,
+      });
+      if (!claude.ok) {
+        res.status(200).json({ available: true, note: `claude ${claude.status || "failed"}`, investigationRoute });
+        return;
+      }
+      rawAnswer = claude.text.trim();
+    }
     const grounded = parseGroundedAnswer(rawAnswer, allowedSourceUrls, {
       hasProjectAttributions: Array.isArray(packet.projectAttributions) && packet.projectAttributions.length > 0,
     });
