@@ -37,6 +37,34 @@ export const countWord = (n: number): string => COUNT_WORDS[n] ?? String(n);
 export const compositionHeadline = (n: number): string =>
   `${countWord(n)} ${n === 1 ? "dimension" : "dimensions"}. One number.`;
 
+/* The canonical reading order and plain names (Enigma, from the Auric File:
+   "anyone can understand it"). The account's dimensions lead with the team;
+   the token's follow the mock's arc. Engine keys stay untouched; only what
+   the reader sees is renamed and ordered. */
+const PLAIN_AXES: Record<string, { label: string; order: number }> = {
+  P1_team_and_identity: { label: "The team", order: 10 },
+  P2_product_substance: { label: "The product", order: 20 },
+  P5_traction_and_liveness: { label: "Traction", order: 30 },
+  P4_backing_and_partners: { label: "Backing & partners", order: 40 },
+  P3_token_conduct: { label: "Token conduct", order: 50 },
+  P6_transparency_integrity: { label: "Transparency", order: 60 },
+  T5: { label: "Onchain health", order: 110 },
+  T4: { label: "The holders", order: 120 },
+  T3: { label: "The token", order: 130 },
+  T2: { label: "Code & security", order: 140 },
+  T1: { label: "The liquidity", order: 150 },
+  T6: { label: "Maturity & presence", order: 160 },
+};
+
+export const plainAxisLabel = (key: string, fallback: string): string =>
+  PLAIN_AXES[key]?.label ?? fallback;
+
+export const plainAxisOrder = (key: string): number => PLAIN_AXES[key]?.order ?? 900;
+
+/** Sort anything keyed by axis into the canonical reading order. */
+export const orderByPlainAxis = <T extends { axis: string }>(rows: T[]): T[] =>
+  [...rows].sort((a, b) => plainAxisOrder(a.axis) - plainAxisOrder(b.axis));
+
 const money = (n?: number | null): string | null => {
   if (n == null || !Number.isFinite(n)) return null;
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
@@ -151,11 +179,11 @@ function factsFor(axisKey: string, d: TokenDossier): ChapterFact[] {
 
 /** The composition strip is the table of contents; these are the chapters. */
 export function tokenDimensionChapters(d: TokenDossier): DimensionChapter[] {
-  return (d.axes ?? []).map((axis) => {
+  return orderByPlainAxis((d.axes ?? []).map((axis) => {
     const tone = band(axis.score, axis.weight);
     return {
       axis: axis.key,
-      eyebrow: `${axis.label} · ${axis.weight}% of the score`,
+      eyebrow: `${plainAxisLabel(axis.key, axis.label)} · ${axis.weight}% of the score`,
       headline: HEADLINES[axis.key]?.[tone]
         ?? (tone === "pass" ? `${axis.label}: no concerns recorded.` : tone === "caution" ? `${axis.label}: mixed.` : `${axis.label}: weak.`),
       score: axis.score,
@@ -164,7 +192,7 @@ export function tokenDimensionChapters(d: TokenDossier): DimensionChapter[] {
       lead: axis.rationale,
       facts: factsFor(axis.key, d),
     };
-  });
+  }));
 }
 
 

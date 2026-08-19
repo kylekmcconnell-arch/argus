@@ -84,14 +84,25 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
             <span className="flex items-baseline gap-2">
               <span className="text-[13.5px] font-medium text-ink">{row.label}</span>
               <span className="mono text-[10px] uppercase tracking-wide text-ink-faint max-sm:hidden">
-                {row.sublabel ?? `${row.weight}% of the score`}
+                {row.sublabel ?? `${row.weight}% weight`}
               </span>
             </span>
-            <span className="mono text-[11px] tabular text-ink-dim">
-              <span className="font-semibold" style={{ color }}>{row.score}</span>
-              <span className="text-ink-faint"> / {row.weight}</span>
-              <span className="ml-2 text-ink-faint">{word}</span>
-            </span>
+            {row.tone ? (
+              <span className="mono text-[11px] tabular text-ink-dim">
+                <span className="font-semibold" style={{ color }}>{row.score}</span>
+                <span className="text-ink-faint"> / {row.weight}</span>
+                <span className="ml-2 text-ink-faint">{word}</span>
+              </span>
+            ) : (
+              /* The Auric File presentation: the normalized score reads at a
+                 glance in the band color; "drove" states the actual points
+                 this dimension put into the total. */
+              <span className="mono text-[12px] tabular text-ink-faint">
+                <span className="text-[15px] font-semibold" style={{ color }}>{Math.round(ratio * 100)}</span>
+                {" /100"}
+                <span className="ml-2">drove {row.score} pts</span>
+              </span>
+            )}
           </div>
           <div className="mt-2 h-[3px] overflow-hidden rounded-full bg-line" role="presentation">
             <div
@@ -114,7 +125,7 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
         <div className="overflow-hidden">
           <div className="px-4 pb-3.5 pt-0.5">
             {row.rationale && (
-              <p className="max-w-[68ch] text-[12.5px] leading-relaxed text-ink-dim">{row.rationale}</p>
+              <p className="max-w-[68ch] text-[13.5px] leading-relaxed text-ink">{row.rationale}</p>
             )}
             {row.countsLine ? (
               <p className="mono mt-2 text-[11px] text-ink-faint">{row.countsLine}</p>

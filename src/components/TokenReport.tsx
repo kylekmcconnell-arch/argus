@@ -51,7 +51,7 @@ import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
-import { compositionHeadline, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -549,14 +549,14 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           <h2 className="af-h2 mt-3">{compositionHeadline(d.axes.length)}</h2>
           <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
         <ScoreComposition
-          rows={d.axes.map((a) => ({
+          rows={orderByPlainAxis(d.axes.map((a) => ({
             axis: a.key,
-            label: a.label,
+            label: plainAxisLabel(a.key, a.label),
             score: a.score,
             weight: a.weight,
             rationale: a.rationale,
             evidenceHref: `#dimension-${a.key}` as const,
-          }))}
+          })))}
           totalScore={d.score}
           capNote={d.capApplied ? `limited to ${d.score}` : null}
           challengeAnchor={shareView ? null : "#token-challenge"}

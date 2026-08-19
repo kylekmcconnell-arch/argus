@@ -44,7 +44,7 @@ describe("tokenDimensionChapters", () => {
     expect(chapters.find((c) => c.axis === "T1")).toMatchObject({
       tone: "pass",
       headline: "The liquidity is locked where it belongs.",
-      eyebrow: "Liquidity & lock · 24% of the score",
+      eyebrow: "The liquidity · 24% of the score",
     });
     expect(chapters.find((c) => c.axis === "T4")).toMatchObject({
       tone: "caution",
