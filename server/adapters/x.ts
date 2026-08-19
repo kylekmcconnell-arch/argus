@@ -230,6 +230,7 @@ export async function generalWebSearch(system: string, user: string, opts?: {
   bypassCache?: boolean;
   claimProviderCall?: () => boolean;
   queries?: readonly string[];
+  newsQuery?: string;
 }): Promise<string | null> {
   const forceGrok = (env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() === "grok";
   if (!forceGrok && groundedSearchProvisioned()) {
@@ -238,6 +239,7 @@ export async function generalWebSearch(system: string, user: string, opts?: {
       cacheKey: opts?.cacheKey,
       bypassCache: opts?.bypassCache,
       queries: opts?.queries,
+      newsQuery: opts?.newsQuery,
       onProviderUnavailable: () => { groundedUnavailable = true; },
     });
     if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
@@ -1456,7 +1458,16 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT. Do NOT downgrade a founder to advisor. " +
     "For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal. This exposes serial founders and cross-project ties. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for \"built by\", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site-v2:${clean || projectName}` });
+  const project = (projectName ?? "").replace(/"/g, "").trim();
+  const officialSiteQueries = [
+    ...(clean ? [`site:${clean} team`, `site:${clean} founder`, `site:${clean} about`] : []),
+    ...(clean && project ? [`site:linkedin.com "${project}" founder`] : []),
+    ...(project ? [`"${project}" founder LinkedIn`, `"${project}" cofounder`] : []),
+  ];
+  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for \"built by\", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, {
+    cacheKey: `team-site-v2:${clean || projectName}`,
+    queries: officialSiteQueries.length ? officialSiteQueries : undefined,
+  });
   return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 
@@ -1777,6 +1788,61 @@ export async function discoverOperatorsFromAmplified(
   return out.slice(0, 6);
 }
 
+/** Hostname for official-site Google queries. Empty when no unique-id-bound domain. */
+export function officialSearchHost(domain?: string): string {
+  const raw = (domain ?? "").trim();
+  if (!raw) return "";
+  try {
+    const url = raw.includes("://") ? new URL(raw) : new URL(`https://${raw}`);
+    return url.hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return raw.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./i, "").toLowerCase();
+  }
+}
+
+/**
+ * Deterministic Serper queries for reverse-role search. Quoted founder phrases
+ * first, then Google-only official-site / LinkedIn queries Grok x_search cannot
+ * replace. groundedSearch keeps the first 8 after sanitize. Optional /news is
+ * separate (1 credit) and skipped when no project name exists.
+ */
+export function roleClaimantSerperPlan(
+  subjectHandle: string,
+  subjectName?: string,
+  domain?: string,
+): { queries: string[]; newsQuery?: string } {
+  const h = subjectHandle.replace(/^@/, "");
+  const projectName = (subjectName ?? "").replace(/"/g, "").trim();
+  const nameDistinct = projectName && projectName.toLowerCase() !== h.toLowerCase() ? projectName : "";
+  const host = officialSearchHost(domain);
+
+  const quoted = [
+    `"founder of @${h}"`,
+    `"co-founder of @${h}"`,
+    `"CEO of @${h}"`,
+    `"@${h} team"`,
+    `"cofounder of @${h}"`,
+    `"CEO at @${h}"`,
+    `"Founder @${h}"`,
+    ...(nameDistinct ? [`"founder of ${nameDistinct}"`, `"${nameDistinct} founder"`, `"${nameDistinct} team"`] : []),
+    ...(host ? [`"founder of ${host}"`] : []),
+  ];
+  const googleOnly: string[] = [];
+  if (host) {
+    googleOnly.push(`site:${host} team`, `site:${host} founder`, `site:${host} about`);
+  }
+  if (host && projectName) {
+    googleOnly.push(`site:linkedin.com "${projectName}" founder`);
+  }
+  if (projectName) {
+    googleOnly.push(`"${projectName}" founder LinkedIn`, `"${projectName}" cofounder`);
+  }
+  return {
+    queries: [...quoted.slice(0, 4), ...googleOnly, ...quoted.slice(4)],
+    newsQuery: projectName ? `"${projectName}" founder OR team` : undefined,
+  };
+}
+
 /**
  * REVERSE ROLE-PHRASE SEARCH: instead of asking who the project names, ask who
  * the public record says LEADS the project. People state this in exactly a few
@@ -1794,6 +1860,7 @@ export async function findRoleClaimants(
   domain?: string,
 ): Promise<TeamMember[]> {
   const h = subjectHandle.replace(/^@/, "");
+  const plan = roleClaimantSerperPlan(subjectHandle, subjectName, domain);
   const nameVariant = subjectName?.trim() && subjectName.trim().toLowerCase() !== h.toLowerCase()
     ? subjectName.trim()
     : "";
@@ -1804,15 +1871,7 @@ export async function findRoleClaimants(
     ...(nameVariant ? [`"founder of ${nameVariant}"`, `"${nameVariant} founder"`, `"${nameVariant} team"`] : []),
     ...(domainVariant ? [`"founder of ${domainVariant}"`] : []),
   ];
-  // groundedSearch slices to 5. Spend those credits on the highest-value
-  // quoted searches (founder / co-founder / CEO / team, then the name variant).
-  const serperQueries = [
-    `"founder of @${h}"`,
-    `"co-founder of @${h}"`,
-    `"CEO of @${h}"`,
-    `"@${h} team"`,
-    ...(nameVariant ? [`"founder of ${nameVariant}"`] : [`"Founder @${h}"`]),
-  ];
+  const serperQueries = plan.queries;
   const system =
     "You are a forensic OSINT researcher with live web and X search. The subject is a crypto/tech project's X account. Find the PEOPLE the public record credits with leading it: founders, cofounders, CEO/CTO/COO, core team. " +
     "Work the REVERSE direction: run the exact quoted searches given below on X AND on the general web (Google-style), and read what AI-answer search summaries say about who founded the project. " +
@@ -1822,7 +1881,7 @@ export async function findRoleClaimants(
   const text = await generalWebSearch(
     system,
     `Project X account: @${h}${nameVariant ? ` (${nameVariant})` : ""}${domainVariant ? `, website ${domainVariant}` : ""}. Who does the public record say founded or leads it? Run these exact searches on X and the web, then verify each hit: ${queries.join(", ")}.`,
-    { maxToolCalls: 6, cacheKey: `reverse-role:${h}`, queries: serperQueries },
+    { maxToolCalls: 6, cacheKey: `reverse-role:${h}`, queries: serperQueries, newsQuery: plan.newsQuery },
   ).catch(() => null);
   const twitterBio = await discoverReverseBioFromTwitterapi(subjectHandle, subjectName);
   const fromWeb = parseTeamJSON(text, h, "reverse role-phrase search");
@@ -1836,6 +1895,9 @@ export async function findRoleClaimants(
   return fromWeb;
 }
 
+/** Unique-id-confirmed claimant: live twitterapi bio carries a role claim for THIS project handle. */
+export type ConfirmedClaimant = { role: string; phrase: string; bio?: string; name?: string };
+
 /**
  * Live first-party confirmation for reverse-search leads: fetch each named
  * handle's CURRENT bio and keep only claims the bio really carries. The
@@ -1848,9 +1910,9 @@ export async function confirmClaimantBios(
   subjectHandle: string,
   _subjectName?: string,
   cap = 5,
-): Promise<Map<string, { role: string; phrase: string; bio?: string; name?: string }>> {
+): Promise<Map<string, ConfirmedClaimant>> {
   const subject = subjectHandle.replace(/^@/, "");
-  const confirmed = new Map<string, { role: string; phrase: string; bio?: string; name?: string }>();
+  const confirmed = new Map<string, ConfirmedClaimant>();
   const handles = [...new Set(
     candidates
       .map((c) => (c.handle ?? "").replace(/^@/, ""))
@@ -1866,6 +1928,130 @@ export async function confirmClaimantBios(
     } catch { /* confirmation is best-effort; the lead stays a lead */ }
   }
   return confirmed;
+}
+
+/** Temporary Serper LinkedIn/press follow-up. Empty/unset = on; 0/false/off disables without a deploy. */
+export function serperFounderFollowupEnabled(): boolean {
+  const raw = (env("ARGUS_SERPER_FOUNDER_FOLLOWUP") ?? "").trim().toLowerCase();
+  return raw !== "0" && raw !== "false" && raw !== "off";
+}
+
+export const CONFIRMED_FOUNDER_FOLLOWUP_CAP = 3;
+
+export type ConfirmedFounderFollowupPlan = {
+  handle: string;
+  displayName?: string;
+  linkedinQuery: string;
+  /** One /news query. Never also posted as a web /search. */
+  pressQuery?: string;
+};
+
+function distinctPersonName(name: string | undefined, handle: string): string {
+  const n = (name ?? "").replace(/"/g, "").trim();
+  const h = handle.replace(/^@/, "");
+  if (!n) return "";
+  if (n.replace(/^@/, "").toLowerCase() === h.toLowerCase()) return "";
+  return n;
+}
+
+function isConfirmedFounderRole(role: string): boolean {
+  const r = (role ?? "").toLowerCase();
+  if (/\b(advisor|adviser|vc|fund|incubator|backed-by|team-behind)\b/.test(r)) return false;
+  return /\b(co-?founder|founder|ceo|builder)\b/.test(r);
+}
+
+/** linkedin.com/in/... from a Serper organic URL. Never invents a slug. */
+export function linkedInProfileFromOrganicUrl(url: string): string | null {
+  const raw = (url ?? "").trim();
+  if (!raw) return null;
+  try {
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, "")}`;
+    const parsed = new URL(href);
+    if (!/(^|\.)linkedin\.com$/i.test(parsed.hostname)) return null;
+    const match = parsed.pathname.match(/^\/in\/([A-Za-z0-9_-]{2,100})\/?/i);
+    if (!match) return null;
+    return `linkedin.com/in/${match[1]}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Deterministic Serper plan for UNIQUE-ID CONFIRMED founders only.
+ * Unverified leads, orgs, the subject project handle, and display-name-only
+ * rows never produce queries. Cap 3 people, 2 queries each.
+ */
+export function confirmedFounderFollowupPlan(
+  confirmed: ReadonlyMap<string, ConfirmedClaimant>,
+  projectHandle: string,
+  projectName?: string,
+): ConfirmedFounderFollowupPlan[] {
+  const subject = projectHandle.replace(/^@/, "").toLowerCase();
+  const project = (projectName ?? "").replace(/"/g, "").trim();
+  const plans: ConfirmedFounderFollowupPlan[] = [];
+  for (const [rawHandle, claim] of confirmed) {
+    if (plans.length >= CONFIRMED_FOUNDER_FOLLOWUP_CAP) break;
+    const handle = rawHandle.replace(/^@/, "").toLowerCase();
+    if (!handle || handle === subject) continue;
+    if (!isConfirmedFounderRole(claim.role)) continue;
+    const displayName = distinctPersonName(claim.name, handle);
+    const linkedinQuery = displayName
+      ? `site:linkedin.com/in "${displayName}"`
+      : `site:linkedin.com "${handle}" founder`;
+    const pressQuery = displayName && project
+      ? `"${displayName}" "${project}" founder`
+      : undefined;
+    plans.push({
+      handle,
+      displayName: displayName || undefined,
+      linkedinQuery,
+      pressQuery,
+    });
+  }
+  return plans;
+}
+
+export type ConfirmedFounderFollowupHit = {
+  linkedin?: string;
+  pressUrls: string[];
+};
+
+/**
+ * Bounded Serper LinkedIn/press follow-up for unique-id-confirmed founders.
+ * Reuses groundedSearch (num:10, recordSerper inside). LinkedIn URLs are
+ * copied from Serper organic as corroboration, never used as bind keys.
+ */
+export async function serperConfirmedFounderFollowup(
+  confirmed: ReadonlyMap<string, ConfirmedClaimant>,
+  projectHandle: string,
+  projectName?: string,
+): Promise<Map<string, ConfirmedFounderFollowupHit>> {
+  const out = new Map<string, ConfirmedFounderFollowupHit>();
+  if (!serperFounderFollowupEnabled() || !groundedSearchProvisioned()) return out;
+  const plans = confirmedFounderFollowupPlan(confirmed, projectHandle, projectName);
+  if (!plans.length) return out;
+  const subject = projectHandle.replace(/^@/, "").toLowerCase();
+  await Promise.all(plans.map(async (plan) => {
+    const organic: { title: string; url: string; snippet: string }[] = [];
+    const project = (projectName ?? "").replace(/"/g, "").trim();
+    await groundedSearch(
+      "You extract corroborating public URLs for a person already uniquely identified by their X handle. Copy linkedin.com/in/... URLs only when they appear in the given search results. Never invent a LinkedIn URL or slug. Unique-id bind stays the X handle.",
+      `Confirmed founder @${plan.handle}${plan.displayName ? ` (${plan.displayName})` : ""}${project ? ` of ${project}` : ""}. Return compact JSON {"linkedin":"linkedin.com/in/... or omit","press":["https://..."]}.`,
+      {
+        queries: [plan.linkedinQuery],
+        newsQuery: plan.pressQuery,
+        cacheKey: `founder-followup:${subject}:${plan.handle}`,
+        onOrganicResults: (rows) => { organic.push(...rows); },
+      },
+    ).catch(() => null);
+    const linkedin = organic.map((row) => linkedInProfileFromOrganicUrl(row.url)).find((url): url is string => Boolean(url));
+    const pressUrls = organic
+      .map((row) => row.url)
+      .filter((url) => /^https?:\/\//i.test(url) && !/linkedin\.com/i.test(url))
+      .slice(0, 3);
+    if (linkedin || pressUrls.length) out.set(plan.handle, { linkedin, pressUrls });
+  }));
+  return out;
 }
 
 interface ReverseBioCandidate {

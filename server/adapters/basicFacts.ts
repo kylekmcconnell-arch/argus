@@ -1456,6 +1456,7 @@ function deterministicFundingSearchQueries(
   return [
     host ? `site:${host} "${subject}" funding raised financing` : "",
     host ? `site:${host} "${subject}" "Series A" OR "Series B" OR "seed round"` : "",
+    host ? `site:${host} (team OR about OR founders)` : "",
     unscoped,
   ].filter(Boolean);
 }
@@ -1734,12 +1735,15 @@ export async function discoverGroundedBasicFactLeadsDetailed(
     const fingerprint = createHash("sha256")
       .update(batchQuestions.map((question) => question.id).sort().join("|"))
       .digest("hex").slice(0, 12);
+    const officialQueries = deterministicFundingSearchQueries(ctx, batchQuestions);
+    const subject = canonicalSubject.replace(/"/g, "").trim();
     const text = await groundedSearch(
       "You are ARGUS's basic-facts research scout. Answer only from the provided sources, cite their exact URLs, and return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
       discoveryPrompt(ctx, batchQuestions, phase),
       {
         cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grounded:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}`,
-        queries: deterministicFundingSearchQueries(ctx, batchQuestions),
+        queries: officialQueries,
+        newsQuery: officialQueries && subject ? `"${subject}" founder OR team` : undefined,
       },
     );
     if (text === null) {

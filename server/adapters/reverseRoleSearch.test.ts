@@ -14,7 +14,11 @@ import {
   resetReverseBioMemo,
   reverseBioTeamAsWebMembers,
   reverseBioOrgsAsWebMembers,
+  roleClaimantSerperPlan,
   scanPostsForRoles,
+  confirmedFounderFollowupPlan,
+  serperConfirmedFounderFollowup,
+  linkedInProfileFromOrganicUrl,
 } from "./x";
 
 afterEach(() => {
@@ -191,23 +195,26 @@ describe("findRoleClaimants", () => {
     expect(await findRoleClaimants("@clutchmarkets")).toEqual([]);
   });
 
-  it("posts the quoted founder queries to Serper when provisioned, not an LLM-invented @handle string", async () => {
+  it("posts more than 5 quoted + official-site queries to Serper, including site: team, when a domain is passed", async () => {
     vi.stubEnv("SERPER_API_KEY", "serp");
     vi.stubEnv("XAI_API_KEY", "xai");
     vi.stubEnv("TWITTERAPI_KEY", "");
     vi.stubEnv("ARGUS_GENERAL_WEB_PROVIDER", "");
-    const serperQueries: string[] = [];
+    const webQueries: string[] = [];
+    const newsQueries: string[] = [];
     const serperNums: number[] = [];
     let xaiHits = 0;
     vi.stubGlobal("fetch", vi.fn(async (url?: unknown, init?: RequestInit) => {
       const u = String(url);
-      if (u.includes("serper")) {
+      if (u.includes("google.serper.dev")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as { q?: string; num?: number };
-        serperQueries.push(String(body.q ?? ""));
+        if (u.includes("/news")) newsQueries.push(String(body.q ?? ""));
+        else webQueries.push(String(body.q ?? ""));
         serperNums.push(Number(body.num));
-        return new Response(JSON.stringify({
-          organic: [{ title: "Founder bio", link: "https://ex.com/a", snippet: "Founder @clutchmarkets" }],
-        }), { status: 200, headers: { "content-type": "application/json" } });
+        const hits = [{ title: "Founder bio", link: "https://ex.com/a", snippet: "Founder @clutchmarkets" }];
+        return new Response(JSON.stringify(u.includes("/news") ? { news: hits } : { organic: hits }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
       }
       if (u.includes("api.x.ai")) {
         xaiHits += 1;
@@ -233,18 +240,42 @@ describe("findRoleClaimants", () => {
 
     const team = await findRoleClaimants("@clutchmarkets", "CLUTCH", "clutch.markets");
 
-    expect(serperQueries).toEqual([
-      '"founder of @clutchmarkets"',
-      '"co-founder of @clutchmarkets"',
-      '"CEO of @clutchmarkets"',
-      '"@clutchmarkets team"',
-      '"founder of CLUTCH"',
-    ]);
+    expect(webQueries.length).toBeGreaterThan(5);
+    expect(webQueries.length).toBeLessThanOrEqual(8);
+    expect(webQueries).toContain('"founder of @clutchmarkets"');
+    expect(webQueries).toContain('"co-founder of @clutchmarkets"');
+    expect(webQueries).toContain('"CEO of @clutchmarkets"');
+    expect(webQueries).toContain('"@clutchmarkets team"');
+    expect(webQueries).toContain("site:clutch.markets team");
+    expect(webQueries).toContain("site:clutch.markets founder");
+    expect(webQueries).toContain("site:clutch.markets about");
+    expect(webQueries).toContain('site:linkedin.com "CLUTCH" founder');
+    expect(webQueries.some((q) => q === "@clutchmarkets founder CEO team" || q.startsWith("@clutchmarkets "))).toBe(false);
+    expect(webQueries.some((q) => q.startsWith("@") && !q.startsWith('"'))).toBe(false);
+    expect(newsQueries).toEqual(['"CLUTCH" founder OR team']);
     expect(serperNums.every((n) => n === 10)).toBe(true);
-    expect(serperQueries.some((q) => q === "@clutchmarkets founder CEO team" || q.startsWith("@clutchmarkets "))).toBe(false);
     expect(xaiHits).toBe(1);
     expect(team).toHaveLength(1);
     expect(team[0]).toMatchObject({ handle: "@OxSimpleFarmer", role: "founder", source: "reverse role-phrase search" });
+  });
+});
+
+describe("roleClaimantSerperPlan", () => {
+  it("builds official-site and LinkedIn queries from the bound handle/name/domain, never a twitter-style @handle dump", () => {
+    const plan = roleClaimantSerperPlan("@examplebrand", "Example Brand", "https://www.examplebrand.io/about");
+    expect(plan.queries[0]).toBe('"founder of @examplebrand"');
+    expect(plan.queries).toContain("site:examplebrand.io team");
+    expect(plan.queries).toContain('site:linkedin.com "Example Brand" founder');
+    expect(plan.queries).toContain('"Example Brand" founder LinkedIn');
+    expect(plan.queries.some((q) => q === "@examplebrand founder CEO team")).toBe(false);
+    expect(plan.newsQuery).toBe('"Example Brand" founder OR team');
+  });
+
+  it("skips news and name/LinkedIn extras when no project name is supplied", () => {
+    const plan = roleClaimantSerperPlan("@examplebrand", undefined, "examplebrand.io");
+    expect(plan.newsQuery).toBeUndefined();
+    expect(plan.queries).toContain("site:examplebrand.io team");
+    expect(plan.queries.some((q) => /linkedin/i.test(q))).toBe(false);
   });
 });
 
@@ -443,5 +474,196 @@ describe("reverse-bio keep path · @alice @bob @SomeOrg @projecthandle", () => {
       "Project Handle",
     );
     expect([...confirmed.keys()]).toEqual([]);
+  });
+});
+
+describe("confirmedFounderFollowupPlan", () => {
+  it("builds a LinkedIn site: query for a named confirmed founder and skips unverified leads", () => {
+    const plan = confirmedFounderFollowupPlan(
+      new Map([
+        ["alice", { role: "founder", phrase: "Founder @projecthandle", name: "Alice Example" }],
+      ]),
+      "@projecthandle",
+      "Example Project",
+    );
+    expect(plan).toEqual([{
+      handle: "alice",
+      displayName: "Alice Example",
+      linkedinQuery: 'site:linkedin.com/in "Alice Example"',
+      pressQuery: '"Alice Example" "Example Project" founder',
+    }]);
+  });
+
+  it("skips the subject project handle even if it is in the confirmed map", () => {
+    const plan = confirmedFounderFollowupPlan(
+      new Map([
+        ["projecthandle", { role: "founder", phrase: "Founder @projecthandle", name: "Project Brand" }],
+        ["alice", { role: "ceo", phrase: "CEO @projecthandle", name: "Alice Example" }],
+      ]),
+      "@projecthandle",
+      "Example Project",
+    );
+    expect(plan.map((row) => row.handle)).toEqual(["alice"]);
+  });
+
+  it("caps follow-up at 3 confirmed people", () => {
+    const confirmed = new Map(
+      ["ann", "ben", "cam", "dee"].map((handle) => [
+        handle,
+        { role: "founder" as const, phrase: "Founder @projecthandle", name: `Person ${handle}` },
+      ]),
+    );
+    const plan = confirmedFounderFollowupPlan(confirmed, "@projecthandle", "Example Project");
+    expect(plan).toHaveLength(3);
+    expect(plan.map((row) => row.handle)).toEqual(["ann", "ben", "cam"]);
+  });
+
+  it("uses a handle LinkedIn query when the display name is the @handle, and skips orgs", () => {
+    const plan = confirmedFounderFollowupPlan(
+      new Map([
+        ["alice", { role: "founder", phrase: "Founder @projecthandle", name: "@alice" }],
+        ["somefund", { role: "vc", phrase: "backed by", name: "Some Fund" }],
+      ]),
+      "@projecthandle",
+      "Example Project",
+    );
+    expect(plan).toEqual([{
+      handle: "alice",
+      displayName: undefined,
+      linkedinQuery: 'site:linkedin.com "alice" founder',
+      pressQuery: undefined,
+    }]);
+  });
+});
+
+describe("linkedInProfileFromOrganicUrl", () => {
+  it("keeps linkedin.com/in profile URLs and rejects company pages", () => {
+    expect(linkedInProfileFromOrganicUrl("https://www.linkedin.com/in/alice-example")).toBe("linkedin.com/in/alice-example");
+    expect(linkedInProfileFromOrganicUrl("https://www.linkedin.com/company/example-project")).toBeNull();
+  });
+});
+
+describe("serperConfirmedFounderFollowup", () => {
+  const ok = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+
+  it("fires LinkedIn site: for a confirmed named founder and does not search an unverified lead", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "tw-key");
+    vi.stubEnv("SERPER_API_KEY", "serp");
+    vi.stubEnv("XAI_API_KEY", "xai");
+    vi.stubEnv("ARGUS_GENERAL_WEB_PROVIDER", "");
+    const webQueries: string[] = [];
+    const newsQueries: string[] = [];
+    const serperNums: number[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url?: unknown, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/twitter/user/info")) {
+        const alice = /userName=alice/i.test(u);
+        const bio = alice ? "Founder @projecthandle" : "just a fan of @projecthandle";
+        const name = alice ? "Alice Example" : "Unverified Bob";
+        return ok({ data: { name, description: bio, followers: 1 } });
+      }
+      if (u.includes("google.serper.dev")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { q?: string; num?: number };
+        if (u.includes("/news")) newsQueries.push(String(body.q ?? ""));
+        else webQueries.push(String(body.q ?? ""));
+        serperNums.push(Number(body.num));
+        const hits = [{ title: "Alice Example", link: "https://www.linkedin.com/in/alice-example", snippet: "Founder" }];
+        return ok(u.includes("/news") ? { news: hits } : { organic: hits });
+      }
+      return ok({
+        choices: [{ message: { content: '{"linkedin":"linkedin.com/in/invented-slug"}' } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+
+    const confirmed = await confirmClaimantBios(
+      [
+        { name: "Alice Example", handle: "@alice", role: "founder", kind: "team" },
+        { name: "Unverified Bob", handle: "@bob", role: "founder", kind: "team" },
+      ],
+      "@projecthandle",
+      "Example Project",
+    );
+    const hits = await serperConfirmedFounderFollowup(confirmed, "@projecthandle", "Example Project");
+
+    expect([...confirmed.keys()]).toEqual(["alice"]);
+    expect(webQueries).toEqual(['site:linkedin.com/in "Alice Example"']);
+    expect(newsQueries).toEqual(['"Alice Example" "Example Project" founder']);
+    expect(serperNums.every((n) => n === 10)).toBe(true);
+    expect(webQueries.some((q) => /bob|Unverified/i.test(q))).toBe(false);
+    expect(newsQueries.some((q) => /bob|Unverified/i.test(q))).toBe(false);
+    expect(hits.get("alice")?.linkedin).toBe("linkedin.com/in/alice-example");
+  });
+
+  it("skips all follow-up fetches when ARGUS_SERPER_FOUNDER_FOLLOWUP is off", async () => {
+    vi.stubEnv("SERPER_API_KEY", "serp");
+    vi.stubEnv("XAI_API_KEY", "xai");
+    vi.stubEnv("ARGUS_SERPER_FOUNDER_FOLLOWUP", "0");
+    const fetchMock = vi.fn(async () => ok({ organic: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hits = await serperConfirmedFounderFollowup(
+      new Map([["alice", { role: "founder", phrase: "Founder @projecthandle", name: "Alice Example" }]]),
+      "@projecthandle",
+      "Example Project",
+    );
+    expect(hits.size).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not search the project subject handle", async () => {
+    vi.stubEnv("SERPER_API_KEY", "serp");
+    vi.stubEnv("XAI_API_KEY", "xai");
+    const webQueries: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url?: unknown, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("google.serper.dev") && !u.includes("/news")) {
+        webQueries.push(String((JSON.parse(String(init?.body ?? "{}")) as { q?: string }).q ?? ""));
+        return ok({ organic: [] });
+      }
+      if (u.includes("google.serper.dev/news")) return ok({ news: [] });
+      return ok({ choices: [{ message: { content: "{}" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+    }));
+
+    await serperConfirmedFounderFollowup(
+      new Map([
+        ["projecthandle", { role: "founder", phrase: "Founder @projecthandle", name: "Project Brand" }],
+        ["alice", { role: "founder", phrase: "Founder @projecthandle", name: "Alice Example" }],
+      ]),
+      "@projecthandle",
+      "Example Project",
+    );
+    expect(webQueries).toEqual(['site:linkedin.com/in "Alice Example"']);
+  });
+
+  it("caps Serper follow-up at 3 confirmed people", async () => {
+    vi.stubEnv("SERPER_API_KEY", "serp");
+    vi.stubEnv("XAI_API_KEY", "xai");
+    const webQueries: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url?: unknown, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("google.serper.dev") && !u.includes("/news")) {
+        webQueries.push(String((JSON.parse(String(init?.body ?? "{}")) as { q?: string }).q ?? ""));
+        return ok({ organic: [] });
+      }
+      if (u.includes("google.serper.dev/news")) return ok({ news: [] });
+      return ok({ choices: [{ message: { content: "{}" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+    }));
+
+    const confirmed = new Map(
+      ["ann", "ben", "cam", "dee"].map((handle) => [
+        handle,
+        { role: "founder", phrase: "Founder @projecthandle", name: `Person ${handle}` },
+      ]),
+    );
+    await serperConfirmedFounderFollowup(confirmed, "@projecthandle", "Example Project");
+    expect(webQueries).toHaveLength(3);
+    expect([...webQueries].sort()).toEqual([
+      'site:linkedin.com/in "Person ann"',
+      'site:linkedin.com/in "Person ben"',
+      'site:linkedin.com/in "Person cam"',
+    ]);
+    expect(webQueries.some((q) => q.includes("Person dee"))).toBe(false);
   });
 });
