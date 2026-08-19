@@ -296,9 +296,14 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const identityGrounded = (row: WebTeamMember) =>
     meaningfulTeamValue(row.name)
     && meaningfulTeamValue(row.role)
-    && !teamNameIsOwnHandle(row)
     && row.evidence_origin !== "model_lead"
-    && row.artifact_verified === true;
+    && row.artifact_verified === true
+    && (
+      // A first-party handle is the unique id. Post-scan and reverse-bio rows
+      // often use @handle as the display name until enrichment fills it.
+      (row.handleProvenance === "subject_first_party" && Boolean(row.handle))
+      || !teamNameIsOwnHandle(row)
+    );
   const groundedWebTeam = (ev.webTeam ?? [])
     .filter(identityGrounded)
     .map((member) => ({

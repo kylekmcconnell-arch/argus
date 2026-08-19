@@ -1926,7 +1926,19 @@ export function deriveProjectStrengthBands(
       ? "adverse"
       : assessedEmpty ? "assessed_null" : tier;
     const range = projectBandRange(spec.weight, effectiveTier);
-    const widenedByUnverified = floorTier !== undefined && floorTier !== effectiveTier && effectiveTier !== "adverse";
+    const POSITIVE_TIER_ORDER = ["none", "emerging", "solid", "exceptional"] as const;
+    const floorRank = floorTier === undefined
+      ? -1
+      : POSITIVE_TIER_ORDER.indexOf(floorTier as (typeof POSITIVE_TIER_ORDER)[number]);
+    const ceilingRank = POSITIVE_TIER_ORDER.indexOf(effectiveTier as (typeof POSITIVE_TIER_ORDER)[number]);
+    const floorStrictlyBelow = floorRank >= 0 && ceilingRank >= 0 && floorRank < ceilingRank;
+    // Never emit floorTier on assessed_null/adverse, or when floor is not
+    // strictly below the ceiling. Persistence rejects those shapes.
+    const widenedByUnverified = floorTier !== undefined
+      && floorTier !== effectiveTier
+      && effectiveTier !== "adverse"
+      && effectiveTier !== "assessed_null"
+      && floorStrictlyBelow;
     // Persistence enforces the band contract strictly: at least one reason for
     // every non-none tier, no duplicates, items capped at 240 chars. A band
     // composition slip here must degrade to a generic reason, never to a
@@ -1937,10 +1949,11 @@ export function deriveProjectStrengthBands(
       ...(widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : []),
       ...reasons,
     ].map((reason) => reason.slice(0, 240)).filter(Boolean))].slice(0, 12);
+    const persistFloor = widenedByUnverified ? floorTier : undefined;
     bands[axis] = {
       tier: effectiveTier,
-      ...(widenedByUnverified
-        ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore, floorTier }
+      ...(persistFloor !== undefined
+        ? { minScore: projectBandRange(spec.weight, persistFloor).minScore, maxScore: range.maxScore, floorTier: persistFloor }
         : range),
       reasons: composedReasons.length || effectiveTier === "none"
         ? composedReasons
