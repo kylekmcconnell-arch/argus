@@ -45,8 +45,100 @@ const MAX_PAGE_CHARS = 4_000;
 interface SerperResult { title: string; url: string; snippet: string }
 interface SerperSearchOutcome {
   results: SerperResult[];
-  status: "succeeded" | "failed";
+  status: "succeeded" | "failed" | "skipped";
   detail?: string;
+}
+
+/** Local skip reasons. These are query-shape problems, not a missing key. */
+export type SerperQuerySkipReason =
+  | "empty"
+  | "too_long"
+  | "unmatched_quotes"
+  | "dangling_operator"
+  | "empty_site_operator"
+  | "empty_filetype_operator"
+  | "twitter_style"
+  | "operator_only";
+
+export interface SerperQueryInspection {
+  queryChars: number;
+  reason: SerperQuerySkipReason | null;
+  unmatchedQuotes: boolean;
+  hasSiteOperator: boolean;
+  hasAtHandle: boolean;
+  hasTwitterHost: boolean;
+}
+
+// Google's practical q ceiling; Serper 400s oversized bodies as invalid_request.
+const MAX_SERPER_QUERY_CHARS = 2048;
+
+function residualSearchTerms(query: string): string {
+  return query
+    .replace(/[()]/g, " ")
+    .replace(/"/g, " ")
+    .replace(/\b(?:site|filetype|intitle|inurl|intext|ext|from|filter|min_faves|min_retweets|min_replies):[^\s]*/gi, " ")
+    .replace(/\b(?:site|filetype):(?=\s|$)/gi, " ")
+    .replace(/\b(?:OR|AND|NOT)\b/gi, " ")
+    .replace(/(^|\s)@[A-Za-z0-9_]+/g, " ")
+    .replace(/[^\p{L}\p{N}.+-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Decide whether `q` is something Serper will 400 as invalid_request.
+ * Logs must use this shape (never the query text, never secrets).
+ */
+export function inspectSerperQuery(query: string): SerperQueryInspection {
+  const trimmed = query.trim();
+  const unmatchedQuotes = (trimmed.match(/"/g)?.length ?? 0) % 2 === 1;
+  const hasSiteOperator = /(?:^|\s)site:/i.test(trimmed);
+  const hasAtHandle = /@[A-Za-z0-9_]+/.test(trimmed);
+  const hasTwitterHost = /(?:^|\s|:)(?:www\.)?(?:twitter\.com|x\.com)\b/i.test(trimmed);
+  const base: SerperQueryInspection = {
+    queryChars: trimmed.length,
+    reason: null,
+    unmatchedQuotes,
+    hasSiteOperator,
+    hasAtHandle,
+    hasTwitterHost,
+  };
+  if (!trimmed) return { ...base, queryChars: 0, reason: "empty" };
+  if (trimmed.length > MAX_SERPER_QUERY_CHARS) return { ...base, reason: "too_long" };
+  if (unmatchedQuotes) return { ...base, reason: "unmatched_quotes" };
+  if (/^(?:OR|AND)\b|\b(?:OR|AND)$/i.test(trimmed)) return { ...base, reason: "dangling_operator" };
+  if (/(?:^|\s)site:(?![A-Za-z0-9][A-Za-z0-9.-]*)/i.test(trimmed)) return { ...base, reason: "empty_site_operator" };
+  if (/(?:^|\s)filetype:(?![A-Za-z0-9]+)/i.test(trimmed)) return { ...base, reason: "empty_filetype_operator" };
+  if (
+    /^"?@[A-Za-z0-9_]{1,30}"?$/.test(trimmed)
+    || /^"?from:@?[A-Za-z0-9_]{1,30}"?$/i.test(trimmed)
+    || /\b(?:from|filter|min_faves|min_retweets|min_replies):/i.test(trimmed)
+    || /\bsite:(?:www\.)?(?:twitter\.com|x\.com)\/@/i.test(trimmed)
+  ) return { ...base, reason: "twitter_style" };
+  const residual = residualSearchTerms(trimmed);
+  if (!residual || /^(?:www\.)?(?:twitter\.com|x\.com)$/i.test(residual)) {
+    return { ...base, reason: hasAtHandle || hasTwitterHost || /\bfrom:/i.test(trimmed) ? "twitter_style" : "operator_only" };
+  }
+  return base;
+}
+
+function serperQueryShapeLog(inspect: SerperQueryInspection, extra?: Record<string, unknown>): Record<string, unknown> {
+  return {
+    reason: inspect.reason,
+    queryChars: inspect.queryChars,
+    unmatchedQuotes: inspect.unmatchedQuotes,
+    hasSiteOperator: inspect.hasSiteOperator,
+    hasAtHandle: inspect.hasAtHandle,
+    hasTwitterHost: inspect.hasTwitterHost,
+    ...extra,
+  };
+}
+
+function isSerperProviderOutage(detail?: string): boolean {
+  if (!detail) return true;
+  if (detail.startsWith("skipped:")) return false;
+  if (detail.includes("invalid_request")) return false;
+  return true;
 }
 
 function safeSerperFailure(status: number, raw: string): string {
@@ -73,6 +165,12 @@ function asRec(v: unknown): Record<string, unknown> {
 }
 
 async function serperSearch(query: string, key: string): Promise<SerperSearchOutcome> {
+  const inspect = inspectSerperQuery(query);
+  if (inspect.reason) {
+    // Do not POST a q Serper will 400. Shape-only log: never the query, never the key.
+    console.warn("[serper-search] skipped invalid query", serperQueryShapeLog(inspect));
+    return { results: [], status: "skipped", detail: `skipped:${inspect.reason}` };
+  }
   try {
     const res = await fetch(SERPER, {
       method: "POST",
@@ -82,10 +180,11 @@ async function serperSearch(query: string, key: string): Promise<SerperSearchOut
     });
     if (!res.ok) {
       const detail = safeSerperFailure(res.status, await res.text().catch(() => ""));
+      const reason = detail.split(":")[1];
       // Keep the provider's rejection observable without logging the search
-      // query, response body, or credential. The stable reason is sufficient
-      // to distinguish a retryable outage from configuration attention.
-      console.warn("[serper-search] request rejected", { status: res.status, reason: detail.split(":")[1], queryChars: query.length });
+      // query, response body, or credential. The stable reason plus query
+      // shape is enough to tell a bad q from a missing key or empty wallet.
+      console.warn("[serper-search] request rejected", serperQueryShapeLog(inspect, { status: res.status, reason }));
       return { results: [], status: "failed", detail };
     }
     const d = asRec(await res.json());
@@ -255,7 +354,7 @@ async function callExtractModel(system: string, user: string, maxTokens: number,
 
 async function generateQueries(system: string, user: string): Promise<string[]> {
   const text = await callExtractModel(
-    "You turn a research task into effective Google search queries. Output ONLY a JSON array of query strings.",
+    "You turn a research task into effective Google search queries. Output ONLY a JSON array of query strings. Use ordinary Google syntax: quoted phrases, site:example.com, names. Never emit Twitter-only operators (from:, filter:, min_faves), site:twitter.com/@handle, site:x.com/@handle, a query that is only @handle, unmatched quotes, empty site:/filetype: operands, or a dangling OR/AND.",
     `A due-diligence collector needs to answer this task with web evidence.\n\nTASK SYSTEM: ${system}\n\nTASK REQUEST: ${user}\n\nOutput 3 to 5 precise Google search queries that will surface the exact pages needed (names, companies, filings, press). Return ONLY a compact JSON array, e.g. ["query one","query two"].`,
     400,
     "grounded-queries",
@@ -265,7 +364,9 @@ async function generateQueries(system: string, user: string): Promise<string[]> 
   if (!m) return [];
   try {
     const arr: unknown = JSON.parse(m[0]);
-    return Array.isArray(arr) ? arr.filter((q): q is string => typeof q === "string" && q.trim().length > 0).slice(0, 5) : [];
+    return Array.isArray(arr)
+      ? arr.filter((q): q is string => typeof q === "string" && !inspectSerperQuery(q).reason).slice(0, 5)
+      : [];
   } catch {
     return [];
   }
@@ -334,7 +435,11 @@ export async function groundedSearch(
       [...new Set(failed.flatMap((outcome) => outcome.detail ? [outcome.detail] : []))].join(","),
     );
   }
-  if (failed.length && succeeded.length === 0) opts?.onProviderUnavailable?.();
+  // invalid_request and locally skipped q are not an outage or missing key.
+  // credits_or_quota / unauthorized / transport still surface as unavailable.
+  if (failed.some((outcome) => isSerperProviderOutage(outcome.detail)) && succeeded.length === 0) {
+    opts?.onProviderUnavailable?.();
+  }
   const results = dedupeByUrl(searched.flatMap((outcome) => outcome.results)).slice(0, MAX_RESULTS);
   if (!results.length) return null;
 

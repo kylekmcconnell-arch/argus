@@ -5,7 +5,7 @@ import { addOpenRouterUsage, getCost, withCostLedger } from "../cost";
 // extractor endpoint (no real page fetches to reason about).
 vi.mock("../publicWeb", () => ({ fetchPublicText: vi.fn(async () => null) }));
 
-import { groundedSearch } from "./groundedSearch";
+import { groundedSearch, inspectSerperQuery } from "./groundedSearch";
 
 const ok = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
@@ -206,5 +206,182 @@ describe("groundedSearch OpenRouter routing", () => {
     const line = cost.calls.find((entry) => entry.provider === "serper");
     expect(line?.meta).toContain("http_400:credits_or_quota");
     expect(line?.meta).not.toContain("secret-account-42");
+  });
+});
+
+
+describe("inspectSerperQuery", () => {
+  it("skips empty, unmatched quotes, dangling OR, and empty operators", () => {
+    expect(inspectSerperQuery("").reason).toBe("empty");
+    expect(inspectSerperQuery("   ").reason).toBe("empty");
+    expect(inspectSerperQuery('"founder of').reason).toBe("unmatched_quotes");
+    expect(inspectSerperQuery("founder OR").reason).toBe("dangling_operator");
+    expect(inspectSerperQuery("site:").reason).toBe("empty_site_operator");
+    expect(inspectSerperQuery("filetype:").reason).toBe("empty_filetype_operator");
+    expect(inspectSerperQuery("site: example.com founder").reason).toBe("empty_site_operator");
+  });
+
+  it("skips twitter-style q including the 29-char site:twitter.com/@handle class", () => {
+    const handle = "alicehandle";
+    const withAtPath = `site:twitter.com/@${handle}`;
+    const withAtToken = `site:twitter.com @${handle}`;
+    expect(handle.length).toBe(11);
+    expect(withAtPath.length).toBe(29);
+    expect(withAtToken.length).toBe(29);
+    expect(inspectSerperQuery(withAtPath)).toMatchObject({
+      reason: "twitter_style",
+      queryChars: 29,
+      hasTwitterHost: true,
+      hasAtHandle: true,
+    });
+    expect(inspectSerperQuery(withAtToken)).toMatchObject({
+      reason: "twitter_style",
+      queryChars: 29,
+      hasTwitterHost: true,
+      hasAtHandle: true,
+    });
+    expect(inspectSerperQuery("@alice").reason).toBe("twitter_style");
+    expect(inspectSerperQuery("from:alice").reason).toBe("twitter_style");
+    expect(inspectSerperQuery("from:alice (founder OR CEO)").reason).toBe("twitter_style");
+    expect(inspectSerperQuery("site:x.com/@alice").reason).toBe("twitter_style");
+  });
+
+  it("allows ordinary Google queries including quoted @handle phrases", () => {
+    expect(inspectSerperQuery("OpenAI funding round").reason).toBeNull();
+    expect(inspectSerperQuery('site:venice.ai "Venice" funding raised financing').reason).toBeNull();
+    expect(inspectSerperQuery('"Founder @alicehandle"').reason).toBeNull();
+    expect(inspectSerperQuery('"founder of @alicehandle"').reason).toBeNull();
+  });
+});
+
+describe("groundedSearch Serper query gating", () => {
+  const ENV = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ENV };
+    vi.restoreAllMocks();
+  });
+
+  function provision() {
+    process.env.SERPER_API_KEY = "serp";
+    process.env.XAI_API_KEY = "xai";
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+  }
+
+  it("never posts malformed twitter-style q to /search and does not look like a missing key", async () => {
+    provision();
+    const fetchMock = vi.fn(async () => {
+      throw new Error("network must not be consulted");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    let unavailable = false;
+    const captured = await withCostLedger(async () => {
+      const result = await groundedSearch("system", "user", {
+        queries: ["site:twitter.com/@alicehandle", "  ", "from:alice"],
+        onProviderUnavailable: () => { unavailable = true; },
+      });
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBeNull();
+    expect(unavailable).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(captured.cost.calls.filter((line) => line.provider === "serper")).toEqual([]);
+    const skipLogs = warn.mock.calls.filter((args) => args[0] === "[serper-search] skipped invalid query");
+    expect(skipLogs.length).toBeGreaterThan(0);
+    for (const [, payload] of skipLogs) {
+      expect(JSON.stringify(payload)).not.toMatch(/alicehandle|from:alice|rejected \(serper\)/i);
+      expect(payload).toEqual(expect.objectContaining({
+        reason: expect.stringMatching(/twitter_style|empty/),
+        queryChars: expect.any(Number),
+      }));
+    }
+  });
+
+  it("still posts a normal query to google.serper.dev/search", async () => {
+    provision();
+    const serperUrls: string[] = [];
+    const serperBodies: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const u = String(url);
+      if (u.includes("serper")) {
+        serperUrls.push(u);
+        serperBodies.push(JSON.parse(init.body));
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+    }));
+
+    const result = await groundedSearch("system", "user", {
+      queries: ['site:venice.ai "Venice" funding raised financing'],
+    });
+    expect(result).toBe("ANSWER");
+    expect(serperUrls).toEqual(["https://google.serper.dev/search"]);
+    expect(serperBodies).toEqual([{ q: 'site:venice.ai "Venice" funding raised financing', num: 8 }]);
+  });
+
+  it("classifies credits_or_quota without changing that path, and treats it as unavailable", async () => {
+    provision();
+    process.env.SERPER_API_KEY = "configured-but-empty";
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"Not enough credits"}', { status: 400 });
+      }
+      return ok({
+        choices: [{ message: { content: "must-not-extract" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+
+    let unavailable = false;
+    const cost = await withCostLedger(async () => {
+      await groundedSearch("system", "user", {
+        queries: ["ordinary google query about a project"],
+        onProviderUnavailable: () => { unavailable = true; },
+      });
+      return getCost();
+    });
+    const line = cost.calls.find((entry) => entry.provider === "serper");
+    expect(line?.meta).toContain("http_400:credits_or_quota");
+    expect(unavailable).toBe(true);
+  });
+
+  it("classifies API invalid_request without looking like a missing key or config panic", async () => {
+    provision();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"Invalid query parameter"}', { status: 400 });
+      }
+      return ok({
+        choices: [{ message: { content: "must-not-extract" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+
+    let unavailable = false;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const cost = await withCostLedger(async () => {
+      await groundedSearch("system", "user", {
+        queries: ["ordinary google query about a project"],
+        onProviderUnavailable: () => { unavailable = true; },
+      });
+      return getCost();
+    });
+    const line = cost.calls.find((entry) => entry.provider === "serper");
+    expect(line?.meta).toContain("http_400:invalid_request");
+    expect(line?.meta).not.toMatch(/unauthorized|rejected$/);
+    expect(unavailable).toBe(false);
+    const rejectedLogs = warn.mock.calls.filter((args) => args[0] === "[serper-search] request rejected");
+    expect(rejectedLogs.length).toBe(1);
+    expect(rejectedLogs[0][1]).toEqual(expect.objectContaining({
+      status: 400,
+      reason: "invalid_request",
+    }));
+    expect(JSON.stringify(rejectedLogs[0][1])).not.toMatch(/ordinary google query|SERPER_API_KEY|xai/i);
   });
 });
