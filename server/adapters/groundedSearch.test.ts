@@ -211,18 +211,18 @@ describe("groundedSearch OpenRouter routing", () => {
 
 
 describe("sanitizeSerperQuery", () => {
-  it("rewrites the 29-char leading @handle class and leaves ordinary Google q alone", () => {
+  it("rewrites twitter-style q with useful terms into quoted Google form", () => {
     const invented = "@multihopper founder CEO team";
     expect(invented.length).toBe(29);
     const rewritten = sanitizeSerperQuery(invented);
-    expect(rewritten).not.toBe(invented);
-    expect(rewritten).toBe("site:x.com/multihopper founder CEO team");
+    expect(rewritten).toBe('founder CEO team "@multihopper"');
     expect(rewritten?.startsWith("@")).toBe(false);
+    expect(rewritten).not.toMatch(/site:(?:x|twitter)\.com/i);
 
-    expect(sanitizeSerperQuery("@alicehandle")).toBe("site:x.com/alicehandle");
-    expect(sanitizeSerperQuery('"@alicehandle"')).toBe("site:x.com/alicehandle");
-    expect(sanitizeSerperQuery("from:@alicehandle")).toBe("site:x.com/alicehandle");
-    expect(sanitizeSerperQuery("site:twitter.com/@alicehandle")).toBe("site:x.com/alicehandle");
+    expect(sanitizeSerperQuery("from:alice (founder OR CEO)")).toBe('founder OR CEO "@alice"');
+    expect(sanitizeSerperQuery('site:twitter.com/@alicehandle "founder of @alicehandle"')).toBe(
+      '"founder of @alicehandle"',
+    );
 
     expect(sanitizeSerperQuery('site:venice.ai "Venice" funding raised financing')).toBe(
       'site:venice.ai "Venice" funding raised financing',
@@ -230,6 +230,15 @@ describe("sanitizeSerperQuery", () => {
     expect(sanitizeSerperQuery('"founder of @alicehandle"')).toBe('"founder of @alicehandle"');
     expect(sanitizeSerperQuery('"@alicehandle team"')).toBe('"@alicehandle team"');
     expect(sanitizeSerperQuery("site:examplebrand.io")).toBe("site:examplebrand.io");
+  });
+
+  it("skips handle-only twitter-style q instead of spending a credit on site:x.com/handle", () => {
+    expect(sanitizeSerperQuery("@alicehandle")).toBeNull();
+    expect(sanitizeSerperQuery('"@alicehandle"')).toBeNull();
+    expect(sanitizeSerperQuery("from:@alicehandle")).toBeNull();
+    expect(sanitizeSerperQuery("from:alice")).toBeNull();
+    expect(sanitizeSerperQuery("site:twitter.com/@alicehandle")).toBeNull();
+    expect(sanitizeSerperQuery("site:x.com/@alicehandle")).toBeNull();
   });
 
   it("skips only empty or still-illegal q", () => {
@@ -277,7 +286,7 @@ describe("groundedSearch Serper query quality", () => {
     });
     expect(result).toBe("ANSWER");
     expect(bodies.map((b) => b.q)).toEqual([
-      "site:x.com/multihopper founder CEO team",
+      'founder CEO team "@multihopper"',
       'site:venice.ai "Venice" funding',
     ]);
     expect(bodies.every((b) => b.num === 10)).toBe(true);
@@ -360,6 +369,29 @@ describe("groundedSearch Serper query quality", () => {
     expect(line?.meta).toContain("http_400:invalid_request");
   });
 
+  it("does not treat all-invalid_request as a missing key", async () => {
+    provision();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"Invalid query parameter"}', { status: 400 });
+      }
+      return ok({
+        choices: [{ message: { content: "must-not-extract" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    let unavailable = false;
+    const cost = await withCostLedger(async () => {
+      await groundedSearch("system", "user", {
+        queries: ["ordinary google query about a project"],
+        onProviderUnavailable: () => { unavailable = true; },
+      });
+      return getCost();
+    });
+    expect(cost.calls.find((entry) => entry.provider === "serper")?.meta).toContain("http_400:invalid_request");
+    expect(unavailable).toBe(false);
+  });
+
   it("keeps credits_or_quota classification and still marks unavailable when every attempt fails that way", async () => {
     provision();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
@@ -408,8 +440,8 @@ describe("groundedSearch Serper query quality", () => {
       'Project X account: @alicehandle (Example Brand), website examplebrand.io. Who founded it?',
     );
     expect(result).toBe("ANSWER");
-    expect(bodies).toContain("site:x.com/alicehandle");
     expect(bodies).toContain("site:examplebrand.io");
+    expect(bodies.some((q) => /site:(?:x|twitter)\.com/i.test(q))).toBe(false);
     expect(bodies.some((q) => /founder CEO team/i.test(q))).toBe(false);
     expect(bodies.some((q) => q.startsWith("@"))).toBe(false);
   });
