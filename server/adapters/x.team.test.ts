@@ -123,6 +123,15 @@ describe("official corpus names handles as team or linked orgs", () => {
     expect(team.some((m) => (m.handle ?? "").toLowerCase() === "someorg")).toBe(false);
   });
 
+  it("does not list the audited subject handle as a founder of itself", () => {
+    const team = officialXNamedTeam([
+      "Meet founder @brandlab.",
+      "Proud to introduce co-founder @alice.",
+    ], "BrandLab", "@brandlab");
+    expect(team.map((m) => (m.handle ?? "").toLowerCase())).toEqual(["@alice"]);
+    expect(team.map((m) => (m.handle ?? "").toLowerCase())).not.toContain("@brandlab");
+  });
+
   it("does not bind an unrelated @mention as team", () => {
     expect(officialXNamedTeam([
       "Thanks @alice for the shoutout, shipping next week.",

@@ -222,6 +222,14 @@ export function orientationHandleBound(evidence: CollectedEvidence): boolean {
     && handlesMatch(orientation.boundHandle, evidence.profile.handle);
 }
 
+/** Brand-account unique-id: PROJECT kind + twitterapi handle bind + official domain. */
+export function projectOrientationBound(evidence: CollectedEvidence): boolean {
+  const orientation = evidence.subjectOrientation;
+  return orientation?.kind === "PROJECT"
+    && Boolean(orientation.boundDomain)
+    && orientationHandleBound(evidence);
+}
+
 /** Reverse-role-shaped leads. Unique-id confirmation still required downstream. */
 export function orientationMentionLeads(orientation: SubjectOrientation | null | undefined): Array<{
   name: string;

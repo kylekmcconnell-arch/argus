@@ -4,6 +4,7 @@ import {
   buildOrientationPacket,
   orientationHandleBound,
   orientationMentionLeads,
+  projectOrientationBound,
   orientSubjectWithGrok,
   parseOrientation,
   type OrientationPacket,
@@ -328,5 +329,19 @@ describe("orientationHandleBound", () => {
     const evidence = stubEvidence();
     evidence.subjectOrientation = grokProject();
     expect(orientationHandleBound(evidence)).toBe(true);
+  });
+});
+
+describe("projectOrientationBound", () => {
+  it("requires PROJECT kind, a bound handle, and a bound official domain", () => {
+    const evidence = stubEvidence();
+    evidence.subjectOrientation = grokProject();
+    expect(projectOrientationBound(evidence)).toBe(true);
+
+    evidence.subjectOrientation = grokProject({ boundDomain: null });
+    expect(projectOrientationBound(evidence)).toBe(false);
+
+    evidence.subjectOrientation = grokProject({ kind: "FOUNDER", boundDomain: null });
+    expect(projectOrientationBound(evidence)).toBe(false);
   });
 });

@@ -419,6 +419,79 @@ describe("provider-backed project routing", () => {
     expect(roles).not.toContain(SubjectClass.FOUNDER);
   });
 
+  it("does not let FOUNDER leak onto a PROJECT-bound brand handle", () => {
+    // Display name looks like a person; unique-id is the X handle + official
+    // domain. A product-lab bio ("building"), a verified founder fact, and a
+    // venture founder title all describe a person — not this brand account.
+    const evidence = emptyEvidence("@brandlab");
+    evidence.profile.display_name = "Morgan Chen";
+    evidence.profile.bio = "A product lab building onchain markets.";
+    evidence.profile.website = "https://brandlab.example";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-19T12:00:00.000Z";
+    evidence.profile.identity_binding = "independent_exact_handle";
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "A product lab for onchain markets.",
+      audience: "builders",
+      boundHandle: "@brandlab",
+      boundDomain: "brandlab.example",
+      sourceUrls: ["https://x.com/brandlab", "https://brandlab.example/"],
+    };
+    evidence.basicFacts = [basicFact("founder", "Someone")];
+    evidence.ventures.push({
+      name: "Brand Lab",
+      role: "founder",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    } as unknown as Venture);
+
+    const roles = providerBackedRoles(evidence);
+    expect(roles).toContain(SubjectClass.PROJECT);
+    expect(roles).not.toContain(SubjectClass.FOUNDER);
+  });
+
+  it("routes a person-named brand account to PROJECT when the bio only scores FOUNDER", () => {
+    // "Building …" is a FOUNDER classifier hit and has no protocol/platform
+    // noun. Without the PROJECT-bound unique-id gate, methodology leaks onto
+    // the brand handle as if we were rating the person.
+    const evidence = emptyEvidence("@productlab");
+    evidence.profile.display_name = "Morgan";
+    evidence.profile.bio = "Building the next generation of onchain markets.";
+    evidence.profile.website = "https://productlab.example";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-19T12:00:00.000Z";
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "Onchain markets product lab.",
+      audience: "",
+      boundHandle: "@productlab",
+      boundDomain: "productlab.example",
+      sourceUrls: ["https://x.com/productlab", "https://productlab.example/"],
+    };
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+  });
+
+  it("keeps FOUNDER routing on a personal account with FOUNDER orientation", () => {
+    const evidence = emptyEvidence("@alicefounder");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.bio = "gm";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-19T12:00:00.000Z";
+    evidence.subjectOrientation = {
+      kind: "FOUNDER",
+      what: "Founder of a product lab.",
+      audience: "",
+      boundHandle: "@alicefounder",
+      boundDomain: null,
+      sourceUrls: ["https://x.com/alicefounder"],
+    };
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.FOUNDER]);
+  });
+
   it("keeps orientation-PROJECT unroutable when the domain did not bind", () => {
     const evidence = emptyEvidence("@multihopper");
     evidence.profile.bio = "SWIFT 2.0 for digital assets. Programmable, non-custodial routing…";

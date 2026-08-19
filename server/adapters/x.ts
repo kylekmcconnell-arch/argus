@@ -2457,7 +2457,10 @@ export function scanPostsForRoles(posts: string[], projectName?: string, subject
     ? `https://x.com/${subjectHandle.replace(/^@/, "")}`
     : undefined;
   const add = (m: TeamMember) => { const k = (m.handle ?? m.name).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push(m); };
+  const subjectKey = subjectHandle?.replace(/^@/, "").toLowerCase() ?? "";
   const addHandle = (handle: string, role: string, kind: "team" | "advisor", evidence: string) => {
+    // Never put the audited subject on its own team as founder of itself.
+    if (subjectKey && handle.replace(/^@/, "").toLowerCase() === subjectKey) return;
     add({
       name: `@${handle}`,
       handle: `@${handle}`,
