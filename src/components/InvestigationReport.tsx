@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { verdictMeta } from "../lib/verdict";
+import { verdictMeta, axisLabel } from "../lib/verdict";
 import { printReportPdf } from "../lib/printPdf";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import {
@@ -70,8 +70,7 @@ import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { VerdictHero } from "./VerdictHero";
-import { compositionHeadline, personDimensionChapters, tokenDimensionChapters } from "../lib/dimensionChapters";
-import { DossierReport } from "./DossierReport";
+import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -755,6 +754,9 @@ export function InvestigationReport({
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
   const { token, projectX, siteUrl, recon, projectAccount, founders, deployerTrail } = inv;
+  const accountReport = projectAccount?.report;
+  const accountGoverning = accountReport?.role_reports?.find((rr) => rr.role === accountReport.governing_role);
+  const accountAxes = accountGoverning ? Object.entries(accountGoverning.axes ?? {}) : [];
   // The deployer wallet's age, said in the unit that carries it and stamped with
   // what it was measured to. Null when the trail never measured one: a wallet
   // whose first activity sits outside the pagination window is not a new wallet
@@ -1627,21 +1629,39 @@ export function InvestigationReport({
             </section>
           </div>
 
-          {/* the composition: the file's table of contents, Auric File framing */}
+          {/* the composition: the file's table of contents, Auric File framing.
+              The account's dimensions lead with the team; the token's follow.
+              Two recorded scores stay two honest strips, never blended. */}
           {token.axes?.length > 0 && (
             <section id="composition" className="af-doc mt-10 scroll-mt-28">
               <p className="af-sec-label">The composition</p>
-              <h2 className="af-h2 mt-3">{compositionHeadline(token.axes.length)}</h2>
+              <h2 className="af-h2 mt-3">{accountAxes.length > 0 ? "Every dimension. Two honest scores." : compositionHeadline(token.axes.length)}</h2>
               <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
+            {accountAxes.length > 0 && (
+              <ScoreComposition
+                heading={`The project account · ${projectAccount?.handle ?? "its own 100"}`}
+                rows={orderByPlainAxis(accountAxes.map(([key, a]) => ({
+                  axis: key,
+                  label: plainAxisLabel(key, axisLabel(key)),
+                  score: a.score,
+                  weight: a.weight,
+                  rationale: a.rationale,
+                  evidenceHref: "#investigation-people" as const,
+                })))}
+                totalScore={accountGoverning?.score_total ?? null}
+                challengeAnchor={shareView ? null : "#investigation-challenge"}
+              />
+            )}
             <ScoreComposition
-              rows={token.axes.map((a) => ({
+              heading={accountAxes.length > 0 ? "The token · its own 100" : "How the score is built"}
+              rows={orderByPlainAxis(token.axes.map((a) => ({
                 axis: a.key,
-                label: a.label,
+                label: plainAxisLabel(a.key, a.label),
                 score: a.score,
                 weight: a.weight,
                 rationale: a.rationale,
                 evidenceHref: `#dimension-${a.key}` as const,
-              }))}
+              })))}
               totalScore={token.score}
               capNote={token.capApplied ? `limited to ${token.score}` : null}
               challengeAnchor={shareView ? null : "#investigation-challenge"}
@@ -1649,25 +1669,10 @@ export function InvestigationReport({
             </section>
           )}
 
-          {/* the reading spine: live dossier first; token/person chapters are the deep dive */}
+          {/* the reading spine: Auric File chapters only (Enigma: do not use
+              the dossier-beats layout here; it stays available as the
+              standalone sharing format). */}
           <div className="af-doc">
-          <DossierReport
-            payload={{
-              ...(projectAccount ? (projectAccount as unknown as Record<string, unknown>) : {
-                handle: projectX ?? "",
-                display_name: token.name || token.symbol,
-                website: siteUrl,
-                headline: token.headline,
-                avatar_url: token.imageUrl,
-                report: { verdict: token.verdict, score_total: token.score },
-              }),
-              checkRuns: projectAccount?.checkRuns?.length ? projectAccount.checkRuns : diligenceChecks,
-              basicFacts: projectAccount?.basicFacts?.length ? projectAccount.basicFacts : projectBasicFacts,
-              basicFactLeads: projectAccount?.basicFactLeads ?? projectBasicFactLeads,
-              webTeam: groundedProjectTeamMembers,
-              webTeamLeads: projectAccount?.webTeamLeads ?? [],
-            }}
-          />
           {projectAccount?.projectStrengthBands && (
             <DimensionChapters
               chapters={personDimensionChapters(projectAccount.projectStrengthBands)}
@@ -1775,7 +1780,7 @@ export function InvestigationReport({
             sticky={false}
             label="Report story"
             items={[
-              { href: "#dossier", label: "The file", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
+              ...(token.axes?.length ? [{ href: "#composition" as const, label: "The composition", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> }] : []),
               { href: "#report-summary", label: "The short answer", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               ...(projectAccount?.intelligence ? [{ href: "#decision-intelligence" as const, label: "Deep dive", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> }] : []),
               ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
