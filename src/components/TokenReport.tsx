@@ -544,10 +544,10 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
 
         {/* the composition: the file's table of contents, Auric File framing */}
-        <section id="composition" className="mt-7 scroll-mt-28">
-          <p className="eyebrow">The composition</p>
-          <h2 className="story-chapter-title mt-1 text-ink">{compositionHeadline(d.axes.length)}</h2>
-          <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
+        <section id="composition" className="af-doc mt-10 scroll-mt-28">
+          <p className="af-sec-label">The composition</p>
+          <h2 className="af-h2 mt-3">{compositionHeadline(d.axes.length)}</h2>
+          <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
         <ScoreComposition
           rows={d.axes.map((a) => ({
             axis: a.key,
@@ -565,7 +565,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         </section>
 
         {/* the reading spine: each weighted dimension as its own chapter */}
-        <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
+        <div className="af-doc">
+          <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
+        </div>
 
         {/* panels */}
         <div className="mt-3 grid gap-3 lg:grid-cols-2">

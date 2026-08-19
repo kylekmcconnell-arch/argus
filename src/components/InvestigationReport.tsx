@@ -69,6 +69,7 @@ import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
+import { VerdictHero } from "./VerdictHero";
 import { compositionHeadline, personDimensionChapters, tokenDimensionChapters } from "../lib/dimensionChapters";
 import { DossierReport } from "./DossierReport";
 import {
@@ -1467,6 +1468,15 @@ export function InvestigationReport({
             links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
           />
 
+          {/* the editorial opening, earned: only a decision-ready report gets
+              the Auric File hero. A not-ready report keeps leading with the
+              readiness gate in the card grid below. */}
+          {readiness.status === "ready" && (
+            <div className="af-doc">
+              <VerdictHero token={token} savedLabel={capturedAt ? `Saved ${capturedAt}` : null} />
+            </div>
+          )}
+
           <div className="investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
             <section
               className={`panel investigation-hero-card flex flex-col ${readiness.status === "ready" ? "p-5" : "order-2 p-4 lg:p-5"}`}
@@ -1486,12 +1496,14 @@ export function InvestigationReport({
                 )}
               </div>
               <div className={`${readiness.status === "ready" ? "mt-4" : "mt-2.5"} flex items-center gap-4`}>
-                <ScoreRing
-                  score={token.score}
-                  verdict={token.verdict}
-                  size={104}
-                  bands={readiness.status === "ready"}
-                />
+                {readiness.status !== "ready" && (
+                  <ScoreRing
+                    score={token.score}
+                    verdict={token.verdict}
+                    size={104}
+                    bands={false}
+                  />
+                )}
                 <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-ink-dim">
                   {readiness.status === "ready"
                     ? "This score uses the checks that finished. It is not an approval to buy or invest."
@@ -1617,10 +1629,10 @@ export function InvestigationReport({
 
           {/* the composition: the file's table of contents, Auric File framing */}
           {token.axes?.length > 0 && (
-            <section id="composition" className="mt-7 scroll-mt-28">
-              <p className="eyebrow">The composition</p>
-              <h2 className="story-chapter-title mt-1 text-ink">{compositionHeadline(token.axes.length)}</h2>
-              <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
+            <section id="composition" className="af-doc mt-10 scroll-mt-28">
+              <p className="af-sec-label">The composition</p>
+              <h2 className="af-h2 mt-3">{compositionHeadline(token.axes.length)}</h2>
+              <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
             <ScoreComposition
               rows={token.axes.map((a) => ({
                 axis: a.key,
@@ -1638,6 +1650,7 @@ export function InvestigationReport({
           )}
 
           {/* the reading spine: live dossier first; token/person chapters are the deep dive */}
+          <div className="af-doc">
           <DossierReport
             payload={{
               ...(projectAccount ? (projectAccount as unknown as Record<string, unknown>) : {
@@ -1665,6 +1678,7 @@ export function InvestigationReport({
             chapters={tokenDimensionChapters(token)}
             checksHref="#investigation-methodology"
           />
+          </div>
 
           {noticedSignals.length > 0 && (
             <section className="panel mt-3 p-4" aria-label="What Argus noticed">
