@@ -54,33 +54,83 @@ const MAX_SERPER_QUERY_CHARS = 2048;
 
 /**
  * Turn a candidate Serper `q` into a Google-legal query, or null to skip.
- * Twitter-style `@handle` tokens (the 29-char "@handle founder CEO team" class)
- * are rewritten to `site:x.com/handle` plus remaining terms rather than dropped.
- * Skip only when the result is still empty or illegal. Never log `q`.
+ * Twitter-style q that still has useful terms (quoted phrase, founder/CEO/team
+ * words) is rewritten to ordinary Google syntax — quoted phrases stay, @handle
+ * becomes "@handle" next to residual words. Handle-only / operator-only q is
+ * skipped so we do not spend a credit on site:x.com/@handle junk. Never log `q`.
  */
 export function sanitizeSerperQuery(q: string): string | null {
-  let s = q.trim();
-  if (!s) return null;
-  if (s.length > MAX_SERPER_QUERY_CHARS) return null;
-  if ((s.match(/"/g)?.length ?? 0) % 2 === 1) return null;
+  const original = q.trim();
+  if (!original) return null;
+  if (original.length > MAX_SERPER_QUERY_CHARS) return null;
+  if ((original.match(/"/g)?.length ?? 0) % 2 === 1) return null;
 
-  // Bare handle, optionally quoted: @alice or "@alice".
-  const bare = s.match(/^"?@([A-Za-z0-9_]{1,30})"?$/);
-  if (bare) return `site:x.com/${bare[1]}`;
-
-  // Twitter-only operators are not valid Google q.
-  s = s.replace(/\b(?:filter|min_faves|min_retweets|min_replies):[^\s]*/gi, " ");
-  s = s.replace(/\bfrom:@?([A-Za-z0-9_]{1,30})\b/gi, "site:x.com/$1");
-  s = s.replace(/\bsite:(?:www\.)?(?:twitter\.com|x\.com)\/@([A-Za-z0-9_]{1,30})/gi, "site:x.com/$1");
-
-  // Leading unquoted @handle token — rewrite, do not drop a useful search.
-  if (!s.startsWith('"')) {
-    s = s.replace(/^@([A-Za-z0-9_]{1,30})(?=\s|$)/, "site:x.com/$1");
+  const unquoted = original.replace(/"[^"]*"/g, " ");
+  const twitterStyle = /\b(?:from|filter|min_faves|min_retweets|min_replies):/i.test(original)
+    || /\bsite:(?:www\.)?(?:twitter|x)\.com\b/i.test(original)
+    || /@[A-Za-z0-9_]+/.test(unquoted)
+    || /^"@[A-Za-z0-9_]{1,30}"$/.test(original);
+  if (!twitterStyle) {
+    if (/^@/.test(original) && !original.startsWith('"')) return null;
+    if (/^(?:OR|AND)\b|\b(?:OR|AND)$/i.test(original)) return null;
+    if (/(?:^|\s)(?:site|filetype):\s*(?:$|[)"']|\b(?:OR|AND)\b)/i.test(original)) return null;
+    const residual = original
+      .replace(/\b(?:site|filetype|intitle|inurl|intext|ext):[^\s]*/gi, " ")
+      .replace(/\b(?:OR|AND|NOT)\b/gi, " ")
+      .replace(/[()"+-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!residual && !/\b(?:site|filetype):[^\s]+/i.test(original)) return null;
+    return original;
   }
 
-  s = s.replace(/\s+/g, " ").trim();
+  const quoted: string[] = [];
+  let rest = original.replace(/"([^"]*)"/g, (_, phrase: string) => {
+    const inner = phrase.trim();
+    if (inner) quoted.push(`"${inner}"`);
+    return " ";
+  });
+
+  const handles: string[] = [];
+  const addHandle = (raw: string) => {
+    const handle = raw.replace(/^@/, "");
+    if (!handle) return;
+    if (!handles.some((existing) => existing.toLowerCase() === handle.toLowerCase())) handles.push(handle);
+  };
+
+  rest = rest.replace(/\bfrom:@?([A-Za-z0-9_]{1,30})\b/gi, (_, handle: string) => {
+    addHandle(handle);
+    return " ";
+  });
+  rest = rest.replace(/\bsite:(?:www\.)?(?:twitter|x)\.com\/@?([A-Za-z0-9_]{1,30})(?:\/\S*)?/gi, (_, handle: string) => {
+    addHandle(handle);
+    return " ";
+  });
+  rest = rest.replace(/\bsite:(?:www\.)?(?:twitter|x)\.com\b/gi, " ");
+  rest = rest.replace(/\b(?:filter|min_faves|min_retweets|min_replies):[^\s]*/gi, " ");
+  rest = rest.replace(/(^|[^\w])@([A-Za-z0-9_]{1,30})/g, (_match, pre: string, handle: string) => {
+    addHandle(handle);
+    return `${pre} `;
+  });
+  rest = rest.replace(/\b(?:www\.)?(?:twitter|x)\.com\b/gi, " ");
+  rest = rest.replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
+
+  const usefulQuoted = quoted.filter((phrase) => !/^"@[A-Za-z0-9_]{1,30}"$/.test(phrase));
+  for (const phrase of quoted) {
+    const only = phrase.match(/^"@([A-Za-z0-9_]{1,30})"$/);
+    if (only) addHandle(only[1]);
+  }
+
+  const parts = [...usefulQuoted];
+  if (rest) {
+    parts.push(rest);
+    for (const handle of handles) {
+      const already = usefulQuoted.some((phrase) => phrase.toLowerCase().includes(`@${handle.toLowerCase()}`));
+      if (!already) parts.push(`"@${handle}"`);
+    }
+  }
+  const s = parts.join(" ").replace(/\s+/g, " ").trim();
   if (!s) return null;
-  // A leftover Twitter-style token we could not rewrite is not a legal q.
   if (/^@/.test(s) && !s.startsWith('"')) return null;
   if (/^(?:OR|AND)\b|\b(?:OR|AND)$/i.test(s)) return null;
   if (/(?:^|\s)(?:site|filetype):\s*(?:$|[)"']|\b(?:OR|AND)\b)/i.test(s)) return null;
@@ -117,7 +167,7 @@ function sanitizeQueryList(queries: readonly string[]): string[] {
 function fallbackQueriesFromUser(user: string): string[] {
   const candidates: string[] = [];
   for (const m of user.matchAll(/"([^"]{2,80})"/g)) candidates.push(`"${m[1]}"`);
-  for (const m of user.matchAll(/(^|[^\w])@([A-Za-z0-9_]{1,30})/g)) candidates.push(`site:x.com/${m[2]}`);
+  // Bare @handle is not a Google q. Quoted phrases and real domains still run.
   for (const m of user.matchAll(/\b((?:[a-z0-9-]+\.)+[a-z]{2,24})\b/gi)) {
     const host = m[1].replace(/^www\./i, "").toLowerCase();
     if (/^(?:x\.com|twitter\.com|t\.co|github\.com|linkedin\.com|youtube\.com|youtu\.be|google\.com|facebook\.com|instagram\.com)$/i.test(host)) continue;
@@ -126,6 +176,12 @@ function fallbackQueriesFromUser(user: string): string[] {
   return sanitizeQueryList(candidates);
 }
 
+
+function isSerperProviderOutage(detail?: string): boolean {
+  if (!detail) return true;
+  if (detail.includes("invalid_request")) return false;
+  return true;
+}
 
 function safeSerperFailure(status: number, raw: string): string {
   let message = "";
@@ -420,7 +476,10 @@ export async function groundedSearch(
       [...new Set(failed.flatMap((outcome) => outcome.detail ? [outcome.detail] : []))].join(","),
     );
   }
-  if (failed.length && succeeded.length === 0) opts?.onProviderUnavailable?.();
+  // invalid_request is a bad q, not a missing key or empty wallet.
+  if (failed.some((outcome) => isSerperProviderOutage(outcome.detail)) && succeeded.length === 0) {
+    opts?.onProviderUnavailable?.();
+  }
   const results = dedupeByUrl(searched.flatMap((outcome) => outcome.results)).slice(0, MAX_RESULTS);
   if (!results.length) return null;
 
