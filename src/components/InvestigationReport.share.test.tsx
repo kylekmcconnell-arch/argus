@@ -647,7 +647,6 @@ describe("investigation exact sharing", () => {
     const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
       .map((link) => link.getAttribute("href"));
     expect(hrefs).toEqual([
-      "#dossier",
       "#report-summary",
       "#investigation-why",
       "#investigation-visuals",

@@ -12,7 +12,7 @@ import { env, DISCOVERY_MODEL, providerFallbacksEnabled } from "../config";
 import { addGrokUsage, addClaudeUsage, recordCall, recordTwitterapi, grokSpendUsd } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
-import type { NotableFollower } from "../../src/data/evidence";
+import type { NotableFollower, WebTeamMember } from "../../src/data/evidence";
 import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
 import { NOTABLE_ACCOUNTS } from "./notableAccounts";
 import { groundedSearch, groundedSearchProvisioned } from "./groundedSearch";
@@ -229,6 +229,8 @@ export async function generalWebSearch(system: string, user: string, opts?: {
   cacheKey?: string;
   bypassCache?: boolean;
   claimProviderCall?: () => boolean;
+  queries?: readonly string[];
+  newsQuery?: string;
 }): Promise<string | null> {
   const forceGrok = (env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() === "grok";
   if (!forceGrok && groundedSearchProvisioned()) {
@@ -236,6 +238,8 @@ export async function generalWebSearch(system: string, user: string, opts?: {
     const viaGrounded = await groundedSearch(system, user, {
       cacheKey: opts?.cacheKey,
       bypassCache: opts?.bypassCache,
+      queries: opts?.queries,
+      newsQuery: opts?.newsQuery,
       onProviderUnavailable: () => { groundedUnavailable = true; },
     });
     if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
@@ -575,6 +579,10 @@ const KW_IDENTITY = [
   // repeating formal titles. These retrieval terms feed the strict project-
   // owned role grammar below; they do not establish team membership by alone.
   '"our team"', '"team member"', '"members of"', '"core team"',
+  // Retrieval only. Official posts that name an incubator / team-behind /
+  // backed-by handle must reach the corpus so the deterministic org scan
+  // can bind them without Serper.
+  "incubator", '"incubated by"', '"team behind"', '"backed by"',
 ];
 const KW_LAUNCH = ["launching", "presale", "mint", "airdrop", "raised", "seed", "IDO", '"CA:"', "tokenomics", "whitelist"];
 const KW_ENDORSE = ["backed", "investors", "partnership", "gem", "100x", '"proud to"'];
@@ -587,7 +595,7 @@ const KW_SHILL = ["aped", "sending", '"the play"', "entry", "accumulated", "conv
 // the founder/shill layers miss them and their report shows ~5 of 100s of calls.
 // Chart-link domains are near-certain calls AND hand the resolver the token page.
 const KW_CALLS = ["dexscreener.com", "pump.fun", "birdeye.so", "dextools.io", "geckoterminal.com", "photon-sol", '"CA"'];
-const CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined|aped?|shill|calling|conviction|printing|pumping|sending it)\b/i;
+const CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined|aped?|shill|calling|conviction|printing|pumping|sending it|incubator|incubated|team behind)\b/i;
 
 function parseTweet(t: any): CorpusPost {
   const text = (t.text ?? t.full_text ?? "").trim();
@@ -618,9 +626,9 @@ async function lastTweetsPage(handle: string, key: string, cursor?: string): Pro
   return { tweets, next: d.has_next_page ? d.next_cursor : undefined };
 }
 
-export async function searchFrom(handle: string, terms: string[], key: string): Promise<any[]> {
+export async function searchFrom(handle: string, terms: string[], key: string, queryType: "Top" | "Latest" = "Top"): Promise<any[]> {
   const q = `from:${handle} (${terms.join(" OR ")})`;
-  const res = await twFetch(`${TWITTERAPI}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Top`, key);
+  const res = await twFetch(`${TWITTERAPI}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=${queryType}`, key);
   if (!res || !res.ok) return [];
   const d = (await res.json()) as any;
   return d.tweets ?? d.data?.tweets ?? [];
@@ -651,7 +659,7 @@ export async function collectCorpus(handle: string): Promise<Corpus> {
   const p1 = await lastTweetsPage(u, key).catch(() => ({ tweets: [] as any[], next: undefined }));
   const [p2, sId, sLa, sEn, sSh, sCa] = await Promise.all([
     p1.next ? lastTweetsPage(u, key, p1.next).catch(() => ({ tweets: [] as any[] })) : Promise.resolve({ tweets: [] as any[] }),
-    searchFrom(u, KW_IDENTITY, key).catch(() => []),
+    searchFrom(u, KW_IDENTITY, key, "Latest").catch(() => []),
     searchFrom(u, KW_LAUNCH, key).catch(() => []),
     searchFrom(u, KW_ENDORSE, key).catch(() => []),
     searchFrom(u, KW_SHILL, key).catch(() => []),
@@ -1386,6 +1394,17 @@ export async function discoverAffiliations(handle: string, name?: string, oldHan
 // This mines that content for team members the site/bio never listed.
 export interface TeamMember { name: string; handle?: string; role: string; evidence?: string; kind: "team" | "advisor"; linkedin?: string; source?: string; sourceUrl?: string; projects?: { name: string; role?: string }[] }
 
+export type LinkedOrgRole = "incubator" | "team-behind" | "backed-by" | "fund" | "vc";
+
+export interface LinkedOrg {
+  name: string;
+  handle: string;
+  role: LinkedOrgRole;
+  evidence: string;
+  source: string;
+  sourceUrl?: string;
+}
+
 export async function findTeam(
   handle: string,
   name: string | undefined,
@@ -1403,7 +1422,7 @@ export async function findTeam(
   ])].slice(0, 30);
   if (key && purchasedTeamSignalPosts === undefined) {
     try {
-      const teamPosts = await searchFrom(h, KW_IDENTITY, key);
+      const teamPosts = await searchFrom(h, KW_IDENTITY, key, "Latest");
       const extra = teamPosts.map((t) => String((t as any)?.text ?? (t as any)?.full_text ?? "")).filter(Boolean);
       corpus = [...new Set([...corpus, ...extra])].slice(0, 30);
     } catch { /* twitterapi unavailable -> extract from the provided posts only */ }
@@ -1439,7 +1458,16 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT. Do NOT downgrade a founder to advisor. " +
     "For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal. This exposes serial founders and cross-project ties. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for \"built by\", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site-v2:${clean || projectName}` });
+  const project = (projectName ?? "").replace(/"/g, "").trim();
+  const officialSiteQueries = [
+    ...(clean ? [`site:${clean} team`, `site:${clean} founder`, `site:${clean} about`] : []),
+    ...(clean && project ? [`site:linkedin.com "${project}" founder`] : []),
+    ...(project ? [`"${project}" founder LinkedIn`, `"${project}" cofounder`] : []),
+  ];
+  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for \"built by\", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, {
+    cacheKey: `team-site-v2:${clean || projectName}`,
+    queries: officialSiteQueries.length ? officialSiteQueries : undefined,
+  });
   return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 
@@ -1503,7 +1531,7 @@ const connectorAllowed = (gap: string, allowed: Set<string>): boolean =>
  * Bounded by design: at most MAX_FOLLOWING_PAGES pages, and a candidate is
  * only returned when their bio names THIS subject next to a builder verb.
  */
-const OPERATOR_VERB = "building|builder|build|dev(?:eloper)?|developing|creator|created|creating|founder|co-?founder|behind|maker|making|shipping|ships|working\\s+on|work\\s+on|author\\s+of|team\\s+behind";
+const OPERATOR_VERB = "building|builder|build|built|we\\s+built|i\\s+built|dev(?:eloper)?|developing|creator|created|creating|founder|co-?founder|ceo|cto|coo|cfo|cmo|chief\\s+\\w+\\s+officer|behind|maker|making|shipping|ships|working\\s+on|work\\s+on|author\\s+of|team\\s+behind";
 const MAX_FOLLOWING_PAGES = 2;
 const FOLLOWING_PAGE_SIZE = 100;
 
@@ -1525,20 +1553,80 @@ export function operatorClaimInBio(
     names.push(regexEscape(trimmedName));
   }
   const subject = `(?:@?(?:${names.join("|")}))`;
-  // Verb before the subject ("building @x") or after it ("@x dev").
-  const before = new RegExp(`\\b(${OPERATOR_VERB})\\b[^@|,.\\n]{0,24}${subject}\\b`, "i");
-  const after = new RegExp(`${subject}\\b[^@|,.\\n]{0,16}\\b(${OPERATOR_VERB})\\b`, "i");
+  // Verb/title before the subject ("COO @x", "we built @x") or after it ("@x dev").
+  // Commas are allowed in the gap so "Co-founder, COO @x" still binds; pipes are
+  // not, so "Building @other | @x" cannot steal the verb.
+  const before = new RegExp(`\\b(${OPERATOR_VERB})\\b[^@|\\n]{0,40}${subject}\\b`, "i");
+  const after = new RegExp(`${subject}\\b[^@|\\n]{0,16}\\b(${OPERATOR_VERB})\\b`, "i");
   const match = text.match(before) ?? text.match(after);
   if (!match) return null;
-  const verb = (match[1] ?? "").toLowerCase();
-  const role = /founder/.test(verb)
-    ? verb.replace(/\s+/g, " ")
-    : /creator|created|creating|maker|making/.test(verb)
-      ? "creator"
-      : /dev/.test(verb)
-        ? "developer"
-        : "operator";
+  const verb = (match[1] ?? "").toLowerCase().replace(/\s+/g, " ");
+  const role = /co-?founder/.test(verb)
+    ? "co-founder"
+    : /founder/.test(verb)
+      ? "founder"
+      : /\bcoo\b|chief operating/.test(verb)
+        ? "coo"
+        : /\bceo\b|chief executive/.test(verb)
+          ? "ceo"
+          : /\bcto\b|chief technology/.test(verb)
+            ? "cto"
+            : /\bcfo\b|chief financial/.test(verb)
+              ? "cfo"
+              : /^(?:we built|i built|built)$/.test(verb)
+                ? "founder"
+                : /creator|created|creating|maker|making/.test(verb)
+                  ? "creator"
+                  : /dev/.test(verb)
+                    ? "developer"
+                    : "operator";
   return { role, phrase: match[0].trim().slice(0, 160) };
+}
+
+/**
+ * First-party project role in a twitterapi-resolved bio. Unique-id is the
+ * @handle: a display name never binds. Matches founder / co-founder / COO /
+ * CEO / "we-built @handle", including comma-separated titles
+ * ("Co-founder, COO @projecthandle").
+ */
+const PROJECT_BIO_ROLE = "co-?founders?|founders?|ceo|coo|cto|cfo|we[-\\s]?built";
+
+export function projectRoleClaimInBio(
+  bio: string,
+  projectHandle: string,
+): { role: string; phrase: string } | null {
+  const text = String(bio ?? "").replace(/\s+/g, " ").trim();
+  const handle = projectHandle.replace(/^@/, "");
+  if (!text || !handle) return null;
+  const at = `@${regexEscape(handle)}`;
+  if (!new RegExp(`${at}\\b`, "i").test(text)) return null;
+  const before = new RegExp(
+    `\\b((?:${PROJECT_BIO_ROLE})(?:\\s*[,/&]\\s*(?:${PROJECT_BIO_ROLE}))*)\\b[^@\\n]{0,32}${at}\\b`,
+    "i",
+  );
+  const after = new RegExp(
+    `${at}\\b[^@\\n]{0,24}\\b((?:${PROJECT_BIO_ROLE})(?:\\s*[,/&]\\s*(?:${PROJECT_BIO_ROLE}))*)\\b`,
+    "i",
+  );
+  const match = text.match(before) ?? text.match(after);
+  if (!match) return null;
+  const raw = (match[1] ?? "").toLowerCase().replace(/\s+/g, " ");
+  const role = /we[- ]?built/.test(raw) ? "builder"
+    : /co-?founder/.test(raw) ? (/coo/.test(raw) ? "co-founder, coo" : "co-founder")
+    : /founder/.test(raw) ? "founder"
+    : /ceo/.test(raw) ? "ceo"
+    : /coo/.test(raw) ? "coo"
+    : /cto/.test(raw) ? "cto"
+    : "founder";
+  return { role, phrase: match[0].trim().slice(0, 160) };
+}
+
+export function orgClassFromProfile(name?: string, bio?: string, context?: string): LinkedOrgRole | null {
+  const text = `${name ?? ""} ${bio ?? ""} ${context ?? ""}`;
+  if (/\bincubator|\baccelerator\b/i.test(text)) return "incubator";
+  if (/\bventure\s+capital|\bvc\b/i.test(text)) return "vc";
+  if (/\bfunds?\b/i.test(text)) return "fund";
+  return null;
 }
 
 /** Other @projects the same bio claims, for the serial-launcher venture graph. */
@@ -1684,7 +1772,7 @@ export async function discoverOperatorsFromAmplified(
       name = name ?? profile?.name;
     }
     if (!bio) continue;
-    const claim = operatorClaimInBio(bio, handle, subjectName);
+    const claim = projectRoleClaimInBio(bio, handle);
     if (!claim) continue;
     out.push({
       name: name?.trim() || `@${author.handle}`,
@@ -1698,6 +1786,61 @@ export async function discoverOperatorsFromAmplified(
     });
   }
   return out.slice(0, 6);
+}
+
+/** Hostname for official-site Google queries. Empty when no unique-id-bound domain. */
+export function officialSearchHost(domain?: string): string {
+  const raw = (domain ?? "").trim();
+  if (!raw) return "";
+  try {
+    const url = raw.includes("://") ? new URL(raw) : new URL(`https://${raw}`);
+    return url.hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return raw.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./i, "").toLowerCase();
+  }
+}
+
+/**
+ * Deterministic Serper queries for reverse-role search. Quoted founder phrases
+ * first, then Google-only official-site / LinkedIn queries Grok x_search cannot
+ * replace. groundedSearch keeps the first 8 after sanitize. Optional /news is
+ * separate (1 credit) and skipped when no project name exists.
+ */
+export function roleClaimantSerperPlan(
+  subjectHandle: string,
+  subjectName?: string,
+  domain?: string,
+): { queries: string[]; newsQuery?: string } {
+  const h = subjectHandle.replace(/^@/, "");
+  const projectName = (subjectName ?? "").replace(/"/g, "").trim();
+  const nameDistinct = projectName && projectName.toLowerCase() !== h.toLowerCase() ? projectName : "";
+  const host = officialSearchHost(domain);
+
+  const quoted = [
+    `"founder of @${h}"`,
+    `"co-founder of @${h}"`,
+    `"CEO of @${h}"`,
+    `"@${h} team"`,
+    `"cofounder of @${h}"`,
+    `"CEO at @${h}"`,
+    `"Founder @${h}"`,
+    ...(nameDistinct ? [`"founder of ${nameDistinct}"`, `"${nameDistinct} founder"`, `"${nameDistinct} team"`] : []),
+    ...(host ? [`"founder of ${host}"`] : []),
+  ];
+  const googleOnly: string[] = [];
+  if (host) {
+    googleOnly.push(`site:${host} team`, `site:${host} founder`, `site:${host} about`);
+  }
+  if (host && projectName) {
+    googleOnly.push(`site:linkedin.com "${projectName}" founder`);
+  }
+  if (projectName) {
+    googleOnly.push(`"${projectName}" founder LinkedIn`, `"${projectName}" cofounder`);
+  }
+  return {
+    queries: [...quoted.slice(0, 4), ...googleOnly, ...quoted.slice(4)],
+    newsQuery: projectName ? `"${projectName}" founder OR team` : undefined,
+  };
 }
 
 /**
@@ -1717,6 +1860,7 @@ export async function findRoleClaimants(
   domain?: string,
 ): Promise<TeamMember[]> {
   const h = subjectHandle.replace(/^@/, "");
+  const plan = roleClaimantSerperPlan(subjectHandle, subjectName, domain);
   const nameVariant = subjectName?.trim() && subjectName.trim().toLowerCase() !== h.toLowerCase()
     ? subjectName.trim()
     : "";
@@ -1727,6 +1871,7 @@ export async function findRoleClaimants(
     ...(nameVariant ? [`"founder of ${nameVariant}"`, `"${nameVariant} founder"`, `"${nameVariant} team"`] : []),
     ...(domainVariant ? [`"founder of ${domainVariant}"`] : []),
   ];
+  const serperQueries = plan.queries;
   const system =
     "You are a forensic OSINT researcher with live web and X search. The subject is a crypto/tech project's X account. Find the PEOPLE the public record credits with leading it: founders, cofounders, CEO/CTO/COO, core team. " +
     "Work the REVERSE direction: run the exact quoted searches given below on X AND on the general web (Google-style), and read what AI-answer search summaries say about who founded the project. " +
@@ -1736,10 +1881,22 @@ export async function findRoleClaimants(
   const text = await generalWebSearch(
     system,
     `Project X account: @${h}${nameVariant ? ` (${nameVariant})` : ""}${domainVariant ? `, website ${domainVariant}` : ""}. Who does the public record say founded or leads it? Run these exact searches on X and the web, then verify each hit: ${queries.join(", ")}.`,
-    { maxToolCalls: 6, cacheKey: `reverse-role:${h}` },
-  );
-  return parseTeamJSON(text, h, "reverse role-phrase search");
+    { maxToolCalls: 6, cacheKey: `reverse-role:${h}`, queries: serperQueries, newsQuery: plan.newsQuery },
+  ).catch(() => null);
+  const twitterBio = await discoverReverseBioFromTwitterapi(subjectHandle, subjectName);
+  const fromWeb = parseTeamJSON(text, h, "reverse role-phrase search");
+  const seen = new Set(fromWeb.map((member) => (member.handle ?? "").replace(/^@/, "").toLowerCase()).filter(Boolean));
+  for (const member of twitterBio.team) {
+    const key = (member.handle ?? "").replace(/^@/, "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    fromWeb.push(member);
+  }
+  return fromWeb;
 }
+
+/** Unique-id-confirmed claimant: live twitterapi bio carries a role claim for THIS project handle. */
+export type ConfirmedClaimant = { role: string; phrase: string; bio?: string; name?: string };
 
 /**
  * Live first-party confirmation for reverse-search leads: fetch each named
@@ -1751,11 +1908,11 @@ export async function findRoleClaimants(
 export async function confirmClaimantBios(
   candidates: readonly TeamMember[],
   subjectHandle: string,
-  subjectName?: string,
+  _subjectName?: string,
   cap = 5,
-): Promise<Map<string, { role: string; phrase: string }>> {
+): Promise<Map<string, ConfirmedClaimant>> {
   const subject = subjectHandle.replace(/^@/, "");
-  const confirmed = new Map<string, { role: string; phrase: string }>();
+  const confirmed = new Map<string, ConfirmedClaimant>();
   const handles = [...new Set(
     candidates
       .map((c) => (c.handle ?? "").replace(/^@/, ""))
@@ -1765,17 +1922,552 @@ export async function confirmClaimantBios(
     try {
       const profile = await getProfile(`@${h}`);
       if (!profile?.bio) continue;
-      const claim = operatorClaimInBio(profile.bio, subject, subjectName);
-      if (claim) confirmed.set(h.toLowerCase(), claim);
+      // Unique-id is the handle: a display-name-only bio never confirms.
+      const handleClaim = projectRoleClaimInBio(profile.bio, subject);
+      if (handleClaim) confirmed.set(h.toLowerCase(), { ...handleClaim, bio: profile.bio, name: profile.name });
     } catch { /* confirmation is best-effort; the lead stays a lead */ }
   }
   return confirmed;
 }
 
-export function scanPostsForRoles(posts: string[], projectName?: string): TeamMember[] {
+/** Temporary Serper LinkedIn/press follow-up. Empty/unset = on; 0/false/off disables without a deploy. */
+export function serperFounderFollowupEnabled(): boolean {
+  const raw = (env("ARGUS_SERPER_FOUNDER_FOLLOWUP") ?? "").trim().toLowerCase();
+  return raw !== "0" && raw !== "false" && raw !== "off";
+}
+
+export const CONFIRMED_FOUNDER_FOLLOWUP_CAP = 3;
+
+export type ConfirmedFounderFollowupPlan = {
+  handle: string;
+  displayName?: string;
+  linkedinQuery: string;
+  /** One /news query. Never also posted as a web /search. */
+  pressQuery?: string;
+};
+
+function distinctPersonName(name: string | undefined, handle: string): string {
+  const n = (name ?? "").replace(/"/g, "").trim();
+  const h = handle.replace(/^@/, "");
+  if (!n) return "";
+  if (n.replace(/^@/, "").toLowerCase() === h.toLowerCase()) return "";
+  return n;
+}
+
+function isConfirmedFounderRole(role: string): boolean {
+  const r = (role ?? "").toLowerCase();
+  if (/\b(advisor|adviser|vc|fund|incubator|backed-by|team-behind)\b/.test(r)) return false;
+  return /\b(co-?founder|founder|ceo|builder)\b/.test(r);
+}
+
+/** linkedin.com/in/... from a Serper organic URL. Never invents a slug. */
+export function linkedInProfileFromOrganicUrl(url: string): string | null {
+  const raw = (url ?? "").trim();
+  if (!raw) return null;
+  try {
+    const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, "")}`;
+    const parsed = new URL(href);
+    if (!/(^|\.)linkedin\.com$/i.test(parsed.hostname)) return null;
+    const match = parsed.pathname.match(/^\/in\/([A-Za-z0-9_-]{2,100})\/?/i);
+    if (!match) return null;
+    return `linkedin.com/in/${match[1]}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Deterministic Serper plan for UNIQUE-ID CONFIRMED founders only.
+ * Unverified leads, orgs, the subject project handle, and display-name-only
+ * rows never produce queries. Cap 3 people, 2 queries each.
+ */
+export function confirmedFounderFollowupPlan(
+  confirmed: ReadonlyMap<string, ConfirmedClaimant>,
+  projectHandle: string,
+  projectName?: string,
+): ConfirmedFounderFollowupPlan[] {
+  const subject = projectHandle.replace(/^@/, "").toLowerCase();
+  const project = (projectName ?? "").replace(/"/g, "").trim();
+  const plans: ConfirmedFounderFollowupPlan[] = [];
+  for (const [rawHandle, claim] of confirmed) {
+    if (plans.length >= CONFIRMED_FOUNDER_FOLLOWUP_CAP) break;
+    const handle = rawHandle.replace(/^@/, "").toLowerCase();
+    if (!handle || handle === subject) continue;
+    if (!isConfirmedFounderRole(claim.role)) continue;
+    const displayName = distinctPersonName(claim.name, handle);
+    const linkedinQuery = displayName
+      ? `site:linkedin.com/in "${displayName}"`
+      : `site:linkedin.com "${handle}" founder`;
+    const pressQuery = displayName && project
+      ? `"${displayName}" "${project}" founder`
+      : undefined;
+    plans.push({
+      handle,
+      displayName: displayName || undefined,
+      linkedinQuery,
+      pressQuery,
+    });
+  }
+  return plans;
+}
+
+export type ConfirmedFounderFollowupHit = {
+  linkedin?: string;
+  pressUrls: string[];
+};
+
+/**
+ * Bounded Serper LinkedIn/press follow-up for unique-id-confirmed founders.
+ * Reuses groundedSearch (num:10, recordSerper inside). LinkedIn URLs are
+ * copied from Serper organic as corroboration, never used as bind keys.
+ */
+export async function serperConfirmedFounderFollowup(
+  confirmed: ReadonlyMap<string, ConfirmedClaimant>,
+  projectHandle: string,
+  projectName?: string,
+): Promise<Map<string, ConfirmedFounderFollowupHit>> {
+  const out = new Map<string, ConfirmedFounderFollowupHit>();
+  if (!serperFounderFollowupEnabled() || !groundedSearchProvisioned()) return out;
+  const plans = confirmedFounderFollowupPlan(confirmed, projectHandle, projectName);
+  if (!plans.length) return out;
+  const subject = projectHandle.replace(/^@/, "").toLowerCase();
+  await Promise.all(plans.map(async (plan) => {
+    const organic: { title: string; url: string; snippet: string }[] = [];
+    const project = (projectName ?? "").replace(/"/g, "").trim();
+    await groundedSearch(
+      "You extract corroborating public URLs for a person already uniquely identified by their X handle. Copy linkedin.com/in/... URLs only when they appear in the given search results. Never invent a LinkedIn URL or slug. Unique-id bind stays the X handle.",
+      `Confirmed founder @${plan.handle}${plan.displayName ? ` (${plan.displayName})` : ""}${project ? ` of ${project}` : ""}. Return compact JSON {"linkedin":"linkedin.com/in/... or omit","press":["https://..."]}.`,
+      {
+        queries: [plan.linkedinQuery],
+        newsQuery: plan.pressQuery,
+        cacheKey: `founder-followup:${subject}:${plan.handle}`,
+        onOrganicResults: (rows) => { organic.push(...rows); },
+      },
+    ).catch(() => null);
+    const linkedin = organic.map((row) => linkedInProfileFromOrganicUrl(row.url)).find((url): url is string => Boolean(url));
+    const pressUrls = organic
+      .map((row) => row.url)
+      .filter((url) => /^https?:\/\//i.test(url) && !/linkedin\.com/i.test(url))
+      .slice(0, 3);
+    if (linkedin || pressUrls.length) out.set(plan.handle, { linkedin, pressUrls });
+  }));
+  return out;
+}
+
+interface ReverseBioCandidate {
+  handle: string;
+  name?: string;
+  bio?: string;
+  image?: string;
+  tweetTexts?: string[];
+}
+
+const linkedOrgRoleFromWindow = (window: string): LinkedOrgRole => {
+  const lower = window.toLowerCase();
+  if (/incubate/.test(lower)) return "incubator";
+  if (/backed/.test(lower)) return "backed-by";
+  if (/\bvc\b|venture/.test(lower)) return "vc";
+  if (/fund/.test(lower)) return "fund";
+  return "team-behind";
+};
+
+/**
+ * Other @handles in a bio that sit next to org/fund/incubator language.
+ * Never binds the subject, a person already claimed as team, or a bare
+ * display name. Unique-id is the @handle.
+ */
+export function linkedOrgsFromBioText(
+  bio: string,
+  subjectHandle: string,
+  personHandles: ReadonlySet<string> = new Set(),
+): LinkedOrg[] {
+  const subject = subjectHandle.replace(/^@/, "").toLowerCase();
+  const out: LinkedOrg[] = [];
+  const seen = new Set<string>();
+  const text = String(bio ?? "").replace(/\s+/g, " ");
+  if (!text) return out;
+  for (const match of text.matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
+    const handle = match[1];
+    const key = handle.toLowerCase();
+    if (!key || key === subject || personHandles.has(key) || seen.has(key)) continue;
+    const start = Math.max(0, (match.index ?? 0) - 48);
+    const window = text.slice(start, (match.index ?? 0) + match[0].length + 48);
+    if (!/\b(vc|venture(?:s|\s+capital)?|fund|funds?|incubators?|incubated|accelerators?|team\s+behind)\b/i.test(window)) continue;
+    seen.add(key);
+    const role = linkedOrgRoleFromWindow(window);
+    out.push({
+      name: `@${handle}`,
+      handle: `@${handle}`,
+      role,
+      evidence: `bio names @${handle} next to ${role.replace("-", " ")} language`,
+      source: "reverse-bio org scan",
+      sourceUrl: `https://x.com/${handle}`,
+    });
+  }
+  return out.slice(0, 8);
+}
+
+function reverseBioCandidateFromUnknown(row: unknown): ReverseBioCandidate | null {
+  const person = asRecord(row);
+  const userName = typeof person.userName === "string" ? person.userName
+    : typeof person.screen_name === "string" ? person.screen_name
+    : typeof person.username === "string" ? person.username
+    : "";
+  if (!userName) return null;
+  const bio = typeof person.description === "string" ? person.description
+    : typeof person.bio === "string" ? person.bio
+    : "";
+  const name = typeof person.name === "string" && person.name.trim() ? person.name.trim() : undefined;
+  const rawImg = person.profilePicture ?? person.profile_image_url_https ?? person.profile_image_url ?? person.profile_image;
+  const image = typeof rawImg === "string" ? rawImg.replace(/_normal\.(jpg|jpeg|png|gif|webp)$/i, "_400x400.$1") : undefined;
+  return { handle: userName.replace(/^@/, ""), name, bio: bio || undefined, image };
+}
+
+function candidatesFromTweetPayload(payload: unknown, subject: string): ReverseBioCandidate[] {
+  const root = asRecord(payload);
+  const data = asRecord(root.data);
+  const rows = (data.tweets ?? root.tweets ?? (Array.isArray(root.data) ? root.data : [])) as unknown;
+  const out: ReverseBioCandidate[] = [];
+  const seen = new Set<string>();
+  const add = (candidate: ReverseBioCandidate | null) => {
+    if (!candidate) return;
+    const key = candidate.handle.toLowerCase();
+    if (!key || key === subject || seen.has(key)) return;
+    seen.add(key);
+    out.push(candidate);
+  };
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const tweet = asRecord(row);
+    const tweetText = typeof tweet.text === "string" ? tweet.text
+      : typeof tweet.full_text === "string" ? tweet.full_text
+      : "";
+    const attachText = (candidate: ReverseBioCandidate | null): ReverseBioCandidate | null => {
+      if (!candidate) return null;
+      if (!tweetText.trim()) return candidate;
+      return { ...candidate, tweetTexts: [tweetText.trim()] };
+    };
+    add(attachText(reverseBioCandidateFromUnknown(tweet.author)));
+    add(attachText(reverseBioCandidateFromUnknown(asRecord(tweet.author).user)));
+    add(attachText(reverseBioCandidateFromUnknown(tweet.user)));
+    add(attachText(reverseBioCandidateFromUnknown(tweet)));
+    const entities = asRecord(tweet.entities);
+    const mentions = Array.isArray(entities.user_mentions) ? entities.user_mentions
+      : Array.isArray(entities.mentions) ? entities.mentions
+      : [];
+    for (const mention of mentions) add(reverseBioCandidateFromUnknown(mention));
+  }
+  return out;
+}
+
+function candidatesFromUserList(payload: unknown, keys: string[]): ReverseBioCandidate[] {
+  const root = asRecord(payload);
+  const nested = asRecord(root.data);
+  let rows: unknown = undefined;
+  for (const key of keys) {
+    if (Array.isArray(root[key])) { rows = root[key]; break; }
+    if (Array.isArray(nested[key])) { rows = nested[key]; break; }
+  }
+  if (!Array.isArray(rows) && Array.isArray(root.data)) rows = root.data;
+  return (Array.isArray(rows) ? rows : []).flatMap((row) => {
+    const candidate = reverseBioCandidateFromUnknown(row);
+    return candidate ? [candidate] : [];
+  });
+}
+
+async function twitterSearchPayload(query: string, key: string): Promise<unknown> {
+  const url = `${TWITTERAPI}/twitter/tweet/advanced_search?query=${encodeURIComponent(query)}&queryType=Latest`;
+  const res = await twFetch(url, key);
+  if (!res || !res.ok) return null;
+  try { return await res.json(); } catch { return null; }
+}
+
+async function twitterUserGraphPage(
+  path: "followings" | "followers" | "mentions",
+  handle: string,
+  key: string,
+): Promise<unknown> {
+  const url = path === "mentions"
+    ? `${TWITTERAPI}/twitter/user/mentions?userName=${encodeURIComponent(handle)}`
+    : `${TWITTERAPI}/twitter/user/${path}?userName=${encodeURIComponent(handle)}&pageSize=${FOLLOWING_PAGE_SIZE}`;
+  const res = await twFetch(url, key);
+  if (!res || !res.ok) return null;
+  try { return await res.json(); } catch { return null; }
+}
+
+export interface ReverseBioDiscovery {
+  team: TeamMember[];
+  orgs: LinkedOrg[];
+}
+
+/**
+ * REVERSE-BIO FOUNDER FINDER (twitterapi only). Official-account posts often
+ * never name anyone. Discovery walks mentions of H, followings/followers of
+ * the official account, and tweet search for H, then reads those users' bios.
+ * A bind requires an @handle whose bio @-mentions H AND carries founder /
+ * co-founder / COO / CEO / "we built @H" language. Display names never bind.
+ * Serper/web search is never consulted.
+ */
+const reverseBioMemo = new Map<string, Promise<ReverseBioDiscovery>>();
+
+export function resetReverseBioMemo(): void {
+  reverseBioMemo.clear();
+}
+
+export async function discoverReverseBioFromTwitterapi(
+  subjectHandle: string,
+  subjectName?: string,
+  projectBio?: string,
+): Promise<ReverseBioDiscovery> {
+  const memoKey = subjectHandle.replace(/^@/, "").toLowerCase() || "_";
+  const hit = reverseBioMemo.get(memoKey);
+  if (hit) return hit;
+  const pending = discoverReverseBioFromTwitterapiUncached(subjectHandle, subjectName, projectBio);
+  reverseBioMemo.set(memoKey, pending);
+  pending.catch(() => { if (reverseBioMemo.get(memoKey) === pending) reverseBioMemo.delete(memoKey); });
+  return pending;
+}
+
+async function discoverReverseBioFromTwitterapiUncached(
+  subjectHandle: string,
+  _subjectName?: string,
+  projectBio?: string,
+): Promise<ReverseBioDiscovery> {
+  const empty: ReverseBioDiscovery = { team: [], orgs: [] };
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return empty;
+  const handle = subjectHandle.replace(/^@/, "");
+  if (!handle) return empty;
+  const subject = handle.toLowerCase();
+  const candidates = new Map<string, ReverseBioCandidate>();
+  const add = (candidate: ReverseBioCandidate) => {
+    const keyHandle = candidate.handle.replace(/^@/, "").toLowerCase();
+    if (!keyHandle || keyHandle === subject) return;
+    const prev = candidates.get(keyHandle);
+    if (!prev) {
+      candidates.set(keyHandle, candidate);
+      return;
+    }
+    candidates.set(keyHandle, {
+      handle: prev.handle,
+      name: prev.name ?? candidate.name,
+      bio: prev.bio || candidate.bio,
+      image: prev.image ?? candidate.image,
+      tweetTexts: [...(prev.tweetTexts ?? []), ...(candidate.tweetTexts ?? [])].slice(0, 8),
+    });
+  };
+
+  try {
+    const [mentionsSearch, tweetSearch, mentionTimeline, followings, followers] = await Promise.all([
+      twitterSearchPayload(`@${handle}`, key),
+      twitterSearchPayload(handle, key),
+      twitterUserGraphPage("mentions", handle, key),
+      twitterUserGraphPage("followings", handle, key),
+      twitterUserGraphPage("followers", handle, key),
+    ]);
+    for (const candidate of candidatesFromTweetPayload(mentionsSearch, subject)) add(candidate);
+    for (const candidate of candidatesFromTweetPayload(tweetSearch, subject)) add(candidate);
+    for (const candidate of candidatesFromTweetPayload(mentionTimeline, subject)) add(candidate);
+    for (const candidate of candidatesFromUserList(followings, ["followings", "users"])) add(candidate);
+    for (const candidate of candidatesFromUserList(followers, ["followers", "users"])) add(candidate);
+  } catch {
+    // Discovery is best-effort; a single provider failure must not abort team.
+  }
+
+  const team: TeamMember[] = [];
+  const personKeys = new Set<string>();
+  const biosByHandle = new Map<string, string>();
+  let fetches = 0;
+  const MAX_PROFILE_FETCHES = 12;
+  for (const candidate of [...candidates.values()].slice(0, 40)) {
+    let bio = candidate.bio;
+    let name = candidate.name;
+    if (!bio && fetches < MAX_PROFILE_FETCHES) {
+      fetches += 1;
+      try {
+        const profile = await getProfile(`@${candidate.handle}`);
+        bio = profile?.bio ?? "";
+        name = name ?? profile?.name;
+      } catch {
+        bio = "";
+      }
+    }
+    if (!bio) continue;
+    biosByHandle.set(candidate.handle.toLowerCase(), bio);
+    // Unique-id is the handle. A display name never binds.
+    const bioMentionsSubject = new RegExp(`@${regexEscape(handle)}\\b`, "i").test(bio);
+    const bioClaim = projectRoleClaimInBio(bio, handle) ?? (bioMentionsSubject ? operatorClaimInBio(bio, handle) : null);
+    const tweetClaim = !bioClaim && bioMentionsSubject
+      ? (candidate.tweetTexts ?? []).map((t) => operatorClaimInBio(t, handle)).find((c) => c !== null) ?? null
+      : null;
+    const claim = bioClaim ?? tweetClaim;
+    if (!claim) continue;
+    const userName = candidate.handle.replace(/^@/, "");
+    personKeys.add(userName.toLowerCase());
+    team.push({
+      name: name?.trim() || `@${userName}`,
+      handle: `@${userName}`,
+      role: claim.role,
+      kind: "team",
+      evidence: bioClaim
+        ? `their current X bio states "${claim.phrase}"`
+        : `their current X bio @-mentions @${handle} and they wrote "${claim.phrase}"`,
+      source: "reverse-bio twitterapi",
+      sourceUrl: `https://x.com/${userName}`,
+      projects: otherProjectsInBio(bio, handle),
+    });
+    if (team.length >= 8) break;
+  }
+
+  const orgs: LinkedOrg[] = [];
+  const orgSeen = new Set<string>();
+  const addOrg = (org: LinkedOrg) => {
+    const keyHandle = org.handle.replace(/^@/, "").toLowerCase();
+    if (!keyHandle || orgSeen.has(keyHandle) || personKeys.has(keyHandle) || keyHandle === subject) return;
+    orgSeen.add(keyHandle);
+    orgs.push(org);
+  };
+  for (const bio of [projectBio ?? "", ...biosByHandle.values()]) {
+    for (const org of linkedOrgsFromBioText(bio, handle, personKeys)) addOrg(org);
+  }
+  // Role-claim bios may @-mention a fund without adjacent class language
+  // ("Co-founder, COO @project | @SomeOrg"). Fetch those profiles and bind
+  // only fund / incubator / VC class accounts as orgs, never as people.
+  const extraMentions = new Map<string, string>();
+  for (const bio of biosByHandle.values()) {
+    if (!projectRoleClaimInBio(bio, handle)) continue;
+    for (const match of String(bio).matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
+      const keyHandle = match[1].toLowerCase();
+      if (!keyHandle || keyHandle === subject || personKeys.has(keyHandle) || orgSeen.has(keyHandle)) continue;
+      extraMentions.set(keyHandle, match[1]);
+    }
+  }
+  let orgFetches = 0;
+  for (const [keyHandle, raw] of extraMentions) {
+    if (orgs.length >= 8 || orgFetches >= 6) break;
+    orgFetches += 1;
+    try {
+      const profile = await getProfile(`@${raw}`);
+      const classified = orgClassFromProfile(profile?.name, profile?.bio);
+      if (!classified || !profile) continue;
+      addOrg({
+        name: profile.name?.trim() || `@${raw}`,
+        handle: `@${raw}`,
+        role: classified,
+        evidence: `linked from a first-party role bio; @${raw}'s own X profile is ${classified} class`,
+        source: "reverse-bio twitterapi",
+        sourceUrl: `https://x.com/${raw}`,
+      });
+    } catch { /* org bind is best-effort */ }
+  }
+  return { team: team.slice(0, 8), orgs: orgs.slice(0, 8) };
+}
+
+export function reverseBioTeamAsWebMembers(team: readonly TeamMember[]): WebTeamMember[] {
+  return team.flatMap((member) => {
+    if (!member.handle) return [];
+    return [{
+      name: member.name,
+      handle: member.handle,
+      role: member.role,
+      kind: "person",
+      evidence: member.evidence,
+      source: member.source ?? "reverse-bio twitterapi",
+      sourceUrl: member.sourceUrl,
+      projects: member.projects,
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic" as const,
+      projects_evidence_origin: "model_lead" as const,
+      handleProvenance: "subject_first_party" as const,
+    }];
+  });
+}
+
+export function reverseBioOrgsAsWebMembers(orgs: readonly LinkedOrg[]): WebTeamMember[] {
+  return orgs.flatMap((org) => {
+    if (!org.handle) return [];
+    return [{
+      name: org.name,
+      handle: org.handle,
+      role: org.role,
+      kind: "org",
+      evidence: org.evidence,
+      source: org.source,
+      sourceUrl: org.sourceUrl,
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic" as const,
+      handleProvenance: "subject_first_party" as const,
+    }];
+  });
+}
+
+export function reverseBioOrgsAsAssociates(orgs: readonly LinkedOrg[]) {
+  return orgs.map((org) => ({
+    associate_handle: org.handle,
+    relation: org.role,
+    notes: org.evidence,
+    evidence_url: org.sourceUrl,
+    provider: "twitterapi",
+    evidence_origin: "deterministic" as const,
+    artifact_verified: true,
+  }));
+}
+
+const PLURAL_FOUNDER_ROLE = /^(?:co-?)?founders$/i;
+const LIST_JOIN_AFTER = /^(?:[\s,]+and\s*|,\s*(?:and\s*)?|[\s,]*and\s*)@([A-Za-z0-9_]{2,30})/;
+
+function isPluralFounderRole(role: string): boolean {
+  return PLURAL_FOUNDER_ROLE.test(role);
+}
+
+/** Handles after the first bind, same clause, joined by comma/and. Stop at : . ! */
+function peerHandlesAfter(rest: string): string[] {
+  const clause = rest.split(/[:.!]/, 1)[0] ?? "";
+  const handles: string[] = [];
+  let remaining = clause;
+  while (handles.length < 3) {
+    const match = remaining.match(LIST_JOIN_AFTER);
+    if (!match) break;
+    handles.push(match[1]);
+    remaining = remaining.slice(match[0].length);
+  }
+  return handles;
+}
+
+/** Handles before the adjacent bind, same clause, joined by comma/and. */
+function peerHandlesBefore(prefix: string): string[] {
+  let clauseStart = 0;
+  for (const ch of [":", ".", "!"]) {
+    const at = prefix.lastIndexOf(ch);
+    if (at >= clauseStart) clauseStart = at + 1;
+  }
+  const clause = prefix.slice(clauseStart);
+  const trailing = clause.match(/(?:@[A-Za-z0-9_]{2,30}[\s,]*(?:and\s+)?)+$/);
+  if (!trailing) return [];
+  return [...trailing[0].matchAll(/@([A-Za-z0-9_]{2,30})/g)].map((m) => m[1]).slice(-3);
+}
+
+export function scanPostsForRoles(posts: string[], projectName?: string, subjectHandle?: string): TeamMember[] {
   const out: TeamMember[] = [];
   const seen = new Set<string>();
+  const sourceUrl = subjectHandle?.trim()
+    ? `https://x.com/${subjectHandle.replace(/^@/, "")}`
+    : undefined;
   const add = (m: TeamMember) => { const k = (m.handle ?? m.name).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push(m); };
+  const addHandle = (handle: string, role: string, kind: "team" | "advisor", evidence: string) => {
+    add({
+      name: `@${handle}`,
+      handle: `@${handle}`,
+      role,
+      kind,
+      evidence,
+      source: "post role-scan",
+      ...(sourceUrl ? { sourceUrl } : {}),
+    });
+  };
   const project = projectName?.trim() ? regexEscape(projectName.trim()) : "";
   const roleIsProjectOwned = (post: string, index: number, length: number, role: string): boolean => {
     const window = post.slice(Math.max(0, index - 56), Math.min(post.length, index + length + 56));
@@ -1797,16 +2489,33 @@ export function scanPostsForRoles(posts: string[], projectName?: string): TeamMe
       if (!connectorAllowed(gap, BEFORE_ROLE_CONNECTORS)) continue;
       if (!roleIsProjectOwned(p, match.index, match[0].length, role)) continue;
       const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
-      add({ name: `@${match[1]}`, handle: `@${match[1]}`, role, kind, evidence: `the official account placed @${match[1]} next to the role "${role}"`, source: "post role-scan" });
+      const handles = [match[1]];
+      if (isPluralFounderRole(role)) {
+        handles.unshift(...peerHandlesBefore(p.slice(0, match.index ?? 0)));
+      }
+      for (const handle of handles) {
+        addHandle(handle, role, kind, `the official account placed @${handle} next to the role "${role}"`);
+      }
     }
     const after = new RegExp(`\\b(${ROLE_SOURCE})\\b(?!\\s+of\\b)[^@\\n.!?]{0,24}@([A-Za-z0-9_]{2,30})`, "gi");
     for (const match of p.matchAll(after)) {
       const role = match[1].toLowerCase().replace(/^our\s+/, "");
       const gap = match[0].slice(match[1].length, match[0].length - match[2].length - 1);
       if (!connectorAllowed(gap, AFTER_ROLE_CONNECTORS)) continue;
-      if (!roleIsProjectOwned(p, match.index, match[0].length, role)) continue;
+      // Official posts are the owner: founder/co-founder next to a handle
+      // does not need "our" or the display name. CEO/CTO still do. Guest
+      // "@x Co-Founder of @other" is the before-pattern (kept owned-check)
+      // plus (?!\s+of\b) on this arm.
+      const founderOwned = /^(?:co-)?founders?$/i.test(role);
+      if (!founderOwned && !roleIsProjectOwned(p, match.index ?? 0, match[0].length, role)) continue;
       const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
-      add({ name: `@${match[2]}`, handle: `@${match[2]}`, role, kind, evidence: `the official account placed the role "${role}" next to @${match[2]}`, source: "post role-scan" });
+      const handles = [match[2]];
+      if (isPluralFounderRole(role)) {
+        handles.push(...peerHandlesAfter(p.slice((match.index ?? 0) + match[0].length)));
+      }
+      for (const handle of handles) {
+        addHandle(handle, role, kind, `the official account placed the role "${role}" next to @${handle}`);
+      }
     }
     // Project accounts often identify several people as "members of the team"
     // in one phrase. Capture the bounded handle list immediately before it.
@@ -1815,12 +2524,83 @@ export function scanPostsForRoles(posts: string[], projectName?: string): TeamMe
       const rosterOwner = project ? new RegExp(`members?\\s+of\\s+(?:the\\s+)?(?:our|${project})\\s+team\\b`, "i") : /members?\s+of\s+(?:the\s+)?our\s+team\b/i;
       if (!rosterOwner.test(match[0])) continue;
       for (const handle of match[1].matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
-        add({ name: `@${handle[1]}`, handle: `@${handle[1]}`, role: "team member", kind: "team", evidence: `the official account named @${handle[1]} as a project team member`, source: "post role-scan" });
+        addHandle(handle[1], "team member", "team", `the official account named @${handle[1]} as a project team member`);
       }
     }
   }
   return out.slice(0, 12);
 }
+
+const HANDLE_TOKEN = "@([A-Za-z0-9_]{2,30})";
+
+/**
+ * Official-account posts naming an incubator / team-behind / backed-by
+ * @handle. Unique-id is the handle; display names never bind. These are
+ * linked orgs, never founder people.
+ */
+export function scanPostsForLinkedOrgs(posts: string[]): LinkedOrg[] {
+  const out: LinkedOrg[] = [];
+  const seen = new Set<string>();
+  const add = (handle: string, role: LinkedOrgRole, evidence: string) => {
+    const key = handle.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      name: `@${handle}`,
+      handle: `@${handle}`,
+      role,
+      evidence,
+      source: "post org-scan",
+    });
+  };
+  const patterns: Array<{ re: RegExp; role: LinkedOrgRole; evidence: (h: string) => string }> = [
+    { re: new RegExp(`\\bincubated\\s+by\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "incubator", evidence: (h) => `the official account named @${h} as its incubator` },
+    { re: new RegExp(`\\bincubator\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "incubator", evidence: (h) => `the official account named @${h} as its incubator` },
+    { re: new RegExp(`${HANDLE_TOKEN}\\s+(?:is\\s+)?(?:the\\s+|an?\\s+)?incubator\\b`, "gi"), role: "incubator", evidence: (h) => `the official account named @${h} as its incubator` },
+    { re: new RegExp(`\\b(?:the\\s+)?team\\s+behind(?:\\s+(?:this|us|(?:the\\s+)?project))?\\s+(?:is\\s+)?${HANDLE_TOKEN}\\b`, "gi"), role: "team-behind", evidence: (h) => `the official account named @${h} as the team behind the project` },
+    { re: new RegExp(`${HANDLE_TOKEN}\\s+is\\s+(?:the\\s+)?team\\s+behind\\b`, "gi"), role: "team-behind", evidence: (h) => `the official account named @${h} as the team behind the project` },
+    { re: new RegExp(`\\bbacked\\s+by\\s+${HANDLE_TOKEN}\\b`, "gi"), role: "backed-by", evidence: (h) => `the official account named @${h} as a backer` },
+  ];
+  for (const raw of posts.slice(0, 80)) {
+    const p = String(raw ?? "");
+    for (const { re, role, evidence } of patterns) {
+      for (const match of p.matchAll(re)) {
+        const handle = match[1];
+        if (!handle) continue;
+        add(handle, role, evidence(handle));
+      }
+    }
+  }
+  return out.slice(0, 8);
+}
+
+/** First-party team rows from the official twitterapi corpus. Handle is the unique id. */
+export function officialXNamedTeam(posts: string[], projectName?: string, subjectHandle?: string): WebTeamMember[] {
+  return scanPostsForRoles(posts, projectName, subjectHandle).flatMap((member) => {
+    if (!member.handle) return [];
+    const handle = member.handle.startsWith("@") ? member.handle : `@${member.handle}`;
+    return [{
+      name: handle,
+      handle,
+      role: member.role,
+      evidence: member.evidence,
+      source: member.source ?? "post role-scan",
+      sourceUrl: member.sourceUrl,
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic" as const,
+      projects_evidence_origin: "deterministic" as const,
+      handleProvenance: "subject_first_party" as const,
+    }];
+  });
+}
+
+/** First-party linked-org rows from the official twitterapi corpus. Handle is the unique id. */
+export function officialXNamedOrgs(posts: string[]): LinkedOrg[] {
+  return scanPostsForLinkedOrgs(posts);
+}
+
 
 // Shared parser for the team JSON both Grok team-finders return.
 function parseTeamJSON(text: string | null, selfHandle: string | undefined, source: string): TeamMember[] {

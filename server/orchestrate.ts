@@ -32,7 +32,7 @@ import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cos
 import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
-import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
@@ -42,6 +42,7 @@ import { enrichFirstPartyTeamAvatars } from "./adapters/teamEnrichment";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
+import { handlesMatch, orientSubjectWithGrok, orientationHandleBound, orientationMentionLeads, projectOrientationBound } from "./subjectOrientation";
 import { personChecks } from "../src/lib/scanChecklist";
 import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
 import { isOrganizationAccount } from "../src/lib/investorSubject";
@@ -812,11 +813,13 @@ export function applySiteSubstanceOutcome(
   }
 }
 
-async function collectProjectSiteSubstance(ctx: CollectContext, domain: string): Promise<void> {
-  if (!domain) return;
+async function collectProjectSiteSubstance(ctx: CollectContext, domain: string): Promise<SiteSubstance | null> {
+  if (!domain) return null;
   const site = await checkSiteSubstance(domain).catch(() => null);
-  if (!site) return;
+  if (!site) return null;
+  if (site.detail.trim()) siteSubstanceExcerptByEvidence.set(ctx.evidence, site.detail);
   applySiteSubstanceOutcome(ctx, domain, site);
+  return site;
 }
 
 // The bare-domain grab from bio TEXT (distinct from the profile's website
@@ -882,6 +885,24 @@ export function mergeDiscoveredAffiliations(
   return pending;
 }
 
+
+/**
+ * Serper LinkedIn/press follow-up is for unique-id confirmed founders only.
+ * discoverReverseBioFromTwitterapi puts two kinds of people on `.team`:
+ * live-bio unique-id confirms (`their current X bio states "..."`) and
+ * tweet-only rows (bio @-mentions the project; role came from a tweet).
+ * Tweet-only people stay on the report team but must not spend Serper.
+ */
+export function uniqueIdConfirmedForFounderFollowup(
+  member: Pick<TeamMember, "handle" | "evidence">,
+  subjectHandle: string,
+): boolean {
+  const key = (member.handle ?? "").replace(/^@/, "").toLowerCase();
+  const subject = subjectHandle.replace(/^@/, "").toLowerCase();
+  if (!key || key === subject) return false;
+  return /their current X bio states/.test(member.evidence ?? "");
+}
+
 // Cold handle: resolve the profile, pull recent posts, and extract self-claims
 // so the verification adapters have something to check. Without this an unknown
 // subject has no ventures/endorsements/advisory seats to verify.
@@ -897,7 +918,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // the corpus posts; site liveness), so this prelude costs one slow provider,
   // not the sum. Results are applied in the original order below so every
   // evidence merge stays identical to the serial pipeline.
-  const [hist, { corpus, foundWallets }, registration] = await Promise.all([
+  const [hist, { corpus, foundWallets }, registration, siteSubstance] = await Promise.all([
     handleHistory(ctx.handle),
     (async () => {
       const corpus = await collectCorpus(ctx.handle);
@@ -955,10 +976,11 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // Freeze a bounded sample so routing can classify from first-party content
     // instead of abandoning the subject for lack of a bio string.
     if (!ctx.evidence.profile.bio.trim()) {
-      ctx.evidence.profile.self_post_sample = posts.slice(0, 12).join(" \n ").slice(0, 2000);
+      ctx.evidence.profile.self_post_sample = posts.slice(0, 24).join(" \n ").slice(0, 6000);
     }
     ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
   }
+  await maybeOrientSubject(ctx, siteSubstance?.detail);
 
   // Find-wallet: a self-disclosed wallet (a 0x address or ENS/basename/.sol name)
   // in the bio/posts. The richer corpus surfaces more contract/URL mentions.
@@ -1020,6 +1042,10 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // where the project's own surfaces never name anyone but the founder's
     // bio, a press piece, or an AI answer does.
     findRoleClaimants(ctx.handle, ctx.evidence.profile.display_name, domain),
+    // twitterapi reverse-bio: mentions / followings / followers / tweet search
+    // for H, then live bios. Official posts often never name anyone. This lane
+    // does not consult Serper/Grok, so founder finding survives web-search down.
+    discoverReverseBioFromTwitterapi(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.bio),
   ]);
 
   const claims = await claimsPromise;
@@ -1094,34 +1120,64 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // is where the team page actually lives — mine it like Site recon would.
   // discoverAffiliations now covers the reverse-mention angle too (was a second
   // Grok search call — merged to halve intake search spend).
-  const [bySubject, people, siteTeam, pageTeam, operatorTeam, amplifiedTeam, reverseTeam] = await discoveryPromise;
+  const [bySubject, people, siteTeam, pageTeam, operatorTeam, amplifiedTeam, reverseTeam, reverseBioTwitter] = await discoveryPromise;
 
   // Reverse-search leads are model output until the claimed person's LIVE bio
   // is fetched and really carries the claim. A confirmed bio is a first-party
   // artifact from the claimant's side; it upgrades the lead's identity link
   // and evidence quote, while subject-side vouching still comes only from the
   // account's own edges (follow, amplification, its posts, its site).
-  const reverseBioClaims = reverseTeam.length
-    ? await confirmClaimantBios(reverseTeam, ctx.handle, ctx.evidence.profile.display_name)
-    : new Map<string, { role: string; phrase: string }>();
+  const mentionLeads = orientationMentionLeads(ctx.evidence.subjectOrientation);
+  const roleLeads = [...mentionLeads, ...reverseTeam];
+  const reverseBioClaims = roleLeads.length
+    ? await confirmClaimantBios(roleLeads, ctx.handle, ctx.evidence.profile.display_name)
+    : new Map<string, { role: string; phrase: string; bio?: string; name?: string }>();
   if (reverseBioClaims.size) {
     const quoted = [...reverseBioClaims.entries()]
       .map(([h, claim]) => `@${h} ("${claim.phrase}")`)
       .join(", ");
-    ctx.emit({ phase: "P1 · Team", label: "Role claim in live bio", detail: `Reverse role-phrase search surfaced ${reverseBioClaims.size} candidate${reverseBioClaims.size === 1 ? "" : "s"} whose current X bio carries the claim first-party: ${quoted}.`, source: "reverse role search + bio fetch", tone: "good" });
+    ctx.emit({ phase: "P1 · Team", label: "Role claim in live bio", detail: `Live-bio confirmation surfaced ${reverseBioClaims.size} candidate${reverseBioClaims.size === 1 ? "" : "s"} whose current X bio carries the claim first-party: ${quoted}.`, source: "reverse role search + orientation + bio fetch", tone: "good" });
   }
+
+  // Temporary Serper LinkedIn/press follow-up: UNIQUE-ID CONFIRMED founders only
+  // (live bio claim for THIS project handle). Unverified leads, orgs, the
+  // subject handle, display-name-only rows, and tweet-only reverse-bio members
+  // are never searched. Cap 3. confirmClaimantBios entries stay as they are.
+  const followupConfirmed = new Map(reverseBioClaims);
+  for (const member of reverseBioTwitter.team) {
+    if (!uniqueIdConfirmedForFounderFollowup(member, ctx.handle)) continue;
+    const key = (member.handle ?? "").replace(/^@/, "").toLowerCase();
+    if (followupConfirmed.has(key)) continue;
+    followupConfirmed.set(key, {
+      role: member.role,
+      phrase: member.evidence ?? member.role,
+      name: member.name,
+    });
+  }
+  const founderFollowup = followupConfirmed.size
+    ? await serperConfirmedFounderFollowup(followupConfirmed, ctx.handle, ctx.evidence.profile.display_name)
+    : new Map<string, { linkedin?: string; pressUrls: string[] }>();
 
   // Auto-pivot team: merge everyone found across the website search, the account's
   // own X content, and a deterministic post role-word scan (founder/CEO/CTO...).
   // Named-only people are KEPT here (a real name + role is signal even with no
   // handle to audit) — this is what a plain handle audit used to drop.
-  const postRoleTeam = scanPostsForRoles(posts, ctx.evidence.profile.display_name);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   // MERGE duplicates instead of dropping them: the team page gives the
   // authoritative name+role but no links; Grok gives the same person WITH their
   // @handle/LinkedIn. Keep the first occurrence and fill its missing fields from
   // later duplicates, so a page-roster name still gets its identity links.
   const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
+  const namedCorpus = [...posts, ...corpus.teamSignalPosts];
+  const officialOrgs = officialXNamedOrgs(namedCorpus).filter((org) => norm(org.handle) && norm(org.handle) !== norm(ctx.handle));
+  const orgKeys = new Set(officialOrgs.map((org) => norm(org.handle)));
+  // Official twitterapi corpus naming @handles as founder/co-founder/team.
+  // Unique-id is the handle. Independent of Serper.
+  const postRoleTeam = officialXNamedTeam(namedCorpus, ctx.evidence.profile.display_name, ctx.handle)
+    .filter((member) => {
+      const h = norm(member.handle);
+      return !!h && h !== norm(ctx.handle) && !orgKeys.has(h);
+    });
   const byHandle = new Map<string, (typeof webTeam)[number]>();
   const byName = new Map<string, (typeof webTeam)[number]>();
   // Provider-backed management rows may already be present before the website
@@ -1203,27 +1259,53 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // edges vouch — the deterministic lanes above own that call and win the
     // merge), but a live-bio-confirmed claim upgrades the identity link and
     // swaps the model's paraphrase for the fetched artifact's own words.
-    ...reverseTeam.map((member) => {
+    // Orientation mentionedHandles are the same class of lead: quoted from
+    // official posts or live x_search of THIS subject, never auto-bound.
+    ...[...mentionLeads, ...reverseTeam].map((member) => {
       const claim = member.handle ? reverseBioClaims.get(member.handle.replace(/^@/, "").toLowerCase()) : undefined;
-      return {
-        ...member,
-        ...(claim ? {
+      const handle = member.handle?.replace(/^@/, "");
+      if (claim && handle) {
+        return {
+          ...member,
           role: claim.role,
           evidence: `their current X bio states "${claim.phrase}"`,
-        } : {}),
+          sourceUrl: member.sourceUrl ?? `https://x.com/${handle}`,
+          evidence_origin: "deterministic" as const,
+          artifact_verified: true,
+          provider: "twitterapi",
+          identity_link_evidence_origin: "deterministic" as const,
+          projects_evidence_origin: "model_lead" as const,
+          handleProvenance: "subject_first_party" as const,
+        };
+      }
+      return {
+        ...member,
         evidence_origin: "model_lead" as const,
         artifact_verified: false,
-        provider: "reverse-role-search",
-        identity_link_evidence_origin: claim ? "deterministic" as const : "model_lead" as const,
+        provider: member.source === "orientation-live-x" ? "orientation-live-x" : "reverse-role-search",
+        identity_link_evidence_origin: "model_lead" as const,
         projects_evidence_origin: "model_lead" as const,
         handleProvenance: undefined as "subject_first_party" | undefined,
       };
     }),
+    // Reverse-bio twitterapi: the claimant's own bio @-mentions this subject
+    // next to founder/COO/CEO/"we built @H" language. Handle is the unique id.
+    ...reverseBioTwitter.team.map((member) => ({
+      ...member,
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic" as const,
+      projects_evidence_origin: "model_lead" as const,
+      handleProvenance: member.handle ? "subject_first_party" as const : undefined,
+    })),
   ];
   for (const t of teamCandidates) {
     const h = t.handle ? norm(t.handle) : "";
     const n = norm(t.name);
     if (!h && !n) continue;
+    // Never list the audited subject handle as founder (or any role) of itself.
+    if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
     if (existing) {
       if (!existing.handle && t.handle) {
@@ -1281,6 +1363,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       name: t.name,
       handle: t.handle,
       role: t.role,
+      kind: "kind" in t && (t.kind === "org" || t.kind === "person") ? t.kind : "person" as const,
       linkedin: t.linkedin,
       evidence: t.evidence,
       source: t.source ?? "X content",
@@ -1296,6 +1379,80 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
     if (n) byName.set(n, rec);
+  }
+
+  // Corroboration only: copy linkedin.com/in URLs extracted from Serper organic
+  // onto already unique-id-bound founders. Never create rows, never bind by
+  // LinkedIn, never change identity_link_evidence_origin.
+  let linkedinCorroborated = 0;
+  for (const [handle, hit] of founderFollowup) {
+    const existing = byHandle.get(handle);
+    if (!existing || existing.kind === "org" || !hit.linkedin) continue;
+    if (!existing.linkedin) {
+      existing.linkedin = hit.linkedin;
+      linkedinCorroborated += 1;
+    }
+  }
+  if (linkedinCorroborated) {
+    ctx.emit({
+      phase: "P1 · Team",
+      label: "Founder LinkedIn corroboration",
+      detail: `Serper organic added LinkedIn profile URLs for ${linkedinCorroborated} unique-id-confirmed founder${linkedinCorroborated === 1 ? "" : "s"} (corroboration, not a bind key).`,
+      source: "serper founder follow-up",
+      tone: "good",
+    });
+  }
+
+  // Linked orgs/funds/incubators named next to org language in founder or
+  // project bios. They are associates, never founder people (a fund on webTeam
+  // would inflate P1 namedLeaderCount).
+  const linkedOrgs = [...officialOrgs, ...reverseBioTwitter.orgs];
+  if (linkedOrgs.length) {
+    const haveAssoc = new Set(ctx.evidence.associates.map((a) => a.associate_handle.replace(/^@/, "").toLowerCase()));
+    const personKeys = new Set(webTeam.map((m) => (m.handle ?? "").replace(/^@/, "").toLowerCase()).filter(Boolean));
+    const addedOrgs: string[] = [];
+    for (const org of linkedOrgs) {
+      const key = org.handle.replace(/^@/, "").toLowerCase();
+      if (!key || key === norm(ctx.handle) || haveAssoc.has(key) || personKeys.has(key)) continue;
+      haveAssoc.add(key);
+      if (!byHandle.has(key)) {
+        const orgRow = {
+          name: org.name,
+          handle: org.handle,
+          role: org.role,
+          kind: "org" as const,
+          evidence: org.evidence,
+          source: org.source,
+          sourceUrl: org.sourceUrl,
+          evidence_origin: "deterministic" as const,
+          artifact_verified: true,
+          provider: "twitterapi",
+          identity_link_evidence_origin: "deterministic" as const,
+          handleProvenance: "subject_first_party" as const,
+        };
+        webTeam.push(orgRow);
+        byHandle.set(key, orgRow);
+      }
+      ctx.evidence.associates.push({
+        associate_handle: org.handle,
+        relation: org.role,
+        notes: org.evidence,
+        evidence_url: org.sourceUrl,
+        provider: "twitterapi",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      });
+      addedOrgs.push(org.handle);
+    }
+    if (addedOrgs.length) {
+      ctx.emit({
+        phase: "P1 · Team",
+        label: "Linked orgs",
+        detail: `Bound ${addedOrgs.length} org/fund/incubator handle${addedOrgs.length === 1 ? "" : "s"} from official posts or founder/project bios: ${addedOrgs.slice(0, 6).join(", ")}.`,
+        source: "twitterapi",
+        tone: "good",
+      });
+    }
   }
 
   // PRIOR LAUNCHES: a launchpad token's risk lives in the operator's history,
@@ -1375,10 +1532,14 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     || postRoleTeam.length > 0
     || operatorTeam.length > 0
     || amplifiedTeam.length > 0
+    || reverseBioTwitter.team.length > 0
     || webTeam.some((t) => t.artifact_verified === true && norm(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
     for (const member of webTeam) {
+      // Reverse-bio / follow / amplify first-party handles must survive even
+      // when the official account never named anyone and no domain is bound.
+      if (member.handleProvenance === "subject_first_party") continue;
       member.evidence_origin = "model_lead";
       member.artifact_verified = false;
       member.identity_link_evidence_origin = "model_lead";
@@ -1449,7 +1610,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // Only directly fetched first-party team pages and deterministic role scans
     // can raise identity confidence. Grok web/X results remain useful leads in
     // the roster, but cannot confirm the very identity it was asked to discover.
-    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam].filter((candidate) =>
+    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam, ...reverseBioTwitter.team, ...operatorTeam, ...amplifiedTeam].filter((candidate) =>
       webTeam.some((member) =>
         (!!candidate.handle && norm(candidate.handle) === norm(member.handle)) ||
         (!!candidate.name && norm(candidate.name) === norm(member.name)),
@@ -1645,6 +1806,31 @@ export function axisCatalog(roles: SubjectClass[]) {
   return out;
 }
 
+const siteSubstanceExcerptByEvidence = new WeakMap<CollectedEvidence, string>();
+
+async function maybeOrientSubject(ctx: CollectContext, siteExcerpt?: string): Promise<void> {
+  const prior = ctx.evidence.subjectOrientation;
+  if (prior && prior.kind !== "UNKNOWN") return;
+  if (providerBackedRoles(ctx.evidence).length > 0) return;
+  const excerpt = (siteExcerpt ?? siteSubstanceExcerptByEvidence.get(ctx.evidence) ?? "").trim() || undefined;
+  const orientation = await orientSubjectWithGrok(ctx.evidence, { siteExcerpt: excerpt });
+  if (!orientation) return;
+  ctx.evidence.subjectOrientation = orientation;
+  if (orientation.kind !== "UNKNOWN" && orientation.what.trim()) {
+    ctx.evidence.profile.identity_note = orientation.what;
+  }
+  if (orientation.what.trim()) {
+    ctx.emit({
+      phase: "Director",
+      label: `Orientation: ${orientation.what}`,
+      detail: orientation.what,
+      source: "grok-orientation",
+      tone: "neutral",
+    });
+  }
+  ctx.evidence.roles = providerBackedRoles(ctx.evidence);
+}
+
 /**
  * Select methodologies only from collector-owned evidence. A PROJECT label is
  * intentionally stricter than a generic bio keyword: the current X profile
@@ -1656,6 +1842,9 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   const roles = new Set<SubjectClass>();
   let bioPrimaryProjectVerified = false;
   let investorBeyondBio = false;
+  // Unique-id: a PROJECT-bound handle is the brand/protocol account. Display
+  // name never binds a person. Founder facts describe some OTHER handle.
+  const projectBound = projectOrientationBound(evidence);
   // The bio is the first-party self-description, but an empty bio is not an
   // absent subject: the account's own posts are the same kind of evidence from
   // the same provider, so they classify when the bio says nothing.
@@ -1674,13 +1863,18 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
       && classification.subject_class === SubjectClass.PROJECT
       && classification.scores[SubjectClass.PROJECT] > classification.scores[SubjectClass.INVESTOR];
     profileRoles.forEach((role) => {
+      // classifySubject(bio) founder/CEO/"building" language describes a person.
+      // It must not put FOUNDER methodology on a PROJECT-bound brand handle.
+      if (role === SubjectClass.FOUNDER && projectBound) return;
       if (role !== SubjectClass.PROJECT || projectProfileVerified) roles.add(role);
     });
   }
   for (const venture of evidence.ventures) {
     if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;
     const role = (venture.role ?? "").toLowerCase();
-    if (/founder|co-?founder|\bceo\b|\bcto\b|creator|owner/.test(role)) roles.add(SubjectClass.FOUNDER);
+    if (/founder|co-?founder|\bceo\b|\bcto\b|creator|owner/.test(role)) {
+      if (!projectBound) roles.add(SubjectClass.FOUNDER);
+    }
     else if (/advisor|adviser|board/.test(role)) roles.add(SubjectClass.ADVISOR);
     // Specific capital-allocation titles are checked before generic employment
     // words so Investment Director and Portfolio Manager do not collapse into
@@ -1707,7 +1901,8 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     if (fact.artifact_verified !== true) continue;
     if (fact.status !== "verified" && fact.status !== "corroborated") continue;
     if (!organizationSubject && personIdentityBound && (fact.predicate === "founder" || fact.predicate === "founded" || fact.predicate === "executive")) {
-      roles.add(SubjectClass.FOUNDER);
+      // A verified founder fact is about a person, not this PROJECT-bound handle.
+      if (!projectBound) roles.add(SubjectClass.FOUNDER);
     }
     if (
       !organizationSubject
@@ -1765,6 +1960,29 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     && canonicalOfficialWebsite(evidence.profile.website) !== null
     && evidence.profile.site_substance_status === "live") {
     roles.add(SubjectClass.PROJECT);
+  }
+  // Grok orientation last-resort: same empty-role gate as the live-site
+  // fallback, so a bio-classified KOL/founder is never overwritten. PROJECT
+  // needs a bound official domain; FOUNDER/INVESTOR need only the twitterapi
+  // handle. UNKNOWN never adds a role. site_substance_status is not required.
+  if (roles.size === 0 && evidence.subjectOrientation && evidence.subjectOrientation.kind !== "UNKNOWN"
+    && orientationHandleBound(evidence)) {
+    const kind = evidence.subjectOrientation.kind;
+    if (kind === "PROJECT" && evidence.subjectOrientation.boundDomain) {
+      roles.add(SubjectClass.PROJECT);
+    } else if (kind === "FOUNDER") {
+      roles.add(SubjectClass.FOUNDER);
+    } else if (kind === "INVESTOR") {
+      roles.add(SubjectClass.INVESTOR);
+    }
+  }
+  // PROJECT-bound unique-id is final for this handle: it is the brand account,
+  // never also the founder person. Personal orientation FOUNDER stays FOUNDER.
+  // Other bio-classified methodologies (KOL / INVESTOR) still govern.
+  if (projectBound) {
+    roles.delete(SubjectClass.FOUNDER);
+    const other = [...roles].filter((role) => role !== SubjectClass.PROJECT);
+    if (other.length === 0) roles.add(SubjectClass.PROJECT);
   }
   return [...roles];
 }
@@ -1906,6 +2124,8 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
   const people = facts.filter((fact) => fact.predicate === "founder" || fact.predicate === "executive");
   for (const fact of people) {
     const citedHandle = citedPersonHandle(fact);
+    if (handlesMatch(fact.value, ctx.handle)) continue;
+    if (citedHandle && handlesMatch(citedHandle, ctx.handle)) continue;
     const existing = roster.find((member) =>
       norm(member.name) === norm(fact.value)
       || Boolean(citedHandle && member.handle && normHandle(member.handle) === citedHandle));
@@ -3818,7 +4038,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       tone: "warn",
     });
   }
-  const rolesAfterBasicFacts = providerBackedRoles(evidence);
+  let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
   // AFTER the roles are updated, never before. The hydration bails unless
   // evidence.roles already carries PROJECT, and the sparse or suspended
@@ -3851,6 +4071,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const siteHost = new URL(officialWebsiteAfterBasicFacts).hostname.replace(/^www\./, "");
     evidence.roles = rolesAfterBasicFacts;
     await collectProjectSiteSubstance(ctx, siteHost);
+  }
+  if (rolesAfterBasicFacts.length === 0) {
+    await maybeOrientSubject(ctx);
+    rolesAfterBasicFacts = providerBackedRoles(evidence);
+    evidence.roles = rolesAfterBasicFacts;
   }
   if (fixture || (recoveredProjectSite && !evidence.projectToken?.verified)) {
     await projectTokenPass();

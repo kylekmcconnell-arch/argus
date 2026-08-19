@@ -594,7 +594,7 @@ export const FOUNDER_SCORING_POLICY = [
   "F4 build substance: verified live products, protocols, documentation, audits, usage, releases, or organization repositories establish build substance. A personal GitHub account is optional and its absence cannot negate a verified live product. A verified venture token is direct evidence the venture shipped and is live at the observed market scale; a large, independently ranked network is the strongest build evidence available and belongs in the exceptional band.",
   "F5 reputation and integrity: use direct-subject, source-verified conduct, legal, regulatory, sanctions, governance, or conflict evidence. A completed clear screen is coverage context, not affirmative character evidence, and an unavailable screen is not adverse evidence.",
   "F6 network quality: use observed professional relationships and notable network evidence only for network quality. Never transfer that evidence into identity, track record, repeat backing, or build substance.",
-  "Preserve the entity named by each source. A person may be CEO of an operating company and founder of a related protocol; do not transfer the company title onto the protocol or DAO.",
+  "Preserve the entity named by each source. A person may be CEO of an operating company and founder of a related protocol; do not transfer the company title onto the protocol, token, or DAO. Do not transfer the founder's person score onto the company account. A launched product or token bound by contract address or official domain is related, not the company subject.",
 ].join("\n");
 
 /**
@@ -1926,7 +1926,19 @@ export function deriveProjectStrengthBands(
       ? "adverse"
       : assessedEmpty ? "assessed_null" : tier;
     const range = projectBandRange(spec.weight, effectiveTier);
-    const widenedByUnverified = floorTier !== undefined && floorTier !== effectiveTier && effectiveTier !== "adverse";
+    const POSITIVE_TIER_ORDER = ["none", "emerging", "solid", "exceptional"] as const;
+    const floorRank = floorTier === undefined
+      ? -1
+      : POSITIVE_TIER_ORDER.indexOf(floorTier as (typeof POSITIVE_TIER_ORDER)[number]);
+    const ceilingRank = POSITIVE_TIER_ORDER.indexOf(effectiveTier as (typeof POSITIVE_TIER_ORDER)[number]);
+    const floorStrictlyBelow = floorRank >= 0 && ceilingRank >= 0 && floorRank < ceilingRank;
+    // Never emit floorTier on assessed_null/adverse, or when floor is not
+    // strictly below the ceiling. Persistence rejects those shapes.
+    const widenedByUnverified = floorTier !== undefined
+      && floorTier !== effectiveTier
+      && effectiveTier !== "adverse"
+      && effectiveTier !== "assessed_null"
+      && floorStrictlyBelow;
     // Persistence enforces the band contract strictly: at least one reason for
     // every non-none tier, no duplicates, items capped at 240 chars. A band
     // composition slip here must degrade to a generic reason, never to a
@@ -1937,10 +1949,11 @@ export function deriveProjectStrengthBands(
       ...(widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : []),
       ...reasons,
     ].map((reason) => reason.slice(0, 240)).filter(Boolean))].slice(0, 12);
+    const persistFloor = widenedByUnverified ? floorTier : undefined;
     bands[axis] = {
       tier: effectiveTier,
-      ...(widenedByUnverified
-        ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore, floorTier }
+      ...(persistFloor !== undefined
+        ? { minScore: projectBandRange(spec.weight, persistFloor).minScore, maxScore: range.maxScore, floorTier: persistFloor }
         : range),
       reasons: composedReasons.length || effectiveTier === "none"
         ? composedReasons
@@ -4197,7 +4210,9 @@ export async function analyzeSubject(
     `exact-name news query is a coverage limitation and cannot erase verified ` +
     `founder, company, product, or outcome evidence. Preserve source-specific ` +
     `entities: being CEO of an operating company does not make the person CEO of ` +
-    `a related protocol or DAO.\n\n` +
+    `a related protocol, token, or DAO. Do not transfer the founder's person ` +
+    `score onto the company account. A launched product or token bound by ` +
+    `contract address or official domain is related, not the company subject.\n\n` +
     `PUBLIC DILIGENCE GAP RULE: identity gaps must be resolvable through public ` +
     `or consensually supplied professional records. Never request or recommend ` +
     `collecting a government-issued ID, passport, SSN or tax ID, home address, ` +

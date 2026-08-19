@@ -2,10 +2,14 @@ import { ScoreComposition } from "../components/ScoreComposition";
 import { AskReport } from "../components/AskReport";
 import { DimensionChapters } from "../components/DimensionChapters";
 import { tokenDimensionChapters } from "../lib/dimensionChapters";
+import { VerdictHero } from "../components/VerdictHero";
 import type { TokenDossier } from "../token/audit";
 
 const CHAPTER_FIXTURE = {
   chain: "robinhood",
+  score: 60,
+  verdict: "CAUTION",
+  capApplied: null,
   liquidityUsd: 114_100,
   mcap: 2_000_000,
   ageDays: 12,
@@ -104,13 +108,18 @@ const ROWS = [
 export function CompositionPreview() {
   return (
     <div className="min-h-screen bg-void px-6 py-10 text-ink">
-      <div className="mx-auto max-w-[760px]">
+      <div className="mx-auto af-doc">
         <div className="eyebrow">design preview · composition strip</div>
         <h1 className="display mt-2 text-[32px] leading-tight">Auric Protocol</h1>
         <p className="mt-1 text-[13.5px] text-ink-dim">
           62 / 100 · CAUTION · the strip sits directly under the report hero
         </p>
         <ScoreComposition rows={ROWS} totalScore={62} />
+
+        <p className="mt-8 text-[13.5px] text-ink-dim">
+          The editorial verdict hero, rendered only when the readiness gate has passed.
+        </p>
+        <VerdictHero token={CHAPTER_FIXTURE} savedLabel="Saved Aug 19, 2026" />
 
         <p className="mt-8 text-[13.5px] text-ink-dim">
           The reading spine: each dimension as a chapter with its judgment headline and fact ledger.

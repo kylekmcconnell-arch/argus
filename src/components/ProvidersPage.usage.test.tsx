@@ -69,4 +69,82 @@ describe("Providers immutable usage trail", () => {
     expect(container.textContent).toContain("partial");
     expect(container.textContent).toContain("Kyle");
   });
+
+  it("shows the Serper last top-up and fetches credits only after click", async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/keys-status") {
+        return Promise.resolve(new Response(JSON.stringify({
+          providers: [{
+            label: "Serper (grounded search)",
+            powers: "grounded web search for reverse-bio / extra checks",
+            source: "serper.dev",
+            tier: "paid",
+            configured: true,
+            purchases: [{
+              purchasedAt: "2026-08-19T16:00:00.000Z",
+              usd: 50,
+              credits: 50000,
+              pack: "Starter",
+              expiresAt: "2027-02-19",
+              active: true,
+            }],
+          }],
+          keyless: [],
+        }), { status: 200 }));
+      }
+      if (url === "/api/provider-usage?limit=40") {
+        return Promise.resolve(new Response(JSON.stringify({
+          available: true,
+          window: { limit: 40, eventCount: 0 },
+          totals: { eventCount: 0, calls: 0, usd: 0 },
+          events: [],
+        }), { status: 200 }));
+      }
+      if (url === "/api/serper-credits") {
+        return Promise.resolve(new Response(JSON.stringify({
+          configured: true,
+          remaining: 49123,
+          remainingSource: "serper",
+          remainingEstimate: 50000,
+          usedSinceLatestPurchase: 0,
+          dashboardUrl: "https://serper.dev/dashboard",
+          purchases: [{
+            purchasedAt: "2026-08-19T16:00:00.000Z",
+            usd: 50,
+            credits: 50000,
+            pack: "Starter",
+            expiresAt: "2027-02-19",
+            active: true,
+          }],
+        }), { status: 200 }));
+      }
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await act(async () => {
+      root.render(<ProvidersPage />);
+    });
+    await vi.waitFor(() => expect(container.textContent).toContain("Serper (grounded search)"));
+
+    expect(container.textContent).toContain("Last top-up Aug 19, 2026");
+    expect(container.textContent).toContain("$50 / 50,000 credits");
+    expect(container.textContent).toContain("Check credits");
+    expect(container.textContent).not.toContain("Remaining: 49,123");
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).not.toContain("/api/serper-credits");
+
+    const button = Array.from(container.querySelectorAll("button")).find((node) => node.textContent?.includes("Check credits"));
+    expect(button).toBeTruthy();
+    await act(async () => {
+      (button as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => expect(container.textContent).toContain("Remaining: 49,123"));
+    expect(container.textContent).toContain("Source: serper");
+    expect(container.textContent).toContain("Purchase history");
+    expect(container.textContent).toContain("Starter");
+    expect(container.textContent).toContain("expires Feb 19, 2027");
+    expect(container.textContent).toContain("serper.dev/dashboard");
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toContain("/api/serper-credits");
+  });
 });

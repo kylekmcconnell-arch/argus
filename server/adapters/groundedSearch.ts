@@ -17,6 +17,9 @@ import { fetchPublicText } from "../publicWeb";
 const ANTHROPIC = "https://api.anthropic.com/v1/messages";
 const OPENROUTER = "https://openrouter.ai/api/v1/chat/completions";
 const SERPER = "https://google.serper.dev/search";
+const SERPER_NEWS = "https://google.serper.dev/news";
+const MAX_SUPPLIED_QUERIES = 8;
+const MAX_GENERATED_QUERIES = 5;
 const XAI_CHAT = "https://api.x.ai/v1/chat/completions";
 const GROK_EXTRACT_MODEL = () => env("ARGUS_GROK_MODEL") || "grok-4-fast";
 const CLAUDE_EXTRACT_MODEL = () => env("ARGUS_EXTRACT_MODEL") || "claude-haiku-4-5";
@@ -49,6 +52,140 @@ interface SerperSearchOutcome {
   detail?: string;
 }
 
+// Google's practical q ceiling. Oversized bodies 400 as invalid_request.
+const MAX_SERPER_QUERY_CHARS = 2048;
+
+/**
+ * Turn a candidate Serper `q` into a Google-legal query, or null to skip.
+ * Twitter-style q that still has useful terms (quoted phrase, founder/CEO/team
+ * words) is rewritten to ordinary Google syntax — quoted phrases stay, @handle
+ * becomes "@handle" next to residual words. Handle-only / operator-only q is
+ * skipped so we do not spend a credit on site:x.com/@handle junk. Never log `q`.
+ */
+export function sanitizeSerperQuery(q: string): string | null {
+  const original = q.trim();
+  if (!original) return null;
+  if (original.length > MAX_SERPER_QUERY_CHARS) return null;
+  if ((original.match(/"/g)?.length ?? 0) % 2 === 1) return null;
+
+  const unquoted = original.replace(/"[^"]*"/g, " ");
+  const twitterStyle = /\b(?:from|filter|min_faves|min_retweets|min_replies):/i.test(original)
+    || /\bsite:(?:www\.)?(?:twitter|x)\.com\b/i.test(original)
+    || /@[A-Za-z0-9_]+/.test(unquoted)
+    || /^"@[A-Za-z0-9_]{1,30}"$/.test(original);
+  if (!twitterStyle) {
+    if (/^@/.test(original) && !original.startsWith('"')) return null;
+    if (/^(?:OR|AND)\b|\b(?:OR|AND)$/i.test(original)) return null;
+    if (/(?:^|\s)(?:site|filetype):\s*(?:$|[)"']|\b(?:OR|AND)\b)/i.test(original)) return null;
+    const residual = original
+      .replace(/\b(?:site|filetype|intitle|inurl|intext|ext):[^\s]*/gi, " ")
+      .replace(/\b(?:OR|AND|NOT)\b/gi, " ")
+      .replace(/[()"+-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!residual && !/\b(?:site|filetype):[^\s]+/i.test(original)) return null;
+    return original;
+  }
+
+  const quoted: string[] = [];
+  let rest = original.replace(/"([^"]*)"/g, (_, phrase: string) => {
+    const inner = phrase.trim();
+    if (inner) quoted.push(`"${inner}"`);
+    return " ";
+  });
+
+  const handles: string[] = [];
+  const addHandle = (raw: string) => {
+    const handle = raw.replace(/^@/, "");
+    if (!handle) return;
+    if (!handles.some((existing) => existing.toLowerCase() === handle.toLowerCase())) handles.push(handle);
+  };
+
+  rest = rest.replace(/\bfrom:@?([A-Za-z0-9_]{1,30})\b/gi, (_, handle: string) => {
+    addHandle(handle);
+    return " ";
+  });
+  rest = rest.replace(/\bsite:(?:www\.)?(?:twitter|x)\.com\/@?([A-Za-z0-9_]{1,30})(?:\/\S*)?/gi, (_, handle: string) => {
+    addHandle(handle);
+    return " ";
+  });
+  rest = rest.replace(/\bsite:(?:www\.)?(?:twitter|x)\.com\b/gi, " ");
+  rest = rest.replace(/\b(?:filter|min_faves|min_retweets|min_replies):[^\s]*/gi, " ");
+  rest = rest.replace(/(^|[^\w])@([A-Za-z0-9_]{1,30})/g, (_match, pre: string, handle: string) => {
+    addHandle(handle);
+    return `${pre} `;
+  });
+  rest = rest.replace(/\b(?:www\.)?(?:twitter|x)\.com\b/gi, " ");
+  rest = rest.replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
+
+  const usefulQuoted = quoted.filter((phrase) => !/^"@[A-Za-z0-9_]{1,30}"$/.test(phrase));
+  for (const phrase of quoted) {
+    const only = phrase.match(/^"@([A-Za-z0-9_]{1,30})"$/);
+    if (only) addHandle(only[1]);
+  }
+
+  const parts = [...usefulQuoted];
+  if (rest) {
+    parts.push(rest);
+    for (const handle of handles) {
+      const already = usefulQuoted.some((phrase) => phrase.toLowerCase().includes(`@${handle.toLowerCase()}`));
+      if (!already) parts.push(`"@${handle}"`);
+    }
+  }
+  const s = parts.join(" ").replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  if (/^@/.test(s) && !s.startsWith('"')) return null;
+  if (/^(?:OR|AND)\b|\b(?:OR|AND)$/i.test(s)) return null;
+  if (/(?:^|\s)(?:site|filetype):\s*(?:$|[)"']|\b(?:OR|AND)\b)/i.test(s)) return null;
+
+  const residual = s
+    .replace(/\b(?:site|filetype|intitle|inurl|intext|ext):[^\s]*/gi, " ")
+    .replace(/\b(?:OR|AND|NOT)\b/gi, " ")
+    .replace(/[()"+-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!residual && !/\b(?:site|filetype):[^\s]+/i.test(s)) return null;
+  return s;
+}
+
+function sanitizeQueryList(queries: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const q of queries) {
+    const chars = q.trim().length;
+    const s = sanitizeSerperQuery(q);
+    if (!s) {
+      if (chars) console.warn("[serper-search] skipped invalid query", { queryChars: chars });
+      continue;
+    }
+    const key = s.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+/** Last-resort queries from the user string itself. No invented role phrases. */
+function fallbackQueriesFromUser(user: string): string[] {
+  const candidates: string[] = [];
+  for (const m of user.matchAll(/"([^"]{2,80})"/g)) candidates.push(`"${m[1]}"`);
+  // Bare @handle is not a Google q. Quoted phrases and real domains still run.
+  for (const m of user.matchAll(/\b((?:[a-z0-9-]+\.)+[a-z]{2,24})\b/gi)) {
+    const host = m[1].replace(/^www\./i, "").toLowerCase();
+    if (/^(?:x\.com|twitter\.com|t\.co|github\.com|linkedin\.com|youtube\.com|youtu\.be|google\.com|facebook\.com|instagram\.com)$/i.test(host)) continue;
+    candidates.push(`site:${host}`);
+  }
+  return sanitizeQueryList(candidates);
+}
+
+
+function isSerperProviderOutage(detail?: string): boolean {
+  if (!detail) return true;
+  if (detail.includes("invalid_request")) return false;
+  return true;
+}
+
 function safeSerperFailure(status: number, raw: string): string {
   let message = "";
   try {
@@ -77,7 +214,7 @@ async function serperSearch(query: string, key: string): Promise<SerperSearchOut
     const res = await fetch(SERPER, {
       method: "POST",
       headers: { "X-API-KEY": key, "content-type": "application/json" },
-      body: JSON.stringify({ q: query, num: 8 }),
+      body: JSON.stringify({ q: query, num: 10 }),
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
@@ -97,6 +234,39 @@ async function serperSearch(query: string, key: string): Promise<SerperSearchOut
           title: typeof o.title === "string" ? o.title : "",
           url: typeof o.link === "string" ? o.link : "",
           snippet: typeof o.snippet === "string" ? o.snippet : "",
+        }))
+        .filter((r) => /^https?:\/\//.test(r.url)),
+    };
+  } catch (error) {
+    const detail = error instanceof Error && error.name === "TimeoutError"
+      ? "timeout_15000ms"
+      : "transport_or_parse_error";
+    return { results: [], status: "failed", detail };
+  }
+}
+
+async function serperNews(query: string, key: string): Promise<SerperSearchOutcome> {
+  try {
+    const res = await fetch(SERPER_NEWS, {
+      method: "POST",
+      headers: { "X-API-KEY": key, "content-type": "application/json" },
+      body: JSON.stringify({ q: query, num: 10 }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      const detail = safeSerperFailure(res.status, await res.text().catch(() => ""));
+      console.warn("[serper-news] request rejected", { status: res.status, reason: detail.split(":")[1], queryChars: query.length });
+      return { results: [], status: "failed", detail };
+    }
+    const d = asRec(await res.json());
+    const news = Array.isArray(d.news) ? d.news.map(asRec) : [];
+    return {
+      status: "succeeded",
+      results: news
+        .map((o) => ({
+          title: typeof o.title === "string" ? o.title : "",
+          url: typeof o.link === "string" ? o.link : typeof o.url === "string" ? o.url : "",
+          snippet: typeof o.snippet === "string" ? o.snippet : typeof o.date === "string" ? o.date : "",
         }))
         .filter((r) => /^https?:\/\//.test(r.url)),
     };
@@ -255,7 +425,7 @@ async function callExtractModel(system: string, user: string, maxTokens: number,
 
 async function generateQueries(system: string, user: string): Promise<string[]> {
   const text = await callExtractModel(
-    "You turn a research task into effective Google search queries. Output ONLY a JSON array of query strings.",
+    "You turn a research task into effective Google search queries. Output ONLY a JSON array of query strings. Use ordinary Google syntax: quoted phrases, site:example.com, names. Never emit a query that starts with @handle, Twitter-only operators (from:, filter:, min_faves), or site:twitter.com/@handle.",
     `A due-diligence collector needs to answer this task with web evidence.\n\nTASK SYSTEM: ${system}\n\nTASK REQUEST: ${user}\n\nOutput 3 to 5 precise Google search queries that will surface the exact pages needed (names, companies, filings, press). Return ONLY a compact JSON array, e.g. ["query one","query two"].`,
     400,
     "grounded-queries",
@@ -295,6 +465,10 @@ export async function groundedSearch(
     cacheKey?: string;
     bypassCache?: boolean;
     queries?: readonly string[];
+    /** Optional single Serper /news POST (same 1-credit tier as /search). Skip when empty. */
+    newsQuery?: string;
+    /** Organic (+ news) hits after URL dedupe. Callers extract corroborating URLs from these; never invent them. */
+    onOrganicResults?: (results: ReadonlyArray<{ title: string; url: string; snippet: string }>) => void;
     /** Called only when every physical search attempt failed, never for a valid empty result. */
     onProviderUnavailable?: () => void;
   },
@@ -313,11 +487,26 @@ export async function groundedSearch(
   // asking a model to rediscover obvious search syntax such as an official
   // company's own funding announcements, while retaining the same Serper,
   // source-fetch, and grounded extraction boundaries.
-  const queries = opts?.queries?.map((query) => query.trim()).filter(Boolean).slice(0, 5)
-    ?? await generateQueries(system, user);
+  // Caller-supplied queries win. If the model invents nothing, still search
+  // obvious subject tokens from the user string — never a hardcoded role phrase.
+  let raw: readonly string[];
+  if (opts?.queries) {
+    raw = opts.queries;
+  } else {
+    const generated = await generateQueries(system, user);
+    raw = generated.length ? generated : fallbackQueriesFromUser(user);
+  }
+  // Caller-supplied queries may use the useful cap (8). LLM-invented queries
+  // stay at 5 so generateQueries junk cannot explode spend or scan latency.
+  const queryCap = opts?.queries ? MAX_SUPPLIED_QUERIES : MAX_GENERATED_QUERIES;
+  const queries = sanitizeQueryList(raw).slice(0, queryCap);
   if (!queries.length) return null;
 
-  const searched = await Promise.all(queries.map((q) => serperSearch(q, serperKey)));
+  const newsQ = opts?.newsQuery ? sanitizeSerperQuery(opts.newsQuery) : null;
+  const searched = await Promise.all([
+    ...queries.map((q) => serperSearch(q, serperKey)),
+    ...(newsQ ? [serperNews(newsQ, serperKey)] : []),
+  ]);
   const succeeded = searched.filter((outcome) => outcome.status === "succeeded");
   const failed = searched.filter((outcome) => outcome.status === "failed");
   if (succeeded.length) {
@@ -334,8 +523,12 @@ export async function groundedSearch(
       [...new Set(failed.flatMap((outcome) => outcome.detail ? [outcome.detail] : []))].join(","),
     );
   }
-  if (failed.length && succeeded.length === 0) opts?.onProviderUnavailable?.();
+  // invalid_request is a bad q, not a missing key or empty wallet.
+  if (failed.some((outcome) => isSerperProviderOutage(outcome.detail)) && succeeded.length === 0) {
+    opts?.onProviderUnavailable?.();
+  }
   const results = dedupeByUrl(searched.flatMap((outcome) => outcome.results)).slice(0, MAX_RESULTS);
+  opts?.onOrganicResults?.(results);
   if (!results.length) return null;
 
   const fetchWithTimeout = async (url: string): Promise<{ url: string; text: string } | null> => {

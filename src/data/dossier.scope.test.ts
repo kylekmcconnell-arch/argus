@@ -154,3 +154,75 @@ describe("dossier finding scope", () => {
     expect(dossier.ventureTeams?.map((team) => team.name)).toEqual(expect.arrayContaining(["Verified Venture", "Model Venture"]));
   });
 });
+
+describe("dossier webTeam · reverse-bio first-party keep", () => {
+  it("keeps a first-party handle-bound founder that would have been dropped as an unverified search candidate", () => {
+    const evidence = emptyEvidence("@projecthandle");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.webTeam = [
+      {
+        name: "Alice",
+        handle: "@alice",
+        role: "co-founder, coo",
+        source: "web search",
+        provider: "grok",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+      },
+      {
+        name: "Alice",
+        handle: "@alice",
+        role: "co-founder, coo",
+        kind: "person",
+        evidence: 'their current X bio states "Co-founder, COO @projecthandle"',
+        source: "reverse-bio twitterapi",
+        sourceUrl: "https://x.com/alice",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "twitterapi",
+        identity_link_evidence_origin: "deterministic",
+        handleProvenance: "subject_first_party",
+      },
+      {
+        name: "Bob",
+        handle: "@bob",
+        role: "fan",
+        source: "web search",
+        provider: "grok",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+      },
+      {
+        name: "Some Org",
+        handle: "@SomeOrg",
+        role: "fund",
+        kind: "org",
+        source: "reverse-bio twitterapi",
+        sourceUrl: "https://x.com/SomeOrg",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "twitterapi",
+        identity_link_evidence_origin: "deterministic",
+        handleProvenance: "subject_first_party",
+      },
+    ];
+
+    const unverifiedOnly = emptyEvidence("@projecthandle");
+    unverifiedOnly.roles = [SubjectClass.PROJECT];
+    unverifiedOnly.webTeam = [evidence.webTeam[0]];
+    expect(assembleDossier(unverifiedOnly, true).webTeam.map((m) => m.handle)).toEqual([]);
+
+    const dossier = assembleDossier(evidence, true);
+    expect(dossier.webTeam.map((m) => m.handle)).toEqual(expect.arrayContaining(["@alice", "@SomeOrg"]));
+    expect(dossier.webTeam.find((m) => m.handle === "@alice")).toMatchObject({
+      handle: "@alice",
+      handleProvenance: "subject_first_party",
+      artifact_verified: true,
+    });
+    expect(dossier.webTeam.find((m) => m.handle === "@SomeOrg")).toMatchObject({
+      kind: "org",
+      role: "fund",
+    });
+    expect(dossier.webTeam.map((m) => m.handle)).not.toContain("@bob");
+  });
+});

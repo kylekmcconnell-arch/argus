@@ -5,7 +5,7 @@ import { addOpenRouterUsage, getCost, withCostLedger } from "../cost";
 // extractor endpoint (no real page fetches to reason about).
 vi.mock("../publicWeb", () => ({ fetchPublicText: vi.fn(async () => null) }));
 
-import { groundedSearch } from "./groundedSearch";
+import { groundedSearch, sanitizeSerperQuery } from "./groundedSearch";
 
 const ok = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
@@ -206,5 +206,359 @@ describe("groundedSearch OpenRouter routing", () => {
     const line = cost.calls.find((entry) => entry.provider === "serper");
     expect(line?.meta).toContain("http_400:credits_or_quota");
     expect(line?.meta).not.toContain("secret-account-42");
+  });
+});
+
+
+describe("sanitizeSerperQuery", () => {
+  it("rewrites twitter-style q with useful terms into quoted Google form", () => {
+    const invented = "@multihopper founder CEO team";
+    expect(invented.length).toBe(29);
+    const rewritten = sanitizeSerperQuery(invented);
+    expect(rewritten).toBe('founder CEO team "@multihopper"');
+    expect(rewritten?.startsWith("@")).toBe(false);
+    expect(rewritten).not.toMatch(/site:(?:x|twitter)\.com/i);
+
+    expect(sanitizeSerperQuery("from:alice (founder OR CEO)")).toBe('founder OR CEO "@alice"');
+    expect(sanitizeSerperQuery('site:twitter.com/@alicehandle "founder of @alicehandle"')).toBe(
+      '"founder of @alicehandle"',
+    );
+
+    expect(sanitizeSerperQuery('site:venice.ai "Venice" funding raised financing')).toBe(
+      'site:venice.ai "Venice" funding raised financing',
+    );
+    expect(sanitizeSerperQuery('"founder of @alicehandle"')).toBe('"founder of @alicehandle"');
+    expect(sanitizeSerperQuery('"@alicehandle team"')).toBe('"@alicehandle team"');
+    expect(sanitizeSerperQuery("site:examplebrand.io")).toBe("site:examplebrand.io");
+  });
+
+  it("skips handle-only twitter-style q instead of spending a credit on site:x.com/handle", () => {
+    expect(sanitizeSerperQuery("@alicehandle")).toBeNull();
+    expect(sanitizeSerperQuery('"@alicehandle"')).toBeNull();
+    expect(sanitizeSerperQuery("from:@alicehandle")).toBeNull();
+    expect(sanitizeSerperQuery("from:alice")).toBeNull();
+    expect(sanitizeSerperQuery("site:twitter.com/@alicehandle")).toBeNull();
+    expect(sanitizeSerperQuery("site:x.com/@alicehandle")).toBeNull();
+  });
+
+  it("skips only empty or still-illegal q", () => {
+    expect(sanitizeSerperQuery("")).toBeNull();
+    expect(sanitizeSerperQuery("   ")).toBeNull();
+    expect(sanitizeSerperQuery('"founder of')).toBeNull();
+    expect(sanitizeSerperQuery("site:")).toBeNull();
+    expect(sanitizeSerperQuery("@")).toBeNull();
+    expect(sanitizeSerperQuery("founder OR")).toBeNull();
+  });
+});
+
+describe("groundedSearch Serper query quality", () => {
+  const ENV = { ...process.env };
+  afterEach(() => {
+    process.env = { ...ENV };
+    vi.restoreAllMocks();
+  });
+
+  function provision() {
+    process.env.SERPER_API_KEY = "serp";
+    process.env.XAI_API_KEY = "xai";
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+  }
+
+  it("does not POST the 29-char @handle invention as-is; posts rewritten q with num 10", async () => {
+    provision();
+    const invented = "@multihopper founder CEO team";
+    expect(invented.length).toBe(29);
+    const bodies: { q?: string; num?: number }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        bodies.push(JSON.parse(init.body) as { q?: string; num?: number });
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+    }));
+
+    const result = await groundedSearch("system", "user", {
+      queries: [invented, 'site:venice.ai "Venice" funding'],
+    });
+    expect(result).toBe("ANSWER");
+    expect(bodies.map((b) => b.q)).toEqual([
+      'founder CEO team "@multihopper"',
+      'site:venice.ai "Venice" funding',
+    ]);
+    expect(bodies.every((b) => b.num === 10)).toBe(true);
+    expect(bodies.some((b) => b.q === invented)).toBe(false);
+  });
+
+  it("does not POST a query sanitize returns null for, but still searches the rest", async () => {
+    provision();
+    const bodies: { q?: string; num?: number }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        bodies.push(JSON.parse(init.body) as { q?: string; num?: number });
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+    }));
+
+    let unavailable = false;
+    const result = await groundedSearch("system", "user", {
+      queries: ["   ", '"unmatched', "ordinary google query about a project"],
+      onProviderUnavailable: () => { unavailable = true; },
+    });
+    expect(result).toBe("ANSWER");
+    expect(unavailable).toBe(false);
+    expect(bodies).toEqual([{ q: "ordinary google query about a project", num: 10 }]);
+  });
+
+  it("dedupes sanitized queries casefold+whitespace before fetch", async () => {
+    provision();
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        bodies.push(String((JSON.parse(init.body) as { q?: unknown }).q ?? ""));
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+
+    await groundedSearch("system", "user", {
+      queries: ["OpenAI funding", "  openai   funding  ", "OPENAI funding"],
+    });
+    expect(bodies).toEqual(["OpenAI funding"]);
+  });
+
+  it("does not mark the provider unavailable when one query 400s invalid_request and another 200s", async () => {
+    provision();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        const q = String((JSON.parse(init.body) as { q?: unknown }).q ?? "");
+        if (q.includes("rejected-shape")) {
+          return new Response('{"message":"Invalid query parameter"}', { status: 400 });
+        }
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+    }));
+
+    let unavailable = false;
+    const captured = await withCostLedger(async () => {
+      const result = await groundedSearch("system", "user", {
+        queries: ["ordinary good query", "rejected-shape query"],
+        onProviderUnavailable: () => { unavailable = true; },
+      });
+      return { result, cost: getCost() };
+    });
+    expect(captured.result).toBe("ANSWER");
+    expect(unavailable).toBe(false);
+    const line = captured.cost.calls.find((entry) => entry.provider === "serper");
+    expect(line?.failed).toBeGreaterThan(0);
+    expect(line?.succeeded).toBeGreaterThan(0);
+    expect(line?.meta).toContain("http_400:invalid_request");
+  });
+
+  it("does not treat all-invalid_request as a missing key", async () => {
+    provision();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"Invalid query parameter"}', { status: 400 });
+      }
+      return ok({
+        choices: [{ message: { content: "must-not-extract" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    let unavailable = false;
+    const cost = await withCostLedger(async () => {
+      await groundedSearch("system", "user", {
+        queries: ["ordinary google query about a project"],
+        onProviderUnavailable: () => { unavailable = true; },
+      });
+      return getCost();
+    });
+    expect(cost.calls.find((entry) => entry.provider === "serper")?.meta).toContain("http_400:invalid_request");
+    expect(unavailable).toBe(false);
+  });
+
+  it("keeps credits_or_quota classification and still marks unavailable when every attempt fails that way", async () => {
+    provision();
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"Not enough credits for customer secret-account-42"}', { status: 400 });
+      }
+      return ok({
+        choices: [{ message: { content: "must-not-extract" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+
+    let unavailable = false;
+    const cost = await withCostLedger(async () => {
+      await groundedSearch("system", "user", {
+        queries: ["ordinary google query about a project"],
+        onProviderUnavailable: () => { unavailable = true; },
+      });
+      return getCost();
+    });
+    const line = cost.calls.find((entry) => entry.provider === "serper");
+    expect(line?.meta).toContain("http_400:credits_or_quota");
+    expect(line?.meta).not.toContain("secret-account-42");
+    expect(unavailable).toBe(true);
+  });
+
+  it("falls back to subject tokens in the user string when generateQueries returns nothing", async () => {
+    provision();
+    const bodies: string[] = [];
+    let extractHits = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      if (String(url).includes("serper")) {
+        bodies.push(String((JSON.parse(init.body) as { q?: unknown }).q ?? ""));
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      extractHits += 1;
+      const content = extractHits === 1 ? "not-a-json-array" : "ANSWER";
+      return ok({
+        choices: [{ message: { content } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      });
+    }));
+
+    const result = await groundedSearch(
+      "system",
+      'Project X account: @alicehandle (Example Brand), website examplebrand.io. Who founded it?',
+    );
+    expect(result).toBe("ANSWER");
+    expect(bodies).toContain("site:examplebrand.io");
+    expect(bodies.some((q) => /site:(?:x|twitter)\.com/i.test(q))).toBe(false);
+    expect(bodies.some((q) => /founder CEO team/i.test(q))).toBe(false);
+    expect(bodies.some((q) => q.startsWith("@"))).toBe(false);
+  });
+
+  it("never logs q or the API key on a skipped or rejected search", async () => {
+    provision();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"Invalid query parameter"}', { status: 400 });
+      }
+      return ok({
+        choices: [{ message: { content: "must-not-extract" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+
+    await groundedSearch("system", "user", {
+      queries: ['"unmatched', "ordinary google query about a project"],
+    });
+    const dumped = JSON.stringify(warn.mock.calls);
+    expect(dumped).not.toContain("ordinary google query about a project");
+    expect(dumped).not.toContain('"unmatched');
+    expect(dumped).not.toContain("SERPER_API_KEY");
+    expect(dumped).not.toContain("X-API-KEY");
+  });
+
+  it("posts all 8 caller-supplied queries and still slices generateQueries to 5", async () => {
+    provision();
+    const supplied = Array.from({ length: 10 }, (_, i) => `official supplied query ${i + 1}`);
+    const webQs: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const u = String(url);
+      if (u.includes("google.serper.dev")) {
+        webQs.push(String((JSON.parse(init.body) as { q?: unknown }).q ?? ""));
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    await groundedSearch("system", "user", { queries: supplied });
+    expect(webQs).toEqual(supplied.slice(0, 8));
+
+    webQs.length = 0;
+    let extractHits = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const u = String(url);
+      if (u.includes("google.serper.dev")) {
+        webQs.push(String((JSON.parse(init.body) as { q?: unknown }).q ?? ""));
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      extractHits += 1;
+      const content = extractHits === 1
+        ? JSON.stringify(Array.from({ length: 8 }, (_, i) => `invented query ${i + 1}`))
+        : "ANSWER";
+      return ok({
+        choices: [{ message: { content } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    await groundedSearch("system", "user");
+    expect(webQs).toHaveLength(5);
+    expect(webQs.every((q) => q.startsWith("invented query"))).toBe(true);
+  });
+
+  it("POSTs one /news query when newsQuery is supplied and merges those hits into extract", async () => {
+    provision();
+    const urls: string[] = [];
+    const newsBodies: { q?: string; num?: number }[] = [];
+    let extractUser = "";
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const u = String(url);
+      urls.push(u);
+      if (u.includes("google.serper.dev/news")) {
+        newsBodies.push(JSON.parse(init.body) as { q?: string; num?: number });
+        return ok({ news: [{ title: "News founder item", link: "https://news.example/a", snippet: "team announced" }] });
+      }
+      if (u.includes("google.serper.dev/search")) {
+        return ok({ organic: [{ title: "Web item", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      const body = JSON.parse(init.body) as { messages?: Array<{ content?: string }> };
+      extractUser = String(body.messages?.[1]?.content ?? body.messages?.[0]?.content ?? "");
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    const result = await groundedSearch("system", "user", {
+      queries: ["ordinary google query about a project"],
+      newsQuery: '"Example Brand" founder OR team',
+    });
+    expect(result).toBe("ANSWER");
+    expect(newsBodies).toEqual([{ q: '"Example Brand" founder OR team', num: 10 }]);
+    expect(urls.filter((u) => u.includes("/news")).length).toBe(1);
+    expect(extractUser).toContain("News founder item");
+    expect(extractUser).toContain("https://news.example/a");
+  });
+
+  it("skips /news when newsQuery is empty or sanitizes to null", async () => {
+    provision();
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      urls.push(String(url));
+      if (String(url).includes("serper")) {
+        return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
+      }
+      return ok({
+        choices: [{ message: { content: "ANSWER" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      });
+    }));
+    await groundedSearch("system", "user", {
+      queries: ["ordinary google query about a project"],
+      newsQuery: '"unmatched',
+    });
+    expect(urls.some((u) => u.includes("/news"))).toBe(false);
   });
 });

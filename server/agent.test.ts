@@ -209,6 +209,9 @@ describe("analyst verdict integrity", () => {
     expect(FOUNDER_SCORING_POLICY).toContain("Follower count, posting cadence, profile biography, fame, and X follow relationships never establish a founder role or track record");
     expect(FOUNDER_SCORING_POLICY).toContain("A personal GitHub account is optional and its absence cannot negate a verified live product");
     expect(FOUNDER_SCORING_POLICY).toContain("Social follows, mutual follows, and generic affiliations are network context, not repeat backing");
+    expect(FOUNDER_SCORING_POLICY).toContain("do not transfer the company title onto the protocol, token, or DAO");
+    expect(FOUNDER_SCORING_POLICY).toContain("Do not transfer the founder's person score onto the company account");
+    expect(FOUNDER_SCORING_POLICY).toContain("A launched product or token bound by contract address or official domain is related, not the company subject");
   });
 
   it("derives exceptional evidence bands for established projects without using fame or artifact counts", () => {
@@ -6147,5 +6150,61 @@ describe("completed-empty checks are assessed, not missing", () => {
   it("still treats a check that never completed as missing", () => {
     const unavailable = inspectAnalystScoringPreflight(founderAxes, packetWith("unavailable"));
     expect(unavailable.missingSubstantiveAxes).toContain("F3_repeat_backing");
+  });
+});
+
+describe("project strength bands omit illegal floorTier", () => {
+  it("checked_empty on P2 and P5 is assessed_null with no floorTier", () => {
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@youngproject",
+        display_name: "Young Project",
+        bio: "Shipping soon",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-08-19T00:00:00.000Z",
+      },
+      checkOutcomes: [
+        { checkId: "project-product-substance", label: "Product substance", status: "checked-empty" },
+        { checkId: "project-traction-liveness", label: "Traction", status: "checked-empty" },
+      ],
+    }, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+    expect(bands.P2_product_substance.tier).toBe("assessed_null");
+    expect(bands.P2_product_substance).not.toHaveProperty("floorTier");
+    expect(bands.P5_traction_and_liveness.tier).toBe("assessed_null");
+    expect(bands.P5_traction_and_liveness).not.toHaveProperty("floorTier");
+  });
+});
+
+describe("derived project bands omit illegal floorTier", () => {
+  const POSITIVE = ["none", "emerging", "solid", "exceptional"] as const;
+
+  it("checked-empty P3/P4 packets omit illegal floors so persist is not rejected", async () => {
+    const { getProfile, SubjectClass } = await import("../src/engine");
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      checkOutcomes: [
+        { checkId: "project-token-identity", status: "checked-empty", provider: "test" },
+        { checkId: "project-backing-partners", status: "checked-empty", provider: "test" },
+      ],
+    }, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+    for (const [axis, band] of Object.entries(bands)) {
+      if (band.floorTier !== undefined) {
+        const floorRank = POSITIVE.indexOf(band.floorTier as (typeof POSITIVE)[number]);
+        const tierRank = POSITIVE.indexOf(band.tier as (typeof POSITIVE)[number]);
+        expect(floorRank, axis).toBeGreaterThanOrEqual(0);
+        expect(tierRank, axis).toBeGreaterThanOrEqual(0);
+        expect(floorRank, axis).toBeLessThan(tierRank);
+      }
+    }
+    expect(bands.P3_token_conduct.tier).toBe("assessed_null");
+    expect(bands.P3_token_conduct.floorTier).toBeUndefined();
+    expect(bands.P4_backing_and_partners.tier).toBe("assessed_null");
+    expect(bands.P4_backing_and_partners.floorTier).toBeUndefined();
   });
 });
