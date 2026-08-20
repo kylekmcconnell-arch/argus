@@ -457,7 +457,9 @@ export default function App() {
     if (providers) {
       // Start the background run NOW (before the view mounts) so it survives an
       // immediate navigation away — the runner owns the stream, not the view.
-      const run = startPersonAudit(handle, priv, intent, { force });
+      const run = force
+        ? startPersonAudit(handle, priv, intent, { force: true })
+        : startPersonAudit(handle, priv, intent);
       if (!!run.priv !== priv) { showPrivacyConflict(handle); return; }
       setPhase("live");
     } else {

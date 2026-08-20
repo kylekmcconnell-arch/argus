@@ -217,7 +217,7 @@ function parseMentionedHandles(
   return out.length ? out : undefined;
 }
 
-const TICKER_MAX = 10;
+const TICKER_MAX = 16;
 
 function parseRelatedHandle(raw: unknown, subjectHandle: string, dropIfSubject: boolean): string | null {
   if (typeof raw !== "string") return null;
@@ -240,7 +240,7 @@ function parseRelatedDomain(raw: unknown, packet: OrientationPacket): string | n
 function parseTokenTicker(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
   const ticker = raw.trim().replace(/^\$/, "").toUpperCase();
-  if (!/^[A-Z][A-Z0-9]{1,9}$/.test(ticker) || ticker.length > TICKER_MAX) return undefined;
+  if (!/^[A-Z][A-Z0-9]{1,15}$/.test(ticker) || ticker.length > TICKER_MAX) return undefined;
   return ticker;
 }
 
@@ -259,7 +259,7 @@ export function firstPartyTokenTickers(packet: OrientationPacket): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const text of texts) {
-    for (const match of text.matchAll(/\$([A-Za-z][A-Za-z0-9]{1,9})\b/g)) {
+    for (const match of text.matchAll(/\$([A-Za-z][A-Za-z0-9]{1,15})\b/g)) {
       const ticker = parseTokenTicker(match[1]);
       if (!ticker || seen.has(ticker)) continue;
       seen.add(ticker);
