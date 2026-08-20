@@ -334,18 +334,24 @@ export async function publicXAccountState(
       signal: AbortSignal.timeout(10_000),
     });
   } catch {
-    recordCall("x-public", "account-state", 0, `${u} · transport_error`, "failed");
+    // This logged-out HTML probe is diagnostic only. A transport failure says
+    // nothing about whether the account exists and must not become a provider
+    // failure or a subject warning.
+    recordCall("x-public", "account-state", 0, `${u} · probe_inconclusive_transport_error`, "partial");
     return null;
   }
   if (!response.ok) {
-    recordCall("x-public", "account-state", 0, `${u} · http_${response.status}`, "failed");
+    // X frequently returns edge/login/anti-bot status codes for valid profiles.
+    // Only an explicit terminal state in a readable 200 response can establish
+    // suspension or unavailability. The status code itself is inconclusive.
+    recordCall("x-public", "account-state", 0, `${u} · probe_inconclusive_http_${response.status}`, "partial");
     return null;
   }
   let html: string;
   try {
     html = await response.text();
   } catch {
-    recordCall("x-public", "account-state", 0, `${u} · unreadable`, "failed");
+    recordCall("x-public", "account-state", 0, `${u} · probe_inconclusive_unreadable`, "partial");
     return null;
   }
   const suspended = /\bAccount suspended\b/i.test(html)
