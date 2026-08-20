@@ -11,6 +11,7 @@ import type {
   IntelligenceSpineSnapshot,
 } from "../intelligence/types";
 import { usdCompact } from "../lib/format";
+import { evidencePostureForSignal } from "../lib/evidenceReasoning";
 
 const LENS_ORDER: DecisionLensId[] = [
   "investment",
@@ -351,11 +352,13 @@ function SummaryCard({
   signal,
   emptyCopy,
   tone,
+  evidencePosture,
 }: {
   label: string;
   signal?: DerivedIntelligenceSignal;
   emptyCopy: string;
   tone: string;
+  evidencePosture?: string;
 }) {
   return (
     <section className={`panel-inset p-3.5 ${tone}`} aria-label={label}>
@@ -365,6 +368,11 @@ function SummaryCard({
           <h4 className="mt-1.5 text-[13.5px] font-semibold leading-snug text-ink">{signal.headline}</h4>
           <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">{signal.finding}</p>
           <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">{signal.whyItMatters}</p>
+          {evidencePosture && (
+            <p className="mono mt-2 text-[10px] uppercase tracking-[0.07em] text-ink-faint">
+              Evidence posture · {evidencePosture}
+            </p>
+          )}
         </>
       ) : (
         <p className="mt-1.5 text-[12px] leading-relaxed text-ink-faint">{emptyCopy}</p>
@@ -406,6 +414,12 @@ export function PointInTimeIntelligencePanel({
   const strongestSupport = emphasizedUsableSignals.find((signal) => signal.polarity === "support");
   const strongestPressure = emphasizedUsableSignals.find((signal) =>
     signal.polarity === "risk" || signal.polarity === "mixed");
+  const strongestSupportPosture = strongestSupport
+    ? evidencePostureForSignal(snapshot, strongestSupport)
+    : null;
+  const strongestPressurePosture = strongestPressure
+    ? evidencePostureForSignal(snapshot, strongestPressure)
+    : null;
   const questions = openQuestions(snapshot.questions, selectedLens);
   const thesisPriorityDomains = new Set(selectedLens.domainPriority.slice(0, 3));
   const criticalDecisionGaps = questions.filter((question) =>
@@ -637,12 +651,14 @@ export function PointInTimeIntelligencePanel({
               signal={strongestSupport}
               emptyCopy="No usable support signal is tagged to this lens."
               tone="tint-pass"
+              evidencePosture={strongestSupportPosture?.label}
             />
             <SummaryCard
               label="Strongest pressure"
               signal={strongestPressure}
               emptyCopy="No usable risk or mixed signal is tagged to this lens."
               tone="tint-avoid"
+              evidencePosture={strongestPressurePosture?.label}
             />
             <section className="panel-inset p-3.5 tint-caution" aria-label="Open questions">
               <div className="flex items-center gap-2">
