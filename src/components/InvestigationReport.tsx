@@ -759,10 +759,7 @@ export function InvestigationReport({
     projectToken: projectAccount?.projectToken,
     canonicalGeckoId: projectAccount?.projectToken?.coingeckoId,
     officialHandle: projectAccount?.handle,
-    officialWebsites: [
-      projectAccount?.website,
-      ...(projectAccount?.official_websites ?? []),
-    ],
+    officialWebsites: [projectAccount?.website],
   };
   const protocolTvlValidation = validateProtocolEvidenceBinding(
     protocolBindingContext,
@@ -1945,7 +1942,6 @@ export function InvestigationReport({
               projectToken={projectAccount?.projectToken}
               officialHandle={projectAccount?.handle}
               officialWebsite={projectAccount?.website}
-              officialWebsites={projectAccount?.official_websites}
               protocolFunding={projectAccount?.protocolFunding}
               protocolTvl={projectAccount?.protocolTvl}
               canonicalGeckoId={projectAccount?.projectToken?.coingeckoId}

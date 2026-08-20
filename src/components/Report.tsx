@@ -214,7 +214,7 @@ function CriticalSubjectAlerts({ dossier }: { dossier: Dossier }) {
     projectToken: dossier.projectToken,
     canonicalGeckoId: dossier.projectToken?.coingeckoId,
     officialHandle: dossier.handle,
-    officialWebsites: [dossier.website, ...(dossier.official_websites ?? [])],
+    officialWebsites: [dossier.website],
   }, dossier.protocolTvl);
   const boundProtocolTvl = protocolValidation.state === "matched"
     ? dossier.protocolTvl
@@ -1855,7 +1855,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     projectToken: f.projectToken,
     canonicalGeckoId: f.projectToken?.coingeckoId,
     officialHandle: f.handle,
-    officialWebsites: [f.website, ...(f.official_websites ?? [])],
+    officialWebsites: [f.website],
   };
   const protocolTvlValidation = validateProtocolEvidenceBinding(
     protocolBindingContext,
@@ -1876,8 +1876,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     { corroboratedProtocolSlugs: validatedProtocolSlugs },
   );
   const boundProtocolTvl = protocolTvlValidation.state === "matched" ? f.protocolTvl : undefined;
-  const protocolTvlMeasured = typeof boundProtocolTvl?.tvlUsd === "number"
-    && boundProtocolTvl.tvlUsd > 0;
+  const boundProtocolTvlUsd = typeof boundProtocolTvl?.tvlUsd === "number"
+    && boundProtocolTvl.tvlUsd > 0
+    ? boundProtocolTvl.tvlUsd
+    : null;
+  const protocolTvlMeasured = boundProtocolTvlUsd !== null;
   const boundProtocolFunding = protocolFundingValidation.state === "matched" ? f.protocolFunding : undefined;
   const boundProtocolFees = protocolFeesValidation.state === "matched" ? f.protocolFees : undefined;
   const protocolTvlBinding = protocolTvlValidation.state === "matched"
@@ -2857,10 +2860,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   // Fundamentals we verified, as headline numbers. Every tile derives from a
   // frozen snapshot and is omitted when absent; nothing renders a dash.
   const fundamentalTiles: Array<{ key: string; label: string; value: string; sub: string }> = [
-    ...(boundProtocolTvl && boundProtocolTvl.tvlUsd > 0 ? [{
+    ...(boundProtocolTvl && boundProtocolTvlUsd !== null ? [{
       key: "tvl",
       label: "Value locked",
-      value: usdCompact(boundProtocolTvl.tvlUsd),
+      value: usdCompact(boundProtocolTvlUsd),
       sub: `${protocolTvlBinding ? protocolBindingMethodLabel(protocolTvlBinding) : "DeFiLlama"} · ${boundProtocolTvl.capturedAt.slice(0, 10)}`,
     }] : []),
     ...(f.projectToken?.rank != null ? [{
@@ -3670,7 +3673,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           projectToken={f.projectToken}
           officialHandle={f.handle}
           officialWebsite={f.website}
-          officialWebsites={f.official_websites}
           protocolFunding={f.protocolFunding}
           protocolTvl={f.protocolTvl}
           canonicalGeckoId={f.projectToken?.coingeckoId}

@@ -164,17 +164,19 @@ export function startPersonAudit(
     // discovery are never identity: a client-side CoinGecko lookup cannot bind
     // a same-name asset to the audited subject.
     if (!threatLeg) {
-      const hasFrozenProjectToken = d.projectToken?.verified === true;
+      const frozenProjectToken = d.projectToken?.verified === true
+        ? d.projectToken
+        : undefined;
       const frozen = frozenProjectTokenCandidate(d);
       // Once the server froze a canonical token, that receipt governs. An
       // unsupported frozen chain must not fall through to format guessing (a
       // Tron address, for example, can look like a Solana base58 mint).
-      const cand = hasFrozenProjectToken
+      const cand = frozenProjectToken
         ? frozen
         : tokenFromBio(d.bio) ?? tokenFromPromotions(d.evidence?.promotions);
       if (cand) startThreatLeg(cand);
-      else if (hasFrozenProjectToken) {
-        threatNote = `The server hard-bound ${d.projectToken.symbol} on ${d.projectToken.chain}, but the browser threat scanner does not support that chain - token threat leg skipped.`;
+      else if (frozenProjectToken) {
+        threatNote = `The server hard-bound ${frozenProjectToken.symbol} on ${frozenProjectToken.chain}, but the browser threat scanner does not support that chain - token threat leg skipped.`;
       } else {
         threatNote = "No project token was hard-bound by the server and no explicit contract was present in collected evidence - token threat leg skipped.";
       }
