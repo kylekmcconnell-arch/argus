@@ -113,6 +113,15 @@ describe("ProviderFailureNotice", () => {
     expect(container.textContent).not.toContain("Run a new scan later");
   });
 
+  it("suppresses historical x-public probe failures because an HTTP status is not an account-state result", () => {
+    act(() => {
+      root.render(<ProviderFailureNotice failures={[
+        { provider: "x-public", op: "account-state", failed: 1, meta: "multihopper · http_404" },
+      ]} />);
+    });
+    expect(container.textContent).toBe("");
+  });
+
   it("renders nothing on a clean run", () => {
     act(() => {
       root.render(<ProviderFailureNotice failures={[]} />);
