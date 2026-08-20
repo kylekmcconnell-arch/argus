@@ -1153,7 +1153,7 @@ describe("private person report evidence boundary", () => {
 });
 
 describe("decision-safe person report presentation", () => {
-  it("keeps verified project-token fundamentals above an incomplete decision state", () => {
+  it("keeps verified project-token fundamentals available after an incomplete decision summary", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
       ...base,
@@ -1385,6 +1385,8 @@ describe("decision-safe person report presentation", () => {
     const axisName = Object.keys(governing.axes)[0]!;
     const dossier = {
       ...base,
+      axisCitationVersion: 1 as const,
+      axisEvidenceCatalog: [],
       report: {
         ...base.report,
         role_reports: base.report.role_reports.map((role) => role.role === governing.role ? {
@@ -1492,7 +1494,7 @@ describe("decision-safe person report presentation", () => {
         operation: "project-diligence",
         section: "governing-axis",
         title: "Verified operating-team source",
-        contentHash: "b".repeat(64),
+        contentHash: "a".repeat(64),
         eligibleAxes: [originalAxisName],
         verification: "verified" as const,
         scope: "direct_subject" as const,
