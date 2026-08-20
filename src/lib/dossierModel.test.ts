@@ -117,6 +117,34 @@ describe("dossier model", () => {
     expect(coverage.heading).toBe("3 leads. 1 check still open.");
   });
 
+  it("treats checked-empty as completed coverage and uses the canonical question ledger", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [],
+      checkRuns: [
+        { checkId: "bounded-search", label: "Bounded search", status: "checked-empty", note: "No record in this source" },
+        { checkId: "retryable-source", label: "Retryable source", status: "unavailable", note: "Provider timed out" },
+      ],
+      intelligence: {
+        questions: [
+          { id: "q-resolved", state: "resolved", prompt: "Resolved question" },
+          { id: "q-open", state: "unavailable", prompt: "Retry the unavailable source" },
+        ],
+        signals: [
+          { kind: "coverage_gap", finding: "Legacy duplicate question" },
+        ],
+      },
+      basicFactLeads: [],
+      providerFailures: [],
+    });
+    const coverage = dossier.beats.find((beat) => beat.id === "coverage")!;
+    expect(coverage.heading).toBe("0 leads. 1 check still open.");
+    expect(JSON.stringify(coverage)).not.toContain("No record in this source");
+    expect(dossier.coverage.questionsAnswered).toBe(1);
+    expect(dossier.coverage.questionsTotal).toBe(2);
+    expect(dossier.openQuestions).toEqual(["Retry the unavailable source"]);
+  });
+
   it("does not print unbound aggregator funding as a raised figure or led-by", () => {
     // Display name is not a bind key. A DeFiLlama /protocol/{name} slug is the
     // same namesake collision as Dynex Capital on the SEC filings: it must not

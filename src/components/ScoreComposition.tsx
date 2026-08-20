@@ -180,7 +180,7 @@ export function ScoreComposition({ rows, totalScore, capNote, challengeAnchor = 
 }) {
   if (rows.length === 0) return null;
   return (
-    <section className="panel mt-4 overflow-hidden" aria-label={heading}>
+    <section id="scorecard" className="panel mt-4 scroll-mt-28 overflow-hidden" aria-label={heading}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 pb-1 pt-3.5">
         <h2 className="eyebrow">{heading}</h2>
         {summary !== null && (

@@ -17,7 +17,7 @@ import { canonicalOfficialWebsite, isStrictFundScaleArtifact } from "../src/lib/
 import { isOrganizationAccount } from "../src/lib/investorSubject";
 import { portfolioRelationshipBinding } from "../src/lib/portfolioRelationshipBinding";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
-import { canonicalizeCoreTeamRecords } from "../src/lib/teamRelationships";
+import { canonicalizeTeamRecords, isCoreTeamRecord } from "../src/lib/teamRelationships";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
@@ -1770,13 +1770,14 @@ export function deriveProjectStrengthBands(
   const factText = (facts: readonly Record<string, unknown>[]): string => facts
     .map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`)
     .join(" ");
-  const team = canonicalizeCoreTeamRecords(records(packet.team).filter((member) =>
+  const relationshipTeam = canonicalizeTeamRecords(records(packet.team).filter((member) =>
     member.artifact_verified === true && member.evidence_origin !== "model_lead")
     .map((member) => ({
       ...member,
       name: String(member.name ?? ""),
       role: String(member.role ?? ""),
     })));
+  const team = relationshipTeam.filter(isCoreTeamRecord);
   const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
   const leaderNames = new Set(leaders.map((member) => String(member.name ?? "").trim().toLowerCase()).filter(Boolean));
   const profile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile)
@@ -1861,7 +1862,7 @@ export function deriveProjectStrengthBands(
   // can establish current operation without X, while an undated historical
   // usage claim remains traction evidence and cannot manufacture liveness.
   const currentActivity = currentSocialActivity || freshProductPress.length > 0;
-  const advisorTeam = team.filter((member) => {
+  const advisorTeam = relationshipTeam.filter((member) => {
     const role = String(member.role ?? "");
     return PROJECT_BACKING_TEAM_ROLE.test(role) && !PROJECT_NON_BACKING_TEAM_ROLE.test(role);
   });
@@ -2747,6 +2748,7 @@ const PROJECT_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   traction: ["P5_traction_and_liveness"],
   legal_regulatory_event: ["P6_transparency_integrity"],
   security_incident: ["P2_product_substance", "P3_token_conduct"],
+  public_security: ["P3_token_conduct", "P6_transparency_integrity"],
 };
 
 const FOUNDER_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {

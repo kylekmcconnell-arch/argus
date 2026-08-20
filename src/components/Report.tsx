@@ -8,7 +8,6 @@ import {
   Buildings,
   CheckCircle,
   Cube,
-  Database,
   DotsThree,
   FileText,
   Fingerprint,
@@ -54,8 +53,6 @@ import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
 import { ScoreComposition } from "./ScoreComposition";
-import { DimensionChapters } from "./DimensionChapters";
-import { personDimensionChapters } from "../lib/dimensionChapters";
 import { DossierReport } from "./DossierReport";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
@@ -429,25 +426,6 @@ function sourceProviderLabel(provider: string): string {
   return plain ? plain.replace(/^./, (letter) => letter.toUpperCase()) : "Source";
 }
 
-function evidenceStrength({
-  score,
-  weight,
-  supportCount,
-  counterCount = 0,
-  questionCount = 0,
-}: {
-  score: number;
-  weight: number;
-  supportCount: number;
-  counterCount?: number;
-  questionCount?: number;
-}): "Strong support" | "Some support" | "Limited support" {
-  const ratio = weight > 0 ? score / weight : 0;
-  if (supportCount >= 3 && ratio >= 0.72 && counterCount === 0 && questionCount === 0) return "Strong support";
-  if (supportCount >= 2 && ratio >= 0.48 && counterCount <= 1) return "Some support";
-  return "Limited support";
-}
-
 function questionMeta(count: number): string {
   return count > 0 ? ` · ${count} ${count === 1 ? "question" : "questions"} to verify` : "";
 }
@@ -492,12 +470,16 @@ function AxisBar({
   const supportCount = evidenceRefs?.length ?? 0;
   const counterCount = counterEvidenceRefs?.length ?? 0;
   const questionCount = gaps?.length ?? 0;
-  const strength = evidenceStrength({ score, weight, supportCount, counterCount, questionCount });
+  const coverageLabel = supportCount > 0
+    ? `${supportCount} cited ${supportCount === 1 ? "source" : "sources"}${questionCount > 0 ? ` · ${questionCount} open` : ""}`
+    : questionCount > 0
+      ? `${questionCount} open ${questionCount === 1 ? "question" : "questions"}`
+      : "No cited source";
   return (
     <div className="py-2">
       <div className="flex items-center justify-between gap-3">
         <span className="text-[12.5px] text-ink-dim">{diligenceAreaLabel(axis)}</span>
-        <span className="shrink-0 text-[11px] text-ink-faint">{strength}</span>
+        <span className="shrink-0 text-[11px] text-ink-faint">{coverageLabel}</span>
       </div>
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-line">
         <div
@@ -2244,13 +2226,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .slice(0, 5)
     .map((axis) => {
       const questionCount = Math.max(axis.gaps.length, axis.gapArtifacts.length);
-      const strength = evidenceStrength({
-        score: axis.score,
-        weight: axis.weight,
-        supportCount: axis.support.length,
-        counterCount: axis.counter.length,
-        questionCount,
-      });
       const posture = evidencePostureForAxisArtifacts(axis.support);
       const conciseRationale = plainLanguageSummary(axis.rationale);
       const firstSentence = conciseRationale.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() ?? conciseRationale;
@@ -2261,7 +2236,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         id: `support-${axis.axis}`,
         title: diligenceAreaLabel(axis.axis),
         detail: summary,
-        meta: `${strength} · ${posture.label} · ${axis.support.length} cited artifact${axis.support.length === 1 ? "" : "s"}`,
+        meta: `${posture.label} · ${axis.support.length} cited artifact${axis.support.length === 1 ? "" : "s"}${questionMeta(questionCount)}`,
         href: axisHref(axis.axis),
       };
     });
@@ -2336,9 +2311,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   // A solid or exceptional strength band is not a risk driver even when its
   // integer floor dips just under the 70 percent line.
   const bandTierFor = (axis: string): string | undefined => f.projectStrengthBands?.[axis]?.tier;
-  const ASSESSED_NULL_RISK_TITLES: Record<string, string> = {
-    P4_backing_and_partners: "No outside backers or partners are verified.",
-  };
   const AXIS_GAP_FALLBACK_TITLES: Record<string, string> = {
     P2_product_substance: "Independent verification of live product operation is still limited.",
     P5_traction_and_liveness: "Independent usage and adoption metrics are still limited.",
@@ -2349,23 +2321,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .filter((axis) => axis.weight > 0 && axis.score / axis.weight < 0.7)
     // A completed no-token assessment is neutral unless a token claim or
     // contradictory contract creates an actual conduct risk.
-    .filter((axis) => !(axis.axis === "P3_token_conduct" && bandTierFor(axis.axis) === "assessed_null" && axis.counter.length === 0))
+    .filter((axis) => !(
+      ["P3_token_conduct", "P4_backing_and_partners"].includes(axis.axis)
+      && bandTierFor(axis.axis) === "assessed_null"
+      && axis.counter.length === 0
+    ))
     .filter((axis) => !["solid", "exceptional"].includes(bandTierFor(axis.axis) ?? ""))
     .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
     .map((axis) => {
       const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
       const firstGap = plainLanguageSummary(axis.gaps[0] ?? "");
-      const title = bandTierFor(axis.axis) === "assessed_null"
-        ? (ASSESSED_NULL_RISK_TITLES[axis.axis] ?? `${diligenceAreaLabel(axis.axis)} was assessed with no positive record.`)
-        : firstGap && firstGap.length <= 140
-          ? sentence(firstGap)
-          : (AXIS_GAP_FALLBACK_TITLES[axis.axis]
-            ?? `Verified evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is thin.`);
+      const title = firstGap && firstGap.length <= 140
+        ? sentence(firstGap)
+        : (AXIS_GAP_FALLBACK_TITLES[axis.axis]
+          ?? `Verified evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is thin.`);
+      const posture = evidencePostureForAxisArtifacts(axis.support);
       return {
         id: `low-axis-${axis.axis}`,
         title,
         detail: plainLanguageSummary(axis.rationale),
-        provenance: `Limited source support${questionMeta(questions)}`,
+        provenance: `${posture.label}${questionMeta(questions)}`,
         href: axisHref(axis.axis),
       };
     });
@@ -2564,9 +2539,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     remainingPointsItems[0] ? `Top open item: ${remainingPointsItems[0].title}.` : "",
   ].filter(Boolean).join("\n");
   const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
-  const adverseVerdictNarrative = [...confidenceLimits, ...lowAxisDrivers]
+  const evidenceLimitNarrative = lowAxisDrivers
     .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
     .slice(0, 6);
+  // Weak or incomplete evidence is uncertainty, not misconduct. The concern
+  // lane contains only adverse findings, contradictions, caps, and pressures.
+  const adverseVerdictNarrative = confidenceLimits;
   // An unverified lead is not a finding: it never enters the findings ledger and
   // it never moves the score. What it does do is stop the risk section from
   // saying "no adverse findings" while the same page carries an accusation
@@ -2602,10 +2580,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       ...intelligenceBrief.supports.map((item) => item.title),
       ...axisSupportNarrative.map((item) => item.title),
     ],
-    concerns: [
-      ...confidenceLimitsBase,
-      ...lowAxisDrivers,
-    ].map((item) => item.title),
+    concerns: confidenceLimitsBase.map((item) => item.title),
     capReason: report.cap_applied
       ? `The score is limited because of: ${capLabel(report.cap_applied)}`
       : null,
@@ -3297,43 +3272,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         </section>
 
-        {/* the composition strip: the governing role's weighted dimensions as
-            readable rows — expand for the why, jump to the evidence, or
-            challenge the score */}
-        {presentation.primaryScore && governingAxes.length > 0 && (
-          <ScoreComposition
-            rows={governingAxes.map(([axis, a]) => ({
-              axis,
-              label: diligenceAreaLabel(axis),
-              score: a.score,
-              weight: a.weight,
-              rationale: a.rationale,
-              supportCount: a.evidenceRefs?.length,
-              counterCount: a.counterEvidenceRefs?.length,
-              questionCount: a.gaps?.length,
-              evidenceHref: f.projectStrengthBands ? `#dimension-${axis}` as const : undefined,
-            }))}
-            totalScore={report.governing_score}
-            capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
-            challengeAnchor={shareView ? null : "#ask-report"}
-          />
-        )}
-
-        <DossierReport payload={f as unknown as Record<string, unknown>} />
-        {f.projectStrengthBands && (
-          <DimensionChapters
-            chapters={personDimensionChapters(f.projectStrengthBands)}
-            checksHref="#scan-methodology"
-          />
-        )}
-
         <div className="sticky top-[69px] z-20 mt-5">
           <ReportCanvasSectionNav
             sticky={false}
             items={[
-              { href: "#dossier", label: "The file", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
               { href: "#decision-summary", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
-              ...(f.intelligence ? [{ href: "#decision-intelligence" as const, label: "Deep dive", icon: <MagnifyingGlassPlus aria-hidden="true" size={15} weight="bold" />, count: f.intelligence.signals.length }] : []),
+              ...(presentation.primaryScore && governingAxes.length > 0 ? [{ href: "#scorecard" as const, label: "Score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" /> }] : []),
+              ...(f.intelligence ? [{ href: "#decision-intelligence" as const, label: "Evidence read", icon: <MagnifyingGlassPlus aria-hidden="true" size={15} weight="bold" />, count: f.intelligence.signals.length }] : []),
               ...(f.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> }] : []),
               ...(showBasicFacts ? [{
                 href: "#basic-facts" as const,
@@ -3346,79 +3291,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
               { href: "#decision-basis", label: "Why this score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
               { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
-              ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Sources", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
-              { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
+              { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" /> },
               ...(diligenceChecks.length > 0 ? [{ href: "#scan-methodology" as const, label: "Checks", icon: <UserFocus aria-hidden="true" size={15} weight="bold" />, count: diligenceChecks.length }] : []),
+              { href: "#audit-trail", label: "Audit trail", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
             ]}
           />
         </div>
-
-        {prioritizeDecisionIntelligence && f.intelligence && (
-          <PointInTimeIntelligencePanel
-            snapshot={f.intelligence}
-            thesisEligible={presentation.final && !decisionFrameworkUnavailable}
-            governingVerdict={presentedVerdict}
-            selectedLensId={decisionLensId}
-            onSelectedLensChange={setDecisionLensId}
-          />
-        )}
-
-        {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
-
-        {showBasicFacts && (
-          <div className="mt-5">
-            <BasicFactsPanel
-              facts={basicFacts}
-              leads={basicFactLeads}
-              fillRequired={fillDecisionFacts}
-              audience={basicFactsAudience}
-              questionLedger={f.basicFactQuestionLedger}
-              fundingRounds={fundingEvidence.rounds}
-              supportingAffiliationCount={evidence.ventures.filter((venture) =>
-                venture.evidence_origin !== "model_lead" && venture.artifact_verified === true).length}
-            />
-          </div>
-        )}
-
-        {f.operatorLaunches && (
-          <div className="mt-3">
-            <OperatorTrackRecord
-              history={f.operatorLaunches}
-              operatorHandle={operatorHandleForDossier}
-              creatorWallet={f.operatorLaunches.creatorWallet}
-            />
-          </div>
-        )}
-
-        {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
-          <div className="mt-3">
-            <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
-          </div>
-        )}
-
-        <DiligenceEvidenceLedgers
-          className="mt-3"
-          company={f.companyEnrichment}
-          officialWebsite={f.website}
-          protocolFunding={f.protocolFunding}
-          protocolTvl={f.protocolTvl}
-          canonicalGeckoId={f.projectToken?.coingeckoId}
-        />
-
-        {f.projectToken && (
-          <div className="py-5">
-            <ProjectTokenCard
-              token={f.projectToken}
-              chains={f.projectToken.deployedChains}
-              showCurrentIntelligence={showCurrentIntelligence}
-              refreshCurrentMarket={currentIntelligenceEnabled}
-              onAudit={onAudit}
-              onLoadCurrentIntelligence={versionContext
-                ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
-                : undefined}
-            />
-          </div>
-        )}
 
         <div id="decision-summary" className="grid scroll-mt-28 gap-4 py-5">
           {partialAxisAssessment && (
@@ -3538,6 +3416,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       : noCleanScreenCopy
                   : "No confirmed positive finding is recorded in this report."}
             />
+            {evidenceLimitNarrative.length > 0 && (
+              <ReportCanvasNarrativeSection
+                id="evidence-limits"
+                title="What remains unverified"
+                description="Evidence gaps and collection limits that reduce confidence without alleging misconduct."
+                tone="caution"
+                items={evidenceLimitNarrative}
+                emptyCopy=""
+              />
+            )}
             {intelligenceContextNarrative.length > 0 && (
               <ReportCanvasNarrativeSection
                 id="important-context"
@@ -3555,6 +3443,84 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             )}
           </div>
         </div>
+
+        {/* the composition strip: the governing role's weighted dimensions as
+            readable rows — expand for the why, jump to the evidence, or
+            challenge the score */}
+        {presentation.primaryScore && governingAxes.length > 0 && (
+          <ScoreComposition
+            rows={governingAxes.map(([axis, a]) => ({
+              axis,
+              label: diligenceAreaLabel(axis),
+              score: a.score,
+              weight: a.weight,
+              rationale: a.rationale,
+              supportCount: a.evidenceRefs?.length,
+              counterCount: a.counterEvidenceRefs?.length,
+              questionCount: a.gaps?.length,
+              evidenceHref: axisHref(axis),
+            }))}
+            totalScore={report.governing_score}
+            capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
+            challengeAnchor={shareView ? null : "#ask-report"}
+          />
+        )}
+
+        {prioritizeDecisionIntelligence && f.intelligence && (
+          <PointInTimeIntelligencePanel
+            snapshot={f.intelligence}
+            thesisEligible={presentation.final && !decisionFrameworkUnavailable}
+            governingVerdict={presentedVerdict}
+            selectedLensId={decisionLensId}
+            onSelectedLensChange={setDecisionLensId}
+          />
+        )}
+
+        {showBasicFacts && (
+          <div className="mt-5">
+            <BasicFactsPanel
+              facts={basicFacts}
+              leads={basicFactLeads}
+              fillRequired={fillDecisionFacts}
+              audience={basicFactsAudience}
+              questionLedger={f.basicFactQuestionLedger}
+              fundingRounds={fundingEvidence.rounds}
+              supportingAffiliationCount={evidence.ventures.filter((venture) =>
+                venture.evidence_origin !== "model_lead" && venture.artifact_verified === true).length}
+            />
+          </div>
+        )}
+
+        {f.operatorLaunches && (
+          <div className="mt-3">
+            <OperatorTrackRecord
+              history={f.operatorLaunches}
+              operatorHandle={operatorHandleForDossier}
+              creatorWallet={f.operatorLaunches.creatorWallet}
+            />
+          </div>
+        )}
+
+        {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
+          <div className="mt-3">
+            <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
+          </div>
+        )}
+
+        {f.projectToken && (
+          <div className="py-5">
+            <ProjectTokenCard
+              token={f.projectToken}
+              chains={f.projectToken.deployedChains}
+              showCurrentIntelligence={showCurrentIntelligence}
+              refreshCurrentMarket={currentIntelligenceEnabled}
+              onAudit={onAudit}
+              onLoadCurrentIntelligence={versionContext
+                ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
+                : undefined}
+            />
+          </div>
+        )}
 
         {f.intelligence && !prioritizeDecisionIntelligence && (
           <PointInTimeIntelligencePanel
@@ -3620,6 +3586,29 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             />
           </div>
         )}
+
+        <details id="audit-trail" className="panel mt-6 scroll-mt-28 overflow-hidden" open={printExpanded || undefined}>
+          <summary className="cursor-pointer list-none px-5 py-4 [&::-webkit-details-marker]:hidden">
+            <span className="eyebrow text-signal-lift">Detailed case file and audit trail</span>
+            <span className="mt-1 block text-[12.5px] leading-relaxed text-ink-dim">
+              Source receipts, collection records, research plan, and the complete dossier. These explain the assessment; they do not create a second verdict.
+            </span>
+          </summary>
+          <div className="space-y-4 border-t border-line/70 p-4">
+        <DossierReport payload={f as unknown as Record<string, unknown>} />
+        {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
+
+        <DiligenceEvidenceLedgers
+          className="mt-3"
+          company={f.companyEnrichment}
+          officialWebsite={f.website}
+          protocolFunding={f.protocolFunding}
+          protocolTvl={f.protocolTvl}
+          canonicalGeckoId={f.projectToken?.coingeckoId}
+        />
+
+          </div>
+        </details>
 
         <div id="identity-evidence" className="scroll-mt-28">
         {/* Supplemental live checks are deliberately separated from the frozen

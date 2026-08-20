@@ -546,7 +546,7 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
   const team = collectTeam(payload);
   const claimed = new Set(BEAT_CHECKS.flatMap((b) => b.checks));
   const leftover = checks.filter((c) => !claimed.has(str(c.checkId)));
-  const openCount = leftover.filter((c) => ["unknown", "unavailable", "checked-empty"].includes(str(c.status))).length;
+  const openCount = leftover.filter((c) => ["unknown", "unavailable"].includes(str(c.status))).length;
   const headingCtx = {
     subject,
     team,
@@ -577,7 +577,7 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     heading: headingFor("coverage", coverageFigures, headingCtx),
     figures: [
       ...coverageFigures,
-      ...leftover.filter((c) => str(c.status) !== "confirmed").map((c): DossierFigure => ({
+      ...leftover.filter((c) => ["unknown", "unavailable"].includes(str(c.status))).map((c): DossierFigure => ({
         label: str(c.label),
         value: str(c.note) || str(c.status) || EMPTY_VALUE,
         provenance: provenanceForCheckStatus(str(c.status) as never) ?? { tier: "unestablished" },
@@ -611,6 +611,8 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     counts.set(state, (counts.get(state) ?? 0) + 1);
   }
   const ledger = arr<{ status?: unknown }>(payload.basicFactQuestionLedger);
+  const intelligenceQuestions = arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown>)?.questions);
+  const openQuestionStates = new Set(["reported", "partial", "unresolved", "unavailable", "not_collected"]);
   const domain = (payload.domainRegistration ?? {}) as Record<string, unknown>;
   const authenticity = (payload.profileAuthenticity ?? {}) as Record<string, unknown>;
 
@@ -637,8 +639,10 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     strengthBands,
     coverage: {
       checks: [...counts.entries()].map(([state, count]) => ({ state, count })).sort((a, b) => b.count - a.count),
-      questionsAnswered: ledger.filter((q) => str(q.status) === "answered").length,
-      questionsTotal: ledger.length,
+      questionsAnswered: intelligenceQuestions.length
+        ? intelligenceQuestions.filter((q) => !openQuestionStates.has(str(q.state))).length
+        : ledger.filter((q) => str(q.status) === "answered").length,
+      questionsTotal: intelligenceQuestions.length || ledger.length,
       leads: leads.length,
       failedProviders: arr<{ provider?: unknown }>(payload.providerFailures).map((f) => str(f.provider)).filter(Boolean),
     },
@@ -683,10 +687,15 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
         domain: str(m.domain) || "other",
       }))
       .filter((m) => m.label && m.value),
-    openQuestions: arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown>)?.signals)
-      .filter((sig) => str(sig.kind) === "coverage_gap")
-      .map((sig) => str(sig.finding))
-      .filter(Boolean),
+    openQuestions: intelligenceQuestions.length
+      ? intelligenceQuestions
+        .filter((question) => openQuestionStates.has(str(question.state)))
+        .map((question) => str(question.prompt))
+        .filter(Boolean)
+      : arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown>)?.signals)
+        .filter((sig) => str(sig.kind) === "coverage_gap")
+        .map((sig) => str(sig.finding))
+        .filter(Boolean),
     cost: num((payload.cost as Record<string, unknown>)?.usd) === null ? null : {
       usd: num((payload.cost as Record<string, unknown>).usd),
       estimated: (payload.cost as Record<string, unknown>).estimated === true,

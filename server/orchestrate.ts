@@ -132,11 +132,23 @@ export function providerFailureLinesForEvidence(
     || profile.identity_binding
     || verifiedOfficialProjectIdentity(evidence),
   );
-  if (!identityEstablishedElsewhere) return failures;
-  return failures.filter((line) => !(
-    line.provider.toLowerCase() === "x-public"
-    && line.op.toLowerCase() === "account-state"
-  ));
+  const subjectHandle = profile.handle.replace(/^@/, "").trim().toLowerCase();
+  return failures.filter((line) => {
+    if (
+      line.provider.toLowerCase() !== "x-public"
+      || line.op.toLowerCase() !== "account-state"
+    ) return true;
+    // Cost rows include the probed handle before the separator. A failure for a
+    // team candidate or associate is collection health for that related entity,
+    // never a statement that the audited subject has no X record.
+    const probedHandle = (line.meta ?? "")
+      .split("·", 1)[0]
+      .replace(/^@/, "")
+      .trim()
+      .toLowerCase();
+    if (probedHandle && subjectHandle && probedHandle !== subjectHandle) return false;
+    return !identityEstablishedElsewhere;
+  });
 }
 
 function cleanVentureName(value: string): string {
@@ -374,8 +386,17 @@ export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): 
   for (const member of members) {
     const handle = member.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
     const name = canonicalTeamName(member.name);
-    const existingIndex = (handle ? indexByHandle.get(handle) : undefined)
-      ?? (name ? indexByName.get(name) : undefined);
+    const handleIndex = handle ? indexByHandle.get(handle) : undefined;
+    const nameIndex = name ? indexByName.get(name) : undefined;
+    const nameMatch = nameIndex === undefined ? undefined : output[nameIndex];
+    const nameMatchHandle = nameMatch?.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
+    // A name may suggest a duplicate only while it does not contradict a stable
+    // handle. Two different handles are two entities until an explicit alias
+    // bridge proves otherwise.
+    const existingIndex = handleIndex
+      ?? (nameIndex !== undefined && (!handle || !nameMatchHandle || handle === nameMatchHandle)
+        ? nameIndex
+        : undefined);
     if (existingIndex === undefined) {
       output.push({ ...member });
       if (handle) indexByHandle.set(handle, output.length - 1);
@@ -393,6 +414,9 @@ export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): 
     // from a different lane (e.g. a team page) that never carried the marker.
     if (secondary.handleProvenance === "subject_first_party" && merged.handleProvenance !== "subject_first_party") {
       merged.handleProvenance = "subject_first_party";
+    }
+    if (secondary.relationshipProvenance === "subject_official" && merged.relationshipProvenance !== "subject_official") {
+      merged.relationshipProvenance = "subject_official";
     }
     if (!merged.handle && secondary.handle) merged.handle = secondary.handle;
     if (!merged.linkedin && secondary.linkedin) merged.linkedin = secondary.linkedin;
@@ -415,6 +439,17 @@ export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): 
     if (mergedName) indexByName.set(mergedName, existingIndex);
   }
   return output;
+}
+
+/**
+ * Finalize the project relationship roster in place. Keeping the array identity
+ * stable prevents collectors, graph materialization, scoring, and the dossier
+ * from observing different snapshots of the same people.
+ */
+export function finalizeProjectRelationshipRoster(evidence: CollectedEvidence): void {
+  const finalized = canonicalizeTeamRecords(evidence.webTeam ?? []);
+  if (!evidence.webTeam) evidence.webTeam = [];
+  evidence.webTeam.splice(0, evidence.webTeam.length, ...finalized);
 }
 
 // Adapters that require a key to do anything meaningful (keyless DEX/CG no-op
@@ -1346,7 +1381,11 @@ export async function coldIntake(
     if (!h && !n) continue;
     // Never list the audited subject handle as founder (or any role) of itself.
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
-    const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
+    const handleMatch = h ? byHandle.get(h) : undefined;
+    const nameMatch = n ? byName.get(n) : undefined;
+    const nameMatchHandle = norm(nameMatch?.handle);
+    const existing = handleMatch
+      ?? (nameMatch && (!h || !nameMatchHandle || h === nameMatchHandle) ? nameMatch : null);
     if (existing) {
       if (!existing.handle && t.handle) {
         existing.handle = t.handle;
@@ -1396,6 +1435,12 @@ export async function coldIntake(
         && existing.handleProvenance !== "subject_first_party"
       ) {
         existing.handleProvenance = "subject_first_party";
+      }
+      if (
+        t.relationshipProvenance === "subject_official"
+        && existing.relationshipProvenance !== "subject_official"
+      ) {
+        existing.relationshipProvenance = "subject_official";
       }
       continue;
     }
@@ -1487,12 +1532,8 @@ export async function coldIntake(
     }
   }
 
-  // Freeze one canonical relationship classification before any later scorer
-  // or renderer consumes the roster.
-  ctx.evidence.webTeam = canonicalizeTeamRecords(webTeam).map((member) => ({
-    ...member,
-    relationship: classifyProjectRelationship(member),
-  }));
+  // Do not replace the roster here. Later identity safety, enrichment, and
+  // deduplication steps still operate on this same array reference.
 
   // PRIOR LAUNCHES: a launchpad token's risk lives in the operator's history,
   // not its (renounced, LP-locked) contract. Same-wallet history plus the
@@ -1557,34 +1598,10 @@ export async function coldIntake(
     }
   }
 
-  // Does the ACCOUNT ITSELF vouch for this team, or was it only matched by NAME?
-  // A real project/founder account ties to its team through its OWN evidence: its
-  // handle is among them, it links its site in bio (domain), or its own posts name
-  // the people (people/postRoleTeam come from the account's content). A KOL whose
-  // display name merely COLLIDES with a project (e.g. @KaminoCrypto vs the Kamino
-  // protocol) has none of these — so a by-name team lookup returns that project's
-  // founders, and attaching them here is a false identity resolution (the exact
-  // name collision the contradictions section catches). Drop it at the source
-  // rather than present a stranger's team as this account's identity.
-  const subj = norm(ctx.handle);
-  const accountVouchesTeam = !!domain
-    || postRoleTeam.length > 0
-    || operatorTeam.length > 0
-    || amplifiedTeam.length > 0
-    || reverseBioTwitter.team.length > 0
-    || webTeam.some((t) => t.artifact_verified === true && norm(t.handle) === subj);
-  if (webTeam.length && !accountVouchesTeam) {
-    ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
-    for (const member of webTeam) {
-      // Reverse-bio / follow / amplify first-party handles must survive even
-      // when the official account never named anyone and no domain is bound.
-      if (member.handleProvenance === "subject_first_party") continue;
-      member.evidence_origin = "model_lead";
-      member.artifact_verified = false;
-      member.identity_link_evidence_origin = "model_lead";
-      member.projects_evidence_origin = "model_lead";
-    }
-  }
+  // Authority is adjudicated per relationship edge above. A project-side team
+  // page/post/follow can establish only the people it names; a claimant-side bio
+  // can establish only that claimant's statement. There is deliberately no
+  // roster-wide "account vouches" switch.
 
   // Actively resolve identities for members still name-only (the team page names
   // them but links nothing): one batched Grok pass finds each person's X handle
@@ -1614,6 +1631,7 @@ export async function coldIntake(
   if (coalescedTeam.length !== webTeam.length) {
     webTeam.splice(0, webTeam.length, ...coalescedTeam);
   }
+  finalizeProjectRelationshipRoster(ctx.evidence);
   // A face, follower count, and account status only for a member whose handle
   // the subject account itself bound (its own posts, following, or
   // amplification edge) — never a team-page or search-discovered handle. See
@@ -1649,7 +1667,7 @@ export async function coldIntake(
     // Only directly fetched first-party team pages and deterministic role scans
     // can raise identity confidence. Grok web/X results remain useful leads in
     // the roster, but cannot confirm the very identity it was asked to discover.
-    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam, ...reverseBioTwitter.team, ...operatorTeam, ...amplifiedTeam].filter((candidate) =>
+    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam, ...operatorTeam, ...amplifiedTeam].filter((candidate) =>
       webTeam.some((member) =>
         (!!candidate.handle && norm(candidate.handle) === norm(member.handle)) ||
         (!!candidate.name && norm(candidate.name) === norm(member.name)),
@@ -1663,7 +1681,7 @@ export async function coldIntake(
       ctx.recordCheck?.({
         id: "affiliations-associates",
         status: "confirmed",
-        note: `${backedTeam.length} team identit${backedTeam.length === 1 ? "y" : "ies"} backed by a first-party team page or deterministic post scan`,
+        note: `${backedTeam.length} team identit${backedTeam.length === 1 ? "y" : "ies"} backed by project-side team or account evidence`,
         provider: "team-page/post-scan",
         sourceCount: backedTeam.length,
       });
@@ -1681,14 +1699,14 @@ export async function coldIntake(
         ctx.recordCheck?.({
           id: "identity-resolution",
           status: "confirmed",
-          note: `project identity resolved through ${backedTeam.length} independently collected team record${backedTeam.length === 1 ? "" : "s"}`,
+          note: `project identity resolved through ${backedTeam.length} project-side team record${backedTeam.length === 1 ? "" : "s"}`,
           provider: "team-page/post-scan",
           sourceCount: backedTeam.length,
         });
       }
       if (target && (rank[target] ?? 0) > (rank[cur ?? "Unverified"] ?? 0)) {
         ctx.evidence.profile.identity_confidence = target as typeof cur;
-        ctx.emit({ phase: "P1 · Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through independently fetched team evidence${leaderWithLinkedin ? " (a first-party team page links its leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-page / post scan", tone: "good" });
+        ctx.emit({ phase: "P1 · Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through project-side team evidence${leaderWithLinkedin ? " (a first-party team page links its leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-page / post scan", tone: "good" });
       }
     }
   } else if (domain) {
@@ -4095,6 +4113,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // the report claiming no known team while verified founder facts sat in the
   // ledger.
   hydrateProjectTeamFromVerifiedFacts(evidence);
+  finalizeProjectRelationshipRoster(evidence);
   const revisedResearchPlan = buildResearchPlan(evidence, researchPlan.intent);
   researchPlan = { ...revisedResearchPlan, createdAt: researchPlan.createdAt };
   evidence.researchPlan = researchPlan;
@@ -4568,6 +4587,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // server-collected report versions to carry verdict text or govern a cap.
   // The provisional dossier is used only to materialize today's graph; its
   // score/verdict is deliberately omitted from the contribution.
+  // This is the last legal relationship-roster mutation boundary. Freeze the
+  // one canonical roster before graph, outcome, scoring, and dossier consumers.
+  finalizeProjectRelationshipRoster(evidence);
   const trustGraphStartedAt = startRuntimeStage("trust-graph");
   if (graphScreenOverBudget()) {
     // Never-waive gate, but graph reconciliation (which scales with connectivity)
@@ -4656,6 +4678,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       evidence: p.evidence,
       otherProjects: p.projects_evidence_origin === "model_lead" ? undefined : p.projects,
       provider: p.provider,
+      kind: p.kind,
+      relationship: p.relationship,
+      relationshipProvenance: p.relationshipProvenance,
+      handleProvenance: p.handleProvenance,
       evidence_origin: p.evidence_origin,
       artifact_verified: p.artifact_verified,
     })),

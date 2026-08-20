@@ -1389,17 +1389,21 @@ describe("decision-safe person report presentation", () => {
     expect(dossier.report.composite_verdict).not.toBe("PASS");
     const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
     const counterweight = container.querySelector('section[aria-labelledby="confidence-limits-title"]')?.textContent ?? "";
-    expect(verdictDrivers).toMatch(/score is limited|is thin|assessed with no positive record|No token could be tied|No outside backers/i);
-    // The risk section leads with findings, never with our own process status.
+    // A concern must be an adverse finding, contradiction, pressure, or cap.
+    // Weak evidence and neutral absence belong to separate semantics.
+    expect(verdictDrivers).not.toMatch(/No outside backers|Verified evidence on .* is thin|transparency.*thin/i);
     expect(verdictDrivers).not.toContain("needs more verification");
     expect(verdictDrivers).not.toContain("Treat the score and verdict as provisional");
     expect(counterweight).toContain("What looks credible");
+    const evidenceLimits = container.querySelector('section[aria-labelledby="evidence-limits-title"]')?.textContent ?? "";
+    expect(evidenceLimits).toMatch(/unverified|limited|thin/i);
   });
 
-  it("titles assessed-null axes with their deterministic finding and keeps coverage out of the risk section", () => {
+  it("keeps a completed no-backer result neutral instead of calling it a concern", () => {
     const base = buildReport(SUBJECTS[0]);
     const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
-    const axisName = Object.keys(governing.axes)[0]!;
+    const axisName = "P4_backing_and_partners";
+    expect(governing.axes[axisName]).toBeDefined();
     const artifactId = `art_v1_${"c".repeat(64)}`;
     const dossier = {
       ...base,
@@ -1442,7 +1446,7 @@ describe("decision-safe person report presentation", () => {
     });
 
     const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
-    expect(verdictDrivers).toMatch(/assessed with no positive record|No token could be tied|No outside backers/);
+    expect(verdictDrivers).not.toMatch(/assessed with no positive record|No outside backers/);
     expect(verdictDrivers).not.toContain("needs more verification");
   });
 
@@ -2803,4 +2807,23 @@ describe("legacy person report coverage truth", () => {
     expect(container.querySelector("#verification-next")?.textContent)
       .not.toContain("Promoted-token performance");
   });
+  it("presents one decision story before score details and the audit appendix", () => {
+    const dossier = buildReport(SUBJECTS[0]);
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const ordered = ["report-overview", "decision-summary", "scorecard", "decision-basis", "audit-trail"]
+      .map((id) => container.querySelector(`#${id}`));
+    expect(ordered.every(Boolean)).toBe(true);
+    for (let index = 0; index < ordered.length - 1; index += 1) {
+      expect((ordered[index]!.compareDocumentPosition(ordered[index + 1]!) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0)
+        .toBe(true);
+    }
+    expect(container.querySelectorAll("#scorecard")).toHaveLength(1);
+    expect(container.querySelectorAll("#dossier")).toHaveLength(1);
+    expect((container.querySelector("#audit-trail") as HTMLDetailsElement).open).toBe(false);
+    expect(container.querySelector('a[href="#composition"]')).toBeNull();
+  });
+
 });

@@ -376,8 +376,8 @@ export function ProvidersPage() {
     <div className="mx-auto max-w-5xl px-6 py-10">
       <h1 className="display-sm text-[24px] text-ink">Data sources and check status</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-        See which outside sources ARGUS can use and whether recent checks worked. “Connected” means access is set up.
-        “Healthy” means a recent check succeeded. Secret keys are never shown.
+        See which outside sources ARGUS can use and what their latest saved request did. “Connected” means access is set up.
+        A successful latest request is not continuous uptime and does not mean that source contributed evidence to every report. Secret keys are never shown.
       </p>
       {data && (
         <div className="panel mt-5 grid grid-cols-2 gap-px overflow-hidden bg-line/60 sm:grid-cols-4" aria-label="Provider status summary">
@@ -390,7 +390,7 @@ export function ProvidersPage() {
             <span className="stat-value">{configured}/{providers.length}</span>
           </div>
           <div className="stat-tile rounded-none">
-            <span className="stat-label">recently healthy</span>
+            <span className="stat-label">latest request succeeded</span>
             <span className="stat-value text-pass">{usage ? healthy : "…"}</span>
           </div>
           <div className="stat-tile rounded-none">
@@ -407,6 +407,14 @@ export function ProvidersPage() {
           <p className="mt-1 text-[12.5px] text-ink-dim">{dataError} This is a status failure, not confirmation that sources are unconfigured.</p>
         </div>
       )}
+      <section className="panel mt-4 px-4 py-3" aria-labelledby="source-status-guide">
+        <h2 id="source-status-guide" className="text-[13px] font-medium text-ink">How to read source status</h2>
+        <dl className="mt-2 grid gap-2 text-[11.5px] leading-relaxed text-ink-dim sm:grid-cols-3">
+          <div><dt className="font-medium text-ink">Connected</dt><dd>A credential or keyless route is available.</dd></div>
+          <div><dt className="font-medium text-ink">Latest request</dt><dd>The newest request visible in saved activity; this is not a live uptime monitor.</dd></div>
+          <div><dt className="font-medium text-ink">Report evidence</dt><dd>A source counts only when a specific report binds its artifact to the audited subject and claim.</dd></div>
+        </dl>
+      </section>
       {missing.length > 0 && (
         <div className="tint-caution mt-4 rounded-lg border px-3 py-2 text-[12.5px]">
           {missing.length} required source{missing.length === 1 ? "" : "s"} not connected: {missing.map((m) => m.label).join(", ")}.

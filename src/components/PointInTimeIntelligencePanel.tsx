@@ -538,12 +538,12 @@ export function PointInTimeIntelligencePanel({
     <section id="decision-intelligence" className="report-section mt-6 scroll-mt-28" aria-labelledby={`${panelId}-title`}>
       <header className="report-section-heading">
         <div>
-          <p className="eyebrow text-signal-lift">Decision intelligence</p>
+          <p className="eyebrow text-signal-lift">Decision brief</p>
           <h2 id={`${panelId}-title`} className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">
-            {snapshot.rulesetVersion === "argus-entity-point-in-time-v1" ? "Entity decision map" : "Point in time decision map"}
+            {snapshot.rulesetVersion === "argus-entity-point-in-time-v1" ? "What the evidence says about this entity" : "What the evidence says now"}
           </h2>
           <p className="story-chapter-description mt-2 max-w-3xl leading-relaxed text-ink-dim">
-            A frozen, score-neutral map for <span className="font-medium text-ink">{snapshot.subject.label}</span> that separates verified evidence, reported context, conflicts, and unknowns. Changing the lens reorders the same complete signal set and never overrides the governing report.
+            A saved evidence read for <span className="font-medium text-ink">{snapshot.subject.label}</span> that separates proof, pressure, context, and unknowns. Changing the lens changes emphasis only; the report result stays the same.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
@@ -558,13 +558,13 @@ export function PointInTimeIntelligencePanel({
         <div className="border-b border-line/70 px-4 py-3 sm:px-5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="chip tint-neutral">Point in time</span>
-            <span className="chip tint-pass">Score-neutral / saved-snapshot derivation</span>
+            <span className="chip tint-pass">Built from this saved report</span>
             <span className="mono ml-auto text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">
-              Schema v{snapshot.schemaVersion} · {snapshot.rulesetVersion}
+              Saved evidence only
             </span>
           </div>
           <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-            This panel reads the saved snapshot only. It does not change the ARGUS score and it makes no provider call when rendered.
+            This section reads only the evidence saved with this report. Opening it does not rerun sources or change the score.
           </p>
         </div>
 
@@ -619,13 +619,13 @@ export function PointInTimeIntelligencePanel({
             <section className="panel-inset p-4" aria-label="Capture window">
               <p className="eyebrow">Dated source window</p>
               <p className="mono mt-2 text-[12px] leading-relaxed text-ink">{captureSummary}</p>
-              <dl className="mt-3 grid grid-cols-4 gap-2 text-center">
+              <dl className="mt-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
                 <div>
                   <dt className="text-[10.5px] text-ink-faint">Artifacts</dt>
                   <dd data-stat="unique-artifacts" className="mono mt-1 text-[14px] font-semibold text-ink">{uniqueArtifactCount}</dd>
                 </div>
                 <div>
-                  <dt className="text-[10.5px] text-ink-faint">Lineage origins</dt>
+                  <dt className="text-[10.5px] text-ink-faint">Source systems</dt>
                   <dd data-stat="lineage-origins" className="mono mt-1 text-[14px] font-semibold text-ink">{lineageOriginCount}</dd>
                 </div>
                 <div>
@@ -687,14 +687,57 @@ export function PointInTimeIntelligencePanel({
             </section>
           </div>
 
+          <section className="mt-5" aria-labelledby={`${panelId}-cases-title`}>
+            <div>
+              <p className="eyebrow text-signal-lift">Conditional cases</p>
+              <h3 id={`${panelId}-cases-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
+                What should trigger another evidence review
+              </h3>
+            </div>
+            <div className="mt-3 grid gap-3 lg:grid-cols-3">
+              <article className="panel-inset p-3.5 tint-signal">
+                <p className="eyebrow">Priority recheck trigger</p>
+                {recheckCondition ? (
+                  <>
+                    <p className="mt-2 text-[12px] leading-relaxed text-ink"><span className="font-semibold">Recheck when:</span> {recheckCondition}</p>
+                    <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">A changed input can strengthen, weaken, or leave the read unchanged. Direction must come from the new evidence.</p>
+                  </>
+                ) : (
+                  <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">No grounded recheck trigger is available in this capture.</p>
+                )}
+              </article>
+              <article className="panel-inset p-3.5 tint-signal">
+                <p className="eyebrow">Current case</p>
+                <p className="mt-2 text-[12px] leading-relaxed text-ink"><span className="font-semibold">If:</span> The frozen inputs remain the only evidence considered.</p>
+                <p className="mt-2 text-[12px] leading-relaxed text-ink-dim"><span className="font-semibold text-ink">Then:</span> {thesis}</p>
+              </article>
+              <article className="panel-inset p-3.5 tint-caution">
+                <p className="eyebrow">Evidence still needed</p>
+                {evidenceNeeded ? (
+                  <>
+                    <p className="mt-2 text-[12px] leading-relaxed text-ink"><span className="font-semibold">Resolve:</span> {evidenceNeeded}</p>
+                    <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">Until a source-backed answer is frozen, this remains an open decision condition.</p>
+                  </>
+                ) : (
+                  <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">No unresolved decision condition is stored for this lens.</p>
+                )}
+              </article>
+            </div>
+          </section>
+
+          <details className="panel-inset mt-5 overflow-hidden" data-testid="complete-research-record">
+            <summary className="cursor-pointer px-4 py-3 text-[12.5px] font-medium text-ink hover:bg-panel-2/60">
+              Open complete research record · {snapshot.measurements.length} measurements · {signals.length} findings · {allQuestions.length} questions
+            </summary>
+            <div className="border-t border-line/60 p-4">
           <section className="mt-5" aria-labelledby={`${panelId}-atlas-title`}>
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <p className="eyebrow text-signal-lift">Evidence atlas</p>
-                <h3 id={`${panelId}-atlas-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">The frozen numbers behind the read</h3>
+                <p className="eyebrow text-signal-lift">Measurements</p>
+                <h3 id={`${panelId}-atlas-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Numbers behind this assessment</h3>
               </div>
               <p className="ml-auto max-w-xl text-right text-[11px] leading-relaxed text-ink-faint">
-                Measurements are prioritized for this lens. The complete register remains available and no missing value is displayed as zero.
+                Measurements are ordered for this lens. Missing values remain missing; they are never displayed as zero.
               </p>
             </div>
 
@@ -740,7 +783,7 @@ export function PointInTimeIntelligencePanel({
 
             <details className="panel-inset mt-3 overflow-hidden" data-testid="complete-measurement-ledger">
               <summary className="cursor-pointer px-4 py-3 text-[12.5px] font-medium text-ink hover:bg-panel-2/60">
-                Open complete measurement register · {orderedMeasurements.length} measurements
+                Open all measurements · {orderedMeasurements.length} measurements
               </summary>
               <ol className="border-t border-line/60">
                 {orderedMeasurements.map((measurement) => {
@@ -776,7 +819,7 @@ export function PointInTimeIntelligencePanel({
 
             <details className="panel-inset mt-3 overflow-hidden" data-testid="complete-source-ledger">
               <summary className="cursor-pointer px-4 py-3 text-[12.5px] font-medium text-ink hover:bg-panel-2/60">
-                Open exact source lineage · {snapshot.sources.length} references · {uniqueArtifactCount} unique artifacts
+                Open source records · {snapshot.sources.length} references · {uniqueArtifactCount} unique artifacts
               </summary>
               <ol className="border-t border-line/60">
                 {snapshot.sources.map((source) => {
@@ -805,52 +848,14 @@ export function PointInTimeIntelligencePanel({
             </details>
           </section>
 
-          <section className="mt-5" aria-labelledby={`${panelId}-cases-title`}>
-            <div>
-              <p className="eyebrow text-signal-lift">Conditional cases</p>
-              <h3 id={`${panelId}-cases-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
-                What should trigger another evidence review
-              </h3>
-            </div>
-            <div className="mt-3 grid gap-3 lg:grid-cols-3">
-              <article className="panel-inset p-3.5 tint-signal">
-                <p className="eyebrow">Priority recheck trigger</p>
-                {recheckCondition ? (
-                  <>
-                    <p className="mt-2 text-[12px] leading-relaxed text-ink"><span className="font-semibold">Recheck when:</span> {recheckCondition}</p>
-                    <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">A changed input can strengthen, weaken, or leave the read unchanged. Direction must come from the new evidence.</p>
-                  </>
-                ) : (
-                  <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">No grounded recheck trigger is available in this capture.</p>
-                )}
-              </article>
-              <article className="panel-inset p-3.5 tint-signal">
-                <p className="eyebrow">Current case</p>
-                <p className="mt-2 text-[12px] leading-relaxed text-ink"><span className="font-semibold">If:</span> The frozen inputs remain the only evidence considered.</p>
-                <p className="mt-2 text-[12px] leading-relaxed text-ink-dim"><span className="font-semibold text-ink">Then:</span> {thesis}</p>
-              </article>
-              <article className="panel-inset p-3.5 tint-caution">
-                <p className="eyebrow">Evidence still needed</p>
-                {evidenceNeeded ? (
-                  <>
-                    <p className="mt-2 text-[12px] leading-relaxed text-ink"><span className="font-semibold">Resolve:</span> {evidenceNeeded}</p>
-                    <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">Until a source-backed answer is frozen, this remains an open decision condition.</p>
-                  </>
-                ) : (
-                  <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">No unresolved decision condition is stored for this lens.</p>
-                )}
-              </article>
-            </div>
-          </section>
-
           <section className="mt-5" aria-labelledby={`${panelId}-signals-title`}>
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <p className="eyebrow text-signal-lift">Complete signal set</p>
-                <h3 id={`${panelId}-signals-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Signal register</h3>
+                <p className="eyebrow text-signal-lift">All findings</p>
+                <h3 id={`${panelId}-signals-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Finding record</h3>
               </div>
               <p className="ml-auto max-w-xl text-right text-[11px] leading-relaxed text-ink-faint">
-                All {signals.length} saved signals remain visible. The selected lens changes order and emphasis only.
+                All {signals.length} saved findings remain available. The selected lens changes order and emphasis only.
               </p>
             </div>
             {sortedSignals.length ? (
@@ -929,7 +934,7 @@ export function PointInTimeIntelligencePanel({
             <div className="flex flex-wrap items-end gap-2">
               <div>
                 <p className="eyebrow text-signal-lift">Question ledger</p>
-                <h3 id={`${panelId}-questions-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Every tracked diligence question</h3>
+                <h3 id={`${panelId}-questions-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">All tracked questions</h3>
               </div>
               <p className="ml-auto max-w-xl text-right text-[11px] leading-relaxed text-ink-faint">
                 A related metric never answers a different question. Each state and basis comes from the frozen collection record.
@@ -994,8 +999,8 @@ export function PointInTimeIntelligencePanel({
           <section className="mt-5" aria-labelledby={`${panelId}-coverage-title`}>
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <p className="eyebrow text-signal-lift">Coverage</p>
-                <h3 id={`${panelId}-coverage-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Domain coverage map</h3>
+                <p className="eyebrow text-signal-lift">Research coverage</p>
+                <h3 id={`${panelId}-coverage-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Where the research is complete</h3>
               </div>
               <p className="ml-auto max-w-xl text-right text-[11px] leading-relaxed text-ink-faint">
                 Coverage records what was measured or asked. It is not confidence that the subject is safe.
@@ -1027,6 +1032,8 @@ export function PointInTimeIntelligencePanel({
               })}
             </div>
           </section>
+            </div>
+          </details>
         </div>
       </div>
     </section>

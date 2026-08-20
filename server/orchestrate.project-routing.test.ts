@@ -96,6 +96,17 @@ describe("public X probe failure policy", () => {
       .toEqual(["github"]);
   });
 
+  it("suppresses a related-person X probe even when the subject itself is unresolved", () => {
+    const evidence = emptyEvidence("@multihopper");
+    const relatedCost = {
+      calls: cost.calls.map((line) => line.provider === "x-public"
+        ? { ...line, meta: "lovable_dev · temporarily_unavailable_http_404" }
+        : line),
+    };
+    expect(providerFailureLinesForEvidence(relatedCost, evidence).map((line) => line.provider))
+      .toEqual(["github"]);
+  });
+
   it("suppresses only the public-X probe after a verified official-site identity binding", () => {
     const evidence = emptyEvidence("@multihopper");
     const identity = {

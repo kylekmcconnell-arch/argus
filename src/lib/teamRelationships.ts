@@ -26,6 +26,7 @@ export interface TeamRelationshipRecord {
   evidence_origin?: string;
   artifact_verified?: boolean;
   relationship?: ProjectRelationshipClass;
+  relationshipProvenance?: "subject_official" | "claimant_self" | "counterparty" | "independent" | "third_party";
   source?: string;
   sourceUrl?: string;
 }
@@ -44,8 +45,14 @@ export function hasOperatingTeamRole(member: TeamRelationshipRecord): boolean {
 export function classifyProjectRelationship(
   member: TeamRelationshipRecord,
 ): ProjectRelationshipClass {
-  if (member.relationship) return member.relationship;
+  // A stored relationship is derived data, not an override. Recompute it from
+  // the strongest merged evidence so an early "VC" guess cannot survive a
+  // later verified operating role. Model/search rows remain candidates even if
+  // they arrived with a prefilled relationship.
   if (member.evidence_origin === "model_lead" || member.artifact_verified === false) return "candidate";
+  // A claimant saying "founder of @project" proves that claimant made the
+  // statement. It does not prove that the project recognizes the relationship.
+  if (member.relationshipProvenance === "claimant_self") return "associate";
   const role = member.role.trim();
   if (member.kind === "org") {
     if (BACKER_ROLE.test(role)) return "backer";
@@ -58,7 +65,10 @@ export function classifyProjectRelationship(
   // remain backer relationships.
   if (hasOperatingTeamRole(member)) return "core_team";
   if (ADVISOR_ROLE.test(role)) return "advisor";
-  if (BACKER_ROLE.test(role)) return "backer";
+  // A person's generic "VC" bio is an occupation, not evidence that they
+  // invested in this project. Project backing requires a bound organization or
+  // an explicit relationship artifact; otherwise keep the person as context.
+  if (BACKER_ROLE.test(role)) return "associate";
   if (PARTNER_ROLE.test(role)) return "partner";
   if (ECOSYSTEM_ROLE.test(role)) return "ecosystem";
   if (AFFILIATION_ROLE.test(role)) return "team_affiliation";
@@ -179,6 +189,8 @@ function mergeRecords<T extends TeamRelationshipRecord>(left: T, right: T): T {
     evidence_origin: left.evidence_origin === "model_lead" && right.evidence_origin === "model_lead"
       ? "model_lead"
       : preferred.evidence_origin ?? other.evidence_origin,
+    relationshipProvenance: preferred.relationshipProvenance ?? other.relationshipProvenance,
+    relationship: undefined,
   } as T;
 }
 
@@ -196,7 +208,10 @@ export function canonicalizeTeamRecords<T extends TeamRelationshipRecord>(
     if (index < 0) out.push({ ...row });
     else out[index] = mergeRecords(out[index], row);
   }
-  return out;
+  return out.map((row) => ({
+    ...row,
+    relationship: classifyProjectRelationship({ ...row, relationship: undefined }),
+  }));
 }
 
 export function canonicalizeCoreTeamRecords<T extends TeamRelationshipRecord>(

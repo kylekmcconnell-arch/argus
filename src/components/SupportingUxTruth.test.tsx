@@ -117,7 +117,7 @@ describe("supporting-page truth states", () => {
 
     await vi.waitFor(() => expect(container.textContent).toContain("Not configured"));
     expect(container.textContent).toContain("served from cache");
-    expect(container.textContent?.toLowerCase()).toContain("recently healthy0");
+    expect(container.textContent?.toLowerCase()).toContain("latest request succeeded0");
     expect(container.textContent?.toLowerCase()).toContain("needs attention1");
   });
 
