@@ -126,8 +126,18 @@ export function ProviderFailureNotice({ failures }: {
   failures?: Array<{ provider: string; op: string; failed: number; meta?: string }>;
 }) {
   if (!failures?.length) return null;
+  // Historical reports can carry an x-public HTTP failure from the optional
+  // logged-out account-state probe. X status codes do not establish whether an
+  // account exists, and the governing profile/identity checks already disclose
+  // their own outcome. Do not turn this diagnostic probe into a safety warning.
+  const visibleFailures = failures.filter((line) => !(
+    line.provider.toLowerCase() === "x-public"
+    && line.op.toLowerCase() === "account-state"
+    && /(?:http_\d{3}|transport_error|unreadable|probe_inconclusive)/i.test(line.meta ?? "")
+  ));
+  if (!visibleFailures.length) return null;
   const buckets: Record<ProviderFailureKind, string[]> = { no_record: [], unavailable: [], rejected: [] };
-  for (const line of failures) buckets[classifyProviderFailure(line.meta)].push(line.provider);
+  for (const line of visibleFailures) buckets[classifyProviderFailure(line.meta)].push(line.provider);
   const names = (providers: string[]) => [...new Set(providers)].join(", ");
   const sentences = [
     buckets.unavailable.length
@@ -157,8 +167,8 @@ export function ProviderFailureNotice({ failures }: {
       <details className="mt-2 text-[10.5px] text-ink-faint">
         <summary className="cursor-pointer select-none">Technical details</summary>
         <p className="mono mt-1 leading-relaxed">
-          {failures.slice(0, 5).map((line) => `${line.provider} · ${line.op}${line.meta ? ` · ${line.meta.slice(0, 70)}` : ""}`).join("  |  ")}
-          {failures.length > 5 ? `  |  +${failures.length - 5} more` : ""}
+          {visibleFailures.slice(0, 5).map((line) => `${line.provider} · ${line.op}${line.meta ? ` · ${line.meta.slice(0, 70)}` : ""}`).join("  |  ")}
+          {visibleFailures.length > 5 ? `  |  +${visibleFailures.length - 5} more` : ""}
         </p>
       </details>
     </div>
