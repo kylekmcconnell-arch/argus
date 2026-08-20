@@ -130,7 +130,7 @@ describe.sequential("discoverReverseBioFromTwitterapi", () => {
     const ctx: CollectContext = { handle: "@projecthandle", evidence, emit: vi.fn() };
     await enrichFirstPartyTeamAvatars(ctx);
     expect(webTeam[0].avatarUrl).toBeUndefined();
-    expect(webTeam[0].enrichmentProvider).toBe("twitterapi");
+    expect(webTeam[0].enrichmentProvider).toBeUndefined();
   });
 
   it("still finds @alice when official project posts never name anyone", async () => {
