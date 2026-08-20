@@ -593,6 +593,7 @@ describe("collectProtocolFees", () => {
     });
 
     expect(result.outcome.available).toBe(false);
+    if (result.outcome.available) throw new Error("expected checked-empty fee outcome");
     expect(result.outcome.note).toContain("No DeFiLlama fee record");
     expect(result.cost.calls).toContainEqual(expect.objectContaining({
       provider: "defillama",

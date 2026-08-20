@@ -81,7 +81,8 @@ describe("orchestrator provider execution truth", () => {
       emit,
       recordCheck: vi.fn(),
     };
-    const fetchMock = vi.fn(async () => new Response("Not found", { status: 404 }));
+    const fetchMock = vi.fn(async (_input: string | URL | Request) =>
+      new Response("Not found", { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await withCostLedger(async () => ({

@@ -2843,6 +2843,10 @@ export async function collectBoundProtocolEvidence(
   return { tvlMatched, fundingMatched, feesMatched, binding };
 }
 
+function readProtocolTvlAfterAdmission(ctx: CollectContext) {
+  return ctx.evidence.protocolTvl;
+}
+
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
@@ -2850,16 +2854,20 @@ async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Prom
     ctx,
     defiLlamaLookupName(token.name),
   );
-  if (!admission.tvlMatched || !ctx.evidence.protocolTvl) return;
+  // collectBoundProtocolEvidence mutates the evidence envelope. Read through a
+  // function boundary so TypeScript does not retain the pre-admission absence
+  // narrowing across that asynchronous mutation.
+  const protocolTvlForIncident = readProtocolTvlAfterAdmission(ctx);
+  if (!admission.tvlMatched || !protocolTvlForIncident) return;
   const tvlBinding = validateProtocolEvidenceBinding(
     protocolBindingContextFromEvidence(ctx.evidence),
-    ctx.evidence.protocolTvl,
+    protocolTvlForIncident,
   );
   if (tvlBinding.state !== "matched") return;
   const projectOnly = tvlBinding.binding.scope === "project";
   const incidentCount = recordProtocolSecurityIncidentFindings(ctx.evidence);
   if (!incidentCount) return;
-  const newest = [...(ctx.evidence.protocolTvl.hacks ?? [])]
+  const newest = [...(protocolTvlForIncident.hacks ?? [])]
     .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")))[0];
   ctx.emit({
     phase: projectOnly ? "Project" : "Token",
