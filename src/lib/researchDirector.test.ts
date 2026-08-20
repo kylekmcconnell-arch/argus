@@ -96,7 +96,7 @@ describe("research director", () => {
         searchForCounterEvidence: true,
       },
     });
-    expect(corroboration?.collectionContract.rejectWhen).toContain("repeated first-party copy");
+    expect(corroboration?.collectionContract?.rejectWhen).toContain("repeated first-party copy");
 
     const firstPartyOnly = finalizeResearchPlan(plan, [{
       checkId: "project-product-substance",
