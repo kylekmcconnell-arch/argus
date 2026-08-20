@@ -1206,7 +1206,7 @@ describe("decision-safe person report presentation", () => {
     expect(tokenSection?.textContent).toContain("$JUP");
     expect(tokenSection?.textContent).toContain("$620.00M");
     expect(tokenSection?.querySelector("svg polygon")).not.toBeNull();
-    expect(tokenSection!.compareDocumentPosition(decisionSummary!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(decisionSummary!.compareDocumentPosition(tokenSection!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("uses the stored project website for project intelligence when the bio has no domain", () => {
@@ -1380,7 +1380,26 @@ describe("decision-safe person report presentation", () => {
   });
 
   it("explains an adverse verdict with adverse drivers and labels positive evidence as counterweight", () => {
-    const dossier = buildReport(SUBJECTS[0]);
+    const base = buildReport(SUBJECTS[0]);
+    const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
+    const axisName = Object.keys(governing.axes)[0]!;
+    const dossier = {
+      ...base,
+      report: {
+        ...base.report,
+        role_reports: base.report.role_reports.map((role) => role.role === governing.role ? {
+          ...role,
+          axes: {
+            ...role.axes,
+            [axisName]: {
+              ...role.axes[axisName],
+              score: 0,
+              gaps: ["Independent verification remains limited."],
+            },
+          },
+        } : role),
+      },
+    } as Dossier;
 
     act(() => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
@@ -1403,7 +1422,8 @@ describe("decision-safe person report presentation", () => {
     const base = buildReport(SUBJECTS[0]);
     const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
     const axisName = "P4_backing_and_partners";
-    expect(governing.axes[axisName]).toBeDefined();
+    const axisTemplate = Object.values(governing.axes)[0]!;
+    expect(axisTemplate).toBeDefined();
     const artifactId = `art_v1_${"c".repeat(64)}`;
     const dossier = {
       ...base,
@@ -1435,7 +1455,14 @@ describe("decision-safe person report presentation", () => {
           ...role,
           axes: {
             ...role.axes,
-            [axisName]: { ...role.axes[axisName], score: 0, evidenceRefs: [artifactId] },
+            [axisName]: {
+              ...axisTemplate,
+              score: 0,
+              weight: 14,
+              evidenceRefs: [artifactId],
+              counterEvidenceRefs: [],
+              gaps: [],
+            },
           },
         } : role),
       },
@@ -1518,7 +1545,7 @@ describe("decision-safe person report presentation", () => {
     expect(decisionBasis).not.toContain(originalAxisName);
     expect(decisionBasis).not.toMatch(/[A-Z]\d+_/);
     expect(verificationSection).not.toMatch(/[A-Z]\d+_/);
-    expect(container.textContent).toMatch(/Strong support|Some support|Limited support/);
+    expect(container.textContent).toContain("Single-source context");
     // Provider diagnostics stay in the methodology ledger; they never leak
     // into the decision summary or the verification list.
     const summarySurfaces = `${container.querySelector("#decision-summary")?.textContent ?? ""}${verificationSection}`;

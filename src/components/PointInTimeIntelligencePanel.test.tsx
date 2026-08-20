@@ -453,9 +453,9 @@ describe("PointInTimeIntelligencePanel", () => {
   it("shows arithmetic receipts, capture bounds, and every coverage domain without making a provider call", () => {
     render(snapshot());
 
-    expect(container.textContent).toContain("Score-neutral / saved-snapshot derivation");
-    expect(container.textContent).toContain("does not change the ARGUS score");
-    expect(container.textContent).toContain("makes no provider call when rendered");
+    expect(container.textContent).toContain("Built from this saved report");
+    expect(container.textContent).toContain("Opening it does not rerun sources or change the score");
+    expect(container.textContent).toContain("Saved evidence only");
     expect(container.textContent).toContain("Evidence posture");
     expect(container.textContent).toContain("First-party evidence only");
     expect(container.textContent).toContain("Aug 1, 2026");
