@@ -122,6 +122,9 @@ describe("deriveIntelligenceBrief", () => {
     expect(brief.supports[0]).toMatchObject({
       title: "Three outcomes were verified.",
       provenance: expect.stringContaining("Verified saved evidence"),
+      evidencePosture: "first_party_only",
+      independentOriginCount: 0,
+      originCount: 1,
     });
     expect(brief.pressures[0]).toMatchObject({
       title: "Source-reported context: control remains concentrated.",
