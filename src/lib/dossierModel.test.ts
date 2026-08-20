@@ -199,7 +199,7 @@ describe("team enrichment boundary", () => {
     // The collector marks these first-party too. An earlier draft matched the
     // source string for "post role-scan" and would have dropped their avatars.
     const [m] = withTeam([{
-      name: "@proph3ttt", role: "advisor", handle: "@proph3ttt",
+      name: "@proph3ttt", role: "COO", handle: "@proph3ttt",
       handleProvenance: "subject_first_party", source: "amplification edge",
       avatarUrl: "https://pbs.twimg.com/y.jpg", avatarCapturedAt: "2026-08-16T04:51:31.270Z",
     }]).team;

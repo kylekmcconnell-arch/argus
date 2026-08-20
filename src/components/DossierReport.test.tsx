@@ -52,13 +52,15 @@ const livePayload = (): Record<string, unknown> => ({
     { checkId: "project-team-identity", label: "Team", status: "confirmed", note: "Two people named on the official site." },
     { checkId: "organization-registration", label: "Entity", status: "confirmed" },
   ],
-  webTeamLeads: [{
+  webTeam: [{
     name: "@firstparty",
     role: "founder",
     handle: "@firstparty",
     handleProvenance: "subject_first_party",
+    relationshipProvenance: "subject_official",
     avatarUrl: "https://pbs.twimg.com/x.jpg",
-  }, {
+  }],
+  webTeamLeads: [{
     name: "Search Only",
     role: "advisor",
     source: "web/LinkedIn search",
@@ -74,7 +76,7 @@ describe("DossierReport", () => {
     expect(container.textContent).toContain("CLUTCH");
     expect(container.textContent).toContain("@clutchmarkets");
     expect(container.textContent).toContain("This is the @clutchmarkets we audited. The site is bound.");
-    expect(container.textContent).toContain("The project named 1 founder. Nobody else confirmed them.");
+    expect(container.textContent).toContain("The project named 1 founder. Its role evidence is still unverified.");
     expect(container.textContent).not.toContain("Handle resolves to the official site.");
     expect(container.textContent).not.toContain("The project account is identified.");
     expect(container.textContent).not.toContain("dynexcoin.org");
@@ -95,9 +97,8 @@ describe("DossierReport", () => {
   it("splits team cards by the collector first-party marker, not by having a face", () => {
     render(livePayload());
     expect(container.textContent).toContain("named by the account itself");
-    expect(container.textContent).toContain("web search only");
     expect(container.textContent).toContain("@firstparty");
-    expect(container.textContent).toContain("Search Only");
+    expect(container.textContent).not.toContain("Search Only");
     expect(container.querySelector('img[src="https://example.org/someone.jpg"]')).toBeNull();
     expect(container.querySelector('img[src="https://pbs.twimg.com/x.jpg"]')).not.toBeNull();
   });

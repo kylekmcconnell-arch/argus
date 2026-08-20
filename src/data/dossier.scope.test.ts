@@ -213,16 +213,13 @@ describe("dossier webTeam · reverse-bio first-party keep", () => {
     expect(assembleDossier(unverifiedOnly, true).webTeam.map((m) => m.handle)).toEqual([]);
 
     const dossier = assembleDossier(evidence, true);
-    expect(dossier.webTeam.map((m) => m.handle)).toEqual(expect.arrayContaining(["@alice", "@SomeOrg"]));
+    expect(dossier.webTeam.map((m) => m.handle)).toEqual(["@alice"]);
     expect(dossier.webTeam.find((m) => m.handle === "@alice")).toMatchObject({
       handle: "@alice",
       handleProvenance: "subject_first_party",
       artifact_verified: true,
     });
-    expect(dossier.webTeam.find((m) => m.handle === "@SomeOrg")).toMatchObject({
-      kind: "org",
-      role: "fund",
-    });
+    expect(dossier.webTeam.map((m) => m.handle)).not.toContain("@SomeOrg");
     expect(dossier.webTeam.map((m) => m.handle)).not.toContain("@bob");
   });
 });

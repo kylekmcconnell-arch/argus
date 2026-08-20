@@ -59,7 +59,7 @@ function twitterapiStub(opts: {
 describe("linkedOrgsFromBioText", () => {
   it("binds a fund/incubator handle and never the subject or a person", () => {
     const orgs = linkedOrgsFromBioText(
-      "COO @projecthandle · @orghandle fund / incubator",
+      "COO @projecthandle · incubated by @orghandle",
       "projecthandle",
       new Set(["alice"]),
     );
@@ -114,12 +114,14 @@ describe.sequential("discoverReverseBioFromTwitterapi", () => {
     });
     expect(found.team[0].role).toMatch(/coo|co-founder/i);
     expect(found.team[0].evidence).toMatch(/COO @projecthandle/i);
-    expect(found.orgs.map((o) => o.handle.toLowerCase())).toContain("@orghandle");
-    expect(found.orgs.every((o) => o.handle.toLowerCase() !== "@alice")).toBe(true);
+    // @orghandle is Alice's separate affiliation, not a relationship the
+    // project itself claimed.
+    expect(found.orgs).toEqual([]);
     expect(fetchMock.mock.calls.every((c) => !/serper|google/i.test(String(c[0])))).toBe(true);
 
     const webTeam = reverseBioTeamAsWebMembers(found.team);
-    expect(webTeam[0].handleProvenance).toBe("subject_first_party");
+    expect(webTeam[0].relationshipProvenance).toBe("claimant_self");
+    expect(webTeam[0].handleProvenance).toBeUndefined();
     expect(webTeam[0].evidence_origin).toBe("deterministic");
     expect(webTeam[0].provider).toBe("twitterapi");
 
@@ -127,7 +129,7 @@ describe.sequential("discoverReverseBioFromTwitterapi", () => {
     evidence.webTeam = webTeam;
     const ctx: CollectContext = { handle: "@projecthandle", evidence, emit: vi.fn() };
     await enrichFirstPartyTeamAvatars(ctx);
-    expect(webTeam[0].avatarUrl).toMatch(/pbs\.twimg\.com/);
+    expect(webTeam[0].avatarUrl).toBeUndefined();
     expect(webTeam[0].enrichmentProvider).toBe("twitterapi");
   });
 
@@ -209,9 +211,10 @@ describe("extra-check persist must not abort team collection", () => {
         member.artifact_verified = false;
       }
     }
-    expect(webTeam[0].handleProvenance).toBe("subject_first_party");
-    expect(webTeam[0].artifact_verified).toBe(true);
-    expect(webTeam[0].evidence_origin).toBe("deterministic");
+    expect(webTeam[0].handleProvenance).toBeUndefined();
+    expect(webTeam[0].relationshipProvenance).toBe("claimant_self");
+    expect(webTeam[0].artifact_verified).toBe(false);
+    expect(webTeam[0].evidence_origin).toBe("model_lead");
   });
 });
 

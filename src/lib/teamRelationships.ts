@@ -37,6 +37,10 @@ const PARTNER_ROLE = /\b(?:partner|partnership|integrat(?:ed|ion)|service\s+prov
 const ECOSYSTEM_ROLE = /\b(?:ecosystem|community|accelerator|incubator)\b/i;
 const AFFILIATION_ROLE = /\b(?:affiliation|team[- ]?affiliation)\b/i;
 
+export function hasOperatingTeamRole(member: TeamRelationshipRecord): boolean {
+  return member.kind !== "org" && CORE_ROLE.test(member.role.trim());
+}
+
 export function classifyProjectRelationship(
   member: TeamRelationshipRecord,
 ): ProjectRelationshipClass {
@@ -49,12 +53,16 @@ export function classifyProjectRelationship(
     if (ECOSYSTEM_ROLE.test(role)) return "ecosystem";
     return "associate";
   }
+  // An explicit operating title wins for a person even when the same title
+  // contains words such as "Investor Relations". Pure VC/fund roles still
+  // remain backer relationships.
+  if (hasOperatingTeamRole(member)) return "core_team";
   if (ADVISOR_ROLE.test(role)) return "advisor";
   if (BACKER_ROLE.test(role)) return "backer";
   if (PARTNER_ROLE.test(role)) return "partner";
   if (ECOSYSTEM_ROLE.test(role)) return "ecosystem";
   if (AFFILIATION_ROLE.test(role)) return "team_affiliation";
-  return CORE_ROLE.test(role) ? "core_team" : "associate";
+  return "associate";
 }
 
 export function isCoreTeamRecord(member: TeamRelationshipRecord): boolean {

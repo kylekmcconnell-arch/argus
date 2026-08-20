@@ -24,7 +24,7 @@ import {
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
 import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
-import { canonicalizeCoreTeamRecords, canonicalizeTeamRecords, isCoreTeamRecord } from "../lib/teamRelationships";
+import { canonicalizeCoreTeamRecords, canonicalizeTeamRecords, hasOperatingTeamRole, isCoreTeamRecord } from "../lib/teamRelationships";
 import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
 import type { DecisionLensId } from "../intelligence/types";
 import { ArgusMark } from "./ArgusMark";
@@ -1485,7 +1485,7 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
   });
   return canonicalizeTeamRecords(
     [...(dossier.webTeamLeads ?? []), ...inferred]
-      .filter((member) => meaningfulTeamMember(member) && isCoreTeamRecord(member))
+      .filter((member) => meaningfulTeamMember(member) && hasOperatingTeamRole(member))
       // A model-only name with no stable identity locator is not actionable.
       .filter((member) => Boolean(member.handle?.trim() || member.linkedin?.trim())),
   );
