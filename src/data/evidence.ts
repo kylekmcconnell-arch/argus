@@ -842,8 +842,12 @@ export interface WebTeamMember {
   name: string;
   handle?: string;
   role: string;
-  /** Person vs linked fund/incubator/VC. Unique-id is still the handle. */
+  /** Person vs linked organization. Organizations never enter the core-team roster. */
   kind?: "person" | "org";
+  /** Governing relationship class shared by collection, scoring, graph, and UI. */
+  relationship?: import("../lib/teamRelationships").ProjectRelationshipClass;
+  /** Whose surface made the role claim; separate from whether the artifact was fetched. */
+  relationshipProvenance?: "subject_official" | "claimant_self" | "third_party";
   linkedin?: string;
   evidence?: string;
   source: string; // where it came from: web/LinkedIn search, post role-scan, X content

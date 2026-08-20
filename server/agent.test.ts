@@ -6208,3 +6208,36 @@ describe("derived project bands omit illegal floorTier", () => {
     expect(bands.P4_backing_and_partners.floorTier).toBeUndefined();
   });
 });
+
+
+describe("project tokenless conduct semantics", () => {
+  const axes: AnalystAxis[] = [
+    { axis: "P3_token_conduct", weight: 20, role: SubjectClass.PROJECT },
+  ];
+
+  it("treats an explicit official no-token disclosure as clean conduct, not a risk", () => {
+    const packet = buildScoringEvidencePacket({
+      checkOutcomes: [{
+        checkId: "project-token-identity",
+        status: "confirmed",
+        provider: "official-site",
+        note: "The official project bio explicitly states that the project has no token.",
+      }],
+    }, axes);
+    const band = deriveProjectStrengthBands(packet, axes).P3_token_conduct;
+    expect(band.tier).toBe("solid");
+    expect(band.reasons).toContain("official source explicitly discloses that the project has no token");
+  });
+
+  it("does not confuse a registry miss with an explicit no-token policy", () => {
+    const packet = buildScoringEvidencePacket({
+      checkOutcomes: [{
+        checkId: "project-token-identity",
+        status: "confirmed",
+        provider: "coingecko",
+        note: "CoinGecko returned no token record for this query.",
+      }],
+    }, axes);
+    expect(deriveProjectStrengthBands(packet, axes).P3_token_conduct.tier).toBe("assessed_null");
+  });
+});

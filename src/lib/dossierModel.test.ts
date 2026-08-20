@@ -180,7 +180,7 @@ describe("dossier model", () => {
 describe("team enrichment boundary", () => {
   const withTeam = (leads: Array<Record<string, unknown>>) => buildDossier({
     ...subject, basicFacts: [], checkRuns: [], basicFactLeads: [], providerFailures: [],
-    webTeamLeads: leads,
+    webTeam: leads,
   });
 
   it("keeps a face on a person the subject's own account named", () => {
@@ -313,12 +313,12 @@ describe("count-true headings", () => {
       checkRuns: [{ checkId: "project-team-identity", label: "Team", status: "confirmed", note: "Two people named on the official site." }],
       basicFactLeads: [],
       providerFailures: [],
-      webTeamLeads: [{
+      webTeam: [{
         name: "Ada", role: "founder", handle: "@ada",
         handleProvenance: "subject_first_party",
       }],
     });
-    expect(oneNamed.beats.find((b) => b.id === "team")!.heading).toBe("The project named 1 founder. Nobody else confirmed them.");
+    expect(oneNamed.beats.find((b) => b.id === "team")!.heading).toBe("The project named 1 founder. Its role evidence is still unverified.");
     expect(oneNamed.beats.find((b) => b.id === "team")!.heading).not.toContain("Two people named");
 
     const mixed = buildDossier({
@@ -330,15 +330,37 @@ describe("count-true headings", () => {
       checkRuns: [{ checkId: "project-team-identity", label: "Team", status: "confirmed" }],
       basicFactLeads: [],
       providerFailures: [],
-      webTeamLeads: [
+      webTeam: [
         { name: "Ada", role: "engineer", handle: "@ada", handleProvenance: "subject_first_party" },
         { name: "Bea", role: "engineer", handle: "@bea", handleProvenance: "subject_first_party" },
         { name: "Cara", role: "engineer", handle: "@cara", handleProvenance: "subject_first_party", artifact_verified: true },
       ],
     });
-    expect(mixed.beats.find((b) => b.id === "team")!.heading).toBe("The project named 3 people. 1 is independently confirmed.");
+    expect(mixed.beats.find((b) => b.id === "team")!.heading).toBe("The project named 3 people. 1 role has fetched evidence.");
     expect(JSON.stringify(mixed)).not.toContain("Fourteen people");
     expect(JSON.stringify(mixed)).not.toContain("Nine of them proven");
+  });
+
+  it("keeps candidates and relationship organizations out of the governed team", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [],
+      checkRuns: [{ checkId: "project-team-identity", label: "Team", status: "confirmed" }],
+      basicFactLeads: [],
+      providerFailures: [],
+      webTeam: [
+        { name: "Kuj Crypto", role: "cofounder", handle: "@kujcrypto", kind: "person", artifact_verified: true, evidence_origin: "deterministic", relationshipProvenance: "subject_official" },
+        { name: "@lovable_dev", role: "vc", handle: "@lovable_dev", kind: "org", artifact_verified: true, evidence_origin: "deterministic" },
+        { name: "@strategicsuperR", role: "vc", handle: "@strategicsuperR", kind: "person", artifact_verified: true, evidence_origin: "deterministic" },
+      ],
+      webTeamLeads: [
+        { name: "Alex Kujavesky", role: "CBO", linkedin: "linkedin.com/in/alexander-kujavsky-90a80b90", source: "search" },
+        { name: "Alexander Kujavsky", role: "co-founder", linkedin: "linkedin.com/in/alexander-kujavsky-90a80b90", source: "search" },
+      ],
+    });
+    expect(dossier.team.map((member) => member.handle)).toEqual(["@kujcrypto"]);
+    expect(dossier.beats.find((beat) => beat.id === "team")?.heading)
+      .toBe("The project named 1 founder. 1 role has fetched evidence.");
   });
 
   it("keeps the recorded verdict call and does not invent a thesis", () => {

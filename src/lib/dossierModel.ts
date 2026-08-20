@@ -13,6 +13,7 @@ import {
   provenanceForCheckStatus,
   type ProvenanceState,
 } from "./provenance";
+import { canonicalizeCoreTeamRecords } from "./teamRelationships";
 
 export interface DossierReceiptSource {
   url: string;
@@ -403,10 +404,10 @@ function headingFor(
       ? "The project named nobody."
       : `The project named ${plural(role.count, role.one, role.many)}.`;
     const second = confirmed.length === 0
-      ? (named.length === 1 ? "Nobody else confirmed them." : "Nobody is independently confirmed.")
+      ? (named.length === 1 ? "Its role evidence is still unverified." : "No role evidence is verified yet.")
       : confirmed.length === 1
-        ? "1 is independently confirmed."
-        : `${confirmed.length} are independently confirmed.`;
+        ? "1 role has fetched evidence."
+        : `${confirmed.length} roles have fetched evidence.`;
     return `${first} ${second}`;
   }
 
@@ -464,24 +465,20 @@ function headingFor(
 
 
 function collectTeam(payload: Record<string, unknown>): TeamMember[] {
-  // Union collector leads with grounded webTeam rows the leads list may
-  // omit. firstParty is only the durable marker — never inferred from a
-  // display name, a face, or the word "official". Independently confirmed
-  // is artifact_verified, a separate bar from first-party naming.
-  const rows = [
-    ...arr<Record<string, unknown>>(payload.webTeamLeads),
-    ...arr<Record<string, unknown>>(payload.webTeam),
-  ];
-  const seen = new Set<string>();
-  const team: TeamMember[] = [];
-  for (const m of rows) {
+  // The roster is one governed set: verified people in operating roles only.
+  // Search candidates remain in webTeamLeads and relationship organizations
+  // remain in associates, so neither can inflate the team headline.
+  const rows = canonicalizeCoreTeamRecords(
+    arr<Record<string, unknown>>(payload.webTeam) as Array<Record<string, unknown> & {
+      name: string; role: string;
+    }>,
+  );
+  return rows.flatMap((m) => {
     const name = str(m.name);
-    if (!name) continue;
-    const key = `${name}|${str(m.handle)}|${str(m.role)}`.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const firstParty = str(m.handleProvenance) === "subject_first_party";
-    team.push({
+    if (!name) return [];
+    const firstParty = str(m.relationshipProvenance) === "subject_official"
+      || str(m.handleProvenance) === "subject_first_party";
+    return [{
       name,
       role: str(m.role),
       handle: str(m.handle) || null,
@@ -489,9 +486,8 @@ function collectTeam(payload: Record<string, unknown>): TeamMember[] {
       avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
       avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
       independentlyConfirmed: m.artifact_verified === true || m.artifactVerified === true,
-    });
-  }
-  return team;
+    }];
+  });
 }
 
 export function buildDossier(payload: Record<string, unknown>): Dossier {

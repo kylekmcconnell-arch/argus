@@ -24,6 +24,7 @@ import {
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
 import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
+import { canonicalizeCoreTeamRecords, canonicalizeTeamRecords, isCoreTeamRecord } from "../lib/teamRelationships";
 import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
 import type { DecisionLensId } from "../intelligence/types";
 import { ArgusMark } from "./ArgusMark";
@@ -1449,6 +1450,7 @@ function meaningfulTeamMember(member: ReportTeamMember): boolean {
 
 function groundedTeamMember(member: ReportTeamMember): boolean {
   return meaningfulTeamMember(member)
+    && isCoreTeamRecord(member)
     && member.evidence_origin !== "model_lead"
     && member.artifact_verified === true;
 }
@@ -1481,18 +1483,12 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
       provider: "grok",
     }];
   });
-  const seen = new Set<string>();
-  return [...(dossier.webTeamLeads ?? []), ...inferred].filter((member) => {
-    if (!meaningfulTeamMember(member)) return false;
-    // A model-only name with no stable identity locator is not an actionable
-    // candidate. Showing generic names makes unrelated search snippets look
-    // like team evidence and gives the reader no way to verify them.
-    if (!member.handle?.trim() && !member.linkedin?.trim()) return false;
-    const key = [member.name, member.handle ?? "", member.linkedin ?? "", member.role, member.source].join("|").toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return canonicalizeTeamRecords(
+    [...(dossier.webTeamLeads ?? []), ...inferred]
+      .filter((member) => meaningfulTeamMember(member) && isCoreTeamRecord(member))
+      // A model-only name with no stable identity locator is not actionable.
+      .filter((member) => Boolean(member.handle?.trim() || member.linkedin?.trim())),
+  );
 }
 
 const REPORT_PROJECT_PRODUCT_LANGUAGE = /\b(?:app|application|borrow|build|chain|coins?|develop|exchange|launch|launchpad|lend|marketplace|network|operate|payments?|platform|protocol|provide|stake|tokens?|trade|trading|wallet)\b/i;
@@ -1684,7 +1680,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       identity_binding: f.identity_binding,
     },
   };
-  const webTeam = (dossier.webTeam ?? []).filter(groundedTeamMember).map(sanitizedGroundedTeamMember);
+  const webTeam = canonicalizeCoreTeamRecords(
+    (dossier.webTeam ?? []).filter(groundedTeamMember),
+  ).map(sanitizedGroundedTeamMember);
   const webTeamLeads = reportTeamLeads(dossier);
   // The operator is the verified team member the launch history was traced
   // through; fall back to the subject's own handle so the panel never renders
@@ -2337,12 +2335,19 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   // integer floor dips just under the 70 percent line.
   const bandTierFor = (axis: string): string | undefined => f.projectStrengthBands?.[axis]?.tier;
   const ASSESSED_NULL_RISK_TITLES: Record<string, string> = {
-    P3_token_conduct: "No token could be tied to the project's official identity.",
     P4_backing_and_partners: "No outside backers or partners are verified.",
+  };
+  const AXIS_GAP_FALLBACK_TITLES: Record<string, string> = {
+    P2_product_substance: "Independent verification of live product operation is still limited.",
+    P5_traction_and_liveness: "Independent usage and adoption metrics are still limited.",
+    P6_transparency_integrity: "Legal operator, governance, audit, and public-code disclosures remain limited.",
   };
   const sentence = (value: string): string => /[.!?]$/.test(value) ? value : `${value}.`;
   const lowAxisDrivers: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
     .filter((axis) => axis.weight > 0 && axis.score / axis.weight < 0.7)
+    // A completed no-token assessment is neutral unless a token claim or
+    // contradictory contract creates an actual conduct risk.
+    .filter((axis) => !(axis.axis === "P3_token_conduct" && bandTierFor(axis.axis) === "assessed_null" && axis.counter.length === 0))
     .filter((axis) => !["solid", "exceptional"].includes(bandTierFor(axis.axis) ?? ""))
     .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
     .map((axis) => {
@@ -2352,7 +2357,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         ? (ASSESSED_NULL_RISK_TITLES[axis.axis] ?? `${diligenceAreaLabel(axis.axis)} was assessed with no positive record.`)
         : firstGap && firstGap.length <= 140
           ? sentence(firstGap)
-          : `Verified evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is thin.`;
+          : (AXIS_GAP_FALLBACK_TITLES[axis.axis]
+            ?? `Verified evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is thin.`);
       return {
         id: `low-axis-${axis.axis}`,
         title,
@@ -2499,6 +2505,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   // them. Guidance framing by design; never a promise of points.
   const remainingPointsItems: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
     .filter((axis) => axis.weight > 0 && axis.weight - axis.score > 0)
+    .filter((axis) => !(axis.axis === "P3_token_conduct" && bandTierFor(axis.axis) === "assessed_null" && axis.counter.length === 0))
     .sort((left, right) => (right.weight - right.score) - (left.weight - left.score))
     .slice(0, 4)
     .map((axis) => {

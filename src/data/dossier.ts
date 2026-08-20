@@ -30,6 +30,7 @@ import type { ReportPersistenceContext, ReportVersionContext } from "../lib/repo
 import type { ScanCheck } from "../lib/scanChecklist";
 import type { ResearchPlan } from "../lib/researchDirector";
 import { portfolioRelationshipBinding } from "../lib/portfolioRelationshipBinding";
+import { canonicalizeCoreTeamRecords } from "../lib/teamRelationships";
 import { buildPointInTimeIntelligence } from "../intelligence/buildPointInTimeIntelligence";
 import { buildEntityPointInTimeIntelligence } from "../intelligence/buildEntityPointInTimeIntelligence";
 import type { IntelligenceSpineSnapshot } from "../intelligence/types";
@@ -304,8 +305,8 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       (row.handleProvenance === "subject_first_party" && Boolean(row.handle))
       || !teamNameIsOwnHandle(row)
     );
-  const groundedWebTeam = (ev.webTeam ?? [])
-    .filter(identityGrounded)
+  const groundedWebTeam = canonicalizeCoreTeamRecords((ev.webTeam ?? [])
+    .filter(identityGrounded))
     .map((member) => ({
       ...member,
       ...(member.identity_link_evidence_origin === "model_lead"

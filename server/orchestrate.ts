@@ -47,6 +47,7 @@ import { personChecks } from "../src/lib/scanChecklist";
 import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
 import { isOrganizationAccount } from "../src/lib/investorSubject";
 import { axisLabel } from "../src/lib/verdict";
+import { canonicalizeTeamRecords, classifyProjectRelationship } from "../src/lib/teamRelationships";
 import {
   buildResearchPlan,
   finalizeResearchPlan,
@@ -1206,6 +1207,7 @@ export async function coldIntake(
       identity_link_evidence_origin: domain ? "deterministic" as const : "model_lead" as const,
       projects_evidence_origin: domain ? "deterministic" as const : "model_lead" as const,
       handleProvenance: undefined as "subject_first_party" | undefined,
+      relationshipProvenance: "subject_official" as const,
     })),
     ...siteTeam.map((member) => ({
       ...member,
@@ -1215,6 +1217,7 @@ export async function coldIntake(
       identity_link_evidence_origin: "model_lead" as const,
       projects_evidence_origin: "model_lead" as const,
       handleProvenance: undefined as "subject_first_party" | undefined,
+      relationshipProvenance: "third_party" as const,
     })),
     ...people.map((member) => ({
       ...member,
@@ -1224,6 +1227,7 @@ export async function coldIntake(
       identity_link_evidence_origin: "model_lead" as const,
       projects_evidence_origin: "model_lead" as const,
       handleProvenance: undefined as "subject_first_party" | undefined,
+      relationshipProvenance: "third_party" as const,
     })),
     ...postRoleTeam.map((member) => ({
       ...member,
@@ -1233,6 +1237,7 @@ export async function coldIntake(
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "deterministic" as const,
       handleProvenance: member.handle ? "subject_first_party" as const : undefined,
+      relationshipProvenance: "subject_official" as const,
     })),
     // Both halves are first-party provider records: the subject's own
     // following edge and the candidate's own profile text. The handle IS the
@@ -1246,6 +1251,7 @@ export async function coldIntake(
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
       handleProvenance: member.handle ? "subject_first_party" as const : undefined,
+      relationshipProvenance: "subject_official" as const,
     })),
     // Same two crossing first-party signals as the followings lane, over the
     // amplification edge (the subject's own timeline retweeted/quoted the
@@ -1258,6 +1264,7 @@ export async function coldIntake(
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
       handleProvenance: member.handle ? "subject_first_party" as const : undefined,
+      relationshipProvenance: "subject_official" as const,
     })),
     // Reverse-search leads stay model leads (one-sided until the subject's own
     // edges vouch — the deterministic lanes above own that call and win the
@@ -1280,6 +1287,7 @@ export async function coldIntake(
           identity_link_evidence_origin: "deterministic" as const,
           projects_evidence_origin: "model_lead" as const,
           handleProvenance: "subject_first_party" as const,
+          relationshipProvenance: "claimant_self" as const,
         };
       }
       return {
@@ -1290,6 +1298,7 @@ export async function coldIntake(
         identity_link_evidence_origin: "model_lead" as const,
         projects_evidence_origin: "model_lead" as const,
         handleProvenance: undefined as "subject_first_party" | undefined,
+        relationshipProvenance: "third_party" as const,
       };
     }),
     // Reverse-bio twitterapi: the claimant's own bio @-mentions this subject
@@ -1301,7 +1310,8 @@ export async function coldIntake(
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
-      handleProvenance: member.handle ? "subject_first_party" as const : undefined,
+      handleProvenance: undefined,
+      relationshipProvenance: "claimant_self" as const,
     })),
   ];
   for (const t of teamCandidates) {
@@ -1379,6 +1389,14 @@ export async function coldIntake(
       identity_link_evidence_origin: t.identity_link_evidence_origin,
       projects_evidence_origin: t.projects_evidence_origin,
       handleProvenance: t.handleProvenance,
+      relationshipProvenance: t.relationshipProvenance,
+      relationship: classifyProjectRelationship({
+        name: t.name,
+        role: t.role,
+        kind: "kind" in t && t.kind === "org" ? "org" : "person",
+        evidence_origin: t.evidence_origin,
+        artifact_verified: t.artifact_verified,
+      }),
     };
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
@@ -1419,24 +1437,8 @@ export async function coldIntake(
       const key = org.handle.replace(/^@/, "").toLowerCase();
       if (!key || key === norm(ctx.handle) || haveAssoc.has(key) || personKeys.has(key)) continue;
       haveAssoc.add(key);
-      if (!byHandle.has(key)) {
-        const orgRow = {
-          name: org.name,
-          handle: org.handle,
-          role: org.role,
-          kind: "org" as const,
-          evidence: org.evidence,
-          source: org.source,
-          sourceUrl: org.sourceUrl,
-          evidence_origin: "deterministic" as const,
-          artifact_verified: true,
-          provider: "twitterapi",
-          identity_link_evidence_origin: "deterministic" as const,
-          handleProvenance: "subject_first_party" as const,
-        };
-        webTeam.push(orgRow);
-        byHandle.set(key, orgRow);
-      }
+      // Relationship organizations belong only in the associates ledger.
+      // Duplicating them into webTeam made affiliations look like employees.
       ctx.evidence.associates.push({
         associate_handle: org.handle,
         relation: org.role,
@@ -1458,6 +1460,13 @@ export async function coldIntake(
       });
     }
   }
+
+  // Freeze one canonical relationship classification before any later scorer
+  // or renderer consumes the roster.
+  ctx.evidence.webTeam = canonicalizeTeamRecords(webTeam).map((member) => ({
+    ...member,
+    relationship: classifyProjectRelationship(member),
+  }));
 
   // PRIOR LAUNCHES: a launchpad token's risk lives in the operator's history,
   // not its (renounced, LP-locked) contract. Same-wallet history plus the

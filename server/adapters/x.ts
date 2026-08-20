@@ -1394,7 +1394,7 @@ export async function discoverAffiliations(handle: string, name?: string, oldHan
 // This mines that content for team members the site/bio never listed.
 export interface TeamMember { name: string; handle?: string; role: string; evidence?: string; kind: "team" | "advisor"; linkedin?: string; source?: string; sourceUrl?: string; projects?: { name: string; role?: string }[] }
 
-export type LinkedOrgRole = "incubator" | "team-behind" | "backed-by" | "fund" | "vc";
+export type LinkedOrgRole = "incubator" | "team-behind" | "backed-by" | "partner" | "ecosystem" | "fund" | "vc";
 
 export interface LinkedOrg {
   name: string;
@@ -2062,19 +2062,11 @@ interface ReverseBioCandidate {
   tweetTexts?: string[];
 }
 
-const linkedOrgRoleFromWindow = (window: string): LinkedOrgRole => {
-  const lower = window.toLowerCase();
-  if (/incubate/.test(lower)) return "incubator";
-  if (/backed/.test(lower)) return "backed-by";
-  if (/\bvc\b|venture/.test(lower)) return "vc";
-  if (/fund/.test(lower)) return "fund";
-  return "team-behind";
-};
-
 /**
- * Other @handles in a bio that sit next to org/fund/incubator language.
- * Never binds the subject, a person already claimed as team, or a bare
- * display name. Unique-id is the @handle.
+ * Extract only an explicit project-to-organization relationship. A founder's
+ * bio often lists their employer, tools, communities, and portfolio beside
+ * words such as "VC"; proximity alone does not make those accounts a project
+ * backer or team member.
  */
 export function linkedOrgsFromBioText(
   bio: string,
@@ -2085,24 +2077,28 @@ export function linkedOrgsFromBioText(
   const out: LinkedOrg[] = [];
   const seen = new Set<string>();
   const text = String(bio ?? "").replace(/\s+/g, " ");
-  if (!text) return out;
-  for (const match of text.matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
-    const handle = match[1];
-    const key = handle.toLowerCase();
-    if (!key || key === subject || personHandles.has(key) || seen.has(key)) continue;
-    const start = Math.max(0, (match.index ?? 0) - 48);
-    const window = text.slice(start, (match.index ?? 0) + match[0].length + 48);
-    if (!/\b(vc|venture(?:s|\s+capital)?|fund|funds?|incubators?|incubated|accelerators?|team\s+behind)\b/i.test(window)) continue;
-    seen.add(key);
-    const role = linkedOrgRoleFromWindow(window);
-    out.push({
-      name: `@${handle}`,
-      handle: `@${handle}`,
-      role,
-      evidence: `bio names @${handle} next to ${role.replace("-", " ")} language`,
-      source: "reverse-bio org scan",
-      sourceUrl: `https://x.com/${handle}`,
-    });
+  const patterns: Array<{ re: RegExp; role: LinkedOrgRole; label: string }> = [
+    { re: /\bincubat(?:ed|or)\s+(?:by\s+)?@([A-Za-z0-9_]{2,30})\b/gi, role: "incubator", label: "incubator" },
+    { re: /\bbacked\s+by\s+@([A-Za-z0-9_]{2,30})\b/gi, role: "backed-by", label: "backer" },
+    { re: /\bpartner(?:ed|ship)?\s+(?:with\s+)?@([A-Za-z0-9_]{2,30})\b/gi, role: "partner", label: "partner" },
+    { re: /\b(?:part\s+of|member\s+of)\s+(?:the\s+)?@([A-Za-z0-9_]{2,30})\s+ecosystem\b/gi, role: "ecosystem", label: "ecosystem" },
+    { re: /\b(?:the\s+)?team\s+behind\s+(?:us|this|the\s+project)?\s*(?:is\s+)?@([A-Za-z0-9_]{2,30})\b/gi, role: "team-behind", label: "team behind" },
+  ];
+  for (const { re, role, label } of patterns) {
+    for (const match of text.matchAll(re)) {
+      const handle = match[1];
+      const key = handle.toLowerCase();
+      if (!key || key === subject || personHandles.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        name: `@${handle}`,
+        handle: `@${handle}`,
+        role,
+        evidence: `bio explicitly names @${handle} as ${label}`,
+        source: "explicit bio relationship scan",
+        sourceUrl: `https://x.com/${handle}`,
+      });
+    }
   }
   return out.slice(0, 8);
 }
@@ -2326,39 +2322,10 @@ async function discoverReverseBioFromTwitterapiUncached(
     orgSeen.add(keyHandle);
     orgs.push(org);
   };
-  for (const bio of [projectBio ?? "", ...biosByHandle.values()]) {
-    for (const org of linkedOrgsFromBioText(bio, handle, personKeys)) addOrg(org);
-  }
-  // Role-claim bios may @-mention a fund without adjacent class language
-  // ("Co-founder, COO @project | @SomeOrg"). Fetch those profiles and bind
-  // only fund / incubator / VC class accounts as orgs, never as people.
-  const extraMentions = new Map<string, string>();
-  for (const bio of biosByHandle.values()) {
-    if (!projectRoleClaimInBio(bio, handle)) continue;
-    for (const match of String(bio).matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
-      const keyHandle = match[1].toLowerCase();
-      if (!keyHandle || keyHandle === subject || personKeys.has(keyHandle) || orgSeen.has(keyHandle)) continue;
-      extraMentions.set(keyHandle, match[1]);
-    }
-  }
-  let orgFetches = 0;
-  for (const [keyHandle, raw] of extraMentions) {
-    if (orgs.length >= 8 || orgFetches >= 6) break;
-    orgFetches += 1;
-    try {
-      const profile = await getProfile(`@${raw}`);
-      const classified = orgClassFromProfile(profile?.name, profile?.bio);
-      if (!classified || !profile) continue;
-      addOrg({
-        name: profile.name?.trim() || `@${raw}`,
-        handle: `@${raw}`,
-        role: classified,
-        evidence: `linked from a first-party role bio; @${raw}'s own X profile is ${classified} class`,
-        source: "reverse-bio twitterapi",
-        sourceUrl: `https://x.com/${raw}`,
-      });
-    } catch { /* org bind is best-effort */ }
-  }
+  // Only the audited project's own bio can establish a project-to-org edge.
+  // A team member's bio establishes that person's affiliation, not a backer,
+  // partner, or staff relationship for the project.
+  for (const org of linkedOrgsFromBioText(projectBio ?? "", handle, personKeys)) addOrg(org);
   return { team: team.slice(0, 8), orgs: orgs.slice(0, 8) };
 }
 
@@ -2379,7 +2346,7 @@ export function reverseBioTeamAsWebMembers(team: readonly TeamMember[]): WebTeam
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
       projects_evidence_origin: "model_lead" as const,
-      handleProvenance: "subject_first_party" as const,
+      relationshipProvenance: "claimant_self" as const,
     }];
   });
 }
@@ -2399,7 +2366,7 @@ export function reverseBioOrgsAsWebMembers(orgs: readonly LinkedOrg[]): WebTeamM
       artifact_verified: true,
       provider: "twitterapi",
       identity_link_evidence_origin: "deterministic" as const,
-      handleProvenance: "subject_first_party" as const,
+      relationshipProvenance: "third_party" as const,
     }];
   });
 }

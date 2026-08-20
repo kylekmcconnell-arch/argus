@@ -17,6 +17,7 @@ import { canonicalOfficialWebsite, isStrictFundScaleArtifact } from "../src/lib/
 import { isOrganizationAccount } from "../src/lib/investorSubject";
 import { portfolioRelationshipBinding } from "../src/lib/portfolioRelationshipBinding";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
+import { canonicalizeCoreTeamRecords } from "../src/lib/teamRelationships";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
@@ -1769,8 +1770,13 @@ export function deriveProjectStrengthBands(
   const factText = (facts: readonly Record<string, unknown>[]): string => facts
     .map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`)
     .join(" ");
-  const team = records(packet.team).filter((member) =>
-    member.artifact_verified === true && member.evidence_origin !== "model_lead");
+  const team = canonicalizeCoreTeamRecords(records(packet.team).filter((member) =>
+    member.artifact_verified === true && member.evidence_origin !== "model_lead")
+    .map((member) => ({
+      ...member,
+      name: String(member.name ?? ""),
+      role: String(member.role ?? ""),
+    })));
   const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
   const leaderNames = new Set(leaders.map((member) => String(member.name ?? "").trim().toLowerCase()).filter(Boolean));
   const profile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile)
@@ -2004,24 +2010,32 @@ export function deriveProjectStrengthBands(
   // Ceiling uses registry-matched audit discovery leads. Floor uses the strict
   // corroborated auditFact only, so an unverified lead widens the allowed range
   // without minting an enforced minimum (H2).
+  const tokenIdentityAssessment = assessmentArtifactFor("P3_token_conduct", "project-token-identity");
+  const explicitTokenlessDisclosure = !token && Boolean(tokenIdentityAssessment) && /\b(?:official|bio|website|project)\b[\s\S]{0,80}\b(?:explicitly\s+)?(?:states?|says?|discloses?)\b[\s\S]{0,40}\bno\s+(?:official\s+|native\s+|project\s+)?token\b/i.test(
+    [tokenIdentityAssessment?.title, tokenIdentityAssessment?.excerpt].filter(Boolean).join(" "),
+  );
   const p3CeilingTier: ProjectStrengthTier = verifiedToken
     ? (scaleSignals >= 2
       && tokenDisclosures.length > 0
       && auditExceptionalCeiling ? "exceptional"
       : moderateMarket ? "solid" : "emerging")
-    : !token && tokenlessConductCategories > 0
-      ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
-      : "none";
+    : explicitTokenlessDisclosure
+      ? "solid"
+      : !token && tokenlessConductCategories > 0
+        ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
+        : "none";
   const p3FloorTier: ProjectStrengthTier = verifiedToken
     ? (scaleSignals >= 2
       && tokenDisclosures.length > 0
       && auditFacts.length > 0 ? "exceptional"
       : moderateMarket ? "solid" : "emerging")
-    : !token && tokenlessConductCategories > 0
-      ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
-      : "none";
+    : explicitTokenlessDisclosure
+      ? "solid"
+      : !token && tokenlessConductCategories > 0
+        ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
+        : "none";
   const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0
-    ? assessmentArtifactFor("P3_token_conduct", "project-token-identity")
+    ? tokenIdentityAssessment
     : null;
   let p3FinalTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3CeilingTier;
   let p3FinalFloorTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3FloorTier;
@@ -2030,6 +2044,7 @@ export function deriveProjectStrengthBands(
   setBand("P3_token_conduct", p3FinalTier, [
     ...(verifiedToken ? ["canonical token verified"] : []),
     ...(!token && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : []),
+    ...(explicitTokenlessDisclosure ? ["official source explicitly discloses that the project has no token"] : []),
     ...(p3Assessment ? ["completed token-identity assessment bound no canonical token"] : []),
     ...(moderateMarket ? ["measured market activity"] : []),
     ...(governanceFacts.length ? ["verified token governance"] : []),
@@ -2041,6 +2056,7 @@ export function deriveProjectStrengthBands(
   ], [
     ...artifactIds([...(token ? [token] : []), ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
     ...(p3Assessment ? [p3Assessment.artifactId] : []),
+    ...(explicitTokenlessDisclosure && tokenIdentityAssessment ? [tokenIdentityAssessment.artifactId] : []),
   ], p3FinalFloorTier);
 
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));

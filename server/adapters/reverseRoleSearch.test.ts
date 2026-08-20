@@ -13,7 +13,6 @@ import {
   projectRoleClaimInBio,
   resetReverseBioMemo,
   reverseBioTeamAsWebMembers,
-  reverseBioOrgsAsWebMembers,
   roleClaimantSerperPlan,
   scanPostsForRoles,
   confirmedFounderFollowupPlan,
@@ -423,33 +422,38 @@ describe("reverse-bio keep path · @alice @bob @SomeOrg @projecthandle", () => {
     expect(viaSearch[0].source).toBe("reverse-bio twitterapi");
   });
 
-  it("binds @SomeOrg from that bio as a fund org, never as a person", async () => {
+  it("does not turn a founder's separate fund affiliation into a project backer", async () => {
     vi.stubEnv("TWITTERAPI_KEY", "tw-key");
     vi.stubGlobal("fetch", vi.fn(twitterapiStub));
 
     const found = await discoverReverseBioFromTwitterapi("@projecthandle");
     expect(found.team.map((m) => m.handle)).toEqual(["@alice"]);
-    expect(found.orgs.map((o) => o.handle.toLowerCase())).toEqual(["@someorg"]);
-    expect(found.orgs[0].role).toBe("fund");
+    expect(found.orgs).toEqual([]);
 
     const people = reverseBioTeamAsWebMembers(found.team);
-    const orgs = reverseBioOrgsAsWebMembers(found.orgs);
     expect(people[0]).toMatchObject({
       handle: "@alice",
       kind: "person",
       evidence_origin: "deterministic",
       artifact_verified: true,
-      handleProvenance: "subject_first_party",
+      relationshipProvenance: "claimant_self",
       provider: "twitterapi",
     });
-    expect(orgs[0]).toMatchObject({
-      handle: "@SomeOrg",
-      kind: "org",
-      role: "fund",
-      evidence_origin: "deterministic",
-      artifact_verified: true,
-      handleProvenance: "subject_first_party",
-    });
+    expect(people[0]).not.toHaveProperty("handleProvenance");
+  });
+
+  it("requires explicit relationship grammar before linking an organization", () => {
+    expect(linkedOrgsFromBioText(
+      "Co-founder @projecthandle | VC @lovable_dev | member @superteamde",
+      "@projecthandle",
+    )).toEqual([]);
+    expect(linkedOrgsFromBioText(
+      "Project incubated by @somefundvc and partnered with @trmlabs",
+      "@projecthandle",
+    )).toEqual([
+      expect.objectContaining({ handle: "@somefundvc", role: "incubator" }),
+      expect.objectContaining({ handle: "@trmlabs", role: "partner" }),
+    ]);
   });
 
   it("does not bind a display-name-only bio or a random @mention without role language", async () => {
