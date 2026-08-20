@@ -4,6 +4,11 @@ import type {
   IntelligenceQuestion,
   IntelligenceSpineSnapshot,
 } from "../intelligence/types";
+import {
+  EVIDENCE_POSTURE_RANK,
+  evidencePostureForSignal,
+  type EvidencePosture,
+} from "./evidenceReasoning";
 
 export interface IntelligenceBriefItem {
   id: string;
@@ -12,6 +17,9 @@ export interface IntelligenceBriefItem {
   provenance: string;
   domain: string;
   sourceRefs: string[];
+  evidencePosture: EvidencePosture["kind"];
+  independentOriginCount: number;
+  originCount: number;
 }
 
 export interface IntelligenceBrief {
@@ -51,29 +59,35 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
-function signalProvenance(signal: DerivedIntelligenceSignal, sourceCount: number): string {
-  const evidence = signal.evidenceState === "verified"
+function signalEvidenceLabel(signal: DerivedIntelligenceSignal): string {
+  return signal.evidenceState === "verified"
     ? "Verified saved evidence"
     : signal.evidenceState === "measured"
       ? "Measured saved evidence"
       : signal.evidenceState === "bounded"
         ? "Bounded saved evidence"
         : "Source-reported context";
-  return `${evidence} · score-neutral derivation${sourceCount > 0 ? ` · ${sourceCount} source${sourceCount === 1 ? "" : "s"}` : ""}`;
 }
 
-function signalItem(signal: DerivedIntelligenceSignal): IntelligenceBriefItem {
+function signalItem(
+  snapshot: IntelligenceSpineSnapshot,
+  signal: DerivedIntelligenceSignal,
+): IntelligenceBriefItem {
   const sourceRefs = unique(signal.sourceRefs);
   const headline = sentence(signal.headline);
+  const posture = evidencePostureForSignal(snapshot, signal);
   return {
     id: `intelligence-signal:${signal.id}`,
     title: signal.evidenceState === "reported_context"
       ? `Source-reported context: ${headline.charAt(0).toLowerCase()}${headline.slice(1)}`
       : headline,
     detail: [sentence(signal.finding), sentence(signal.whyItMatters)].filter(Boolean).join(" "),
-    provenance: signalProvenance(signal, sourceRefs.length),
+    provenance: `${signalEvidenceLabel(signal)} · ${posture.label} · score-neutral derivation`,
     domain: signal.domain,
     sourceRefs,
+    evidencePosture: posture.kind,
+    independentOriginCount: posture.independentOriginCount,
+    originCount: posture.originCount,
   };
 }
 
@@ -87,6 +101,9 @@ function questionItem(question: IntelligenceQuestion): IntelligenceBriefItem {
     provenance: `${question.materiality} question · ${state} · score-neutral`,
     domain: question.domain,
     sourceRefs,
+    evidencePosture: "unanchored",
+    independentOriginCount: 0,
+    originCount: sourceRefs.length,
   };
 }
 
@@ -128,6 +145,13 @@ export function deriveIntelligenceBrief(
       if (SEVERITY_RANK[left.severity] !== SEVERITY_RANK[right.severity]) {
         return SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity];
       }
+      // When two claims are equally material, prefer the one with stronger
+      // source independence. Citation count alone is not corroboration.
+      const leftPosture = evidencePostureForSignal(snapshot, left);
+      const rightPosture = evidencePostureForSignal(snapshot, right);
+      if (EVIDENCE_POSTURE_RANK[leftPosture.kind] !== EVIDENCE_POSTURE_RANK[rightPosture.kind]) {
+        return EVIDENCE_POSTURE_RANK[leftPosture.kind] - EVIDENCE_POSTURE_RANK[rightPosture.kind];
+      }
       return (originalSignalRank.get(left.id) ?? 0) - (originalSignalRank.get(right.id) ?? 0);
     });
 
@@ -159,8 +183,8 @@ export function deriveIntelligenceBrief(
     .map(questionItem);
 
   return {
-    supports: orderedSignals.filter((signal) => signal.polarity === "support").map(signalItem),
-    pressures: orderedSignals.filter((signal) => signal.polarity === "risk" || signal.polarity === "mixed").map(signalItem),
+    supports: orderedSignals.filter((signal) => signal.polarity === "support").map((signal) => signalItem(snapshot, signal)),
+    pressures: orderedSignals.filter((signal) => signal.polarity === "risk" || signal.polarity === "mixed").map((signal) => signalItem(snapshot, signal)),
     // "unknown" polarity belongs with neutral context, not nowhere. Filtering
     // for "neutral" alone silently dropped every signal the spine declined to
     // polarize, including the single-signer Safe-compatible authority reading,
@@ -169,7 +193,7 @@ export function deriveIntelligenceBrief(
     // the reader sees it without ARGUS asserting a polarity it did not derive.
     context: orderedSignals
       .filter((signal) => signal.polarity === "neutral" || signal.polarity === "unknown")
-      .map(signalItem),
+      .map((signal) => signalItem(snapshot, signal)),
     questions,
   };
 }
