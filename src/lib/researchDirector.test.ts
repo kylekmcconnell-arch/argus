@@ -80,6 +80,44 @@ describe("research director", () => {
     expect(plan.nextActions[0]?.rank).toBe(1);
   });
 
+  it("gives project collection lanes explicit claim and corroboration contracts", () => {
+    const evidence = emptyEvidence("@multihopper");
+    evidence.roles = [SubjectClass.PROJECT];
+    const plan = buildResearchPlan(evidence);
+
+    const relationships = plan.tasks.find((task) => task.capability === "relationship_reconciliation");
+    const corroboration = plan.tasks.find((task) => task.capability === "independent_corroboration");
+    expect(relationships).toMatchObject({
+      priority: "critical",
+      collectionContract: {
+        sourceStrategy: "external_corroboration",
+        minimumIndependentOrigins: 1,
+        preserveFirstPartyClaimsAsClaims: true,
+        searchForCounterEvidence: true,
+      },
+    });
+    expect(corroboration?.collectionContract.rejectWhen).toContain("repeated first-party copy");
+
+    const firstPartyOnly = finalizeResearchPlan(plan, [{
+      checkId: "project-product-substance",
+      label: "Product",
+      status: "reported",
+      provider: "official-site",
+    }]);
+    expect(firstPartyOnly.tasks.find((task) => task.capability === "independent_corroboration")).toMatchObject({
+      state: "partial",
+      outcome: expect.stringContaining("required independent origins"),
+    });
+
+    const externallySupported = finalizeResearchPlan(plan, [{
+      checkId: "project-product-substance",
+      label: "Product",
+      status: "confirmed",
+      provider: "github",
+    }]);
+    expect(externallySupported.tasks.find((task) => task.capability === "independent_corroboration")?.state).toBe("completed");
+  });
+
   it("uses legal-entity uncertainty narrowly instead of suppressing an attributable portfolio", () => {
     const evidence = emptyEvidence("@fixturefund");
     evidence.roles = [SubjectClass.INVESTOR];
