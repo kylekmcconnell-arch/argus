@@ -456,6 +456,8 @@ describe("PointInTimeIntelligencePanel", () => {
     expect(container.textContent).toContain("Score-neutral / saved-snapshot derivation");
     expect(container.textContent).toContain("does not change the ARGUS score");
     expect(container.textContent).toContain("makes no provider call when rendered");
+    expect(container.textContent).toContain("Evidence posture");
+    expect(container.textContent).toContain("First-party evidence only");
     expect(container.textContent).toContain("Aug 1, 2026");
     expect(container.textContent).toContain("10:00 UTC to Aug 1, 2026");
     expect(container.textContent).toContain("10:30 UTC");
