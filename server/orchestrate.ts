@@ -113,6 +113,32 @@ import {
 const VENTURE_ROLE_TOKENS = /\b(?:co[- ]?founders?|founders?|creators?|ceo|cto|coo|cfo|chief\s+\w+(?:\s+officer)?|presidents?|chair(?:man|woman|person)?|executives?)\b/gi;
 const BIO_FOUNDER_CLAIM = /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i;
 
+/**
+ * Keep an inconclusive public-X probe visible as a retryable provider outage
+ * unless another source established the same account identity during this
+ * scan. Suppression happens before a NEW immutable dossier is frozen; saved
+ * reports are never reinterpreted by presentation code.
+ */
+export function providerFailureLinesForEvidence(
+  cost: Parameters<typeof providerFailureLines>[0],
+  evidence: CollectedEvidence,
+): ReturnType<typeof providerFailureLines> {
+  const failures = providerFailureLines(cost);
+  const profile = evidence.profile;
+  const identityEstablishedElsewhere = Boolean(
+    (profile.profile_collection_state === "resolved"
+      && profile.profile_provider
+      && profile.profile_provider !== "x-public")
+    || profile.identity_binding
+    || verifiedOfficialProjectIdentity(evidence),
+  );
+  if (!identityEstablishedElsewhere) return failures;
+  return failures.filter((line) => !(
+    line.provider.toLowerCase() === "x-public"
+    && line.op.toLowerCase() === "account-state"
+  ));
+}
+
 function cleanVentureName(value: string): string {
   const afterAt = value.split(/\bat\b/i).pop() ?? value;
   return afterAt.replace(VENTURE_ROLE_TOKENS, " ").replace(/[&,@]/g, " ").replace(/\s+/g, " ").trim();
@@ -4910,7 +4936,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   dossier.cost = cost;
   // Owner policy: a failed provider fails VISIBLY. Stamp the failures into the
   // payload for the report banner and say it on screen in the live stream.
-  const providerFailures = providerFailureLines(cost);
+  const providerFailures = providerFailureLinesForEvidence(cost, evidence);
   if (providerFailures.length) {
     dossier.providerFailures = providerFailures;
     const summary = providerFailures.slice(0, 6)

@@ -51,7 +51,7 @@ describe("X provider attempt accounting", () => {
     expect(state?.statusCapturedAt).toEqual(expect.any(String));
   });
 
-  it("treats a public X HTTP status as an inconclusive probe, not proof the account is missing", async () => {
+  it("classifies an inconclusive public X response as temporarily unavailable", async () => {
     const captured = await withCostLedger(async () => {
       const state = await publicXAccountState("@multihopper", vi.fn().mockResolvedValue(
         new Response("login edge", { status: 404 }),
@@ -63,9 +63,51 @@ describe("X provider attempt accounting", () => {
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "x-public",
       op: "account-state",
-      partial: 1,
+      status: "failed",
+      partial: 0,
+      failed: 1,
+      meta: expect.stringContaining("temporarily_unavailable_http_404"),
+    }));
+  });
+
+  it("does not promote a hidden reason field without X's explicit page statement", async () => {
+    const captured = await withCostLedger(async () => {
+      const state = await publicXAccountState("@multihopper", vi.fn().mockResolvedValue(
+        new Response('<script>{"unavailable_reason":"NotFound"}</script>', { status: 200 }),
+      ) as unknown as typeof fetch);
+      return { state, cost: getCost() };
+    });
+
+    expect(captured.state).toBeNull();
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "x-public",
+      op: "account-state",
+      status: "failed",
+      failed: 1,
+      meta: expect.stringContaining("temporarily_unavailable_no_explicit_terminal_state"),
+    }));
+  });
+
+  it("accepts an explicit account-does-not-exist page even when X returns HTTP 404", async () => {
+    const captured = await withCostLedger(async () => {
+      const state = await publicXAccountState("@gone", vi.fn().mockResolvedValue(
+        new Response("<h2>This account doesn’t exist</h2>", { status: 404 }),
+      ) as unknown as typeof fetch);
+      return { state, cost: getCost() };
+    });
+
+    expect(captured.state).toEqual(expect.objectContaining({
+      handle: "@gone",
+      accountStatus: "unavailable",
+      statusSourceUrl: "https://x.com/gone",
+    }));
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "x-public",
+      op: "account-state",
+      status: "succeeded",
+      succeeded: 1,
       failed: 0,
-      meta: expect.stringContaining("probe_inconclusive_http_404"),
+      meta: expect.stringContaining("unavailable"),
     }));
   });
 

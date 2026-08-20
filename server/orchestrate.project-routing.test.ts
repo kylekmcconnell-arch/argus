@@ -11,6 +11,7 @@ import {
   protocolRecordMatchesCanonicalToken,
   projectVerifiedBasicFacts,
   providerBackedRoles,
+  providerFailureLinesForEvidence,
 } from "./orchestrate";
 import {
   hydrateOfficialProjectIdentityFromFacts,
@@ -51,6 +52,68 @@ function resolvedProjectProfile(bio: string, website: string | null | undefined 
   evidence.profile.profile_captured_at = "2026-07-12T14:00:00.000Z";
   return evidence;
 }
+
+describe("public X probe failure policy", () => {
+  const cost = {
+    calls: [
+      {
+        provider: "x-public",
+        op: "account-state",
+        calls: 1,
+        succeeded: 0,
+        partial: 0,
+        failed: 1,
+        cached: 0,
+        status: "failed" as const,
+        usd: 0,
+        meta: "multihopper · temporarily_unavailable_http_404",
+      },
+      {
+        provider: "github",
+        op: "users/multihopper",
+        calls: 1,
+        succeeded: 0,
+        partial: 0,
+        failed: 1,
+        cached: 0,
+        status: "failed" as const,
+        usd: 0,
+        meta: "http_503",
+      },
+    ],
+  };
+
+  it("keeps the retryable probe notice when no other source established identity", () => {
+    const evidence = emptyEvidence("@multihopper");
+    expect(providerFailureLinesForEvidence(cost, evidence).map((line) => line.provider))
+      .toEqual(["x-public", "github"]);
+  });
+
+  it("suppresses only the public-X probe after an independent handle binding", () => {
+    const evidence = emptyEvidence("@person");
+    evidence.profile.identity_binding = "independent_exact_handle";
+    expect(providerFailureLinesForEvidence(cost, evidence).map((line) => line.provider))
+      .toEqual(["github"]);
+  });
+
+  it("suppresses only the public-X probe after a verified official-site identity binding", () => {
+    const evidence = emptyEvidence("@multihopper");
+    const identity = {
+      ...basicFact("official_identity", "MultiHopper routing protocol"),
+      subjectKey: "@multihopper",
+      questionId: "project.official_identity",
+      sources: [{
+        ...basicFact("official_identity", "MultiHopper routing protocol").sources[0],
+        url: "https://multihopper.com/about",
+      }],
+    };
+    evidence.basicFacts = [identity];
+
+    expect(verifiedOfficialProjectIdentity(evidence)).not.toBeNull();
+    expect(providerFailureLinesForEvidence(cost, evidence).map((line) => line.provider))
+      .toEqual(["github"]);
+  });
+});
 
 describe("provider-backed project routing", () => {
   it("classifies an empty-bio account from its own posts instead of refusing to route", () => {

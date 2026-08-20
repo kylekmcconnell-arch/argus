@@ -334,44 +334,54 @@ export async function publicXAccountState(
       signal: AbortSignal.timeout(10_000),
     });
   } catch {
-    // This logged-out HTML probe is diagnostic only. A transport failure says
-    // nothing about whether the account exists and must not become a provider
-    // failure or a subject warning.
-    recordCall("x-public", "account-state", 0, `${u} · probe_inconclusive_transport_error`, "partial");
+    recordCall("x-public", "account-state", 0, `${u} · temporarily_unavailable_transport_error`, "failed");
     return null;
   }
-  if (!response.ok) {
-    // X frequently returns edge/login/anti-bot status codes for valid profiles.
-    // Only an explicit terminal state in a readable 200 response can establish
-    // suspension or unavailability. The status code itself is inconclusive.
-    recordCall("x-public", "account-state", 0, `${u} · probe_inconclusive_http_${response.status}`, "partial");
-    return null;
-  }
+
+  // Read the returned page even on a non-2xx response. X sometimes serves a
+  // real terminal account-state page with an HTTP error, while the status code
+  // alone is also commonly produced by login, edge, and anti-bot layers.
   let html: string;
   try {
     html = await response.text();
   } catch {
-    recordCall("x-public", "account-state", 0, `${u} · probe_inconclusive_unreadable`, "partial");
+    recordCall(
+      "x-public",
+      "account-state",
+      0,
+      `${u} · temporarily_unavailable_unreadable_http_${response.status}`,
+      "failed",
+    );
     return null;
   }
-  const suspended = /\bAccount suspended\b/i.test(html)
-    || /unavailable_reason\s*[:=]\s*["']Suspended["']/i.test(html)
-    || /unavailable_reason\\?["']?\s*:\s*\\?["']Suspended\\?["']/i.test(html);
-  const unavailable = suspended
-    || /\bThis account (?:doesn['’]t|does not) exist\b/i.test(html)
-    || /unavailable_reason\s*[:=]\s*["'](?:NotFound|Unavailable|Deactivated)["']/i.test(html);
-  if (!unavailable) {
-    recordCall("x-public", "account-state", 0, `${u} · no_terminal_state`, "succeeded");
-    return null;
+
+  // Only X's explicit human-readable terminal statements establish account
+  // state. Hidden reason fields, an HTTP 404, or a generic unavailable page do
+  // not prove that this specific account was suspended or does not exist.
+  const suspended = /\bAccount suspended\b/i.test(html);
+  const nonexistent = /\bThis account (?:doesn['’]t|does not) exist\b/i.test(html);
+  if (suspended || nonexistent) {
+    const accountStatus = suspended ? "suspended" : "unavailable";
+    recordCall("x-public", "account-state", 0, `${u} · ${accountStatus}`, "succeeded");
+    return {
+      handle: `@${u}`,
+      accountStatus,
+      statusSourceUrl,
+      statusCapturedAt: captureTimestamp(),
+    };
   }
-  const accountStatus = suspended ? "suspended" : "unavailable";
-  recordCall("x-public", "account-state", 0, `${u} · ${accountStatus}`, "succeeded");
-  return {
-    handle: `@${u}`,
-    accountStatus,
-    statusSourceUrl,
-    statusCapturedAt: captureTimestamp(),
-  };
+
+  const inconclusiveReason = response.ok
+    ? "no_explicit_terminal_state"
+    : `http_${response.status}`;
+  recordCall(
+    "x-public",
+    "account-state",
+    0,
+    `${u} · temporarily_unavailable_${inconclusiveReason}`,
+    "failed",
+  );
+  return null;
 }
 
 // The project's own website is the biggest un-mined lead on a project account —

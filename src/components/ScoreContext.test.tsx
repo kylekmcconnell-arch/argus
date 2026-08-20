@@ -113,13 +113,28 @@ describe("ProviderFailureNotice", () => {
     expect(container.textContent).not.toContain("Run a new scan later");
   });
 
-  it("suppresses historical x-public probe failures because an HTTP status is not an account-state result", () => {
+  it("preserves the original notice on a historical saved x-public report", () => {
     act(() => {
       root.render(<ProviderFailureNotice failures={[
         { provider: "x-public", op: "account-state", failed: 1, meta: "multihopper · http_404" },
       ]} />);
     });
-    expect(container.textContent).toBe("");
+    expect(container.textContent).toContain("1 source has no record of this subject (x-public).");
+  });
+
+  it("renders a new inconclusive x-public probe as temporarily unavailable", () => {
+    act(() => {
+      root.render(<ProviderFailureNotice failures={[
+        {
+          provider: "x-public",
+          op: "account-state",
+          failed: 1,
+          meta: "multihopper · temporarily_unavailable_http_404",
+        },
+      ]} />);
+    });
+    expect(container.textContent).toContain("1 source was temporarily unavailable (x-public).");
+    expect(container.textContent).not.toContain("no record of this subject");
   });
 
   it("renders nothing on a clean run", () => {
