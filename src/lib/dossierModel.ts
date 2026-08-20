@@ -13,7 +13,11 @@ import {
   provenanceForCheckStatus,
   type ProvenanceState,
 } from "./provenance";
-import { canonicalizeCoreTeamRecords } from "./teamRelationships";
+import {
+  canonicalizeTeamRecords,
+  hasOperatingTeamRole,
+  isCoreTeamRecord,
+} from "./teamRelationships";
 
 export interface DossierReceiptSource {
   url: string;
@@ -465,14 +469,22 @@ function headingFor(
 
 
 function collectTeam(payload: Record<string, unknown>): TeamMember[] {
-  // The roster is one governed set: verified people in operating roles only.
-  // Search candidates remain in webTeamLeads and relationship organizations
-  // remain in associates, so neither can inflate the team headline.
-  const rows = canonicalizeCoreTeamRecords(
+  // This is the report-story roster, not the scorer's confirmed core-team lane.
+  // It includes (a) relationship-bound core people and (b) people the subject
+  // explicitly named in an operating role, even while that role remains
+  // unverified. Candidates, organizations, advisors, affiliations, and other
+  // non-operating relationships still stay outside the team story.
+  const rows = canonicalizeTeamRecords(
     arr<Record<string, unknown>>(payload.webTeam) as Array<Record<string, unknown> & {
       name: string; role: string;
     }>,
-  );
+  ).filter((member) => {
+    const firstPartyNamedOperator = str(member.handleProvenance) === "subject_first_party"
+      && member.evidence_origin !== "model_lead"
+      && member.artifact_verified !== false
+      && hasOperatingTeamRole(member);
+    return isCoreTeamRecord(member) || firstPartyNamedOperator;
+  });
   return rows.flatMap((m) => {
     const name = str(m.name);
     if (!name) return [];

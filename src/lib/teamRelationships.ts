@@ -116,12 +116,11 @@ export function classifyProjectRelationship(
   const hasSpecificCoreRole = SPECIFIC_CORE_ROLE.test(role);
   const hasGenericCoreRole = GENERIC_CORE_ROLE.test(role);
 
-  // A concrete operating title wins for a person even when the same title
-  // contains words such as "Investor Relations". Generic developer/engineer/
-  // team language needs a project-side, counterparty, or independent binding;
-  // otherwise it remains contextual rather than silently becoming employment.
-  if (hasSpecificCoreRole) return "core_team";
-  if (hasGenericCoreRole) {
+  // An operating title describes a possible role; it does not by itself prove
+  // that the person holds that role for this project. Specific founder/executive
+  // titles and generic developer/team titles both require project-side,
+  // counterparty, or independent relationship authority before entering core.
+  if (hasSpecificCoreRole || hasGenericCoreRole) {
     return hasConfirmedRelationshipProof(member) ? "core_team" : "associate";
   }
 

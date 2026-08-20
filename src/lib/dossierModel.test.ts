@@ -235,18 +235,16 @@ describe("team enrichment boundary", () => {
     expect(m.avatarUrl).toBe("https://pbs.twimg.com/y.jpg");
   });
 
-  it("refuses a face on a person found only by web search, even when one is offered", () => {
+  it("keeps a web-search namesake candidate out of the governed team", () => {
     // Attaching a photograph to a handle nobody confirmed is the namesake error
-    // in a more persuasive form: the reader now has a face to trust.
-    const [m] = withTeam([{
+    // in a more persuasive form. Without project-bound relationship proof the
+    // candidate belongs in investigation context, not the team story.
+    const team = withTeam([{
       name: "Daniela Herrmann", role: "CEO & Co-Founder",
       source: "web/LinkedIn search", avatarUrl: "https://example.org/someone.jpg",
       avatarCapturedAt: "2026-08-16T04:51:31.270Z",
     }]).team;
-    expect(m.firstParty).toBe(false);
-    expect(m.independentlyConfirmed).toBe(false);
-    expect(m.avatarUrl).toBeNull();
-    expect(m.avatarCapturedAt).toBeNull();
+    expect(team).toEqual([]);
   });
 });
 
@@ -278,8 +276,11 @@ describe("live report field names", () => {
         name: "Official Site Person",
         role: "Engineer",
         avatarUrl: "https://example.org/face.jpg",
+        source: "Independent project team directory",
+        sourceUrl: "https://example.org/dynex/team",
         artifact_verified: true,
         evidence_origin: "deterministic",
+        relationshipProvenance: "independent",
       }],
     });
     expect(dossier.team).toHaveLength(1);
@@ -344,6 +345,8 @@ describe("count-true headings", () => {
       webTeam: [{
         name: "Ada", role: "founder", handle: "@ada",
         handleProvenance: "subject_first_party",
+        source: "Subject's official X roster mention",
+        sourceUrl: "https://x.com/alice/status/100",
       }],
     });
     expect(oneNamed.beats.find((b) => b.id === "team")!.heading).toBe("The project named 1 founder. Its role evidence is still unverified.");
@@ -359,9 +362,25 @@ describe("count-true headings", () => {
       basicFactLeads: [],
       providerFailures: [],
       webTeam: [
-        { name: "Ada", role: "engineer", handle: "@ada", handleProvenance: "subject_first_party" },
-        { name: "Bea", role: "engineer", handle: "@bea", handleProvenance: "subject_first_party" },
-        { name: "Cara", role: "engineer", handle: "@cara", handleProvenance: "subject_first_party", artifact_verified: true },
+        {
+          name: "Ada", role: "engineer", handle: "@ada",
+          handleProvenance: "subject_first_party",
+          source: "Subject's official X roster mention",
+          sourceUrl: "https://x.com/alice/status/101",
+        },
+        {
+          name: "Bea", role: "engineer", handle: "@bea",
+          handleProvenance: "subject_first_party",
+          source: "Subject's official X roster mention",
+          sourceUrl: "https://x.com/alice/status/101",
+        },
+        {
+          name: "Cara", role: "engineer", handle: "@cara",
+          handleProvenance: "subject_first_party",
+          source: "Fetched first-party roster artifact",
+          sourceUrl: "https://x.com/alice/status/101",
+          artifact_verified: true,
+        },
       ],
     });
     expect(mixed.beats.find((b) => b.id === "team")!.heading).toBe("The project named 3 people. 1 role has fetched evidence.");

@@ -3255,12 +3255,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           </div>
 
-          {/* A lone tile reads as a broken empty band; two or more justify the
-              strip, and the column count tracks the tile count so no cell is
-              ever an empty grey box. */}
-          {fundamentalTiles.length >= 2 && (
+          {/* Every verified fundamental renders. A single tile spans the band;
+              multi-tile rows keep the responsive grid without an empty cell. */}
+          {fundamentalTiles.length > 0 && (
             <dl
-              className="order-4 grid grid-cols-2 gap-px border-t border-line/60 bg-line max-sm:[&>div:last-child:nth-child(odd)]:col-span-2 sm:[grid-template-columns:repeat(var(--tile-count),minmax(0,1fr))]"
+              className={`order-4 grid gap-px border-t border-line/60 bg-line ${
+                fundamentalTiles.length === 1
+                  ? "grid-cols-1"
+                  : "grid-cols-2 max-sm:[&>div:last-child:nth-child(odd)]:col-span-2 sm:[grid-template-columns:repeat(var(--tile-count),minmax(0,1fr))]"
+              }`}
               style={{ "--tile-count": Math.min(fundamentalTiles.length, 5) } as React.CSSProperties}
               aria-label="Verified fundamentals"
             >

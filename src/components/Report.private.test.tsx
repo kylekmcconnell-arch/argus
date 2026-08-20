@@ -912,12 +912,23 @@ describe("private person report evidence boundary", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
       ...base,
+      handle: "@uniswap",
       display_name: "Uniswap",
+      website: "https://uniswap.org",
       report: { ...base.report, roles: ["PROJECT"], governing_role: "PROJECT" },
       protocolFunding: {
         slug: "uniswap",
         name: "Uniswap",
         geckoId: "uniswap",
+        binding: {
+          method: "matched_official_x_and_domain",
+          scope: "project",
+          protocolSlug: "uniswap",
+          canonicalHandle: "uniswap",
+          canonicalDomain: "uniswap.org",
+          providerHandle: "uniswap",
+          providerDomain: "app.uniswap.org",
+        },
         rounds: [{
           date: "2020-08-07",
           round: "Series A",

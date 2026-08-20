@@ -9,8 +9,22 @@ import {
 
 describe("project relationship ontology", () => {
   it("keeps operating people on team and routes affiliations elsewhere", () => {
-    expect(classifyProjectRelationship({ name: "JRA", role: "COO & cofounder", kind: "person", artifact_verified: true })).toBe("core_team");
-    expect(classifyProjectRelationship({ name: "Ovidiu Dan", role: "BD manager", kind: "person", artifact_verified: true })).toBe("core_team");
+    expect(classifyProjectRelationship({
+      name: "JRA",
+      role: "COO & cofounder",
+      kind: "person",
+      artifact_verified: true,
+      relationshipProvenance: "subject_official",
+      source: "Official project team page",
+    })).toBe("core_team");
+    expect(classifyProjectRelationship({
+      name: "Ovidiu Dan",
+      role: "BD manager",
+      kind: "person",
+      artifact_verified: true,
+      relationshipProvenance: "subject_official",
+      source: "Official project team page",
+    })).toBe("core_team");
     expect(classifyProjectRelationship({ name: "Superteam DE", role: "ecosystem", kind: "org", artifact_verified: true })).toBe("ecosystem");
     expect(classifyProjectRelationship({ name: "SSR", role: "VC", kind: "person", artifact_verified: true })).toBe("associate");
     expect(classifyProjectRelationship({
@@ -37,7 +51,20 @@ describe("project relationship ontology", () => {
     })).toBe("candidate");
   });
 
-  it("requires bound relationship proof for relationship labels and generic operating roles", () => {
+  it("requires bound relationship proof for material relationships and every operating role", () => {
+    expect(classifyProjectRelationship({
+      name: "Unbound Founder",
+      role: "founder",
+      kind: "person",
+      artifact_verified: true,
+    })).toBe("associate");
+    expect(classifyProjectRelationship({
+      name: "Unbound Executive",
+      role: "CEO",
+      kind: "person",
+      artifact_verified: true,
+      relationshipProvenance: "third_party",
+    })).toBe("associate");
     expect(classifyProjectRelationship({
       name: "Unbound Fund",
       role: "VC fund",
@@ -184,11 +211,31 @@ describe("project relationship ontology", () => {
 
   it("produces one core roster and excludes orgs, VCs, advisors, and leads", () => {
     const roster = canonicalizeCoreTeamRecords([
-      { name: "Enigma", role: "CEO founder", handle: "@enigmafund", kind: "person", artifact_verified: true },
-      { name: "JRA", role: "COO cofounder", handle: "@jra_xyz", kind: "person", artifact_verified: true },
-      { name: "Kuj", role: "CBO cofounder", handle: "@kujcrypto", kind: "person", artifact_verified: true },
-      { name: "Martin", role: "lead developer", kind: "person", artifact_verified: true },
-      { name: "Ovidiu", role: "BD manager", kind: "person", artifact_verified: true },
+      {
+        name: "Enigma", role: "CEO founder", handle: "@enigmafund", kind: "person",
+        artifact_verified: true, relationshipProvenance: "subject_official",
+        source: "Official project team page",
+      },
+      {
+        name: "JRA", role: "COO cofounder", handle: "@jra_xyz", kind: "person",
+        artifact_verified: true, relationshipProvenance: "subject_official",
+        source: "Official project team page",
+      },
+      {
+        name: "Kuj", role: "CBO cofounder", handle: "@kujcrypto", kind: "person",
+        artifact_verified: true, relationshipProvenance: "subject_official",
+        source: "Official project team page",
+      },
+      {
+        name: "Martin", role: "lead developer", kind: "person",
+        artifact_verified: true, relationshipProvenance: "subject_official",
+        source: "Official project team page",
+      },
+      {
+        name: "Ovidiu", role: "BD manager", kind: "person",
+        artifact_verified: true, relationshipProvenance: "subject_official",
+        source: "Official project team page",
+      },
       { name: "Superteam DE", role: "ecosystem", handle: "@superteamde", kind: "org", artifact_verified: true },
       { name: "Strategic Super R", role: "VC", handle: "@strategicsuperR", kind: "person", artifact_verified: true },
       { name: "Lovable", role: "VC", handle: "@lovable_dev", kind: "org", artifact_verified: true },
@@ -206,6 +253,8 @@ describe("project relationship ontology", () => {
       artifact_verified: true,
       evidence_origin: "deterministic",
       relationshipProvenance: "subject_official" as const,
+      source: "Official project team page",
+      sourceUrl: "https://project.example/team",
     };
     const selfClaim = {
       name: "Kuj Crypto",
@@ -215,6 +264,7 @@ describe("project relationship ontology", () => {
       artifact_verified: true,
       evidence_origin: "deterministic",
       relationshipProvenance: "claimant_self" as const,
+      source: "Self-authored X bio",
     };
 
     for (const rows of [[selfClaim, official], [official, selfClaim]]) {
@@ -226,7 +276,7 @@ describe("project relationship ontology", () => {
       });
     }
 
-    const [implicitOfficial] = canonicalizeTeamRecords([
+    const [sourceWordedButUnbound] = canonicalizeTeamRecords([
       selfClaim,
       {
         ...official,
@@ -234,11 +284,11 @@ describe("project relationship ontology", () => {
         source: "deterministically fetched official team page",
       },
     ]);
-    expect(implicitOfficial).toMatchObject({
+    expect(sourceWordedButUnbound).toMatchObject({
       role: "cofounder",
-      relationship: "core_team",
+      relationship: "associate",
     });
-    expect(implicitOfficial.relationshipProvenance).toBeUndefined();
+    expect(sourceWordedButUnbound.relationshipProvenance).toBeUndefined();
 
     const [protectedFromModelMetadata] = canonicalizeTeamRecords([
       selfClaim,
@@ -298,6 +348,9 @@ describe("project relationship ontology", () => {
         artifact_verified: true,
         evidence_origin: "deterministic",
         linkedin: "https://linkedin.com/in/builder",
+        relationshipProvenance: "subject_official",
+        source: "Official project team page",
+        sourceUrl: "https://project.example/team",
       },
     ]);
     expect(member.relationship).toBe("core_team");
