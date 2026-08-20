@@ -51,6 +51,24 @@ describe("X provider attempt accounting", () => {
     expect(state?.statusCapturedAt).toEqual(expect.any(String));
   });
 
+  it("treats a public X HTTP status as an inconclusive probe, not proof the account is missing", async () => {
+    const captured = await withCostLedger(async () => {
+      const state = await publicXAccountState("@multihopper", vi.fn().mockResolvedValue(
+        new Response("login edge", { status: 404 }),
+      ) as unknown as typeof fetch);
+      return { state, cost: getCost() };
+    });
+
+    expect(captured.state).toBeNull();
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "x-public",
+      op: "account-state",
+      partial: 1,
+      failed: 0,
+      meta: expect.stringContaining("probe_inconclusive_http_404"),
+    }));
+  });
+
   it("falls through from a provider 404 to the exact public X terminal state", async () => {
     vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
     const fetchMock = vi.fn()
