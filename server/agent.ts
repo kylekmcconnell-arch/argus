@@ -4147,7 +4147,8 @@ export async function analyzeSubject(
     "evidence that has been verified. Understating fully verified strength is as " +
     "much a scoring error as overstating thin evidence. Each axis score must be " +
     "between 0 and its weight. Write one tight rationale per axis citing the " +
-    "evidence. Never use em dashes.";
+    "evidence. Reason in the order observation, source qualification, decision implication, and unresolved proof. " +
+    "Count independent origins rather than URLs or citations. Never use em dashes.";
   const roleSpecificScoringPolicy = scoringPolicyForAxes(axisCatalog);
   const projectScoreBands = deriveProjectStrengthBands(evidenceJson, axisCatalog);
   const investorScoreBands = deriveInvestorStrengthBands(evidenceJson, axisCatalog);
@@ -4258,6 +4259,25 @@ export async function analyzeSubject(
     `responsibility. This restriction applies to finding collections, not to ` +
     `legitimate non-finding evidence: profile, team, wallet, check-outcome, source, ` +
     `and provider evidence may affect scoring when relevant and reliable.\n\n` +
+    `SOURCE INDEPENDENCE RULE: count origins, not pages, URLs, or provider rows. ` +
+    `Several pages controlled by the subject are one first-party origin. Repeated ` +
+    `wire copy or identical saved content is one publication origin. A registry, ` +
+    `direct chain read, official counterparty, and genuinely independent publication ` +
+    `may corroborate one another only when each binds the same exact subject and claim. ` +
+    `Do not call evidence independent merely because two aggregators repeat it. State ` +
+    `first-party-only support plainly and never turn citation volume into confidence.\n\n` +
+    `CLAIM RECONCILIATION RULE: decide one atomic claim at a time. Keep entity, role, ` +
+    `relationship direction, time, and source owner attached to the claim. A person can ` +
+    `be a core operator, advisor, investor, partner contact, ecosystem member, or merely ` +
+    `associated; those are different claims. A person's affiliation never becomes the ` +
+    `project's affiliation without project-side or counterparty evidence. Resolve aliases ` +
+    `before counting people, and leave an unresolved candidate outside scoring.\n\n` +
+    `NARRATIVE RULE: every rationale should tell a compact evidence story in this order: ` +
+    `what was observed; who or what source establishes it; the strongest qualification ` +
+    `or counterpoint; why it changes this axis; and the exact missing proof that would ` +
+    `change the read. Do not write generic lines such as evidence is thin when a concrete ` +
+    `missing disclosure, independent metric, control receipt, or identity binding can be ` +
+    `named. The headline must describe the governing tension, not summarize all facts.\n\n` +
     `CITATION RULE: return exactly one array row for every requested axis. The axis ` +
     `field must exactly match an ID in the requested axis list and score must be an ` +
     `integer from zero through that axis's listed maximum. primaryEvidenceRef must ` +
