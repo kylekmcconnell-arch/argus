@@ -78,6 +78,35 @@ describe("audit SSE liveness", () => {
     );
   });
 
+  it("marks an explicit report rescan as fresh", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: done\ndata: {"handle":"@argus","report":{}}\n\n'));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    streamAudit(
+      "@argus",
+      false,
+      { onStep: vi.fn(), onDone: vi.fn(), onError: vi.fn() },
+      "investment_due_diligence",
+      undefined,
+      { fresh: true },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/audit?handle=%40argus&intent=investment_due_diligence&fresh=1",
+      expect.any(Object),
+    );
+  });
+
   it("forwards the investigation contract into the embedded project scan", async () => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CollectedEvidence, SubjectOrientation } from "../src/data/evidence";
 import {
   buildOrientationPacket,
+  firstPartyTokenTickers,
   orientationHandleBound,
   orientationMentionLeads,
   orientSubjectWithGrok,
@@ -113,6 +114,35 @@ describe("buildOrientationPacket", () => {
 });
 
 describe("parseOrientation bind rules", () => {
+  it("keeps a first-party ticker candidate when Grok omits it from launched products", () => {
+    const clutchPacket = packet({
+      handle: "@ClutchMarkets",
+      profileName: "CLUTCH",
+      bio: "Building prediction markets and $STONKBROKER.",
+      selfPostSample: "We launched $STONKBROKER on Robinhood Chain.",
+      recentActivity: ["$STONKBROKER is now live."],
+      websiteUrl: "https://clutch.markets/",
+      websiteHost: "clutch.markets",
+      websiteTitle: "Clutch Markets",
+      siteExcerpt: "Clutch Markets",
+      sourceUrls: ["https://x.com/ClutchMarkets", "https://clutch.markets/"],
+    });
+
+    expect(firstPartyTokenTickers(clutchPacket)).toEqual(["STONKBROKER"]);
+    const parsed = parseOrientation({
+      ...grokProject({
+        boundHandle: "@ClutchMarkets",
+        boundDomain: "clutch.markets",
+        launchedProducts: [{ name: "Stonk Exchange", domain: "stonkbrokers.io" }],
+      }),
+    }, clutchPacket);
+
+    expect(parsed?.launchedProducts).toEqual([
+      { tokenTicker: "STONKBROKER" },
+      { name: "Stonk Exchange", domain: "stonkbrokers.io" },
+    ]);
+  });
+
   it("accepts a Multihopper PROJECT when handle and official domain bind", () => {
     const parsed = parseOrientation(grokProject(), packet());
     expect(parsed).toEqual(expect.objectContaining({
@@ -261,6 +291,22 @@ describe("orientationMentionLeads", () => {
 });
 
 describe("orientSubjectWithGrok", () => {
+  it("bypasses the orientation cache for an explicit rescan", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    const search = vi.fn(async () => JSON.stringify(grokProject()));
+
+    await orientSubjectWithGrok(stubEvidence(), { search, bypassCache: true });
+
+    expect(search).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({
+        cacheKey: "subject-orientation:multihopper",
+        bypassCache: true,
+      }),
+    );
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();

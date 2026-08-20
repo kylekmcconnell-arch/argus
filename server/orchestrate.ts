@@ -907,7 +907,11 @@ export function uniqueIdConfirmedForFounderFollowup(
 // so the verification adapters have something to check. Without this an unknown
 // subject has no ventures/endorsements/advisory seats to verify.
 // Exported for tests.
-export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
+export async function coldIntake(
+  ctx: CollectContext,
+  profileAlreadyResolved = false,
+  bypassOrientationCache = false,
+) {
   if (!profileAlreadyResolved) await resolveProfile(ctx);
   const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website) ?? undefined;
   const bioDomain = bioWebsiteDomain(ctx.evidence.profile.bio);
@@ -980,7 +984,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     }
     ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
   }
-  await maybeOrientSubject(ctx, siteSubstance?.detail);
+  await maybeOrientSubject(ctx, siteSubstance?.detail, bypassOrientationCache);
 
   // Find-wallet: a self-disclosed wallet (a 0x address or ENS/basename/.sol name)
   // in the bio/posts. The richer corpus surfaces more contract/URL mentions.
@@ -1808,12 +1812,19 @@ export function axisCatalog(roles: SubjectClass[]) {
 
 const siteSubstanceExcerptByEvidence = new WeakMap<CollectedEvidence, string>();
 
-async function maybeOrientSubject(ctx: CollectContext, siteExcerpt?: string): Promise<void> {
+async function maybeOrientSubject(
+  ctx: CollectContext,
+  siteExcerpt?: string,
+  bypassCache = false,
+): Promise<void> {
   const prior = ctx.evidence.subjectOrientation;
   if (prior && prior.kind !== "UNKNOWN") return;
   if (providerBackedRoles(ctx.evidence).length > 0) return;
   const excerpt = (siteExcerpt ?? siteSubstanceExcerptByEvidence.get(ctx.evidence) ?? "").trim() || undefined;
-  const orientation = await orientSubjectWithGrok(ctx.evidence, { siteExcerpt: excerpt });
+  const orientation = await orientSubjectWithGrok(ctx.evidence, {
+    siteExcerpt: excerpt,
+    bypassCache,
+  });
   if (!orientation) return;
   ctx.evidence.subjectOrientation = orientation;
   if (orientation.kind !== "UNKNOWN" && orientation.what.trim()) {
@@ -3318,6 +3329,7 @@ interface RunAuditOptions {
   organizationId?: string;
   analystDeadlineAt?: number;
   intent?: ResearchIntent;
+  fresh?: boolean;
   tokenAddress?: string;
   tokenChain?: string;
   tokenSymbol?: string;
@@ -3855,7 +3867,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     }
     evidence.roles = providerBackedRoles(evidence);
     recordOfficialXAccountStatusFinding(evidence);
-    await coldIntake(ctx, true);
+    await coldIntake(ctx, true, options?.fresh === true);
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
 
@@ -4073,7 +4085,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     await collectProjectSiteSubstance(ctx, siteHost);
   }
   if (rolesAfterBasicFacts.length === 0) {
-    await maybeOrientSubject(ctx);
+    await maybeOrientSubject(ctx, undefined, options?.fresh === true);
     rolesAfterBasicFacts = providerBackedRoles(evidence);
     evidence.roles = rolesAfterBasicFacts;
   }

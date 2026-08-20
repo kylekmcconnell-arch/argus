@@ -311,6 +311,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       intent: typeof req.query.intent === "string" && RESEARCH_INTENTS.has(req.query.intent as ResearchIntent)
         ? req.query.intent as ResearchIntent
         : "investment_due_diligence",
+      fresh: req.query.fresh === "1",
       analystDeadlineAt: requestStartedAt
         + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
         - ANALYST_FINALIZATION_RESERVE_MS,

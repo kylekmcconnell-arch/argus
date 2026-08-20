@@ -65,6 +65,7 @@ export function startPersonAudit(
   handle: string,
   priv = false,
   intent: ResearchIntent = "investment_due_diligence",
+  options?: { force?: boolean },
 ): BgRun {
   const key = norm(handle);
   const existing = runs.get(key);
@@ -173,7 +174,7 @@ export function startPersonAudit(
       aborts.delete(key);
       emit();
     },
-  }, intent);
+  }, intent, undefined, { fresh: options?.force });
   aborts.set(key, abort);
   return run;
 }

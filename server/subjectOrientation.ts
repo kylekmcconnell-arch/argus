@@ -18,6 +18,7 @@ const MENTIONED_HANDLE_CAP = 8;
 const ORIENTATION_TIMEOUT_MS = 45_000;
 const ORIENTATION_MAX_TOKENS = 800;
 const ORIENTATION_MAX_TOOL_CALLS = 3;
+const FIRST_PARTY_TICKER_CAP = 6;
 
 export interface OrientationPacket {
   handle: string;
@@ -243,6 +244,32 @@ function parseTokenTicker(raw: unknown): string | undefined {
   return ticker;
 }
 
+/**
+ * Preserve explicit cashtags from the subject-bound packet as registry-search
+ * candidates. This does not verify ownership: projectToken still requires the
+ * registry's official X handle or official domain to bind back to the subject.
+ */
+export function firstPartyTokenTickers(packet: OrientationPacket): string[] {
+  const texts = [
+    packet.bio,
+    packet.selfPostSample,
+    ...packet.recentActivity,
+    packet.siteExcerpt ?? "",
+  ];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const text of texts) {
+    for (const match of text.matchAll(/\$([A-Za-z][A-Za-z0-9]{1,9})\b/g)) {
+      const ticker = parseTokenTicker(match[1]);
+      if (!ticker || seen.has(ticker)) continue;
+      seen.add(ticker);
+      out.push(ticker);
+      if (out.length >= FIRST_PARTY_TICKER_CAP) return out;
+    }
+  }
+  return out;
+}
+
 function parseLaunchedProducts(
   raw: unknown,
   packet: OrientationPacket,
@@ -283,6 +310,25 @@ function parseLaunchedProducts(
     out.push(lead);
     if (out.length >= 6) break;
   }
+  return out.length ? out : undefined;
+}
+
+function launchedProductsWithFirstPartyTickers(
+  raw: unknown,
+  packet: OrientationPacket,
+): LaunchedProductLead[] | undefined {
+  const parsed = parseLaunchedProducts(raw, packet) ?? [];
+  const modelTickers = new Set(
+    parsed
+      .map((lead) => lead.tokenTicker)
+      .filter((ticker): ticker is string => Boolean(ticker)),
+  );
+  // Put recovered ticker-only candidates first so the bounded registry query
+  // fan-out cannot hide them behind a verbose model-produced product list.
+  const recovered = firstPartyTokenTickers(packet)
+    .filter((tokenTicker) => !modelTickers.has(tokenTicker))
+    .map((tokenTicker) => ({ tokenTicker }));
+  const out = [...recovered, ...parsed].slice(0, 6);
   return out.length ? out : undefined;
 }
 
@@ -421,7 +467,7 @@ export function parseOrientation(raw: unknown, packet: OrientationPacket): Subje
     kindRaw === "PROJECT",
   );
   const relatedCompanyDomain = parseRelatedDomain(obj.relatedCompanyDomain, packet);
-  const launchedProducts = parseLaunchedProducts(obj.launchedProducts, packet);
+  const launchedProducts = launchedProductsWithFirstPartyTickers(obj.launchedProducts, packet);
 
   // A domain Grok named as THIS subject's bind that is not the packet website
   // is a hallucination. Related-row invented domains never UNKNOWN the subject.
@@ -472,7 +518,12 @@ function liveSearchUser(packet: OrientationPacket): string {
 
 export async function orientSubjectWithGrok(
   evidence: CollectedEvidence,
-  options?: { siteExcerpt?: string; chat?: OrientationChat; search?: OrientationSearch },
+  options?: {
+    siteExcerpt?: string;
+    chat?: OrientationChat;
+    search?: OrientationSearch;
+    bypassCache?: boolean;
+  },
 ): Promise<SubjectOrientation | null> {
   const packet = buildOrientationPacket(evidence, options?.siteExcerpt);
   const chat = options?.chat;
@@ -498,6 +549,7 @@ export async function orientSubjectWithGrok(
   const text = await search(ORIENTATION_SYSTEM, liveSearchUser(packet), {
     maxToolCalls: ORIENTATION_MAX_TOOL_CALLS,
     cacheKey: `subject-orientation:${normalizeHandle(packet.handle)}`,
+    bypassCache: options?.bypassCache,
   });
   if (!text) return null;
   return parseOrientation(text, packet);
