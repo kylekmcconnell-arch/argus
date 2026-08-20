@@ -8,7 +8,12 @@ import type { ResearchIntent } from "../src/lib/researchDirector";
 export function runAudit(
   handle: string,
   emit?: (step: TraceStep) => void,
-  options?: { organizationId?: string; analystDeadlineAt?: number; intent?: ResearchIntent },
+  options?: {
+    organizationId?: string;
+    analystDeadlineAt?: number;
+    intent?: ResearchIntent;
+    fresh?: boolean;
+  },
 ): Promise<Dossier | null>;
 
 export function auditToken(
