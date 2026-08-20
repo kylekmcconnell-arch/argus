@@ -104,6 +104,7 @@ import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief } from "../lib/intelligenceBrief";
+import { evidencePostureForAxisArtifacts } from "../lib/evidenceReasoning";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -2250,6 +2251,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         counterCount: axis.counter.length,
         questionCount,
       });
+      const posture = evidencePostureForAxisArtifacts(axis.support);
       const conciseRationale = plainLanguageSummary(axis.rationale);
       const firstSentence = conciseRationale.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() ?? conciseRationale;
       const summary = firstSentence.length > 220
@@ -2259,7 +2261,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         id: `support-${axis.axis}`,
         title: diligenceAreaLabel(axis.axis),
         detail: summary,
-        meta: `${strength} · ${axis.support.length} ${axis.support.length === 1 ? "source" : "sources"}`,
+        meta: `${strength} · ${posture.label} · ${axis.support.length} cited artifact${axis.support.length === 1 ? "" : "s"}`,
         href: axisHref(axis.axis),
       };
     });
