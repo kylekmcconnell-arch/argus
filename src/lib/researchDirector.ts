@@ -12,6 +12,8 @@ export type ResearchCapability =
   | "role_resolution"
   | "identity_resolution"
   | "official_facts"
+  | "independent_corroboration"
+  | "relationship_reconciliation"
   | "people_and_control"
   | "token_and_market"
   | "project_fundamentals"
@@ -23,6 +25,17 @@ export type ResearchCapability =
   | "analyst_synthesis";
 
 export type ResearchTaskState = "planned" | "completed" | "partial" | "unavailable" | "skipped";
+
+export interface ResearchCollectionContract {
+  /** The evidence role required before this lane can close as decision-grade. */
+  sourceStrategy: "first_party_baseline" | "direct_observation" | "external_corroboration" | "counter_evidence";
+  /** Repeated pages or providers carrying identical content count as one origin. */
+  minimumIndependentOrigins: 0 | 1 | 2;
+  preserveFirstPartyClaimsAsClaims: boolean;
+  searchForCounterEvidence: boolean;
+  acceptWhen: string;
+  rejectWhen: string;
+}
 
 export interface ResearchTask {
   id: string;
@@ -39,6 +52,7 @@ export interface ResearchTask {
   dispatchReason: string;
   stopWhen: string;
   blockedBy: string[];
+  collectionContract: ResearchCollectionContract;
   state: ResearchTaskState;
   outcome?: string;
 }
@@ -62,7 +76,7 @@ export interface ResearchPlan {
   nextActions: ResearchNextAction[];
 }
 
-interface TaskTemplate extends Omit<ResearchTask, "id" | "priority" | "triggeredBy" | "rank" | "dispatchReason" | "blockedBy" | "state"> {
+interface TaskTemplate extends Omit<ResearchTask, "id" | "priority" | "triggeredBy" | "rank" | "dispatchReason" | "blockedBy" | "collectionContract" | "state"> {
   roles?: SubjectClass[];
   intents?: ResearchIntent[];
   predicates?: string[];
@@ -199,6 +213,33 @@ const TEMPLATES: TaskTemplate[] = [
     checkIds: ["trust-graph-connections", "affiliations-associates"],
   },
   {
+    capability: "relationship_reconciliation",
+    question: "Which discovered people and organizations are core team, advisors, backers, partners, ecosystem groups, or unverified candidates?",
+    why: "A relationship is not a role. Every edge must name its direction, evidence owner, and project-specific meaning before it enters scoring or narrative.",
+    baselinePriority: "critical",
+    decisionImpact: 5,
+    costClass: "low",
+    stopWhen: "Every material relationship candidate is classified or left explicitly unresolved, aliases are reconciled, and no organization is promoted into a people roster.",
+    roles: [SubjectClass.PROJECT, SubjectClass.FOUNDER, SubjectClass.INVESTOR, SubjectClass.AGENCY],
+    delegates: ["official-site", "official-x", "official-counterparty", "peopledatalabs", "public-web", "trust-graph"],
+    checkIds: ["project-team-identity", "project-backing-partners", "affiliations-associates", "founder-company-relationships"],
+    predicates: ["founder", "executive", "current_role", "investor", "partnership"],
+  },
+  {
+    capability: "independent_corroboration",
+    question: "Which material first-party claims survive an independent, counterparty, registry, or direct-observation check?",
+    why: "Several pages repeating the same project claim are one origin, not corroboration. Product, traction, backing, team, and transparency need claim-specific external checks.",
+    baselinePriority: "critical",
+    decisionImpact: 5,
+    costClass: "medium",
+    stopWhen: "Each decision-material project claim has an independent outcome, a bounded empty result, or a named unavailable source; syndicated copies remain one origin.",
+    roles: [SubjectClass.PROJECT, SubjectClass.FOUNDER],
+    intents: ["investment_due_diligence", "counterparty_risk", "alpha_discovery"],
+    delegates: ["official-counterparty", "public-registry", "direct-chain-rpc", "defillama", "github", "independent-web"],
+    checkIds: ["project-team-identity", "project-product-substance", "project-backing-partners", "project-traction-liveness", "project-transparency", "news-press"],
+    predicates: ["founder", "product", "launched", "traction", "funding", "partnership", "repository", "audit", "governance"],
+  },
+  {
     capability: "counter_evidence",
     question: "What is the strongest evidence against the emerging thesis, and which claims conflict?",
     why: "A case plan that searches only for confirmation cannot support a real capital decision.",
@@ -227,6 +268,8 @@ const GAP = new Set(["unknown", "unavailable", "stale"]);
 
 const RELATIONSHIP_CAPABILITIES = new Set<ResearchCapability>([
   "project_fundamentals",
+  "relationship_reconciliation",
+  "independent_corroboration",
   "portfolio_and_outcomes",
   "fund_scale",
 ]);
@@ -257,6 +300,41 @@ function delegateMatchesRun(delegate: string, runId: string): boolean {
   if (!target || !run) return false;
   if (run === target) return true;
   return run.startsWith(`${target}-`) || run.startsWith(`${target}:`);
+}
+
+function collectionContractFor(capability: ResearchCapability): ResearchCollectionContract {
+  const firstPartyBaseline = capability === "role_resolution" || capability === "official_facts";
+  const directObservation = capability === "token_and_market";
+  const counterEvidence = capability === "counter_evidence";
+  const higherCorroboration = capability === "portfolio_and_outcomes" || capability === "fund_scale";
+  const minimumIndependentOrigins: 0 | 1 | 2 = firstPartyBaseline || capability === "analyst_synthesis"
+    ? 0
+    : higherCorroboration
+      ? 2
+      : 1;
+  const sourceStrategy: ResearchCollectionContract["sourceStrategy"] = firstPartyBaseline
+    ? "first_party_baseline"
+    : directObservation
+      ? "direct_observation"
+      : counterEvidence
+        ? "counter_evidence"
+        : "external_corroboration";
+  return {
+    sourceStrategy,
+    minimumIndependentOrigins,
+    preserveFirstPartyClaimsAsClaims: true,
+    searchForCounterEvidence: !firstPartyBaseline,
+    acceptWhen: minimumIndependentOrigins === 0
+      ? "The canonical first-party or routing surface is fetched, identity-bound, and preserved with its source role."
+      : "The exact claim is identity-bound and supported by the required number of independent origins or a direct observation.",
+    rejectWhen: "The match depends on a name, ticker, nearby biography language, repeated first-party copy, syndicated copy, or an unresolved entity collision.",
+  };
+}
+
+function providerCountsAsIndependent(provider: string | undefined): boolean {
+  const value = (provider ?? "").trim().toLowerCase();
+  if (!value) return false;
+  return !/(?:official|first.party|subject|twitterapi|x-profile|argus|cache|collector)/.test(value);
 }
 
 function nextActions(tasks: readonly ResearchTask[]): ResearchNextAction[] {
@@ -311,6 +389,7 @@ export function buildResearchPlan(evidence: CollectedEvidence, intent: ResearchI
         : `Selected for ${intent.replaceAll("_", " ")} based on the provider-backed subject role.`,
       stopWhen: template.stopWhen,
       blockedBy: [...blockedBy],
+      collectionContract: collectionContractFor(template.capability),
       state: "planned",
     };
   });
@@ -356,8 +435,20 @@ export function finalizeResearchPlan(
         ? ` (${reported.length} from source-reported context, not ARGUS verification)`
         : "";
       if (taskChecks.length) {
-        if (successful.length && gaps.length) return { ...task, state: "partial", outcome: `${successful.length} answered${reportedNote}; ${gaps.length} unresolved` };
-        if (successful.length) return { ...task, state: "completed", outcome: `${successful.length} evidence question${successful.length === 1 ? "" : "s"} answered${reportedNote}` };
+        const independentOrigins = new Set(successful
+          .filter((check) => check.status !== "reported" && providerCountsAsIndependent(check.provider))
+          .map((check) => check.provider!.trim().toLowerCase())).size;
+        const independenceGap = independentOrigins < task.collectionContract.minimumIndependentOrigins;
+        if (successful.length && (gaps.length || independenceGap)) {
+          const gapParts = [
+            gaps.length ? `${gaps.length} unresolved` : "",
+            independenceGap
+              ? `only ${independentOrigins} of ${task.collectionContract.minimumIndependentOrigins} required independent origins recorded`
+              : "",
+          ].filter(Boolean).join("; ");
+          return { ...task, state: "partial", outcome: `${successful.length} answered${reportedNote}; ${gapParts}` };
+        }
+        if (successful.length) return { ...task, state: "completed", outcome: `${successful.length} evidence question${successful.length === 1 ? "" : "s"} answered${reportedNote}; ${independentOrigins} independent origin${independentOrigins === 1 ? "" : "s"} recorded` };
         if (gaps.length) return { ...task, state: "unavailable", outcome: `${gaps.length} evidence question${gaps.length === 1 ? "" : "s"} unresolved` };
         if (taskChecks.every((check) => check.status === "not-applicable")) return { ...task, state: "skipped", outcome: "not applicable to the resolved subject" };
       }
