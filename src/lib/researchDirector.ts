@@ -438,7 +438,9 @@ export function finalizeResearchPlan(
         const independentOrigins = new Set(successful
           .filter((check) => check.status !== "reported" && providerCountsAsIndependent(check.provider))
           .map((check) => check.provider!.trim().toLowerCase())).size;
-        const independenceGap = independentOrigins < task.collectionContract.minimumIndependentOrigins;
+        const completedBoundedEmpty = successful.some((check) => check.status === "checked-empty");
+        const independenceGap = !completedBoundedEmpty
+          && independentOrigins < task.collectionContract.minimumIndependentOrigins;
         if (successful.length && (gaps.length || independenceGap)) {
           const gapParts = [
             gaps.length ? `${gaps.length} unresolved` : "",
