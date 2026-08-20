@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type {
   CompanyEnrichmentSnapshot,
+  ProjectTokenSnapshot,
   ProtocolFundingSnapshot,
   ProtocolTvlSnapshot,
 } from "../data/evidence";
@@ -103,6 +104,22 @@ const protocolTvl: ProtocolTvlSnapshot = {
   ],
   sourceUrl: "https://defillama.com/protocol/fixture",
   capturedAt: "2026-08-06T12:00:00.000Z",
+};
+
+
+const TOKEN_ADDRESS = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+const projectToken: ProjectTokenSnapshot = {
+  verified: true,
+  verification: "official_domain",
+  name: "Fixture",
+  symbol: "FIX",
+  rank: null,
+  address: TOKEN_ADDRESS,
+  chain: "base",
+  sourceUrl: "https://dexscreener.com/base/fixture",
+  capturedAt: "2026-08-20T12:00:00.000Z",
+  providers: ["dexscreener"],
 };
 
 const protocolFunding: ProtocolFundingSnapshot = {
@@ -280,6 +297,78 @@ describe("provider evidence ledgers", () => {
       ...company,
       sourceUrl: "https://unrelated.example/company-fixture",
     }, "https://app.fixture.xyz")).toBe(false);
+  });
+
+  it("labels an exact chain-and-contract receipt without claiming a CoinGecko join", () => {
+    const binding = {
+      method: "matched_chain_contract" as const,
+      scope: "project_and_token" as const,
+      protocolSlug: "fixture",
+      canonicalChain: "base",
+      canonicalAddress: TOKEN_ADDRESS,
+      providerChain: "base",
+      providerAddress: TOKEN_ADDRESS,
+    };
+    render({
+      company: null,
+      projectToken,
+      canonicalGeckoId: null,
+      protocolFunding: { ...protocolFunding, geckoId: null, binding },
+      protocolTvl: { ...protocolTvl, geckoId: null, binding },
+    });
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("Exact chain + contract");
+    expect(text).toContain(TOKEN_ADDRESS);
+    expect(text).not.toContain("Exact CoinGecko ID");
+  });
+
+  it("admits an official-X plus domain receipt at project scope and states that it creates no token linkage", () => {
+    const binding = {
+      method: "matched_official_x_and_domain" as const,
+      scope: "project" as const,
+      protocolSlug: "fixture",
+      canonicalHandle: "fixture",
+      canonicalDomain: "fixture.xyz",
+      providerHandle: "fixture",
+      providerDomain: "app.fixture.xyz",
+    };
+    render({
+      company: null,
+      projectToken: null,
+      canonicalGeckoId: null,
+      officialHandle: "@fixture",
+      officialWebsite: "https://fixture.xyz",
+      protocolFunding: { ...protocolFunding, geckoId: null, binding },
+      protocolTvl: { ...protocolTvl, geckoId: null, binding },
+    });
+
+    const text = container.textContent ?? "";
+    expect(text).toContain("Exact official X + domain · project only");
+    expect(text).toContain("binds the protocol record to the project only");
+    expect(text).toContain("does not establish or create token linkage");
+    expect(text).not.toContain("Canonical token identity");
+  });
+
+  it("withholds a conflicting chain-and-contract receipt even when the provider slug matches", () => {
+    const binding = {
+      method: "matched_chain_contract" as const,
+      scope: "project_and_token" as const,
+      protocolSlug: "fixture",
+      canonicalChain: "base",
+      canonicalAddress: TOKEN_ADDRESS,
+      providerChain: "base",
+      providerAddress: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    };
+    render({
+      company: null,
+      projectToken,
+      canonicalGeckoId: null,
+      protocolFunding: { ...protocolFunding, geckoId: null, binding },
+      protocolTvl: { ...protocolTvl, geckoId: null, binding },
+    });
+
+    expect(container.querySelector('[aria-label="Provider evidence ledgers"]')).toBeNull();
   });
 
   it("distinguishes uncollected optional company sections from explicit empty provider sections", () => {

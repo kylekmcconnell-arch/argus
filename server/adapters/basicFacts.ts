@@ -15,6 +15,7 @@ import { isInstitutionalInvestorAccount, isOrganizationAccount } from "../../src
 import { projectLeadIsRelevant } from "../../src/lib/projectLeadRelevance";
 import { DISCOVERY_MODEL, env, providerFallbacksEnabled } from "../config";
 import { cacheGet, cacheSet } from "../cache";
+import { currentSubjectCachePolicy, subjectCacheAccess } from "../auditRunContext";
 import { addClaudeUsage, recordCall } from "../cost";
 import { fetchPublicTextWithRecovery, type PublicTextDocument, type PublicTextResult } from "../publicWeb";
 import { grokSearch } from "./x";
@@ -1493,6 +1494,7 @@ export async function discoverBasicFactLeadsDetailed(
     return { provider: "claude-web-search", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "Claude search is not configured" };
   }
   const canonicalSubject = subjectName(ctx);
+  const cacheAccess = subjectCacheAccess();
   const cacheRead = dependencies.cacheRead ?? ((key: string) => cacheGet(key, { operation: "basic-facts-hit", meta: "24h Claude web-search cache" }));
   const cacheWrite = dependencies.cacheWrite ?? cacheSet;
   const request = dependencies.request ?? fetch;
@@ -1511,7 +1513,7 @@ export async function discoverBasicFactLeadsDetailed(
       .update(batchQuestions.map((question) => question.id).sort().join("|"))
       .digest("hex").slice(0, 12);
     const cacheKey = `basic-facts:${RESEARCH_CACHE_VERSION}:claude:${audience}:${phase}:${key}:${questionFingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
-    const cached = await cacheRead(cacheKey);
+    const cached = cacheAccess.read ? await cacheRead(cacheKey) : null;
     if (cached) {
       const parsed = parseBasicFactLeads(cached, canonicalSubject, "claude-web-search", batchQuestions);
       const rawFactCount = rawBasicFactCount(cached);
@@ -1587,7 +1589,7 @@ export async function discoverBasicFactLeadsDetailed(
     if (!text) return { ...group, state: "partial", leads: [], attempts, detail: `${key}:empty_output_after_retry` };
     if (!parsed) return { ...group, state: "partial", leads: [], attempts, detail: `${key}:invalid_json_after_retry` };
     const webSearchRequests = search.webSearchRequests;
-    void cacheWrite(cacheKey, text);
+    if (cacheAccess.write) void cacheWrite(cacheKey, text);
     const rawFactCount = rawBasicFactCount(text);
     const explicitEmpty = rawFactCount === 0;
     const attributableEmpty = !parsed.length
@@ -4630,6 +4632,7 @@ function cachedFactClosesDiscovery(
 }
 
 async function loadReusableBasicFacts(ctx: CollectContext): Promise<BasicFact[]> {
+  if (currentSubjectCachePolicy() === "refresh") return [];
   if (env("ARGUS_ENTITY_REUSE") !== "on") return [];
   const rec = await readEntityFacts(
     ctx.organizationId,

@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { withAuditRunContext } from "../auditRunContext";
 import { getCost, withCostLedger } from "../cost";
 import {
   collectProtocolAuditLinks,
   collectProtocolFees,
   collectProtocolFunding,
+  collectProtocolIdentity,
   collectProtocolTvl,
   defiLlamaLookupName,
   defiLlamaSlug,
@@ -46,6 +48,65 @@ const fetcherReturning = (make: () => Response) =>
     void input;
     return Promise.resolve(make());
   }) as unknown as typeof fetch;
+
+describe("collectProtocolIdentity", () => {
+  it("freezes contract, official X, and website anchors without requiring CoinGecko", async () => {
+    const out = await collectProtocolIdentity("Project", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({
+        gecko_id: null,
+        address: "base:0x1111111111111111111111111111111111111111",
+        chain: "Base",
+        chains: ["Base"],
+        twitter: "https://x.com/RealProject",
+        url: "https://realproject.example/app",
+        tvl: [],
+        raises: [],
+      }))),
+    });
+    expect(out).toMatchObject({
+      state: "resolved",
+      value: {
+        slug: "project",
+        geckoId: null,
+        contracts: [{
+          chain: "base",
+          address: "0x1111111111111111111111111111111111111111",
+        }],
+        officialX: "@RealProject",
+        website: "https://realproject.example/app",
+      },
+    });
+  });
+
+  it("does not project a bare address across an ambiguous multichain row", async () => {
+    const out = await collectProtocolIdentity("Project", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({
+        address: "0x1111111111111111111111111111111111111111",
+        chain: "Multi-Chain",
+        chains: ["Base", "Ethereum"],
+      }))),
+    });
+    expect(out).toMatchObject({
+      state: "resolved",
+      value: { contracts: [] },
+    });
+  });
+
+  it("distinguishes 400/404 provider no-records from an unavailable lookup", async () => {
+    for (const status of [400, 404]) {
+      resetDefiLlamaScanMemo();
+      const noRecord = await collectProtocolIdentity("Missing", {
+        fetcher: fetcherReturning(() => new Response("Protocol not found", { status })),
+      });
+      expect(noRecord).toMatchObject({ state: "no_record", slug: "missing" });
+    }
+
+    const unavailable = await collectProtocolIdentity("Missing", {
+      fetcher: fetcherReturning(() => new Response("upstream", { status: 503 })),
+    });
+    expect(unavailable).toMatchObject({ state: "unavailable", slug: "missing" });
+  });
+});
 
 describe("collectProtocolTvl", () => {
   it("returns the latest TVL and a chain breakdown, excluding pseudo-segments", async () => {
@@ -92,18 +153,62 @@ describe("collectProtocolTvl", () => {
     expect(out.note).toContain("No DeFiLlama protocol matched");
   });
 
-  it("does not claim TVL when the series is empty", async () => {
+  it("preserves the identity-bound protocol row while marking an empty TVL series checked-empty", async () => {
     const out = await collectProtocolTvl("Aave", {
       fetcher: fetcherReturning(() => jsonResponse(protocolBody({ tvl: [] }))),
     });
-    expect(out.available).toBe(false);
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected checked-empty protocol context");
+    expect(out.value).toMatchObject({
+      tvlUsd: null,
+      tvlState: "checked_empty",
+      chains: [],
+      chainBreakdown: [],
+      trend: [],
+    });
   });
 
-  it("does not claim TVL when the latest point is zero or non-numeric", async () => {
+  it.each([0, "unreadable"])("does not coerce a nonpositive or unreadable latest TVL (%s) into zero", async (latestTvl) => {
     const out = await collectProtocolTvl("Aave", {
-      fetcher: fetcherReturning(() => jsonResponse(protocolBody({ tvl: [{ date: 2, totalLiquidityUSD: 0 }] }))),
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({
+        tvl: [{ date: 2, totalLiquidityUSD: latestTvl }],
+      }))),
     });
-    expect(out.available).toBe(false);
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected checked-empty protocol context");
+    expect(out.value.tvlUsd).toBeNull();
+    expect(out.value.tvlState).toBe("checked_empty");
+    expect(out.value.trend).toEqual([]);
+    expect(out.value.chainBreakdown).toEqual([]);
+  });
+
+  it("retains incident rows when the same protocol document has no usable TVL metric", async () => {
+    const out = await collectProtocolTvl("Drift", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({
+        name: "Drift",
+        tvl: [],
+        currentChainTvls: {},
+        hacks: [{
+          date: 1_775_001_600,
+          amount: 295_000_000,
+          returnedFunds: false,
+          classification: "Infrastructure",
+          technique: "Compromised Admin",
+        }],
+      }))),
+    });
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected identity-bound incident context");
+    expect(out.value.tvlUsd).toBeNull();
+    expect(out.value.tvlState).toBe("checked_empty");
+    expect(out.value.hacks).toEqual([
+      expect.objectContaining({
+        date: "2026-04-01",
+        amountUsd: 295_000_000,
+        returnedFunds: false,
+        technique: "Compromised Admin",
+      }),
+    ]);
   });
 
   it("is resilient to a transport error", async () => {
@@ -413,6 +518,17 @@ describe("one document, one read", () => {
 
     expect(urls).toHaveLength(2);
   });
+
+  it("never shares an in-flight document between concurrent audit contexts", async () => {
+    const { fetcher, urls } = countingFetcher(() => jsonResponse(protocolBody()));
+
+    await Promise.all([
+      withAuditRunContext({ scanId: "scan-a" }, () => collectProtocolTvl("Aave", { fetcher })),
+      withAuditRunContext({ scanId: "scan-b" }, () => collectProtocolTvl("Aave", { fetcher })),
+    ]);
+
+    expect(urls).toHaveLength(2);
+  });
 });
 
 describe("formatUsd", () => {
@@ -466,6 +582,25 @@ describe("collectProtocolFees", () => {
     expect(out.value.total30dUsd).toBe(80_400_000);
     expect(out.value.total24hUsd).toBe(3_840_000);
     expect(out.value.change30dOver30dPct).toBe(-12.3);
+  });
+
+  it("records a 404 fee lookup as a completed checked-empty read, not a provider failure", async () => {
+    const result = await withCostLedger(async () => {
+      const outcome = await collectProtocolFees("Missing", {
+        fetcher: fetcherReturning(() => new Response("Not found", { status: 404 })),
+      });
+      return { outcome, cost: getCost() };
+    });
+
+    expect(result.outcome.available).toBe(false);
+    expect(result.outcome.note).toContain("No DeFiLlama fee record");
+    expect(result.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "defillama",
+      op: "fees",
+      succeeded: 1,
+      failed: 0,
+      status: "succeeded",
+    }));
   });
 
   it("drops an absent or absurd trend to null instead of misleading", async () => {

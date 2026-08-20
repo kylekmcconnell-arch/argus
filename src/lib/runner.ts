@@ -12,7 +12,6 @@ import { streamAudit } from "./live";
 import { threatScan } from "../threat/scan";
 import type { ThreatScan } from "../threat/types";
 import { tokenFromBio, tokenFromPromotions, type TokenCandidate } from "./projectTokenLeg";
-import { resolveProjectToken } from "./resolveProjectToken";
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
 import type { ResearchIntent } from "./researchDirector";
@@ -28,6 +27,9 @@ export interface BgRun {
   startedAt: number;
   priv?: boolean;   // private/incognito: never persisted, logged, graphed, or shown in the sidebar
   intent?: ResearchIntent;
+  fresh?: boolean;
+  /** Present only on a non-destructive start attempt that cannot reuse this run. */
+  startConflict?: "full-rescan-waits-for-standard";
 }
 
 type Listener = () => void;
@@ -38,6 +40,42 @@ const listeners = new Set<Listener>();
 let onComplete: ((d: Dossier, priv: boolean) => void) | null = null;
 
 const norm = (h: string) => h.trim().toLowerCase().replace(/^@/, "");
+// The browser threat pipeline currently has dedicated Solana handling and EVM
+// safety coverage for these chain ids. Never reinterpret an unknown chain as
+// EVM merely because it is not Solana (Sui, TON and Tron are counterexamples).
+const THREAT_EVM_CHAINS = new Set([
+  "ethereum",
+  "bsc",
+  "base",
+  "polygon",
+  "arbitrum",
+  "optimism",
+  "avalanche",
+  "fantom",
+  "cronos",
+  "zksync",
+  "linea",
+  "scroll",
+  "robinhood",
+]);
+
+function frozenProjectTokenCandidate(d: Dossier): TokenCandidate | null {
+  const token = d.projectToken;
+  if (token?.verified !== true || !token.address) return null;
+  const chain = token.chain.trim().toLowerCase();
+  const via: TokenCandidate["via"] | null = chain === "solana"
+    ? "solana"
+    : THREAT_EVM_CHAINS.has(chain)
+      ? "evm"
+      : null;
+  return via
+    ? {
+        address: token.address,
+        via,
+        source: `the server-frozen canonical project token (${token.verification.replace(/_/g, " ")})`,
+      }
+    : null;
+}
 function emit() { for (const l of listeners) l(); }
 
 // App registers the data-side completion handler (log + persist + graph + cache).
@@ -59,8 +97,10 @@ export function activeRuns(): BgRun[] {
   return [...runs.values()].filter((r) => r.status === "running" && !r.priv).sort((a, b) => b.startedAt - a.startedAt);
 }
 
-// Start (or re-attach to) a background person audit. Idempotent per handle: if one
-// is already streaming, the existing run is returned so we never double-stream.
+// Start (or re-attach to) a background person audit. Reuse is mode-compatible:
+// a running full rescan may satisfy a standard viewer, but a standard run cannot
+// satisfy a requested full rescan. That mismatch returns an explicit conflict
+// and never cancels or starts a second paid stream.
 export function startPersonAudit(
   handle: string,
   priv = false,
@@ -69,7 +109,15 @@ export function startPersonAudit(
 ): BgRun {
   const key = norm(handle);
   const existing = runs.get(key);
-  if (existing && existing.status === "running") return existing;
+  if (existing && existing.status === "running") {
+    // A fresh scan is not equivalent to the standard scan already spending.
+    // Return an explicit, non-persisted conflict instead of silently attaching,
+    // cancelling useful work, or launching a second paid stream.
+    if (options?.force === true && existing.fresh !== true) {
+      return { ...existing, startConflict: "full-rescan-waits-for-standard" };
+    }
+    return existing;
+  }
 
   const run: BgRun = {
     handle: handle.startsWith("@") ? handle : "@" + key,
@@ -80,6 +128,7 @@ export function startPersonAudit(
     startedAt: Date.now(),
     priv,
     intent,
+    fresh: options?.force === true,
   };
   runs.set(key, run);
   emit();
@@ -109,29 +158,25 @@ export function startPersonAudit(
   };
 
   const finalize = async (d: Dossier) => {
-    // Fallback attribution when the server never announced a token: bio CA, a
-    // claimed promotion, then the canonical CoinGecko name-match - guarded
-    // against namesakes by the bio's own domain (never smear a subject with a
-    // same-name token that isn't theirs).
+    // If the server did not announce a token mid-stream, hydrate only from the
+    // frozen canonical token snapshot or from an explicit contract already
+    // present in collected first-party/claimed evidence. Name, ticker and slug
+    // discovery are never identity: a client-side CoinGecko lookup cannot bind
+    // a same-name asset to the audited subject.
     if (!threatLeg) {
-      const cand = tokenFromBio(d.bio) ?? tokenFromPromotions(d.evidence?.promotions);
+      const hasFrozenProjectToken = d.projectToken?.verified === true;
+      const frozen = frozenProjectTokenCandidate(d);
+      // Once the server froze a canonical token, that receipt governs. An
+      // unsupported frozen chain must not fall through to format guessing (a
+      // Tron address, for example, can look like a Solana base58 mint).
+      const cand = hasFrozenProjectToken
+        ? frozen
+        : tokenFromBio(d.bio) ?? tokenFromPromotions(d.evidence?.promotions);
       if (cand) startThreatLeg(cand);
-      else {
-        const cg = await resolveProjectToken(d.display_name || d.handle).catch(() => null);
-        if (cg) {
-          const bioDomain = (d.bio ?? "").match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1]?.toLowerCase();
-          let homeHost: string | null = null;
-          try { homeHost = cg.homepage ? new URL(cg.homepage).hostname.replace(/^www\./, "").toLowerCase() : null; } catch { /* bad homepage URL */ }
-          const mismatch = !!bioDomain && !!homeHost && bioDomain !== homeHost && !homeHost.endsWith("." + bioDomain) && !bioDomain.endsWith("." + homeHost);
-          if (mismatch) {
-            threatNote = `A same-name token ($${cg.symbol}) exists, but its official site (${homeHost}) does not match this subject's bio domain (${bioDomain}) - treated as a namesake; no token leg run.`;
-            pushStep({ phase: "ARGUS · Threat", label: "Namesake token skipped", detail: threatNote, source: "argus", tone: "warn" });
-          } else {
-            startThreatLeg({ address: cg.contract, via: cg.chain === "solana" ? "solana" : "evm", source: `the canonical CoinGecko match for "${cg.name}" ($${cg.symbol})${homeHost && bioDomain ? " - site matches the bio" : ""}` });
-          }
-        } else {
-          threatNote = "No project token could be attributed to this subject (no contract in the bio, no claimed promotion, no canonical name match) - token threat leg skipped.";
-        }
+      else if (hasFrozenProjectToken) {
+        threatNote = `The server hard-bound ${d.projectToken.symbol} on ${d.projectToken.chain}, but the browser threat scanner does not support that chain - token threat leg skipped.`;
+      } else {
+        threatNote = "No project token was hard-bound by the server and no explicit contract was present in collected evidence - token threat leg skipped.";
       }
     }
     if (threatLeg) {

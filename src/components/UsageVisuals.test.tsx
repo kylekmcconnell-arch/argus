@@ -80,6 +80,42 @@ describe("UsageVisuals", () => {
     expect(container.textContent).toBe("");
   });
 
+  it("does not render stale TVL charts or a synthetic zero when the metric is checked-empty", () => {
+    act(() => {
+      root.render(
+        <UsageVisuals
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          tvl={snapshot({ tvlUsd: null, tvlState: "checked_empty" }) as any}
+        />,
+      );
+    });
+    expect(container.textContent).toBe("");
+    expect(container.textContent).not.toContain("$0");
+    expect(container.querySelector("polyline")).toBeNull();
+    expect(container.querySelector('[aria-label^="Value locked by chain"]')).toBeNull();
+  });
+
+  it("uses the fee receipt when a checked-empty protocol row has no TVL visual", () => {
+    act(() => {
+      root.render(
+        <UsageVisuals
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          tvl={snapshot({ tvlUsd: null, tvlState: "checked_empty" }) as any}
+          fees={{
+            slug: "uniswap",
+            total24hUsd: 3_000_000,
+            total30dUsd: 85_800_000,
+            sourceUrl: "https://api.llama.fi/summary/fees/uniswap",
+            capturedAt: "2026-07-23T00:00:00.000Z",
+          }}
+        />,
+      );
+    });
+    expect(container.textContent).toContain("$85.8M");
+    expect(container.querySelector('a[href="https://api.llama.fi/summary/fees/uniswap"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://defillama.com/protocol/uniswap"]')).toBeNull();
+  });
+
   it("shows the fee stat and the holder-concentration bar when frozen", () => {
     act(() => {
       root.render(

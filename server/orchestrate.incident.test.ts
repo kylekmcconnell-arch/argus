@@ -55,6 +55,37 @@ describe("material project incident findings", () => {
     expect(evidence.findings[0].claim).toContain("not by itself evidence of fraud");
   });
 
+  it("retains the incident and freezes a null TVL reference when the metric was checked-empty", () => {
+    const evidence = emptyEvidence("@checkedempty");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.protocolTvl = {
+      slug: "checked-empty",
+      name: "Checked Empty",
+      symbol: null,
+      tvlUsd: null,
+      tvlState: "checked_empty",
+      chains: [],
+      chainBreakdown: [],
+      geckoId: null,
+      hacks: [{
+        date: "2026-04-01",
+        amountUsd: 295_000_000,
+        returnedFunds: null,
+        returnedAmountUsd: null,
+        classification: "Infrastructure",
+        technique: "Compromised Admin",
+      }],
+      sourceUrl: "https://defillama.com/protocol/checked-empty",
+      capturedAt: "2026-07-24T12:00:00.000Z",
+    };
+
+    expect(recordProtocolSecurityIncidentFindings(evidence)).toBe(1);
+    expect(evidence.findings[0].protocol_incident).toMatchObject({
+      amount_usd: 295_000_000,
+      reference_tvl_usd: null,
+    });
+  });
+
   it("records X suspension separately from project identity", () => {
     const evidence = emptyEvidence("@driftprotocol");
     evidence.roles = [SubjectClass.PROJECT];

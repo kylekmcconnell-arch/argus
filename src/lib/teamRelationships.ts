@@ -31,47 +31,108 @@ export interface TeamRelationshipRecord {
   sourceUrl?: string;
 }
 
-const CORE_ROLE = /\b(?:founder|co[- ]?founder|chief\s+(?:executive|technology|operating|business|product|marketing|financial)\s+officer|ceo|cto|coo|cbo|cpo|cmo|cfo|business\s+development|bd\s+manager|developer|engineer|product\s+lead|engineering\s+lead|lead\s+developer|team(?:\s+member)?|core\s+team|operator)\b/i;
+const SPECIFIC_CORE_ROLE = /\b(?:founder|co[- ]?founder|chief\s+(?:executive|technology|operating|business|product|marketing|financial)\s+officer|ceo|cto|coo|cbo|cpo|cmo|cfo|business\s+development|bd\s+manager|product\s+lead|engineering\s+lead|lead\s+developer)\b/i;
+const GENERIC_CORE_ROLE = /\b(?:developer|engineer|team(?:\s+member)?|core\s+team|operator)\b/i;
+const CORE_ROLE = new RegExp(`${SPECIFIC_CORE_ROLE.source}|${GENERIC_CORE_ROLE.source}`, "i");
 const ADVISOR_ROLE = /\b(?:advisor|adviser|advisory|ambassador)\b/i;
 const BACKER_ROLE = /\b(?:vc|venture\s+capital|fund|investor|backer|backed[- ]?by)\b/i;
 const PARTNER_ROLE = /\b(?:partner|partnership|integrat(?:ed|ion)|service\s+provider)\b/i;
 const ECOSYSTEM_ROLE = /\b(?:ecosystem|community|accelerator|incubator)\b/i;
 const AFFILIATION_ROLE = /\b(?:affiliation|team[- ]?affiliation)\b/i;
+const FORMER_TEAM_ROLE = /\b(?:former|previously|ex[- ]|past)\b[^.;]{0,80}\b(?:founder|co[- ]?founder|team|developer|engineer|operator|ceo|cto|coo|cbo|cpo|cmo|cfo)\b/i;
+
+const CONFIRMED_RELATIONSHIP_PROVENANCE = new Set<
+  NonNullable<TeamRelationshipRecord["relationshipProvenance"]>
+>(["subject_official", "counterparty", "independent"]);
+
+export function hasConfirmedRelationshipProof(member: TeamRelationshipRecord): boolean {
+  return Boolean(
+    member.relationshipProvenance
+    && CONFIRMED_RELATIONSHIP_PROVENANCE.has(member.relationshipProvenance),
+  );
+}
+
+/**
+ * P4 is a material-relationship axis. A generic occupation or self-authored bio
+ * is still useful context, but only project-side, counterparty, or independent
+ * proof of an explicit backer/partner relationship may support the score.
+ */
+export function isScoreableBackingRelationship(member: TeamRelationshipRecord): boolean {
+  return member.evidence_origin !== "model_lead"
+    && member.artifact_verified === true
+    && hasConfirmedRelationshipProof(member)
+    && (member.relationship === "backer" || member.relationship === "partner");
+}
 
 export function hasOperatingTeamRole(member: TeamRelationshipRecord): boolean {
-  return member.kind !== "org" && CORE_ROLE.test(member.role.trim());
+  const role = member.role.trim();
+  return member.kind !== "org"
+    && !FORMER_TEAM_ROLE.test(role)
+    && !AFFILIATION_ROLE.test(role)
+    && !ADVISOR_ROLE.test(role)
+    && CORE_ROLE.test(role);
 }
 
 export function classifyProjectRelationship(
   member: TeamRelationshipRecord,
 ): ProjectRelationshipClass {
-  // A stored relationship is derived data, not an override. Recompute it from
-  // the strongest merged evidence so an early "VC" guess cannot survive a
-  // later verified operating role. Model/search rows remain candidates even if
-  // they arrived with a prefilled relationship.
+  // Model/search rows remain candidates even if they arrived with a prefilled
+  // relationship. Claimant-only bios are statements by the claimant, not proof
+  // that the audited project recognizes the relationship.
   if (member.evidence_origin === "model_lead" || member.artifact_verified === false) return "candidate";
-  // A claimant saying "founder of @project" proves that claimant made the
-  // statement. It does not prove that the project recognizes the relationship.
   if (member.relationshipProvenance === "claimant_self") return "associate";
+
   const role = member.role.trim();
+  // Explicitly non-current or non-operating wording outranks a stale/pre-filled
+  // core classification, even when the source itself is authoritative.
+  if (member.kind !== "org" && FORMER_TEAM_ROLE.test(role)) return "associate";
+  if (member.kind !== "org" && AFFILIATION_ROLE.test(role)) return "team_affiliation";
+  if (member.kind !== "org" && ADVISOR_ROLE.test(role)) return "advisor";
+
+  // A confirmed explicit classification outranks the remaining occupation
+  // keywords. This preserves an official partner's engineer title as a
+  // relationship and a current core member whose title is terse.
+  if (
+    member.relationship
+    && member.relationship !== "candidate"
+    && hasConfirmedRelationshipProof(member)
+  ) {
+    return member.relationship;
+  }
+
   if (member.kind === "org") {
-    if (BACKER_ROLE.test(role)) return "backer";
-    if (PARTNER_ROLE.test(role)) return "partner";
+    if (BACKER_ROLE.test(role)) {
+      return hasConfirmedRelationshipProof(member) ? "backer" : "associate";
+    }
+    if (PARTNER_ROLE.test(role)) {
+      return hasConfirmedRelationshipProof(member) ? "partner" : "associate";
+    }
     if (ECOSYSTEM_ROLE.test(role)) return "ecosystem";
     return "associate";
   }
-  // An explicit operating title wins for a person even when the same title
-  // contains words such as "Investor Relations". Pure VC/fund roles still
-  // remain backer relationships.
-  if (hasOperatingTeamRole(member)) return "core_team";
-  if (ADVISOR_ROLE.test(role)) return "advisor";
-  // A person's generic "VC" bio is an occupation, not evidence that they
-  // invested in this project. Project backing requires a bound organization or
-  // an explicit relationship artifact; otherwise keep the person as context.
-  if (BACKER_ROLE.test(role)) return "associate";
-  if (PARTNER_ROLE.test(role)) return "partner";
+
   if (ECOSYSTEM_ROLE.test(role)) return "ecosystem";
-  if (AFFILIATION_ROLE.test(role)) return "team_affiliation";
+
+  const hasSpecificCoreRole = SPECIFIC_CORE_ROLE.test(role);
+  const hasGenericCoreRole = GENERIC_CORE_ROLE.test(role);
+
+  // A concrete operating title wins for a person even when the same title
+  // contains words such as "Investor Relations". Generic developer/engineer/
+  // team language needs a project-side, counterparty, or independent binding;
+  // otherwise it remains contextual rather than silently becoming employment.
+  if (hasSpecificCoreRole) return "core_team";
+  if (hasGenericCoreRole) {
+    return hasConfirmedRelationshipProof(member) ? "core_team" : "associate";
+  }
+
+  // Occupation text alone does not establish a project relationship. VC/fund
+  // and partner labels require proof that explicitly binds them to this subject.
+  if (BACKER_ROLE.test(role)) {
+    return hasConfirmedRelationshipProof(member) ? "backer" : "associate";
+  }
+  if (PARTNER_ROLE.test(role)) {
+    return hasConfirmedRelationshipProof(member) ? "partner" : "associate";
+  }
   return "associate";
 }
 
@@ -79,17 +140,27 @@ export function isCoreTeamRecord(member: TeamRelationshipRecord): boolean {
   return member.kind !== "org" && classifyProjectRelationship(member) === "core_team";
 }
 
-const normalizedHandle = (value?: string): string =>
-  (value ?? "").trim().replace(/^https?:\/\/(?:www\.)?(?:x|twitter)\.com\//i, "").replace(/^@/, "").toLowerCase();
+export const normalizeTeamHandle = (value?: string): string => {
+  const raw = (value ?? "")
+    .trim()
+    .replace(/^https?:\/\/(?:www\.)?(?:x|twitter)\.com\//i, "")
+    .replace(/^@/, "")
+    .replace(/[/?#].*$/, "")
+    .toLowerCase();
+  return /^[a-z0-9_]{1,30}$/.test(raw) ? raw : "";
+};
 
-const normalizedLinkedIn = (value?: string): string => {
+export const normalizeTeamLinkedIn = (value?: string): string => {
   const raw = (value ?? "").trim();
   if (!raw) return "";
   try {
     const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
-    return url.pathname.replace(/\/+$/, "").toLowerCase();
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (host !== "linkedin.com" && !host.endsWith(".linkedin.com")) return "";
+    const path = url.pathname.replace(/\/+$/, "").toLowerCase();
+    return /^\/in\/[a-z0-9%_.-]+$/i.test(path) ? path : "";
   } catch {
-    return raw.replace(/^https?:\/\/(?:[^/]+)\//i, "/").replace(/\/+$/, "").toLowerCase();
+    return "";
   }
 };
 
@@ -148,30 +219,59 @@ export function samePersonName(left: string, right: string): boolean {
     || (Math.min(aLast.length, bLast.length) >= 6 && editDistance(aLast, bLast) <= 2);
 }
 
-function stableIdentityConflict(left: TeamRelationshipRecord, right: TeamRelationshipRecord): boolean {
-  const aHandle = normalizedHandle(left.handle);
-  const bHandle = normalizedHandle(right.handle);
-  if (aHandle && bHandle && aHandle !== bHandle) return true;
-  const aLinkedIn = normalizedLinkedIn(left.linkedin);
-  const bLinkedIn = normalizedLinkedIn(right.linkedin);
-  return Boolean(aLinkedIn && bLinkedIn && aLinkedIn !== bLinkedIn);
+function sameTeamEntity(left: TeamRelationshipRecord, right: TeamRelationshipRecord): boolean {
+  const aHandle = normalizeTeamHandle(left.handle);
+  const bHandle = normalizeTeamHandle(right.handle);
+  if (aHandle && bHandle) return aHandle === bHandle;
+  const aLinkedIn = normalizeTeamLinkedIn(left.linkedin);
+  const bLinkedIn = normalizeTeamLinkedIn(right.linkedin);
+  if (aLinkedIn && bLinkedIn) return aLinkedIn === bLinkedIn;
+  // Similar names are a review hint, never an identity key. A merge requires
+  // the two rows to share at least one stable handle or LinkedIn profile.
+  return false;
 }
 
-function sameTeamEntity(left: TeamRelationshipRecord, right: TeamRelationshipRecord): boolean {
-  const aHandle = normalizedHandle(left.handle);
-  const bHandle = normalizedHandle(right.handle);
-  if (aHandle && bHandle) return aHandle === bHandle;
-  const aLinkedIn = normalizedLinkedIn(left.linkedin);
-  const bLinkedIn = normalizedLinkedIn(right.linkedin);
-  if (aLinkedIn && bLinkedIn) return aLinkedIn === bLinkedIn;
-  return !stableIdentityConflict(left, right) && samePersonName(left.name, right.name);
+const RELATIONSHIP_PROVENANCE_RANK: Record<
+  NonNullable<TeamRelationshipRecord["relationshipProvenance"]>,
+  number
+> = {
+  third_party: 1,
+  claimant_self: 2,
+  independent: 4,
+  counterparty: 4,
+  subject_official: 5,
+};
+
+function relationshipAuthority(member: TeamRelationshipRecord): number {
+  if (member.evidence_origin === "model_lead" || member.artifact_verified === false) return 0;
+  if (member.relationshipProvenance) return RELATIONSHIP_PROVENANCE_RANK[member.relationshipProvenance];
+  // A deterministically fetched, artifact-verified row without an explicit
+  // relationship label still outranks self-claims and search-derived context.
+  return member.artifact_verified === true ? 3 : 0;
+}
+
+function trustedRelationshipProvenance(
+  member: TeamRelationshipRecord,
+): TeamRelationshipRecord["relationshipProvenance"] {
+  if (member.evidence_origin === "model_lead" || member.artifact_verified === false) return undefined;
+  return member.relationshipProvenance;
+}
+
+function strongerRelationshipProvenance(
+  left?: TeamRelationshipRecord["relationshipProvenance"],
+  right?: TeamRelationshipRecord["relationshipProvenance"],
+): TeamRelationshipRecord["relationshipProvenance"] {
+  if (!left) return right;
+  if (!right) return left;
+  return RELATIONSHIP_PROVENANCE_RANK[right] > RELATIONSHIP_PROVENANCE_RANK[left] ? right : left;
 }
 
 function recordRank(member: TeamRelationshipRecord): number {
-  return (member.artifact_verified === true ? 8 : 0)
+  return relationshipAuthority(member) * 32
+    + (member.artifact_verified === true ? 8 : 0)
     + (member.evidence_origin !== "model_lead" ? 4 : 0)
-    + (normalizedHandle(member.handle) ? 2 : 0)
-    + (normalizedLinkedIn(member.linkedin) ? 1 : 0);
+    + (normalizeTeamHandle(member.handle) ? 2 : 0)
+    + (normalizeTeamLinkedIn(member.linkedin) ? 1 : 0);
 }
 
 function mergeRecords<T extends TeamRelationshipRecord>(left: T, right: T): T {
@@ -189,33 +289,59 @@ function mergeRecords<T extends TeamRelationshipRecord>(left: T, right: T): T {
     evidence_origin: left.evidence_origin === "model_lead" && right.evidence_origin === "model_lead"
       ? "model_lead"
       : preferred.evidence_origin ?? other.evidence_origin,
-    relationshipProvenance: preferred.relationshipProvenance ?? other.relationshipProvenance,
-    relationship: undefined,
+    ...(([left, right] as const).some((member) =>
+      (member as TeamRelationshipRecord & { handleProvenance?: string }).handleProvenance === "subject_first_party"
+      && member.evidence_origin !== "model_lead"
+      && member.artifact_verified === true)
+      ? { handleProvenance: "subject_first_party" }
+      : {}),
+    relationshipProvenance: trustedRelationshipProvenance(preferred)
+      ? strongerRelationshipProvenance(
+          trustedRelationshipProvenance(left),
+          trustedRelationshipProvenance(right),
+        )
+      : undefined,
+    relationship: hasConfirmedRelationshipProof(preferred)
+      ? preferred.relationship
+      : undefined,
   } as T;
 }
 
 /**
- * Collapse only identity-safe duplicates: same handle, same LinkedIn profile,
- * or a conservative real-name variant (Alex/Alexander plus a near-identical
- * surname). Conflicting stable identifiers never merge.
+ * Collapse only identity-safe duplicates that share an exact normalized handle
+ * or LinkedIn profile. Name similarity remains available to discovery as a lead,
+ * but cannot collapse two people into one authoritative record.
  */
 export function canonicalizeTeamRecords<T extends TeamRelationshipRecord>(
   rows: readonly T[],
 ): T[] {
   const out: T[] = [];
   for (const row of rows) {
-    const index = out.findIndex((candidate) => sameTeamEntity(candidate, row));
-    if (index < 0) out.push({ ...row });
-    else out[index] = mergeRecords(out[index], row);
+    let merged = { ...row };
+    let insertAt = out.length;
+    // A bridge row can carry both a handle and LinkedIn URL, joining two
+    // earlier one-identifier aliases. Re-scan after each merge so the result is
+    // transitive without ever falling back to a fuzzy name.
+    while (true) {
+      const index = out.findIndex((candidate) => sameTeamEntity(candidate, merged));
+      if (index < 0) break;
+      insertAt = Math.min(insertAt, index);
+      merged = mergeRecords(out[index], merged);
+      out.splice(index, 1);
+    }
+    out.splice(Math.min(insertAt, out.length), 0, merged);
   }
   return out.map((row) => ({
     ...row,
-    relationship: classifyProjectRelationship({ ...row, relationship: undefined }),
+    relationship: classifyProjectRelationship(row),
   }));
 }
 
 export function canonicalizeCoreTeamRecords<T extends TeamRelationshipRecord>(
   rows: readonly T[],
 ): T[] {
-  return canonicalizeTeamRecords(rows.filter(isCoreTeamRecord));
+  // Merge the full relationship record first so the strongest bound source
+  // governs classification. Filtering first can discard the official core-team
+  // row while preserving a weaker alias as an associate.
+  return canonicalizeTeamRecords(rows).filter(isCoreTeamRecord);
 }

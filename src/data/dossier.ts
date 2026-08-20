@@ -30,7 +30,12 @@ import type { ReportPersistenceContext, ReportVersionContext } from "../lib/repo
 import type { ScanCheck } from "../lib/scanChecklist";
 import type { ResearchPlan } from "../lib/researchDirector";
 import { portfolioRelationshipBinding } from "../lib/portfolioRelationshipBinding";
-import { canonicalizeCoreTeamRecords } from "../lib/teamRelationships";
+import {
+  canonicalizeTeamRecords,
+  isCoreTeamRecord,
+  normalizeTeamHandle,
+  normalizeTeamLinkedIn,
+} from "../lib/teamRelationships";
 import { buildPointInTimeIntelligence } from "../intelligence/buildPointInTimeIntelligence";
 import { buildEntityPointInTimeIntelligence } from "../intelligence/buildEntityPointInTimeIntelligence";
 import type { IntelligenceSpineSnapshot } from "../intelligence/types";
@@ -199,15 +204,17 @@ export interface Dossier {
   persistence?: ReportPersistenceContext;
   notableFollowers: NotableFollower[];
   contradictions: Contradiction[];
-  /** Independently collected team records that may ground identity context. */
+  /** Independently collected core-team records that may ground identity context. */
   webTeam: WebTeamMember[];
+  /** Verified non-core people and organizations connected to the project. */
+  projectRelationships?: WebTeamMember[];
   /**
    * Whether each named founder / C-level leader still lists this project as a
    * current role. A paid, bounded lookup: without this field the answer was
    * collected, charged for, and then dropped before it could ever render.
    */
   leaderDepartures?: CollectedEvidence["leaderDepartures"];
-  /** Model-only or otherwise unverified team candidates; never grounded evidence. */
+  /** Model-only or otherwise unconfirmed team/relationship candidates; never grounded evidence. */
   webTeamLeads?: WebTeamMember[];
   githubAssessment?: GithubAssessment; // subject's resolved GitHub: quality/claims/history
   // The token threat leg of the FULL scan. Attached client-side by the runner
@@ -305,7 +312,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       (row.handleProvenance === "subject_first_party" && Boolean(row.handle))
       || !teamNameIsOwnHandle(row)
     );
-  const groundedWebTeam = canonicalizeCoreTeamRecords((ev.webTeam ?? [])
+  const groundedRelationships = canonicalizeTeamRecords((ev.webTeam ?? [])
     .filter(identityGrounded))
     .map((member) => ({
       ...member,
@@ -314,22 +321,63 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
         : {}),
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));
-  const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
-    if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
-    if (!identityGrounded(member)) return [{ ...member }];
-    // Only an unproven identity LINK makes a verified person a candidate
-    // again. Model-found projects alone are stripped from the verified row
-    // (sanitization above) and must not re-render the person with a verify
-    // button: a deterministically-bound founder is not a lead.
-    if (member.identity_link_evidence_origin !== "model_lead") return [];
-    return [{
-      ...member,
-      evidence_origin: "model_lead" as const,
-      artifact_verified: false,
-      provider: "grok",
-      source: `${member.source} · unverified model-enriched links`,
-    }];
+  // A reverse-bio claimant proves only that the claimant wrote the bio. Keep
+  // it inspectable, but never publish it as a verified project relationship
+  // unless canonicalization also found stronger project-side, counterparty, or
+  // independent proof for the same stable identity.
+  const confirmedGroundedRelationships = groundedRelationships.filter((member) =>
+    member.relationshipProvenance !== "claimant_self");
+  const groundedWebTeam = confirmedGroundedRelationships.filter(isCoreTeamRecord);
+  const projectRelationships = confirmedGroundedRelationships.filter((member) =>
+    !isCoreTeamRecord(member) && member.relationship !== "candidate");
+  const sameStableTeamIdentity = (left: WebTeamMember, right: WebTeamMember) => {
+    const leftHandle = normalizeTeamHandle(left.handle);
+    const rightHandle = normalizeTeamHandle(right.handle);
+    if (leftHandle && rightHandle && leftHandle === rightHandle) return true;
+    const leftLinkedin = normalizeTeamLinkedIn(left.linkedin);
+    const rightLinkedin = normalizeTeamLinkedIn(right.linkedin);
+    return Boolean(leftLinkedin && rightLinkedin && leftLinkedin === rightLinkedin);
+  };
+  const resolvedByConfirmedRelationship = (member: WebTeamMember) =>
+    confirmedGroundedRelationships.some((confirmed) => sameStableTeamIdentity(confirmed, member));
+  const asUnconfirmedRelationshipLead = (member: WebTeamMember): WebTeamMember => ({
+    ...member,
+    relationship: "candidate",
+    artifact_verified: false,
+    source: member.source
+      ? `${member.source} · claimant-only relationship (unconfirmed by project)`
+      : "claimant-only relationship (unconfirmed by project)",
   });
+  const claimantOnlyRelationshipLeads = groundedRelationships
+    .filter((member) => member.relationshipProvenance === "claimant_self")
+    .map(asUnconfirmedRelationshipLead);
+  const webTeamLeads = [
+    ...claimantOnlyRelationshipLeads,
+    ...(ev.webTeam ?? []).flatMap((member) => {
+      if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
+      // Stronger proof already resolved this exact handle/profile. Do not
+      // re-render a weaker model row or claimant statement as a second person.
+      if (resolvedByConfirmedRelationship(member)) return [];
+      if (member.relationshipProvenance === "claimant_self") {
+        // Grounded claimant rows were canonicalized above. If stronger proof
+        // won the merge, this raw self-claim must not reappear as a lead.
+        return identityGrounded(member) ? [] : [asUnconfirmedRelationshipLead(member)];
+      }
+      if (!identityGrounded(member)) return [{ ...member }];
+      // Only an unproven identity LINK makes a verified person a candidate
+      // again. Model-found projects alone are stripped from the verified row
+      // (sanitization above) and must not re-render the person with a verify
+      // button: a deterministically-bound founder is not a lead.
+      if (member.identity_link_evidence_origin !== "model_lead") return [];
+      return [{
+        ...member,
+        evidence_origin: "model_lead" as const,
+        artifact_verified: false,
+        provider: "grok",
+        source: `${member.source} · unverified model-enriched links`,
+      }];
+    }),
+  ];
 
   ev.ventures.forEach((v) => { a.addVenture(v); if (governingEligible(v)) graphAudit.addVenture(v); });
   ev.testimonials.forEach((t) => { a.addTestimonial(t); if (governingEligible(t)) graphAudit.addTestimonial(t); });
@@ -375,6 +423,36 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       if (!prKey) continue;
       if (!hasNode(prKey)) graph.nodes.push({ type: "Company", key: prKey, label: pr.name } as PanoptesNode);
       graph.edges.push({ src: pkey, dst: prKey, type: "WORKED_ON", role: pr.role });
+    }
+  }
+  // Preserve verified non-core context in the graph without relabeling it as
+  // team. A deterministic relationship can be useful even when it is not an
+  // employment claim.
+  for (const relationship of projectRelationships) {
+    const relationshipKey = canonicalEntityKey({
+      handle: relationship.handle,
+      name: relationship.name,
+    });
+    if (!relationshipKey) continue;
+    if (!hasNode(relationshipKey)) graph.nodes.push({
+      type: relationship.kind === "org" ? "Company" : "Person",
+      key: relationshipKey,
+      label: relationship.name,
+      role: relationship.role,
+    } as PanoptesNode);
+    const existing = graph.edges.find((edge) =>
+      edge.src === subjectKey && edge.dst === relationshipKey && edge.type === "ASSOCIATES_WITH");
+    if (existing) {
+      existing.relation = relationship.relationship ?? "associate";
+      existing.role = relationship.role;
+    } else {
+      graph.edges.push({
+        src: subjectKey,
+        dst: relationshipKey,
+        type: "ASSOCIATES_WITH",
+        relation: relationship.relationship ?? "associate",
+        role: relationship.role,
+      });
     }
   }
   // Second hop: the people behind the subject's ventures (subject → venture →
@@ -518,6 +596,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
     webTeam: groundedWebTeam,
+    ...(projectRelationships.length ? { projectRelationships } : {}),
     ...(webTeamLeads.length ? { webTeamLeads } : {}),
     ...(ev.leaderDepartures?.length
       ? { leaderDepartures: ev.leaderDepartures.map((row) => ({ ...row })) }

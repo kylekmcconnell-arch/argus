@@ -17,7 +17,12 @@ import { canonicalOfficialWebsite, isStrictFundScaleArtifact } from "../src/lib/
 import { isOrganizationAccount } from "../src/lib/investorSubject";
 import { portfolioRelationshipBinding } from "../src/lib/portfolioRelationshipBinding";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
-import { canonicalizeTeamRecords, isCoreTeamRecord } from "../src/lib/teamRelationships";
+import {
+  canonicalizeTeamRecords,
+  isCoreTeamRecord,
+  isScoreableBackingRelationship,
+  type TeamRelationshipRecord,
+} from "../src/lib/teamRelationships";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
@@ -1862,10 +1867,8 @@ export function deriveProjectStrengthBands(
   // can establish current operation without X, while an undated historical
   // usage claim remains traction evidence and cannot manufacture liveness.
   const currentActivity = currentSocialActivity || freshProductPress.length > 0;
-  const advisorTeam = relationshipTeam.filter((member) => {
-    const role = String(member.role ?? "");
-    return PROJECT_BACKING_TEAM_ROLE.test(role) && !PROJECT_NON_BACKING_TEAM_ROLE.test(role);
-  });
+  const backingRelationships = records(packet.associates)
+    .filter((member) => isScoreableBackingRelationship(scoringTeamRelationshipRecord(member)));
   const productStageText = [
     factText(productFacts),
     ...productActivity.map((row) => String(row.text ?? row.value ?? "")),
@@ -2063,10 +2066,10 @@ export function deriveProjectStrengthBands(
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
   // Verified-only ladder (press excluded) for the enforced floor: headlines can
   // suggest a partnership story to the analyst but cannot force a minimum score.
-  let p4FloorTier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || advisorTeam.length ? "emerging" : "none";
-  if (investorFacts.length > 0 || partnershipFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
-  let p4Tier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
-  if (relationshipPress.length > 0 || investorFacts.length > 0 || partnershipFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
+  let p4FloorTier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || backingRelationships.length ? "emerging" : "none";
+  if (investorFacts.length > 0 || partnershipFacts.length > 0 || backingRelationships.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
+  let p4Tier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || backingRelationships.length || relationshipPress.length ? "emerging" : "none";
+  if (relationshipPress.length > 0 || investorFacts.length > 0 || partnershipFacts.length > 0 || backingRelationships.length >= 2 || disclosedTreasury) p4Tier = "solid";
   if (distinctRelationshipKeys.size >= 2) p4Tier = "exceptional";
   const p4Assessment = p4Tier === "none" && (limitingByAxis.get("P4_backing_and_partners") ?? []).length === 0
     ? assessmentArtifactFor("P4_backing_and_partners", "project-backing-partners")
@@ -2077,10 +2080,10 @@ export function deriveProjectStrengthBands(
     ...(fundingFacts.length ? ["source-backed financing state"] : []),
     ...(investorFacts.length ? [`${investorFacts.length} verified investor record${investorFacts.length === 1 ? "" : "s"}`] : []),
     ...(partnershipFacts.length ? [`${partnershipFacts.length} verified operating relationship${partnershipFacts.length === 1 ? "" : "s"}`] : []),
-    ...(advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : []),
+    ...(backingRelationships.length ? [`${backingRelationships.length} verified backer or partner record${backingRelationships.length === 1 ? "" : "s"}`] : []),
     ...(p4Assessment ? ["completed backing assessment found no verified backer or partner"] : []),
   ], [
-    ...artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...partnershipFacts, ...advisorTeam]),
+    ...artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...partnershipFacts, ...backingRelationships]),
     ...(p4Assessment ? [p4Assessment.artifactId] : []),
     // An assessed-null band is a plain band, never a press-widened one.
   ], p4Assessment ? undefined : p4FloorTier);
@@ -2828,8 +2831,49 @@ const BASIC_FACT_AXIS_ELIGIBILITY = mergeAxisEligibility(
   OTHER_ROLE_BASIC_FACT_AXIS_ELIGIBILITY,
 );
 
-const PROJECT_BACKING_TEAM_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
-const PROJECT_NON_BACKING_TEAM_ROLE = /\binvestor relations?\b/i;
+const PROJECT_RELATIONSHIP_CLASSES = new Set<NonNullable<TeamRelationshipRecord["relationship"]>>([
+  "core_team",
+  "advisor",
+  "backer",
+  "partner",
+  "ecosystem",
+  "team_affiliation",
+  "associate",
+  "candidate",
+]);
+const PROJECT_RELATIONSHIP_PROVENANCE = new Set<
+  NonNullable<TeamRelationshipRecord["relationshipProvenance"]>
+>(["subject_official", "claimant_self", "counterparty", "independent", "third_party"]);
+
+const scoringTeamRelationshipRecord = (
+  value: Record<string, unknown>,
+): TeamRelationshipRecord => {
+  const relationshipValue = value.relationship ?? value.relation;
+  const relationship = typeof relationshipValue === "string"
+    && PROJECT_RELATIONSHIP_CLASSES.has(relationshipValue as NonNullable<TeamRelationshipRecord["relationship"]>)
+    ? relationshipValue as TeamRelationshipRecord["relationship"]
+    : undefined;
+  const provenanceValue = value.relationshipProvenance;
+  return {
+    name: recordText(value, ["name", "associate_handle"], 180) ?? "",
+    role: recordText(value, ["role", "relation"], 180) ?? "",
+    handle: recordText(value, ["handle", "associate_handle"], 180),
+    linkedin: recordText(value, ["linkedin"], 1_000),
+    kind: value.kind === "org" ? "org" : "person",
+    evidence_origin: recordText(value, ["evidence_origin"], 40),
+    artifact_verified: typeof value.artifact_verified === "boolean"
+      ? value.artifact_verified
+      : undefined,
+    relationship,
+    relationshipProvenance: typeof provenanceValue === "string"
+      && PROJECT_RELATIONSHIP_PROVENANCE.has(
+        provenanceValue as NonNullable<TeamRelationshipRecord["relationshipProvenance"]>,
+      )
+      ? provenanceValue as TeamRelationshipRecord["relationshipProvenance"]
+      : undefined,
+  };
+};
+
 const PROJECT_TOKEN_ACTIVITY = /\b(?:tokenomics|vesting|token unlock|unlock schedule|emission(?:s| schedule)?|token supply|circulating supply|total supply|max(?:imum)? supply|treasury|token burn|burn mechanism|liquidity|contract address|token contract|airdrop|staking)\b/i;
 const PROJECT_TRANSPARENCY_ACTIVITY = /\b(?:governance|proposal|vote|treasury|audit|security audit|security review|vulnerability|incident|disclosure|transparency|multisig|multi-sig)\b/i;
 const SCREENED_TESTIMONIAL_VERDICTS = new Set([
@@ -3070,13 +3114,18 @@ const eligibleAxesFor = (
           : []),
       ]
     : [];
-  const teamAxes = section === "team"
+  const teamRelationship = scoringTeamRelationshipRecord(value);
+  const teamIsCore = section === "team"
+    && (teamRelationship.relationship === undefined || teamRelationship.relationship === "core_team")
+    && isCoreTeamRecord(teamRelationship);
+  const teamAxes = teamIsCore
     ? SECTION_AXIS_ELIGIBILITY.team.filter((axis) =>
-        axis !== "P2_product_substance"
-        && (axis !== "P4_backing_and_partners" || (
-          PROJECT_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? "")
-          && !PROJECT_NON_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? "")
-        )))
+        axis !== "P2_product_substance" && axis !== "P4_backing_and_partners")
+    : [];
+  const associateAxes = section === "associates"
+    ? SECTION_AXIS_ELIGIBILITY.associates.filter((axis) =>
+        axis !== "P4_backing_and_partners"
+        || isScoreableBackingRelationship(scoringTeamRelationshipRecord(value)))
     : [];
   const recentActivityText = section === "recentActivity"
     ? recordText(value, ["text", "value", "claim", "title"], 1_000) ?? ""
@@ -3101,6 +3150,8 @@ const eligibleAxesFor = (
       ? projectTokenAxes
     : section === "team"
       ? teamAxes
+    : section === "associates"
+      ? associateAxes
     : section === "recentActivity"
       ? recentActivityAxes
     : section === "testimonials"
@@ -3785,6 +3836,16 @@ function serializeAnalystEvidencePacket(
           // deterministic rows, never discovery-only/model-lead objects. This
           // closes the same attribution boundary for ventures, testimonials,
           // wallets, promotions, and advisory rows as for findings.
+          if (
+            options.axisCatalog
+            && (section === "team" || section === "associates")
+            && record.relationshipProvenance === "claimant_self"
+          ) {
+            // A reverse-bio probe verifies only that the claimant made the
+            // statement. It is an investigative lead until the project,
+            // counterparty, or an independent source confirms the relationship.
+            return false;
+          }
           return record.evidence_origin !== "model_lead" && record.artifact_verified !== false;
         });
     // Scoring packets first inspect the complete bounded collector output for

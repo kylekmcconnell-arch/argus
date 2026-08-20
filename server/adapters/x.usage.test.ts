@@ -88,6 +88,40 @@ describe("X provider attempt accounting", () => {
     }));
   });
 
+  it("ignores terminal-state copy found only in hidden page resources", async () => {
+    const captured = await withCostLedger(async () => {
+      const state = await publicXAccountState("@active", vi.fn().mockResolvedValue(
+        new Response(`
+          <script>{"labels":["Account suspended","This account doesn't exist"]}</script>
+          <style>.status::after { content: "Account suspended"; }</style>
+          <template><h2>Account suspended</h2></template>
+          <noscript>This account doesn't exist</noscript>
+          <main>Sign in to see this profile</main>
+        `, { status: 200 }),
+      ) as unknown as typeof fetch);
+      return { state, cost: getCost() };
+    });
+
+    expect(captured.state).toBeNull();
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "x-public",
+      op: "account-state",
+      status: "failed",
+      failed: 1,
+      meta: expect.stringContaining("temporarily_unavailable_no_explicit_terminal_state"),
+    }));
+  });
+
+  it("accepts visible entity-encoded terminal copy", async () => {
+    const state = await publicXAccountState("@gone", vi.fn().mockResolvedValue(
+      new Response("<main>This account doesn&#x27;t exist</main>", { status: 404 }),
+    ) as unknown as typeof fetch);
+    expect(state).toEqual(expect.objectContaining({
+      handle: "@gone",
+      accountStatus: "unavailable",
+    }));
+  });
+
   it("accepts an explicit account-does-not-exist page even when X returns HTTP 404", async () => {
     const captured = await withCostLedger(async () => {
       const state = await publicXAccountState("@gone", vi.fn().mockResolvedValue(

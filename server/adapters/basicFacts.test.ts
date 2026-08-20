@@ -17,6 +17,7 @@ import {
   overlappingNetworkAnswers,
 } from "./basicFacts";
 import { readEntityFacts } from "../entityStore";
+import { withAuditRunContext } from "../auditRunContext";
 
 vi.mock("../entityStore", () => ({ readEntityFacts: vi.fn(async () => null) }));
 
@@ -29,6 +30,8 @@ const promptText = (value: unknown): string => Array.isArray(value)
   : String(value ?? "");
 
 afterEach(() => {
+  vi.mocked(readEntityFacts).mockReset();
+  vi.mocked(readEntityFacts).mockResolvedValue(null);
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
@@ -5476,6 +5479,32 @@ describe("knowledge base read-through", () => {
 
     expect(discoveredIds).toContain("person.founder");
     expect(readEntityFacts).not.toHaveBeenCalled();
+  });
+
+  it("does not let prior verified facts answer or score during a full rescan", async () => {
+    vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
+    vi.mocked(readEntityFacts).mockResolvedValue({
+      facts: { basicFacts: [cachedFounderFact()] },
+      updatedAt: NOW,
+      auditCount: 2,
+      entityType: "FOUNDER",
+    });
+    const { ctx, evidence } = founderCtx();
+    let discoveredIds: string[] = [];
+
+    await withAuditRunContext(
+      { fresh: true, scanId: "basic-facts-full-rescan" },
+      () => collectBasicFacts(ctx, {
+        discover: spyDiscover((ids) => { discoveredIds = ids; }),
+        fetchSource: vi.fn(),
+      }),
+    );
+
+    expect(readEntityFacts).not.toHaveBeenCalled();
+    expect(discoveredIds).toContain("person.founder");
+    expect(evidence.basicFacts ?? []).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ factId: "kb-founder" }),
+    ]));
   });
 });
 

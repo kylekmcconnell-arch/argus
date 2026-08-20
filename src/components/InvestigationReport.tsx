@@ -81,6 +81,7 @@ import { deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPoo
 import { deriveIntelligenceBrief } from "../lib/intelligenceBrief";
 import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
+import { validateProtocolEvidenceBinding } from "../lib/diligenceEvidenceBinding";
 import { walletAgeFact } from "../lib/operatorTrace";
 import { projectLeadIsRelevant, type ProjectLeadSubject } from "../lib/projectLeadRelevance";
 import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
@@ -754,6 +755,47 @@ export function InvestigationReport({
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
   const { token, projectX, siteUrl, recon, projectAccount, founders, deployerTrail } = inv;
+  const protocolBindingContext = {
+    projectToken: projectAccount?.projectToken,
+    canonicalGeckoId: projectAccount?.projectToken?.coingeckoId,
+    officialHandle: projectAccount?.handle,
+    officialWebsites: [
+      projectAccount?.website,
+      ...(projectAccount?.official_websites ?? []),
+    ],
+  };
+  const protocolTvlValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    projectAccount?.protocolTvl,
+  );
+  const protocolFundingValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    projectAccount?.protocolFunding,
+  );
+  const validatedProtocolSlugs = new Set(
+    [protocolTvlValidation, protocolFundingValidation]
+      .filter((result) => result.state === "matched")
+      .map((result) => result.state === "matched" ? result.binding.protocolSlug.trim().toLowerCase() : ""),
+  );
+  const protocolFeesValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    projectAccount?.protocolFees,
+    { corroboratedProtocolSlugs: validatedProtocolSlugs },
+  );
+  const boundProtocolTvl = protocolTvlValidation.state === "matched"
+    ? projectAccount?.protocolTvl
+    : undefined;
+  const protocolTvlMeasured = typeof boundProtocolTvl?.tvlUsd === "number"
+    && boundProtocolTvl.tvlUsd > 0;
+  const boundProtocolFunding = protocolFundingValidation.state === "matched"
+    ? projectAccount?.protocolFunding
+    : undefined;
+  const boundProtocolFees = protocolFeesValidation.state === "matched"
+    ? projectAccount?.protocolFees
+    : undefined;
+  const protocolUsageProjectOnly =
+    (protocolTvlMeasured && protocolTvlValidation.state === "matched" && protocolTvlValidation.binding.scope === "project")
+    || (protocolFeesValidation.state === "matched" && protocolFeesValidation.binding.scope === "project");
   const accountReport = projectAccount?.report;
   const accountGoverning = accountReport?.role_reports?.find((rr) => rr.role === accountReport.governing_role);
   const accountAxes = accountGoverning ? Object.entries(accountGoverning.axes ?? {}) : [];
@@ -1095,8 +1137,8 @@ export function InvestigationReport({
     nextUnlock: upcomingUnlocks
       ? { date: upcomingUnlocks.nextUnlockDate, amountUsd: upcomingUnlocks.unlockValueUsd, pctSupply: upcomingUnlocks.percentOfSupply }
       : null,
-    tvlChange30dPct: projectAccount?.protocolTvl?.change30dPct ?? null,
-    feesChange30dPct: projectAccount?.protocolFees?.change30dOver30dPct ?? null,
+    tvlChange30dPct: boundProtocolTvl?.change30dPct ?? null,
+    feesChange30dPct: boundProtocolFees?.change30dOver30dPct ?? null,
     athDrawdownPct: token.cg?.ath?.drawdownPct ?? projectAccount?.projectToken?.ath?.drawdownPct ?? null,
     accountSuspended: projectAccount?.x_account_status === "suspended",
     daysSinceLastPost: projectAccount?.days_since_post ?? null,
@@ -1868,7 +1910,7 @@ export function InvestigationReport({
           <div className="mt-3 space-y-3">
             <CapitalStructurePanel
               facts={projectBasicFacts}
-              indexedRounds={projectAccount?.protocolFunding?.rounds ?? []}
+              indexedRounds={boundProtocolFunding?.rounds ?? []}
               tokenSymbol={token.symbol}
               tokenMarketCap={projectAccount?.projectToken?.marketCapUsd ?? token.cg?.mcapUsd ?? marketCap}
               tokenFdv={projectAccount?.projectToken?.fdvUsd ?? fullyDilutedValue}
@@ -1884,16 +1926,26 @@ export function InvestigationReport({
             {isConcentratedLiquidityPool(token.dexId, token.dexLabels) && token.pairAddress && (
               <LpCustody chain={token.chain} pairAddress={token.pairAddress} />
             )}
-            {(projectAccount?.protocolTvl || projectAccount?.protocolFees || projectAccount?.holderProfile) && (
-              <UsageVisuals
-                tvl={projectAccount.protocolTvl}
-                fees={projectAccount.protocolFees}
-                holders={projectAccount.holderProfile}
-              />
+            {(protocolTvlMeasured || boundProtocolFees || projectAccount?.holderProfile) && (
+              <>
+                {protocolUsageProjectOnly && (
+                  <p className="rounded-lg border border-line/60 bg-panel/45 px-3 py-2 text-[11px] leading-relaxed text-ink-faint">
+                    Protocol usage is bound to the project through its exact official X account and domain. It does not establish token linkage, token revenue, or token value capture.
+                  </p>
+                )}
+                <UsageVisuals
+                  tvl={boundProtocolTvl}
+                  fees={boundProtocolFees}
+                  holders={projectAccount?.holderProfile}
+                />
+              </>
             )}
             <DiligenceEvidenceLedgers
               company={projectAccount?.companyEnrichment}
-              officialWebsite={projectAccount?.website ?? siteUrl}
+              projectToken={projectAccount?.projectToken}
+              officialHandle={projectAccount?.handle}
+              officialWebsite={projectAccount?.website}
+              officialWebsites={projectAccount?.official_websites}
               protocolFunding={projectAccount?.protocolFunding}
               protocolTvl={projectAccount?.protocolTvl}
               canonicalGeckoId={projectAccount?.projectToken?.coingeckoId}

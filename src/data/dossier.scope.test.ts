@@ -107,6 +107,8 @@ describe("dossier finding scope", () => {
     );
     evidence.webTeam = [
       { name: "Verified Leader", handle: "@verified_leader", role: "CEO", source: "team page", provider: "team-page", evidence_origin: "deterministic", artifact_verified: true },
+      { name: "Superteam DE", handle: "@superteamde", role: "ecosystem", kind: "org", source: "official project page", provider: "team-page", evidence_origin: "deterministic", artifact_verified: true, relationshipProvenance: "subject_official" },
+      { name: "Strategic Super R", handle: "@strategicsuperr", role: "VC", kind: "person", source: "self bio", provider: "twitterapi", evidence_origin: "deterministic", artifact_verified: true, relationshipProvenance: "claimant_self" },
       { name: "Model Lead", handle: "@model_leader", role: "CTO", source: "web search", provider: "grok", evidence_origin: "model_lead", artifact_verified: false },
       {
         name: "Verified Name",
@@ -131,6 +133,8 @@ describe("dossier finding scope", () => {
 
     expect(graphKeys.has("@verified_peer")).toBe(true);
     expect(graphKeys.has("@verified_leader")).toBe(true);
+    expect(graphKeys.has("@superteamde")).toBe(true);
+    expect(graphKeys.has("@strategicsuperr")).toBe(false);
     expect(graphKeys.has("venture:verified")).toBe(true);
     expect(graphKeys.has("@model_peer")).toBe(false);
     expect(graphKeys.has("@model_leader")).toBe(false);
@@ -140,7 +144,18 @@ describe("dossier finding scope", () => {
       expect.arrayContaining(["@verified_peer", "@model_peer"]),
     );
     expect(dossier.webTeam.map((member) => member.name)).toEqual(expect.arrayContaining(["Verified Leader", "Verified Name"]));
+    expect(dossier.webTeam.map((member) => member.name)).not.toContain("Superteam DE");
+    expect(dossier.webTeam.map((member) => member.name)).not.toContain("Strategic Super R");
     expect(dossier.webTeam.map((member) => member.name)).not.toContain("Model Lead");
+    expect(dossier.projectRelationships).toEqual([
+      expect.objectContaining({ name: "Superteam DE", relationship: "ecosystem" }),
+    ]);
+    expect(dossier.graph.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ dst: "@superteamde", type: "ASSOCIATES_WITH", relation: "ecosystem" }),
+    ]));
+    expect(dossier.graph.edges).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ dst: "@strategicsuperr", type: "ASSOCIATES_WITH" }),
+    ]));
     expect(dossier.webTeam.map((member) => member.name)).not.toContain("<UNKNOWN>");
     expect(dossier.webTeam.find((member) => member.name === "Verified Name")).toMatchObject({
       handle: undefined,
@@ -149,14 +164,20 @@ describe("dossier finding scope", () => {
     expect(dossier.webTeamLeads).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "Model Lead", evidence_origin: "model_lead", artifact_verified: false }),
       expect.objectContaining({ name: "Verified Name", handle: "@model_link_candidate", evidence_origin: "model_lead", artifact_verified: false }),
+      expect.objectContaining({
+        name: "Strategic Super R",
+        relationship: "candidate",
+        relationshipProvenance: "claimant_self",
+        artifact_verified: false,
+      }),
     ]));
     expect(dossier.webTeamLeads?.map((member) => member.name)).not.toContain("<UNKNOWN>");
     expect(dossier.ventureTeams?.map((team) => team.name)).toEqual(expect.arrayContaining(["Verified Venture", "Model Venture"]));
   });
 });
 
-describe("dossier webTeam · reverse-bio first-party keep", () => {
-  it("keeps a first-party handle-bound founder that would have been dropped as an unverified search candidate", () => {
+describe("dossier webTeam · claimant-only relationship boundary", () => {
+  it("keeps reverse-bio claims unconfirmed until stronger project-side proof resolves the same identity", () => {
     const evidence = emptyEvidence("@projecthandle");
     evidence.roles = [SubjectClass.PROJECT];
     evidence.webTeam = [
@@ -182,15 +203,7 @@ describe("dossier webTeam · reverse-bio first-party keep", () => {
         provider: "twitterapi",
         identity_link_evidence_origin: "deterministic",
         handleProvenance: "subject_first_party",
-      },
-      {
-        name: "Bob",
-        handle: "@bob",
-        role: "fan",
-        source: "web search",
-        provider: "grok",
-        evidence_origin: "model_lead",
-        artifact_verified: false,
+        relationshipProvenance: "claimant_self",
       },
       {
         name: "Some Org",
@@ -204,22 +217,108 @@ describe("dossier webTeam · reverse-bio first-party keep", () => {
         provider: "twitterapi",
         identity_link_evidence_origin: "deterministic",
         handleProvenance: "subject_first_party",
+        relationshipProvenance: "claimant_self",
       },
     ];
 
-    const unverifiedOnly = emptyEvidence("@projecthandle");
-    unverifiedOnly.roles = [SubjectClass.PROJECT];
-    unverifiedOnly.webTeam = [evidence.webTeam[0]];
-    expect(assembleDossier(unverifiedOnly, true).webTeam.map((m) => m.handle)).toEqual([]);
+    const claimantOnly = assembleDossier(evidence, true);
+    expect(claimantOnly.webTeam).toEqual([]);
+    expect(claimantOnly.projectRelationships).toBeUndefined();
+    expect(claimantOnly.graph.nodes.map((node) => String(node.key).toLowerCase())).not.toEqual(
+      expect.arrayContaining(["@alice", "@someorg"]),
+    );
+    expect(claimantOnly.webTeamLeads).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: "Alice",
+        handle: "@alice",
+        relationship: "candidate",
+        relationshipProvenance: "claimant_self",
+        artifact_verified: false,
+      }),
+      expect.objectContaining({
+        name: "Some Org",
+        handle: "@SomeOrg",
+        relationship: "candidate",
+        relationshipProvenance: "claimant_self",
+        artifact_verified: false,
+      }),
+    ]));
+
+    const projectConfirmed = {
+      ...evidence,
+      webTeam: [
+        ...evidence.webTeam,
+        {
+          ...evidence.webTeam[1],
+          source: "official project team page",
+          sourceUrl: "https://projecthandle.example/team",
+          provider: "team-page",
+          relationshipProvenance: "subject_official" as const,
+        },
+      ],
+    };
+    const confirmed = assembleDossier(projectConfirmed, true);
+    expect(confirmed.webTeam).toEqual([
+      expect.objectContaining({
+        name: "Alice",
+        handle: "@alice",
+        relationship: "core_team",
+        relationshipProvenance: "subject_official",
+        artifact_verified: true,
+      }),
+    ]);
+    expect(confirmed.webTeamLeads?.map((member) => member.name)).not.toContain("Alice");
+  });
+
+  it("suppresses model aliases when stable handles and LinkedIn profiles use different URL forms", () => {
+    const evidence = emptyEvidence("@multihopper");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.webTeam = [
+      {
+        name: "Kuj Crypto",
+        handle: "@kujcrypto",
+        linkedin: "https://www.linkedin.com/in/alexander-kujavsky-90a80b90/",
+        role: "cofounder",
+        kind: "person",
+        source: "official project team page",
+        sourceUrl: "https://multihopper.example/team",
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        relationshipProvenance: "subject_official",
+      },
+      {
+        name: "Alexander Kujavsky",
+        handle: "https://x.com/kujcrypto/status/12345?ref=team",
+        role: "cofounder",
+        kind: "person",
+        source: "search candidate",
+        provider: "grok",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+      },
+      {
+        name: "Alex Kujavesky",
+        linkedin: "linkedin.com/in/alexander-kujavsky-90a80b90?trk=public_profile",
+        role: "CBO",
+        kind: "person",
+        source: "search candidate",
+        provider: "grok",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+      },
+    ];
 
     const dossier = assembleDossier(evidence, true);
-    expect(dossier.webTeam.map((m) => m.handle)).toEqual(["@alice"]);
-    expect(dossier.webTeam.find((m) => m.handle === "@alice")).toMatchObject({
-      handle: "@alice",
-      handleProvenance: "subject_first_party",
-      artifact_verified: true,
-    });
-    expect(dossier.webTeam.map((m) => m.handle)).not.toContain("@SomeOrg");
-    expect(dossier.webTeam.map((m) => m.handle)).not.toContain("@bob");
+    expect(dossier.webTeam).toEqual([
+      expect.objectContaining({
+        name: "Kuj Crypto",
+        handle: "@kujcrypto",
+        relationship: "core_team",
+      }),
+    ]);
+    expect(dossier.webTeamLeads?.map((member) => member.name) ?? []).not.toEqual(
+      expect.arrayContaining(["Alexander Kujavsky", "Alex Kujavesky"]),
+    );
   });
 });

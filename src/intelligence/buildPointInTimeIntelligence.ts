@@ -13,6 +13,12 @@ import {
 } from "../graph/network";
 import { canonicalOfficialWebsite, isStrictFundScaleArtifact } from "../lib/fundScaleEvidence";
 import {
+  describeProtocolBinding,
+  protocolBindingContextFromEvidence,
+  validateProtocolEvidenceBinding,
+  type ProtocolBindingValidation,
+} from "../lib/diligenceEvidenceBinding";
+import {
   portfolioRelationshipBinding,
   type PortfolioRelationshipBinding,
 } from "../lib/portfolioRelationshipBinding";
@@ -227,8 +233,10 @@ interface CrossProducerIdentityBindings {
   canonicalGeckoId: string | null;
   protocolTvlMatched: boolean;
   protocolFundingMatched: boolean;
-  protocolFeesReceiptComplete: boolean;
   protocolFeesMatched: boolean;
+  protocolTvlValidation: ProtocolBindingValidation;
+  protocolFundingValidation: ProtocolBindingValidation;
+  protocolFeesValidation: ProtocolBindingValidation;
   holderProfileMatched: boolean;
   canonicalCompanyHost: string | null;
   companyRequestedHost: string | null;
@@ -260,36 +268,31 @@ function crossProducerIdentityBindings(
   const canonicalGeckoId = canonicalTokenVerified
     ? normalizedProducerIdentifier(token?.coingeckoId)
     : null;
-  const protocolTvlMatched = Boolean(
-    evidence.protocolTvl
-    && canonicalGeckoId
-    && normalizedProducerIdentifier(evidence.protocolTvl.geckoId) === canonicalGeckoId,
+  const protocolBindingContext = protocolBindingContextFromEvidence(evidence);
+  const protocolTvlValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    evidence.protocolTvl,
   );
-  const protocolFundingMatched = Boolean(
-    evidence.protocolFunding
-    && canonicalGeckoId
-    && normalizedProducerIdentifier(evidence.protocolFunding.geckoId) === canonicalGeckoId,
+  const protocolFundingValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    evidence.protocolFunding,
   );
-  const matchedProtocolSlugs = new Set([
-    ...(protocolTvlMatched ? [normalizedProducerIdentifier(evidence.protocolTvl?.slug)] : []),
-    ...(protocolFundingMatched ? [normalizedProducerIdentifier(evidence.protocolFunding?.slug)] : []),
-  ].filter((slug): slug is string => slug !== null));
-  const protocolFeesSlug = normalizedProducerIdentifier(evidence.protocolFees?.slug);
-  const protocolFeesBinding = evidence.protocolFees?.binding;
-  const protocolFeesReceiptComplete = Boolean(
-    protocolFeesBinding
-    && protocolFeesBinding.method === "matched_protocol_gecko_id"
-    && protocolFeesSlug
-    && normalizedProducerIdentifier(protocolFeesBinding.protocolSlug) === protocolFeesSlug
-    && canonicalGeckoId
-    && normalizedProducerIdentifier(protocolFeesBinding.canonicalGeckoId) === canonicalGeckoId,
+  const matchedProtocolSlugs = new Set(
+    [protocolTvlValidation, protocolFundingValidation]
+      .filter((result) => result.state === "matched")
+      .map((result) => result.state === "matched"
+        ? normalizedProducerIdentifier(result.binding.protocolSlug)
+        : null)
+      .filter((slug): slug is string => slug !== null),
   );
-  const protocolFeesMatched = Boolean(
-    evidence.protocolFees
-    && protocolFeesSlug
-    && protocolFeesReceiptComplete
-    && matchedProtocolSlugs.has(protocolFeesSlug),
+  const protocolFeesValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    evidence.protocolFees,
+    { corroboratedProtocolSlugs: matchedProtocolSlugs },
   );
+  const protocolTvlMatched = protocolTvlValidation.state === "matched";
+  const protocolFundingMatched = protocolFundingValidation.state === "matched";
+  const protocolFeesMatched = protocolFeesValidation.state === "matched";
   const holderBinding = evidence.holderProfile?.binding;
   const holderChain = normalizedProducerIdentifier(holderBinding?.chain);
   const holderAddress = normalizedProducerAddress(holderBinding?.canonicalAddress, holderChain);
@@ -402,8 +405,10 @@ function crossProducerIdentityBindings(
     canonicalGeckoId,
     protocolTvlMatched,
     protocolFundingMatched,
-    protocolFeesReceiptComplete,
     protocolFeesMatched,
+    protocolTvlValidation,
+    protocolFundingValidation,
+    protocolFeesValidation,
     holderProfileMatched,
     canonicalCompanyHost: expectedCompanyHost,
     companyRequestedHost,
@@ -742,6 +747,8 @@ function projectAxisDomain(axis: string): IntelligenceDomain {
 function buildSources(evidence: Readonly<CollectedEvidence>): IntelligenceSourceRef[] {
   const sources: IntelligenceSourceRef[] = [];
   const identityBindings = crossProducerIdentityBindings(evidence);
+  const protocolTvlMeasured = identityBindings.protocolTvlMatched
+    && positive(evidence.protocolTvl?.tvlUsd);
   const derivedLaunchWindow = recomputeLaunchWindow(
     evidence,
     identityBindings.domainRegistrationMatched,
@@ -862,15 +869,22 @@ function buildSources(evidence: Readonly<CollectedEvidence>): IntelligenceSource
     inputPath: "protocolTvl",
     provider: "defillama",
     title: identityBindings.protocolTvlMatched
-      ? "Frozen identity-bound protocol TVL snapshot"
+      ? protocolTvlMeasured
+        ? "Frozen identity-bound protocol TVL snapshot"
+        : "Frozen identity-bound protocol record · TVL checked empty"
       : "Unbound protocol TVL receipt",
     sourceClass: "protocol_index",
-    evidenceState: identityBindings.protocolTvlMatched ? "measured" : "bounded",
+    evidenceState: identityBindings.protocolTvlMatched
+      ? protocolTvlMeasured ? "measured" : "reported_context"
+      : "bounded",
     sourceUrl: evidence.protocolTvl.sourceUrl,
     capturedAt: evidence.protocolTvl.capturedAt,
-    excerpt: identityBindings.protocolTvlMatched
-      ? `Protocol CoinGecko id ${evidence.protocolTvl.geckoId} exactly matches the verified canonical token.`
-      : `Protocol CoinGecko id ${evidence.protocolTvl.geckoId ?? "missing"} does not exactly match the verified canonical token id ${identityBindings.canonicalGeckoId ?? "missing"}; protocol measurements are withheld.`,
+    excerpt: identityBindings.protocolTvlValidation.state === "matched"
+      ? "Admitted through " + describeProtocolBinding(identityBindings.protocolTvlValidation.binding) + "."
+        + (protocolTvlMeasured
+          ? ""
+          : " The provider returned no usable positive TVL metric; identity, governance, and incident rows remain available independently.")
+      : identityBindings.protocolTvlValidation.detail + " Protocol measurements are withheld.",
   } : null);
 
   addSnapshotSource(sources, evidence.protocolFees ? {
@@ -884,11 +898,9 @@ function buildSources(evidence: Readonly<CollectedEvidence>): IntelligenceSource
     evidenceState: identityBindings.protocolFeesMatched ? "measured" : "bounded",
     sourceUrl: evidence.protocolFees.sourceUrl,
     capturedAt: evidence.protocolFees.capturedAt,
-    excerpt: identityBindings.protocolFeesMatched
-      ? `Fee slug ${evidence.protocolFees.slug} exactly matches an identity-bound protocol record.`
-      : identityBindings.protocolFeesReceiptComplete
-        ? `Fee slug ${evidence.protocolFees.slug} has no exact same-slug match among protocol records rebound to the verified canonical token; fee measurements are withheld.`
-        : "The fee row lacks the complete matched-protocol CoinGecko identity receipt required for subject-level use; fee measurements are withheld.",
+    excerpt: identityBindings.protocolFeesValidation.state === "matched"
+      ? "Admitted through " + describeProtocolBinding(identityBindings.protocolFeesValidation.binding) + "."
+      : identityBindings.protocolFeesValidation.detail + " Fee measurements are withheld.",
   } : null);
 
   addSnapshotSource(sources, evidence.holderProfile ? {
@@ -1081,9 +1093,9 @@ function buildSources(evidence: Readonly<CollectedEvidence>): IntelligenceSource
     evidenceState: identityBindings.protocolFundingMatched ? "reported_context" : "bounded",
     sourceUrl: evidence.protocolFunding.sourceUrl,
     capturedAt: evidence.protocolFunding.capturedAt,
-    excerpt: identityBindings.protocolFundingMatched
-      ? `Protocol CoinGecko id ${evidence.protocolFunding.geckoId} exactly matches the verified canonical token.`
-      : `Protocol CoinGecko id ${evidence.protocolFunding.geckoId ?? "missing"} does not exactly match the verified canonical token id ${identityBindings.canonicalGeckoId ?? "missing"}; funding measurements are withheld.`,
+    excerpt: identityBindings.protocolFundingValidation.state === "matched"
+      ? "Admitted through " + describeProtocolBinding(identityBindings.protocolFundingValidation.binding) + "."
+      : identityBindings.protocolFundingValidation.detail + " Funding measurements are withheld.",
   } : null);
 
   addSnapshotSource(sources, evidence.companyEnrichment ? {
@@ -1465,19 +1477,21 @@ function buildMeasurements(evidence: Readonly<CollectedEvidence>): IntelligenceM
   if (evidence.protocolTvl && identityBindings.protocolTvlMatched) {
     const tvl = evidence.protocolTvl;
     const sourceRefs = ["snapshot:protocol-tvl"];
-    addNumber(measurements, tvl.tvlUsd, { id: "tvl_usd", domain: "economics", label: "Protocol TVL", unit: "usd", entityKey, window: { kind: "instant", asOf: tvl.capturedAt }, evidenceState: "measured", sourceRefs });
-    addNumber(measurements, tvl.change30dPct, { id: "tvl_change_30d_pct", domain: "economics", label: "TVL change over 30 days", unit: "percent", entityKey, window: { kind: "historical", days: 30, asOf: tvl.capturedAt }, evidenceState: "measured", sourceRefs });
-    addNumber(measurements, tvl.chains.length, { id: "tvl_chain_count", domain: "economics", label: "Chains in the identity-bound protocol TVL record", unit: "count", entityKey, evidenceState: "bounded", sourceRefs });
-    addNumber(measurements, tvl.trend?.length, { id: "tvl_trend_point_count", domain: "economics", label: "Frozen weekly TVL trend points", unit: "count", entityKey, evidenceState: "bounded", sourceRefs });
-    if (tvl.firstRecordedAt) {
-      measurements.push({ id: "tvl_first_recorded_date", domain: "chronology", label: "First date in the provider's TVL series", unit: "date", valueType: "date", value: tvl.firstRecordedAt, entityKey, evidenceState: "bounded", sourceRefs });
-    }
-    const positiveChains = tvl.chainBreakdown.filter((row) => positive(row.tvlUsd));
-    const total = positiveChains.reduce((sum, row) => sum + row.tvlUsd, 0);
-    if (positiveChains.length >= 2 && positive(total)) {
-      const top = [...positiveChains].sort((left, right) => right.tvlUsd - left.tvlUsd || left.chain.localeCompare(right.chain))[0];
-      measurements.push({ id: "top_chain", domain: "economics", label: "Largest TVL chain", unit: "text", valueType: "text", value: top.chain, entityKey, chain: top.chain, evidenceState: "measured", sourceRefs });
-      addNumber(measurements, rounded((top.tvlUsd / total) * 100), { id: "top_chain_tvl_share_pct", domain: "economics", label: "Largest chain share of positive reported TVL", unit: "percent", entityKey, chain: top.chain, evidenceState: "measured", sourceRefs });
+    if (positive(tvl.tvlUsd)) {
+      addNumber(measurements, tvl.tvlUsd, { id: "tvl_usd", domain: "economics", label: "Protocol TVL", unit: "usd", entityKey, window: { kind: "instant", asOf: tvl.capturedAt }, evidenceState: "measured", sourceRefs });
+      addNumber(measurements, tvl.change30dPct, { id: "tvl_change_30d_pct", domain: "economics", label: "TVL change over 30 days", unit: "percent", entityKey, window: { kind: "historical", days: 30, asOf: tvl.capturedAt }, evidenceState: "measured", sourceRefs });
+      addNumber(measurements, tvl.chains.length, { id: "tvl_chain_count", domain: "economics", label: "Chains in the identity-bound protocol TVL record", unit: "count", entityKey, evidenceState: "bounded", sourceRefs });
+      addNumber(measurements, tvl.trend?.length, { id: "tvl_trend_point_count", domain: "economics", label: "Frozen weekly TVL trend points", unit: "count", entityKey, evidenceState: "bounded", sourceRefs });
+      if (tvl.firstRecordedAt) {
+        measurements.push({ id: "tvl_first_recorded_date", domain: "chronology", label: "First date in the provider's TVL series", unit: "date", valueType: "date", value: tvl.firstRecordedAt, entityKey, evidenceState: "bounded", sourceRefs });
+      }
+      const positiveChains = tvl.chainBreakdown.filter((row) => positive(row.tvlUsd));
+      const total = positiveChains.reduce((sum, row) => sum + row.tvlUsd, 0);
+      if (positiveChains.length >= 2 && positive(total)) {
+        const top = [...positiveChains].sort((left, right) => right.tvlUsd - left.tvlUsd || left.chain.localeCompare(right.chain))[0];
+        measurements.push({ id: "top_chain", domain: "economics", label: "Largest TVL chain", unit: "text", valueType: "text", value: top.chain, entityKey, chain: top.chain, evidenceState: "measured", sourceRefs });
+        addNumber(measurements, rounded((top.tvlUsd / total) * 100), { id: "top_chain_tvl_share_pct", domain: "economics", label: "Largest chain share of positive reported TVL", unit: "percent", entityKey, chain: top.chain, evidenceState: "measured", sourceRefs });
+      }
     }
   }
 
@@ -2454,7 +2468,10 @@ function buildSignals(
   };
 
   const canonicalTokenBinding = identityBindings.canonicalTokenVerified
-    ? `${identityBindings.canonicalChain ?? "missing chain"}:${identityBindings.canonicalAddress ?? "missing address"}, CoinGecko id ${identityBindings.canonicalGeckoId ?? "missing"}`
+    ? [
+        `${identityBindings.canonicalChain ?? "missing chain"}:${identityBindings.canonicalAddress ?? "missing address"}`,
+        identityBindings.canonicalGeckoId ? `CoinGecko id ${identityBindings.canonicalGeckoId}` : null,
+      ].filter(Boolean).join(", ")
     : "no verified canonical token record";
   if (evidence.projectToken && !identityBindings.canonicalTokenVerified) {
     addSignal({
@@ -2489,10 +2506,10 @@ function buildSignals(
       domain: "identity",
       severity: "high",
       polarity: "unknown",
-      headline: "Protocol TVL does not rebind to the canonical token",
-      finding: `The saved protocol TVL row carries CoinGecko id ${evidence.protocolTvl.geckoId ?? "missing"}, while the canonical binding is ${canonicalTokenBinding}. TVL, chain, incident, governance, and trend fields from this row are withheld.`,
+      headline: "Protocol TVL lacks a valid hard-anchor receipt",
+      finding: identityBindings.protocolTvlValidation.detail + " TVL, chain, incident, governance, and trend fields from this row are withheld.",
       whyItMatters: "Protocol-name and slug collisions can attach another project's capital, incidents, or governance metadata to the audited subject.",
-      changeCondition: "Recollect a protocol row whose normalized CoinGecko id exactly matches the verified canonical token id.",
+      changeCondition: "Recollect a receipt using an exact canonical chain-and-contract, exact CoinGecko ID, or exact official X-plus-domain project bridge.",
       evidenceState: "bounded",
       measurementRefs: [],
       sourceRefs: ["snapshot:protocol-tvl"],
@@ -2508,10 +2525,10 @@ function buildSignals(
       domain: "identity",
       severity: "high",
       polarity: "unknown",
-      headline: "Protocol funding does not rebind to the canonical token",
-      finding: `The saved protocol funding row carries CoinGecko id ${evidence.protocolFunding.geckoId ?? "missing"}, while the canonical binding is ${canonicalTokenBinding}. Round, investor, valuation, and capital-scale fields from this row are withheld.`,
+      headline: "Protocol funding lacks a valid hard-anchor receipt",
+      finding: identityBindings.protocolFundingValidation.detail + " Round, investor, valuation, and capital-scale fields from this row are withheld.",
       whyItMatters: "A namesake funding record can create precise but false claims about investors, capital raised, and financing recency.",
-      changeCondition: "Recollect a funding row whose normalized CoinGecko id exactly matches the verified canonical token id.",
+      changeCondition: "Recollect a receipt using an exact canonical chain-and-contract, exact CoinGecko ID, or exact official X-plus-domain project bridge.",
       evidenceState: "bounded",
       measurementRefs: [],
       sourceRefs: ["snapshot:protocol-funding"],
@@ -2519,9 +2536,6 @@ function buildSignals(
     });
   }
   if (evidence.protocolFees && !identityBindings.protocolFeesMatched) {
-    const feeBindingFailure = identityBindings.protocolFeesReceiptComplete
-      ? `The saved fee row uses slug ${evidence.protocolFees.slug}, but no same-slug TVL or funding record in this scan exactly rebinds to the verified canonical token.`
-      : `The saved fee row uses slug ${evidence.protocolFees.slug} but lacks a complete binding with method matched_protocol_gecko_id, an exact canonical CoinGecko id, and an exact same-slug protocolSlug.`;
     addSignal({
       id: "protocol_fees_identity_unbound",
       ruleId: "protocol-fees-identity-unbound",
@@ -2531,9 +2545,9 @@ function buildSignals(
       severity: "high",
       polarity: "unknown",
       headline: "Protocol fees lack an identity-bound protocol record",
-      finding: `${feeBindingFailure} Fee totals, growth, and every fee-based ratio are withheld.`,
+      finding: identityBindings.protocolFeesValidation.detail + " Fee totals, growth, and every fee-based ratio are withheld.",
       whyItMatters: "A discovery slug is not identity, and another protocol's fees can fabricate traction or capital-efficiency conclusions.",
-      changeCondition: "First bind a same-slug protocol TVL or funding record by exact CoinGecko id, then recollect the fee row.",
+      changeCondition: "Recollect a complete hard-anchor receipt for this exact fee-row slug; legacy CoinGecko receipts also require a same-slug validated protocol row.",
       evidenceState: "bounded",
       measurementRefs: [],
       sourceRefs: ["snapshot:protocol-fees"],

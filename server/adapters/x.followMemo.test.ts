@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { withAuditRunContext } from "../auditRunContext";
 import { checkFollow, resetFollowScanMemo } from "./x";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
@@ -90,6 +91,18 @@ describe("a follow answer is bought once per scan", () => {
     resetFollowScanMemo();
     await checkFollow("@balajis", "@uniswap");
 
+    expect(calls).toHaveLength(2);
+  });
+
+  it("never shares an in-flight answer between concurrent audit contexts", async () => {
+    const calls = followStub({ data: { following: true, followed_by: false } });
+
+    const answers = await Promise.all([
+      withAuditRunContext({ scanId: "scan-a" }, () => checkFollow("@a16z", "@uniswap")),
+      withAuditRunContext({ scanId: "scan-b" }, () => checkFollow("@a16z", "@uniswap")),
+    ]);
+
+    expect(answers[0]).toEqual(answers[1]);
     expect(calls).toHaveLength(2);
   });
 });

@@ -103,31 +103,140 @@ function canonicalHost(value: unknown): string | null {
   }
 }
 
-function originKey(source: EvidenceLike): string {
-  const hashes = [
+function contentKeys(source: EvidenceLike): string[] {
+  return [
     ...(source.contentHashes ?? []),
     ...(source.contentHash ? [source.contentHash] : []),
   ].map((value) => value.trim().toLowerCase()).filter(Boolean).sort();
-  // Identical saved content is one origin even when several URLs or provider
-  // rows repeat it. This is the minimum safe defense against syndicated copy.
-  if (hashes.length) return "content:" + hashes.join(",");
+}
+
+const COUNTRY_CODE_SECOND_LEVEL = new Set([
+  "ac", "co", "com", "edu", "gov", "net", "org",
+]);
+
+const MULTI_TENANT_SUFFIXES = [
+  "blogspot.com",
+  "gitbook.io",
+  "github.io",
+  "netlify.app",
+  "notion.site",
+  "pages.dev",
+  "readthedocs.io",
+  "vercel.app",
+  "web.app",
+  "wordpress.com",
+];
+
+/**
+ * Collapse pages and controlled subdomains to one publisher origin. Multi-
+ * tenant hosts retain the tenant label so unrelated projects never become one
+ * source merely because they share a hosting platform.
+ */
+function publisherDomain(host: string): string {
+  const labels = host.split(".").filter(Boolean);
+  for (const suffix of MULTI_TENANT_SUFFIXES) {
+    if (host === suffix) return host;
+    if (host.endsWith("." + suffix)) {
+      const keep = suffix.split(".").length + 1;
+      return labels.slice(-keep).join(".");
+    }
+  }
+  if (labels.length <= 2) return host;
+  const topLevel = labels.at(-1) ?? "";
+  const secondLevel = labels.at(-2) ?? "";
+  const keep = topLevel.length === 2 && COUNTRY_CODE_SECOND_LEVEL.has(secondLevel) ? 3 : 2;
+  return labels.slice(-keep).join(".");
+}
+
+function publisherKey(source: EvidenceLike): string {
+  const host = canonicalHost(source.sourceUrl);
+  if (host) return "host:" + publisherDomain(host);
   const provider = normalizedProvider(source.provider);
   if (provider) return "provider:" + provider;
-  const host = canonicalHost(source.sourceUrl);
-  if (host) return "host:" + host;
   return "ref:" + (source.id ?? "unknown");
+}
+
+function citationKey(source: EvidenceLike): string {
+  if (source.id) return "id:" + source.id;
+  const url = typeof source.sourceUrl === "string" ? source.sourceUrl.trim().toLowerCase() : "";
+  if (url) return "url:" + url;
+  const hashes = contentKeys(source);
+  const provider = normalizedProvider(source.provider);
+  if (hashes.length || provider) return `provider:${provider}|content:${hashes.join(",")}`;
+  return "unknown";
 }
 
 function uniqueById<T extends EvidenceLike>(sources: readonly T[]): T[] {
   const seen = new Set<string>();
   const out: T[] = [];
   for (const source of sources) {
-    const key = source.id || originKey(source);
+    const key = citationKey(source);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(source);
   }
   return out;
+}
+
+function conservativeOriginRole(roles: readonly EvidenceOriginRole[]): EvidenceOriginRole {
+  const values = new Set(roles);
+  // If identical material appears on the subject's own channel and elsewhere,
+  // it is still one first-party origin, not independent corroboration.
+  if (values.has("first_party")) return "first_party";
+  if (values.has("collection_receipt")) return "collection_receipt";
+  if (values.has("data_aggregator")) return "data_aggregator";
+  if (values.has("unknown")) return "unknown";
+  // Direct observation is claimed only when every record in the collapsed
+  // origin is itself a direct observation.
+  if (values.size === 1 && values.has("direct_observation")) return "direct_observation";
+  if (values.has("authoritative_record")) return "authoritative_record";
+  if (values.has("counterparty")) return "counterparty";
+  return "independent_reporting";
+}
+
+function groupedOriginRoles(sources: readonly EvidenceLike[]): EvidenceOriginRole[] {
+  if (sources.length === 0) return [];
+
+  const parent = sources.map((_, index) => index);
+  const find = (index: number): number => {
+    let root = index;
+    while (parent[root] !== root) root = parent[root]!;
+    while (parent[index] !== index) {
+      const next = parent[index]!;
+      parent[index] = root;
+      index = next;
+    }
+    return root;
+  };
+  const union = (left: number, right: number) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+  };
+
+  const publisherOwners = new Map<string, number>();
+  const contentOwners = new Map<string, number>();
+  sources.forEach((source, index) => {
+    const publisher = publisherKey(source);
+    const publisherOwner = publisherOwners.get(publisher);
+    if (publisherOwner == null) publisherOwners.set(publisher, index);
+    else union(index, publisherOwner);
+
+    for (const content of contentKeys(source)) {
+      const contentOwner = contentOwners.get(content);
+      if (contentOwner == null) contentOwners.set(content, index);
+      else union(index, contentOwner);
+    }
+  });
+
+  const grouped = new Map<number, EvidenceOriginRole[]>();
+  sources.forEach((source, index) => {
+    const root = find(index);
+    const roles = grouped.get(root) ?? [];
+    roles.push(evidenceOriginRole(source));
+    grouped.set(root, roles);
+  });
+  return [...grouped.values()].map(conservativeOriginRole);
 }
 
 function postureLabel(kind: EvidencePostureKind, independent: number, origins: number): string {
@@ -146,19 +255,13 @@ export function summarizeEvidencePosture(
   evidenceState?: IntelligenceEvidenceState,
 ): EvidencePosture {
   const sources = uniqueById(input);
-  const originRows = new Map<string, EvidenceOriginRole>();
-  for (const source of sources) {
-    const key = originKey(source);
-    const role = evidenceOriginRole(source);
-    const prior = originRows.get(key);
-    if (!prior || prior === "unknown" || prior === "collection_receipt") originRows.set(key, role);
-  }
-  const roles = [...new Set(originRows.values())];
-  const independentOriginCount = [...originRows.values()].filter((role) => INDEPENDENT_ROLES.has(role)).length;
-  const originCount = originRows.size;
+  const originRoles = groupedOriginRoles(sources);
+  const roles = [...new Set(originRoles)];
+  const independentOriginCount = originRoles.filter((role) => INDEPENDENT_ROLES.has(role)).length;
+  const originCount = originRoles.length;
   const firstPartyOnly = originCount > 0 && roles.every((role) => role === "first_party");
   const direct = roles.includes("direct_observation");
-  const externalAggregators = [...originRows.values()].filter((role) => role === "data_aggregator").length;
+  const externalAggregators = originRoles.filter((role) => role === "data_aggregator").length;
   const boundedOnly = originCount > 0 && roles.every((role) => role === "collection_receipt");
   const reported = evidenceState === "reported_context"
     || sources.every((source) => source.verification === "reported");

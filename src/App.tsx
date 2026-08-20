@@ -461,6 +461,12 @@ export default function App() {
         ? startPersonAudit(handle, priv, intent, { force: true })
         : startPersonAudit(handle, priv, intent);
       if (!!run.priv !== priv) { showPrivacyConflict(handle); return; }
+      if (run.startConflict === "full-rescan-waits-for-standard") {
+        setLiveError("A standard scan for this subject is already running. ARGUS did not attach that cached-mode run to your full-rescan request, cancel it, or start a second paid scan. Try Rescan again after the active scan finishes.");
+        setCaseNotice({ reason: "launch-failed", ref: handle });
+        setPhase("notfound");
+        return;
+      }
       setPhase("live");
     } else {
       setPhase("notfound");

@@ -82,6 +82,55 @@ describe("evidence reasoning", () => {
     });
   });
 
+  it("keeps different independent publisher domains as separate origins", () => {
+    const posture = summarizeEvidencePosture([
+      {
+        id: "publisher-a",
+        provider: "public-web",
+        sourceClass: "independent_publication",
+        evidenceState: "verified",
+        sourceUrl: "https://news.publisher-a.example/report",
+        contentHashes: ["publisher-a-copy"],
+      },
+      {
+        id: "publisher-b",
+        provider: "public-web",
+        sourceClass: "independent_publication",
+        evidenceState: "verified",
+        sourceUrl: "https://research.publisher-b.example/report",
+        contentHashes: ["publisher-b-copy"],
+      },
+    ], "verified");
+
+    expect(posture).toMatchObject({
+      kind: "independently_corroborated",
+      originCount: 2,
+      independentOriginCount: 2,
+    });
+  });
+
+  it("keeps unrelated tenants on a shared hosting suffix separate", () => {
+    const posture = summarizeEvidencePosture([
+      {
+        id: "tenant-a",
+        provider: "public-web",
+        sourceClass: "independent_publication",
+        evidenceState: "verified",
+        sourceUrl: "https://project-a.github.io/report",
+      },
+      {
+        id: "tenant-b",
+        provider: "public-web",
+        sourceClass: "independent_publication",
+        evidenceState: "verified",
+        sourceUrl: "https://project-b.github.io/report",
+      },
+    ], "verified");
+
+    expect(posture.originCount).toBe(2);
+    expect(posture.independentOriginCount).toBe(2);
+  });
+
   it("collapses identical syndicated content before counting origins", () => {
     const posture = summarizeEvidencePosture([
       {

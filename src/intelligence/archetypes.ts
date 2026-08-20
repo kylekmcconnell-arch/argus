@@ -243,7 +243,9 @@ export function classifyProjectArchetypes(evidence: Readonly<CollectedEvidence>)
   if (evidence.protocolTvl) {
     forms.push({
       form: "protocol",
-      evidenceState: "measured",
+      evidenceState: typeof evidence.protocolTvl.tvlUsd === "number" && evidence.protocolTvl.tvlUsd > 0
+        ? "measured"
+        : "reported_context",
       sourceRefs: ["snapshot:protocol-tvl"],
     });
   }

@@ -14,7 +14,7 @@ import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEnt
 import { env, providerFallbacksEnabled } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
-import { emptyEvidence, type BasicFact, type WebTeamMember } from "../src/data/evidence";
+import { emptyEvidence, type BasicFact, type ProtocolBindingReceipt, type WebTeamMember } from "../src/data/evidence";
 import type { EvmControlRealitySnapshot } from "../src/data/evmControlReality";
 import type { AdapterRunResult, CheckObservation, CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import {
@@ -29,6 +29,7 @@ import {
   scanContradictions,
 } from "./agent";
 import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cost";
+import { withAuditRunContext } from "./auditRunContext";
 import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
@@ -47,7 +48,11 @@ import { personChecks } from "../src/lib/scanChecklist";
 import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
 import { isOrganizationAccount } from "../src/lib/investorSubject";
 import { axisLabel } from "../src/lib/verdict";
-import { canonicalizeTeamRecords, classifyProjectRelationship } from "../src/lib/teamRelationships";
+import { canonicalizeTeamRecords, classifyProjectRelationship, isCoreTeamRecord } from "../src/lib/teamRelationships";
+import {
+  protocolBindingContextFromEvidence,
+  validateProtocolEvidenceBinding,
+} from "../src/lib/diligenceEvidenceBinding";
 import {
   buildResearchPlan,
   finalizeResearchPlan,
@@ -86,6 +91,7 @@ import {
   collectProtocolAuditLinks,
   collectProtocolFees,
   collectProtocolFunding,
+  collectProtocolIdentity,
   collectProtocolTvl,
   defiLlamaLookupName,
   resetDefiLlamaScanMemo,
@@ -107,6 +113,10 @@ import {
   hydrateOfficialProjectIdentityFromFacts,
   verifiedOfficialProjectIdentity,
 } from "./projectIdentity";
+import {
+  canonicalProjectProtocolAnchors,
+  matchProtocolIdentity,
+} from "./protocolIdentity";
 
 // Role words stripped when a venture name is derived from a fact value like
 // "Aave Labs CEO" or "CEO at Aave Labs": only the company survives.
@@ -132,11 +142,27 @@ export function providerFailureLinesForEvidence(
     || profile.identity_binding
     || verifiedOfficialProjectIdentity(evidence),
   );
+  const projectToken = evidence.projectToken;
+  const tokenIdentityProvider = projectToken?.producerSources?.identity?.provider;
+  const tokenIdentityEstablishedWithoutCoinGecko = Boolean(
+    projectToken?.verified
+      && (tokenIdentityProvider === "dexscreener" || tokenIdentityProvider === "official_site"),
+  );
   const subjectHandle = profile.handle.replace(/^@/, "").trim().toLowerCase();
   return failures.filter((line) => {
+    const provider = line.provider.toLowerCase();
+    const op = line.op.toLowerCase();
+    // Keep the raw attempt in the cost ledger, but do not turn an optional
+    // CoinGecko registry outage into a subject warning after a stronger DEX or
+    // first-party-site receipt already established the canonical token.
     if (
-      line.provider.toLowerCase() !== "x-public"
-      || line.op.toLowerCase() !== "account-state"
+      tokenIdentityEstablishedWithoutCoinGecko
+      && provider === "coingecko"
+      && ["project-search", "project-details", "project-contract"].includes(op)
+    ) return false;
+    if (
+      provider !== "x-public"
+      || op !== "account-state"
     ) return true;
     // Cost rows include the probed handle before the separator. A failure for a
     // team candidate or associate is collection health for that related entity,
@@ -358,87 +384,13 @@ export const ADAPTER_PROVIDERS: Record<string, readonly string[]> = {
   "onchain": ["helius"],
 };
 
-const teamEvidenceRank = (member: WebTeamMember): number =>
-  member.artifact_verified === true && member.evidence_origin !== "model_lead"
-    ? 2
-    : member.evidence_origin !== "model_lead"
-      ? 1
-      : 0;
-
-const canonicalTeamName = (value?: string): string => {
-  const raw = (value ?? "").trim().toLowerCase();
-  if (!raw || raw.startsWith("@")) return "";
-  const tokens = raw.split(/[^a-z0-9]+/).filter(Boolean);
-  return tokens.length >= 2 ? tokens.join(" ") : "";
-};
-
 /**
- * Collapse roster rows that resolve to the same X identity after enrichment.
- * Exact multi-part names are also safe merge keys for the common case where a
- * provider roster arrives before another source resolves that person's handle.
- * Keep the strongest source-backed row as the governing name, role, and
- * provenance, while carrying over non-governing identity links it lacks.
+ * Collapse roster rows only across a stable identity bridge. The shared
+ * canonicalizer also applies the relationship-authority lattice, so a weaker
+ * self-claim cannot overwrite an official role before the final roster freeze.
  */
 export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): WebTeamMember[] {
-  const output: WebTeamMember[] = [];
-  const indexByHandle = new Map<string, number>();
-  const indexByName = new Map<string, number>();
-  for (const member of members) {
-    const handle = member.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
-    const name = canonicalTeamName(member.name);
-    const handleIndex = handle ? indexByHandle.get(handle) : undefined;
-    const nameIndex = name ? indexByName.get(name) : undefined;
-    const nameMatch = nameIndex === undefined ? undefined : output[nameIndex];
-    const nameMatchHandle = nameMatch?.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
-    // A name may suggest a duplicate only while it does not contradict a stable
-    // handle. Two different handles are two entities until an explicit alias
-    // bridge proves otherwise.
-    const existingIndex = handleIndex
-      ?? (nameIndex !== undefined && (!handle || !nameMatchHandle || handle === nameMatchHandle)
-        ? nameIndex
-        : undefined);
-    if (existingIndex === undefined) {
-      output.push({ ...member });
-      if (handle) indexByHandle.set(handle, output.length - 1);
-      if (name) indexByName.set(name, output.length - 1);
-      continue;
-    }
-
-    const existing = output[existingIndex];
-    const preferred = teamEvidenceRank(member) > teamEvidenceRank(existing) ? member : existing;
-    const secondary = preferred === existing ? member : existing;
-    const merged: WebTeamMember = { ...preferred };
-    // Same "only ever turns ON" rule as the assembly merge above: a person
-    // the subject's own posts/following/amplification bound stays
-    // first-party even when the higher-ranked row for this coalesce came
-    // from a different lane (e.g. a team page) that never carried the marker.
-    if (secondary.handleProvenance === "subject_first_party" && merged.handleProvenance !== "subject_first_party") {
-      merged.handleProvenance = "subject_first_party";
-    }
-    if (secondary.relationshipProvenance === "subject_official" && merged.relationshipProvenance !== "subject_official") {
-      merged.relationshipProvenance = "subject_official";
-    }
-    if (!merged.handle && secondary.handle) merged.handle = secondary.handle;
-    if (!merged.linkedin && secondary.linkedin) merged.linkedin = secondary.linkedin;
-    if ((!merged.projects || !merged.projects.length) && secondary.projects?.length) {
-      merged.projects = secondary.projects;
-      merged.projects_evidence_origin = secondary.projects_evidence_origin;
-    }
-    if (
-      secondary.identity_link_evidence_origin !== "model_lead"
-      && preferred.identity_link_evidence_origin === "model_lead"
-    ) {
-      merged.identity_link_evidence_origin = secondary.identity_link_evidence_origin;
-      if (secondary.handle) merged.handle = secondary.handle;
-      if (secondary.linkedin) merged.linkedin = secondary.linkedin;
-    }
-    output[existingIndex] = merged;
-    const mergedHandle = merged.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
-    const mergedName = canonicalTeamName(merged.name);
-    if (mergedHandle) indexByHandle.set(mergedHandle, existingIndex);
-    if (mergedName) indexByName.set(mergedName, existingIndex);
-  }
-  return output;
+  return canonicalizeTeamRecords(members);
 }
 
 /**
@@ -450,6 +402,28 @@ export function finalizeProjectRelationshipRoster(evidence: CollectedEvidence): 
   const finalized = canonicalizeTeamRecords(evidence.webTeam ?? []);
   if (!evidence.webTeam) evidence.webTeam = [];
   evidence.webTeam.splice(0, evidence.webTeam.length, ...finalized);
+}
+
+/**
+ * Freeze one canonical roster, then expose disjoint scorer lanes. Only verified
+ * operating people may enter the team lane and P1; verified advisors, backers,
+ * partners, ecosystem groups, affiliations, and associates remain relationship
+ * context. Candidates and claimant-only reverse-bio statements are excluded
+ * from decision evidence entirely.
+ */
+export function partitionProjectRelationshipsForScoring(rows: readonly WebTeamMember[]): {
+  coreTeam: WebTeamMember[];
+  nonCoreRelationships: WebTeamMember[];
+} {
+  const verified = canonicalizeTeamRecords(rows).filter((member) =>
+    member.evidence_origin !== "model_lead"
+    && member.artifact_verified === true
+    && member.relationshipProvenance !== "claimant_self");
+  return {
+    coreTeam: verified.filter(isCoreTeamRecord),
+    nonCoreRelationships: verified.filter((member) =>
+      !isCoreTeamRecord(member) && member.relationship !== "candidate"),
+  };
 }
 
 // Adapters that require a key to do anything meaningful (keyless DEX/CG no-op
@@ -2791,32 +2765,108 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
   return recorded;
 }
 
+interface ProtocolAdmissionOutcome {
+  tvlMatched: boolean;
+  fundingMatched: boolean;
+  feesMatched: boolean;
+  binding: ProtocolBindingReceipt | null;
+}
+
+export async function collectBoundProtocolEvidence(
+  ctx: CollectContext,
+  lookupName: string,
+): Promise<ProtocolAdmissionOutcome> {
+  // Identity is the gate, not a sibling enrichment. Await the one protocol
+  // document first; only an exact hard-anchor receipt is allowed to trigger
+  // metrics or the separate fees endpoint. This keeps an unbound display-name
+  // slug from producing cost, latency, or false provider-failure warnings.
+  const identityOutcome = await collectProtocolIdentity(lookupName);
+  if (identityOutcome.state !== "resolved") {
+    return { tvlMatched: false, fundingMatched: false, feesMatched: false, binding: null };
+  }
+  const protocolMatch = matchProtocolIdentity(
+    canonicalProjectProtocolAnchors(ctx.evidence),
+    identityOutcome.value,
+  );
+  if (protocolMatch.state !== "matched") {
+    ctx.emit({
+      phase: "Project",
+      label: "Protocol enrichment identity unbound",
+      detail: "The discovered DeFiLlama row stayed outside the evidence bag. " + protocolMatch.detail,
+      source: "defillama",
+      tone: protocolMatch.reason === "hard_anchor_conflict" ? "warn" : "neutral",
+    });
+    return { tvlMatched: false, fundingMatched: false, feesMatched: false, binding: null };
+  }
+
+  const binding = protocolMatch.binding;
+  // TVL and funding now reuse the already-frozen protocol document from the
+  // scan memo; fees is called only after identity admission.
+  const [tvlOutcome, fundingOutcome, feesOutcome] = await Promise.all([
+    collectProtocolTvl(lookupName),
+    collectProtocolFunding(lookupName),
+    collectProtocolFees(lookupName),
+  ]);
+  const tvlMatched = Boolean(
+    tvlOutcome.available
+    && tvlOutcome.value.slug === binding.protocolSlug,
+  );
+  const fundingMatched = Boolean(
+    fundingOutcome.available
+    && fundingOutcome.value.slug === binding.protocolSlug,
+  );
+  const feesMatched = Boolean(
+    feesOutcome.available
+    && feesOutcome.value.slug === binding.protocolSlug,
+  );
+
+  if (tvlOutcome.available && tvlMatched) {
+    ctx.evidence.protocolTvl = { ...tvlOutcome.value, binding };
+    if (
+      binding.scope === "project_and_token"
+      && ctx.evidence.projectToken?.verified
+      && tvlOutcome.value.chains.length
+    ) {
+      ctx.evidence.projectToken = {
+        ...ctx.evidence.projectToken,
+        deployedChains: tvlOutcome.value.chains,
+      };
+    }
+  }
+  if (fundingOutcome.available && fundingMatched) {
+    ctx.evidence.protocolFunding = { ...fundingOutcome.value, binding };
+  }
+  if (feesOutcome.available && feesMatched) {
+    ctx.evidence.protocolFees = { ...feesOutcome.value, binding };
+  }
+
+  return { tvlMatched, fundingMatched, feesMatched, binding };
+}
+
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
-  const outcome = await collectProtocolTvl(defiLlamaLookupName(token.name));
-  if (
-    !outcome.available
-    || !token.coingeckoId
-    || !protocolRecordMatchesCanonicalToken(outcome.value.geckoId, token.coingeckoId)
-  ) return;
-  ctx.evidence.protocolTvl = {
-    ...outcome.value,
-  };
-  if (outcome.value.chains.length) {
-    ctx.evidence.projectToken = {
-      ...token,
-      deployedChains: outcome.value.chains,
-    };
-  }
+  const admission = await collectBoundProtocolEvidence(
+    ctx,
+    defiLlamaLookupName(token.name),
+  );
+  if (!admission.tvlMatched || !ctx.evidence.protocolTvl) return;
+  const tvlBinding = validateProtocolEvidenceBinding(
+    protocolBindingContextFromEvidence(ctx.evidence),
+    ctx.evidence.protocolTvl,
+  );
+  if (tvlBinding.state !== "matched") return;
+  const projectOnly = tvlBinding.binding.scope === "project";
   const incidentCount = recordProtocolSecurityIncidentFindings(ctx.evidence);
   if (!incidentCount) return;
   const newest = [...(ctx.evidence.protocolTvl.hacks ?? [])]
     .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")))[0];
   ctx.emit({
-    phase: "Token",
+    phase: projectOnly ? "Project" : "Token",
     label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recovered`,
-    detail: `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` · $${(newest.amountUsd / 1_000_000).toFixed(0)}M` : ""} · verified after the official project identity was restored.`,
+    detail: projectOnly
+      ? `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` · $${(newest.amountUsd / 1_000_000).toFixed(0)}M` : ""} · bound to the project through official X plus domain; no token linkage or misconduct is inferred.`
+      : `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` · $${(newest.amountUsd / 1_000_000).toFixed(0)}M` : ""} · verified after the official project identity was restored.`,
     source: "defillama",
     tone: "warn",
   });
@@ -3540,6 +3590,15 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const checkTracker = new PersonCheckTracker();
   const adapterResults = new Map<string, AdapterRunResult>();
   emit({ phase: "P0 · Intake", label: "Resolve handle", detail: `Normalizing ${rawHandle} and opening the audit ledger.`, tone: "neutral" });
+  if (options?.fresh === true) {
+    emit({
+      phase: "P0 · Intake",
+      label: "Full rescan mode",
+      detail: "Prior subject search results and reusable verified subject facts are bypassed. Successful live results refresh those subject caches; shared reference indexes and duplicate-call coalescing inside this scan remain enabled. Normal provider budgets and the investigation deadline still apply.",
+      source: "argus",
+      tone: "neutral",
+    });
+  }
 
   const ctx: CollectContext = {
     handle: evidence.profile.handle,
@@ -3774,10 +3833,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       const projectName = evidence.projectToken.name;
       const protocolLookupName = defiLlamaLookupName(projectName);
       try {
-        const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome, unlocksOutcome] = await Promise.all([
-          collectProtocolTvl(protocolLookupName),
-          collectProtocolFunding(protocolLookupName),
-          collectProtocolFees(protocolLookupName),
+        const [protocolAdmission, holdersOutcome, unlocksOutcome] = await Promise.all([
+          collectBoundProtocolEvidence(ctx, protocolLookupName),
           // Float control (free, keyless): who holds the supply, is the LP
           // locked. Answers the reader's dump/rug question for project tokens.
           evidence.projectToken.address
@@ -3800,71 +3857,45 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         // CryptoRank owns this timestamp and exact source lineage. Reusing the
         // canonical token's capture time would falsely date a later vesting read.
         if (unlocksOutcome.available) evidence.tokenUnlocks = { ...unlocksOutcome.value };
-        const canonicalGeckoId = evidence.projectToken.coingeckoId;
-        const tvlIdentityMatched = canonicalGeckoId !== undefined
-          && tvlOutcome.available
-          && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId);
-        const fundingIdentityMatched = canonicalGeckoId !== undefined
-          && fundingOutcome.available
-          && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId);
-        // Slug similarity is discovery, not identity. A protocol document can
-        // only lend TVL, fees, or funding to the audited project when its own
-        // CoinGecko id joins the already verified canonical token.
-        if (feesOutcome.available && (tvlIdentityMatched || fundingIdentityMatched)) {
-          evidence.protocolFees = {
-            ...feesOutcome.value,
-            binding: {
-              canonicalGeckoId: canonicalGeckoId!,
-              protocolSlug: feesOutcome.value.slug,
-              method: "matched_protocol_gecko_id",
-            },
-          };
-        }
-        if (tvlIdentityMatched) {
-          evidence.protocolTvl = { ...tvlOutcome.value };
+        const protocolBindingContext = protocolBindingContextFromEvidence(evidence);
+        const protocolTvlValidation = validateProtocolEvidenceBinding(
+          protocolBindingContext,
+          evidence.protocolTvl,
+        );
+        const tvlIdentityMatched = protocolAdmission.tvlMatched
+          && protocolTvlValidation.state === "matched";
+        const fundingIdentityMatched = protocolAdmission.fundingMatched
+          && validateProtocolEvidenceBinding(protocolBindingContext, evidence.protocolFunding).state === "matched";
+        if (tvlIdentityMatched && evidence.protocolTvl && protocolTvlValidation.state === "matched") {
+          const projectOnly = protocolTvlValidation.binding.scope === "project";
           const incidentCount = recordProtocolSecurityIncidentFindings(evidence);
           if (incidentCount > 0) {
             const newest = evidence.protocolTvl.hacks?.[0];
             emit({
-              phase: "Token",
+              phase: projectOnly ? "Project" : "Token",
               label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recorded`,
-              detail: `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` · $${(newest.amountUsd / 1_000_000).toFixed(0)}M` : ""} · frozen as verified counter-evidence, separate from misconduct.`,
+              detail: projectOnly
+                ? `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` · $${(newest.amountUsd / 1_000_000).toFixed(0)}M` : ""} · bound to the project through official X plus domain; no token linkage or misconduct is inferred.`
+                : `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` · $${(newest.amountUsd / 1_000_000).toFixed(0)}M` : ""} · frozen as verified counter-evidence, separate from misconduct.`,
               source: "defillama",
               tone: "warn",
             });
           }
-          if (tvlOutcome.value.chains.length) {
-            evidence.projectToken = { ...evidence.projectToken, deployedChains: tvlOutcome.value.chains };
-          }
-        }
-        if (fundingIdentityMatched) {
-          evidence.protocolFunding = { ...fundingOutcome.value };
-        }
-        const mismatchedProtocolSources = canonicalGeckoId ? [
-          ...(tvlOutcome.available && !tvlIdentityMatched ? [`TVL (${tvlOutcome.value.geckoId ?? "no CoinGecko id"})`] : []),
-          ...(fundingOutcome.available && !fundingIdentityMatched ? [`funding (${fundingOutcome.value.geckoId ?? "no CoinGecko id"})`] : []),
-          ...(feesOutcome.available && !tvlIdentityMatched && !fundingIdentityMatched ? ["fees"] : []),
-        ] : [];
-        if (mismatchedProtocolSources.length) {
-          emit({
-            phase: "Token",
-            label: "Protocol enrichment identity mismatch",
-            detail: `${mismatchedProtocolSources.join(", ")} did not join canonical CoinGecko id ${canonicalGeckoId}; those records were excluded.`,
-            source: "defillama",
-            tone: "warn",
-          });
         }
         // Independent audits: bounded discovery leads plus the auditor-domain
         // corroboration hop. Wall-clock boxed: up to ~6
         // bounded fetches must degrade to a skipped enrichment, never a
         // stalled audit.
         {
-          const auditLinks = await collectProtocolAuditLinks(protocolLookupName);
+          const auditLinkUrls = protocolAdmission.binding
+            ? await collectProtocolAuditLinks(protocolLookupName)
+              .then((outcome) => outcome.available ? outcome.value.auditLinks : [])
+            : [];
           const auditsResult = await withWallClockBox(
             collectSecurityAudits(
               projectName,
               evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
-              auditLinks.available ? auditLinks.value.auditLinks : [],
+              auditLinkUrls,
               { canonicalContractAddress: evidence.projectToken.address },
             ),
             SECURITY_AUDITS_BUDGET_MS,
@@ -3920,7 +3951,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     }
     evidence.roles = providerBackedRoles(evidence);
     recordOfficialXAccountStatusFinding(evidence);
-    await coldIntake(ctx, true, options?.fresh === true);
+    await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
 
@@ -3930,8 +3961,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // threat scanner in parallel with everything below - one product, no added
   // wall-clock. The bio CA is authoritative (impersonation defense: the
   // official account states its own contract); a claimed promotion with a
-  // contract is second. No match here is not terminal - the client falls back
-  // to a canonical name-match after the dossier lands.
+  // contract is second. No match here is not terminal: the server may still
+  // announce a later contract-bound token, but the client never name-matches.
   try {
     const tokenCand = tokenFromBio(evidence.profile.bio) ?? tokenFromPromotions(evidence.promotions);
     if (tokenCand) {
@@ -4139,7 +4170,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     await collectProjectSiteSubstance(ctx, siteHost);
   }
   if (rolesAfterBasicFacts.length === 0) {
-    await maybeOrientSubject(ctx, undefined, options?.fresh === true);
+    await maybeOrientSubject(ctx);
     rolesAfterBasicFacts = providerBackedRoles(evidence);
     evidence.roles = rolesAfterBasicFacts;
   }
@@ -4150,6 +4181,49 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     evidence.roles = rolesAfterBasicFacts;
   }
   await organizationSafetyPass();
+  if (
+    !evidence.projectToken?.verified
+    && rolesAfterBasicFacts.includes(SubjectClass.PROJECT)
+  ) {
+    const projectName = evidence.profile.display_name.trim()
+      || evidence.profile.handle.replace(/^@/, "");
+    try {
+      const protocolAdmission = await collectBoundProtocolEvidence(
+        ctx,
+        defiLlamaLookupName(projectName),
+      );
+      // Project-scope X+domain receipts admit project fundamentals without
+      // manufacturing a token link. Incident rows remain protocol-attributed
+      // counter-evidence and never mutate projectToken.
+      if (
+        protocolAdmission.tvlMatched
+        && evidence.protocolTvl
+        && validateProtocolEvidenceBinding(
+          protocolBindingContextFromEvidence(evidence),
+          evidence.protocolTvl,
+        ).state === "matched"
+      ) {
+        const incidentCount = recordProtocolSecurityIncidentFindings(evidence);
+        if (incidentCount > 0) {
+          emit({
+            phase: "Project",
+            label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recorded`,
+            detail: "Identity-bound DeFiLlama incident rows were frozen at project scope; they do not establish token linkage or misconduct.",
+            source: "defillama",
+            tone: "warn",
+          });
+        }
+      }
+    } catch (error) {
+      emit({
+        phase: "Project",
+        label: "Project protocol enrichment failed",
+        detail: String(error),
+        source: "defillama",
+        tone: "warn",
+      });
+    }
+  }
   if (recoveredProjectSite && evidence.projectToken?.verified && !evidence.protocolTvl) {
     try {
       await recoverProjectProtocolIncidentEvidence(ctx);
@@ -4657,6 +4731,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const profileForLlm: Record<string, unknown> = { ...evidence.profile };
   delete profileForLlm.identity_confidence;
   delete profileForLlm.identity_note;
+  const scoringRelationships = partitionProjectRelationshipsForScoring(evidence.webTeam ?? []);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -4665,10 +4740,27 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     promotions: evidence.promotions.map((promotion) => ({ ...promotion, provider: "twitterapi" })),
     wallets: evidence.wallets.map((wallet) => ({ ...wallet, provider: "find-wallet/onchain" })),
     clientEngagements: evidence.clientEngagements,
-    associates: evidence.associates,
-    // The named people behind the project (from the site + LinkedIn + X content),
-    // so identity/founder scoring reflects the team we actually found.
-    team: (evidence.webTeam ?? []).map((p) => ({
+    associates: [
+      ...evidence.associates,
+      ...scoringRelationships.nonCoreRelationships.map((relationship) => ({
+        associate_handle: relationship.handle ?? relationship.name,
+        name: relationship.name,
+        role: relationship.role,
+        relation: relationship.relationship ?? "associate",
+        source: relationship.source,
+        sourceUrl: relationship.sourceUrl,
+        evidence: relationship.evidence,
+        provider: relationship.provider,
+        kind: relationship.kind,
+        relationship: relationship.relationship,
+        relationshipProvenance: relationship.relationshipProvenance,
+        evidence_origin: relationship.evidence_origin,
+        artifact_verified: relationship.artifact_verified,
+      })),
+    ],
+    // Only the verified operating people behind the project enter the team lane.
+    // Every other verified relationship remains context in associates above.
+    team: scoringRelationships.coreTeam.map((p) => ({
       name: p.name,
       handle: p.identity_link_evidence_origin === "model_lead" ? undefined : p.handle,
       role: p.role,
@@ -5014,5 +5106,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
 }
 
 export function runAudit(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
-  return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
+  return withCostLedger(() =>
+    withAuditRunContext(
+      { fresh: options?.fresh === true },
+      () => runAuditWithLedger(rawHandle, emit, options),
+    ));
 }

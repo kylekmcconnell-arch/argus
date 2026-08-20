@@ -200,14 +200,25 @@ describe("private person report evidence boundary", () => {
       x_account_status: "suspended",
       x_account_status_source_url: "https://x.com/driftprotocol",
       x_account_status_captured_at: "2026-07-24T12:00:00.000Z",
+      website: "https://drift.trade",
       protocolTvl: {
         slug: "drift",
         name: "Drift",
         symbol: "DRIFT",
-        tvlUsd: 100_000_000,
-        chains: ["Solana"],
-        chainBreakdown: [{ chain: "Solana", tvlUsd: 100_000_000 }],
+        tvlUsd: null,
+        tvlState: "checked_empty",
+        chains: [],
+        chainBreakdown: [],
         geckoId: "drift-protocol",
+        binding: {
+          method: "matched_official_x_and_domain",
+          scope: "project",
+          protocolSlug: "drift",
+          canonicalHandle: "driftprotocol",
+          canonicalDomain: "drift.trade",
+          providerHandle: "driftprotocol",
+          providerDomain: "app.drift.trade",
+        },
         hacks: [{
           date: "2026-04-01",
           amountUsd: 295_000_000,
@@ -242,10 +253,47 @@ describe("private person report evidence boundary", () => {
     expect(container.textContent).toContain("X profile metrics unavailable");
     expect(alert?.querySelector('a[href="https://x.com/driftprotocol"]')).not.toBeNull();
     expect(alert?.querySelector('a[href="https://defillama.com/protocol/drift"]')).not.toBeNull();
+    expect(alert?.textContent).not.toContain("$0");
     const synthesis = container.querySelector('[aria-label="Case synthesis"]')?.textContent ?? "";
     expect(synthesis).toContain("Sharpest concern");
     expect(synthesis).toContain("The score is limited because of:");
     expect(synthesis).toContain("Critical protocol loss");
+  });
+
+  it("suppresses an unbound namesake protocol incident from the subject alert", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier: Dossier = {
+      ...base,
+      handle: "@realproject",
+      display_name: "Real Project",
+      website: "https://realproject.example",
+      protocolTvl: {
+        slug: "namesake",
+        name: "Namesake Project",
+        symbol: null,
+        tvlUsd: null,
+        tvlState: "checked_empty",
+        chains: [],
+        chainBreakdown: [],
+        geckoId: null,
+        hacks: [{
+          date: "2026-04-01",
+          amountUsd: 295_000_000,
+          returnedFunds: false,
+          returnedAmountUsd: null,
+          classification: "Infrastructure",
+        }],
+        sourceUrl: "https://defillama.com/protocol/namesake",
+        capturedAt: "2026-07-24T12:00:00.000Z",
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.querySelector('[aria-label="Material subject alerts"]')).toBeNull();
+    expect(container.textContent).not.toContain("$295M");
   });
 
   it("mounts the complete provider ledgers in a standalone report", () => {
@@ -346,14 +394,77 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Investigative team candidates");
+    expect(container.textContent).toContain("Investigative relationship candidates");
     expect(container.textContent).toContain("Model Team Lead");
-    expect(container.textContent).toContain("not identity proof");
+    expect(container.textContent).toContain("unconfirmed by the project");
     expect(container.textContent).not.toContain("identity resolved through the named team");
     expect(container.querySelector('a[href*="model-team-lead"]')).toBeNull();
     const context = String(harness.askReport.mock.calls.at(-1)?.[0]?.context ?? "");
     expect(context).not.toContain("Model Team Lead");
     expect(context).not.toContain("Model Venture");
+  });
+
+  it("renders verified non-core relationships separately from the core team", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier: Dossier = {
+      ...base,
+      webTeam: [{
+        name: "JRA",
+        handle: "@jra_xyz",
+        role: "COO and cofounder",
+        kind: "person",
+        source: "official team page",
+        sourceUrl: "https://multihopper.com/team",
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        relationshipProvenance: "subject_official",
+      }],
+      projectRelationships: [{
+        name: "Superteam DE",
+        handle: "@superteamde",
+        role: "ecosystem",
+        kind: "org",
+        source: "official project page",
+        sourceUrl: "https://multihopper.com/ecosystem",
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        relationship: "ecosystem",
+        relationshipProvenance: "subject_official",
+      }],
+      webTeamLeads: [{
+        name: "Strategic Super R",
+        handle: "@strategicsuperr",
+        role: "VC",
+        kind: "person",
+        source: "self bio · claimant-only relationship (unconfirmed by project)",
+        sourceUrl: "https://x.com/strategicsuperr",
+        provider: "twitterapi",
+        evidence_origin: "deterministic",
+        artifact_verified: false,
+        relationship: "candidate",
+        relationshipProvenance: "claimant_self",
+      }],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const relationships = container.querySelector('[aria-label="Verified project relationships"]');
+    expect(relationships).not.toBeNull();
+    expect(relationships?.textContent).toContain("Superteam DE");
+    expect(relationships?.textContent).toContain("ecosystem");
+    expect(relationships?.textContent).not.toContain("Strategic Super R");
+    expect(relationships?.textContent).toContain("not core team");
+    expect(relationships?.textContent).toContain("excluded from team and identity score");
+    expect(container.textContent).toContain("Investigative relationship candidates");
+    expect(container.textContent).toContain("Strategic Super R");
+    expect(container.textContent).toContain("candidate @strategicsuperr");
+    expect(container.textContent).toContain("claim: VC");
+    expect(container.textContent).toContain("unconfirmed by the project");
+    expect(container.textContent).toContain("identity resolved through the named team");
   });
 
   it("shows exact team-role proof, developer-profile lineage, and every leadership-currency state", () => {
@@ -481,7 +592,7 @@ describe("private person report evidence boundary", () => {
     });
 
     expect(container.textContent).not.toContain("Dr. Unrelated Executive");
-    expect(container.textContent).not.toContain("Investigative team candidates");
+    expect(container.textContent).not.toContain("Investigative relationship candidates");
   });
 
   it("cleans namesake citations and answers the project product from the frozen official profile", () => {
@@ -2853,6 +2964,180 @@ describe("legacy person report coverage truth", () => {
     expect(container.querySelectorAll("#dossier")).toHaveLength(1);
     expect((container.querySelector("#audit-trail") as HTMLDetailsElement).open).toBe(false);
     expect(container.querySelector('a[href="#composition"]')).toBeNull();
+  });
+
+
+  it("labels a CoinGecko-less protocol footprint by its exact chain-and-contract receipt", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const dossier: Dossier = {
+      ...base,
+      handle: "@contractbound",
+      display_name: "Contract Bound",
+      website: "https://contractbound.xyz",
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Contract Bound",
+        symbol: "CB",
+        rank: null,
+        address,
+        chain: "base",
+        deployedChains: ["Base", "Ethereum"],
+        sourceUrl: "https://dexscreener.com/base/contract-bound",
+        capturedAt: "2026-08-20T12:00:00.000Z",
+        providers: ["dexscreener"],
+      },
+      protocolTvl: {
+        slug: "contract-bound",
+        name: "Contract Bound",
+        symbol: "CB",
+        tvlUsd: 12_000_000,
+        chains: ["Base", "Ethereum"],
+        chainBreakdown: [{ chain: "Base", tvlUsd: 8_000_000 }],
+        geckoId: null,
+        sourceUrl: "https://defillama.com/protocol/contract-bound",
+        capturedAt: "2026-08-20T12:01:00.000Z",
+        binding: {
+          method: "matched_chain_contract",
+          scope: "project_and_token",
+          protocolSlug: "contract-bound",
+          canonicalChain: "base",
+          canonicalAddress: address,
+          providerChain: "base",
+          providerAddress: address,
+        },
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Exact chain + contract");
+    expect(container.textContent).toContain("Value locked");
+    expect(container.textContent).not.toContain("Matched through CoinGecko");
+  });
+
+
+  it("does not pass stored deployed chains from an unbound TVL row into the token card", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const address = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const dossier: Dossier = {
+      ...base,
+      handle: "@fundingbound",
+      display_name: "Funding Bound",
+      website: "https://fundingbound.xyz",
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Funding Bound",
+        symbol: "FB",
+        rank: null,
+        address,
+        chain: "base",
+        deployedChains: ["Base", "Ethereum"],
+        sourceUrl: "https://dexscreener.com/base/funding-bound",
+        capturedAt: "2026-08-20T12:00:00.000Z",
+        providers: ["dexscreener"],
+      },
+      protocolTvl: {
+        slug: "funding-bound",
+        name: "Funding Bound",
+        symbol: "FB",
+        tvlUsd: 9_000_000,
+        chains: ["Base", "Ethereum"],
+        chainBreakdown: [],
+        geckoId: null,
+        sourceUrl: "https://defillama.com/protocol/funding-bound",
+        capturedAt: "2026-08-20T12:01:00.000Z",
+      },
+      protocolFunding: {
+        slug: "funding-bound",
+        name: "Funding Bound",
+        geckoId: null,
+        rounds: [],
+        totalRaisedUsd: 0,
+        leadInvestors: [],
+        sourceUrl: "https://defillama.com/protocol/funding-bound",
+        capturedAt: "2026-08-20T12:01:00.000Z",
+        binding: {
+          method: "matched_chain_contract",
+          scope: "project_and_token",
+          protocolSlug: "funding-bound",
+          canonicalChain: "base",
+          canonicalAddress: address,
+          providerChain: "base",
+          providerAddress: address,
+        },
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const tokenCard = container.querySelector('[aria-label="Verified token and market fundamentals"]');
+    expect(tokenCard).not.toBeNull();
+    expect(tokenCard?.textContent).toContain("base");
+    expect(tokenCard?.textContent).not.toContain("Ethereum");
+    expect(container.textContent).not.toContain("Value locked");
+  });
+
+
+  it("labels project-only protocol usage and never lends its chains to the token", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier: Dossier = {
+      ...base,
+      handle: "@projectscope",
+      display_name: "Project Scope",
+      website: "https://projectscope.xyz",
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Project Scope Token",
+        symbol: "PST",
+        rank: null,
+        address: "0xcccccccccccccccccccccccccccccccccccccccc",
+        chain: "base",
+        deployedChains: ["Base", "Ethereum"],
+        sourceUrl: "https://dexscreener.com/base/project-scope-token",
+        capturedAt: "2026-08-20T12:00:00.000Z",
+        providers: ["dexscreener"],
+      },
+      protocolTvl: {
+        slug: "project-scope",
+        name: "Project Scope",
+        symbol: null,
+        tvlUsd: 7_000_000,
+        chains: ["Base", "Ethereum"],
+        chainBreakdown: [],
+        geckoId: null,
+        sourceUrl: "https://defillama.com/protocol/project-scope",
+        capturedAt: "2026-08-20T12:01:00.000Z",
+        binding: {
+          method: "matched_official_x_and_domain",
+          scope: "project",
+          protocolSlug: "project-scope",
+          canonicalHandle: "projectscope",
+          canonicalDomain: "projectscope.xyz",
+          providerHandle: "projectscope",
+          providerDomain: "app.projectscope.xyz",
+        },
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Value locked");
+    expect(container.textContent).toContain("Exact official X + domain · project only");
+    expect(container.textContent).toContain(
+      "It does not establish token linkage or token value capture",
+    );
+    const tokenCard = container.querySelector('[aria-label="Verified token and market fundamentals"]');
+    expect(tokenCard?.textContent).not.toContain("Ethereum");
   });
 
 });

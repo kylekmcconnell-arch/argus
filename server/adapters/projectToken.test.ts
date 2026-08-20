@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import { getCost, withCostLedger } from "../cost";
 import type { CollectContext } from "./types";
-import { collectProjectTokenIdentity, launchedProductSearchQueries, PLATFORM_CHAIN, projectRegistrySearchQueries, siteContractCandidates } from "./projectToken";
+import { collectProjectTokenIdentity, collectVentureTokenIdentity, launchedProductSearchQueries, PLATFORM_CHAIN, projectRegistrySearchQueries, siteContractCandidates } from "./projectToken";
 
 const SOLANA_TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const OTHER_TOKEN = "So11111111111111111111111111111111111111112";
@@ -381,6 +381,170 @@ describe("verified project-token collection", () => {
       id: "project-traction-liveness",
       status: "confirmed",
       provider: "dexscreener/geckoterminal",
+    }));
+  });
+
+  it("treats a stale CoinGecko candidate 404 as checked-empty and still binds the DEX/site identity", async () => {
+    const { ctx, evidence } = context("@ponsdotfamily", "Pons", "https://ponsfamily.com/launchpad");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        return json(search({ name: "Pons", symbol: "PONS" }));
+      }
+      if (url.includes("/coins/project-token?")) return json({ error: "candidate removed" }, 404);
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({
+        pairs: [{
+          chainId: "robinhood",
+          pairAddress: PONS_POOL,
+          url: `https://dexscreener.com/robinhood/${PONS_POOL.toLowerCase()}`,
+          baseToken: { address: PONS_TOKEN, name: "Pons", symbol: "PONS" },
+          quoteToken: { address: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", symbol: "WETH" },
+          priceUsd: "0.04125",
+          marketCap: 32_591_975,
+          liquidity: { usd: 1_552_550.02 },
+          info: {
+            websites: [{ url: "https://ponsfamily.com/launchpad", label: "Website" }],
+            socials: [{ url: "https://x.com/ponsdotfamily", type: "twitter" }],
+          },
+        }],
+      });
+      if (url.includes("/ohlcv/")) {
+        return json({ data: { attributes: { ohlcv_list: [[100, 0.03, 0.05, 0.02, 0.04125, 1_000]] } } });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    const captured = await withCostLedger(async () => ({
+      result: await collectProjectTokenIdentity(ctx),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("identity-bound DEX pair"),
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      address: PONS_TOKEN,
+      chain: "robinhood",
+      verification: "official_x",
+    });
+    expect(captured.cost.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provider: "coingecko",
+        op: "project-details",
+        status: "succeeded",
+        succeeded: 1,
+        failed: 0,
+        meta: expect.stringContaining("candidate_not_found"),
+      }),
+    ]));
+    expect(captured.cost.calls.find((line) =>
+      line.provider === "coingecko" && line.op === "project-details",
+    )?.meta).toContain("candidate_id=project-token");
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+      provider: "dexscreener",
+    }));
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "unavailable",
+    }));
+  });
+
+  it("keeps a candidate detail 503 unavailable in the ledger but lets a DEX/site receipt close identity", async () => {
+    const { ctx, evidence } = context("@ponsdotfamily", "Pons", "https://ponsfamily.com/launchpad");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        return json(search({ name: "Pons", symbol: "PONS" }));
+      }
+      if (url.includes("/coins/project-token?")) return json({ error: "unavailable" }, 503);
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({
+        pairs: [{
+          chainId: "robinhood",
+          pairAddress: PONS_POOL,
+          url: `https://dexscreener.com/robinhood/${PONS_POOL.toLowerCase()}`,
+          baseToken: { address: PONS_TOKEN, name: "Pons", symbol: "PONS" },
+          quoteToken: { address: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", symbol: "WETH" },
+          priceUsd: "0.04125",
+          liquidity: { usd: 1_552_550.02 },
+          info: {
+            websites: [{ url: "https://ponsfamily.com/launchpad", label: "Website" }],
+            socials: [{ url: "https://x.com/ponsdotfamily", type: "twitter" }],
+          },
+        }],
+      });
+      if (url.includes("/ohlcv/")) {
+        return json({ data: { attributes: { ohlcv_list: [[100, 0.03, 0.05, 0.02, 0.04125, 1_000]] } } });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    const captured = await withCostLedger(async () => ({
+      result: await collectProjectTokenIdentity(ctx),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      address: PONS_TOKEN,
+      verification: "official_x",
+    });
+    expect(captured.cost.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provider: "coingecko",
+        op: "project-details",
+        status: "failed",
+        failed: 1,
+        meta: expect.stringContaining("http_503"),
+      }),
+    ]));
+    expect(captured.cost.calls.find((line) =>
+      line.provider === "coingecko" && line.op === "project-details",
+    )?.meta).toContain("candidate_id=project-token");
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "unavailable",
+    }));
+  });
+
+  it("keeps a candidate detail 503 retryable when no independent identity receipt closes the lane", async () => {
+    const { ctx, evidence } = context("@projectdex", "Project Dex", "https://project.example/");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
+      if (url.includes("/coins/project-token?")) return json({ error: "unavailable" }, 503);
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://project.example/") {
+        return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    const captured = await withCostLedger(async () => ({
+      result: await collectProjectTokenIdentity(ctx),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toMatchObject({
+      state: "partial",
+      detail: expect.stringContaining("CoinGecko candidate records failed"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(captured.cost.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provider: "coingecko",
+        op: "project-details",
+        status: "failed",
+        meta: expect.stringContaining("candidate_id=project-token"),
+      }),
+    ]));
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "unavailable",
     }));
   });
 
@@ -1079,3 +1243,51 @@ describe("launched-product CoinGecko recall", () => {
   });
 });
 
+
+
+describe("venture-token collection", () => {
+  it("skips a no-record CoinGecko candidate and continues to the next exact venture identity", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search?")) {
+        return json({
+          coins: [
+            { id: "missing-candidate", name: "Project Dex", symbol: "PDX", market_cap_rank: 1 },
+            { id: "venture-token", name: "Project Dex", symbol: "PDX", market_cap_rank: 2 },
+          ],
+        });
+      }
+      if (url.includes("/coins/missing-candidate?")) {
+        return new Response("Not found", { status: 404 });
+      }
+      if (url.includes("/coins/venture-token?")) {
+        return json(details({
+          id: "venture-token",
+          links: {
+            twitter_screen_name: "projectdex",
+            homepage: ["https://project.example/"],
+          },
+        }));
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await collectVentureTokenIdentity({
+      name: "Project Dex",
+      xHandle: "@projectdex",
+      domain: "https://project.example/",
+    });
+
+    expect(result).toMatchObject({
+      verified: true,
+      coingeckoId: "venture-token",
+      verification: "official_x",
+      ventureName: "Project Dex",
+    });
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(expect.arrayContaining([
+      expect.stringContaining("/coins/missing-candidate?"),
+      expect.stringContaining("/coins/venture-token?"),
+    ]));
+  });
+});

@@ -963,6 +963,203 @@ describe("buildPointInTimeIntelligence", () => {
     expect(snapshot?.sources.find((source) => source.id === "snapshot:protocol-fees")?.evidenceState).toBe("bounded");
   });
 
+  it("admits CoinGecko-less protocol metrics through an exact chain-and-contract receipt", () => {
+    const evidence = projectEvidence("@contractbound");
+    addCanonicalToken(evidence);
+    const address = "0x00000000000000000000000000000000000000aa";
+    delete evidence.projectToken!.coingeckoId;
+    evidence.projectToken!.providers = ["dexscreener"];
+    evidence.projectToken!.chain = "ethereum";
+    evidence.projectToken!.address = address;
+    const binding = {
+      method: "matched_chain_contract" as const,
+      scope: "project_and_token" as const,
+      protocolSlug: "fixture",
+      canonicalChain: "ethereum",
+      canonicalAddress: address,
+      providerChain: "ethereum",
+      providerAddress: address.toUpperCase().replace("0X", "0x"),
+    };
+    addProtocolTvl(evidence);
+    evidence.protocolTvl!.geckoId = null;
+    evidence.protocolTvl!.binding = binding;
+    evidence.protocolTvl!.hacks = [{
+      date: "2025-01-01",
+      amountUsd: 2_000_000,
+      returnedFunds: false,
+      returnedAmountUsd: null,
+      classification: "exploit",
+    }];
+    evidence.protocolFunding = {
+      slug: "fixture",
+      name: "Fixture",
+      geckoId: null,
+      rounds: [{
+        date: "2025-01-01",
+        round: "Seed",
+        amountUsd: 10_000_000,
+        leadInvestors: ["Exact Fund"],
+        otherInvestors: [],
+        valuationUsd: 50_000_000,
+      }],
+      totalRaisedUsd: 10_000_000,
+      leadInvestors: ["Exact Fund"],
+      sourceUrl: "https://defillama.example.test/raises/fixture",
+      capturedAt: "2026-08-05T12:20:00.000Z",
+      binding,
+    };
+    evidence.protocolFees = {
+      slug: "fixture",
+      total24hUsd: 50_000,
+      total30dUsd: 1_500_000,
+      sourceUrl: "https://defillama.example.test/fees/fixture",
+      capturedAt: "2026-08-05T12:20:00.000Z",
+      binding,
+    };
+
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    const ids = new Set(snapshot?.measurements.map((measurement) => measurement.id));
+    const signalIds = new Set(snapshot?.signals.map((signal) => signal.id));
+
+    expect(ids.has("tvl_usd")).toBe(true);
+    expect(ids.has("largest_recorded_incident_usd")).toBe(true);
+    expect(ids.has("funding_round_count")).toBe(true);
+    expect(ids.has("protocol_fees_30d_usd")).toBe(true);
+    expect(signalIds.has("protocol_tvl_identity_mismatch")).toBe(false);
+    expect(signalIds.has("protocol_funding_identity_mismatch")).toBe(false);
+    expect(signalIds.has("protocol_fees_identity_unbound")).toBe(false);
+    expect(snapshot?.sources.find((source) => source.id === "snapshot:protocol-tvl")?.excerpt)
+      .toContain("exact ethereum contract");
+  });
+
+  it("admits tokenless project protocol evidence through official X plus domain without creating token form", () => {
+    const evidence = projectEvidence("@tokenless");
+    evidence.profile.display_name = "Tokenless";
+    evidence.profile.website = "https://tokenless.xyz";
+    const binding = {
+      method: "matched_official_x_and_domain" as const,
+      scope: "project" as const,
+      protocolSlug: "tokenless",
+      canonicalHandle: "tokenless",
+      canonicalDomain: "tokenless.xyz",
+      providerHandle: "tokenless",
+      providerDomain: "app.tokenless.xyz",
+    };
+    evidence.protocolTvl = {
+      slug: "tokenless",
+      name: "Tokenless",
+      symbol: null,
+      tvlUsd: 5_000_000,
+      chains: ["Solana"],
+      chainBreakdown: [{ chain: "Solana", tvlUsd: 5_000_000 }],
+      geckoId: null,
+      hacks: [{
+        date: "2025-02-01",
+        amountUsd: 1_000_000,
+        returnedFunds: true,
+        returnedAmountUsd: 1_000_000,
+        classification: "oracle",
+      }],
+      sourceUrl: "https://defillama.example.test/protocol/tokenless",
+      capturedAt: "2026-08-05T12:20:00.000Z",
+      binding,
+    };
+    evidence.protocolFunding = {
+      slug: "tokenless",
+      name: "Tokenless",
+      geckoId: null,
+      rounds: [{
+        date: "2025-01-01",
+        round: "Strategic",
+        amountUsd: 3_000_000,
+        leadInvestors: ["Project Fund"],
+        otherInvestors: [],
+        valuationUsd: null,
+      }],
+      totalRaisedUsd: 3_000_000,
+      leadInvestors: ["Project Fund"],
+      sourceUrl: "https://defillama.example.test/raises/tokenless",
+      capturedAt: "2026-08-05T12:20:00.000Z",
+      binding,
+    };
+    evidence.protocolFees = {
+      slug: "tokenless",
+      total24hUsd: 10_000,
+      total30dUsd: 300_000,
+      sourceUrl: "https://defillama.example.test/fees/tokenless",
+      capturedAt: "2026-08-05T12:20:00.000Z",
+      binding,
+    };
+
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    const ids = new Set(snapshot?.measurements.map((measurement) => measurement.id));
+    const signalIds = new Set(snapshot?.signals.map((signal) => signal.id));
+
+    expect(snapshot?.subject.forms.some((form) => form.form === "token")).toBe(false);
+    expect(ids.has("tvl_usd")).toBe(true);
+    expect(ids.has("largest_recorded_incident_usd")).toBe(true);
+    expect(ids.has("funding_round_count")).toBe(true);
+    expect(ids.has("protocol_fees_30d_usd")).toBe(true);
+    expect(signalIds.has("protocol_tvl_identity_mismatch")).toBe(false);
+    expect(signalIds.has("protocol_funding_identity_mismatch")).toBe(false);
+    expect(signalIds.has("protocol_fees_identity_unbound")).toBe(false);
+    expect(snapshot?.sources.find((source) => source.id === "snapshot:protocol-tvl")?.excerpt)
+      .toContain("project scope only; no token linkage");
+  });
+
+  it("keeps identity-bound incidents while omitting a checked-empty TVL metric from measurements and arithmetic", () => {
+    const evidence = projectEvidence("@checkedempty");
+    evidence.profile.display_name = "Checked Empty";
+    evidence.profile.website = "https://checked-empty.example";
+    const binding = {
+      method: "matched_official_x_and_domain" as const,
+      scope: "project" as const,
+      protocolSlug: "checked-empty",
+      canonicalHandle: "checkedempty",
+      canonicalDomain: "checked-empty.example",
+      providerHandle: "checkedempty",
+      providerDomain: "app.checked-empty.example",
+    };
+    evidence.protocolTvl = {
+      slug: "checked-empty",
+      name: "Checked Empty",
+      symbol: null,
+      tvlUsd: null,
+      tvlState: "checked_empty",
+      chains: [],
+      chainBreakdown: [],
+      geckoId: null,
+      trend: [],
+      hacks: [{
+        date: "2025-02-01",
+        amountUsd: 1_000_000,
+        returnedFunds: null,
+        returnedAmountUsd: null,
+        classification: "oracle",
+      }],
+      sourceUrl: "https://defillama.example.test/protocol/checked-empty",
+      capturedAt: "2026-08-05T12:20:00.000Z",
+      binding,
+    };
+
+    const snapshot = buildPointInTimeIntelligence(evidence);
+    const ids = new Set(snapshot?.measurements.map((measurement) => measurement.id));
+    const protocolForm = snapshot?.subject.forms.find((form) => form.form === "protocol");
+    const source = snapshot?.sources.find((candidate) => candidate.id === "snapshot:protocol-tvl");
+
+    expect(ids.has("tvl_usd")).toBe(false);
+    expect(ids.has("tvl_chain_count")).toBe(false);
+    expect(ids.has("tvl_trend_point_count")).toBe(false);
+    expect(ids.has("largest_recorded_incident_usd")).toBe(true);
+    expect(snapshot?.signals.find((signal) => signal.id === "recorded_incident_scale")?.arithmetic).toBeUndefined();
+    expect(protocolForm?.evidenceState).toBe("reported_context");
+    expect(source).toMatchObject({
+      evidenceState: "reported_context",
+      title: expect.stringContaining("TVL checked empty"),
+    });
+    expect(source?.excerpt).toContain("no usable positive TVL metric");
+  });
+
   it("requires the structured fee receipt even when the protocol row itself is matched", () => {
     const evidence = projectEvidence();
     addCanonicalToken(evidence);
@@ -982,7 +1179,7 @@ describe("buildPointInTimeIntelligence", () => {
     expect(snapshot?.measurements.find((measurement) => measurement.id === "protocol_fees_30d_usd")).toBeUndefined();
     expect(snapshot?.signals.find((signal) => signal.id === "protocol_fee_intensity")).toBeUndefined();
     expect(gap).toMatchObject({ severity: "high", measurementRefs: [], sourceRefs: ["snapshot:protocol-fees"] });
-    expect(gap?.finding).toContain("lacks a complete binding");
+    expect(gap?.finding).toContain("no hard-anchor receipt");
   });
 
   it("withholds mismatched holder, unlock, and EVM sidecars despite plausible values", () => {

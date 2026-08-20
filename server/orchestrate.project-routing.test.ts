@@ -11,6 +11,7 @@ import {
   protocolRecordMatchesCanonicalToken,
   projectVerifiedBasicFacts,
   providerBackedRoles,
+  partitionProjectRelationshipsForScoring,
   providerFailureLinesForEvidence,
 } from "./orchestrate";
 import {
@@ -52,6 +53,99 @@ function resolvedProjectProfile(bio: string, website: string | null | undefined 
   evidence.profile.profile_captured_at = "2026-07-12T14:00:00.000Z";
   return evidence;
 }
+
+describe("project relationship scorer routing", () => {
+  it("partitions verified operating people from non-core context and excludes candidates", () => {
+    const partitioned = partitionProjectRelationshipsForScoring([
+      {
+        name: "JRA",
+        handle: "@jra_xyz",
+        role: "COO and cofounder",
+        kind: "person",
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        relationshipProvenance: "subject_official",
+      },
+      {
+        name: "Superteam DE",
+        handle: "@superteamde",
+        role: "ecosystem",
+        kind: "org",
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        relationshipProvenance: "subject_official",
+      },
+      {
+        name: "Strategic Super R",
+        handle: "@strategicsuperr",
+        role: "VC",
+        kind: "person",
+        provider: "twitterapi",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        relationshipProvenance: "claimant_self",
+      },
+      {
+        name: "Lovable",
+        handle: "@lovable_dev",
+        role: "VC",
+        kind: "org",
+        provider: "grok",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+      },
+    ]);
+
+    expect(partitioned.coreTeam.map((member) => member.name)).toEqual(["JRA"]);
+    expect(partitioned.nonCoreRelationships.map((member) => ({
+      name: member.name,
+      relationship: member.relationship,
+    }))).toEqual([
+      { name: "Superteam DE", relationship: "ecosystem" },
+    ]);
+    expect([
+      ...partitioned.coreTeam,
+      ...partitioned.nonCoreRelationships,
+    ].map((member) => member.name)).not.toContain("Strategic Super R");
+  });
+
+  it("promotes a claimant-only relationship only after stronger project-side proof binds the same identity", () => {
+    const claimant = {
+      name: "Strategic Super R",
+      handle: "@strategicsuperr",
+      role: "VC",
+      kind: "person" as const,
+      provider: "twitterapi",
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      relationshipProvenance: "claimant_self" as const,
+    };
+    expect(partitionProjectRelationshipsForScoring([claimant])).toMatchObject({
+      coreTeam: [],
+      nonCoreRelationships: [],
+    });
+
+    const confirmed = partitionProjectRelationshipsForScoring([
+      claimant,
+      {
+        ...claimant,
+        provider: "team-page",
+        sourceUrl: "https://multihopper.example/backers",
+        relationshipProvenance: "subject_official",
+      },
+    ]);
+    expect(confirmed.coreTeam).toEqual([]);
+    expect(confirmed.nonCoreRelationships).toEqual([
+      expect.objectContaining({
+        name: "Strategic Super R",
+        relationship: "backer",
+        relationshipProvenance: "subject_official",
+      }),
+    ]);
+  });
+});
 
 describe("public X probe failure policy", () => {
   const cost = {
@@ -232,7 +326,7 @@ describe("provider-backed project routing", () => {
     ]);
   });
 
-  it("coalesces a provider name-only row with the same enriched full-name identity", () => {
+  it("does not collapse a name-only provider row without a stable identity bridge", () => {
     expect(coalesceTeamMembersByHandle([
       {
         name: "Erik Voorhees",
@@ -255,14 +349,7 @@ describe("provider-backed project routing", () => {
         provider: "twitterapi",
         identity_link_evidence_origin: "deterministic",
       },
-    ])).toEqual([
-      expect.objectContaining({
-        name: "Erik Voorhees",
-        handle: "@ErikVoorhees",
-        role: "Founder & CEO",
-        artifact_verified: true,
-      }),
-    ]);
+    ])).toHaveLength(2);
   });
 
   it("carries the first-party handle marker forward through a coalesce, never backward", () => {

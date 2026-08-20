@@ -68,6 +68,17 @@ interface CoinSearchRow {
   rank: number | null;
 }
 
+/**
+ * A CoinGecko search hit is only a candidate identifier. A 404 on that exact
+ * identifier says the candidate disappeared (or the search index is stale);
+ * it does not say the audited project has no token and it is not a provider
+ * outage. All other unreadable detail responses remain retryable/unavailable.
+ */
+type CoinDetailsResult =
+  | { state: "ok"; candidateId: string; details: JsonRecord }
+  | { state: "candidate_not_found"; candidateId: string }
+  | { state: "unavailable"; candidateId: string; reason: string };
+
 interface ContractIdentity {
   address: string;
   chain: string;
@@ -278,33 +289,41 @@ function rankedCandidates(query: string, rows: CoinSearchRow[]): CoinSearchRow[]
     .map(({ row }) => row);
 }
 
-async function coinDetails(id: string): Promise<JsonRecord | null> {
+async function coinDetails(id: string): Promise<CoinDetailsResult> {
   const { base, headers, tier } = coingeckoConfig();
   const url = `${base}/coins/${encodeURIComponent(id)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
+  const candidateMeta = `candidate_id=${id}`;
   let response: Response;
   try {
     response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
   } catch {
-    recordCall("coingecko", "project-details", 0, `${tier} · transport_error`, "failed");
-    return null;
+    recordCall("coingecko", "project-details", 0, `${tier} · ${candidateMeta} · transport_error`, "failed");
+    return { state: "unavailable", candidateId: id, reason: "transport_error" };
+  }
+  if (response.status === 404) {
+    // Checked-empty for this search candidate only. Never promote it to a
+    // provider failure or a "no record" finding about the audited subject.
+    recordCall("coingecko", "project-details", 0, `${tier} · candidate_not_found · ${candidateMeta}`, "succeeded");
+    return { state: "candidate_not_found", candidateId: id };
   }
   if (!response.ok) {
-    recordCall("coingecko", "project-details", 0, `${tier} · http_${response.status}`, "failed");
-    return null;
+    const reason = `http_${response.status}`;
+    recordCall("coingecko", "project-details", 0, `${tier} · ${candidateMeta} · ${reason}`, "failed");
+    return { state: "unavailable", candidateId: id, reason };
   }
   let payload: unknown;
   try {
     payload = await response.json();
   } catch {
-    recordCall("coingecko", "project-details", 0, `${tier} · response_json_error`, "failed");
-    return null;
+    recordCall("coingecko", "project-details", 0, `${tier} · ${candidateMeta} · response_json_error`, "failed");
+    return { state: "unavailable", candidateId: id, reason: "response_json_error" };
   }
   if (!isRecord(payload)) {
-    recordCall("coingecko", "project-details", 0, `${tier} · result_shape_error`, "partial");
-    return null;
+    recordCall("coingecko", "project-details", 0, `${tier} · ${candidateMeta} · result_shape_error`, "partial");
+    return { state: "unavailable", candidateId: id, reason: "result_shape_error" };
   }
-  recordCall("coingecko", "project-details", 0, `${tier} · ${id}`, "succeeded");
-  return payload;
+  recordCall("coingecko", "project-details", 0, `${tier} · ${candidateMeta}`, "succeeded");
+  return { state: "ok", candidateId: id, details: payload };
 }
 
 /**
@@ -1111,7 +1130,11 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
   let selected: SelectedToken | null = null;
   let search: CoinSearchRow[] | null = null;
   let candidates: CoinSearchRow[] = [];
-  let inspected: Array<{ details: JsonRecord | null; selected: SelectedToken | null }> = [];
+  let inspected: Array<{
+    candidate: CoinSearchRow;
+    result: CoinDetailsResult;
+    selected: SelectedToken | null;
+  }> = [];
   let detailAttempts = 0;
   let contractLookupFailed = false;
   let seedPairAttempts = 0;
@@ -1159,13 +1182,15 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     if (!anySearchCompleted) search = null;
     detailAttempts += candidates.length;
     inspected = await Promise.all(candidates.map(async (candidate) => {
-      const details = await coinDetails(candidate.id);
-      if (!details) return { details: null, selected: null };
+      const result = await coinDetails(candidate.id);
+      if (result.state !== "ok") return { candidate, result, selected: null };
+      const details = result.details;
       registryHomepages.push(...cgHandleBoundHomepages(ctx, details));
       const identity = verifyIdentity(ctx, details);
       const contract = canonicalContract(details);
       return {
-        details,
+        candidate,
+        result,
         selected: identity && contract ? { details, identity, contract } : null,
       };
     }));
@@ -1267,7 +1292,7 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
       return { state: "executed", detail: `bound $${declared.snapshot.symbol} from the project's own site`, attempts: attempts + 1 };
     }
 
-    const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
+    const coinDetailsUnavailable = inspected.some((candidate) => candidate.result.state === "unavailable");
     if ((registryQueries.length > 0 && !search) || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
       const gaps = [
         contractLookupFailed ? "CoinGecko contract lookup failed" : null,
@@ -1299,9 +1324,15 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     // identity, not a claim that no similarly named token exists.
     const dexAlikes = dexFallback.state === "empty" ? dexFallback.nameMatches ?? [] : [];
     const dexAlikeCount = dexFallback.state === "empty" ? dexFallback.nameMatchCount ?? 0 : 0;
-    const cgSamples = candidates.slice(0, 3).map((row) => `${row.name} ($${row.symbol.toUpperCase()})`);
+    // A stale search ID that returned candidate_not_found is checked-empty
+    // candidate metadata, not an observable token record and not evidence about
+    // the subject. Only successfully read detail records enter the disclosure.
+    const cgObservedCandidates = inspected
+      .filter((row) => row.result.state === "ok")
+      .map((row) => row.candidate);
+    const cgSamples = cgObservedCandidates.slice(0, 3).map((row) => `${row.name} (${row.symbol.toUpperCase()})`);
     const alikeSamples = [...new Set([...cgSamples, ...dexAlikes])].slice(0, 3);
-    const alikeCount = Math.max(candidates.length + dexAlikeCount, alikeSamples.length);
+    const alikeCount = Math.max(cgObservedCandidates.length + dexAlikeCount, alikeSamples.length);
     ctx.recordCheck?.({
       id: "project-token-identity",
       status: "finding",
@@ -1476,8 +1507,9 @@ export async function collectVentureTokenIdentity(venture: {
   if (!search) return null;
   const candidates = rankedCandidates(query, search);
   for (const candidate of candidates) {
-    const details = await coinDetails(candidate.id);
-    if (!details) continue;
+    const result = await coinDetails(candidate.id);
+    if (result.state !== "ok") continue;
+    const details = result.details;
     const links = isRecord(details.links) ? details.links : {};
     const officialHandle = cleanText(links.twitter_screen_name);
     const exactX = Boolean(ventureHandle && officialHandle && normalizeHandle(officialHandle) === ventureHandle);

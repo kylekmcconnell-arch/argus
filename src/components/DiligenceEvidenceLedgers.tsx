@@ -2,12 +2,16 @@ import { Bank, Buildings, ShieldWarning } from "@phosphor-icons/react";
 import { useId } from "react";
 import type {
   CompanyEnrichmentSnapshot,
+  ProjectTokenSnapshot,
   ProtocolFundingSnapshot,
   ProtocolTvlSnapshot,
 } from "../data/evidence";
 import {
   isExactDomainBoundCompanyEnrichment,
-  isExactProtocolIdentityBinding,
+  protocolBindingMethodLabel,
+  validateProtocolEvidenceBinding,
+  type ProtocolBindingContext,
+  type ValidatedProtocolBindingReceipt,
 } from "../lib/diligenceEvidenceBinding";
 
 const COMPANY_PROVIDER = "Akta via Monid";
@@ -71,6 +75,37 @@ function FactCell({ label, value }: { label: string; value?: string | null }) {
       <dt className="mono text-[9.5px] uppercase tracking-[0.08em] text-ink-faint">{label}</dt>
       <dd className="mt-1 break-words text-[12.5px] font-medium text-ink">{value?.trim() || "Not recorded"}</dd>
     </div>
+  );
+}
+
+function ProtocolBindingReceiptFields({
+  binding,
+}: {
+  binding: ValidatedProtocolBindingReceipt;
+}) {
+  const canonical = binding.method === "matched_chain_contract"
+    ? binding.canonicalChain + ":" + binding.canonicalAddress
+    : binding.method === "matched_official_x_and_domain"
+      ? "@" + binding.canonicalHandle
+      : binding.canonicalGeckoId;
+  const provider = binding.method === "matched_chain_contract"
+    ? binding.providerChain + ":" + binding.providerAddress
+    : binding.method === "matched_official_x_and_domain"
+      ? "@" + binding.providerHandle + " · " + binding.providerDomain
+      : binding.providerGeckoId ?? binding.canonicalGeckoId;
+  return (
+    <>
+      <dl className="mt-2 grid gap-2 sm:grid-cols-3">
+        <FactCell label={binding.method === "matched_official_x_and_domain" ? "Canonical project identity" : "Canonical token identity"} value={canonical} />
+        <FactCell label="Provider identity" value={provider} />
+        <FactCell label="Join method" value={protocolBindingMethodLabel(binding)} />
+      </dl>
+      {binding.scope === "project" && (
+        <p className="mt-2 text-[10.5px] leading-relaxed text-ink-faint">
+          This receipt binds the protocol record to the project only. It does not establish or create token linkage.
+        </p>
+      )}
+    </>
   );
 }
 
@@ -258,10 +293,10 @@ function CompanyEvidenceLedger({ company }: { company: CompanyEnrichmentSnapshot
 
 function ProtocolFundingLedger({
   funding,
-  canonicalGeckoId,
+  binding,
 }: {
   funding: ProtocolFundingSnapshot;
-  canonicalGeckoId: string;
+  binding: ValidatedProtocolBindingReceipt;
 }) {
   const sectionId = useId();
   const rounds = [...funding.rounds].sort((left, right) =>
@@ -295,11 +330,7 @@ function ProtocolFundingLedger({
       <div className="space-y-4 px-4 py-4 sm:px-5">
         <section aria-label="Protocol funding identity binding receipt">
           <p className="eyebrow">Binding receipt</p>
-          <dl className="mt-2 grid gap-2 sm:grid-cols-3">
-            <FactCell label="Canonical CoinGecko ID" value={canonicalGeckoId} />
-            <FactCell label="Provider CoinGecko ID" value={funding.geckoId} />
-            <FactCell label="Join method" value="Exact CoinGecko ID" />
-          </dl>
+          <ProtocolBindingReceiptFields binding={binding} />
         </section>
 
         <section aria-label="Bounded protocol funding aggregates">
@@ -360,10 +391,10 @@ function ProtocolFundingLedger({
 
 function ProtocolIncidentLedger({
   protocolTvl,
-  canonicalGeckoId,
+  binding,
 }: {
   protocolTvl: ProtocolTvlSnapshot;
-  canonicalGeckoId: string;
+  binding: ValidatedProtocolBindingReceipt;
 }) {
   const sectionId = useId();
   const incidents = [...(protocolTvl.hacks ?? [])]
@@ -404,11 +435,7 @@ function ProtocolIncidentLedger({
       <div className="space-y-4 px-4 py-4 sm:px-5">
         <section aria-label="Protocol identity binding receipt">
           <p className="eyebrow">Binding receipt</p>
-          <dl className="mt-2 grid gap-2 sm:grid-cols-3">
-            <FactCell label="Canonical CoinGecko ID" value={canonicalGeckoId} />
-            <FactCell label="Provider CoinGecko ID" value={protocolTvl.geckoId} />
-            <FactCell label="Join method" value="Exact CoinGecko ID" />
-          </dl>
+          <ProtocolBindingReceiptFields binding={binding} />
         </section>
 
         <section aria-label="Bounded incident aggregates">
@@ -475,33 +502,45 @@ export function DiligenceEvidenceLedgers({
   company,
   protocolFunding,
   protocolTvl,
+  projectToken,
+  officialHandle,
   officialWebsite,
+  officialWebsites,
   canonicalGeckoId,
   className = "",
 }: {
   company?: CompanyEnrichmentSnapshot | null;
   protocolFunding?: ProtocolFundingSnapshot | null;
   protocolTvl?: ProtocolTvlSnapshot | null;
+  projectToken?: ProjectTokenSnapshot | null;
+  officialHandle?: string | null;
   officialWebsite?: string | null;
+  officialWebsites?: readonly string[] | null;
   canonicalGeckoId?: string | null;
   className?: string;
 }) {
   const boundCompany = isExactDomainBoundCompanyEnrichment(company, officialWebsite) ? company : null;
-  const fundingProviderId = protocolFunding?.geckoId?.trim().toLowerCase();
-  const fundingCanonicalId = canonicalGeckoId?.trim().toLowerCase();
-  const boundFunding = protocolFunding && fundingProviderId && fundingCanonicalId && fundingProviderId === fundingCanonicalId
-    ? protocolFunding
-    : null;
-  const boundProtocol = isExactProtocolIdentityBinding(protocolTvl, canonicalGeckoId) ? protocolTvl : null;
+  const bindingContext: ProtocolBindingContext = {
+    projectToken,
+    canonicalGeckoId,
+    officialHandle,
+    officialWebsites: [officialWebsite, ...(officialWebsites ?? [])],
+  };
+  const fundingValidation = validateProtocolEvidenceBinding(bindingContext, protocolFunding);
+  const tvlValidation = validateProtocolEvidenceBinding(bindingContext, protocolTvl);
+  const boundFunding = fundingValidation.state === "matched" ? protocolFunding : null;
+  const boundProtocol = tvlValidation.state === "matched" ? protocolTvl : null;
   const hasIncidents = Boolean(boundProtocol?.hacks?.length);
   if (!boundCompany && !boundFunding && !hasIncidents) return null;
 
   return (
     <section className={`space-y-3 ${className}`} aria-label="Provider evidence ledgers">
       {boundCompany && <CompanyEvidenceLedger company={boundCompany} />}
-      {boundFunding && <ProtocolFundingLedger funding={boundFunding} canonicalGeckoId={canonicalGeckoId!.trim()} />}
-      {boundProtocol && hasIncidents && (
-        <ProtocolIncidentLedger protocolTvl={boundProtocol} canonicalGeckoId={canonicalGeckoId!.trim()} />
+      {boundFunding && fundingValidation.state === "matched" && (
+        <ProtocolFundingLedger funding={boundFunding} binding={fundingValidation.binding} />
+      )}
+      {boundProtocol && hasIncidents && tvlValidation.state === "matched" && (
+        <ProtocolIncidentLedger protocolTvl={boundProtocol} binding={tvlValidation.binding} />
       )}
     </section>
   );

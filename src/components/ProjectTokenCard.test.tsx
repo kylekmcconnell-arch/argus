@@ -114,4 +114,19 @@ describe("ProjectTokenCard", () => {
     expect(container.querySelector('a[href="https://dexscreener.com/robinhood/pons-pool"]')?.textContent)
       .toContain("DexScreener");
   });
+
+  it("does not render a stored protocol footprint unless the caller admits its validated receipt", () => {
+    const withStoredFootprint: ProjectTokenSnapshot = {
+      ...token,
+      deployedChains: ["Base", "Arbitrum"],
+    };
+    act(() => root.render(
+      <ProjectTokenCard token={withStoredFootprint} showCurrentIntelligence={false} />,
+    ));
+
+    expect(container.textContent).toContain("solana");
+    expect(container.textContent).not.toContain("Base");
+    expect(container.textContent).not.toContain("Arbitrum");
+  });
+
 });

@@ -3,6 +3,10 @@ import { SubjectClass } from "../src/engine";
 import { canonicalOfficialWebsite } from "../src/lib/fundScaleEvidence";
 import { isOrganizationAccount } from "../src/lib/investorSubject";
 import {
+  protocolBindingContextFromEvidence,
+  validateProtocolEvidenceBinding,
+} from "../src/lib/diligenceEvidenceBinding";
+import {
   canonicalBasicFactComparisonValue,
   type BasicFact,
   type BasicFactPredicate,
@@ -77,17 +81,6 @@ function safePublicUrl(value: string | null | undefined): string | null {
   }
 }
 
-function canonicalProtocolIndexMatch(
-  evidence: Pick<CollectedEvidence, "projectToken">,
-  geckoId: string | null | undefined,
-): boolean {
-  const canonicalId = evidence.projectToken?.verified === true
-    ? evidence.projectToken.coingeckoId?.trim().toLowerCase()
-    : undefined;
-  const indexedId = geckoId?.trim().toLowerCase();
-  return Boolean(canonicalId && indexedId && canonicalId === indexedId);
-}
-
 function canonicalTokenAddressChainMatch(
   evidence: Pick<CollectedEvidence, "projectToken">,
   binding: { canonicalAddress: string; chain: string; method: string } | null | undefined,
@@ -101,21 +94,6 @@ function canonicalTokenAddressChainMatch(
     ? tokenAddress.toLowerCase() === boundAddress.toLowerCase()
     : tokenAddress === boundAddress;
   return chainMatches && addressMatches;
-}
-
-function protocolFeesBindingMatches(evidence: CollectedEvidence): boolean {
-  const fees = evidence.protocolFees;
-  const binding = fees?.binding;
-  const canonicalId = evidence.projectToken?.verified === true
-    ? evidence.projectToken.coingeckoId?.trim().toLowerCase()
-    : undefined;
-  return Boolean(
-    fees
-    && binding?.method === "matched_protocol_gecko_id"
-    && canonicalId
-    && binding.canonicalGeckoId.trim().toLowerCase() === canonicalId
-    && binding.protocolSlug.trim().toLowerCase() === fees.slug.trim().toLowerCase(),
-  );
 }
 
 function auditAnchorMatchesSubject(
@@ -611,6 +589,41 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     ?? evidence.projectToken?.capturedAt
     ?? new Date().toISOString();
 
+  const protocolBindingContext = protocolBindingContextFromEvidence(evidence);
+  const protocolTvlValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    evidence.protocolTvl,
+  );
+  const protocolFundingValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    evidence.protocolFunding,
+  );
+  const validatedProtocolSlugs = new Set(
+    [protocolTvlValidation, protocolFundingValidation]
+      .filter((result) => result.state === "matched")
+      .map((result) => result.state === "matched" ? result.binding.protocolSlug.trim().toLowerCase() : ""),
+  );
+  const protocolFeesValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    evidence.protocolFees,
+    { corroboratedProtocolSlugs: validatedProtocolSlugs },
+  );
+  const boundProtocolTvl = protocolTvlValidation.state === "matched"
+    ? evidence.protocolTvl
+    : undefined;
+  const boundProtocolFunding = protocolFundingValidation.state === "matched"
+    ? evidence.protocolFunding
+    : undefined;
+  const boundProtocolFees = protocolFeesValidation.state === "matched"
+    ? evidence.protocolFees
+    : undefined;
+  const protocolTvlProjectOnly = protocolTvlValidation.state === "matched"
+    && protocolTvlValidation.binding.scope === "project";
+  const protocolFundingProjectOnly = protocolFundingValidation.state === "matched"
+    && protocolFundingValidation.binding.scope === "project";
+  const protocolFeesProjectOnly = protocolFeesValidation.state === "matched"
+    && protocolFeesValidation.binding.scope === "project";
+
   const resolvedProviderProfile = evidence.profile.profile_collection_state === "resolved"
     && evidence.profile.profile_provider === "twitterapi"
     && evidence.profile.display_name.trim();
@@ -812,12 +825,13 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     });
     projected.push(makeFact(evidence, "official_token", `$${token.symbol.toUpperCase()}`, [tokenSource], token.name));
     // network is a singleton predicate: extend the ONE fact's value with the
-    // id-joined DeFiLlama chain footprint instead of minting a second fact,
+    // hard-anchor-bound DeFiLlama chain footprint instead of minting a second fact,
     // which the singleton reconciliation would mark conflicted.
     const protocolFootprint = token.deployedChains?.length
-      && evidence.protocolTvl?.sourceUrl
-      && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId)
-      ? evidence.protocolTvl
+      && boundProtocolTvl?.sourceUrl
+      && protocolTvlValidation.state === "matched"
+      && protocolTvlValidation.binding.scope === "project_and_token"
+      ? boundProtocolTvl
       : undefined;
     const chainFootprint = protocolFootprint
       ? `${protocolFootprint.chains.length} chains incl. ${protocolFootprint.chains.slice(0, 4).join(", ")}`
@@ -970,19 +984,19 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       && candidate.relation === "supports"));
   const fundingFact = !hasStrongerFundingFact
     && isProject
-    && evidence.protocolFunding
-    && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId)
-    && evidence.protocolFunding.rounds.length
+    && boundProtocolFunding
+    && boundProtocolFunding.rounds.length
     ? {
-        rounds: evidence.protocolFunding.rounds.length,
-        totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
-        leadInvestors: evidence.protocolFunding.leadInvestors,
-        sourceUrl: evidence.protocolFunding.sourceUrl,
-        capturedAt: evidence.protocolFunding.capturedAt,
+        rounds: boundProtocolFunding.rounds.length,
+        totalRaisedUsd: boundProtocolFunding.totalRaisedUsd,
+        leadInvestors: boundProtocolFunding.leadInvestors,
+        sourceUrl: boundProtocolFunding.sourceUrl,
+        capturedAt: boundProtocolFunding.capturedAt,
         provider: "defillama",
         title: "DeFiLlama funding record",
         ventureName: "",
         subjectLabel: evidence.profile.display_name || "The project",
+        projectOnly: protocolFundingProjectOnly,
       }
     : (isProject || isFounderSubject) && enrichmentRecord && enrichmentRecord.funding
       ? {
@@ -997,6 +1011,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
           subjectLabel: isProject
             ? evidence.profile.display_name || "The project"
             : enrichmentRecord.name,
+          projectOnly: false,
         }
       : null;
   if (fundingFact) {
@@ -1010,7 +1025,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       [source({
         url: fundingFact.sourceUrl,
         title: fundingFact.title,
-        excerpt: `${fundingFact.subjectLabel} has ${formatUsd(fundingFact.totalRaisedUsd)} disclosed across ${fundingFact.rounds} indexed funding round(s)${leads ? `, with named lead investors including ${leads}` : ""}. This aggregator record is a discovery index, not proof of exhaustive financing history.`,
+        excerpt: `${fundingFact.subjectLabel} has ${formatUsd(fundingFact.totalRaisedUsd)} disclosed across ${fundingFact.rounds} indexed funding round(s)${leads ? `, with named lead investors including ${leads}` : ""}. This aggregator record is a discovery index, not proof of exhaustive financing history.${fundingFact.projectOnly ? " The receipt binds this financing index to the project only and establishes no token linkage." : ""}`,
         capturedAt: fundingFact.capturedAt,
         provider: fundingFact.provider,
         sourceClass: "other_public",
@@ -1030,11 +1045,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // row it came from. DeFiLlama keeps leadInvestors and otherInvestors apart:
   // a name is published at the role the aggregator gave it and is never
   // promoted to lead.
-  const indexedFunding = isProject
-    && evidence.protocolFunding
-    && canonicalProtocolIndexMatch(evidence, evidence.protocolFunding.geckoId)
-    ? evidence.protocolFunding
-    : undefined;
+  const indexedFunding = isProject ? boundProtocolFunding : undefined;
   if (indexedFunding?.rounds.length) {
     const backers = new Map<string, {
       name: string;
@@ -1076,7 +1087,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         [source({
           url: indexedFunding.sourceUrl,
           title: "DeFiLlama funding record",
-          excerpt: `DeFiLlama's funding index names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}`,
+          excerpt: `DeFiLlama's funding index names ${backer.name} as ${role} in ${backer.round}${dated}${sized}. One aggregator naming a backer is an attribution, not a verified investment, and this index is not an exhaustive cap table.${capped}${protocolFundingProjectOnly ? " The identity receipt is project-only and establishes no token ownership or linkage." : ""}`,
           capturedAt: indexedFunding.capturedAt,
           provider: "defillama",
           sourceClass: "other_public",
@@ -1097,13 +1108,10 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // On-chain TVL → traction (P5). Security incidents from the same document
   // become standalone negative facts below. A $295M exploit must never be
   // buried inside the source excerpt for an otherwise positive TVL metric.
-  const tvlSnapshot = isProject
-    && evidence.protocolTvl
-    && canonicalProtocolIndexMatch(evidence, evidence.protocolTvl.geckoId)
-    ? evidence.protocolTvl
-    : undefined;
-  if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
-    const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
+  const tvlSnapshot = isProject ? boundProtocolTvl : undefined;
+  if (tvlSnapshot) {
+    if (typeof tvlSnapshot.tvlUsd === "number" && tvlSnapshot.tvlUsd > 0) {
+      const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
     // Same trend contract as fees: growth-or-bleed, "steady" under 1% noise.
     const tvlTrendPct = typeof tvlSnapshot.change30dPct === "number" ? tvlSnapshot.change30dPct : null;
     const tvlTrendPhrase = tvlTrendPct === null
@@ -1119,13 +1127,14 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       [source({
         url: tvlSnapshot.sourceUrl,
         title: "DeFiLlama TVL record",
-        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""}${tvlTrendPhrase ? `, ${tvlTrendPhrase}` : ""} (DeFiLlama on-chain snapshot).${historySince}`,
+        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""}${tvlTrendPhrase ? `, ${tvlTrendPhrase}` : ""} (DeFiLlama on-chain snapshot).${historySince}${protocolTvlProjectOnly ? " The receipt binds this usage record to the project only and establishes no token linkage or value capture." : ""}`,
         capturedAt: tvlSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain",
       })],
       `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`,
     ));
+    }
     for (const incident of [...(tvlSnapshot.hacks ?? [])]
       .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")))
       .slice(0, 5)) {
@@ -1145,7 +1154,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         [source({
           url: tvlSnapshot.sourceUrl,
           title: "DeFiLlama protocol incident record",
-          excerpt: `DeFiLlama records a ${amount} ${incident.classification?.toLowerCase() ?? "protocol"} security incident affecting ${tvlSnapshot.name} on ${incidentDate}${incident.technique ? ` using ${incident.technique}` : ""}; ${recovery}.`,
+          excerpt: `DeFiLlama records a ${amount} ${incident.classification?.toLowerCase() ?? "protocol"} security incident affecting ${tvlSnapshot.name} on ${incidentDate}${incident.technique ? ` using ${incident.technique}` : ""}; ${recovery}.${protocolTvlProjectOnly ? " The identity receipt is project-only; it establishes neither token linkage nor misconduct." : ""}`,
           capturedAt: tvlSnapshot.capturedAt,
           provider: "defillama",
           sourceClass: "other_public",
@@ -1287,11 +1296,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
 
   // Protocol fees → a second dated usage metric (P5). Fees are on-chain
   // derived and self-limiting to fake: generating fee volume costs the fees.
-  const protocolIndexIdentityMatched = canonicalProtocolIndexMatch(evidence, evidence.protocolTvl?.geckoId)
-    || canonicalProtocolIndexMatch(evidence, evidence.protocolFunding?.geckoId);
-  const feesSnapshot = isProject && protocolIndexIdentityMatched && protocolFeesBindingMatches(evidence)
-    ? evidence.protocolFees
-    : undefined;
+  const feesSnapshot = isProject ? boundProtocolFees : undefined;
   if (feesSnapshot && typeof feesSnapshot.total30dUsd === "number" && feesSnapshot.total30dUsd > 0) {
     // Trend answers what the raw total cannot: is real usage growing or
     // bleeding? Small moves (<1%) read as noise and are reported as steady.
@@ -1308,7 +1313,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       [source({
         url: feesSnapshot.sourceUrl,
         title: "DeFiLlama protocol fees record",
-        excerpt: `Users paid ${formatUsd(feesSnapshot.total30dUsd)} in protocol fees over the trailing 30 days${typeof feesSnapshot.total24hUsd === "number" ? ` (${formatUsd(feesSnapshot.total24hUsd)} in the last 24 hours)` : ""}${trendPhrase ? `, ${trendPhrase}` : ""}.`,
+        excerpt: `Users paid ${formatUsd(feesSnapshot.total30dUsd)} in protocol fees over the trailing 30 days${typeof feesSnapshot.total24hUsd === "number" ? ` (${formatUsd(feesSnapshot.total24hUsd)} in the last 24 hours)` : ""}${trendPhrase ? `, ${trendPhrase}` : ""}.${protocolFeesProjectOnly ? " The receipt binds these fees to the project only; they are not token revenue or token value capture." : ""}`,
         capturedAt: feesSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain",

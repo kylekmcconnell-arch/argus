@@ -9,6 +9,7 @@
 // collectors — the caller decides which evidence/check they feed.
 import { recordCall, type ProviderUsageStatus } from "../cost";
 import { captureTimestamp } from "../captureTime";
+import { auditMemo } from "../auditRunContext";
 
 const API_BASE = "https://api.llama.fi";
 
@@ -26,8 +27,8 @@ export function defiLlamaSlug(name: string): string {
 /**
  * CoinGecko commonly names an asset "{Brand} Protocol" while DeFiLlama uses
  * the shorter brand slug (Drift Protocol -> drift). Strip only that generic
- * suffix. The caller still has to join the returned protocol document to the
- * already verified canonical CoinGecko id before accepting any evidence.
+ * suffix. This produces a discovery slug only. The returned protocol document
+ * still needs an exact hard-anchor receipt before any evidence is admitted.
  */
 export function defiLlamaLookupName(name: string): string {
   const normalized = name.trim();
@@ -38,6 +39,11 @@ type ProtocolDocument = {
   name?: unknown;
   symbol?: unknown;
   gecko_id?: unknown;
+  address?: unknown;
+  chain?: unknown;
+  chains?: unknown;
+  url?: unknown;
+  twitter?: unknown;
   currentChainTvls?: unknown;
   tvl?: unknown;
   raises?: unknown;
@@ -64,8 +70,8 @@ type ProtocolDocument = {
  * Only a SUCCESS is ever retained. Memoising a failure would freeze one provider
  * blip into "no funding rounds on record" for every later caller in the run,
  * turning a transport gap into a clean-looking absence, which is the one thing
- * this adapter's outcome types exist to prevent. A completed 400 no-match is not
- * retained either: it is cheap to re-ask and worth nothing to keep.
+ * this adapter's outcome types exist to prevent. A completed 400/404 no-match is
+ * not retained either: it is cheap to re-ask and worth nothing to keep.
  *
  * Retention is deliberately short. It spans one scan's enrichment burst and
  * nothing longer, so a document cannot carry from one subject's audit into
@@ -85,11 +91,11 @@ interface MemoSlot {
   settled?: { at: number; data: unknown; capturedAt: string };
 }
 
-const scanMemo = new Map<string, MemoSlot>();
+const currentScanMemo = () => auditMemo<MemoSlot>("defillama:documents");
 
 /** Forget every memoised document. Callers with a real scan boundary call this at its start. */
 export function resetDefiLlamaScanMemo(): void {
-  scanMemo.clear();
+  currentScanMemo().clear();
 }
 
 /** A document served from the memo cost no provider attempt, and the ledger says so. */
@@ -114,6 +120,7 @@ async function readJson(url: string, fetcher: typeof fetch): Promise<JsonRead> {
 }
 
 async function fetchJsonOnce(url: string, fetcher: typeof fetch): Promise<JsonRead> {
+  const scanMemo = currentScanMemo();
   const now = Date.now();
   for (const [key, slot] of scanMemo) {
     if (!slot.inFlight && (!slot.settled || now - slot.settled.at >= SCAN_MEMO_MS)) scanMemo.delete(key);
@@ -153,7 +160,7 @@ type FetchResult =
   | { ok: false; notFound: boolean; note: string };
 
 /**
- * Fetch the free /protocol/{slug} document. Never throws. A 400 is a completed
+ * Fetch the free /protocol/{slug} document. Never throws. A 400/404 is a completed
  * "no such protocol" lookup (notFound), distinct from a transport/HTTP outage,
  * so callers can record it as a clean result rather than a provider failure.
  */
@@ -169,7 +176,7 @@ async function fetchProtocol(slug: string, fetcher: typeof fetch): Promise<Fetch
   }
   if (read.kind === "transport") return { ok: false, notFound: false, note: "DeFiLlama was unavailable." };
   if (read.kind === "unreadable") return { ok: false, notFound: false, note: "DeFiLlama response was unreadable." };
-  const notFound = read.status === 400;
+  const notFound = read.status === 400 || read.status === 404;
   return {
     ok: false,
     notFound,
@@ -181,6 +188,160 @@ const strArray = (value: unknown): string[] =>
   Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim())
     : [];
+
+const EVM_ADDRESS = /^0x[a-fA-F0-9]{40}$/;
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const PROTOCOL_CHAIN_ALIASES: Record<string, string> = {
+  ethereum: "ethereum",
+  eth: "ethereum",
+  arbitrum: "arbitrum",
+  arbitrumone: "arbitrum",
+  base: "base",
+  binancesmartchain: "bsc",
+  bsc: "bsc",
+  polygon: "polygon",
+  polygonpos: "polygon",
+  optimism: "optimism",
+  optimisticethereum: "optimism",
+  avalanche: "avalanche",
+  avax: "avalanche",
+  solana: "solana",
+  robinhood: "robinhood",
+  robinhoodchain: "robinhood",
+};
+
+export interface ProtocolContractIdentity {
+  chain: string;
+  address: string;
+}
+
+export interface ProtocolIdentity {
+  slug: string;
+  name: string;
+  symbol: string | null;
+  geckoId: string | null;
+  contracts: ProtocolContractIdentity[];
+  officialX: string | null;
+  website: string | null;
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+export type ProtocolIdentityOutcome =
+  | { state: "resolved"; value: ProtocolIdentity }
+  | { state: "no_record"; slug: string; note: string }
+  | { state: "unavailable"; slug: string; note: string };
+
+export function normalizeProtocolChain(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const key = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return PROTOCOL_CHAIN_ALIASES[key] ?? null;
+}
+
+function validProtocolAddress(chain: string, address: string): boolean {
+  return chain === "solana" ? SOLANA_ADDRESS.test(address) : EVM_ADDRESS.test(address);
+}
+
+function protocolContracts(data: ProtocolDocument): ProtocolContractIdentity[] {
+  const rawAddresses = typeof data.address === "string"
+    ? [data.address.trim()]
+    : strArray(data.address);
+  const listedChains = [
+    ...(typeof data.chain === "string" ? [data.chain] : []),
+    ...strArray(data.chains),
+  ]
+    .map(normalizeProtocolChain)
+    .filter((chain): chain is string => Boolean(chain));
+  const uniqueChains = [...new Set(listedChains)];
+  const contracts: ProtocolContractIdentity[] = [];
+
+  for (const raw of rawAddresses) {
+    if (!raw) continue;
+    let address = raw;
+    let chain: string | null = null;
+    const separator = raw.indexOf(":");
+    if (separator > 0) {
+      const prefixedChain = normalizeProtocolChain(raw.slice(0, separator));
+      if (prefixedChain) {
+        chain = prefixedChain;
+        address = raw.slice(separator + 1).trim();
+      }
+    }
+    // A bare address is usable only when the provider record names one
+    // unambiguous chain. Never project one address across a multichain row.
+    if (!chain && uniqueChains.length === 1) chain = uniqueChains[0];
+    if (!chain || !validProtocolAddress(chain, address)) continue;
+    if (contracts.some((entry) =>
+      entry.chain === chain
+      && (chain === "solana" ? entry.address === address : entry.address.toLowerCase() === address.toLowerCase())
+    )) continue;
+    contracts.push({ chain, address });
+  }
+  return contracts;
+}
+
+function protocolOfficialX(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.trim();
+  let handle = raw.replace(/^@/, "");
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://x.com/${handle}`);
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (host !== "x.com" && host !== "twitter.com") return null;
+    handle = url.pathname.split("/").filter(Boolean)[0] ?? "";
+  } catch {
+    return null;
+  }
+  return /^[A-Za-z0-9_]{1,30}$/.test(handle) ? `@${handle}` : null;
+}
+
+/**
+ * Read the provider's identity surfaces independently of any metric. A valid
+ * 200 response can bind fees even when the same document has no TVL or raises.
+ * A 400/404 is a scoped provider no-record, never proof that the project is absent.
+ */
+export async function collectProtocolIdentity(
+  projectName: string,
+  options: { fetcher?: typeof fetch; slug?: string } = {},
+): Promise<ProtocolIdentityOutcome> {
+  const fetcher = options.fetcher ?? fetch;
+  const slug = options.slug ?? defiLlamaSlug(projectName);
+  if (!slug) return { state: "no_record", slug: "", note: "No resolvable DeFiLlama protocol slug." };
+  const result = await fetchProtocol(slug, fetcher);
+  if (!result.ok) {
+    recordCall(
+      "defillama",
+      "protocol-identity",
+      0,
+      `${slug} · ${result.notFound ? "not_found" : "error"}`,
+      result.notFound ? "succeeded" : "failed",
+    );
+    return result.notFound
+      ? { state: "no_record", slug, note: result.note }
+      : { state: "unavailable", slug, note: result.note };
+  }
+  const data = result.data;
+  const website = typeof data.url === "string" && data.url.trim() ? data.url.trim() : null;
+  const value: ProtocolIdentity = {
+    slug,
+    name: typeof data.name === "string" && data.name.trim() ? data.name.trim() : projectName,
+    symbol: typeof data.symbol === "string" && data.symbol.trim() ? data.symbol.trim() : null,
+    geckoId: typeof data.gecko_id === "string" && data.gecko_id.trim() ? data.gecko_id.trim() : null,
+    contracts: protocolContracts(data),
+    officialX: protocolOfficialX(data.twitter),
+    website,
+    sourceUrl: `https://defillama.com/protocol/${slug}`,
+    capturedAt: result.capturedAt,
+  };
+  recordCall(
+    "defillama",
+    "protocol-identity",
+    0,
+    `${slug} · ${value.contracts.length ? `${value.contracts.length}_contracts` : "metadata"}`,
+    readStatus(result.fromMemo, "succeeded"),
+  );
+  return { state: "resolved", value };
+}
 
 // ---------------------------------------------------------------------------
 // TVL
@@ -202,7 +363,9 @@ export interface ProtocolTvl {
   slug: string;
   name: string;
   symbol: string | null;
-  tvlUsd: number;
+  /** Positive TVL measured in this capture; null when this identity-bound row had no usable positive TVL metric. */
+  tvlUsd: number | null;
+  tvlState: "measured" | "checked_empty";
   chains: string[];
   chainBreakdown: { chain: string; tvlUsd: number }[];
   geckoId: string | null;
@@ -261,17 +424,18 @@ export async function collectProtocolTvl(
     return { available: false, note: result.note };
   }
   const data = result.data;
-
-  const series = Array.isArray(data.tvl) ? (data.tvl as { totalLiquidityUSD?: unknown }[]) : [];
+  const series = Array.isArray(data.tvl) ? (data.tvl as { date?: unknown; totalLiquidityUSD?: unknown }[]) : [];
   const latest = series.length ? series[series.length - 1] : undefined;
-  const tvlUsd = typeof latest?.totalLiquidityUSD === "number" ? latest.totalLiquidityUSD : null;
-  if (tvlUsd === null || !(tvlUsd > 0)) {
-    recordCall("defillama", "tvl", 0, `${slug} · no_tvl`, readStatus(result.fromMemo, "partial"));
-    return { available: false, note: "DeFiLlama returned no positive TVL for this protocol." };
-  }
+  const rawLatestTvl = typeof latest?.totalLiquidityUSD === "number"
+    && Number.isFinite(latest.totalLiquidityUSD)
+    && latest.totalLiquidityUSD > 0
+    ? latest.totalLiquidityUSD
+    : null;
+  const tvlUsd = rawLatestTvl;
+  const tvlState: ProtocolTvl["tvlState"] = tvlUsd === null ? "checked_empty" : "measured";
 
   const rawChainTvls =
-    data.currentChainTvls && typeof data.currentChainTvls === "object"
+    tvlUsd !== null && data.currentChainTvls && typeof data.currentChainTvls === "object"
       ? (data.currentChainTvls as Record<string, unknown>)
       : {};
   const chainBreakdown = Object.entries(rawChainTvls)
@@ -279,22 +443,21 @@ export async function collectProtocolTvl(
     .map(([chain, value]) => ({ chain, tvlUsd: value as number }))
     .sort((a, b) => b.tvlUsd - a.tvlUsd);
 
-  const firstPoint = series.length ? (series[0] as { date?: unknown }) : undefined;
+  const firstPoint = series.length ? series[0] : undefined;
   const firstRecordedAt = typeof firstPoint?.date === "number"
     ? new Date(firstPoint.date * 1000).toISOString().slice(0, 10)
     : null;
 
-  // 30-day trend from the same dated series. Requires a comparison point at
-  // least ~20 days back (short/backfilled series yield null, never a guess);
-  // the nearest point to exactly 30 days is used so daily gaps don't skew it.
-  const latestDate = typeof (latest as { date?: unknown })?.date === "number" ? (latest as { date: number }).date : null;
+  // Trend arithmetic is admitted only when this capture has a positive latest
+  // metric. Historical positives cannot stand in for a missing current TVL.
+  const latestDate = tvlUsd !== null && typeof latest?.date === "number" ? latest.date : null;
   let change30dPct: number | null = null;
-  if (latestDate !== null) {
+  if (tvlUsd !== null && latestDate !== null) {
     const target = latestDate - 30 * 86_400;
     let prior: { date: number; totalLiquidityUSD: number } | null = null;
-    for (const point of series as { date?: unknown; totalLiquidityUSD?: unknown }[]) {
+    for (const point of series) {
       if (typeof point.date !== "number" || typeof point.totalLiquidityUSD !== "number" || point.totalLiquidityUSD <= 0) continue;
-      if (point.date > latestDate - 20 * 86_400) break; // too recent to be a 30d baseline
+      if (point.date > latestDate - 20 * 86_400) break;
       if (!prior || Math.abs(point.date - target) < Math.abs(prior.date - target)) {
         prior = { date: point.date, totalLiquidityUSD: point.totalLiquidityUSD };
       }
@@ -304,14 +467,12 @@ export async function collectProtocolTvl(
       change30dPct = Number.isFinite(raw) && Math.abs(raw) <= 10_000 ? Math.round(raw * 10) / 10 : null;
     }
   }
-  // Weekly trend points over the last ~180 days, always ending on the latest
-  // reading, so the report can draw a real capital-commitment line instead of
-  // quoting one number. Downsampled to keep the immutable payload lean.
+
   const trend: { date: string; tvlUsd: number }[] = [];
-  if (latestDate !== null) {
+  if (tvlUsd !== null && latestDate !== null) {
     const horizon = latestDate - 180 * 86_400;
     let nextAt = -Infinity;
-    for (const point of series as { date?: unknown; totalLiquidityUSD?: unknown }[]) {
+    for (const point of series) {
       if (typeof point.date !== "number" || typeof point.totalLiquidityUSD !== "number" || point.totalLiquidityUSD <= 0) continue;
       if (point.date < horizon || (point.date < nextAt && point.date !== latestDate)) continue;
       trend.push({ date: new Date(point.date * 1000).toISOString().slice(0, 10), tvlUsd: Math.round(point.totalLiquidityUSD) });
@@ -323,6 +484,9 @@ export async function collectProtocolTvl(
     }
   }
 
+  // Parse incident and governance context independently from the TVL metric.
+  // A zero, missing, or unreadable TVL value must never erase adverse rows from
+  // the same successfully read, identity-bound provider document.
   const hacks: ProtocolHackRecord[] = (Array.isArray(data.hacks) ? data.hacks : [])
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
     .map((entry) => {
@@ -344,7 +508,15 @@ export async function collectProtocolTvl(
       };
     });
 
-  recordCall("defillama", "tvl", 0, `${slug} · tvl_${Math.round(tvlUsd)}`, readStatus(result.fromMemo, "succeeded"));
+  recordCall(
+    "defillama",
+    "tvl",
+    0,
+    tvlUsd === null
+      ? `${slug} · checked_empty_tvl · ${hacks.length}_incidents`
+      : `${slug} · tvl_${Math.round(tvlUsd)}`,
+    readStatus(result.fromMemo, "succeeded"),
+  );
   return {
     available: true,
     value: {
@@ -352,6 +524,7 @@ export async function collectProtocolTvl(
       name: typeof data.name === "string" ? data.name : projectName,
       symbol: typeof data.symbol === "string" ? data.symbol : null,
       tvlUsd,
+      tvlState,
       chains: chainBreakdown.map((entry) => entry.chain),
       chainBreakdown,
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
@@ -481,7 +654,7 @@ export async function collectProtocolFees(
     if (read.kind === "unreadable") {
       return { available: false, note: "DeFiLlama fees response was unreadable." };
     }
-    recordCall("defillama", "fees", 0, `${slug} · http_${read.status}`, read.status === 400 ? "succeeded" : "failed");
+    recordCall("defillama", "fees", 0, `${slug} · http_${read.status}`, (read.status === 400 || read.status === 404) ? "succeeded" : "failed");
     return { available: false, note: `No DeFiLlama fee record for "${slug}".` };
   }
   const payload = (read.data ?? {}) as { total24h?: unknown; total30d?: unknown; change_30dover30d?: unknown };

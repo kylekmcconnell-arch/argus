@@ -23,7 +23,7 @@ import {
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
 import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
-import { canonicalizeCoreTeamRecords, canonicalizeTeamRecords, hasOperatingTeamRole, isCoreTeamRecord } from "../lib/teamRelationships";
+import { canonicalizeTeamRecords, hasOperatingTeamRole, isCoreTeamRecord } from "../lib/teamRelationships";
 import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
 import type { DecisionLensId } from "../intelligence/types";
 import { ArgusMark } from "./ArgusMark";
@@ -92,6 +92,10 @@ import {
   supportsExplicitEmptyBasicFact,
 } from "../lib/basicFactQuestions";
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
+import {
+  protocolBindingMethodLabel,
+  validateProtocolEvidenceBinding,
+} from "../lib/diligenceEvidenceBinding";
 import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
@@ -102,6 +106,7 @@ import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief } from "../lib/intelligenceBrief";
 import { evidencePostureForAxisArtifacts } from "../lib/evidenceReasoning";
+import { deriveAxisEvidenceLimits } from "../lib/evidenceStory";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -205,7 +210,16 @@ function frozenDateLabel(value?: string | null): string {
 
 /** Provider-recorded operational events belong beside the subject identity. */
 function CriticalSubjectAlerts({ dossier }: { dossier: Dossier }) {
-  const incidents = [...(dossier.protocolTvl?.hacks ?? [])]
+  const protocolValidation = validateProtocolEvidenceBinding({
+    projectToken: dossier.projectToken,
+    canonicalGeckoId: dossier.projectToken?.coingeckoId,
+    officialHandle: dossier.handle,
+    officialWebsites: [dossier.website, ...(dossier.official_websites ?? [])],
+  }, dossier.protocolTvl);
+  const boundProtocolTvl = protocolValidation.state === "matched"
+    ? dossier.protocolTvl
+    : undefined;
+  const incidents = [...(boundProtocolTvl?.hacks ?? [])]
     .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")));
   const incident = incidents[0];
   const xStatus = dossier.x_account_status === "suspended" || dossier.x_account_status === "unavailable"
@@ -213,7 +227,7 @@ function CriticalSubjectAlerts({ dossier }: { dossier: Dossier }) {
     : null;
   if (!incident && !xStatus) return null;
 
-  const incidentSource = safeSourceLink(dossier.protocolTvl?.sourceUrl);
+  const incidentSource = safeSourceLink(boundProtocolTvl?.sourceUrl);
   const xSource = safeSourceLink(dossier.x_account_status_source_url);
   const incidentRecovery = incident?.returnedFunds === true
     ? incident.returnedAmountUsd
@@ -1431,11 +1445,14 @@ function meaningfulTeamMember(member: ReportTeamMember): boolean {
     && !placeholderEntityValue(role);
 }
 
-function groundedTeamMember(member: ReportTeamMember): boolean {
+function groundedRelationshipMember(member: ReportTeamMember): boolean {
   return meaningfulTeamMember(member)
-    && isCoreTeamRecord(member)
     && member.evidence_origin !== "model_lead"
     && member.artifact_verified === true;
+}
+
+function groundedTeamMember(member: ReportTeamMember): boolean {
+  return groundedRelationshipMember(member) && isCoreTeamRecord(member);
 }
 
 function sanitizedGroundedTeamMember(member: ReportTeamMember): ReportTeamMember {
@@ -1449,6 +1466,20 @@ function sanitizedGroundedTeamMember(member: ReportTeamMember): ReportTeamMember
 }
 
 function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
+  // Canonicalize the frozen confirmed lanes first. An old saved dossier may
+  // still carry a claimant-only row in projectRelationships; compatibility
+  // rendering must demote it instead of calling it verified.
+  const frozenRelationships = canonicalizeTeamRecords([
+    ...(dossier.webTeam ?? []),
+    ...(dossier.projectRelationships ?? []),
+  ].filter(meaningfulTeamMember));
+  const claimantOnly = frozenRelationships
+    .filter((member) => member.relationshipProvenance === "claimant_self")
+    .map((member) => ({
+      ...member,
+      relationship: "candidate" as const,
+      artifact_verified: false,
+    }));
   // assembleDossier already emits model-enriched grounded members into
   // webTeamLeads (handle kept, source suffixed); re-deriving them from the
   // sanitized webTeam copy renders the same person twice. Client derivation
@@ -1466,12 +1497,16 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
       provider: "grok",
     }];
   });
-  return canonicalizeTeamRecords(
-    [...(dossier.webTeamLeads ?? []), ...inferred]
-      .filter((member) => meaningfulTeamMember(member) && hasOperatingTeamRole(member))
-      // A model-only name with no stable identity locator is not actionable.
-      .filter((member) => Boolean(member.handle?.trim() || member.linkedin?.trim())),
-  );
+  return canonicalizeTeamRecords([
+    ...(dossier.webTeamLeads ?? []),
+    ...claimantOnly,
+    ...inferred,
+  ])
+    .filter((member) =>
+      meaningfulTeamMember(member)
+      && (hasOperatingTeamRole(member) || member.relationshipProvenance === "claimant_self"))
+    // A model-only name with no stable identity locator is not actionable.
+    .filter((member) => Boolean(member.handle?.trim() || member.linkedin?.trim()));
 }
 
 const REPORT_PROJECT_PRODUCT_LANGUAGE = /\b(?:app|application|borrow|build|chain|coins?|develop|exchange|launch|launchpad|lend|marketplace|network|operate|payments?|platform|protocol|provide|stake|tokens?|trade|trading|wallet)\b/i;
@@ -1663,9 +1698,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       identity_binding: f.identity_binding,
     },
   };
-  const webTeam = canonicalizeCoreTeamRecords(
-    (dossier.webTeam ?? []).filter(groundedTeamMember),
-  ).map(sanitizedGroundedTeamMember);
+  const canonicalRelationships = canonicalizeTeamRecords([
+    ...(dossier.webTeam ?? []),
+    ...(dossier.projectRelationships ?? []),
+  ].filter((member) =>
+    groundedRelationshipMember(member) && member.relationshipProvenance !== "claimant_self"));
+  const webTeam = canonicalRelationships
+    .filter(isCoreTeamRecord)
+    .map(sanitizedGroundedTeamMember);
+  const projectRelationships = canonicalRelationships
+    .filter((member) => !isCoreTeamRecord(member) && member.relationship !== "candidate")
+    .map(sanitizedGroundedTeamMember);
   const webTeamLeads = reportTeamLeads(dossier);
   // The operator is the verified team member the launch history was traced
   // through; fall back to the subject's own handle so the panel never renders
@@ -1808,9 +1851,48 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             : "person" as const;
   const publicationBasicFacts = reportBasicFacts(f, basicFactsAudience);
   const basicFactLeads = reportBasicFactLeads(f, basicFactsAudience, publicationBasicFacts);
+  const protocolBindingContext = {
+    projectToken: f.projectToken,
+    canonicalGeckoId: f.projectToken?.coingeckoId,
+    officialHandle: f.handle,
+    officialWebsites: [f.website, ...(f.official_websites ?? [])],
+  };
+  const protocolTvlValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    f.protocolTvl,
+  );
+  const protocolFundingValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    f.protocolFunding,
+  );
+  const validatedProtocolSlugs = new Set(
+    [protocolTvlValidation, protocolFundingValidation]
+      .filter((result) => result.state === "matched")
+      .map((result) => result.state === "matched" ? result.binding.protocolSlug.trim().toLowerCase() : ""),
+  );
+  const protocolFeesValidation = validateProtocolEvidenceBinding(
+    protocolBindingContext,
+    f.protocolFees,
+    { corroboratedProtocolSlugs: validatedProtocolSlugs },
+  );
+  const boundProtocolTvl = protocolTvlValidation.state === "matched" ? f.protocolTvl : undefined;
+  const protocolTvlMeasured = typeof boundProtocolTvl?.tvlUsd === "number"
+    && boundProtocolTvl.tvlUsd > 0;
+  const boundProtocolFunding = protocolFundingValidation.state === "matched" ? f.protocolFunding : undefined;
+  const boundProtocolFees = protocolFeesValidation.state === "matched" ? f.protocolFees : undefined;
+  const protocolTvlBinding = protocolTvlValidation.state === "matched"
+    ? protocolTvlValidation.binding
+    : null;
+  // Deployed chains are derived from the TVL document, so only that exact
+  // row's project-and-token receipt may admit them into token UI.
+  const tokenProtocolBinding = protocolTvlBinding?.scope === "project_and_token"
+    ? protocolTvlBinding
+    : null;
+  const protocolUsageProjectOnly = (protocolTvlMeasured && protocolTvlBinding?.scope === "project")
+    || (protocolFeesValidation.state === "matched" && protocolFeesValidation.binding.scope === "project");
   const fundingEvidence = summarizeFundingEvidence(
     publicationBasicFacts,
-    f.protocolFunding?.rounds ?? [],
+    boundProtocolFunding?.rounds ?? [],
   );
   const acceptedFundingFacts = publicationBasicFacts.filter((fact) =>
     canonicalBasicFactPredicate(fact.predicate) === "funding"
@@ -1899,7 +1981,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     identityConfidence: displayIdentityConfidence ?? undefined,
     realName: fullResolvedName,
     roles,
-    hasAssociates: (evidence.associates?.length ?? 0) > 0,
+    hasAssociates: projectRelationships.length > 0 || (evidence.associates?.length ?? 0) > 0,
   });
   const diligenceChecks = versionContext
     ? versionContext.checks
@@ -2304,46 +2386,21 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   ];
   const favorableVerdict = presentedVerdict === "PASS"
     || (presentedVerdict === "PROVISIONAL" && report.composite_verdict === "PASS");
-  // Risk cards lead with a FINDING about the subject, never with our process
-  // status: an assessed-null axis gets its deterministic conclusion, any other
-  // weak axis gets the analyst's own first gap statement (already specific,
-  // already dash-stripped server-side), and only then a thin-evidence fallback.
-  // A solid or exceptional strength band is not a risk driver even when its
-  // integer floor dips just under the 70 percent line.
+  // Performance and evidence confidence are separate stories. A low score
+  // backed by direct or independently corroborated facts is not an evidence
+  // gap; a high score with only first-party or unanchored support still is.
   const bandTierFor = (axis: string): string | undefined => f.projectStrengthBands?.[axis]?.tier;
-  const AXIS_GAP_FALLBACK_TITLES: Record<string, string> = {
-    P2_product_substance: "Independent verification of live product operation is still limited.",
-    P5_traction_and_liveness: "Independent usage and adoption metrics are still limited.",
-    P6_transparency_integrity: "Legal operator, governance, audit, and public-code disclosures remain limited.",
-  };
   const sentence = (value: string): string => /[.!?]$/.test(value) ? value : `${value}.`;
-  const lowAxisDrivers: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
-    .filter((axis) => axis.weight > 0 && axis.score / axis.weight < 0.7)
-    // A completed no-token assessment is neutral unless a token claim or
-    // contradictory contract creates an actual conduct risk.
-    .filter((axis) => !(
-      ["P3_token_conduct", "P4_backing_and_partners"].includes(axis.axis)
-      && bandTierFor(axis.axis) === "assessed_null"
-      && axis.counter.length === 0
-    ))
-    .filter((axis) => !["solid", "exceptional"].includes(bandTierFor(axis.axis) ?? ""))
-    .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
-    .map((axis) => {
-      const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
-      const firstGap = plainLanguageSummary(axis.gaps[0] ?? "");
-      const title = firstGap && firstGap.length <= 140
-        ? sentence(firstGap)
-        : (AXIS_GAP_FALLBACK_TITLES[axis.axis]
-          ?? `Verified evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is thin.`);
-      const posture = evidencePostureForAxisArtifacts(axis.support);
-      return {
-        id: `low-axis-${axis.axis}`,
-        title,
-        detail: plainLanguageSummary(axis.rationale),
-        provenance: `${posture.label}${questionMeta(questions)}`,
-        href: axisHref(axis.axis),
-      };
-    });
+  const axisEvidenceLimitNarrative: ReportCanvasNarrativeItem[] = deriveAxisEvidenceLimits(
+    decisionBasisSummary.rows,
+    f.projectStrengthBands,
+  ).map((limit) => ({
+    id: `evidence-limit-${limit.axis}`,
+    title: plainLanguageSummary(limit.title),
+    detail: plainLanguageSummary(limit.detail),
+    provenance: `${limit.reason === "source_unavailable" ? "Source unavailable" : limit.posture.label}${questionMeta(limit.questionCount)}`,
+    href: axisHref(limit.axis),
+  }));
 
   const notApplicableCheckIds = new Set(diligenceChecks
     .filter((check) => check.status === "not-applicable")
@@ -2482,7 +2539,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   // them. Guidance framing by design; never a promise of points.
   const remainingPointsItems: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
     .filter((axis) => axis.weight > 0 && axis.weight - axis.score > 0)
-    .filter((axis) => !(axis.axis === "P3_token_conduct" && bandTierFor(axis.axis) === "assessed_null" && axis.counter.length === 0))
+    .filter((axis) => !(
+      ["P3_token_conduct", "P4_backing_and_partners"].includes(axis.axis)
+      && bandTierFor(axis.axis) === "assessed_null"
+      && axis.counter.length === 0
+    ))
     .sort((left, right) => (right.weight - right.score) - (left.weight - left.score))
     .slice(0, 4)
     .map((axis) => {
@@ -2522,13 +2583,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     nextUnlock: f.tokenUnlocks
       ? { date: f.tokenUnlocks.nextUnlockDate, amountUsd: f.tokenUnlocks.unlockValueUsd, pctSupply: f.tokenUnlocks.percentOfSupply }
       : null,
-    tvlChange30dPct: f.protocolTvl?.change30dPct,
-    feesChange30dPct: f.protocolFees?.change30dOver30dPct,
+    tvlChange30dPct: boundProtocolTvl?.change30dPct,
+    feesChange30dPct: boundProtocolFees?.change30dOver30dPct,
     athDrawdownPct: f.projectToken?.ath?.drawdownPct,
     accountSuspended: f.x_account_status === "suspended",
     daysSinceLastPost: f.days_since_post,
     verifiedTeamCount: f.projectToken ? webTeam.length : null,
-    namedTeamCount: webTeam.length + webTeamLeads.length,
+    // Relationship-only candidates remain visible below, but they are not
+    // prospective team identities and cannot inflate the team signal.
+    namedTeamCount: webTeam.length + webTeamLeads.filter(hasOperatingTeamRole).length,
     anchors: { market: "#project-token", team: "#identity-evidence", account: "#report-overview" },
   });
   // One paste, whole verdict: composed for group chats and IC memos alike.
@@ -2539,9 +2602,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     remainingPointsItems[0] ? `Top open item: ${remainingPointsItems[0].title}.` : "",
   ].filter(Boolean).join("\n");
   const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
-  const evidenceLimitNarrative = lowAxisDrivers
-    .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
-    .slice(0, 6);
+  const evidenceLimitNarrative = axisEvidenceLimitNarrative.slice(0, 6);
   // Weak or incomplete evidence is uncertainty, not misconduct. The concern
   // lane contains only adverse findings, contradictions, caps, and pressures.
   const adverseVerdictNarrative = confidenceLimits;
@@ -2655,7 +2716,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   ).size;
   const conflictSignalCount = Math.max(visibleContradictions.length, uniqueCounterSignalCount)
     + basicFacts.filter((fact) => fact.status === "conflicted").length;
-  const relationshipRecordCount = connections.length + webTeam.length + (evidence.associates?.length ?? 0);
+  const relationshipRecordCount = connections.length + webTeam.length + projectRelationships.length + (evidence.associates?.length ?? 0);
   const argusEdgeMetrics = [
     ...(basicFactResearchAttempted
       ? [{ label: "Confirmed facts", value: verifiedDecisionFactCount, detail: "answers with sources" }]
@@ -2796,11 +2857,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   // Fundamentals we verified, as headline numbers. Every tile derives from a
   // frozen snapshot and is omitted when absent; nothing renders a dash.
   const fundamentalTiles: Array<{ key: string; label: string; value: string; sub: string }> = [
-    ...(f.protocolTvl && f.protocolTvl.tvlUsd > 0 ? [{
+    ...(boundProtocolTvl && boundProtocolTvl.tvlUsd > 0 ? [{
       key: "tvl",
       label: "Value locked",
-      value: usdCompact(f.protocolTvl.tvlUsd),
-      sub: `DeFiLlama · ${f.protocolTvl.capturedAt.slice(0, 10)}`,
+      value: usdCompact(boundProtocolTvl.tvlUsd),
+      sub: `${protocolTvlBinding ? protocolBindingMethodLabel(protocolTvlBinding) : "DeFiLlama"} · ${boundProtocolTvl.capturedAt.slice(0, 10)}`,
     }] : []),
     ...(f.projectToken?.rank != null ? [{
       key: "rank",
@@ -2808,10 +2869,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       value: `#${f.projectToken.rank}`,
       sub: "CoinGecko, all crypto assets",
     }] : []),
-    ...(f.protocolTvl?.firstRecordedAt ? [{
+    ...(boundProtocolTvl?.firstRecordedAt ? [{
       key: "history",
       label: "TVL history",
-      value: `since ${f.protocolTvl.firstRecordedAt.slice(0, 4)}`,
+      value: `since ${boundProtocolTvl.firstRecordedAt.slice(0, 4)}`,
       sub: "series start, bounds age",
     }] : []),
     ...(fundingEvidence.totalKnownUsd > 0 ? [{
@@ -2822,11 +2883,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         ? `${fundingEvidence.rounds.length} sourced round${fundingEvidence.rounds.length === 1 ? "" : "s"} · minimum known total`
         : `${fundingEvidence.rounds.length} reported round${fundingEvidence.rounds.length === 1 ? "" : "s"} · third-party database`,
     }] : []),
-    ...(f.projectToken?.deployedChains?.length ? [{
+    ...(tokenProtocolBinding && f.projectToken?.deployedChains?.length ? [{
       key: "chains",
       label: "Chains",
       value: String(f.projectToken.deployedChains.length),
-      sub: "Matched through CoinGecko",
+      sub: protocolBindingMethodLabel(tokenProtocolBinding),
     }] : []),
   ];
 
@@ -3501,9 +3562,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
 
-        {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
+        {(protocolTvlMeasured || boundProtocolFees || f.holderProfile) && (
           <div className="mt-3">
-            <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
+            {protocolUsageProjectOnly && (
+              <p className="mb-2 rounded-lg border border-line/60 bg-panel/45 px-3 py-2 text-[11px] leading-relaxed text-ink-faint">
+                Protocol usage is bound to the project through its exact official X account and domain. It does not establish token linkage or token value capture.
+              </p>
+            )}
+            <UsageVisuals tvl={boundProtocolTvl} fees={boundProtocolFees} holders={f.holderProfile} />
           </div>
         )}
 
@@ -3511,7 +3577,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="py-5">
             <ProjectTokenCard
               token={f.projectToken}
-              chains={f.projectToken.deployedChains}
+              chains={tokenProtocolBinding ? f.projectToken.deployedChains : undefined}
               showCurrentIntelligence={showCurrentIntelligence}
               refreshCurrentMarket={currentIntelligenceEnabled}
               onAudit={onAudit}
@@ -3601,7 +3667,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         <DiligenceEvidenceLedgers
           className="mt-3"
           company={f.companyEnrichment}
+          projectToken={f.projectToken}
+          officialHandle={f.handle}
           officialWebsite={f.website}
+          officialWebsites={f.official_websites}
           protocolFunding={f.protocolFunding}
           protocolTvl={f.protocolTvl}
           canonicalGeckoId={f.projectToken?.coingeckoId}
@@ -3717,6 +3786,45 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
 
+        {report.governing_role !== "KOL" && projectRelationships.length > 0 && (
+          <section className="panel mt-3 overflow-hidden" aria-label="Verified project relationships">
+            <div className="border-b border-line/60 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="chip normal-case">Verified project relationships</span>
+                <span className="text-[11px] text-ink-faint">context only · not core team · excluded from team and identity score</span>
+              </div>
+            </div>
+            <ol className="divide-y divide-line/60">
+              {projectRelationships.map((relationship, index) => {
+                const proof = safeSourceLink(relationship.sourceUrl ?? relationship.source);
+                const relationshipLabel = (relationship.relationship ?? "associate").replace(/_/g, " ");
+                return (
+                  <li key={`${relationship.name}:${relationship.role}:${index}`} className="flex flex-wrap items-center gap-1.5 px-4 py-3 text-[12px]">
+                    <Avatar src={personAvatar(relationship.handle, relationship.linkedin)} letter={(relationship.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
+                    <span className="font-medium text-ink">{relationship.name}</span>
+                    {relationship.handle && <span className="mono text-[11px] text-ink-faint">{relationship.handle}</span>}
+                    <span className="chip">{relationshipLabel}</span>
+                    <span className="text-ink-faint">{relationship.role}</span>
+                    {proof && (
+                      <a href={proof.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">
+                        relationship proof
+                      </a>
+                    )}
+                    {relationship.evidence && (
+                      <span className="min-w-full pl-[26px] text-[11px] leading-relaxed text-ink-faint">{relationship.evidence}</span>
+                    )}
+                    {relationship.handle && onAudit && (
+                      <button type="button" onClick={() => onAudit(relationship.handle!)} className="btn-chip tint-signal ml-auto">
+                        audit →
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        )}
+
         {(f.leaderDepartures?.length ?? 0) > 0 && report.governing_role === "PROJECT" && (
           <section className="panel mt-3 overflow-hidden" aria-label="Frozen leadership continuity ledger">
             <div className="border-b border-line/60 px-4 py-3">
@@ -3768,14 +3876,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {webTeamLeads.length > 0 && (
           <div className="mt-3">
             <div className="mb-1.5 flex flex-wrap items-center gap-2">
-              <span className="chip tint-caution">Investigative team candidates</span>
-              <span className="text-[11px] text-ink-faint">unverified leads · not identity proof · not scored or sent to report chat</span>
+              <span className="chip tint-caution">Investigative relationship candidates</span>
+              <span className="text-[11px] text-ink-faint">claimed or discovered · unconfirmed by the project · not scored or sent to report chat</span>
             </div>
             <Card className="divide-y divide-line/60 border-caution/25">
               {webTeamLeads.map((member, index) => (
                 <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-[12.5px]">
                   <span className="font-medium text-ink-dim">{member.name}</span>
-                  <span className="chip">{member.role}</span>
+                  <span className="chip">
+                    {member.relationshipProvenance === "claimant_self"
+                      ? `claim: ${member.role}`
+                      : member.role}
+                  </span>
                   {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
                   {member.linkedin && <span className="text-[11px] text-ink-faint">LinkedIn candidate recorded</span>}
                   <span className="text-[11px] text-ink-faint">{sourceProviderLabel(member.provider ?? member.source)}</span>

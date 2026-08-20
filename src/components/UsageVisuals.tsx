@@ -58,11 +58,12 @@ function TrendChart({ trend, change30dPct }: {
   );
 }
 
-function ChainBar({ breakdown, totalUsd }: {
+function ChainBar({ breakdown }: {
   breakdown: NonNullable<ProtocolTvlSnapshot["chainBreakdown"]>;
-  totalUsd: number;
 }) {
-  const total = breakdown.reduce((sum, entry) => sum + entry.tvlUsd, 0) || totalUsd;
+  // The bar is rendered only with at least two positive provider rows, so its
+  // denominator comes from those rows and never from a nullable headline TVL.
+  const total = breakdown.reduce((sum, entry) => sum + entry.tvlUsd, 0);
   const top = breakdown.slice(0, 4);
   const restUsd = breakdown.slice(4).reduce((sum, entry) => sum + entry.tvlUsd, 0);
   const segments = [
@@ -217,8 +218,13 @@ export function UsageVisuals({ tvl, fees, holders }: {
   fees?: ProtocolFeesSnapshot & { capturedAt?: string };
   holders?: HolderProfileSnapshot;
 }) {
-  const trend = (tvl?.trend ?? []).filter((point) => point.tvlUsd > 0);
-  const breakdown = (tvl?.chainBreakdown ?? []).filter((entry) => entry.tvlUsd > 0);
+  const hasMeasuredTvl = typeof tvl?.tvlUsd === "number" && tvl.tvlUsd > 0;
+  const trend = hasMeasuredTvl
+    ? (tvl?.trend ?? []).filter((point) => point.tvlUsd > 0)
+    : [];
+  const breakdown = hasMeasuredTvl
+    ? (tvl?.chainBreakdown ?? []).filter((entry) => entry.tvlUsd > 0)
+    : [];
   const hasTrend = trend.length >= 2;
   const hasBreakdown = breakdown.length >= 2;
   const hasFees = fees != null && fees.total30dUsd != null && fees.total30dUsd > 0;
@@ -226,8 +232,9 @@ export function UsageVisuals({ tvl, fees, holders }: {
   const hasHolders = holders != null
     && ((holders.topHolderPct != null && holders.top10Pct != null) || holders.holdersAssessed === false);
   if (!hasTrend && !hasBreakdown && !hasFees && !hasHolders) return null;
-  const capturedAt = tvl?.capturedAt ?? fees?.capturedAt;
-  const sourceUrl = tvl?.sourceUrl ?? fees?.sourceUrl;
+  const hasTvlVisual = hasTrend || hasBreakdown;
+  const capturedAt = hasTvlVisual ? tvl?.capturedAt : fees?.capturedAt;
+  const sourceUrl = hasTvlVisual ? tvl?.sourceUrl : fees?.sourceUrl;
   return (
     <section className="panel scroll-mt-28 px-4 py-4 sm:px-5" aria-labelledby="usage-visuals-title">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -253,7 +260,7 @@ export function UsageVisuals({ tvl, fees, holders }: {
               <span className="text-[10px] uppercase tracking-[0.09em] text-ink-faint">chains hold the value</span>
             </div>
             <div className="mt-2">
-              <ChainBar breakdown={breakdown} totalUsd={tvl.tvlUsd} />
+              <ChainBar breakdown={breakdown} />
             </div>
           </div>
         )}

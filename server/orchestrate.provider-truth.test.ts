@@ -1,8 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../src/data/evidence";
+import type { CollectContext } from "./adapters/types";
+import { resetDefiLlamaScanMemo } from "./adapters/defiLlama";
 import { providerStatus } from "./config";
-import { addClaudeUsage, addGrokUsage, withCostLedger } from "./cost";
-import { analystAttemptTotals, coldIntake, runAudit } from "./orchestrate";
+import { addClaudeUsage, addGrokUsage, getCost, recordCall, withCostLedger } from "./cost";
+import {
+  analystAttemptTotals,
+  coldIntake,
+  collectBoundProtocolEvidence,
+  providerFailureLinesForEvidence,
+  runAudit,
+} from "./orchestrate";
 
 const PROVIDER_ENV = [
   "ANTHROPIC_API_KEY",
@@ -57,6 +65,198 @@ describe("orchestrator provider execution truth", () => {
     });
   });
 
+
+  it("stops protocol collection after a completed no-record identity read", async () => {
+    resetDefiLlamaScanMemo();
+    const evidence = emptyEvidence("@fixture");
+    evidence.roles = [];
+    evidence.profile.website = "https://fixture.xyz";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-20T12:00:00.000Z";
+    const emit = vi.fn();
+    const ctx: CollectContext = {
+      handle: "@fixture",
+      evidence,
+      emit,
+      recordCheck: vi.fn(),
+    };
+    const fetchMock = vi.fn(async () => new Response("Not found", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await withCostLedger(async () => ({
+      outcome: await collectBoundProtocolEvidence(ctx, "Missing"),
+      cost: getCost(),
+    }));
+
+    expect(result.outcome).toEqual({
+      tvlMatched: false,
+      fundingMatched: false,
+      feesMatched: false,
+      binding: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/protocol/missing");
+    expect(result.cost.calls.map((call) => call.op)).toEqual(["protocol-identity"]);
+    expect(result.cost.calls[0]).toMatchObject({ succeeded: 1, failed: 0 });
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("does not call metrics or fees when a discovered protocol row has no hard-anchor match", async () => {
+    resetDefiLlamaScanMemo();
+    const evidence = emptyEvidence("@fixture");
+    evidence.profile.website = "https://fixture.xyz";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-20T12:00:00.000Z";
+    const emit = vi.fn();
+    const ctx: CollectContext = {
+      handle: "@fixture",
+      evidence,
+      emit,
+      recordCheck: vi.fn(),
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      name: "Namesake",
+      symbol: "NAME",
+      gecko_id: null,
+      twitter: "other_fixture",
+      url: "https://namesake.xyz",
+      tvl: [{ date: 1, totalLiquidityUSD: 1_000_000 }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await withCostLedger(async () => ({
+      outcome: await collectBoundProtocolEvidence(ctx, "Fixture"),
+      cost: getCost(),
+    }));
+
+    expect(result.outcome.binding).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.cost.calls.map((call) => call.op)).toEqual(["protocol-identity"]);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: "Protocol enrichment identity unbound",
+    }));
+  });
+
+  it("admits tokenless project metrics only after an exact official-X plus domain match", async () => {
+    resetDefiLlamaScanMemo();
+    const evidence = emptyEvidence("@fixture");
+    evidence.roles = [];
+    evidence.profile = {
+      ...evidence.profile,
+      handle: "@fixture",
+      display_name: "Fixture",
+      website: "https://fixture.xyz",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-08-20T12:00:00.000Z",
+    };
+    const ctx: CollectContext = {
+      handle: "@fixture",
+      evidence,
+      emit: vi.fn(),
+      recordCheck: vi.fn(),
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/summary/fees/fixture")) {
+        return new Response(JSON.stringify({
+          total24h: 1_000,
+          total30d: 30_000,
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        name: "Fixture",
+        symbol: null,
+        gecko_id: null,
+        twitter: "https://x.com/fixture",
+        url: "https://app.fixture.xyz",
+        currentChainTvls: { Solana: 2_000_000 },
+        tvl: [
+          { date: 1, totalLiquidityUSD: 1_000_000 },
+          { date: 2, totalLiquidityUSD: 2_000_000 },
+        ],
+        raises: [{
+          date: 1_750_000_000,
+          round: "Seed",
+          amount: 2,
+          leadInvestors: ["Fixture Capital"],
+          otherInvestors: [],
+        }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await withCostLedger(async () => ({
+      outcome: await collectBoundProtocolEvidence(ctx, "Fixture"),
+      cost: getCost(),
+    }));
+
+    expect(result.outcome).toMatchObject({
+      tvlMatched: true,
+      fundingMatched: true,
+      feesMatched: true,
+      binding: {
+        method: "matched_official_x_and_domain",
+        scope: "project",
+        protocolSlug: "fixture",
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(expect.arrayContaining([
+      expect.stringContaining("/protocol/fixture"),
+      expect.stringContaining("/summary/fees/fixture"),
+    ]));
+    expect(evidence.projectToken).toBeUndefined();
+    expect(evidence.protocolTvl?.binding).toMatchObject({ scope: "project" });
+    expect(evidence.protocolFunding?.binding).toMatchObject({ scope: "project" });
+    expect(evidence.protocolFees?.binding).toMatchObject({ scope: "project" });
+    expect(result.cost.calls.map((call) => call.op).sort()).toEqual([
+      "fees",
+      "funding",
+      "protocol-identity",
+      "tvl",
+    ]);
+  });
+
+  it("suppresses an optional CoinGecko identity failure after DEX/site establishes the token", () => {
+    const evidence = emptyEvidence("@ponsdotfamily");
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Pons",
+      symbol: "PONS",
+      rank: null,
+      address: "0x39dBED3a2bd333467115dE45665cC57F813C4571",
+      chain: "robinhood",
+      officialX: "@ponsdotfamily",
+      homepage: "https://ponsfamily.com/launchpad",
+      sourceUrl: "https://dexscreener.com/robinhood/pool",
+      capturedAt: "2026-08-20T00:00:00.000Z",
+      producerSources: {
+        identity: {
+          provider: "dexscreener",
+          sourceUrl: "https://dexscreener.com/robinhood/pool",
+          capturedAt: "2026-08-20T00:00:00.000Z",
+        },
+      },
+      providers: ["dexscreener"],
+    };
+
+    const failures = withCostLedger(() => {
+      recordCall(
+        "coingecko",
+        "project-details",
+        0,
+        "public · candidate_id=pons · http_503",
+        "failed",
+      );
+      return providerFailureLinesForEvidence(getCost(), evidence);
+    });
+
+    expect(failures).toEqual([]);
+  });
 
   it("keeps a fixture curated when Bitquery is the only configured credential", async () => {
     vi.stubEnv("BITQUERY_API_KEY", "configured-but-unused");

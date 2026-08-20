@@ -13,8 +13,9 @@ export function ProjectTokenCard({
   token: ProjectTokenSnapshot;
   /**
    * Protocol chain footprint from DeFiLlama TVL data. The caller must only
-   * pass this when the DeFiLlama protocol record joins the verified token by
-   * CoinGecko id, so a name-alike protocol can never lend its footprint.
+   * pass this when the DeFiLlama protocol record has a validated
+   * project-and-token receipt (exact chain + contract or exact CoinGecko ID),
+   * so a name-alike protocol can never lend its footprint.
    */
   chains?: string[];
   showCurrentIntelligence: boolean;

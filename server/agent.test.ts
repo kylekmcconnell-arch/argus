@@ -1025,6 +1025,122 @@ describe("analyst verdict integrity", () => {
     expect(rejection).toHaveBeenLastCalledWith("root-extra-field");
   });
 
+  it("keeps explicit non-core team rows out of P1 and routes only confirmed backing to P4", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P1_team_and_identity", weight: 16, role: "PROJECT" },
+      { axis: "P4_backing_and_partners", weight: 14, role: "PROJECT" },
+      { axis: "F6_network_quality", weight: 10, role: "FOUNDER" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      team: [
+        {
+          name: "Named Co-Founder",
+          handle: "@founder",
+          role: "co-founder",
+          relationship: "core_team",
+          kind: "person",
+          provider: "team-page",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          relationshipProvenance: "subject_official",
+        },
+        {
+          name: "Associate Engineer",
+          handle: "@associate_engineer",
+          role: "engineer",
+          relationship: "associate",
+          kind: "person",
+          provider: "team-page",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          relationshipProvenance: "subject_official",
+        },
+        {
+          name: "Backer Founder",
+          handle: "@backer_founder",
+          role: "founder",
+          relationship: "backer",
+          kind: "person",
+          provider: "team-page",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          relationshipProvenance: "subject_official",
+        },
+      ],
+      associates: [
+        {
+          associate_handle: "@strategicsuperr",
+          name: "Strategic Super R",
+          role: "VC",
+          relation: "associate",
+          relationship: "associate",
+          kind: "person",
+          provider: "twitterapi",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          relationshipProvenance: "claimant_self",
+        },
+        {
+          associate_handle: "@ecosystem_operator",
+          name: "Ecosystem Operator",
+          role: "ecosystem peer",
+          relation: "associate",
+          relationship: "associate",
+          kind: "person",
+          provider: "team-page",
+          sourceUrl: "https://project.example/ecosystem",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          relationshipProvenance: "subject_official",
+        },
+        {
+          associate_handle: "@seed_backer",
+          name: "Named Seed Backer",
+          role: "seed investor",
+          relation: "backer",
+          relationship: "backer",
+          kind: "person",
+          provider: "team-page",
+          sourceUrl: "https://project.example/backers",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          relationshipProvenance: "subject_official",
+        },
+      ],
+    }, axes);
+    const parsed = JSON.parse(packet) as {
+      team: Array<{ name: string }>;
+      associates: Array<{ name: string }>;
+    };
+    const frozen = extractScoringEvidenceCatalog(packet, axes);
+    const teamArtifacts = frozen.filter((artifact) => artifact.section === "team");
+    const relationshipArtifacts = frozen.filter((artifact) => artifact.section === "associates");
+
+    expect(parsed.team.map((member) => member.name)).toEqual(["Named Co-Founder"]);
+    expect(parsed.associates.map((member) => member.name)).toEqual([
+      "Ecosystem Operator",
+      "Named Seed Backer",
+    ]);
+    expect(packet).not.toContain("Strategic Super R");
+    expect(packet).not.toContain("Associate Engineer");
+    expect(packet).not.toContain("Backer Founder");
+    expect(teamArtifacts).toHaveLength(1);
+    expect(teamArtifacts[0].eligibleAxes).toContain("P1_team_and_identity");
+    expect(teamArtifacts[0].eligibleAxes).not.toContain("P4_backing_and_partners");
+    expect(relationshipArtifacts).toHaveLength(2);
+    expect(relationshipArtifacts.find((artifact) =>
+      !artifact.eligibleAxes.includes("P4_backing_and_partners"))?.eligibleAxes)
+      .toEqual(["F6_network_quality"]);
+    expect(relationshipArtifacts.filter((artifact) =>
+      artifact.eligibleAxes.includes("P4_backing_and_partners"))).toHaveLength(1);
+    expect(relationshipArtifacts.every((artifact) =>
+      !artifact.eligibleAxes.includes("P1_team_and_identity"))).toBe(true);
+    expect(deriveProjectStrengthBands(packet, axes).P4_backing_and_partners).toMatchObject({
+      tier: "emerging",
+      reasons: ["1 verified backer or partner record"],
+    });
+  });
+
   it("rejects an unresolved-identity narrative when the frozen project packet contains a grounded named team", () => {
     const projectAxes: AnalystAxis[] = [
       { axis: "P1_team_and_identity", weight: 16, role: "PROJECT" },
@@ -2599,15 +2715,20 @@ describe("analyst verdict integrity", () => {
     });
   });
 
-  it("routes explicit project advisor, token, and governance evidence to their own axes", () => {
+  it("routes explicit project relationships, token, and governance evidence to their own axes", () => {
     const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
       .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
     const packet = buildScoringEvidencePacket({
-      team: [{
-        name: "Named Advisor",
-        role: "Strategic advisor and seed investor",
+      associates: [{
+        associate_handle: "@named_backer",
+        name: "Named Seed Backer",
+        role: "Seed investor",
+        relation: "backer",
+        relationship: "backer",
+        relationshipProvenance: "subject_official",
         provider: "team-page",
-        sourceUrl: "https://project.example/advisors",
+        sourceUrl: "https://project.example/backers",
+        evidence_origin: "deterministic",
         artifact_verified: true,
       }],
       recentActivity: [{
@@ -2616,10 +2737,11 @@ describe("analyst verdict integrity", () => {
       }],
     }, axes);
     const catalog = extractScoringEvidenceCatalog(packet);
-    const team = catalog.find((artifact) => artifact.section === "team");
+    const relationship = catalog.find((artifact) => artifact.section === "associates");
     const activity = catalog.find((artifact) => artifact.section === "recentActivity");
 
-    expect(team?.eligibleAxes).toContain("P4_backing_and_partners");
+    expect(relationship?.eligibleAxes).toContain("P4_backing_and_partners");
+    expect(relationship?.eligibleAxes).not.toContain("P1_team_and_identity");
     expect(activity?.eligibleAxes).toEqual(expect.arrayContaining([
       "P3_token_conduct",
       "P6_transparency_integrity",

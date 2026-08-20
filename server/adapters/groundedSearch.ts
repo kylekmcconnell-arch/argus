@@ -12,6 +12,7 @@
 import { env, providerFallbacksEnabled } from "../config";
 import { addClaudeUsage, addGrokUsage, addOpenRouterUsage, recordSerper } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
+import { subjectCacheAccess } from "../auditRunContext";
 import { fetchPublicText } from "../publicWeb";
 
 const ANTHROPIC = "https://api.anthropic.com/v1/messages";
@@ -478,7 +479,8 @@ export async function groundedSearch(
   // are fallback-only.
   if (!serperKey || (!env("XAI_API_KEY") && !openRouterExtractModel() && !(providerFallbacksEnabled() && env("ANTHROPIC_API_KEY")))) return null;
   const cacheKey = opts?.cacheKey ? `gs:${opts.cacheKey}` : undefined;
-  if (cacheKey && !opts?.bypassCache) {
+  const cacheAccess = subjectCacheAccess(opts?.bypassCache === true);
+  if (cacheKey && cacheAccess.read) {
     const hit = await cacheGet(cacheKey);
     if (hit) return hit;
   }
@@ -561,6 +563,6 @@ export async function groundedSearch(
   // an extract outage silently reproduced the mechanically empty people
   // report this lane exists to prevent.
   if (answer === null) opts?.onProviderUnavailable?.();
-  if (answer && cacheKey && !opts?.bypassCache) void cacheSet(cacheKey, answer);
+  if (answer && cacheKey && cacheAccess.write) void cacheSet(cacheKey, answer);
   return answer;
 }

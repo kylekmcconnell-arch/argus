@@ -1013,6 +1013,205 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(evidence.basicFacts?.find((fact) => fact.predicate === "vesting")).toBeUndefined();
   });
 
+  it("admits CoinGecko-less protocol facts through an exact chain-and-contract receipt", () => {
+    const evidence = emptyEvidence("@contractbound");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile = {
+      ...evidence.profile,
+      display_name: "Contract Bound",
+      website: "https://contractbound.xyz",
+    };
+    const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_domain",
+      name: "Contract Bound",
+      symbol: "CB",
+      rank: null,
+      address,
+      chain: "base",
+      deployedChains: ["Base", "Ethereum"],
+      sourceUrl: "https://dexscreener.com/base/contract-bound",
+      capturedAt: "2026-08-20T12:00:00.000Z",
+      providers: ["dexscreener"],
+    };
+    const binding = {
+      method: "matched_chain_contract" as const,
+      scope: "project_and_token" as const,
+      protocolSlug: "contract-bound",
+      canonicalChain: "base",
+      canonicalAddress: address,
+      providerChain: "base",
+      providerAddress: address,
+    };
+    evidence.protocolTvl = {
+      slug: "contract-bound",
+      name: "Contract Bound",
+      symbol: "CB",
+      tvlUsd: 12_000_000,
+      chains: ["Base", "Ethereum"],
+      chainBreakdown: [{ chain: "Base", tvlUsd: 8_000_000 }],
+      geckoId: null,
+      sourceUrl: "https://defillama.com/protocol/contract-bound",
+      capturedAt: "2026-08-20T12:01:00.000Z",
+      binding,
+    };
+    evidence.protocolFunding = {
+      slug: "contract-bound",
+      name: "Contract Bound",
+      geckoId: null,
+      rounds: [{
+        date: "2026-01-01",
+        round: "Seed",
+        amountUsd: 4_000_000,
+        leadInvestors: ["Exact Capital"],
+        otherInvestors: [],
+        valuationUsd: null,
+      }],
+      totalRaisedUsd: 4_000_000,
+      leadInvestors: ["Exact Capital"],
+      sourceUrl: "https://defillama.com/protocol/contract-bound",
+      capturedAt: "2026-08-20T12:01:00.000Z",
+      binding,
+    };
+    evidence.protocolFees = {
+      slug: "contract-bound",
+      total24hUsd: 20_000,
+      total30dUsd: 600_000,
+      sourceUrl: "https://defillama.com/protocol/contract-bound",
+      capturedAt: "2026-08-20T12:01:30.000Z",
+      binding,
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts?.find((fact) => fact.predicate === "network")?.value)
+      .toBe("2 chains incl. Base, Ethereum");
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "traction" && fact.value.includes("total value locked"))).toBe(true);
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "traction" && fact.value.includes("protocol fees"))).toBe(true);
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "funding" && fact.value.includes("Exact Capital"))).toBe(true);
+  });
+
+  it("admits project-only protocol fundamentals without minting a token or token network claim", () => {
+    const evidence = emptyEvidence("@tokenless");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile = {
+      ...evidence.profile,
+      handle: "@tokenless",
+      display_name: "Tokenless",
+      website: "https://tokenless.xyz",
+    };
+    const binding = {
+      method: "matched_official_x_and_domain" as const,
+      scope: "project" as const,
+      protocolSlug: "tokenless",
+      canonicalHandle: "tokenless",
+      canonicalDomain: "tokenless.xyz",
+      providerHandle: "tokenless",
+      providerDomain: "app.tokenless.xyz",
+    };
+    evidence.protocolTvl = {
+      slug: "tokenless",
+      name: "Tokenless",
+      symbol: null,
+      tvlUsd: 5_000_000,
+      chains: ["Solana"],
+      chainBreakdown: [{ chain: "Solana", tvlUsd: 5_000_000 }],
+      geckoId: null,
+      sourceUrl: "https://defillama.com/protocol/tokenless",
+      capturedAt: "2026-08-20T12:01:00.000Z",
+      binding,
+    };
+    evidence.protocolFunding = {
+      slug: "tokenless",
+      name: "Tokenless",
+      geckoId: null,
+      rounds: [{
+        date: "2026-01-01",
+        round: "Strategic",
+        amountUsd: 2_000_000,
+        leadInvestors: ["Project Capital"],
+        otherInvestors: [],
+        valuationUsd: null,
+      }],
+      totalRaisedUsd: 2_000_000,
+      leadInvestors: ["Project Capital"],
+      sourceUrl: "https://defillama.com/protocol/tokenless",
+      capturedAt: "2026-08-20T12:01:00.000Z",
+      binding,
+    };
+    evidence.protocolFees = {
+      slug: "tokenless",
+      total24hUsd: 10_000,
+      total30dUsd: 300_000,
+      sourceUrl: "https://defillama.com/protocol/tokenless",
+      capturedAt: "2026-08-20T12:01:30.000Z",
+      binding,
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.projectToken).toBeUndefined();
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "official_token")).toBe(false);
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "network")).toBe(false);
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "traction" && fact.value.includes("total value locked"))).toBe(true);
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "traction" && fact.value.includes("protocol fees"))).toBe(true);
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "funding" && fact.value.includes("Project Capital"))).toBe(true);
+    const projectOnlyExcerpts = (evidence.basicFacts ?? [])
+      .flatMap((fact) => fact.sources.map((source) => source.excerpt));
+    expect(projectOnlyExcerpts.some((excerpt) => excerpt.includes("establishes no token linkage"))).toBe(true);
+    expect(projectOnlyExcerpts.some((excerpt) => excerpt.includes("not token revenue"))).toBe(true);
+  });
+
+  it("withholds protocol facts when a chain receipt conflicts with the canonical token", () => {
+    const evidence = emptyEvidence("@receiptconflict");
+    evidence.roles = [SubjectClass.PROJECT];
+    const address = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_domain",
+      name: "Receipt Conflict",
+      symbol: "RC",
+      rank: null,
+      address,
+      chain: "base",
+      sourceUrl: "https://dexscreener.com/base/receipt-conflict",
+      capturedAt: "2026-08-20T12:00:00.000Z",
+      providers: ["dexscreener"],
+    };
+    evidence.protocolTvl = {
+      slug: "receipt-conflict",
+      name: "Receipt Conflict",
+      symbol: "RC",
+      tvlUsd: 9_000_000,
+      chains: ["Base"],
+      chainBreakdown: [{ chain: "Base", tvlUsd: 9_000_000 }],
+      geckoId: null,
+      sourceUrl: "https://defillama.com/protocol/receipt-conflict",
+      capturedAt: "2026-08-20T12:01:00.000Z",
+      binding: {
+        method: "matched_chain_contract",
+        scope: "project_and_token",
+        protocolSlug: "receipt-conflict",
+        canonicalChain: "base",
+        canonicalAddress: address,
+        providerChain: "base",
+        providerAddress: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      },
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "traction" && fact.value.includes("total value locked"))).toBe(false);
+  });
+
   it("appends the TVL trend so capital commitment reads as growth or bleed", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];
@@ -1037,7 +1236,7 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(tvl?.sources[0].excerpt).toContain("up 6% vs 30 days ago");
   });
 
-  it("projects protocol hacks as standalone critical facts instead of burying them in TVL prose", () => {
+  it("projects protocol incidents when the identity-bound TVL metric is checked-empty", () => {
     const evidence = emptyEvidence("@driftprotocol");
     evidence.roles = [SubjectClass.PROJECT];
     bindCanonicalProjectToken(evidence, "drift-protocol", "Drift", "DRIFT");
@@ -1045,9 +1244,10 @@ describe("projectProviderBackedBasicFacts", () => {
       slug: "drift",
       name: "Drift",
       symbol: "DRIFT",
-      tvlUsd: 100_000_000,
-      chains: ["Solana"],
-      chainBreakdown: [{ chain: "Solana", tvlUsd: 100_000_000 }],
+      tvlUsd: null,
+      tvlState: "checked_empty",
+      chains: [],
+      chainBreakdown: [],
       geckoId: "drift-protocol",
       hacks: [{
         date: "2026-04-01",
@@ -1072,7 +1272,7 @@ describe("projectProviderBackedBasicFacts", () => {
     }));
     expect(incident?.value).toContain("2026-04-01 · $295M security incident");
     expect(incident?.value).toContain("Compromised Admin");
-    expect(tvl?.sources[0].excerpt).not.toContain("security incident");
+    expect(tvl).toBeUndefined();
   });
 
   it("mints a citable, floor-ineligible fact from multi-firm audit attestation", () => {

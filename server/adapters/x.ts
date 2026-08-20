@@ -11,6 +11,7 @@ import type { Adapter, CollectContext } from "./types";
 import { env, DISCOVERY_MODEL, providerFallbacksEnabled } from "../config";
 import { addGrokUsage, addClaudeUsage, recordCall, recordTwitterapi, grokSpendUsd } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
+import { auditMemo, subjectCacheAccess } from "../auditRunContext";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower, WebTeamMember } from "../../src/data/evidence";
 import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
@@ -62,7 +63,8 @@ export async function grokSearch(system: string, user: string, opts?: {
   // 24h read-through cache: a subject's team/affiliations don't change
   // hour-to-hour, and live search is the dominant spend. Keyed by the CALLER's
   // stable subject key (never the raw prompt — prompts embed volatile posts).
-  if (opts?.cacheKey && !opts.bypassCache) {
+  const cacheAccess = subjectCacheAccess(opts?.bypassCache === true);
+  if (opts?.cacheKey && cacheAccess.read) {
     const hit = await cacheGet(opts.cacheKey);
     if (hit) return hit;
   }
@@ -140,7 +142,7 @@ export async function grokSearch(system: string, user: string, opts?: {
 
   let result = await call(true);
   if (result.status === 400 && !result.budgetExhausted) result = await call(false); // param unsupported -> compat retry
-  if (result.text && opts?.cacheKey && !opts.bypassCache) void cacheSet(opts.cacheKey, result.text);
+  if (result.text && opts?.cacheKey && cacheAccess.write) void cacheSet(opts.cacheKey, result.text);
   return result.text;
 }
 
@@ -161,7 +163,8 @@ export async function claudeWebSearch(system: string, user: string, opts?: {
 }): Promise<string | null> {
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
-  if (opts?.cacheKey && !opts.bypassCache) {
+  const cacheAccess = subjectCacheAccess(opts?.bypassCache === true);
+  if (opts?.cacheKey && cacheAccess.read) {
     const hit = await cacheGet(opts.cacheKey);
     if (hit) return hit;
   }
@@ -215,7 +218,7 @@ export async function claudeWebSearch(system: string, user: string, opts?: {
     .map((block) => block.text as string)
     .join("\n");
   addClaudeUsage(usage, "web-search", text ? "succeeded" : "partial", text ? undefined : "empty_output", DISCOVERY_MODEL);
-  if (text && opts?.cacheKey && !opts.bypassCache) void cacheSet(opts.cacheKey, text);
+  if (text && opts?.cacheKey && cacheAccess.write) void cacheSet(opts.cacheKey, text);
   return text || null;
 }
 
@@ -316,6 +319,43 @@ export interface XProfile {
   image?: string; // real X profile photo URL (more reliable than an unavatar guess)
 }
 
+function decodePublicHtmlText(value: string): string {
+  const numericDecoded = value.replace(
+    /&#(?:x([0-9a-f]+)|(\d+));/gi,
+    (entity, hex: string | undefined, decimal: string | undefined) => {
+      const codePoint = Number.parseInt(hex ?? decimal ?? "", hex ? 16 : 10);
+      if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return entity;
+      try {
+        return String.fromCodePoint(codePoint);
+      } catch {
+        return entity;
+      }
+    },
+  );
+  return numericDecoded
+    .replace(/&(?:apos|rsquo);/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+/**
+ * Extract only readable page text from a public X response. Hydration payloads
+ * routinely contain labels for every account state; those strings are code, not
+ * a statement about the requested account.
+ */
+export function publicXVisibleText(html: string): string {
+  return decodePublicHtmlText(html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<(script|style|template|noscript)\b[^>]*\/\s*>/gi, " ")
+    .replace(/<[^>]*>/g, " "))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
  * X's public, logged-out profile HTML contains a server-rendered terminal
  * account state. Probe it only after the licensed profile provider fails, so
@@ -358,8 +398,9 @@ export async function publicXAccountState(
   // Only X's explicit human-readable terminal statements establish account
   // state. Hidden reason fields, an HTTP 404, or a generic unavailable page do
   // not prove that this specific account was suspended or does not exist.
-  const suspended = /\bAccount suspended\b/i.test(html);
-  const nonexistent = /\bThis account (?:doesn['’]t|does not) exist\b/i.test(html);
+  const visibleText = publicXVisibleText(html);
+  const suspended = /\bAccount suspended\b/i.test(visibleText);
+  const nonexistent = /\bThis account (?:doesn['’]t|does not) exist\b/i.test(visibleText);
   if (suspended || nonexistent) {
     const accountStatus = suspended ? "suspended" : "unavailable";
     recordCall("x-public", "account-state", 0, `${u} · ${accountStatus}`, "succeeded");
@@ -515,9 +556,11 @@ export async function handleHistory(handle: string): Promise<{ priorHandles: str
 // stay uncached so pagination and later retries behave exactly as before.
 const LAST_TWEETS_MEMO_TTL_MS = 10 * 60_000;
 const LAST_TWEETS_MEMO_MAX = 64; // bound warm-instance growth across audits
-const lastTweetsMemo = new Map<string, { at: number; payload: unknown }>();
-export function clearLastTweetsMemo(): void { lastTweetsMemo.clear(); } // test isolation seam
+const currentLastTweetsMemo = () =>
+  auditMemo<{ at: number; payload: unknown }>("x:last-tweets");
+export function clearLastTweetsMemo(): void { currentLastTweetsMemo().clear(); } // test isolation seam
 async function lastTweetsFirstPage(handle: string, key: string): Promise<any | null> {
+  const lastTweetsMemo = currentLastTweetsMemo();
   const u = handle.replace(/^@/, "");
   const memoKey = u.toLowerCase();
   const hit = lastTweetsMemo.get(memoKey);
@@ -790,15 +833,16 @@ interface FollowMemoSlot {
  * without a bound would be answered from a cache for the life of the process.
  */
 const FOLLOW_MEMO_MS = 30_000;
-const followMemo = new Map<string, FollowMemoSlot>();
+const currentFollowMemo = () => auditMemo<FollowMemoSlot>("x:follow");
 
 /** Forget this scan's follow answers. Callers with a real scan boundary call this at its start. */
 export function resetFollowScanMemo(): void {
-  followMemo.clear();
+  currentFollowMemo().clear();
 }
 
 // Does `source` follow `target`? One call via check_follow_relationship.
 export async function checkFollow(source: string, target: string): Promise<{ following: boolean | null; followedBy: boolean | null } | null> {
+  const followMemo = currentFollowMemo();
   const now = Date.now();
   for (const [key, slot] of followMemo) {
     if (!slot.inFlight && (!slot.settled || now - slot.settled.at >= FOLLOW_MEMO_MS)) followMemo.delete(key);
@@ -2219,10 +2263,11 @@ export interface ReverseBioDiscovery {
  * co-founder / COO / CEO / "we built @H" language. Display names never bind.
  * Serper/web search is never consulted.
  */
-const reverseBioMemo = new Map<string, Promise<ReverseBioDiscovery>>();
+const currentReverseBioMemo = () =>
+  auditMemo<Promise<ReverseBioDiscovery>>("x:reverse-bio");
 
 export function resetReverseBioMemo(): void {
-  reverseBioMemo.clear();
+  currentReverseBioMemo().clear();
 }
 
 export async function discoverReverseBioFromTwitterapi(
@@ -2230,6 +2275,7 @@ export async function discoverReverseBioFromTwitterapi(
   subjectName?: string,
   projectBio?: string,
 ): Promise<ReverseBioDiscovery> {
+  const reverseBioMemo = currentReverseBioMemo();
   const memoKey = subjectHandle.replace(/^@/, "").toLowerCase() || "_";
   const hit = reverseBioMemo.get(memoKey);
   if (hit) return hit;

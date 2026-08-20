@@ -242,9 +242,9 @@ export interface ProjectTokenSnapshot {
   address: string;
   chain: string;
   /**
-   * Protocol chain footprint from DeFiLlama TVL data, attached only when the
-   * DeFiLlama record joins this token by CoinGecko id (never by name), so a
-   * name-alike protocol can never lend its footprint to a token.
+   * Protocol chain footprint from DeFiLlama TVL data. New writes attach it only
+   * when the frozen protocol receipt has project_and_token scope (exact
+   * chain+contract or exact non-conflicting CoinGecko id); name never binds it.
    */
   deployedChains?: string[];
   homepage?: string;
@@ -323,10 +323,39 @@ export interface VentureTokenSnapshot extends ProjectTokenSnapshot {
   ventureName: string;
 }
 
+export type ProtocolBindingReceipt =
+  | {
+      method: "matched_protocol_gecko_id";
+      /** Absent on legacy CoinGecko-only receipts. New writes always freeze it. */
+      scope?: "project_and_token";
+      protocolSlug: string;
+      canonicalGeckoId: string;
+      /** Absent on legacy CoinGecko-only receipts. New writes always freeze it. */
+      providerGeckoId?: string;
+    }
+  | {
+      method: "matched_chain_contract";
+      scope: "project_and_token";
+      protocolSlug: string;
+      canonicalChain: string;
+      canonicalAddress: string;
+      providerChain: string;
+      providerAddress: string;
+    }
+  | {
+      method: "matched_official_x_and_domain";
+      scope: "project";
+      protocolSlug: string;
+      canonicalHandle: string;
+      canonicalDomain: string;
+      providerHandle: string;
+      providerDomain: string;
+    };
+
 export interface ProtocolFundingSnapshot {
   slug: string;
   name: string;
-  /** CoinGecko identity from the protocol record, used to bind it to the canonical token. */
+  /** Provider CoinGecko id, retained as one possible identity surface; the frozen binding receipt governs admission. */
   geckoId?: string | null;
   rounds: Array<{
     date: string | null;
@@ -340,6 +369,8 @@ export interface ProtocolFundingSnapshot {
   leadInvestors: string[];
   sourceUrl: string;
   capturedAt: string;
+  /** Frozen hard-anchor admission receipt. Absent only on legacy reports. */
+  binding?: ProtocolBindingReceipt;
 }
 
 /**
@@ -350,7 +381,10 @@ export interface ProtocolTvlSnapshot {
   slug: string;
   name: string;
   symbol: string | null;
-  tvlUsd: number;
+  /** Positive TVL measured in this capture; null when the identity-bound provider row was checked but supplied no usable positive TVL metric. */
+  tvlUsd: number | null;
+  /** New writes distinguish a measured metric from a checked-empty metric; legacy rows may omit this field. */
+  tvlState?: "measured" | "checked_empty";
   chains: string[];
   chainBreakdown: Array<{ chain: string; tvlUsd: number }>;
   geckoId: string | null;
@@ -374,6 +408,8 @@ export interface ProtocolTvlSnapshot {
   }>;
   sourceUrl: string;
   capturedAt: string;
+  /** Frozen hard-anchor admission receipt. Absent only on legacy reports. */
+  binding?: ProtocolBindingReceipt;
 }
 
 /**
@@ -471,12 +507,8 @@ export interface ProtocolFeesSnapshot {
   change30dOver30dPct?: number | null;
   sourceUrl: string;
   capturedAt: string;
-  /** Identity join performed by orchestration before this sidecar was admitted. */
-  binding?: {
-    canonicalGeckoId: string;
-    protocolSlug: string;
-    method: "matched_protocol_gecko_id";
-  };
+  /** Frozen hard-anchor admission receipt. Absent only on legacy reports. */
+  binding?: ProtocolBindingReceipt;
 }
 
 /**
@@ -847,7 +879,7 @@ export interface WebTeamMember {
   /** Governing relationship class shared by collection, scoring, graph, and UI. */
   relationship?: import("../lib/teamRelationships").ProjectRelationshipClass;
   /** Whose surface made the role claim; separate from whether the artifact was fetched. */
-  relationshipProvenance?: "subject_official" | "claimant_self" | "third_party";
+  relationshipProvenance?: "subject_official" | "claimant_self" | "counterparty" | "independent" | "third_party";
   linkedin?: string;
   evidence?: string;
   source: string; // where it came from: web/LinkedIn search, post role-scan, X content
