@@ -52,7 +52,8 @@ export interface ResearchTask {
   dispatchReason: string;
   stopWhen: string;
   blockedBy: string[];
-  collectionContract: ResearchCollectionContract;
+  /** Optional for backward compatibility with frozen v1 research plans. New plans always populate it. */
+  collectionContract?: ResearchCollectionContract;
   state: ResearchTaskState;
   outcome?: string;
 }
@@ -435,17 +436,18 @@ export function finalizeResearchPlan(
         ? ` (${reported.length} from source-reported context, not ARGUS verification)`
         : "";
       if (taskChecks.length) {
+        const collectionContract = task.collectionContract ?? collectionContractFor(task.capability);
         const independentOrigins = new Set(successful
           .filter((check) => check.status !== "reported" && providerCountsAsIndependent(check.provider))
           .map((check) => check.provider!.trim().toLowerCase())).size;
         const completedBoundedEmpty = successful.some((check) => check.status === "checked-empty");
         const independenceGap = !completedBoundedEmpty
-          && independentOrigins < task.collectionContract.minimumIndependentOrigins;
+          && independentOrigins < collectionContract.minimumIndependentOrigins;
         if (successful.length && (gaps.length || independenceGap)) {
           const gapParts = [
             gaps.length ? `${gaps.length} unresolved` : "",
             independenceGap
-              ? `only ${independentOrigins} of ${task.collectionContract.minimumIndependentOrigins} required independent origins recorded`
+              ? `only ${independentOrigins} of ${collectionContract.minimumIndependentOrigins} required independent origins recorded`
               : "",
           ].filter(Boolean).join("; ");
           return { ...task, state: "partial", outcome: `${successful.length} answered${reportedNote}; ${gapParts}` };
