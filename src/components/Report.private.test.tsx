@@ -487,6 +487,7 @@ describe("private person report evidence boundary", () => {
         provider: "team-page",
         evidence_origin: "deterministic",
         artifact_verified: true,
+        relationshipProvenance: "subject_official",
       }],
       leaderDepartures: [{
         name: "Ada Example",
@@ -1011,11 +1012,16 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    expect(container.textContent).toContain("≥$176M across 2 evidenced funding rounds");
-    expect(container.textContent).toContain("Series B");
-    expect(container.textContent).toContain("Polychain Capital");
-    expect(container.textContent).not.toContain("BlackRock");
-    expect(container.textContent).not.toContain("2 public funding rounds");
+    const decisionStory = container.querySelector("#basic-facts")?.textContent ?? "";
+    expect(decisionStory).toContain("≥$176M across 2 evidenced funding rounds");
+    expect(decisionStory).toContain("Series B");
+    expect(decisionStory).toContain("Polychain Capital");
+    expect(decisionStory).not.toContain("BlackRock");
+    expect(decisionStory).not.toContain("2 public funding rounds");
+
+    const rawProviderLedger = container.querySelector('[aria-label="Provider evidence ledgers"]')?.textContent ?? "";
+    expect(rawProviderLedger).toContain("Complete public funding ledger");
+    expect(rawProviderLedger).toContain("BlackRock");
   });
 
   it("renders never-collected follow and acknowledgment checks as unchecked instead of affirmative negatives", () => {

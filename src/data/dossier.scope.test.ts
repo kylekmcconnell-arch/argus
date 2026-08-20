@@ -106,7 +106,7 @@ describe("dossier finding scope", () => {
       { associate_handle: "@model_peer", relation: "possible teammate", provider: "grok", evidence_origin: "model_lead", artifact_verified: false },
     );
     evidence.webTeam = [
-      { name: "Verified Leader", handle: "@verified_leader", role: "CEO", source: "team page", provider: "team-page", evidence_origin: "deterministic", artifact_verified: true },
+      { name: "Verified Leader", handle: "@verified_leader", role: "CEO", source: "official project team page", sourceUrl: "https://project.example/team", provider: "team-page", evidence_origin: "deterministic", artifact_verified: true, relationshipProvenance: "subject_official" },
       { name: "Superteam DE", handle: "@superteamde", role: "ecosystem", kind: "org", source: "official project page", provider: "team-page", evidence_origin: "deterministic", artifact_verified: true, relationshipProvenance: "subject_official" },
       { name: "Strategic Super R", handle: "@strategicsuperr", role: "VC", kind: "person", source: "self bio", provider: "twitterapi", evidence_origin: "deterministic", artifact_verified: true, relationshipProvenance: "claimant_self" },
       { name: "Model Lead", handle: "@model_leader", role: "CTO", source: "web search", provider: "grok", evidence_origin: "model_lead", artifact_verified: false },
@@ -115,10 +115,12 @@ describe("dossier finding scope", () => {
         handle: "@model_link_candidate",
         linkedin: "linkedin.com/in/model-link-candidate",
         role: "COO",
-        source: "team page",
+        source: "official project team page",
+        sourceUrl: "https://project.example/team",
         provider: "team-page",
         evidence_origin: "deterministic",
         artifact_verified: true,
+        relationshipProvenance: "subject_official",
         identity_link_evidence_origin: "model_lead",
       },
       { name: "<UNKNOWN>", role: "<UNKNOWN>", source: "team page", provider: "team-page", evidence_origin: "deterministic", artifact_verified: true },
