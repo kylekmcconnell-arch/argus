@@ -5,12 +5,13 @@ on:
     branches: [main]
   pull_request:
 
-# Main: cancel stacked in-progress runs of the same default-branch ref so
-# duplicate failure emails do not pile up. PRs: unique-per-SHA group and no
-# cancel-in-progress, so a later commit cannot hide a real failure.
+# Keep exactly one active run per branch or pull request. Superseded commits
+# are still visible in GitHub history, but they do not consume runners or send
+# a backlog of failure notifications after a newer commit has replaced them.
+# The newest commit always runs the complete suite and remains authoritative.
 concurrency:
-  group: ci-${{ github.event_name == 'push' && github.ref || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   database:
