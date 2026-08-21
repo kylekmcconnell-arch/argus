@@ -9,6 +9,24 @@ import type { TeamMember } from "./x";
 const normalizedApex = (domain: string) =>
   domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./i, "").toLowerCase();
 
+/**
+ * One bounded retry on a thrown fetch (DNS blip, dropped connection, timeout).
+ * The roster fetches arrive in a burst right after the substance fetch, and an
+ * origin that resets one connection under that burst routinely serves the
+ * retry; a scan that lost its team page, doc index, AND credits page to
+ * transport_error published "3 sources temporarily unavailable" for what one
+ * retry would have covered. `init` is a factory so each attempt gets a fresh
+ * AbortSignal (a fired timeout signal would instantly abort the retry).
+ */
+async function fetchWithOneRetry(url: string, init: () => RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init());
+  } catch {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    return fetch(url, init());
+  }
+}
+
 // Common places a crypto/tech project lists its people. Probe the most likely
 // paths first and stop when one works. The previous 48-URL fan-out made an
 // ordinary "no public team page" result look like a provider outage and added
@@ -86,11 +104,11 @@ async function discoverTeamDocumentUrls(domain: string): Promise<string[]> {
   ];
   const bodies = await Promise.all(indexes.map(async (url) => {
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithOneRetry(url, () => ({
         headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/plain,application/xml,text/xml" },
         redirect: "follow",
         signal: AbortSignal.timeout(8000),
-      });
+      }));
       if (!response.ok) {
         recordCall(
           "site-fetch",
@@ -324,7 +342,7 @@ async function fetchPage(url: string, expectedApex: string, purpose: "roster" | 
   const op = purpose === "credits" ? "site-credits" : "team-page";
   let response: Response;
   try {
-    response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,text/markdown,text/plain" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
+    response = await fetchWithOneRetry(url, () => ({ headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,text/markdown,text/plain" }, redirect: "follow", signal: AbortSignal.timeout(8000) }));
   } catch {
     recordCall("site-fetch", op, 0, "transport_error", "failed");
     return null;

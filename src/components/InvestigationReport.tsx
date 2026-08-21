@@ -1890,7 +1890,10 @@ export function InvestigationReport({
               onLoadCurrentIntelligence={loadCurrentIntelligence}
             />
             <TokenSnapshotVisuals token={token} showPriceMomentum={false} />
-            {isConcentratedLiquidityPool(token.dexId, token.dexLabels) && token.pairAddress && (
+            {/* Live on-chain custody trace. An anonymous share-link viewer has
+                no session, so its /api/nftlock call is a guaranteed 401 that
+                only hides the panel after a wasted request - skip it there. */}
+            {!shareView && isConcentratedLiquidityPool(token.dexId, token.dexLabels) && token.pairAddress && (
               <LpCustody chain={token.chain} pairAddress={token.pairAddress} />
             )}
             {(projectAccount?.protocolTvl || projectAccount?.protocolFees || projectAccount?.holderProfile) && (
