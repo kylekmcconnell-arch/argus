@@ -50,6 +50,7 @@ import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLangua
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
+import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
 
@@ -542,6 +543,14 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified by a supported collector on <span className="capitalize">{d.chain}</span>. Those axes are scored conservatively; this report cannot claim that path is complete.
           </div>
         )}
+
+        {/* the document's own actions: share the read-only file, save the PDF */}
+        <ReportActionsRow
+          canShare={canShare}
+          shareState={shareState}
+          onShare={() => void share()}
+          onExportPdf={() => printReportPdf(d.name || d.symbol)}
+        />
 
         {/* the composition: the file's table of contents, Auric File framing */}
         <section id="composition" className="af-doc mt-10 scroll-mt-28">

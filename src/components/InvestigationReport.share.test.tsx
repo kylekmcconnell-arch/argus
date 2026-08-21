@@ -825,6 +825,36 @@ describe("investigation exact sharing", () => {
     expect(fetchMock.mock.calls.every(([url]) => !String(url).includes("threat"))).toBe(true);
   });
 
+  it("the document actions row mints the same read-only link and offers the PDF", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: "/?share=opaque" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(investigation({
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000144",
+        reportVersionId,
+        version: 3,
+        completenessState: "complete",
+        attestationState: "server_collected",
+        methodologyVersion: "test-v1",
+        createdAt: "2026-07-10T12:00:00.000Z",
+        checks: [],
+      },
+    }));
+
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>("button")];
+    expect(buttons.some((button) => button.textContent?.trim() === "Export PDF ↓")).toBe(true);
+    const rowShare = buttons.find((button) => button.textContent?.trim() === "Share ↗");
+    expect(rowShare).toBeDefined();
+    await act(async () => { rowShare?.click(); await Promise.resolve(); });
+
+    const request = fetchMock.mock.calls.find((call) => String(call[0]) === "/api/share");
+    expect(request).toBeDefined();
+    expect(harness.clipboard).toHaveBeenCalledWith("http://localhost:3000/?share=opaque");
+  });
+
   it("copy tldr mints a share link and pastes it under the verdict lines", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
