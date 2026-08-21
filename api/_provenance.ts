@@ -406,7 +406,12 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
     roles.add(role);
     const axes = asRecord(roleReport.axes);
     const axisEntries = axes ? Object.entries(axes) : [];
-    if ((isIncomplete && axisEntries.length !== 0) || (!isIncomplete && (axisEntries.length < 1 || axisEntries.length > 80))) {
+    // An INCOMPLETE report may legitimately carry PARTIAL axis scores: the
+    // engine publishes every axis it could score and withholds the verdict
+    // (the preliminary-score surface renders exactly these). Zero axes is the
+    // decisionless-routing-failure shape and stays valid too. Only a complete
+    // report must score at least one axis per role.
+    if (axisEntries.length > 80 || (!isIncomplete && axisEntries.length < 1)) {
       throw new Error("invalid axis evidence lineage: axes");
     }
     for (const [axisId, rawAxis] of axisEntries) {
@@ -569,8 +574,8 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
     throw new Error("invalid axis evidence lineage: declared roles do not match role reports");
   }
   if (
-    (isIncomplete && (scoredAxes !== 0 || axisRows.length !== 0))
-    || (!isIncomplete && (scoredAxes < 1 || axisRows.length < scoredAxes))
+    (!isIncomplete && scoredAxes < 1)
+    || axisRows.length < scoredAxes
     || axisRows.length > 1_024
   ) {
     throw new Error("invalid axis evidence lineage: axis bounds");

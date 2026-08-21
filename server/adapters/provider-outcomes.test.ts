@@ -170,20 +170,29 @@ describe("keyless adapter attempt accounting", () => {
     ]));
   });
 
-  it("rejects the Bonfida error envelope and accepts only base58 .sol resolutions", async () => {
-    // Bonfida answers HTTP 200 { s: "error", result: "Domain not found" } for
-    // unregistered names; that string must never come back as an address.
+  it("accepts only base58 .sol resolutions from the web3.bio SNS profile", async () => {
+    // web3.bio answers 404 {"error":...} (returned by getJson as null) for
+    // unregistered names, and an identity row can carry an EVM address; only
+    // a base58 owner may ever come back as a Solana wallet.
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response(JSON.stringify({ s: "error", result: "Domain not found" }), 200, "application/json"))
-      .mockResolvedValueOnce(response(JSON.stringify({ s: "ok", result: "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T" }), 200, "application/json"));
+      .mockResolvedValueOnce(response(JSON.stringify({ address: null, error: "Not Found" }), 404, "application/json"))
+      .mockResolvedValueOnce(response(JSON.stringify([{ address: "0x1111111111111111111111111111111111111111", platform: "ethereum" }]), 200, "application/json"))
+      .mockResolvedValueOnce(response(JSON.stringify([{ address: "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T", platform: "sns", identity: "alice.sol" }]), 200, "application/json"));
     vi.stubGlobal("fetch", fetchMock);
 
     const miss = await withCostLedger(() => resolveName("ghost.sol"));
+    const evmOnly = await withCostLedger(() => resolveName("crosschain.sol"));
     const hit = await withCostLedger(() => resolveName("alice.sol"));
 
     expect(miss).toBeNull();
+    expect(evmOnly).toBeNull();
     expect(hit).toEqual({ address: "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T", chain: "solana" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "https://api.web3.bio/profile/ghost.sol",
+      "https://api.web3.bio/profile/crosschain.sol",
+      "https://api.web3.bio/profile/alice.sol",
+    ]);
   });
 
   it("does NOT resolve names embedded in gateway hosts, subdomains, or URL paths", async () => {

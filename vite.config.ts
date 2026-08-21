@@ -11,6 +11,9 @@ export default defineConfig({
     // Local Claude worktrees mirror the repository and otherwise make Vitest
     // discover every suite twice (and occasionally exhaust the worker pool).
     exclude: ["**/node_modules/**", "**/.git/**", "**/.claude/worktrees/**"],
+    // Several suites assert viewer-local date renderings against fixed
+    // fixtures; pin the suite to CI's timezone so they pass on any machine.
+    env: { TZ: "UTC" },
   },
   server: {
     proxy: {

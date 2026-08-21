@@ -1950,6 +1950,34 @@ export function deriveProjectStrengthBands(
       ...reasons,
     ].map((reason) => reason.slice(0, 240)).filter(Boolean))].slice(0, 12);
     const persistFloor = widenedByUnverified ? floorTier : undefined;
+    // Adverse bands must keep a counter-eligible anchor inside persistence's
+    // 32-item cap, so limiting artifacts join the set first.
+    let anchorIds = [...new Set([...limiting, ...anchors])].slice(0, 32);
+    if (!anchorIds.length && effectiveTier !== "none") {
+      // Persistence rejects a non-none band with no anchor at all, and one
+      // rejected band aborts the whole immutable save. Two inputs can lift a
+      // tier while contributing no anchor: rows without an artifactId of
+      // their own (team rows, the profile), and the internal assessedEmpty
+      // reclassification when only a checked-empty artifact covers the axis.
+      // Both shipped on the P4 path and every such report save was rejected.
+      // Anchor on the strongest axis-eligible catalog artifact instead:
+      // substantive first (a scored axis's band anchor must be substantive),
+      // then an absence artifact (legal precisely because an axis with no
+      // substantive evidence cannot be scored, and only scored axes have
+      // their band anchors eligibility-checked). When the catalog holds
+      // nothing for the axis, a plain "none" band keeps the persisted band
+      // set canonical.
+      const fallback = catalog.find((artifact) =>
+        artifact.verification === "verified" && artifact.eligibleAxes.includes(axis))
+        ?? catalog.find((artifact) =>
+          isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis))
+        ?? catalog.find((artifact) => artifact.eligibleAxes.includes(axis));
+      if (!fallback) {
+        bands[axis] = { tier: "none", minScore: 0, maxScore: 0, reasons: [], anchorArtifactIds: [] };
+        return;
+      }
+      anchorIds = [fallback.artifactId];
+    }
     bands[axis] = {
       tier: effectiveTier,
       ...(persistFloor !== undefined
@@ -1958,7 +1986,7 @@ export function deriveProjectStrengthBands(
       reasons: composedReasons.length || effectiveTier === "none"
         ? composedReasons
         : ["verified records reached this evidence tier"],
-      anchorArtifactIds: [...new Set([...anchors, ...limiting])],
+      anchorArtifactIds: anchorIds,
     };
   };
 

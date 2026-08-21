@@ -751,6 +751,72 @@ describe("frozen source artifact provenance", () => {
     expect(rows).toEqual([expect.objectContaining({ evidence_key: artifactId })]);
   });
 
+  it("persists a partial-scored INCOMPLETE report with its axis links", async () => {
+    // The engine publishes every axis it could score on an incomplete role
+    // report (the preliminary-score surface renders them). This shape used to
+    // be rejected outright, so no incomplete scan could ever persist.
+    const artifactId = `art_v1_${"f".repeat(64)}`;
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await persistProvenance(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        reportVersionId: "00000000-0000-4000-8000-000000000022",
+        attestationState: "server_collected",
+      },
+      {
+        axisCitationVersion: 1,
+        axisEvidenceCatalog: [{
+          artifactId,
+          contentHash: "f".repeat(64),
+          kind: "axis_evidence",
+          provider: "github",
+          operation: "account-resolution",
+          section: "identity",
+          title: "A frozen collector artifact remains available for review",
+          eligibleAxes: ["F1_identity_verifiability"],
+          verification: "verified",
+          scope: "direct_subject",
+        }],
+        report: {
+          composite_verdict: "INCOMPLETE",
+          governing_score: null,
+          roles: ["FOUNDER"],
+          role_reports: [{
+            role: "FOUNDER",
+            verdict: "INCOMPLETE",
+            score_total: null,
+            axes: {
+              F1_identity_verifiability: {
+                score: 9,
+                weight: 12,
+                role: "FOUNDER",
+                rationale: "Identity resolved from a verified account linkage.",
+                evidenceRefs: [artifactId],
+                counterEvidenceRefs: [],
+                gaps: [],
+              },
+            },
+          }],
+        },
+      },
+      [],
+    );
+
+    const requestedPaths = fetchMock.mock.calls.map((call) => String(call[0]));
+    expect(requestedPaths.some((path) => path.includes("/evidence_items?"))).toBe(true);
+    const linkCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/report_axis_evidence?"));
+    expect(linkCall).toBeDefined();
+    const linkRows = JSON.parse(String((linkCall![1] as RequestInit).body));
+    expect(linkRows).toEqual([expect.objectContaining({
+      axis_id: "F1_identity_verifiability",
+      artifact_id: artifactId,
+      relation: "support",
+    })]);
+  });
+
   it("persists PROJECT none bands as unscored INCOMPLETE evidence, never numeric zero", async () => {
     const artifactId = `art_v1_${"e".repeat(64)}`;
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
@@ -1626,6 +1692,10 @@ describe("axis evidence migration contract (static SQL assertions only)", () => 
     new URL("../supabase/migrations/20260713115507_accept_counter_eligible_axes.sql", import.meta.url),
     "utf8",
   );
+  const partialScoredSql = readFileSync(
+    new URL("../supabase/migrations/20260822090000_persist_partial_scored_incomplete.sql", import.meta.url),
+    "utf8",
+  );
   const provenanceSource = readFileSync(new URL("./_provenance.ts", import.meta.url), "utf8");
 
   it("declares tenant-safe lineage tables, RLS, and immutable certification", () => {
@@ -1718,6 +1788,22 @@ describe("axis evidence migration contract (static SQL assertions only)", () => 
     expect(counterEligibilitySql).toContain(
       "'catalogArtifact', normalized.catalog_artifact",
     );
+  });
+
+  it("lets the SQL gate certify partial-scored INCOMPLETE reports under complete-report axis rules", () => {
+    // The relaxed gate keeps every per-axis rule and moves only the
+    // minimum-count floors: zero axes stays legal ONLY while incomplete.
+    expect(partialScoredSql).not.toContain("incomplete strict report must not contain scored axes");
+    expect(partialScoredSql).toContain("not between (case when v_is_incomplete then 0 else 1 end) and 80");
+    expect(partialScoredSql).toContain("if (not v_is_incomplete and v_scored_axis_count < 1)");
+    expect(partialScoredSql).toContain("if v_link_count < v_scored_axis_count or v_link_count > 1024 then");
+    // The per-axis machinery must survive the rewrite verbatim.
+    expect(partialScoredSql).toContain("strict report references an absent or ineligible artifact");
+    expect(partialScoredSql).toContain("absence support requires an explicit axis gap");
+    expect(partialScoredSql).toContain("absence evidence cannot be used as counter-evidence");
+    expect(partialScoredSql).toContain("persisted axis links do not exactly match the strict report");
+    expect(partialScoredSql).toContain("v_is_incomplete");
+    expect(partialScoredSql).toContain("{report,governing_score}') = 'null'");
   });
 
   it("adds a forward database gate requiring substantive support on every scored axis", () => {

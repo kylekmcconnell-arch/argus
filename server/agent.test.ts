@@ -6208,3 +6208,53 @@ describe("derived project bands omit illegal floorTier", () => {
     expect(bands.P4_backing_and_partners.floorTier).toBeUndefined();
   });
 });
+
+describe("derived project bands always persist", () => {
+  // The persistence contract rejects any non-none band with an empty
+  // anchorArtifactIds, and one rejected band aborts the whole immutable
+  // report save. Prod rejected every save with
+  // "invalid axis evidence lineage: P4_backing_and_partners.band.anchorArtifactIds"
+  // whenever a tier was lifted by evidence that contributes no anchor.
+  const anchored = (bands: Record<string, { tier: string; anchorArtifactIds: string[] }>) => {
+    for (const [axis, band] of Object.entries(bands)) {
+      if (band.tier === "none") continue;
+      expect(band.anchorArtifactIds.length, `${axis} (${band.tier})`).toBeGreaterThanOrEqual(1);
+      expect(band.anchorArtifactIds.length, axis).toBeLessThanOrEqual(32);
+    }
+  };
+
+  it("anchors assessed_null bands born from checked-empty coverage", () => {
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      checkOutcomes: [
+        { checkId: "project-token-identity", status: "checked-empty", provider: "test" },
+        { checkId: "project-backing-partners", status: "checked-empty", provider: "test" },
+      ],
+    }, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+    anchored(bands);
+    expect(bands.P4_backing_and_partners.tier).toBe("assessed_null");
+  });
+
+  it("anchors a tier lifted only by team rows that carry no artifactId", () => {
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      team: [
+        { name: "Alicia Vega", role: "Advisor", artifact_verified: true, evidence: "listed on the site" },
+        { name: "Marco Duran", role: "Strategic advisor", artifact_verified: true, evidence: "listed on the site" },
+      ],
+      sourceArtifacts: [{
+        kind: "page",
+        provider: "site-fetch",
+        title: "Team page",
+        url: "https://example.com/team",
+        artifactId: `art_v1_${"a".repeat(64)}`,
+        contentHash: "a".repeat(64),
+      }],
+    }, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+    anchored(bands);
+  });
+});

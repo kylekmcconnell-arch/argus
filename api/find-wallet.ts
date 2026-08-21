@@ -32,11 +32,18 @@ async function ensideas(name: string): Promise<string | null> {
   return d && typeof d.address === "string" && EVM.test(d.address) ? d.address : null;
 }
 async function snsResolve(name: string): Promise<string | null> {
-  const j = await getJson(`https://sns-sdk-proxy.bonfida.workers.dev/resolve/${encodeURIComponent(name.replace(/\.sol$/i, ""))}`);
-  // The proxy returns HTTP 200 { s: "error", result: "Domain not found" } for
-  // unregistered names: require the ok flag and a base58 address shape
-  // (mirrors server/adapters/wallet.ts).
-  return j && j.s === "ok" && typeof j.result === "string" && SOL.test(j.result) ? j.result : null;
+  // Bonfida's worker proxy (sns-sdk-proxy.bonfida.workers.dev) is dead: every
+  // lookup, valid or not, returns a bare Cloudflare "error code: 1042" page.
+  // web3.bio resolves SNS names keylessly (platform "sns", full name with the
+  // .sol suffix); require a base58 owner so an EVM identity row can never
+  // book a Solana wallet (mirrors server/adapters/wallet.ts).
+  const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);
+  const arr: unknown[] = Array.isArray(d) ? d : d ? [d] : [];
+  for (const row of arr) {
+    const address = (row as { address?: unknown } | null)?.address;
+    if (typeof address === "string" && SOL.test(address)) return address;
+  }
+  return null;
 }
 async function resolveName(name: string): Promise<{ address: string; chain: string } | null> {
   const lower = name.toLowerCase();
