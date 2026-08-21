@@ -1,6 +1,6 @@
 # ARGUS Early Access, Pricing, Feedback, and Referrals
 
-Status: implementation in review, August 21, 2026. Continues #86 / #88.
+Status: app on `main`; waitlist/credit SQL pending first GitHub→Supabase deploy. Continues #86 / #88.
 
 ## Product model
 
@@ -86,9 +86,30 @@ Cash payouts remain held until identity verification, tax forms, sanctions check
 2. Set RP display name to ARGUS.
 3. Set the stable RP ID to the canonical production domain.
 4. Add production and explicitly approved preview origins.
-5. Apply the growth-foundation and waitlist/credit migrations.
+5. Apply the growth-foundation and waitlist/credit migrations through the
+   GitHub pipeline below. Do not paste SQL by hand.
 6. Deploy the preview and complete passkey create/sign-in/recovery tests.
 7. Confirm early-access grant, credit debit, and referral attribution idempotency.
 8. Select billing provider and create live/test products.
 9. Add checkout, verified webhook fulfillment, refunds, and commission reversals.
 10. Complete legal review for affiliate cash payouts before activation.
+
+## Agent production pipeline
+
+Agents do not log into Supabase or Vercel. They open a GitHub PR. After review
+and merge to `main`:
+
+1. **App:** Vercel already deploys `kylekmcconnell-arch/argus` from `main`.
+2. **Database:** Supabase GitHub integration, project `mpjpmgdklxpzggypmpwn`,
+   **Deploy to production** on, **Automatic branching** off, working directory
+   `.`. New files under `supabase/migrations/` apply on that merge.
+3. **Billing:** stays disabled. No Stripe, checkout, or cash payouts.
+
+Schema work belongs in a new timestamped file in `supabase/migrations/`. Keep
+it additive and re-runnable. Product membership, credits, and waitlist rules
+stay server-owned.
+
+Optional fallback if the integration cannot run: GitHub environment
+`Production` secrets `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`, then
+**Actions → Production Supabase** with `confirm_production=apply-production-argus`.
+Do not put those values in Vercel env files or chat.
