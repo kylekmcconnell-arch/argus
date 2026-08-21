@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CopyIcon, WalletIcon, XIcon } from "@phosphor-icons/react";
 import { ReferralLeaderboard } from "./ReferralLeaderboard";
-import { PricingGrid } from "./PublicGrowthPages";
+import { PricingGrid } from "./PricingGrid";
 import type { ArgusPlan, LeaderboardRow, RevenueShareSplit } from "../lib/growth";
 
 interface AccountSnapshot {
