@@ -14,7 +14,9 @@ begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '120s';
 
-create table public.entity_facts (
+-- Production already has this table without version 20260720120000 recorded.
+-- Keep the existing version; do not invent a second history entry.
+create table if not exists public.entity_facts (
   organization_id          uuid not null,
   canonical_key            text not null,
   entity_type              text,
@@ -28,7 +30,7 @@ create table public.entity_facts (
   primary key (organization_id, canonical_key)
 );
 
-create index entity_facts_org_updated_idx
+create index if not exists entity_facts_org_updated_idx
   on public.entity_facts (organization_id, updated_at desc);
 
 drop trigger if exists entity_facts_touch on public.entity_facts;
