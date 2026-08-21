@@ -24,6 +24,7 @@ const supabase: SupabaseClient | null = authConfigured
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
+        experimental: { passkey: true },
       },
     })
   : null;
@@ -80,6 +81,69 @@ async function loadProfile(session: Session): Promise<ArgusSessionProfile> {
   return body as unknown as ArgusSessionProfile;
 }
 
+function PasskeyEnrollmentNotice({ children }: { children: React.ReactNode }) {
+  const [needed, setNeeded] = useState(false);
+  const [enrolling, setEnrolling] = useState(false);
+  const [error, setError] = useState("");
+  const dismissed = typeof window !== "undefined"
+    && window.sessionStorage.getItem("argus-passkey-nudge-dismissed") === "1";
+
+  useEffect(() => {
+    if (!supabase || dismissed) return;
+    let active = true;
+    void supabase.auth.passkey.list()
+      .then(({ data, error: listError }) => {
+        if (!active || listError) return;
+        setNeeded(Array.isArray(data) && data.length === 0);
+      })
+      .catch(() => {
+        // Passkeys are progressive enhancement; magic-link recovery remains.
+      });
+    return () => { active = false; };
+  }, [dismissed]);
+
+  const enroll = async () => {
+    if (!supabase || enrolling) return;
+    setEnrolling(true);
+    setError("");
+    try {
+      const { error: enrollError } = await supabase.auth.registerPasskey();
+      if (enrollError) throw enrollError;
+      setNeeded(false);
+    } catch (enrollError) {
+      setError(enrollError instanceof Error ? enrollError.message : "Passkey setup was cancelled.");
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
+  const dismiss = () => {
+    window.sessionStorage.setItem("argus-passkey-nudge-dismissed", "1");
+    setNeeded(false);
+  };
+
+  return (
+    <>
+      {children}
+      {needed && (
+        <aside className="fixed right-4 top-4 z-[70] w-[min(390px,calc(100%-2rem))] rounded-xl border border-signal/35 bg-panel p-4 shadow-xl" aria-label="Passkey setup">
+          <div className="text-[13.5px] font-medium text-ink">Secure ARGUS with a passkey</div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+            Use Face ID, Touch ID, Windows Hello, a device PIN, or a hardware key next time. Your email link stays available for recovery.
+          </p>
+          {error && <p className="mt-2 text-[11.5px] text-avoid" role="alert">{error}</p>}
+          <div className="mt-3 flex justify-end gap-2">
+            <button type="button" onClick={dismiss} className="btn-chip">Later</button>
+            <button type="button" onClick={() => void enroll()} disabled={enrolling} className="btn-primary px-3 py-1.5 text-[12px] disabled:opacity-50">
+              {enrolling ? "Opening passkey…" : "Create passkey"}
+            </button>
+          </div>
+        </aside>
+      )}
+    </>
+  );
+}
+
 function GateShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative flex min-h-screen flex-col items-center justify-center px-6" style={{ background: "var(--color-void)" }}>
@@ -102,6 +166,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [passkeySending, setPasskeySending] = useState(false);
   const [authenticatedButDenied, setAuthenticatedButDenied] = useState(false);
 
   const validate = useCallback(async (session: Session | null, validationId: number) => {
@@ -181,6 +246,21 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     [profile, signOut],
   );
 
+  const signInWithPasskey = async () => {
+    if (!supabase || passkeySending) return;
+    setPasskeySending(true);
+    setError("");
+    setMessage("");
+    try {
+      const { error: passkeyError } = await supabase.auth.signInWithPasskey();
+      if (passkeyError) throw passkeyError;
+    } catch (signInError) {
+      setError(signInError instanceof Error ? signInError.message : "Passkey sign-in was cancelled.");
+    } finally {
+      setPasskeySending(false);
+    }
+  };
+
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!supabase || sending) return;
@@ -241,7 +321,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (value) return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  if (value) {
+    return (
+      <AuthContext.Provider value={value}>
+        <PasskeyEnrollmentNotice>{children}</PasskeyEnrollmentNotice>
+      </AuthContext.Provider>
+    );
+  }
 
   return (
     <GateShell>
@@ -251,7 +337,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">
         {authenticatedButDenied
           ? "Your identity is verified, but this account is not an active member of an ARGUS workspace."
-          : "Use your approved work email. ARGUS will send a one-time sign-in link. No shared password."}
+          : "Use a passkey, or verify your approved work email once and create a passkey after entering ARGUS."}
       </p>
 
       {authenticatedButDenied ? (
@@ -259,7 +345,21 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           Sign out and use another account
         </button>
       ) : (
-        <form onSubmit={submit} className="mt-5">
+        <div className="mt-5">
+          <button
+            type="button"
+            onClick={() => void signInWithPasskey()}
+            disabled={passkeySending}
+            className="btn-primary w-full py-2.5 text-[13.5px] font-medium disabled:opacity-40"
+          >
+            {passkeySending ? "Opening passkey…" : "Sign in with a passkey"}
+          </button>
+          <div className="my-3 flex items-center gap-3" aria-hidden>
+            <span className="h-px flex-1 bg-line" />
+            <span className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">or use email</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+        <form onSubmit={submit}>
           <label htmlFor="argus-email" className="mb-1.5 block text-[12px] font-medium text-ink-dim">Work email</label>
           <input
             id="argus-email"
@@ -281,6 +381,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             {sending ? "Sending secure link…" : "Email me a sign-in link"}
           </button>
         </form>
+        </div>
       )}
 
       {message && <div className="mt-3 rounded-lg border border-signal/30 bg-signal/5 px-3 py-2.5 text-[12px] leading-relaxed text-signal-lift" role="status">{message}</div>}
