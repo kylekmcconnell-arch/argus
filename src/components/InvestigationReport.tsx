@@ -70,6 +70,7 @@ import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { VerdictHero } from "./VerdictHero";
+import { ReportActionsRow } from "./ReportActionsRow";
 import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
 import {
   BasicFactsPanel,
@@ -1468,6 +1469,14 @@ export function InvestigationReport({
             xHandle={projectX ?? token.cg?.twitter}
             contractAddress={token.address}
             links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
+          />
+
+          {/* the document's own actions: share the read-only file, save the PDF */}
+          <ReportActionsRow
+            canShare={canShare}
+            shareState={shareState}
+            onShare={() => void share()}
+            onExportPdf={() => printReportPdf(inv.token.name || inv.token.symbol)}
           />
 
           {/* the editorial opening, earned: only a decision-ready report gets
