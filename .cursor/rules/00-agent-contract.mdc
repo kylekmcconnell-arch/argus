@@ -1,0 +1,8 @@
+---
+description: Provider-neutral GitHub and OENBOT routing contract
+alwaysApply: true
+---
+
+Read `AGENTS.md` and `config/agent-context.json`, then run
+`node scripts/validate-agent-context.mjs` before editing. GitHub is the durable
+engineering handoff; OENBOT supplies runtime context and approvals.
