@@ -86,7 +86,12 @@ Cash payouts remain held until identity verification, tax forms, sanctions check
 2. Set RP display name to ARGUS.
 3. Set the stable RP ID to the canonical production domain.
 4. Add production and explicitly approved preview origins.
-5. Apply the growth-foundation and waitlist/credit migrations.
+5. Apply the growth-foundation and waitlist/credit migrations. Production uses
+   the existing GitHub `Production` environment (not Vercel env files): store
+   `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD` there, then run
+   **Actions → Production Supabase** with `confirm_production=apply-production-argus`.
+   That workflow runs `supabase db push` against project `mpjpmgdklxpzggypmpwn`
+   and does not enable billing.
 6. Deploy the preview and complete passkey create/sign-in/recovery tests.
 7. Confirm early-access grant, credit debit, and referral attribution idempotency.
 8. Select billing provider and create live/test products.

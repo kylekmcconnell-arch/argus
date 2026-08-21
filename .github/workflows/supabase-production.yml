@@ -1,0 +1,144 @@
+# Manual production-database activation. Does not deploy the app, touch Vercel
+# env, or enable billing. Secrets stay on the existing GitHub Production
+# environment and are never echoed.
+#
+# Required Production environment secrets (names only):
+#   SUPABASE_ACCESS_TOKEN  — Supabase account token with this project
+#   SUPABASE_DB_PASSWORD   — database password for project mpjpmgdklxpzggypmpwn
+#
+# Run: Actions → Production Supabase → Run workflow
+#      confirm_production = apply-production-argus
+
+name: Production Supabase
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_production:
+        description: Type apply-production-argus to target mpjpmgdklxpzggypmpwn
+        required: true
+        type: string
+      set_passkey_rp:
+        description: Set passkey RP ID to argus-one-flax.vercel.app
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-production
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    if: ${{ inputs.confirm_production == 'apply-production-argus' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: Production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: mpjpmgdklxpzggypmpwn
+      APP_HOST: argus-one-flax.vercel.app
+      APP_ORIGIN: https://argus-one-flax.vercel.app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+
+      - name: Confirm production target and required secrets
+        run: |
+          set -eu
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "Missing Production secret SUPABASE_ACCESS_TOKEN"
+            exit 1
+          fi
+          if [ -z "${SUPABASE_DB_PASSWORD:-}" ]; then
+            echo "Missing Production secret SUPABASE_DB_PASSWORD"
+            exit 1
+          fi
+          echo "Target project_ref=$PROJECT_REF"
+          echo "Target origin=$APP_ORIGIN"
+          echo "Billing remains disabled (workflow does not set ARGUS_BILLING_ENABLED)"
+
+      - name: Migration status before apply
+        run: supabase migration list --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD" --yes
+
+      - name: Apply pending migrations
+        run: supabase db push --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD" --yes
+
+      - name: Migration status after apply
+        run: supabase migration list --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD" --yes
+
+      - name: Verify join and leaderboard
+        run: |
+          set -eu
+          join_code=$(curl -sS -o /tmp/argus-join.json -w "%{http_code}" \
+            -X POST \
+            -H "Origin: $APP_ORIGIN" \
+            -H "content-type: application/json" \
+            -d '{"email":"argus-migration-verify@example.com","publicName":"Migration Verify","returnTo":"/"}' \
+            "$APP_ORIGIN/api/join")
+          echo "POST /api/join -> $join_code"
+          python3 -c 'import json; body=json.load(open("/tmp/argus-join.json")); print("join keys", sorted(body)); print("join error", body.get("error"))'
+          test "$join_code" = "202"
+
+          board_code=$(curl -sS -o /tmp/argus-leaderboard.json -w "%{http_code}" \
+            -H "Origin: $APP_ORIGIN" \
+            "$APP_ORIGIN/api/leaderboard")
+          echo "GET /api/leaderboard -> $board_code"
+          python3 -c '
+          import json, sys
+          body = json.load(open("/tmp/argus-leaderboard.json"))
+          if body.get("error"):
+              print("leaderboard error", body.get("error"))
+              raise SystemExit(1)
+          dumped = json.dumps(body)
+          if "@" in dumped and "email" in dumped.lower():
+              print("leaderboard unexpectedly included email-like fields")
+              raise SystemExit(1)
+          pricing = body.get("pricing") or {}
+          share = body.get("revenueShare") or {}
+          print("checkoutActive", pricing.get("checkoutActive"))
+          print("cashPayoutsActive", share.get("cashPayoutsActive"))
+          print("rowCount", len(body.get("leaderboard") or []))
+          if pricing.get("checkoutActive") is not False:
+              raise SystemExit(1)
+          if share.get("cashPayoutsActive") is not False:
+              raise SystemExit(1)
+          '
+          test "$board_code" = "200"
+
+      - name: Set and verify passkey RP ID
+        if: ${{ inputs.set_passkey_rp }}
+        run: |
+          set -eu
+          curl -sS -X PATCH \
+            "https://api.supabase.com/v1/projects/${PROJECT_REF}/config/auth" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"passkey_enabled\":true,\"webauthn_rp_display_name\":\"ARGUS\",\"webauthn_rp_id\":\"${APP_HOST}\",\"webauthn_rp_origins\":\"${APP_ORIGIN}\"}" \
+            -o /tmp/argus-auth-config.json
+          python3 -c '
+          import json, sys
+          body = json.load(open("/tmp/argus-auth-config.json"))
+          fields = {
+              "passkey_enabled": body.get("passkey_enabled"),
+              "webauthn_rp_display_name": body.get("webauthn_rp_display_name"),
+              "webauthn_rp_id": body.get("webauthn_rp_id"),
+              "webauthn_rp_origins": body.get("webauthn_rp_origins"),
+          }
+          print(json.dumps(fields, sort_keys=True))
+          if fields["passkey_enabled"] is not True:
+              raise SystemExit(1)
+          if fields["webauthn_rp_display_name"] != "ARGUS":
+              raise SystemExit(1)
+          if fields["webauthn_rp_id"] != "argus-one-flax.vercel.app":
+              raise SystemExit(1)
+          if "https://argus-one-flax.vercel.app" not in (fields["webauthn_rp_origins"] or ""):
+              raise SystemExit(1)
+          '
