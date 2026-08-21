@@ -1693,7 +1693,7 @@ describe("axis evidence migration contract (static SQL assertions only)", () => 
     "utf8",
   );
   const partialScoredSql = readFileSync(
-    new URL("../supabase/migrations/20260821120000_persist_partial_scored_incomplete.sql", import.meta.url),
+    new URL("../supabase/migrations/20260822090000_persist_partial_scored_incomplete.sql", import.meta.url),
     "utf8",
   );
   const provenanceSource = readFileSync(new URL("./_provenance.ts", import.meta.url), "utf8");
