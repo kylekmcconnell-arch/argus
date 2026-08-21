@@ -1,5 +1,6 @@
 -- Early-access growth, metered credits, referrals, and Claude feedback queue.
 -- Additive only. Every table is server-mediated and locked away from the Data API.
+-- Production applied this as 20260821135838; the repo previously used 20260821170000.
 
 create table public.credit_ledger (
   id uuid primary key default gen_random_uuid(),
