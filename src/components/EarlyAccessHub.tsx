@@ -1,44 +1,36 @@
 import { useEffect, useRef, useState } from "react";
-import { CopyIcon, MedalIcon, WalletIcon, XIcon } from "@phosphor-icons/react";
+import { CopyIcon, WalletIcon, XIcon } from "@phosphor-icons/react";
+import { ReferralLeaderboard } from "./ReferralLeaderboard";
+import { PricingGrid } from "./PublicGrowthPages";
+import type { ArgusPlan, LeaderboardRow, RevenueShareSplit } from "../lib/growth";
 
-interface Plan {
-  id: string;
-  name: string;
-  monthlyUsd: number;
-  investigationCredits: number;
-  seats: number;
-  dailyLimit: number;
-  description: string;
-  extraPack?: { credits: number; usd: number };
-}
 interface AccountSnapshot {
+  access: "member" | "waitlist";
   credit: {
     balance: number;
     startingGrant: number;
+    dailyLimit: number;
     ledger: Array<{ amount: number; reason: string; createdAt: string }>;
-  };
+  } | null;
   referral: {
     code: string;
+    publicName: string;
     qualified: number;
+    rank: number;
     bonusPerQualifiedReferral: number;
-    leaderboard: Array<{ rank: number; code: string; referrals: number; isCurrentUser: boolean }>;
+    leaderboard: LeaderboardRow[];
     commission: {
       earnedCents: number;
       creditCents: number;
       cashCents: number;
       payableCashCents: number;
     };
-    revenueShare: {
-      commissionPercent: number;
-      creditSplitPercent: number;
-      cashSplitPercent: number;
-      cashPayoutsActive: boolean;
-    };
+    revenueShare: RevenueShareSplit;
   };
   pricing: {
     currency: string;
     creditDefinition: string;
-    plans: Plan[];
+    plans: ArgusPlan[];
     checkoutActive: boolean;
   };
 }
@@ -87,7 +79,7 @@ export function EarlyAccessHub() {
     dialogRef.current?.showModal();
   };
   const close = () => dialogRef.current?.close();
-  const referralLink = data ? `${window.location.origin}/?ref=${data.referral.code}` : "";
+  const referralLink = data ? `${window.location.origin}/?view=join&ref=${data.referral.code}` : "";
 
   const copy = async () => {
     if (!referralLink) return;
@@ -105,13 +97,13 @@ export function EarlyAccessHub() {
         aria-label="Open credits, pricing, and referrals"
       >
         <WalletIcon size={17} aria-hidden />
-        <span>{data ? `${data.credit.balance.toFixed(1)} credits` : "Credits"}</span>
+        <span>{data?.credit ? `${data.credit.balance.toFixed(1)} credits` : "Credits"}</span>
       </button>
 
       <dialog
         ref={dialogRef}
         aria-labelledby="early-access-title"
-        className="m-auto max-h-[88dvh] w-[min(920px,calc(100%-2rem))] overflow-y-auto rounded-xl border border-line bg-void p-0 text-ink shadow-2xl backdrop:bg-black/70"
+        className="m-auto max-h-[88dvh] w-[min(1080px,calc(100%-2rem))] overflow-y-auto rounded-xl border border-line bg-void p-0 text-ink shadow-2xl backdrop:bg-black/70"
         onClick={(event) => {
           if (event.target === dialogRef.current) close();
         }}
@@ -119,7 +111,7 @@ export function EarlyAccessHub() {
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-line bg-void/95 px-5 py-4 backdrop-blur">
           <div>
             <div className="eyebrow">Early access account</div>
-            <h2 id="early-access-title" className="display-sm mt-1 text-[22px] text-ink">Credits, pricing, and referrals</h2>
+            <h2 id="early-access-title" className="display-sm mt-1 text-[24px] text-ink">Credits, pricing, and referrals</h2>
           </div>
           <button type="button" onClick={close} aria-label="Close account panel" className="rounded-md p-2 text-ink-dim hover:bg-panel hover:text-ink">
             <XIcon size={18} aria-hidden />
@@ -129,14 +121,21 @@ export function EarlyAccessHub() {
         <div className="space-y-6 p-5">
           {error && <div role="alert" className="rounded-lg border border-avoid/30 bg-avoid/5 px-3 py-2.5 text-[12.5px] text-avoid">{error}</div>}
           {!data ? (
-            <div role="status" className="py-12 text-center text-[13px] text-ink-dim">Loading account…</div>
+            <div role="status" className="py-12 text-center text-[13.5px] text-ink-dim">Loading account…</div>
           ) : (
             <>
-              <section className="grid gap-3 sm:grid-cols-3">
+              <section className="grid gap-3 sm:grid-cols-4">
                 <div className="stat-tile">
                   <div className="stat-label">Available</div>
-                  <div className="stat-value mt-1">{data.credit.balance.toFixed(1)}</div>
-                  <div className="mt-1 text-[11px] text-ink-faint">investigation credits</div>
+                  <div className="stat-value mt-1">{data.credit ? data.credit.balance.toFixed(1) : "0.0"}</div>
+                  <div className="mt-1 text-[11px] text-ink-faint">
+                    {data.credit ? `${data.credit.startingGrant} starting · ${data.credit.dailyLimit}/day` : "investigation credits"}
+                  </div>
+                </div>
+                <div className="stat-tile">
+                  <div className="stat-label">Board rank</div>
+                  <div className="stat-value mt-1">#{data.referral.rank}</div>
+                  <div className="mt-1 text-[11px] text-ink-faint">earlier rank, earlier access</div>
                 </div>
                 <div className="stat-tile">
                   <div className="stat-label">Qualified referrals</div>
@@ -146,68 +145,37 @@ export function EarlyAccessHub() {
                 <div className="stat-tile">
                   <div className="stat-label">Referral earnings</div>
                   <div className="stat-value mt-1">{money(data.referral.commission.earnedCents)}</div>
-                  <div className="mt-1 text-[11px] text-ink-faint">cash payouts activate after compliance setup</div>
+                  <div className="mt-1 text-[11px] text-ink-faint">{data.referral.revenueShare.creditSplitPercent}% credits · {data.referral.revenueShare.cashSplitPercent}% cash held</div>
                 </div>
               </section>
 
               <section>
-                <h3 className="text-[14px] font-medium text-ink">Your referral link</h3>
-                <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">
-                  Qualified referrals move you up the board and add test credits. Revenue share is configured at {data.referral.revenueShare.commissionPercent}% of referred subscription revenue: {data.referral.revenueShare.creditSplitPercent}% of the commission as ARGUS credits and {data.referral.revenueShare.cashSplitPercent}% as cash.
+                <h3 className="text-[15px] font-medium text-ink">Your referral link</h3>
+                <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
+                  Qualified referrals move you up the board. Revenue share is {data.referral.revenueShare.commissionPercent}% of referred subscription value, paid as {data.referral.revenueShare.creditSplitPercent}% ARGUS credits and {data.referral.revenueShare.cashSplitPercent}% cash.
                 </p>
                 <div className="mt-3 flex gap-2">
-                  <input readOnly value={referralLink} aria-label="Referral link" className="field mono min-w-0 flex-1 px-3 py-2 text-[12px]" />
-                  <button type="button" onClick={() => void copy()} className="btn-primary flex items-center gap-2 px-3 py-2 text-[12px]">
+                  <input readOnly value={referralLink} aria-label="Referral link" className="field mono min-w-0 flex-1 px-3 py-2 text-[12.5px]" />
+                  <button type="button" onClick={() => void copy()} className="btn-primary flex items-center gap-2 px-3 py-2 text-[12.5px]">
                     <CopyIcon size={15} aria-hidden /> {copied ? "Copied" : "Copy"}
                   </button>
                 </div>
               </section>
 
               <section>
-                <div className="flex items-center gap-2">
-                  <MedalIcon size={18} className="text-signal-lift" aria-hidden />
-                  <h3 className="text-[14px] font-medium text-ink">Referral leaderboard</h3>
-                </div>
-                <div className="panel mt-3 overflow-hidden">
-                  {data.referral.leaderboard.length === 0 ? (
-                    <div className="px-4 py-6 text-center text-[12px] text-ink-faint">No qualified referrals yet.</div>
-                  ) : data.referral.leaderboard.map((row) => (
-                    <div key={row.code} className={`flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-0 ${row.isCurrentUser ? "bg-signal/5" : ""}`}>
-                      <span className="mono w-8 text-[12px] text-ink-faint">#{row.rank}</span>
-                      <span className="mono min-w-0 flex-1 truncate text-[12.5px] text-ink">{row.code}{row.isCurrentUser ? " · you" : ""}</span>
-                      <span className="mono text-[12px] text-ink-dim">{row.referrals}</span>
-                    </div>
-                  ))}
+                <h3 className="text-[15px] font-medium text-ink">Referral leaderboard</h3>
+                <div className="mt-3">
+                  <ReferralLeaderboard rows={data.referral.leaderboard} empty="No qualified referrals yet." />
                 </div>
               </section>
 
               <section>
-                <h3 className="text-[14px] font-medium text-ink">Proposed pricing</h3>
-                <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">
-                  One credit funds one standard investigation. Prices are based on the current provider-cost distribution and remain in test mode until billing is connected.
+                <h3 className="text-[15px] font-medium text-ink">Pricing</h3>
+                <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
+                  One credit funds one standard investigation. Extra packs are listed so testers can pay for more once billing is connected.
                 </p>
-                <div className="mt-3 grid gap-3 md:grid-cols-3">
-                  {data.pricing.plans.map((plan) => (
-                    <article key={plan.id} className="panel flex flex-col p-4">
-                      <div className="text-[13.5px] font-medium text-ink">{plan.name}</div>
-                      <div className="mt-2 text-[24px] font-semibold text-ink">
-                        {plan.monthlyUsd ? `$${plan.monthlyUsd}` : "Free"}
-                        {plan.monthlyUsd > 0 && <span className="ml-1 text-[11px] font-normal text-ink-faint">/ month</span>}
-                      </div>
-                      <p className="mt-2 min-h-10 text-[11.5px] leading-relaxed text-ink-dim">{plan.description}</p>
-                      <ul className="mt-3 space-y-1 text-[11.5px] text-ink-dim">
-                        <li>{plan.investigationCredits} investigation credits</li>
-                        <li>{plan.seats} {plan.seats === 1 ? "seat" : "seats"}</li>
-                        <li>{plan.dailyLimit} investigations/day guardrail</li>
-                        {plan.extraPack && <li>{`$${plan.extraPack.usd} per ${plan.extraPack.credits} extra credits`}</li>}
-                      </ul>
-                      {plan.monthlyUsd > 0 && (
-                        <button type="button" disabled className="btn-primary mt-4 w-full py-2 text-[12px] disabled:opacity-50">
-                          Billing connection pending
-                        </button>
-                      )}
-                    </article>
-                  ))}
+                <div className="mt-3">
+                  <PricingGrid plans={data.pricing.plans} checkoutActive={data.pricing.checkoutActive} />
                 </div>
               </section>
             </>

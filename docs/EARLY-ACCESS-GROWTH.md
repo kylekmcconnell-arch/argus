@@ -1,12 +1,12 @@
 # ARGUS Early Access, Pricing, Feedback, and Referrals
 
-Status: draft implementation contract, August 21, 2026.
+Status: implementation in review, August 21, 2026. Continues #86 / #88.
 
 ## Product model
 
 ARGUS meters standard investigations with investigation credits instead of exposing raw provider dollars. Current 30-day production evidence shows an average provider cost of about $1.11 per saved report, a median of $0.97, and a p90 of $2.26. Credits keep the user experience stable while preserving enough price headroom for variance, support, storage, retries, and fixed infrastructure.
 
-### Proposed launch pricing
+### Launch pricing
 
 | Plan | Monthly price | Included investigations | Seats | Daily guardrail | Additional credits |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -21,24 +21,25 @@ Prices are configuration, not an accounting source of truth. Paid checkout remai
 
 ## Signup and passkeys
 
-1. An owner invites an early tester through the existing workspace access flow.
-2. The tester proves email possession with the existing single-use link.
-3. ARGUS prompts the confirmed user to register a passkey.
-4. Subsequent sign-in prefers the discoverable passkey. Email link remains a recovery path.
-5. Workspace membership, role, activation, and credit entitlement remain server-owned.
+1. Anyone can request early access at `/?view=join` with a public board name and email.
+2. ARGUS emails a one-time link. Opening it proves email possession and places the person on the waitlist, not in the product.
+3. ARGUS then asks them to register a passkey. Subsequent sign-in prefers the discoverable passkey. Email remains recovery.
+4. Rank on the public referral leaderboard (`/?view=leaderboard`) determines earlier product access. Owners can admit a waitlist identity from Access and activity.
+5. Admitted testers receive workspace membership, the 10-credit starting grant, and the early-access daily guardrail.
 
-Supabase passkeys are experimental as of this implementation. The relying-party ID must be selected once and kept stable. Production should use the canonical ARGUS domain; previews need allowed origins under the same RP ID or a separate preview Auth project.
+Supabase passkeys are experimental. The relying-party ID must be selected once and kept stable. Production should use the canonical ARGUS domain; previews need allowed origins under the same RP ID or a separate preview Auth project.
 
 ## Early-access credits and limits
 
-- Every active tester receives an idempotent 10-credit starting grant when their growth account is first opened.
-- Existing server-side daily investigation limits continue to constrain abuse during the first test phase.
-- Credit deductions are not enforced until the reserve/finalize path is wired to scan lifecycle events and seeded accounts have been reviewed.
+- Every admitted tester receives an idempotent 10-credit starting grant.
+- Non-owner investigations debit one credit and remain under the 3/day early-access guardrail unless `ARGUS_DAILY_INVESTIGATION_LIMIT` is set.
+- Credit exhaustion fails closed. Daily quota still fails open on storage blips.
 - The credit ledger is append-only. Adjustments and refunds are new rows, never balance rewrites.
+- Extra credit packs are listed on pricing. Checkout stays off until billing is authorized.
 
 ## Feedback to Claude
 
-A persistent hover button is available to authenticated users. A submission records:
+A persistent hover button is available to authenticated members. A submission records:
 
 - exact route and optional report version;
 - viewport and document title;
@@ -46,22 +47,24 @@ A persistent hover button is available to authenticated users. A submission reco
 - immutable submitter and workspace;
 - Claude assignment and lifecycle status.
 
-Owners manage the queue as To do, Planned, In progress, Done, or Won't do. “Assigned to Claude” is task routing, not permission for autonomous production changes.
+Owners manage the queue as To do, Planned, In progress, Done, or Won't do, including a Done checkbox. "Assigned to Claude" is task routing, not permission for autonomous production changes.
 
 ## Referrals
 
 ### Access leaderboard
 
-Every active member gets a referral code. Attribution occurs once, after the referred user has authenticated and received workspace access. Qualified referrals:
+Every waitlist identity and admitted member gets a referral code. Attribution occurs once after the referred person authenticates. Qualified referrals:
 
-- add two ARGUS credits to the referrer;
-- increase the referrer's leaderboard position;
+- increase leaderboard rank (ties break to the earlier signup);
+- add two ARGUS credits to the referrer once that referrer has an organization;
 - cannot be self-referrals;
 - cannot be reassigned after first attribution.
 
+Public rows expose public names, ranks, access state, and counts. They never expose email addresses.
+
 ### Subscription revenue share
 
-Proposed default: a referrer earns 20% of collected subscription revenue from a referred customer. Of that commission:
+Default: a referrer earns 20% of collected subscription revenue from a referred customer. Of that commission:
 
 - 25% is issued as ARGUS credits;
 - 75% is tracked as cash.
@@ -74,8 +77,8 @@ Cash payouts remain held until identity verification, tax forms, sanctions check
 - Product tables are RLS-enabled and not directly granted to anon or authenticated roles.
 - Browser clients use authenticated ARGUS APIs; service credentials remain server-only.
 - Starting grants, referral claims, and future invoice commissions use idempotency keys.
-- Public leaderboard rows expose referral codes and counts, never email addresses.
-- Feedback updates require owner access.
+- Join and sign-in share hashed IP/email rate limits and generic success copy.
+- Feedback updates and waitlist admission require owner access.
 
 ## Activation checklist
 
@@ -83,9 +86,9 @@ Cash payouts remain held until identity verification, tax forms, sanctions check
 2. Set RP display name to ARGUS.
 3. Set the stable RP ID to the canonical production domain.
 4. Add production and explicitly approved preview origins.
-5. Apply the growth-foundation database migration.
+5. Apply the growth-foundation and waitlist/credit migrations.
 6. Deploy the preview and complete passkey create/sign-in/recovery tests.
-7. Confirm early-access grant and referral attribution idempotency.
+7. Confirm early-access grant, credit debit, and referral attribution idempotency.
 8. Select billing provider and create live/test products.
 9. Add checkout, verified webhook fulfillment, refunds, and commission reversals.
 10. Complete legal review for affiliate cash payouts before activation.
