@@ -45,6 +45,16 @@ describe("consumeInvestigationQuota resilience", () => {
     expect(quota.error).toBeUndefined();
   });
 
+  it("blocks an analyst when the credit ledger is exhausted", async () => {
+    const analyst: AuthContext = { ...auth, role: "analyst", email: "analyst@example.com" };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 2 }]))
+      .mockResolvedValueOnce(jsonResponse([{ allowed: false, balance_millis: 0 }])));
+    const quota = await consumeInvestigationQuota(analyst, "/api/audit");
+    expect(quota.allowed).toBe(false);
+    expect(quota.reason).toBe("credit_budget_exhausted");
+  });
+
   it("allows and reports usage when under the limit", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([{ allowed: true, used: 3, remaining: 97 }])));
     const quota = await consumeInvestigationQuota(auth, "/api/audit");

@@ -5,6 +5,7 @@ import {
   serviceCredentials,
   type ArgusRole,
 } from "./_auth.js";
+import { ensureGrowthProfile, ensureStartingCredits } from "./_growth.js";
 
 export const config = { maxDuration: 20 };
 
@@ -270,6 +271,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         active: true,
         eventType: invitationSent ? "member.invited" : "member.access_granted",
       });
+      await ensureGrowthProfile(client, {
+        userId: user.id,
+        email,
+        organizationId: auth.organizationId,
+        publicName: displayName,
+        status: "admitted",
+      });
+      await ensureStartingCredits(client, user.id, auth.organizationId);
       res.status(authUserCreated ? 201 : 200).json({
         member: memberView(member, user),
         invitationSent,

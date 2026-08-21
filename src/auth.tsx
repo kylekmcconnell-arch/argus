@@ -6,6 +6,7 @@ import {
   type AuthValue,
 } from "./auth-context";
 import { ArgusMark } from "./components/ArgusMark";
+import { WaitlistPortal } from "./components/WaitlistPortal";
 import {
   createAuthenticatedFetch,
   shouldRevalidateSession,
@@ -68,7 +69,16 @@ function installAuthenticatedFetch(): void {
 
 if (supabase) installAuthenticatedFetch();
 
-async function loadProfile(session: Session): Promise<ArgusSessionProfile> {
+interface WaitlistSession {
+  user: { id: string; email: string; displayName: string };
+  waitlist: { publicName: string; code: string; status: string };
+}
+
+type SessionResult =
+  | { kind: "member"; profile: ArgusSessionProfile }
+  | { kind: "waitlist"; session: WaitlistSession };
+
+async function loadProfile(session: Session): Promise<SessionResult> {
   const response = await fetch("/api/session", {
     headers: { authorization: `Bearer ${session.access_token}` },
     signal: AbortSignal.timeout(12_000),
@@ -78,7 +88,10 @@ async function loadProfile(session: Session): Promise<ArgusSessionProfile> {
     const message = typeof body.message === "string" ? body.message : "ARGUS access could not be verified.";
     throw new Error(message);
   }
-  return body as unknown as ArgusSessionProfile;
+  if (body.access === "waitlist") {
+    return { kind: "waitlist", session: body as unknown as WaitlistSession };
+  }
+  return { kind: "member", profile: body as unknown as ArgusSessionProfile };
 }
 
 function PasskeyEnrollmentNotice({ children }: { children: React.ReactNode }) {
@@ -161,16 +174,19 @@ function GateShell({ children }: { children: React.ReactNode }) {
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<ArgusSessionProfile | null>(null);
+  const [waitlist, setWaitlist] = useState<WaitlistSession | null>(null);
   const [loading, setLoading] = useState(authConfigured);
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [passkeySending, setPasskeySending] = useState(false);
+  const [enrolling, setEnrolling] = useState(false);
   const [authenticatedButDenied, setAuthenticatedButDenied] = useState(false);
 
   const validate = useCallback(async (session: Session | null, validationId: number) => {
     setProfile(null);
+    setWaitlist(null);
     setAuthenticatedButDenied(false);
     if (!session) {
       validatedAccessToken = null;
@@ -183,8 +199,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       const next = await loadProfile(session);
       if (validationId !== currentValidationId) return;
       validatedAccessToken = session.access_token;
-      setProfile(next);
-      setAnalyst(next.user.displayName);
+      if (next.kind === "waitlist") {
+        setWaitlist(next.session);
+        setAnalyst(next.session.user.displayName);
+      } else {
+        setProfile(next.profile);
+        setAnalyst(next.profile.user.displayName);
+      }
       setError("");
     } catch (validationError) {
       if (validationId !== currentValidationId) return;
@@ -238,6 +259,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     currentValidationId += 1;
     await supabase?.auth.signOut();
     setProfile(null);
+    setWaitlist(null);
     setAuthenticatedButDenied(false);
   }, []);
 
@@ -258,6 +280,20 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setError(signInError instanceof Error ? signInError.message : "Passkey sign-in was cancelled.");
     } finally {
       setPasskeySending(false);
+    }
+  };
+
+  const enrollPasskey = async () => {
+    if (!supabase || enrolling) return;
+    setEnrolling(true);
+    setError("");
+    try {
+      const { error: enrollError } = await supabase.auth.registerPasskey();
+      if (enrollError) throw enrollError;
+    } catch (enrollError) {
+      setError(enrollError instanceof Error ? enrollError.message : "Passkey setup was cancelled.");
+    } finally {
+      setEnrolling(false);
     }
   };
 
@@ -321,6 +357,18 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (waitlist) {
+    return (
+      <WaitlistPortal
+        displayName={waitlist.user.displayName}
+        onEnrollPasskey={enrollPasskey}
+        passkeyBusy={enrolling}
+        passkeyError={error}
+        onSignOut={signOut}
+      />
+    );
+  }
+
   if (value) {
     return (
       <AuthContext.Provider value={value}>
@@ -337,7 +385,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">
         {authenticatedButDenied
           ? "Your identity is verified, but this account is not an active member of an ARGUS workspace."
-          : "Use a passkey, or verify your approved work email once and create a passkey after entering ARGUS."}
+          : "Use a passkey, or verify your email once and create a passkey after you enter ARGUS."}
       </p>
 
       {authenticatedButDenied ? (
@@ -389,6 +437,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       <p className="mt-5 text-[11px] leading-relaxed text-ink-faint">
         Sessions are verified server-side. Workspace roles control reads, investigations, and destructive actions.
       </p>
+      {!authenticatedButDenied && (
+        <p className="mt-3 text-[12.5px] text-ink-dim">
+          New here? <a href="/?view=join" className="text-signal-lift underline">Request early access</a>
+          {" · "}
+          <a href="/?view=leaderboard" className="text-signal-lift underline">Referral board</a>
+          {" · "}
+          <a href="/?view=pricing" className="text-signal-lift underline">Pricing</a>
+        </p>
+      )}
     </GateShell>
   );
 }

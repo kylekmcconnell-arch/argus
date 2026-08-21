@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   resend: vi.fn(),
   from: vi.fn(),
   rpc: vi.fn(),
+  ensureGrowthProfile: vi.fn(),
+  ensureStartingCredits: vi.fn(),
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -19,6 +21,11 @@ vi.mock("@supabase/supabase-js", () => ({
 vi.mock("./_auth.js", () => ({
   requireArgusAuth: mocks.requireArgusAuth,
   serviceCredentials: mocks.serviceCredentials,
+}));
+
+vi.mock("./_growth.js", () => ({
+  ensureGrowthProfile: mocks.ensureGrowthProfile,
+  ensureStartingCredits: mocks.ensureStartingCredits,
 }));
 
 import handler from "./members";
@@ -111,6 +118,14 @@ describe("workspace member invitation recovery", () => {
     });
     mocks.resend.mockResolvedValue({ error: null });
     mocks.rpc.mockResolvedValue({ data: member, error: null });
+    mocks.ensureGrowthProfile.mockResolvedValue({
+      userId: MEMBER_ID,
+      publicName: "Enigma",
+      code: "ABCD1234",
+      status: "admitted",
+      createdAt: member.created_at,
+    });
+    mocks.ensureStartingCredits.mockResolvedValue(undefined);
   });
 
   afterEach(() => {

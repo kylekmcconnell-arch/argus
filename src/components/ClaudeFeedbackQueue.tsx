@@ -76,7 +76,16 @@ export function ClaudeFeedbackQueue() {
                   <p className={`text-[12.5px] leading-relaxed ${item.status === "done" ? "text-ink-faint line-through" : "text-ink"}`}>{item.body}</p>
                   <p className="mono mt-1 truncate text-[10.5px] text-ink-faint">{item.route}</p>
                 </div>
-                <div className="flex shrink-0 gap-2">
+                <div className="flex shrink-0 items-center gap-2">
+                  <label className="flex items-center gap-1.5 text-[11px] text-ink-dim">
+                    <input
+                      type="checkbox"
+                      checked={item.status === "done"}
+                      onChange={(event) => void update(item, { status: event.target.checked ? "done" : "todo" })}
+                      aria-label={`Mark done: ${item.body.slice(0, 40)}`}
+                    />
+                    Done
+                  </label>
                   <select
                     aria-label={`Priority for feedback: ${item.body.slice(0, 40)}`}
                     value={item.priority}

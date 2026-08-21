@@ -38,6 +38,32 @@ describe("Case Brief middleware policy", () => {
     expect(next).toHaveBeenCalledOnce();
   });
 
+  it("allows public join and leaderboard requests without a bearer token", async () => {
+    for (const path of ["/api/join", "/api/leaderboard"]) {
+      vi.mocked(next).mockClear();
+      const response = await middleware(new Request(`https://argus.example${path}`, { method: "GET" }));
+      expect(response.status, path).toBe(204);
+      expect(next).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("lets an authenticated waitlist user reach account growth without membership", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        id: "00000000-0000-4000-8000-000000000099",
+        email_confirmed_at: "2026-08-21T00:00:00.000Z",
+      }))
+      .mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(new Request("https://argus.example/api/account-growth", {
+      headers: { authorization: "Bearer waitlist-token" },
+    }));
+
+    expect(response.status).toBe(204);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
   it("does not expose a nearby sign-in path", async () => {
     const response = await middleware(new Request("https://argus.example/api/signin/admin", {
       method: "POST",

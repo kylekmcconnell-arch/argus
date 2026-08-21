@@ -134,7 +134,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const quota = await consumeInvestigationQuota(auth, "/api/v1/person", { kind: "person_api" });
   if (quota.error) { res.status(503).json({ error: quota.error }); return; }
-  if (!quota.allowed) { res.status(429).json({ error: "daily_investigation_limit_reached", remaining: 0 }); return; }
+  if (!quota.allowed) {
+    res.status(429).json({
+      error: quota.reason === "credit_budget_exhausted" ? "credit_budget_exhausted" : "daily_investigation_limit_reached",
+      remaining: 0,
+    });
+    return;
+  }
   try {
     const dossier = await runAudit(handle, () => {}, {
       organizationId: auth.organizationId,

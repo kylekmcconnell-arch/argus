@@ -4,6 +4,7 @@ import { verdictMeta } from "../lib/verdict";
 import { PendingEdits } from "./PendingEdits";
 import { TeamAccess } from "./TeamAccess";
 import { ClaudeFeedbackQueue } from "./ClaudeFeedbackQueue";
+import { WaitlistAdmin } from "./WaitlistAdmin";
 
 // Re-file every audited person under the CURRENT role taxonomy without
 // rerunning a single audit: batch the stored summaries through /api/reclassify
@@ -174,6 +175,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
       </div>
 
       <TeamAccess />
+      <WaitlistAdmin />
       <ClaudeFeedbackQueue />
 
       {/* analyst edits awaiting approval */}
