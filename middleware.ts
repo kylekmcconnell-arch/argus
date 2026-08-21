@@ -7,7 +7,11 @@ const PUBLIC_API_PATHS = new Set([
   "/api/og",
   "/api/shared-report",
   "/api/signin",
+  "/api/join",
+  "/api/leaderboard",
 ]);
+const WAITLIST_API_PATHS = new Set(["/api/account-growth"]);
+const VIEWER_MUTATION_PATHS = new Set(["/api/account-growth", "/api/feedback"]);
 // Vercel cron paths. These carry no Supabase session (the scheduler is not a
 // member), so the normal bearer-JWT gate would always 401 them. Vercel instead
 // sends "Authorization: Bearer ${CRON_SECRET}" when that env var is set, so we
@@ -33,7 +37,7 @@ const VIEWER_GET_PATHS = new Set([
   // screen (and per-report readiness) once a batch sweep exhausts the budget.
   "/api/sanctions",
 ]);
-const OWNER_PATHS = new Set(["/api/reclassify", "/api/members"]);
+const OWNER_PATHS = new Set(["/api/reclassify", "/api/members", "/api/waitlist"]);
 const UNMETERED_COLLABORATION_PATHS = new Set(["/api/case-brief"]);
 const ROLE_RANK: Record<string, number> = { viewer: 0, analyst: 1, owner: 2 };
 const ROUTE_UNITS: Record<string, number> = {
@@ -213,6 +217,12 @@ export default async function middleware(request: Request): Promise<Response> {
   const role = typeof member?.role === "string" ? member.role : "";
   const organizationId = typeof member?.organization_id === "string" ? member.organization_id : "";
   if (member?.active !== true || !(role in ROLE_RANK) || !organizationId) {
+    if (WAITLIST_API_PATHS.has(pathname)) {
+      const requestHeaders = new Headers(request.headers);
+      requestHeaders.set("x-argus-user-id", user.id);
+      requestHeaders.set("x-argus-role", "waitlist");
+      return next({ request: { headers: requestHeaders } });
+    }
     return Response.json({ error: "access_not_provisioned" }, { status: 403 });
   }
 
@@ -224,9 +234,11 @@ export default async function middleware(request: Request): Promise<Response> {
   const requiredRole = augmentRole
     ?? (OWNER_PATHS.has(pathname)
       ? "owner"
-      : request.method === "GET" && VIEWER_GET_PATHS.has(pathname)
+      : VIEWER_MUTATION_PATHS.has(pathname)
         ? "viewer"
-        : "analyst");
+        : request.method === "GET" && VIEWER_GET_PATHS.has(pathname)
+          ? "viewer"
+          : "analyst");
   if (ROLE_RANK[role] < ROLE_RANK[requiredRole]) {
     return Response.json({ error: "insufficient_role", requiredRole }, { status: 403 });
   }

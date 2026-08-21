@@ -257,9 +257,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     tomorrow.setUTCHours(24, 0, 0, 0);
     res.setHeader("Retry-After", Math.max(1, Math.ceil((tomorrow.getTime() - Date.now()) / 1_000)));
     res.status(429).json({
-      error: "daily_investigation_limit_reached",
+      error: quota.reason === "credit_budget_exhausted"
+        ? "credit_budget_exhausted"
+        : "daily_investigation_limit_reached",
       used: quota.used,
       remaining: 0,
+      message: quota.reason === "credit_budget_exhausted"
+        ? "This early-access budget is spent. Buy more investigation credits to continue."
+        : undefined,
     });
     return;
   }

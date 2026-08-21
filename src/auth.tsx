@@ -6,6 +6,7 @@ import {
   type AuthValue,
 } from "./auth-context";
 import { ArgusMark } from "./components/ArgusMark";
+import { WaitlistPortal } from "./components/WaitlistPortal";
 import {
   createAuthenticatedFetch,
   shouldRevalidateSession,
@@ -24,6 +25,7 @@ const supabase: SupabaseClient | null = authConfigured
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
+        experimental: { passkey: true },
       },
     })
   : null;
@@ -67,7 +69,16 @@ function installAuthenticatedFetch(): void {
 
 if (supabase) installAuthenticatedFetch();
 
-async function loadProfile(session: Session): Promise<ArgusSessionProfile> {
+interface WaitlistSession {
+  user: { id: string; email: string; displayName: string };
+  waitlist: { publicName: string; code: string; status: string };
+}
+
+type SessionResult =
+  | { kind: "member"; profile: ArgusSessionProfile }
+  | { kind: "waitlist"; session: WaitlistSession };
+
+async function loadProfile(session: Session): Promise<SessionResult> {
   const response = await fetch("/api/session", {
     headers: { authorization: `Bearer ${session.access_token}` },
     signal: AbortSignal.timeout(12_000),
@@ -77,7 +88,73 @@ async function loadProfile(session: Session): Promise<ArgusSessionProfile> {
     const message = typeof body.message === "string" ? body.message : "ARGUS access could not be verified.";
     throw new Error(message);
   }
-  return body as unknown as ArgusSessionProfile;
+  if (body.access === "waitlist") {
+    return { kind: "waitlist", session: body as unknown as WaitlistSession };
+  }
+  return { kind: "member", profile: body as unknown as ArgusSessionProfile };
+}
+
+function PasskeyEnrollmentNotice({ children }: { children: React.ReactNode }) {
+  const [needed, setNeeded] = useState(false);
+  const [enrolling, setEnrolling] = useState(false);
+  const [error, setError] = useState("");
+  const dismissed = typeof window !== "undefined"
+    && window.sessionStorage.getItem("argus-passkey-nudge-dismissed") === "1";
+
+  useEffect(() => {
+    if (!supabase || dismissed) return;
+    let active = true;
+    void supabase.auth.passkey.list()
+      .then(({ data, error: listError }) => {
+        if (!active || listError) return;
+        setNeeded(Array.isArray(data) && data.length === 0);
+      })
+      .catch(() => {
+        // Passkeys are progressive enhancement; magic-link recovery remains.
+      });
+    return () => { active = false; };
+  }, [dismissed]);
+
+  const enroll = async () => {
+    if (!supabase || enrolling) return;
+    setEnrolling(true);
+    setError("");
+    try {
+      const { error: enrollError } = await supabase.auth.registerPasskey();
+      if (enrollError) throw enrollError;
+      setNeeded(false);
+    } catch (enrollError) {
+      setError(enrollError instanceof Error ? enrollError.message : "Passkey setup was cancelled.");
+    } finally {
+      setEnrolling(false);
+    }
+  };
+
+  const dismiss = () => {
+    window.sessionStorage.setItem("argus-passkey-nudge-dismissed", "1");
+    setNeeded(false);
+  };
+
+  return (
+    <>
+      {children}
+      {needed && (
+        <aside className="fixed right-4 top-4 z-[70] w-[min(390px,calc(100%-2rem))] rounded-xl border border-signal/35 bg-panel p-4 shadow-xl" aria-label="Passkey setup">
+          <div className="text-[13.5px] font-medium text-ink">Secure ARGUS with a passkey</div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+            Use Face ID, Touch ID, Windows Hello, a device PIN, or a hardware key next time. Your email link stays available for recovery.
+          </p>
+          {error && <p className="mt-2 text-[11.5px] text-avoid" role="alert">{error}</p>}
+          <div className="mt-3 flex justify-end gap-2">
+            <button type="button" onClick={dismiss} className="btn-chip">Later</button>
+            <button type="button" onClick={() => void enroll()} disabled={enrolling} className="btn-primary px-3 py-1.5 text-[12px] disabled:opacity-50">
+              {enrolling ? "Opening passkey…" : "Create passkey"}
+            </button>
+          </div>
+        </aside>
+      )}
+    </>
+  );
 }
 
 function GateShell({ children }: { children: React.ReactNode }) {
@@ -97,15 +174,19 @@ function GateShell({ children }: { children: React.ReactNode }) {
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<ArgusSessionProfile | null>(null);
+  const [waitlist, setWaitlist] = useState<WaitlistSession | null>(null);
   const [loading, setLoading] = useState(authConfigured);
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
+  const [passkeySending, setPasskeySending] = useState(false);
+  const [enrolling, setEnrolling] = useState(false);
   const [authenticatedButDenied, setAuthenticatedButDenied] = useState(false);
 
   const validate = useCallback(async (session: Session | null, validationId: number) => {
     setProfile(null);
+    setWaitlist(null);
     setAuthenticatedButDenied(false);
     if (!session) {
       validatedAccessToken = null;
@@ -118,8 +199,13 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       const next = await loadProfile(session);
       if (validationId !== currentValidationId) return;
       validatedAccessToken = session.access_token;
-      setProfile(next);
-      setAnalyst(next.user.displayName);
+      if (next.kind === "waitlist") {
+        setWaitlist(next.session);
+        setAnalyst(next.session.user.displayName);
+      } else {
+        setProfile(next.profile);
+        setAnalyst(next.profile.user.displayName);
+      }
       setError("");
     } catch (validationError) {
       if (validationId !== currentValidationId) return;
@@ -173,6 +259,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     currentValidationId += 1;
     await supabase?.auth.signOut();
     setProfile(null);
+    setWaitlist(null);
     setAuthenticatedButDenied(false);
   }, []);
 
@@ -180,6 +267,35 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     () => profile ? { ...profile, signOut } : null,
     [profile, signOut],
   );
+
+  const signInWithPasskey = async () => {
+    if (!supabase || passkeySending) return;
+    setPasskeySending(true);
+    setError("");
+    setMessage("");
+    try {
+      const { error: passkeyError } = await supabase.auth.signInWithPasskey();
+      if (passkeyError) throw passkeyError;
+    } catch (signInError) {
+      setError(signInError instanceof Error ? signInError.message : "Passkey sign-in was cancelled.");
+    } finally {
+      setPasskeySending(false);
+    }
+  };
+
+  const enrollPasskey = async () => {
+    if (!supabase || enrolling) return;
+    setEnrolling(true);
+    setError("");
+    try {
+      const { error: enrollError } = await supabase.auth.registerPasskey();
+      if (enrollError) throw enrollError;
+    } catch (enrollError) {
+      setError(enrollError instanceof Error ? enrollError.message : "Passkey setup was cancelled.");
+    } finally {
+      setEnrolling(false);
+    }
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -241,7 +357,25 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (value) return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  if (waitlist) {
+    return (
+      <WaitlistPortal
+        displayName={waitlist.user.displayName}
+        onEnrollPasskey={enrollPasskey}
+        passkeyBusy={enrolling}
+        passkeyError={error}
+        onSignOut={signOut}
+      />
+    );
+  }
+
+  if (value) {
+    return (
+      <AuthContext.Provider value={value}>
+        <PasskeyEnrollmentNotice>{children}</PasskeyEnrollmentNotice>
+      </AuthContext.Provider>
+    );
+  }
 
   return (
     <GateShell>
@@ -251,7 +385,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">
         {authenticatedButDenied
           ? "Your identity is verified, but this account is not an active member of an ARGUS workspace."
-          : "Use your approved work email. ARGUS will send a one-time sign-in link. No shared password."}
+          : "Use a passkey, or verify your email once and create a passkey after you enter ARGUS."}
       </p>
 
       {authenticatedButDenied ? (
@@ -259,7 +393,21 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           Sign out and use another account
         </button>
       ) : (
-        <form onSubmit={submit} className="mt-5">
+        <div className="mt-5">
+          <button
+            type="button"
+            onClick={() => void signInWithPasskey()}
+            disabled={passkeySending}
+            className="btn-primary w-full py-2.5 text-[13.5px] font-medium disabled:opacity-40"
+          >
+            {passkeySending ? "Opening passkey…" : "Sign in with a passkey"}
+          </button>
+          <div className="my-3 flex items-center gap-3" aria-hidden>
+            <span className="h-px flex-1 bg-line" />
+            <span className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">or use email</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+        <form onSubmit={submit}>
           <label htmlFor="argus-email" className="mb-1.5 block text-[12px] font-medium text-ink-dim">Work email</label>
           <input
             id="argus-email"
@@ -281,6 +429,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             {sending ? "Sending secure link…" : "Email me a sign-in link"}
           </button>
         </form>
+        </div>
       )}
 
       {message && <div className="mt-3 rounded-lg border border-signal/30 bg-signal/5 px-3 py-2.5 text-[12px] leading-relaxed text-signal-lift" role="status">{message}</div>}
@@ -288,6 +437,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       <p className="mt-5 text-[11px] leading-relaxed text-ink-faint">
         Sessions are verified server-side. Workspace roles control reads, investigations, and destructive actions.
       </p>
+      {!authenticatedButDenied && (
+        <p className="mt-3 text-[12.5px] text-ink-dim">
+          New here? <a href="/?view=join" className="text-signal-lift underline">Request early access</a>
+          {" · "}
+          <a href="/?view=leaderboard" className="text-signal-lift underline">Referral board</a>
+          {" · "}
+          <a href="/?view=pricing" className="text-signal-lift underline">Pricing</a>
+        </p>
+      )}
     </GateShell>
   );
 }

@@ -5,6 +5,8 @@ import App from './App.tsx'
 import { AuthGate } from './auth.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx'
 import { SessionExpiryNotice } from './components/SessionExpiryNotice.tsx'
+import { EarlyAccessHub } from './components/EarlyAccessHub.tsx'
+import { FeedbackButton } from './components/FeedbackButton.tsx'
 import { installSessionExpiryWatch } from './lib/sessionExpiry.ts'
 import { installPrintTheme } from './lib/printTheme.ts'
 
@@ -35,8 +37,15 @@ const showProvenancePreview = designPreview === 'provenance'
 // A share capability opens the read-only report view with no account and no
 // AuthGate: the token is the entire authority, validated server-side.
 const sharedReportToken = new URLSearchParams(window.location.search).get('share')
+const publicView = new URLSearchParams(window.location.search).get('view')
 // eslint-disable-next-line react-refresh/only-export-components
 const SharedReportView = lazy(() => import('./components/SharedReportView.tsx').then((module) => ({ default: module.SharedReportView })))
+// eslint-disable-next-line react-refresh/only-export-components
+const PublicLeaderboardPage = lazy(() => import('./components/PublicGrowthPages.tsx').then((module) => ({ default: module.PublicLeaderboardPage })))
+// eslint-disable-next-line react-refresh/only-export-components
+const PublicPricingPage = lazy(() => import('./components/PublicGrowthPages.tsx').then((module) => ({ default: module.PublicPricingPage })))
+// eslint-disable-next-line react-refresh/only-export-components
+const JoinPage = lazy(() => import('./components/PublicGrowthPages.tsx').then((module) => ({ default: module.JoinPage })))
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -51,9 +60,17 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><CompositionPreview /></Suspense>
       ) : sharedReportToken ? (
         <Suspense fallback={null}><SharedReportView token={sharedReportToken} /></Suspense>
+      ) : publicView === 'leaderboard' ? (
+        <Suspense fallback={null}><PublicLeaderboardPage /></Suspense>
+      ) : publicView === 'pricing' ? (
+        <Suspense fallback={null}><PublicPricingPage /></Suspense>
+      ) : publicView === 'join' ? (
+        <Suspense fallback={null}><JoinPage /></Suspense>
       ) : (
         <AuthGate>
           <SessionExpiryNotice />
+          <EarlyAccessHub />
+          <FeedbackButton />
           <App />
         </AuthGate>
       )}

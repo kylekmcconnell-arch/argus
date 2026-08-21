@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { CREDIT_MILLIS, EARLY_ACCESS_DAILY_LIMIT } from "../src/lib/growth.js";
 
 export type ArgusRole = "owner" | "analyst" | "viewer";
 
@@ -136,16 +137,38 @@ function reject(res: VercelResponse, status: number, error: string, message: str
   return null;
 }
 
+function memberContext(userId: string, email: string, member: MemberRow): AuthContext | null {
+  if (member.active !== true) return null;
+  const organizationId = typeof member.organization_id === "string" ? member.organization_id : "";
+  const role = isRole(member.role) ? member.role : null;
+  if (!organizationId || !role) return null;
+  return {
+    userId,
+    email,
+    organizationId,
+    role,
+    displayName:
+      typeof member.display_name === "string" && member.display_name.trim()
+        ? member.display_name.trim()
+        : email,
+  };
+}
+
+export interface VerifiedUser {
+  userId: string;
+  email: string;
+  displayName: string;
+  member: AuthContext | null;
+}
+
 /**
- * Verify the Supabase access token, resolve server-owned membership, and enforce
- * the minimum role. Roles are never accepted from JWT user metadata or request
- * input. An allowlisted, verified Supabase user is provisioned on first access.
+ * Verify the Supabase access token and email. Allowlisted users are provisioned
+ * as members. Everyone else may be a waitlist identity without product access.
  */
-export async function requireArgusAuth(
+export async function requireVerifiedUser(
   req: VercelRequest,
   res: VercelResponse,
-  minimumRole: ArgusRole = "viewer",
-): Promise<AuthContext | null> {
+): Promise<VerifiedUser | null> {
   const token = bearerToken(req);
   if (!token) return reject(res, 401, "authentication_required", "Sign in to continue.");
 
@@ -172,41 +195,23 @@ export async function requireArgusAuth(
       return reject(res, 403, "email_not_verified", "Verify ownership of this email before entering ARGUS.");
     }
 
-    let member = await readMember(credentials, userId);
-    if (!member) {
+    let memberRow = await readMember(credentials, userId);
+    if (!memberRow) {
       const role = allowedRole(email);
-      if (!role) {
-        return reject(
-          res,
-          403,
-          "access_not_provisioned",
-          "This account is authenticated but has not been granted ARGUS access.",
-        );
-      }
-      member = await provisionAllowedMember(credentials, userId, email, role);
+      if (role) memberRow = await provisionAllowedMember(credentials, userId, email, role);
     }
-
-    if (member.active !== true) {
+    if (memberRow && memberRow.active !== true) {
       return reject(res, 403, "account_disabled", "This ARGUS membership is disabled.");
     }
-    const organizationId = typeof member.organization_id === "string" ? member.organization_id : "";
-    const role = isRole(member.role) ? member.role : null;
-    if (!organizationId || !role) {
+    const member = memberRow ? memberContext(userId, email, memberRow) : null;
+    if (memberRow && !member) {
       return reject(res, 403, "invalid_membership", "This ARGUS membership is incomplete.");
     }
-    if (ROLE_RANK[role] < ROLE_RANK[minimumRole]) {
-      return reject(res, 403, "insufficient_role", `${minimumRole} access is required.`);
-    }
-
     return {
       userId,
       email,
-      organizationId,
-      role,
-      displayName:
-        typeof member.display_name === "string" && member.display_name.trim()
-          ? member.display_name.trim()
-          : email,
+      displayName: member?.displayName || email.split("@")[0] || "investigator",
+      member,
     };
   } catch (error) {
     console.error("[auth] verification failed", error);
@@ -214,11 +219,39 @@ export async function requireArgusAuth(
   }
 }
 
+/**
+ * Verify the Supabase access token, resolve server-owned membership, and enforce
+ * the minimum role. Roles are never accepted from JWT user metadata or request
+ * input. An allowlisted, verified Supabase user is provisioned on first access.
+ */
+export async function requireArgusAuth(
+  req: VercelRequest,
+  res: VercelResponse,
+  minimumRole: ArgusRole = "viewer",
+): Promise<AuthContext | null> {
+  const verified = await requireVerifiedUser(req, res);
+  if (!verified) return null;
+  if (!verified.member) {
+    return reject(
+      res,
+      403,
+      "access_not_provisioned",
+      "This account is authenticated but has not been granted ARGUS access.",
+    );
+  }
+  if (ROLE_RANK[verified.member.role] < ROLE_RANK[minimumRole]) {
+    return reject(res, 403, "insufficient_role", `${minimumRole} access is required.`);
+  }
+  return verified.member;
+}
+
 export interface QuotaResult {
   allowed: boolean;
   used: number;
   remaining: number;
+  creditRemaining?: number;
   error?: string;
+  reason?: "daily_investigation_limit_reached" | "credit_budget_exhausted";
 }
 
 function positiveInt(value: string | undefined, fallback: number): number {
@@ -237,7 +270,7 @@ export async function consumeInvestigationQuota(
   const dailyLimit =
     auth.role === "owner"
       ? positiveInt(process.env.ARGUS_OWNER_DAILY_INVESTIGATION_LIMIT, 100)
-      : positiveInt(process.env.ARGUS_DAILY_INVESTIGATION_LIMIT, 25);
+      : positiveInt(process.env.ARGUS_DAILY_INVESTIGATION_LIMIT, EARLY_ACCESS_DAILY_LIMIT);
 
   // The daily investigation limit is a soft guardrail. If the usage RPC is
   // transiently unreachable (Supabase latency blip, cold connection), fail OPEN
@@ -274,11 +307,56 @@ export async function consumeInvestigationQuota(
       console.error("[quota] RPC returned no row; allowing (fail-open)");
       return failOpen();
     }
-    return {
+    const daily = {
       allowed: row.allowed === true,
       used: typeof row.used === "number" ? row.used : 0,
       remaining: typeof row.remaining === "number" ? row.remaining : 0,
     };
+    if (!daily.allowed || auth.role === "owner") return daily;
+
+    try {
+      const utcDate = new Date().toISOString().slice(0, 10);
+      const creditResponse = await fetch(`${credentials.url}/rest/v1/rpc/consume_investigation_credit`, {
+        method: "POST",
+        headers: serviceHeaders(credentials.key),
+        body: JSON.stringify({
+          p_organization_id: auth.organizationId,
+          p_user_id: auth.userId,
+          p_idempotency_key: `investigation:${auth.userId}:${route}:${utcDate}:${daily.used}`,
+          p_cost_millis: CREDIT_MILLIS,
+        }),
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!creditResponse.ok) {
+        console.error("[quota] credit RPC failed", creditResponse.status, (await creditResponse.text()).slice(0, 300));
+        return { allowed: false, used: daily.used, remaining: daily.remaining, error: "credit_ledger_unavailable" };
+      }
+      const creditRows = (await creditResponse.json()) as unknown;
+      const credit = Array.isArray(creditRows) && creditRows[0] && typeof creditRows[0] === "object"
+        ? creditRows[0] as Record<string, unknown>
+        : null;
+      if (!credit) {
+        return { allowed: false, used: daily.used, remaining: daily.remaining, error: "credit_ledger_unavailable" };
+      }
+      if (credit.allowed !== true) {
+        return {
+          allowed: false,
+          used: daily.used,
+          remaining: daily.remaining,
+          creditRemaining: 0,
+          reason: "credit_budget_exhausted",
+        };
+      }
+      return {
+        ...daily,
+        creditRemaining: typeof credit.balance_millis === "number"
+          ? Math.max(0, credit.balance_millis / CREDIT_MILLIS)
+          : undefined,
+      };
+    } catch (creditError) {
+      console.error("[quota] credit check failed; denying", creditError);
+      return { allowed: false, used: daily.used, remaining: daily.remaining, error: "credit_ledger_unavailable" };
+    }
   } catch (error) {
     console.error("[quota] check failed; allowing (fail-open)", error);
     return failOpen();

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "2026-08-21.1",
+  "project": {
+    "id": "argus",
+    "name": "ARGUS",
+    "canonicalRepository": "kylekmcconnell-arch/argus"
+  },
+  "repository": {
+    "name": "kylekmcconnell-arch/argus",
+    "defaultBranch": "main",
+    "role": "canonical-product",
+    "purpose": "crypto due-diligence product",
+    "riskClass": "high-financial-analysis"
+  },
+  "authority": {
+    "source": "github-default-branch",
+    "engineeringHandoff": "github",
+    "runtimeContext": "oenbot",
+    "approvals": "oenbot-or-existing-guarded-workflow",
+    "deploymentInput": "immutable-reviewed-sha"
+  },
+  "routing": {
+    "normalProductWork": "kylekmcconnell-arch/argus",
+    "dashboard": "kylekmcconnell-arch/oenbot-dashboard-source",
+    "unknown": "needs-routing",
+    "relatedRepositories": []
+  },
+  "handoffRequired": [
+    "issue",
+    "outcome",
+    "acceptanceCriteria",
+    "route",
+    "risk",
+    "changedBehavior",
+    "verification",
+    "rolloutAndRollback"
+  ],
+  "providerEntrypoints": {
+    "generic": "AGENTS.md",
+    "claude": "CLAUDE.md",
+    "grok": "GROK.md",
+    "cursor": ".cursor/rules/00-agent-contract.mdc",
+    "copilot": ".github/copilot-instructions.md"
+  }
+}
