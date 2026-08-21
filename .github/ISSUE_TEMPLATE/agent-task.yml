@@ -1,0 +1,44 @@
+name: Agent task
+description: Durable, provider-neutral engineering handoff
+title: "[Task] "
+labels: []
+body:
+  - type: dropdown
+    id: route
+    attributes:
+      label: Route
+      options:
+        - This repository
+        - OENBOT dashboard
+        - Needs routing
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Requested outcome
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable conditions that make this complete.
+    validations:
+      required: true
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk
+      options:
+        - Low
+        - Medium
+        - High
+        - Critical
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Existing GitHub context
+      description: Link the current branch, PR, run, or prior issue. Never paste provider transcripts or secrets.
