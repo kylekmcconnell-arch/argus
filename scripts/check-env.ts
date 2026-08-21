@@ -67,4 +67,33 @@ for (const p of PROVIDERS) {
     console.log(`\n  ${C.yellow}! ${p.label} is half-configured — still missing: ${missing.join(", ")}${C.reset}`);
   }
 }
+const OFFICE_DNS_HOSTS = ["api.web3.bio", "api.cryptorank.io"] as const;
+
+async function officeDnsStatus(host: string): Promise<"reachable" | "blocked"> {
+  try {
+    const response = await fetch(`https://${host}/`, { method: "GET", signal: AbortSignal.timeout(6000) });
+    void response.status;
+    return "reachable";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/ENOTFOUND|EAI_AGAIN|ENODATA|getaddrinfo|ERR_NAME_NOT_RESOLVED/i.test(message)) {
+      return "blocked";
+    }
+    return "reachable";
+  }
+}
+
+console.log(`\n${C.bold}Office DNS allowlist${C.reset}  ${C.dim}(local SecuringSam; production Vercel is unaffected)${C.reset}`);
+const dnsRows: Array<"reachable" | "blocked"> = [];
+for (const host of OFFICE_DNS_HOSTS) {
+  const status = await officeDnsStatus(host);
+  dnsRows.push(status);
+  const mark = status === "reachable"
+    ? `${C.green}● reachable   ${C.reset}`
+    : `${C.red}○ blocked     ${C.reset}`;
+  console.log(`  ${mark} ${host}`);
+}
+if (dnsRows.includes("blocked")) {
+  console.log(`${C.dim}  Allowlist those hosts on the office DNS filter, then re-run npm run check-env.${C.reset}`);
+}
 console.log("");
