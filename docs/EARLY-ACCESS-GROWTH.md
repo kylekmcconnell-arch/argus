@@ -109,6 +109,10 @@ Schema work belongs in a new timestamped file in `supabase/migrations/`. Keep
 it additive and re-runnable. Product membership, credits, and waitlist rules
 stay server-owned.
 
+Production already applied the growth foundation as `20260821135838` and
+`20260821135903`. The repo files use those versions so the GitHub integration
+can apply `20260821200000_growth_waitlist_credits`.
+
 Optional fallback if the integration cannot run: GitHub environment
 `Production` secrets `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD`, then
 **Actions → Production Supabase** with `confirm_production=apply-production-argus`.
