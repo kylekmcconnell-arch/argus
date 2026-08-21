@@ -1,6 +1,7 @@
-# Manual production-database activation. Does not deploy the app, touch Vercel
-# env, or enable billing. Secrets stay on the existing GitHub Production
-# environment and are never echoed.
+# Optional fallback if the Supabase GitHub integration cannot apply
+# supabase/migrations/. Primary path is merge to main with Deploy to
+# production enabled. Does not deploy the app, touch Vercel env, or enable
+# billing. Secrets stay on the existing GitHub Production environment.
 #
 # Required Production environment secrets (names only):
 #   SUPABASE_ACCESS_TOKEN  — Supabase account token with this project
