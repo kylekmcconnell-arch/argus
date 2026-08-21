@@ -63,6 +63,16 @@ describe("provider registry truth", () => {
     expect(providers.find((provider) => provider.label === "Arkham")).toMatchObject({ configured: true });
     expect(keyless.map((provider) => provider.label)).toContain("Telegram");
     expect(keyless.map((provider) => provider.label)).not.toContain("Reddit + Telegram");
+    expect(providers.find((provider) => provider.label === "Google Safe Browsing")).toMatchObject({
+      configured: false,
+      tier: "optional",
+      powers: expect.stringContaining("GoPlus"),
+    });
+    expect(providers.find((provider) => provider.label === "Official X API v2")).toMatchObject({
+      configured: false,
+      tier: "optional",
+      powers: expect.stringContaining("twitterapi.io"),
+    });
   });
 
   it("accepts the preferred opaque Supabase secret or the legacy service-role fallback", async () => {

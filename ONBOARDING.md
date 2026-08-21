@@ -70,7 +70,18 @@ Minimum for live people-audits: `XAI_API_KEY` (Grok is the analyst)
 list and where to get each. **Never** paste a key into chat, an issue, or a
 commit — `.env` is gitignored; production keys live in Vercel env.
 
-## 5. Shipping
+## 5. Office DNS allowlist (local only)
+
+The office SecuringSam filter can block two keyless/keyed provider hosts.
+Production Vercel is unaffected. If local wallet-resolve or CryptoRank legs
+go dark, allowlist these FQDNs, then re-run `npm run check-env`:
+
+- `api.web3.bio` — name → wallet resolution
+- `api.cryptorank.io` — unlock schedule (production already has `CRYPTORANK_API_KEY`)
+
+Do not bypass the filter from the app.
+
+## 6. Shipping
 - Push to `main` → auto-deploys to production.
 - Bigger changes: branch + PR. Verify a deploy via the Vercel dashboard or
   `gh api repos/kylekmcconnell-arch/argus/commits/<sha>/status`.

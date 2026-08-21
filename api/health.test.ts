@@ -35,7 +35,7 @@ describe("provider readiness", () => {
     expect(captured.body).toMatchObject({
       available: true,
       mode: "configuration",
-      down: 12, // every provider except xai, anthropic and serper is unconfigured here
+      down: 10, // unconfigured required lanes only; retired and optional fallbacks are listed but not counted down
       services: [
         { id: "xai", ok: true },
         { id: "anthropic", ok: true },
@@ -56,6 +56,8 @@ describe("provider readiness", () => {
         { id: "crunchbase", ok: false, retired: true, detail: "retired: DeFiLlama and Monid/Akta cover funding and backing" },
         { id: "reddit", ok: false, retired: true, detail: "retired: Reddit API access was not approved" },
         { id: "gmgn", ok: false, detail: "not configured in this deployment" },
+        { id: "safebrowsing", ok: false, optional: true, detail: "optional fallback not configured" },
+        { id: "x-api-bearer", ok: false, optional: true, detail: "optional fallback not configured" },
       ],
       // Serper + a model are set but no OpenRouter key -> grounded search runs on
       // the native Anthropic extractor, not OpenRouter.
@@ -91,6 +93,7 @@ describe("provider readiness", () => {
         { id: "cryptorank", ok: true },
         { id: "helius" }, { id: "etherscan" }, { id: "arkham" }, { id: "pdl" },
         { id: "github" }, { id: "coingecko" }, { id: "crunchbase" }, { id: "reddit" }, { id: "gmgn" },
+        { id: "safebrowsing" }, { id: "x-api-bearer" },
       ],
       extraction: { extractProvider: "openrouter", groundedSearchActive: true },
       knowledgeBase: { reuse: true },
@@ -113,6 +116,25 @@ describe("provider readiness", () => {
     expect(captured.body).toMatchObject({
       models: { analyst: "grok-4", discovery: "claude-haiku-4-5", discoveryRoute: "grounded" },
     });
+  });
+
+  it("lists Safe Browsing and official X bearer as optional without counting them down", () => {
+    vi.stubEnv("GOOGLE_SAFE_BROWSING_KEY", "gsb-key");
+    vi.stubEnv("X_API_BEARER", "");
+    const { res, captured } = response();
+
+    handler({ method: "GET" } as never, res as never);
+
+    const body = captured.body as { down: number; services: Array<{ id: string; ok: boolean; optional?: boolean }> };
+    expect(body.services.find((service) => service.id === "safebrowsing")).toMatchObject({
+      ok: true,
+      optional: true,
+    });
+    expect(body.services.find((service) => service.id === "x-api-bearer")).toMatchObject({
+      ok: false,
+      optional: true,
+    });
+    expect(body.services.filter((service) => !service.ok && service.id === "safebrowsing")).toEqual([]);
   });
 
   it("rejects mutating methods", () => {

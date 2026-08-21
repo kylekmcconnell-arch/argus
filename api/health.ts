@@ -17,6 +17,11 @@ interface Svc {
    * report a retired lane as degraded coverage.
    */
   retired?: boolean;
+  /**
+   * Optional fallback credential. Missing it costs no coverage because a
+   * primary or keyless path already runs. Listed so absence is visible.
+   */
+  optional?: boolean;
 }
 
 function configuredService(
@@ -43,6 +48,22 @@ function configuredService(
  */
 function retiredService(id: string, label: string, reason: string): Svc {
   return { id, label, ok: false, retired: true, detail: `retired: ${reason}` };
+}
+
+function optionalService(
+  id: string,
+  label: string,
+  value: string | undefined,
+  action: string,
+): Svc {
+  const ok = Boolean(value?.trim());
+  return {
+    id,
+    label,
+    ok,
+    optional: true,
+    ...(ok ? {} : { detail: "optional fallback not configured", action }),
+  };
 }
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
@@ -73,6 +94,8 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     retiredService("crunchbase", "Crunchbase (company funding)", "DeFiLlama and Monid/Akta cover funding and backing"),
     retiredService("reddit", "Reddit (community signal)", "Reddit API access was not approved"),
     configuredService("gmgn", "GMGN (holder cost basis + wallet tags)", process.env.GMGN_API_KEY, "configure GMGN_API_KEY (apply at https://gmgn.ai/ai)"),
+    optionalService("safebrowsing", "Google Safe Browsing (site-safety recall)", process.env.GOOGLE_SAFE_BROWSING_KEY, "configure GOOGLE_SAFE_BROWSING_KEY"),
+    optionalService("x-api-bearer", "Official X API v2 (authenticity fallback)", process.env.X_API_BEARER, "configure X_API_BEARER"),
   ];
 
   // Knowledge-base reuse diagnostic: read-through only engages when
@@ -142,6 +165,6 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         ? "verified facts from prior audits seed new runs of the same entity"
         : "read-through INACTIVE: ARGUS_ENTITY_REUSE is not 'on' in this build; repeat audits re-discover everything",
     },
-    down: services.filter((service) => !service.ok).length,
+    down: services.filter((service) => !service.ok && !service.retired && !service.optional).length,
   });
 }
