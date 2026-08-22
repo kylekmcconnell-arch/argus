@@ -1,49 +1,34 @@
 @import "tailwindcss";
 
-/* ARGUS: a forensic instrument. A calm light workspace is the product default;
-   the graphite intelligence-room theme remains available as an explicit user
-   choice. The @theme values define dark mode and the light override below
-   supplies the default visual surface. Token NAMES never change — every
-   component flips automatically.
-
-   This file also defines the component idioms (.panel, .eyebrow, .chip,
-   .verdict-pill, .finding, .btn-x, .stat-tile, .tint-x) that DESIGN.md makes
-   binding. One concept, one idiom — never restyle these concepts inline.
-
-   Deliberately off-stock palette: no value here is a default Tailwind hex. */
+/* ARGUS premium fintech system. Token names remain stable so every existing
+   route inherits the same quiet, data-first visual language. */
 @theme {
-  --color-void: #06080c; /* app background: graphite black */
-  --color-panel: #0c0e12; /* cards */
-  --color-panel-2: #15181d; /* raised / inset */
-  --color-sidebar: #090c10; /* left rail */
-  --color-line: #1a1d22; /* quiet hairline */
-  --color-line-2: #41454c; /* stronger structural border */
-  --color-control-line: #5e6877; /* accessible control boundary */
-  --color-ink: #f5f6f8; /* primary text */
-  --color-ink-dim: #a7aeb8; /* secondary text */
-  --color-ink-faint: #858e9b; /* tertiary text · AA on dark panels */
+  --color-void: #0b0b0c;
+  --color-panel: #151516;
+  --color-panel-2: #1d1d1f;
+  --color-sidebar: #111112;
+  --color-line: #282829;
+  --color-line-2: #373739;
+  --color-control-line: #74747a;
+  --color-ink: #f5f5f7;
+  --color-ink-dim: #a1a1a6;
+  --color-ink-faint: #8d8d93;
 
-  --color-signal: #3b67e8; /* electric royal blue — fills / focus */
-  --color-signal-dim: #2e52c7; /* pressed / strong fill */
-  --color-signal-lift: #7fa2ff; /* accessible blue text on graphite */
-  --color-on-signal: #ffffff; /* text / highlights on signal fills */
-  --color-accent-tint: #101621; /* localized active-state wash */
-  --color-eye-pupil: #05070b; /* live iris center; deliberately dark in both themes */
+  /* Neutral interaction color keeps financial hues semantic. */
+  --color-signal: #f5f5f7;
+  --color-signal-dim: #d2d2d7;
+  --color-signal-lift: #f5f5f7;
+  --color-on-signal: #111111;
+  --color-accent-tint: #1d1d1f;
+  --color-eye-pupil: #050505;
 
-  /* Jade and crimson. Adverse states share one rose-to-crimson family so
-     severity reads as depth rather than a hue change, and no orange sits
-     beside the jade. Chosen with Enigma 2026-07-27. */
-  --color-pass: #2fbd7a; /* jade: confirmed good */
-  --color-caution: #d98aa2; /* dusty rose: warn / partial */
-  --color-fail: #e2698e; /* rose: failed verdict score */
-  --color-avoid: #ef4f72; /* vivid crimson: disqualifying */
-  --color-unverifiable: #a98cf5;
-
-  /* Provenance ramp: where a value came from, orthogonal to the verdict
-     palette above (DESIGN.md 2.1). Deliberately off jade and off signal-blue
-     so "sourced" never reads as "confirmed good". */
-  --color-sourced: #1fb8c4; /* cyan-teal: confirmed against an outside artifact */
-  --color-derived: #838fa3; /* slate: ARGUS-calculated from grounded inputs */
+  --color-pass: #00c805;
+  --color-caution: #d68a00;
+  --color-fail: #eb5151;
+  --color-avoid: #eb5151;
+  --color-unverifiable: #8b7cf6;
+  --color-sourced: #3b82f6;
+  --color-derived: #86868b;
 
   /* The console: the ask/challenge surface. Deliberately dark in BOTH themes
      (like --color-eye-pupil) — a terminal window into the file. */
@@ -53,58 +38,55 @@
   --color-console-ink-dim: #9d9e9a;
   --color-console-accent: #4fd1a5; /* signal green lifted for the dark ground */
 
-  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-serif: "Young Serif", Georgia, serif;
-  --font-mono: "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", Inter, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: var(--font-sans);
+  --font-mono: "SF Mono", ui-monospace, "Cascadia Code", "Roboto Mono", monospace;
 }
 
 :root {
   color-scheme: dark;
-  --shadow:
-    0 1px 2px color-mix(in oklab, var(--color-void) 72%, transparent),
-    0 20px 54px -34px color-mix(in oklab, var(--color-void) 88%, transparent);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-pill: 999px;
+  --motion-fast: 140ms;
+  --motion-base: 220ms;
+  --ease-premium: cubic-bezier(.2,.8,.2,1);
+  --content-max: 1480px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 1px 8px rgb(0 0 0 / 0.08);
   --select: color-mix(in oklab, var(--color-signal-lift) 30%, transparent);
 }
 
-/* LIGHT mode — the product default.
-   design-and-ui branch (2026-08-18, Enigma's direction): warm-paper palette
-   after precurion.com, values lifted verbatim from its live CSS where one
-   exists. Cool blue-greys are gone; the single signal is Precurion's green.
-   Merging this to main amends DESIGN.md §2 — flag for Kyle's sign-off. */
 :root[data-theme="light"] {
   color-scheme: light;
-  /* The ground sits a visible step deeper than the reading surfaces, and the
-     surfaces are not stark white but a much lighter shade of the same warm
-     ground (Enigma, 2026-08-18) — important reading lifts off the page the
-     way precurion.com's document cards do. */
-  --color-void: #f1f0ec; /* warm ground, deeper than the reading surfaces */
-  --color-panel: #fbfaf7; /* the reading surface: near-white warm paper */
-  --color-panel-2: #e9ebe7; /* precurion --surface-plate */
-  --color-sidebar: #edece7; /* rail, a step deeper than the ground */
-  --color-line: #dedfdb; /* precurion --rule */
-  --color-line-2: #c2c4be;
-  --color-control-line: #6f716c;
-  --color-ink: #141414; /* precurion --ink */
-  --color-ink-dim: #494b48;
-  --color-ink-faint: #616360; /* precurion --grey #6b6d6d, darkened for AA on panel-2 */
+  --color-void: #f7f7f5;
+  --color-panel: #ffffff;
+  --color-panel-2: #f2f2f0;
+  --color-sidebar: #ffffff;
+  --color-line: #e7e7e4;
+  --color-line-2: #d3d3d0;
+  --color-control-line: #8a8a8f;
+  --color-ink: #111111;
+  --color-ink-dim: #6e6e73;
+  --color-ink-faint: #6d6d73;
 
-  --color-signal: #047756; /* precurion --green */
-  --color-signal-dim: #03614a; /* precurion --green-pressed */
-  --color-signal-lift: #03614a;
-  --color-accent-tint: #e8efe9;
+  --color-signal: #111111;
+  --color-signal-dim: #2c2c2e;
+  --color-signal-lift: #111111;
+  --color-on-signal: #ffffff;
+  --color-accent-tint: #ececea;
   --color-eye-pupil: #141414;
 
-  --color-pass: #12915f; /* one step brighter than signal so fills read */
-  --color-caution: #b45309; /* precurion --provenance-missing amber */
-  --color-fail: #b3402e;
-  --color-avoid: #8f1d1d;
-  --color-unverifiable: #6940cc;
-  --color-sourced: #22666e; /* toward precurion --teal #244c52 */
-  --color-derived: #5d605b; /* warm slate; #8b8d8d fails AA at chip sizes */
+  --color-pass: #00a86b;
+  --color-caution: #b87300;
+  --color-fail: #d63f3f;
+  --color-avoid: #d63f3f;
+  --color-unverifiable: #6f5bd3;
+  --color-sourced: #2563c7;
+  --color-derived: #6e6e73;
 
-  --shadow:
-    0 1px 2px color-mix(in oklab, var(--color-ink) 5%, transparent),
-    0 18px 48px -34px color-mix(in oklab, var(--color-ink) 18%, transparent);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 1px 8px rgb(0 0 0 / 0.03);
   --select: color-mix(in oklab, var(--color-signal) 18%, transparent);
 }
 
@@ -130,6 +112,8 @@
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+    font-size: 15px;
+    line-height: 1.5;
   }
   ::selection {
     background: var(--select);
@@ -157,15 +141,15 @@
    names, hero questions, verdict words. Precurion's restraint is the point:
    the serif appears at display sizes only, never in body or UI text. */
 .display {
-  font-family: var(--font-serif);
-  font-weight: 400;
-  letter-spacing: -0.03em;
+  font-family: var(--font-sans);
+  font-weight: 630;
+  letter-spacing: -0.04em;
 }
 /* 18–24px mixed-case page titles share the serif at a gentler tracking. */
 .display-sm {
-  font-family: var(--font-serif);
-  font-weight: 400;
-  letter-spacing: -0.02em;
+  font-family: var(--font-sans);
+  font-weight: 620;
+  letter-spacing: -0.035em;
 }
 
 .mono {
@@ -178,10 +162,11 @@
 
 /* The ONE section-header treatment. */
 .eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 560;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   color: var(--color-ink-faint);
 }
 
@@ -190,32 +175,20 @@
    ledger-style — borderless zones + hairline dividers — not nested boxes. */
 
 .panel {
-  border-radius: 8px; /* precurion --radius-card */
-  border: 1px solid color-mix(in oklab, var(--color-line) 72%, transparent);
-  background: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--color-panel-2) 16%, var(--color-panel)) 0%,
-    var(--color-panel) 62%
-  );
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-ink) 3.5%, transparent);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-line);
+  background: var(--color-panel);
+  box-shadow: var(--shadow);
+  transition: border-color var(--motion-base) var(--ease-premium), box-shadow var(--motion-base) var(--ease-premium), transform var(--motion-base) var(--ease-premium);
 }
 :root[data-theme="dark"] .panel {
-  border-color: color-mix(in oklab, var(--color-line-2) 54%, transparent);
-  background: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--color-panel-2) 12%, var(--color-panel)) 0%,
-    var(--color-panel) 62%
-  );
+  border-color: var(--color-line);
+  background: var(--color-panel);
 }
 :root[data-theme="light"] .panel {
-  border-color: color-mix(in oklab, var(--color-line-2) 38%, var(--color-line));
+  border-color: var(--color-line);
   background: var(--color-panel);
-  /* Precurion's artefact shadow: soft and document-like, so the paper card
-     reads as lifted off the warm ground rather than outlined on it. */
-  box-shadow:
-    inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
-    0 1px 2px color-mix(in oklab, var(--color-ink) 5%, transparent),
-    0 14px 34px -14px color-mix(in oklab, var(--color-ink) 14%, transparent);
+  box-shadow: var(--shadow);
 }
 
 /* ── The Auric File document idioms (Enigma: the canonical report reading
@@ -505,26 +478,24 @@
 }
 
 .sidebar-nav-active {
-  background: var(--color-signal);
-  color: var(--color-on-signal);
-  box-shadow:
-    inset 0 1px 0 color-mix(in oklab, var(--color-on-signal) 18%, transparent),
-    0 10px 24px -18px color-mix(in oklab, var(--color-signal) 78%, transparent);
+  background: var(--color-ink);
+  color: var(--color-void);
+  box-shadow: none;
 }
 .sidebar-nav-active:hover {
-  background: color-mix(in oklab, var(--color-signal) 80%, var(--color-signal-dim));
+  background: color-mix(in oklab, var(--color-ink) 88%, var(--color-void));
 }
 .app-sidebar .sidebar-case-active {
-  background: color-mix(in oklab, var(--color-signal) 20%, var(--color-panel-2));
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-signal) 22%, transparent);
+  background: var(--color-panel-2);
+  box-shadow: inset 0 0 0 1px var(--color-line);
 }
 /* Borderless interior zone (a wash, not a box). */
 .panel-inset {
-  border-radius: 6px;
-  background: color-mix(in oklab, var(--color-void) 42%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--color-panel-2);
 }
 :root[data-theme="light"] .panel-inset {
-  background: color-mix(in oklab, var(--color-panel-2) 75%, transparent);
+  background: var(--color-panel-2);
 }
 
 .soft-shadow {
@@ -533,22 +504,13 @@
 
 /* Atmospheric glow for hero canvases. Sits on the void. */
 .atmosphere {
-  background:
-    radial-gradient(1050px 500px at 72% -10%, color-mix(in oklab, var(--color-signal) 9%, transparent), transparent 70%),
-    radial-gradient(760px 440px at 16% 112%, color-mix(in oklab, var(--color-signal) 3%, transparent), transparent 72%),
-    var(--color-void);
+  background: var(--color-void);
 }
 :root[data-theme="light"] .atmosphere {
-  background:
-    radial-gradient(980px 460px at 78% -8%, color-mix(in oklab, var(--color-signal) 8%, transparent), transparent 72%),
-    radial-gradient(760px 400px at 8% 108%, color-mix(in oklab, var(--color-signal) 3%, transparent), transparent 74%),
-    var(--color-void);
+  background: var(--color-void);
 }
 :root[data-theme="dark"] .atmosphere {
-  background:
-    radial-gradient(900px 420px at 76% -12%, color-mix(in oklab, var(--color-signal) 3%, transparent), transparent 72%),
-    radial-gradient(640px 360px at 28% 110%, color-mix(in oklab, var(--color-signal) 1.5%, transparent), transparent 76%),
-    var(--color-void);
+  background: var(--color-void);
 }
 
 /* faint paper grid for empty canvases */
@@ -596,7 +558,7 @@
 .finding {
   position: relative;
   border-left: 2px solid var(--tint, var(--color-ink-faint));
-  background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 8%, transparent);
+  background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 6%, var(--color-panel));
   color: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 76%, var(--color-ink));
 }
 
@@ -613,10 +575,10 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border-radius: 5px;
+  border-radius: var(--radius-pill);
   border: 1px solid color-mix(in oklab, var(--tint, var(--color-ink-faint)) 30%, transparent);
   background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 8%, transparent);
-  padding: 1.5px 6px;
+  padding: 2px 7px;
   color: color-mix(in oklab, var(--tint, var(--color-ink-dim)) 76%, var(--color-ink));
   white-space: nowrap;
 }
@@ -644,7 +606,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  border-radius: 6px;
+  border-radius: var(--radius-pill);
   border: 1px solid color-mix(in oklab, var(--tint, var(--color-ink-faint)) 42%, transparent);
   background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 10%, transparent);
   color: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 78%, var(--color-ink));
@@ -666,7 +628,7 @@
 .verdict-pill-lg {
   font-size: 13.5px;
   padding: 5px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
 }
 
 /* Provenance tag (DESIGN.md 2.1): a `.chip` that also carries a leading dot
@@ -713,15 +675,14 @@ summary {
   gap: 6px;
   background: var(--color-signal);
   color: var(--color-on-signal);
-  border-radius: 8px;
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-on-signal) 18%, transparent);
-  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+  min-height: 42px;
+  border-radius: var(--radius-pill);
+  box-shadow: none;
+  transition: background-color var(--motion-base) var(--ease-premium), box-shadow var(--motion-base) var(--ease-premium), transform var(--motion-fast) var(--ease-premium);
 }
 .btn-primary:hover {
   background: color-mix(in oklab, var(--color-signal) 78%, var(--color-signal-dim));
-  box-shadow:
-    inset 0 1px 0 color-mix(in oklab, var(--color-on-signal) 22%, transparent),
-    0 8px 24px -16px color-mix(in oklab, var(--color-signal) 72%, transparent);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.08);
 }
 .btn-primary:active {
   transform: scale(0.985);
@@ -731,7 +692,12 @@ summary {
 }
 
 .landing-cta-signal {
-  border: 1px solid color-mix(in oklab, var(--color-signal) 54%, var(--color-line-2));
+  border: 1px solid color-mix(in oklab, var(--color-pass) 60%, var(--color-line-2));
+  background: var(--color-pass);
+  color: #061006;
+}
+.landing-cta-signal:hover {
+  background: color-mix(in oklab, var(--color-pass) 86%, #006b3c);
 }
 :root[data-theme="dark"] .landing-cta-signal:disabled {
   border-color: var(--color-line-2);
@@ -747,12 +713,15 @@ summary {
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--color-control-line);
-  border-radius: 8px;
+  min-height: 42px;
+  border-radius: var(--radius-pill);
+  background: var(--color-panel);
   color: var(--color-ink-dim);
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 .btn-secondary:hover {
-  border-color: var(--color-signal);
+  border-color: var(--color-line-2);
+  background: var(--color-panel-2);
   color: var(--color-ink);
 }
 
@@ -774,8 +743,8 @@ summary {
   font-family: var(--font-mono);
   font-size: 11px;
   border: 1px solid color-mix(in oklab, var(--tint, var(--color-line-2)) 45%, transparent);
-  border-radius: 6px;
-  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  padding: 3px 9px;
   color: color-mix(in oklab, var(--tint, var(--color-ink-dim)) 76%, var(--color-ink));
   background: transparent;
   white-space: nowrap;
@@ -790,17 +759,18 @@ summary {
 /* The ONE text input. (No outline:none — the global :focus-visible ring
    handles keyboard focus; the border shift is the pointer affordance.) */
 .field {
-  background: color-mix(in oklab, var(--color-void) 60%, transparent);
+  background: var(--color-panel-2);
   border: 1px solid var(--color-control-line);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--color-ink);
-  transition: border-color 0.15s ease;
+  transition: border-color var(--motion-base) var(--ease-premium), box-shadow var(--motion-base) var(--ease-premium), background var(--motion-base) var(--ease-premium);
 }
 .field::placeholder {
   color: var(--color-ink-faint);
 }
 .field:focus {
   border-color: var(--color-signal);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-signal) 10%, transparent);
 }
 /* Dark mode: lift toward the accessible signal-lift so the focused border is
    visibly distinct from the resting control-line border (they were identical). */
@@ -829,12 +799,12 @@ summary {
 
 /* The ONE stat tile: label above value, borderless wash (ledger rhythm). */
 .stat-tile {
-  border-radius: 6px;
-  background: color-mix(in oklab, var(--color-void) 42%, transparent);
-  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-panel-2);
+  padding: 14px 16px;
 }
 :root[data-theme="light"] .stat-tile {
-  background: color-mix(in oklab, var(--color-panel-2) 75%, transparent);
+  background: var(--color-panel-2);
 }
 .stat-label {
   font-family: var(--font-mono);
@@ -844,9 +814,11 @@ summary {
   color: var(--color-ink-faint);
 }
 .stat-value {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
-  font-size: 15px;
+  font-size: 18px;
   color: var(--color-ink);
 }
 
@@ -866,17 +838,84 @@ summary {
 }
 
 .empty-state {
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border: 1px dashed color-mix(in oklab, var(--color-line-2) 78%, transparent);
-  background:
-    radial-gradient(460px 180px at 50% 0%, color-mix(in oklab, var(--color-signal) 6%, transparent), transparent 72%),
-    color-mix(in oklab, var(--color-panel) 74%, transparent);
+  background: var(--color-panel);
   padding: 36px 24px;
   text-align: center;
   font-size: 12.5px;
   line-height: 1.6;
   color: var(--color-ink-faint);
 }
+
+/* Shared financial table rhythm: quiet headers, comparison-friendly numbers,
+   and row hover without enterprise-style boxing. */
+table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+thead th {
+  height: 36px;
+  color: var(--color-ink-faint);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.015em;
+}
+tbody tr {
+  min-height: 48px;
+  transition: background-color var(--motion-fast) var(--ease-premium);
+}
+tbody tr:hover {
+  background: color-mix(in oklab, var(--color-panel-2) 72%, transparent);
+}
+tbody td {
+  padding-block: 12px;
+}
+thead th:not(:first-child),
+tbody td:not(:first-child) {
+  font-variant-numeric: tabular-nums;
+}
+
+.app-sidebar {
+  border-color: var(--color-line);
+  box-shadow: 1px 0 0 var(--color-line);
+}
+.app-mobile-header {
+  background: color-mix(in oklab, var(--color-void) 84%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+}
+
+@media (hover: hover) {
+  .panel[href]:hover,
+  button.panel:hover,
+  a.panel:hover {
+    transform: translateY(-1px);
+    border-color: var(--color-line-2);
+    box-shadow: 0 2px 10px rgb(0 0 0 / 0.06);
+  }
+}
+}
+
+/* Cross-route polish intentionally sits outside Tailwind's layers so the
+   shared system can normalize legacy utility combinations without changing
+   page behavior or deleting page-specific information. */
+h1.display-sm {
+  font-size: clamp(1.75rem, 2.5vw, 2rem);
+  line-height: 1.12;
+}
+.panel.p-4 { padding: 20px; }
+.panel.p-5 { padding: 24px; }
+.panel.p-6 { padding: 24px; }
+.panel.divide-y > :where(:not(:last-child)) {
+  border-color: var(--color-line);
+}
+
+@media (max-width: 639px) {
+  .panel.p-4,
+  .panel.p-5,
+  .panel.p-6 { padding: 16px; }
+  h1.display-sm { font-size: 1.75rem; }
 }
 
 /* ───────────────────────── motion ───────────────────────── */

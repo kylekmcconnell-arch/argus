@@ -64,17 +64,17 @@ export function Landing({
 
   return (
     <div className="relative min-h-full overflow-hidden">
-      <HeroBackdrop className="pointer-events-none absolute bottom-[-70px] left-[24%] z-0 h-[310px] w-[86%] opacity-55 max-md:bottom-[-15px] max-md:left-[5%] max-md:h-[260px] max-md:w-[120%] max-md:opacity-30" />
+      <HeroBackdrop className="pointer-events-none absolute bottom-[-80px] left-[30%] z-0 h-[300px] w-[78%] opacity-20 max-md:bottom-[-15px] max-md:left-[5%] max-md:h-[240px] max-md:w-[120%] max-md:opacity-15" />
 
-      <div className="relative z-10 mx-auto w-full max-w-5xl px-5 py-10 sm:px-7 lg:py-16">
-        <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-10">
+      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-10 lg:py-16">
+        <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-12">
           <section aria-labelledby="landing-title" className="rise-in">
             <div className="eyebrow">Start a new investigation</div>
-            <h1 id="landing-title" className="display mt-3 max-w-3xl text-[44px] leading-[1.04] text-ink max-md:text-[32px]">
+            <h1 id="landing-title" className="display mt-3 max-w-3xl text-[48px] leading-[1.02] text-ink max-md:text-[34px]">
               Know what you’re backing before capital moves.
             </h1>
 
-            <p className="mt-4 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
+            <p className="mt-5 max-w-2xl text-[15px] leading-relaxed text-ink-dim">
               Enter an X account, token address, or project website. ARGUS shows what looks credible,
               what looks risky, and what still needs checking.
             </p>
@@ -86,7 +86,7 @@ export function Landing({
                 void launchFreshAudit(value.trim());
               }}
               aria-busy={launching}
-              className="panel soft-shadow mt-8 w-full p-4 sm:p-5"
+              className="panel soft-shadow mt-8 w-full p-5 sm:p-6"
             >
               <label htmlFor="investigation-subject" className="eyebrow">Subject</label>
               <div className="investigation-control relative mt-2.5">
@@ -177,13 +177,13 @@ export function Landing({
           </section>
 
           <aside aria-labelledby="investigation-output-title" className="panel rise-in overflow-hidden">
-            <div className="border-b border-line px-4 py-3.5">
+            <div className="border-b border-line px-5 py-4.5">
               <div id="investigation-output-title" className="eyebrow">What you’ll get</div>
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A clear result with the evidence behind it.</p>
             </div>
             <div className="divide-y divide-line/70">
               {INVESTIGATION_OUTPUTS.map(({ icon: Icon, label, detail }) => (
-                <div key={label} className="flex gap-3 px-4 py-3.5">
+                <div key={label} className="flex gap-3 px-5 py-4">
                   <Icon size={18} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden />
                   <div>
                     <div className="text-[13.5px] font-medium text-ink">{label}</div>

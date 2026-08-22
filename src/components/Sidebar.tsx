@@ -315,14 +315,14 @@ export function Sidebar({
       aria-hidden={mobile && !open ? true : undefined}
       inert={mobile && !open ? true : undefined}
       data-sidebar-mode={reportLayout ? "report" : "standard"}
-      className={`app-sidebar fixed inset-y-0 left-0 z-40 flex h-full w-[248px] shrink-0 flex-col border-r border-line-2 bg-sidebar transition-[transform,width] duration-200 lg:static lg:translate-x-0 ${
+      className={`app-sidebar fixed inset-y-0 left-0 z-40 flex h-full w-[248px] shrink-0 flex-col border-r border-line bg-sidebar transition-[transform,width] duration-200 lg:static lg:translate-x-0 ${
         "lg:w-[248px]"
       } ${
         open ? "translate-x-0" : "-translate-x-full"
       }`}
     >
       {/* brand */}
-      <div className={`flex min-h-16 items-center gap-2 ${compact ? "justify-center px-2" : "px-4"}`}>
+      <div className={`flex min-h-16 items-center gap-2 border-b border-line/70 ${compact ? "justify-center px-2" : "px-4"}`}>
         <button type="button" onClick={() => nav("idle")} title={compact ? "ARGUS home" : undefined} className={`flex min-w-0 items-center rounded-md text-left ${compact ? "justify-center" : "flex-1 gap-2.5"}`}>
           <ArgusMark size={26} />
           <span className={compact ? "sr-only" : "display text-[15px] tracking-[0.02em] text-ink"}>ARGUS</span>
