@@ -150,7 +150,10 @@ describe("ARGUS Eye floating assistant", () => {
   });
 
   it("asks the immutable report and renders source citations", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(JSON.stringify({
       answer: "A stronger identity-bound source could overturn the founder attribution.",
       citations: ["https://clutch.markets/about"],
       reasoningSteps: ["The project publishes the role -> the report can state the attribution."],
@@ -186,7 +189,8 @@ describe("ARGUS Eye floating assistant", () => {
           counterSignalIds: [],
         }],
       },
-    }), { status: 200, headers: { "content-type": "application/json" } }));
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
     vi.stubGlobal("fetch", fetchMock);
     act(() => root.render(<ArgusEyeAssistant inv={investigation()} reportVersionId={reportVersionId} />));
     clickByLabel("Ask ARGUS Eye about this report");

@@ -27,7 +27,6 @@ import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { AddInfo } from "./AddInfo";
 import { EmbeddedThreatScan } from "./ThreatScanPage";
 import { LinkEntity } from "./LinkEntity";
-import { AskReport } from "./AskReport";
 import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
 import { Counterparties } from "./Counterparties";
 import { RiskPaths } from "./RiskPaths";
@@ -2393,30 +2392,6 @@ export function InvestigationReport({
           </div>
         </div>
 
-        {/* ask-the-report chat — grounded in this investigation's own evidence.
-            Absent from the share view: a link recipient reads the report, they
-            do not interrogate the workspace. */}
-        {!shareView && <div className="mt-3">
-          <AskReport
-            subject={`$${token.symbol}`}
-            reportVersionId={versionContext?.reportVersionId
-              ?? (inv.persistence?.state === "persisted" ? inv.persistence.reportVersionId : undefined)
-              ?? undefined}
-            context={[
-            inv.founderNote,
-            token.headline,
-            `scored token verdict ${token.verdict} ${token.score ?? ""}; decision readiness ${readiness.status}; ${readiness.successful}/${readiness.applicable} evidence outcomes recorded`,
-            projectAccount && projectReadiness ? `project account scored verdict ${projectAccount.report.composite_verdict} ${projectAccount.report.governing_score ?? ""}; decision readiness ${projectReadiness.status}; ${projectReadiness.successful}/${projectReadiness.applicable} evidence outcomes recorded` : "",
-            teamPeople.length ? `team: ${teamPeople.map((p) => p.name + (p.handle ? ` ${p.handle}` : "")).join(", ")}` : "",
-            projectX ? `project X account ${projectX}` : "",
-            token.deployer ? `deployer wallet ${token.deployer}` : "",
-            deployerTrail?.funder ? `funder ${deployerTrail.funder.label ?? deployerTrail.funder.address}` : "",
-            !versionContext && connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
-            invGraph ? `graph entities: ${[...new Set(invGraph.nodes.map((n) => String(n.key)))].slice(0, 30).join(", ")}` : "",
-            ].filter(Boolean).join(" | ")}
-          />
-        </div>}
-
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
         {showCurrentIntelligence && canMutateWorkspace && (
           <div className="mt-3">
@@ -2445,7 +2420,7 @@ export function InvestigationReport({
           ARGUS checked the token, website, project account, and public team. Open a person to run a deeper review. Names without a verified profile stay unconfirmed.
         </div>
       </div>
-      <ArgusEyeAssistant inv={inv} reportVersionId={frozenReportVersionId} />
+      {!shareView && <ArgusEyeAssistant inv={inv} reportVersionId={frozenReportVersionId} />}
     </div>
   );
 }

@@ -23,20 +23,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function setInputValue(input: HTMLInputElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+function setInputValue(input: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
   setter?.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 describe("AskReport", () => {
   it("sends only the question and exact immutable version, leaving evidence loading to the server", async () => {
-    const providerFetch = vi.fn().mockResolvedValue({
-      json: async () => ({
+    const providerFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
         answer: "The frozen source supports the claim.",
         citations: ["https://example.com/source"],
-      }),
-    });
+      }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", providerFetch);
     act(() => {
       root.render(
@@ -46,13 +44,12 @@ describe("AskReport", () => {
         />,
       );
     });
-    const toggle = container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+    const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Ask ARGUS Eye about this report"]');
     act(() => toggle?.click());
-    const input = container.querySelector<HTMLInputElement>('input[aria-label="Question about this report"]');
+    const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask ARGUS Eye"]');
     expect(input?.disabled).toBe(false);
     act(() => setInputValue(input!, "What supports the claim?"));
-    const askButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Ask");
+    const askButton = container.querySelector<HTMLButtonElement>('button[aria-label="Send question"]');
     await act(async () => { askButton?.click(); await Promise.resolve(); });
 
     expect(providerFetch).toHaveBeenCalledTimes(1);
@@ -68,7 +65,10 @@ describe("AskReport", () => {
   });
 
   it("opens with the disputed context on a challenge event and tags the question", async () => {
-    const providerFetch = vi.fn().mockResolvedValue({ json: async () => ({ answer: "ok" }) });
+    const providerFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ answer: "ok" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
     vi.stubGlobal("fetch", providerFetch);
     act(() => {
       root.render(
@@ -86,15 +86,14 @@ describe("AskReport", () => {
     });
 
     // The console opened itself and shows what is being challenged.
-    expect(container.querySelector('button[aria-expanded="true"]')).not.toBeNull();
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
     expect(container.textContent).toContain("Team & identity · scored 14/25");
 
-    const input = container.querySelector<HTMLInputElement>('input[aria-label="Question about this report"]');
+    const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask ARGUS Eye"]');
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(document.activeElement).toBe(input);
     act(() => setInputValue(input!, "The advisor role was disclosed in March."));
-    const askButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Ask");
+    const askButton = container.querySelector<HTMLButtonElement>('button[aria-label="Send question"]');
     await act(async () => { askButton?.click(); await Promise.resolve(); });
 
     const requestBody = JSON.parse(String((providerFetch.mock.calls[0]?.[1] as RequestInit)?.body));
@@ -112,11 +111,11 @@ describe("AskReport", () => {
     const providerFetch = vi.fn();
     vi.stubGlobal("fetch", providerFetch);
     act(() => root.render(<AskReport subject="@alice" />));
-    const toggle = container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+    const toggle = container.querySelector<HTMLButtonElement>('button[aria-label="Ask ARGUS Eye about this report"]');
     act(() => toggle?.click());
 
-    expect(container.querySelector<HTMLInputElement>("input")?.disabled).toBe(true);
-    expect(container.textContent).toContain("Save or open a report before asking a question.");
+    expect(container.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(true);
+    expect(container.textContent).toContain("Save required");
     expect(providerFetch).not.toHaveBeenCalled();
   });
 });

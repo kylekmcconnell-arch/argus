@@ -22,7 +22,7 @@ vi.mock("./LinkEntity", () => ({ LinkEntity: () => null }));
 vi.mock("./SecondOpinion", () => ({ SecondOpinion: () => <div /> }));
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => <div /> }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => <div /> }));
-vi.mock("./AskReport", () => ({ AskReport: () => <div /> }));
+vi.mock("./ArgusEyeAssistant", () => ({ ArgusEyeAssistant: () => <div /> }));
 vi.mock("./Unknowns", () => ({ Unknowns: () => <div /> }));
 vi.mock("./MethodologyChecklist", () => ({ MethodologyChecklist: ({ id }: { id?: string }) => <div id={id} /> }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => <span /> }));
