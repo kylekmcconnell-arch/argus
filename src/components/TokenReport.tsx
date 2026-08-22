@@ -25,7 +25,7 @@ import { Holdings } from "./Holdings";
 import { MoneyFlowStory } from "./MoneyFlowStory";
 import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 import { LinkEntity } from "./LinkEntity";
-import { AskReport } from "./AskReport";
+import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
 import { ExpandableText } from "./ExpandableText";
@@ -744,26 +744,15 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           <MethodologyChecklist id="token-methodology" checks={checks} />
         </div>
 
-        {/* ask-the-report chat — grounded in this token's own evidence.
-            Absent from the share view. */}
-        {!shareView && <div className="mt-3">
-          <AskReport
+        {!shareView && (
+          <ArgusEyeAssistant
             subject={`$${d.symbol}`}
             reportVersionId={versionContext?.reportVersionId
               ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId : undefined)
               ?? undefined}
-            context={[
-            `${d.name} ($${d.symbol}) on ${d.chain}`,
-            plainLanguageSummary(d.headline),
-            `early score ${d.verdict} ${d.score ?? ""}`,
-            `report status ${readiness.status}: ${readiness.successful}/${readiness.applicable} checks finished, ${readiness.unresolved} open`,
-            d.deployer ? `${deployerLabel.toLowerCase()} ${d.deployer}${attribution ? ` (named by ${attribution.source} ${attribution.method})` : ""}` : "",
-            d.cg ? `${d.cg.cexCount} CEX listings${d.cg.rank ? `, rank #${d.cg.rank}` : ""}` : "not on CoinGecko",
-            projectSite ? `site ${projectSite}` : "",
-            d.projectX ? `project X ${d.projectX}` : "",
-            ].filter(Boolean).join(" | ")}
+            anchorId="ask-report"
           />
-        </div>}
+        )}
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
         {showCurrentIntelligence && canMutateWorkspace && (

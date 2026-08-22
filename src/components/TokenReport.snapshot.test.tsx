@@ -39,8 +39,8 @@ vi.mock("./ServiceAlert", () => ({
   },
 }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => <div /> }));
-vi.mock("./AskReport", () => ({
-  AskReport: (props: Record<string, unknown>) => {
+vi.mock("./ArgusEyeAssistant", () => ({
+  ArgusEyeAssistant: (props: Record<string, unknown>) => {
     harness.askReport(props);
     return <div data-panel="ask-report" />;
   },

@@ -58,7 +58,7 @@ import { personDimensionChapters } from "../lib/dimensionChapters";
 import { DossierReport } from "./DossierReport";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
-import { AskReport } from "./AskReport";
+import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
@@ -4417,7 +4417,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               this" affordance. Absent from the share view. */}
           {!shareView && (
             <div id="ask-report" className="min-w-0 scroll-mt-28 lg:col-span-2">
-              <AskReport
+              <ArgusEyeAssistant
                 subject={report.handle}
                 reportVersionId={evidenceReportVersionId}
               />
