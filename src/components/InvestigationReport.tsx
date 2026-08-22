@@ -1325,7 +1325,7 @@ export function InvestigationReport({
   return (
     <div className="investigation-story relative min-h-full pb-24">
       <header className="report-toolbar sticky top-0 z-30 border-b backdrop-blur">
-        <div className="mx-auto flex max-w-6xl flex-nowrap items-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3">
+        <div className="report-frame flex flex-nowrap items-center gap-2 py-2.5 sm:py-3">
           {!shareView && (
             <button onClick={onReset} className="btn-ghost flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 px-2 text-[12.5px] sm:min-w-0 sm:justify-start sm:px-1">
               <ArrowLeft size={15} weight="bold" aria-hidden="true" />
@@ -1404,7 +1404,7 @@ export function InvestigationReport({
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-4 sm:px-5">
+      <div className="report-frame">
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl

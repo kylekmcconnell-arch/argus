@@ -135,6 +135,13 @@
 }
 
 @layer components {
+  /* Report shells should use the whole post-sidebar canvas. Responsive gutters
+     provide breathing room while inner narrative blocks keep readable measures. */
+  .report-frame {
+    width: 100%;
+    padding-inline: clamp(1rem, 2vw, 3rem);
+  }
+
 /* ───────────────────────── typography ───────────────────────── */
 
 /* The brand voice: Young Serif, used sparingly — wordmark, 32/44px subject

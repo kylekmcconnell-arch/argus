@@ -2852,7 +2852,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
       {/* top bar */}
       <header className="sticky top-0 z-30 border-b border-line bg-void/85 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-nowrap items-center gap-2 px-4 py-2.5 sm:px-5 sm:py-3">
+        <div className="report-frame flex flex-nowrap items-center gap-2 py-2.5 sm:py-3">
           <button type="button" onClick={onReset} className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-[13.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink sm:min-w-0 sm:justify-start">
             <ArrowLeft aria-hidden="true" size={15} weight="bold" />
             <span className="max-sm:sr-only">New investigation</span>
@@ -2993,7 +2993,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl px-5">
+      <div className="report-frame">
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl

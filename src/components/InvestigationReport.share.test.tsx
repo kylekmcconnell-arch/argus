@@ -147,6 +147,14 @@ afterEach(async () => {
 });
 
 describe("investigation exact sharing", () => {
+  it("uses fluid report frames instead of a centered fixed-width shell", () => {
+    render(investigation());
+
+    const frames = [...container.querySelectorAll<HTMLElement>(".report-frame")];
+    expect(frames).toHaveLength(2);
+    expect(frames.every((frame) => !frame.className.includes("max-w-"))).toBe(true);
+  });
+
   it("separates a positive risk signal from a blocked scan instead of presenting a contradictory INCOMPLETE verdict", () => {
     const recorded = [
       "contract-safety",
