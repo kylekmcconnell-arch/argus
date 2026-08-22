@@ -102,6 +102,18 @@ afterEach(async () => {
 });
 
 describe("AppShell mobile navigation drawer", () => {
+  it("keeps the credit balance inside the verified account section", async () => {
+    await renderShell();
+
+    const account = drawer().querySelector<HTMLElement>("[data-sidebar-account]");
+    const credits = drawer().querySelector<HTMLButtonElement>("button[aria-label='Open credits, pricing, and referrals']");
+
+    expect(account).not.toBeNull();
+    expect(credits).not.toBeNull();
+    expect(account?.contains(credits)).toBe(true);
+    expect(credits?.classList.contains("fixed")).toBe(false);
+  });
+
   it("keeps the closed drawer inert and exposes it as a modal dialog only while open", async () => {
     await renderShell();
 

@@ -5,7 +5,6 @@ import App from './App.tsx'
 import { AuthGate } from './auth.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx'
 import { SessionExpiryNotice } from './components/SessionExpiryNotice.tsx'
-import { EarlyAccessHub } from './components/EarlyAccessHub.tsx'
 import { FeedbackButton } from './components/FeedbackButton.tsx'
 import { installSessionExpiryWatch } from './lib/sessionExpiry.ts'
 import { installPrintTheme } from './lib/printTheme.ts'
@@ -73,7 +72,6 @@ createRoot(document.getElementById('root')!).render(
       ) : (
         <AuthGate>
           <SessionExpiryNotice />
-          <EarlyAccessHub />
           <FeedbackButton />
           <App />
         </AuthGate>

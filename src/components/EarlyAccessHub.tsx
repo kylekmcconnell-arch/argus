@@ -39,7 +39,7 @@ function money(cents: number): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(cents / 100);
 }
 
-export function EarlyAccessHub() {
+export function EarlyAccessHub({ compact = false }: { compact?: boolean }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [data, setData] = useState<AccountSnapshot | null>(null);
   const [error, setError] = useState("");
@@ -93,11 +93,12 @@ export function EarlyAccessHub() {
       <button
         type="button"
         onClick={open}
-        className="fixed bottom-4 left-4 z-50 flex min-h-10 items-center gap-2 rounded-full border border-line bg-panel px-3.5 py-2 text-[12.5px] font-medium text-ink shadow-lg transition hover:border-signal/60 hover:bg-panel-2 lg:left-[264px]"
+        className={`mt-1 flex min-h-9 w-full items-center rounded-md border border-line/80 bg-panel/45 py-2 text-[12.5px] font-medium text-ink-dim transition hover:border-signal/45 hover:bg-panel hover:text-ink ${compact ? "justify-center px-0" : "gap-2.5 px-2.5"}`}
         aria-label="Open credits, pricing, and referrals"
+        title={compact ? (data?.credit ? `${data.credit.balance.toFixed(1)} credits` : "Credits") : undefined}
       >
-        <WalletIcon size={17} aria-hidden />
-        <span>{data?.credit ? `${data.credit.balance.toFixed(1)} credits` : "Credits"}</span>
+        <WalletIcon size={17} className="text-ink-faint" aria-hidden />
+        <span className={compact ? "sr-only" : undefined}>{data?.credit ? `${data.credit.balance.toFixed(1)} credits` : "Credits"}</span>
       </button>
 
       <dialog
