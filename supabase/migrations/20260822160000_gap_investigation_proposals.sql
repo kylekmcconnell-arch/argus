@@ -58,6 +58,85 @@ create policy gap_investigations_read_member_org on public.gap_investigations
     where member.user_id = (select auth.uid()) and member.active
   ));
 
+-- A newer gap proposal is deliberately not publication-eligible until an
+-- analyst authorizes promotion. Keep the existing projection invariant for
+-- every ordinary version while allowing an exact source version to remain
+-- active in front of one or more inactive proposals.
+create or replace function public.enforce_active_report_projection()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_case_id uuid;
+begin
+  if tg_op = 'UPDATE'
+     and old.kind in ('person', 'token', 'investigation', 'site')
+     and (
+       new.organization_id is distinct from old.organization_id
+       or new.kind is distinct from old.kind
+       or new.ref is distinct from old.ref
+     ) then
+    raise exception 'case report projection identity is immutable';
+  end if;
+
+  if new.kind not in ('person', 'token', 'investigation', 'site') then
+    return new;
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      new.organization_id::text || ':' || new.kind || ':' || new.ref,
+      0
+    )
+  );
+
+  if new.report_version_id is null then
+    raise exception 'case report projection requires an immutable version';
+  end if;
+
+  select c.id
+  into v_case_id
+  from public.cases c
+  join public.report_versions rv
+    on rv.case_id = c.id
+   and rv.id = new.report_version_id
+   and rv.organization_id = new.organization_id
+  where c.organization_id = new.organization_id
+    and c.kind = new.kind
+    and c.canonical_ref = new.ref
+    and c.display_query = new.query
+    and c.status = 'open'
+    and rv.payload is not distinct from new.payload
+    and rv.verdict is not distinct from new.verdict
+    and rv.score is not distinct from new.score
+    and rv.attestation_state = new.attestation_state
+    and rv.contributor_label = new.contributor
+    and rv.created_by is not distinct from new.created_by
+    and not exists (
+      select 1
+      from public.report_versions newer
+      where newer.case_id = c.id
+        and newer.version > rv.version
+        and not exists (
+          select 1
+          from public.gap_investigations investigation
+          where investigation.proposed_report_version_id = newer.id
+            and investigation.organization_id = newer.organization_id
+            and investigation.status not in ('promotion_authorized', 'promoted')
+        )
+    )
+  limit 1;
+
+  if v_case_id is null then
+    raise exception 'case report projection must match the latest immutable publishable version of an open case';
+  end if;
+
+  return new;
+end;
+$$;
+
 create or replace function public.authorize_gap_investigation(
   p_organization_id uuid,
   p_source_report_version_id uuid,
@@ -295,6 +374,17 @@ begin
     raise exception 'proposal was persisted to a different case';
   end if;
 
+  -- Link the proposal before restoring the projection. The projection trigger
+  -- can then prove that the newer version is an inactive proposal rather than
+  -- accidentally treating an arbitrary stale version as current.
+  update public.gap_investigations
+  set proposed_report_version_id = v_result.report_version_id,
+      observed_cost = coalesce(p_cost, '{}'::jsonb),
+      execution_receipts = p_execution_receipts,
+      status = case when p_completeness_state = 'complete' then 'proposed' else 'partial' end,
+      completed_at = now()
+  where id = p_authorization_id;
+
   -- persist_report_version_bundle deliberately clears the active projection.
   -- Restore the exact source inside this same transaction so a proposal never
   -- becomes current and never makes the current report disappear.
@@ -317,14 +407,6 @@ begin
     verdict = excluded.verdict,
     score = excluded.score,
     ts = excluded.ts;
-
-  update public.gap_investigations
-  set proposed_report_version_id = v_result.report_version_id,
-      observed_cost = coalesce(p_cost, '{}'::jsonb),
-      execution_receipts = p_execution_receipts,
-      status = case when p_completeness_state = 'complete' then 'proposed' else 'partial' end,
-      completed_at = now()
-  where id = p_authorization_id;
 
   insert into public.case_events (
     organization_id, case_id, report_version_id, actor_user_id, event_type, metadata

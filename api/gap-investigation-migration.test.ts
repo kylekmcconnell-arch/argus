@@ -16,11 +16,14 @@ describe("gap investigation database boundary", () => {
     expect(migration).toMatch(/revoke all on function public\.promote_gap_investigation_proposal[\s\S]+from public, anon, authenticated/);
   });
 
-  it("restores the exact source projection and blocks normal proposal activation", () => {
+  it("links the inactive proposal before restoring the exact source projection", () => {
     const restore = migration.indexOf("Restore the exact source inside this same transaction");
     const proposalUpdate = migration.indexOf("set proposed_report_version_id");
     expect(restore).toBeGreaterThan(0);
-    expect(proposalUpdate).toBeGreaterThan(restore);
+    expect(proposalUpdate).toBeGreaterThan(0);
+    expect(proposalUpdate).toBeLessThan(restore);
+    expect(migration).toContain("newer.version > rv.version");
+    expect(migration).toContain("investigation.status not in ('promotion_authorized', 'promoted')");
     expect(migration).toContain("proposed gap investigation requires explicit analyst promotion");
     expect(migration).toContain("perform public.activate_report_version_with_graph");
   });
