@@ -27,7 +27,7 @@ vi.mock("./AddInfo", () => ({ AddInfo: () => { harness.livePanel("add-info"); re
 vi.mock("./LinkEntity", () => ({ LinkEntity: () => { harness.livePanel("link-entity"); return null; } }));
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => <div>service-ready</div> }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: (props: Record<string, unknown>) => { harness.trustGraph(props); return null; } }));
-vi.mock("./AskReport", () => ({ AskReport: (props: Record<string, unknown>) => { harness.askReport(props); return null; } }));
+vi.mock("./ArgusEyeAssistant", () => ({ ArgusEyeAssistant: (props: Record<string, unknown>) => { harness.askReport(props); return null; } }));
 vi.mock("./Avatar", () => ({ Avatar: () => null }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
 

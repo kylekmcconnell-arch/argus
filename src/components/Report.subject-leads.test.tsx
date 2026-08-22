@@ -25,7 +25,7 @@ vi.mock("./AddInfo", () => ({ AddInfo: () => null }));
 vi.mock("./LinkEntity", () => ({ LinkEntity: () => null }));
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => <div>service-ready</div> }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => null }));
-vi.mock("./AskReport", () => ({ AskReport: () => null }));
+vi.mock("./ArgusEyeAssistant", () => ({ ArgusEyeAssistant: () => null }));
 vi.mock("./Avatar", () => ({ Avatar: () => null }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
 

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   CheckCircle,
@@ -10,6 +10,7 @@ import {
 } from "@phosphor-icons/react";
 import type { BasicFactLead } from "../data/evidence";
 import type { Investigation } from "../lib/investigation";
+import { CHALLENGE_EVENT, type ChallengeDetail } from "../lib/challenge";
 import { projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 
 interface EyeAnswer {
@@ -66,18 +67,25 @@ function projectLabel(inv: Investigation): string {
 
 export function ArgusEyeAssistant({
   inv,
+  subject,
   reportVersionId,
+  anchorId = "argus-eye",
 }: {
-  inv: Investigation;
+  inv?: Investigation;
+  subject?: string;
   reportVersionId?: string;
+  anchorId?: string;
 }) {
   const [open, setOpen] = useState(() => (
     typeof window !== "undefined" && window.location.hash === "#argus-eye"
   ));
   const [question, setQuestion] = useState("");
   const [answers, setAnswers] = useState<EyeAnswer[]>([]);
+  const [challengeContext, setChallengeContext] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const nextAnswerId = useRef(0);
   const loading = answers.at(-1)?.state === "loading";
+  const requestSubject = subject || inv?.projectX || (inv ? `$${inv.token.symbol}` : "this report");
 
   const intelligence = useMemo<{
     headline: string;
@@ -88,6 +96,15 @@ export function ArgusEyeAssistant({
     person: string;
     sourceUrl?: string;
   }>(() => {
+    if (!inv) {
+      return {
+        headline: `Interrogate the saved case for ${requestSubject}`,
+        detail: "ARGUS Eye can explain the governing conclusion, trace its saved evidence, challenge the thesis, and name the exact evidence that would change it.",
+        status: reportVersionId ? "Report bound" : "Save required",
+        tone: reportVersionId ? "context" as const : "caution" as const,
+        person: requestSubject,
+      };
+    }
     const verifiedTeam = [
       ...(inv.projectAccount?.webTeam ?? []),
       ...(inv.webTeam ?? []),
@@ -137,12 +154,26 @@ export function ArgusEyeAssistant({
       rejectedLead,
       person: label,
     };
-  }, [inv]);
+  }, [inv, reportVersionId, requestSubject]);
+
+  useEffect(() => {
+    const onChallenge = (event: Event) => {
+      const detail = (event as CustomEvent<ChallengeDetail>).detail;
+      if (!detail?.context) return;
+      setChallengeContext(detail.context);
+      setOpen(true);
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+    };
+    window.addEventListener(CHALLENGE_EVENT, onChallenge);
+    return () => window.removeEventListener(CHALLENGE_EVENT, onChallenge);
+  }, []);
 
   const ask = async (preset?: string) => {
     const q = (preset ?? question).trim();
     if (!q || !reportVersionId || loading) return;
-    const id = `${Date.now()}-${answers.length}`;
+    const routedQuestion = challengeContext ? `[Challenging: ${challengeContext}] ${q}` : q;
+    nextAnswerId.current += 1;
+    const id = String(nextAnswerId.current);
     setQuestion("");
     setAnswers((current) => [...current, {
       id,
@@ -159,8 +190,8 @@ export function ArgusEyeAssistant({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          subject: inv.projectX || `$${inv.token.symbol}`,
-          question: q,
+          subject: requestSubject,
+          question: routedQuestion,
           reportVersionId,
           history: answers
             .filter((turn) => turn.state === "ready")
@@ -276,7 +307,7 @@ export function ArgusEyeAssistant({
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-[70] sm:bottom-5 sm:right-5" data-testid="argus-eye-assistant">
+    <div id={anchorId} className="fixed bottom-4 right-4 z-[70] sm:bottom-5 sm:right-5" data-testid="argus-eye-assistant">
       {open && (
         <section
           id="argus-eye-panel"
@@ -290,13 +321,22 @@ export function ArgusEyeAssistant({
               <p className="mono text-[10px] font-semibold uppercase tracking-[0.11em]">ARGUS EYE</p>
               <p className="truncate text-[10px] opacity-80">Talk to the report-wide reasoning layer</p>
             </div>
-            <span className="mono ml-auto rounded border border-white/25 px-1.5 py-0.5 text-[8.5px] uppercase tracking-[0.08em]">Evidence bound</span>
+            <span className="mono ml-auto rounded border border-white/25 px-1.5 py-0.5 text-[8.5px] uppercase tracking-[0.08em]">{reportVersionId ? "Evidence bound" : "Save required"}</span>
             <button type="button" onClick={() => setOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-lg transition hover:bg-white/10" aria-label="Close ARGUS Eye">
               <X size={16} weight="bold" aria-hidden="true" />
             </button>
           </header>
 
           <div className="thin-scroll overflow-y-auto px-3.5 py-3.5">
+            {challengeContext && (
+              <div className="mb-2.5 flex items-start gap-2 rounded-lg border border-caution/25 bg-caution/5 px-3 py-2.5">
+                <ShieldWarning size={15} weight="duotone" className="mt-0.5 shrink-0 text-caution" aria-hidden="true" />
+                <p className="min-w-0 flex-1 text-[10.5px] leading-relaxed text-ink-dim">
+                  <span className="font-semibold text-ink">Challenging:</span> {challengeContext}
+                </p>
+                <button type="button" onClick={() => setChallengeContext(null)} aria-label="Clear challenge context" className="text-[10px] text-ink-faint transition hover:text-ink">Clear</button>
+              </div>
+            )}
             <div className="rounded-xl border border-line bg-panel-2/65 p-3">
               <div className="flex items-start gap-2.5">
                 <Sparkle size={16} weight="duotone" className="mt-0.5 shrink-0 text-signal-lift" aria-hidden="true" />
