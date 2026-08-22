@@ -191,7 +191,7 @@ describe("token report supplemental evidence boundary", () => {
       "#token-methodology",
     ]);
     expect(container.textContent).toContain("What was not verified");
-    expect(container.textContent).toContain("CoinGecko does not list this token");
+    expect(container.textContent).toContain("No CoinGecko record was captured");
     for (const href of hrefs) {
       expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
     }

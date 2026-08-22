@@ -27,6 +27,9 @@ export interface Holder { address: string; percent: number; tag?: string; isCont
 
 export interface NormalizedSafety {
   available: boolean;
+  /** Whether a contract-property provider answered. A successful trade
+   * simulation alone cannot establish mint, ownership, or source-code state. */
+  contractPropertiesAssessed?: boolean;
   simChecked: boolean;
   honeypot: boolean;
   honeypotOnchain: boolean; // GoPlus / on-chain flag, independent of the honeypot.is simulation
@@ -114,6 +117,15 @@ export function deployerRoleLabel(
 export interface TokenDossier {
   address: string; chain: string; dexId: string; dexLabels?: string[]; pairAddress?: string; symbol: string; name: string;
   imageUrl?: string; priceUsd?: number; mcap?: number; fdv?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
+  /** Which headline market fields DexScreener actually returned. Older frozen
+   * reports omit this receipt and therefore render those values as derived. */
+  marketEvidence?: {
+    mcap: boolean;
+    fdv: boolean;
+    liquidityUsd: boolean;
+    vol24: boolean;
+    ageDays: boolean;
+  };
   /**
    * Pool-creation instant from DexScreener, in unix milliseconds. Frozen so a
    * reopened report ages the deployer against the launch instead of against
@@ -394,6 +406,7 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
   const creatorShare = num(gp?.creator_percent);
   return {
     available: !!gp || !!s,
+    contractPropertiesAssessed: !!gp,
     simChecked: !!s,
     honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
@@ -447,6 +460,7 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
   const freezable = solFlag(sol?.freezable);
   return {
     available: !!sol,
+    contractPropertiesAssessed: !!sol,
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
     honeypotOnchain: sol?.non_transferable === "1",
@@ -482,7 +496,7 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
 
 function emptySafety(): NormalizedSafety {
   return {
-    available: false, simChecked: false, honeypot: false, honeypotOnchain: false, serialScammerCreator: false, mintable: false, freezable: false,
+    available: false, contractPropertiesAssessed: false, simChecked: false, honeypot: false, honeypotOnchain: false, serialScammerCreator: false, mintable: false, freezable: false,
     nonTransferable: false, ownerRenounced: false, takeBack: false, hiddenOwner: false,
     selfdestruct: false, pausable: false, openSource: false, cannotSellAll: false,
     metadataMutable: false, buyTax: 0, sellTax: 0, holderCount: 0, topHolderPct: null, lpLocked: false,
@@ -1200,6 +1214,13 @@ async function runTokenAudit(
     address, chain, dexId: pair.dexId, dexLabels: pair.labels ?? [], pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
     mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays,
+    marketEvidence: {
+      mcap: pair.marketCap != null && Number.isFinite(pair.marketCap),
+      fdv: pair.fdv != null && Number.isFinite(pair.fdv),
+      liquidityUsd: pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd),
+      vol24: pair.volume?.h24 != null && Number.isFinite(pair.volume.h24),
+      ageDays: pair.pairCreatedAt != null && Number.isFinite(pair.pairCreatedAt),
+    },
     // Keep the raw instant, not just the day count derived from it above. The
     // operator trace ages the deployer wallet against this launch, and a wallet
     // minutes older than the token it launched is 0 days old in every direction.
