@@ -4,6 +4,7 @@ import { buildTokenStory, tokenDataGaps } from "./tokenStory";
 
 const safety: NormalizedSafety = {
   available: true,
+  contractPropertiesAssessed: true,
   simChecked: true,
   honeypot: false,
   honeypotOnchain: false,
@@ -54,6 +55,7 @@ function dossier(overrides: Partial<TokenDossier> = {}): TokenDossier {
     liquidityUsd: 180_000,
     vol24: 42_000,
     ageDays: 40,
+    marketEvidence: { mcap: true, fdv: true, liquidityUsd: true, vol24: true, ageDays: true },
     verdict: "PASS",
     score: 88,
     capApplied: null,
@@ -158,6 +160,10 @@ describe("buildTokenStory", () => {
     expect(story.sources.some((row) => row.url.includes("dexscreener.com"))).toBe(true);
     expect(story.sources.some((row) => row.url.includes("coingecko.com"))).toBe(true);
     expect(story.sources[0].factsCited).toBeGreaterThanOrEqual(story.sources[story.sources.length - 1].factsCited);
+    const dex = story.sources.find((row) => row.url.includes("dexscreener.com"))!;
+    expect(dex.citedLabels).not.toContain("Holders");
+    expect(dex.citedLabels).not.toContain("LP lock");
+    expect(dex.citedLabels).not.toContain("Deployer");
   });
 
   it("keeps headline market figures sourced when DexScreener recorded them", () => {
@@ -168,5 +174,44 @@ describe("buildTokenStory", () => {
       ["liquidity", "$180.0K", "sourced"],
       ["24h vol", "$42.0K", "sourced"],
     ]);
+  });
+
+  it("does not present fallback zeros as sourced market observations", () => {
+    const story = buildTokenStory(dossier({
+      mcap: 0,
+      fdv: 0,
+      liquidityUsd: 0,
+      vol24: 0,
+      marketEvidence: { mcap: false, fdv: false, liquidityUsd: false, vol24: false, ageDays: true },
+    }));
+    expect(story.headline.map((figure) => figure.provenance.tier)).toEqual([
+      "unestablished",
+      "unestablished",
+      "unestablished",
+      "unestablished",
+    ]);
+    expect(story.beats.find((beat) => beat.id === "liquidity")?.heading).toContain("Liquidity was not recorded.");
+  });
+
+  it("does not turn a successful trade simulation into clean contract-property claims", () => {
+    const story = buildTokenStory(dossier({
+      safety: {
+        ...safety,
+        available: true,
+        contractPropertiesAssessed: false,
+        simChecked: true,
+      },
+    }));
+    const contract = story.beats.find((beat) => beat.id === "contract")!;
+    expect(contract.heading).toBe("1 contract check is on record.");
+    expect(contract.figures.map((item) => [item.label, item.provenance.tier])).toEqual([
+      ["Honeypot", "sourced"],
+      ["Mintable", "unestablished"],
+      ["Ownership", "unestablished"],
+      ["Source code", "unestablished"],
+    ]);
+    expect(story.gaps).toContain(
+      "ARGUS ran a trade simulation but did not receive contract-property checks. Mint, ownership, and source-code status remain unverified.",
+    );
   });
 });

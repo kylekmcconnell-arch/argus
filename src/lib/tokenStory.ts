@@ -99,8 +99,11 @@ function unestablished(label: string, value = EMPTY): DossierFigure {
 export function tokenDataGaps(d: TokenDossier): string[] {
   const gaps: string[] = [];
   const evm = d.chain !== "solana";
+  const contractPropertiesAssessed = d.safety.contractPropertiesAssessed ?? d.safety.available;
   if (!d.safety.available) {
     gaps.push("ARGUS could not check the token contract on this network. The score uses market data only.");
+  } else if (evm && !contractPropertiesAssessed) {
+    gaps.push("ARGUS ran a trade simulation but did not receive contract-property checks. Mint, ownership, and source-code status remain unverified.");
   } else if (evm && !d.safety.openSource) {
     gaps.push("The contract code is not public or verified, so ARGUS cannot fully inspect what it can do.");
   }
@@ -111,7 +114,7 @@ export function tokenDataGaps(d: TokenDossier): string[] {
     gaps.push("ARGUS could not identify the wallet that created the token, so it could not trace its funding or other launches.");
   }
   if (!d.cg) {
-    gaps.push("CoinGecko does not list this token, so ARGUS could not confirm its market through that independent source.");
+    gaps.push("No CoinGecko record was captured, so ARGUS could not confirm the market through that independent source.");
   }
   if (!d.projectX) {
     gaps.push("No official X/social account was found linked to the token.");
@@ -170,6 +173,7 @@ function collectSourceRows(figures: DossierFigure[]): DossierSourceRow[] {
 
 function launchBeat(d: TokenDossier, when: string): DossierBeat {
   const dex = dexUrl(d);
+  const ageRecorded = d.ageDays != null && d.marketEvidence?.ageDays !== false;
   const market = receipt(
     d.ageDays != null
       ? `DexScreener pair age recorded as ${ageLabel(d.ageDays)}.`
@@ -179,7 +183,13 @@ function launchBeat(d: TokenDossier, when: string): DossierBeat {
     when,
   );
   const figures: DossierFigure[] = [];
-  if (d.ageDays != null) figures.push(sourced("Pair age", ageLabel(d.ageDays), market));
+  if (d.ageDays != null && d.marketEvidence?.ageDays === true) figures.push(sourced("Pair age", ageLabel(d.ageDays), market));
+  else if (d.ageDays != null && d.marketEvidence == null) figures.push(derived("Pair age", ageLabel(d.ageDays), receipt(
+    `Saved pair age is ${ageLabel(d.ageDays)}, but this older report did not preserve a per-field collector receipt.`,
+    "Saved token snapshot · legacy",
+    null,
+    when,
+  )));
   else figures.push(unestablished("Pair age"));
 
   if (d.deployer) {
@@ -190,7 +200,7 @@ function launchBeat(d: TokenDossier, when: string): DossierBeat {
         ? `${role} ${d.deployer} named by ${d.deployerAttribution?.source ?? "the collector"} (${d.deployerAttribution?.method ?? "recorded"}).`
         : `${role} ${d.deployer} is named without a confirmed creation signature.`,
       `${d.deployerAttribution?.source ?? "collector"} · ${d.deployerAttribution?.method ?? "attribution"}`,
-      dex,
+      null,
       when,
     );
     figures.push(proven
@@ -201,7 +211,7 @@ function launchBeat(d: TokenDossier, when: string): DossierBeat {
   }
 
   const sentences: string[] = [];
-  sentences.push(d.ageDays != null ? `The pair is ${ageLabel(d.ageDays)} old.` : "Launch age was not recorded.");
+  sentences.push(ageRecorded ? `The pair is ${ageLabel(d.ageDays!)} old.` : "Launch age was not recorded.");
   if (!d.deployer) sentences.push("The creating wallet was not identified.");
   else if (d.deployerAttribution?.kind === "deployer") sentences.push("The deployer wallet is on record.");
   else sentences.push("A creator or authority wallet is named, not a proven deployer.");
@@ -219,6 +229,7 @@ function liquidityBeat(d: TokenDossier, when: string): DossierBeat {
   const s = d.safety;
   const dex = dexUrl(d);
   const liq = money(d.liquidityUsd);
+  const liquidityRecorded = liq != null && d.marketEvidence?.liquidityUsd !== false;
   const market = receipt(
     liq ? `DexScreener liquidity recorded as ${liq}.` : "DexScreener did not record liquidity.",
     "DexScreener · market",
@@ -226,7 +237,14 @@ function liquidityBeat(d: TokenDossier, when: string): DossierBeat {
     when,
   );
   const figures: DossierFigure[] = [];
-  figures.push(liq ? sourced("Liquidity", liq, market) : unestablished("Liquidity"));
+  if (liq && d.marketEvidence?.liquidityUsd === true) figures.push(sourced("Liquidity", liq, market));
+  else if (liq && d.marketEvidence == null) figures.push(derived("Liquidity", liq, receipt(
+    `Saved liquidity is ${liq}, but this older report did not preserve a per-field collector receipt.`,
+    "Saved token snapshot · legacy",
+    null,
+    when,
+  )));
+  else figures.push(unestablished("Liquidity"));
 
   const lpKnown = s.lpAssessed === true || (s.available && s.lpAssessed !== false);
   if (s.lpAssessed === false || (!s.available && s.lpAssessed !== true)) {
@@ -242,12 +260,12 @@ function liquidityBeat(d: TokenDossier, when: string): DossierBeat {
     figures.push(sourced(
       "LP lock",
       lockValue,
-      receipt(`LP lock state recorded as ${lockValue}.`, "Contract / LP collector · onchain", dex, when),
+      receipt(`LP lock state recorded as ${lockValue}.`, "Contract / LP collector · onchain", null, when),
     ));
   }
 
   const sentences: string[] = [];
-  sentences.push(liq ? `Liquidity is ${liq}.` : "Liquidity was not recorded.");
+  sentences.push(liquidityRecorded ? `Liquidity is ${liq}.` : "Liquidity was not recorded.");
   if (s.lpAssessed === false || (!s.available && s.lpAssessed !== true)) {
     sentences.push("The lock state was not assessed.");
   } else if (s.lpBurnedPct >= 50) {
@@ -278,7 +296,7 @@ function holdersBeat(d: TokenDossier, when: string): DossierBeat {
         ? `${s.holderCount.toLocaleString()} holders recorded.`
         : "No holder count was recorded.",
     "Holder collector · onchain",
-    dexUrl(d),
+    null,
     when,
   );
 
@@ -300,7 +318,7 @@ function holdersBeat(d: TokenDossier, when: string): DossierBeat {
     figures.push(sourced(
       "Creator holdings",
       pct,
-      receipt(`Creator share recorded as ${pct}.`, "Holder collector · onchain", dexUrl(d), when),
+      receipt(`Creator share recorded as ${pct}.`, "Holder collector · onchain", null, when),
     ));
   } else {
     figures.push(unestablished("Creator holdings"));
@@ -325,6 +343,7 @@ function holdersBeat(d: TokenDossier, when: string): DossierBeat {
 
 function contractBeat(d: TokenDossier, when: string): DossierBeat {
   const s = d.safety;
+  const contractPropertiesAssessed = s.contractPropertiesAssessed ?? s.available;
   const rec = receipt(
     s.available
       ? "Contract-internal safety was recorded by a supported collector."
@@ -345,21 +364,31 @@ function contractBeat(d: TokenDossier, when: string): DossierBeat {
     };
   }
 
-  figures.push(sourced("Honeypot", s.honeypot ? "flagged" : (s.simChecked ? "simulated clean" : "not simulated"), rec));
-  figures.push(sourced(d.chain === "solana" ? "Mint authority" : "Mintable", s.mintable ? "active" : "revoked", rec));
-  if (d.chain === "solana") {
-    figures.push(sourced("Freeze authority", s.freezable ? "active" : "revoked", rec));
+  if (s.simChecked || contractPropertiesAssessed) {
+    figures.push(sourced("Honeypot", s.honeypot ? "flagged" : (s.simChecked ? "simulated clean" : "not flagged"), rec));
   } else {
-    figures.push(sourced("Ownership", s.ownerRenounced ? "renounced" : "held", rec));
-    figures.push(sourced("Source code", s.openSource ? "verified" : "unverified", rec));
+    figures.push(unestablished("Honeypot"));
+  }
+  if (contractPropertiesAssessed) {
+    figures.push(sourced(d.chain === "solana" ? "Mint authority" : "Mintable", s.mintable ? "active" : "revoked", rec));
+    if (d.chain === "solana") {
+      figures.push(sourced("Freeze authority", s.freezable ? "active" : "revoked", rec));
+    } else {
+      figures.push(sourced("Ownership", s.ownerRenounced ? "renounced" : "held", rec));
+      figures.push(sourced("Source code", s.openSource ? "verified" : "unverified", rec));
+    }
+  } else if (d.chain !== "solana") {
+    figures.push(unestablished("Mintable"));
+    figures.push(unestablished("Ownership"));
+    figures.push(unestablished("Source code"));
   }
 
-  const recorded = figures.length;
+  const recorded = figures.filter((item) => item.provenance.tier === "sourced").length;
   return {
     id: "contract",
     label: "Contract",
     kicker: "Contract",
-    heading: `${recorded} contract checks are on record.`,
+    heading: recorded === 1 ? "1 contract check is on record." : `${recorded} contract checks are on record.`,
     figures,
   };
 }
@@ -427,16 +456,27 @@ function gapsBeat(gaps: string[]): DossierBeat | null {
 
 function headlineFigures(d: TokenDossier, when: string): DossierFigure[] {
   const dex = dexUrl(d);
-  const market = (label: string, value: string | null, passage: string): DossierFigure => (
-    value
-      ? sourced(label, value, receipt(passage, "DexScreener · market", dex, when))
-      : unestablished(label, "N/A")
-  );
+  const market = (
+    field: keyof NonNullable<TokenDossier["marketEvidence"]>,
+    label: string,
+    value: string | null,
+    passage: string,
+  ): DossierFigure => {
+    if (value == null || d.marketEvidence?.[field] === false) return unestablished(label, "N/A");
+    const rec = receipt(passage, "DexScreener · market", dex, when);
+    if (d.marketEvidence?.[field] === true) return sourced(label, value, rec);
+    return derived(label, value, receipt(
+      `${passage} This older report did not preserve a per-field collector receipt.`,
+      "Saved token snapshot · legacy",
+      null,
+      when,
+    ));
+  };
   return [
-    market("mcap", money(d.mcap), d.mcap != null ? `Market cap recorded as ${money(d.mcap)}.` : "Market cap was not recorded."),
-    market("All-token value (FDV)", money(d.fdv), d.fdv != null ? `FDV recorded as ${money(d.fdv)}.` : "FDV was not recorded."),
-    market("liquidity", money(d.liquidityUsd), d.liquidityUsd != null ? `Liquidity recorded as ${money(d.liquidityUsd)}.` : "Liquidity was not recorded."),
-    market("24h vol", money(d.vol24), d.vol24 != null ? `24h volume recorded as ${money(d.vol24)}.` : "24h volume was not recorded."),
+    market("mcap", "mcap", money(d.mcap), d.mcap != null ? `Market cap recorded as ${money(d.mcap)}.` : "Market cap was not recorded."),
+    market("fdv", "All-token value (FDV)", money(d.fdv), d.fdv != null ? `FDV recorded as ${money(d.fdv)}.` : "FDV was not recorded."),
+    market("liquidityUsd", "liquidity", money(d.liquidityUsd), d.liquidityUsd != null ? `Liquidity recorded as ${money(d.liquidityUsd)}.` : "Liquidity was not recorded."),
+    market("vol24", "24h vol", money(d.vol24), d.vol24 != null ? `24h volume recorded as ${money(d.vol24)}.` : "24h volume was not recorded."),
   ];
 }
 
