@@ -22,6 +22,7 @@ import {
   SunIcon,
   UserFocusIcon,
   UsersThreeIcon,
+  UserPlusIcon,
   WalletIcon,
   XIcon,
 } from "@phosphor-icons/react";
@@ -174,7 +175,7 @@ function AnalystBadge({ compact = false }: { compact?: boolean }) {
   );
 }
 
-export type NavTarget = "idle" | "radar" | "trending" | "recon" | "find" | "threat" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
+export type NavTarget = "idle" | "radar" | "trending" | "recon" | "find" | "threat" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "referrals" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
 
 export function Sidebar({
   onNav,
@@ -379,6 +380,7 @@ export function Sidebar({
 
           <NavGroup compact={compact} label="Workspace" />
           <NavItem compact={compact} icon={BellIcon} label="Alerts" active={view === "alerts"} onClick={() => nav("alerts")} />
+          <NavItem compact={compact} icon={UserPlusIcon} label="Referrals" active={view === "referrals"} onClick={() => nav("referrals")} />
           <NavItem compact={compact} icon={PlugsConnectedIcon} label="Data sources" active={view === "providers"} onClick={() => nav("providers")} />
           <NavItem compact={compact} icon={KeyIcon} label={auth.role === "owner" ? "Access & activity" : "Activity log"} active={view === "admin"} onClick={() => nav("admin")} />
         </nav>

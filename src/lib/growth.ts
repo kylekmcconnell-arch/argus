@@ -90,6 +90,7 @@ export interface LeaderboardRow {
   creditEarnedCents: number;
   cashEarnedCents: number;
   isCurrentUser: boolean;
+  codeTail?: string;
 }
 
 export interface CommissionSplit {

@@ -20,7 +20,7 @@ describe("ReferralLeaderboard", () => {
     node = null;
   });
 
-  it("renders FOMO-style rank, referrer, revshare, and access columns", () => {
+  it("renders Fomo-style rank, referrer, credit, and access columns without cash", () => {
     node = document.createElement("div");
     document.body.appendChild(node);
     root = createRoot(node);
@@ -47,7 +47,9 @@ describe("ReferralLeaderboard", () => {
     expect(text).toContain("#1");
     expect(text).toContain("Enigma · you");
     expect(text).toContain("Live access");
-    expect(text).toContain("20%");
-    expect(text).toContain("Revshare earned");
+    expect(text).toContain("Credits earned");
+    expect(text).toContain("16");
+    expect(text).not.toContain("Cash");
+    expect(text).not.toContain("Revshare");
   });
 });
