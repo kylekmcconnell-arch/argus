@@ -11,6 +11,13 @@ import type {
   IntelligenceSpineSnapshot,
 } from "../intelligence/types";
 import { usdCompact } from "../lib/format";
+import {
+  isPublicMeasurement,
+  publicEvidenceLabel,
+  publicMeasurementTitle,
+  publicQuestionStateLabel,
+  publicSignalCopy,
+} from "../lib/intelligencePresentation";
 
 const LENS_ORDER: DecisionLensId[] = [
   "investment",
@@ -84,14 +91,6 @@ const SEVERITY_RANK: Record<DerivedIntelligenceSignal["severity"], number> = {
   context: 3,
 };
 
-const POLARITY_TONE: Record<DerivedIntelligenceSignal["polarity"], string> = {
-  risk: "tint-avoid",
-  support: "tint-pass",
-  mixed: "tint-caution",
-  neutral: "tint-neutral",
-  unknown: "tint-caution",
-};
-
 const COVERAGE_TONE: Record<IntelligenceDomainCoverage["state"], string> = {
   measured: "tint-pass",
   reported: "tint-signal",
@@ -162,7 +161,12 @@ function numberLabel(value: number, maximumFractionDigits = 2): string {
 }
 
 function measurementValue(measurement: IntelligenceMeasurement): string {
-  if (measurement.valueType === "date" || measurement.valueType === "text") return measurement.value;
+  if (measurement.valueType === "date") return measurement.value;
+  if (measurement.valueType === "text") {
+    if (measurement.value === "true") return "Yes";
+    if (measurement.value === "false") return "No";
+    return measurement.value.includes("_") ? words(measurement.value) : measurement.value;
+  }
   if (measurement.unit === "usd") return usdCompact(measurement.value);
   if (measurement.unit === "percent") return `${numberLabel(measurement.value)}%`;
   if (measurement.unit === "ratio") return `${numberLabel(measurement.value)}x`;
@@ -333,12 +337,12 @@ function thesisText(
     return `${cleanSentence(support.headline)} is the strongest support. ${cleanSentence(pressure.headline)} is the strongest pressure.`;
   }
   if (support) {
-    return `${cleanSentence(support.headline)} is the strongest support. No pressure signal was derived from this bounded subset for the ${lens.label.toLowerCase()} lens; that is not evidence that no pressure exists.`;
+    return `${cleanSentence(support.headline)} is the strongest support. The saved evidence did not establish a pressure finding for the ${lens.label.toLowerCase()} view. That does not mean no risk exists.`;
   }
   if (pressure) {
-    return `${cleanSentence(pressure.headline)} is the strongest pressure. No support signal was derived from this bounded subset for the ${lens.label.toLowerCase()} lens; that is not evidence that no support exists.`;
+    return `${cleanSentence(pressure.headline)} is the strongest pressure. The saved evidence did not establish a supporting finding for the ${lens.label.toLowerCase()} view. That does not mean no support exists.`;
   }
-  return `No usable signal was derived from this bounded subset for the ${lens.label.toLowerCase()} lens; that is not evidence that no support or pressure exists.`;
+  return `The saved evidence does not support a conclusion for the ${lens.label.toLowerCase()} view yet. That does not mean the subject is safe or unsafe.`;
 }
 
 function scenarioCondition(signal: DerivedIntelligenceSignal | undefined): string | null {
@@ -357,14 +361,16 @@ function SummaryCard({
   emptyCopy: string;
   tone: string;
 }) {
+  const copy = signal ? publicSignalCopy(signal) : null;
+
   return (
     <section className={`panel-inset p-3.5 ${tone}`} aria-label={label}>
       <p className="eyebrow">{label}</p>
-      {signal ? (
+      {copy ? (
         <>
-          <h4 className="mt-1.5 text-[13.5px] font-semibold leading-snug text-ink">{signal.headline}</h4>
-          <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">{signal.finding}</p>
-          <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">{signal.whyItMatters}</p>
+          <h4 className="mt-1.5 text-[13.5px] font-semibold leading-snug text-ink">{copy.headline}</h4>
+          <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">{copy.finding}</p>
+          <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">{copy.whyItMatters}</p>
         </>
       ) : (
         <p className="mt-1.5 text-[12px] leading-relaxed text-ink-faint">{emptyCopy}</p>
@@ -431,13 +437,13 @@ export function PointInTimeIntelligencePanel({
     && emphasizedUsableSignals.length > 0;
   const derivedThesis = thesisText(strongestSupport, strongestPressure, selectedLens);
   const thesis = !thesisEligible
-    ? "The parent report is not decision-ready, so ARGUS withholds a decision thesis. The frozen signals and open questions remain available for review."
+    ? "This report does not have enough completed evidence to publish a conclusion. The findings and open questions remain available below."
     : governingVerdictWithholdsThesis
-      ? `The governing report verdict is ${normalizedGoverningVerdict}. This score-neutral subset cannot override that adverse decision; review the parent findings alongside the derived signals below.`
+      ? `The report result is ${normalizedGoverningVerdict}. The evidence summary below explains that result and cannot replace it.`
       : criticalDecisionGaps.length > 0
-        ? `ARGUS withholds the ${selectedLens.label.toLowerCase()} thesis because ${criticalDecisionGaps.length === 1 ? "a critical priority question is" : `${criticalDecisionGaps.length} critical priority questions are`} unresolved, unavailable, or not collected. A bounded read cannot convert those absences into decision evidence.`
+        ? `ARGUS cannot publish a conclusion for the ${selectedLens.label.toLowerCase()} view because ${criticalDecisionGaps.length === 1 ? "one critical question has not been answered" : `${criticalDecisionGaps.length} critical questions have not been answered`}. Missing evidence is not treated as a favorable result.`
       : normalizedGoverningVerdict && normalizedGoverningVerdict !== "PASS"
-        ? `Within the governing ${normalizedGoverningVerdict} report, ${derivedThesis.charAt(0).toLowerCase()}${derivedThesis.slice(1)}`
+        ? `This report is ${normalizedGoverningVerdict}. ${derivedThesis}`
         : derivedThesis;
   const measurementIndex = new Map(snapshot.measurements.map((measurement) => [measurement.id, measurement]));
   const sourceIndex = new Map(snapshot.sources.map((source) => [source.id, source]));
@@ -478,7 +484,7 @@ export function PointInTimeIntelligencePanel({
       || left.label.localeCompare(right.label)
       || left.id.localeCompare(right.id);
   });
-  const priorityMeasurements = orderedMeasurements.slice(0, 12);
+  const priorityMeasurements = orderedMeasurements.filter(isPublicMeasurement).slice(0, 12);
   const chronologyMeasurements = snapshot.measurements
     .filter((measurement) => measurement.valueType === "date")
     .sort((left, right) => {
@@ -524,12 +530,12 @@ export function PointInTimeIntelligencePanel({
     <section id="decision-intelligence" className="report-section mt-6 scroll-mt-28" aria-labelledby={`${panelId}-title`}>
       <header className="report-section-heading">
         <div>
-          <p className="eyebrow text-signal-lift">Decision intelligence</p>
+          <p className="eyebrow text-signal-lift">Report interpretation</p>
           <h2 id={`${panelId}-title`} className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">
-            {snapshot.rulesetVersion === "argus-entity-point-in-time-v1" ? "Entity decision map" : "Point in time decision map"}
+            What the evidence says
           </h2>
           <p className="story-chapter-description mt-2 max-w-3xl leading-relaxed text-ink-dim">
-            A frozen, score-neutral map for <span className="font-medium text-ink">{snapshot.subject.label}</span> that separates verified evidence, reported context, conflicts, and unknowns. Changing the lens reorders the same complete signal set and never overrides the governing report.
+            A plain-language reading of the evidence saved with this report for <span className="font-medium text-ink">{snapshot.subject.label}</span>. Choose a view to bring the most relevant facts forward. The underlying evidence and report result do not change.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
@@ -543,15 +549,16 @@ export function PointInTimeIntelligencePanel({
       <div className="panel mt-3 overflow-hidden">
         <div className="border-b border-line/70 px-4 py-3 sm:px-5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="chip tint-neutral">Point in time</span>
-            <span className="chip tint-pass">Score-neutral / saved-snapshot derivation</span>
-            <span className="mono ml-auto text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">
-              Schema v{snapshot.schemaVersion} · {snapshot.rulesetVersion}
-            </span>
+            <span className="chip tint-neutral">Saved report</span>
+            <span className="mono ml-auto text-[10.5px] text-ink-faint">Evidence through {timestampLabel(snapshot.captureWindow.latest)}</span>
           </div>
           <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-            This panel reads the saved snapshot only. It does not change the ARGUS score and it makes no provider call when rendered.
+            This section uses only evidence captured with this report. It does not refresh in the background or change the ARGUS score.
           </p>
+          <details className="mt-2 text-[10.5px] text-ink-faint">
+            <summary className="cursor-pointer font-medium text-ink-dim">Methodology details</summary>
+            <p className="mt-1 mono">Schema v{snapshot.schemaVersion} · {snapshot.rulesetVersion} · score impact: none</p>
+          </details>
         </div>
 
         <div className="border-b border-line/70 px-4 py-3 sm:px-5">
@@ -582,10 +589,10 @@ export function PointInTimeIntelligencePanel({
 
         <div id={panelId} role="tabpanel" aria-labelledby={`${generatedId}-lens-${selectedLens.id}`} className="px-4 py-5 sm:px-5">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.6fr)]">
-            <section className={`panel-inset p-4 ${hasUsableThesis ? "tint-signal" : "tint-caution"}`} aria-label="Point in time thesis">
+            <section className={`panel-inset p-4 ${hasUsableThesis ? "tint-signal" : "tint-caution"}`} aria-label="Current report conclusion">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="eyebrow">{hasUsableThesis ? "Conditional thesis" : "Thesis withheld"}</p>
-                <span className="chip ml-auto">{selectedLens.label} lens</span>
+                <p className="eyebrow">{hasUsableThesis ? "Current read" : "Conclusion limited"}</p>
+                <span className="ml-auto text-[11px] text-ink-faint">{selectedLens.label} view</span>
               </div>
               <p className="mt-2 text-[15px] font-semibold leading-relaxed text-ink">{thesis}</p>
               <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">{selectedLens.question}</p>
@@ -593,17 +600,17 @@ export function PointInTimeIntelligencePanel({
                 <p className="mt-2 text-[11.5px] leading-relaxed text-caution">
                   {thesisEligible
                     ? governingVerdictWithholdsThesis
-                      ? "The parent verdict governs and withholds a derived thesis. Cross-lens context remains visible for investigation, not as a competing verdict."
+                      ? "The report result remains authoritative. The material below explains it and does not create a second verdict."
                       : criticalDecisionGaps.length > 0
-                        ? `${criticalDecisionGaps.length} critical question${criticalDecisionGaps.length === 1 ? "" : "s"} in this lens's top priority domains ${criticalDecisionGaps.length === 1 ? "is" : "are"} unresolved, unavailable, or not collected. Cross-lens context remains visible below, but ARGUS will not construct a thesis across that gap.`
-                        : "Cross-lens context remains visible below, but this lens has no usable support, risk, or mixed signal for a thesis."
-                    : "The parent assessment has not earned a final decision state. Saved evidence remains visible, but ARGUS will not construct a thesis from it."}
+                        ? `${criticalDecisionGaps.length} critical question${criticalDecisionGaps.length === 1 ? " is" : "s are"} still open. ARGUS will not fill that gap with an assumption.`
+                        : "The saved evidence does not yet support a clear conclusion in this view."
+                    : "The investigation has not completed enough decision-critical work to publish a conclusion."}
                 </p>
               )}
             </section>
 
             <section className="panel-inset p-4" aria-label="Capture window">
-              <p className="eyebrow">Dated source window</p>
+              <p className="eyebrow">Evidence dates</p>
               <p className="mono mt-2 text-[12px] leading-relaxed text-ink">{captureSummary}</p>
               <dl className="mt-3 grid grid-cols-4 gap-2 text-center">
                 <div>
@@ -611,22 +618,22 @@ export function PointInTimeIntelligencePanel({
                   <dd data-stat="unique-artifacts" className="mono mt-1 text-[14px] font-semibold text-ink">{uniqueArtifactCount}</dd>
                 </div>
                 <div>
-                  <dt className="text-[10.5px] text-ink-faint">Lineage origins</dt>
+                  <dt className="text-[10.5px] text-ink-faint">Source groups</dt>
                   <dd data-stat="lineage-origins" className="mono mt-1 text-[14px] font-semibold text-ink">{lineageOriginCount}</dd>
                 </div>
                 <div>
-                  <dt className="text-[10.5px] text-ink-faint">Measures</dt>
+                  <dt className="text-[10.5px] text-ink-faint">Facts</dt>
                   <dd className="mono mt-1 text-[14px] font-semibold text-ink">{snapshot.measurements.length}</dd>
                 </div>
                 <div>
-                  <dt className="text-[10.5px] text-ink-faint">Signals</dt>
+                  <dt className="text-[10.5px] text-ink-faint">Findings</dt>
                   <dd className="mono mt-1 text-[14px] font-semibold text-ink">{signals.length}</dd>
                 </div>
               </dl>
               <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
                 {snapshot.captureWindow.latest
-                  ? `This is the span of valid saved source-reference timestamps across ${snapshot.sources.length} lineage reference${snapshot.sources.length === 1 ? "" : "s"}. Events after the latest dated reference are outside this read.${unboundedSourceCount > 0 ? ` ${unboundedSourceCount} saved reference${unboundedSourceCount === 1 ? " has" : "s have"} no valid capture timestamp and ${unboundedSourceCount === 1 ? "is" : "are"} not bounded by this window.` : ""}`
-                  : "No saved source reference carries a valid capture timestamp, so this read has no dated boundary."}
+                  ? `This report uses ${snapshot.sources.length} saved source reference${snapshot.sources.length === 1 ? "" : "s"}. Events after the latest date are not included.${unboundedSourceCount > 0 ? ` ${unboundedSourceCount} source reference${unboundedSourceCount === 1 ? " has" : "s have"} no recorded capture time.` : ""}`
+                  : "The saved sources do not include valid capture times, so this report has no reliable date boundary."}
               </p>
             </section>
           </div>
@@ -655,14 +662,14 @@ export function PointInTimeIntelligencePanel({
                     <li key={question.id} className="text-[12px] leading-relaxed text-ink-dim">
                       <span className="font-medium text-ink">{question.prompt}</span>
                       <span className="mt-0.5 block text-[10.5px] text-ink-faint">
-                        {words(question.materiality)} · {words(question.state)} · {words(question.domain)}
+                        {words(question.materiality)} · {publicQuestionStateLabel(question.state)} · {words(question.domain)}
                       </span>
                     </li>
                   ))}
                 </ol>
               ) : (
                 <p className="mt-1.5 text-[12px] leading-relaxed text-ink-faint">
-                  No unresolved question is recorded in the frozen question ledger.
+                  No open question is recorded for this view.
                 </p>
               )}
               {questions.length > 3 && (
@@ -674,11 +681,11 @@ export function PointInTimeIntelligencePanel({
           <section className="mt-5" aria-labelledby={`${panelId}-atlas-title`}>
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <p className="eyebrow text-signal-lift">Evidence atlas</p>
-                <h3 id={`${panelId}-atlas-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">The frozen numbers behind the read</h3>
+                <p className="eyebrow text-signal-lift">Key evidence</p>
+                <h3 id={`${panelId}-atlas-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Numbers that shape the report</h3>
               </div>
               <p className="ml-auto max-w-xl text-right text-[11px] leading-relaxed text-ink-faint">
-                Measurements are prioritized for this lens. The complete register remains available and no missing value is displayed as zero.
+                The most relevant saved facts appear first. Missing information is never shown as zero.
               </p>
             </div>
 
@@ -687,11 +694,11 @@ export function PointInTimeIntelligencePanel({
                 {priorityMeasurements.map((measurement) => (
                   <article key={measurement.id} data-measurement-id={measurement.id} className="panel-inset p-3">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="chip">{words(measurement.domain)}</span>
-                      <span className="chip ml-auto">{words(measurement.evidenceState)}</span>
+                      <span className="eyebrow">{words(measurement.domain)}</span>
+                      <span className="chip ml-auto">{publicEvidenceLabel(measurement.evidenceState)}</span>
                     </div>
                     <p className="mono mt-3 text-[18px] font-semibold tracking-tight text-ink">{measurementValue(measurement)}</p>
-                    <h4 className="mt-1 text-[12px] font-medium leading-snug text-ink-dim">{measurement.label}</h4>
+                    <h4 className="mt-1 text-[12px] font-medium leading-snug text-ink-dim">{publicMeasurementTitle(measurement)}</h4>
                     <p className="mt-2 text-[10.5px] leading-relaxed text-ink-faint">
                       {measurementCaptureLabel(measurement, sourceIndex)}
                     </p>
@@ -724,7 +731,7 @@ export function PointInTimeIntelligencePanel({
 
             <details className="panel-inset mt-3 overflow-hidden" data-testid="complete-measurement-ledger">
               <summary className="cursor-pointer px-4 py-3 text-[12.5px] font-medium text-ink hover:bg-panel-2/60">
-                Open complete measurement register · {orderedMeasurements.length} measurements
+                Technical measurement details · {orderedMeasurements.length} records
               </summary>
               <ol className="border-t border-line/60">
                 {orderedMeasurements.map((measurement) => {
@@ -760,7 +767,7 @@ export function PointInTimeIntelligencePanel({
 
             <details className="panel-inset mt-3 overflow-hidden" data-testid="complete-source-ledger">
               <summary className="cursor-pointer px-4 py-3 text-[12.5px] font-medium text-ink hover:bg-panel-2/60">
-                Open exact source lineage · {snapshot.sources.length} references · {uniqueArtifactCount} unique artifacts
+                Source details · {snapshot.sources.length} reference{snapshot.sources.length === 1 ? "" : "s"} · {uniqueArtifactCount} unique document{uniqueArtifactCount === 1 ? "" : "s"}
               </summary>
               <ol className="border-t border-line/60">
                 {snapshot.sources.map((source) => {
@@ -791,37 +798,37 @@ export function PointInTimeIntelligencePanel({
 
           <section className="mt-5" aria-labelledby={`${panelId}-cases-title`}>
             <div>
-              <p className="eyebrow text-signal-lift">Conditional cases</p>
+              <p className="eyebrow text-signal-lift">What to do next</p>
               <h3 id={`${panelId}-cases-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
-                What should trigger another evidence review
+                When to refresh this report
               </h3>
             </div>
             <div className="mt-3 grid gap-3 lg:grid-cols-3">
               <article className="panel-inset p-3.5 tint-signal">
-                <p className="eyebrow">Priority recheck trigger</p>
+                <p className="eyebrow">Refresh the report when</p>
                 {recheckCondition ? (
                   <>
-                    <p className="mt-2 text-[12px] leading-relaxed text-ink"><span className="font-semibold">Recheck when:</span> {recheckCondition}</p>
-                    <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">A changed input can strengthen, weaken, or leave the read unchanged. Direction must come from the new evidence.</p>
+                    <p className="mt-2 text-[12px] leading-relaxed text-ink">{recheckCondition}</p>
+                    <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">A new report may strengthen, weaken, or leave the conclusion unchanged.</p>
                   </>
                 ) : (
-                  <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">No grounded recheck trigger is available in this capture.</p>
+                  <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">No specific refresh trigger is supported by the saved evidence.</p>
                 )}
               </article>
               <article className="panel-inset p-3.5 tint-signal">
-                <p className="eyebrow">Current case</p>
-                <p className="mt-2 text-[12px] leading-relaxed text-ink"><span className="font-semibold">If:</span> The frozen inputs remain the only evidence considered.</p>
-                <p className="mt-2 text-[12px] leading-relaxed text-ink-dim"><span className="font-semibold text-ink">Then:</span> {thesis}</p>
+                <p className="eyebrow">What this report says now</p>
+                <p className="mt-2 text-[12px] leading-relaxed text-ink">{thesis}</p>
+                <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">This conclusion uses only evidence saved with this report.</p>
               </article>
               <article className="panel-inset p-3.5 tint-caution">
-                <p className="eyebrow">Evidence still needed</p>
+                <p className="eyebrow">Verify next</p>
                 {evidenceNeeded ? (
                   <>
-                    <p className="mt-2 text-[12px] leading-relaxed text-ink"><span className="font-semibold">Resolve:</span> {evidenceNeeded}</p>
-                    <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">Until a source-backed answer is frozen, this remains an open decision condition.</p>
+                    <p className="mt-2 text-[12px] leading-relaxed text-ink">{evidenceNeeded}</p>
+                    <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">Until a reliable source answers this, it remains an open question.</p>
                   </>
                 ) : (
-                  <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">No unresolved decision condition is stored for this lens.</p>
+                  <p className="mt-2 text-[12px] leading-relaxed text-ink-faint">No decision-critical follow-up is recorded for this view.</p>
                 )}
               </article>
             </div>
@@ -830,11 +837,11 @@ export function PointInTimeIntelligencePanel({
           <section className="mt-5" aria-labelledby={`${panelId}-signals-title`}>
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <p className="eyebrow text-signal-lift">Complete signal set</p>
-                <h3 id={`${panelId}-signals-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Signal register</h3>
+                <p className="eyebrow text-signal-lift">Findings and open questions</p>
+                <h3 id={`${panelId}-signals-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">What ARGUS found</h3>
               </div>
               <p className="ml-auto max-w-xl text-right text-[11px] leading-relaxed text-ink-faint">
-                All {signals.length} saved signals remain visible. The selected lens changes order and emphasis only.
+                All {signals.length} findings remain available. Changing the view only changes their order.
               </p>
             </div>
             {sortedSignals.length ? (
@@ -842,22 +849,26 @@ export function PointInTimeIntelligencePanel({
                 {sortedSignals.map((signal) => {
                   const emphasized = signalEmphasized(signal, selectedLens);
                   const sources = signal.sourceRefs.map((id) => sourceIndex.get(id)).filter(Boolean);
+                  const copy = publicSignalCopy(signal);
                   return (
-                    <li key={signal.id} data-signal-id={signal.id} className={`panel-inset p-3.5 ${POLARITY_TONE[signal.polarity]}`}>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="chip">{words(signal.polarity)}</span>
-                        <span className="chip">{words(signal.severity)}</span>
-                        <span className="chip">{words(signal.domain)}</span>
-                        <span className="chip">{words(signal.evidenceState)}</span>
-                        {emphasized && <span className="chip tint-signal">Lens emphasis</span>}
-                        <span className="mono ml-auto text-[10px] text-ink-faint">{signal.ruleId} v{signal.ruleVersion}</span>
+                    <li key={signal.id} data-signal-id={signal.id} className={`panel-inset p-3.5 ${copy.tone}`}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="chip">{copy.status}</span>
+                        <span className="text-[11px] text-ink-faint">{copy.priority} · {words(signal.domain)}</span>
+                        {emphasized && <span className="ml-auto text-[11px] font-medium text-signal-lift">Prioritized for {selectedLens.label.toLowerCase()}</span>}
                       </div>
-                      <h4 className="mt-2 text-[13.5px] font-semibold leading-snug text-ink">{signal.headline}</h4>
-                      <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">{signal.finding}</p>
-                      <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-faint">Why it matters: {signal.whyItMatters}</p>
+                      <h4 className="mt-2 text-[13.5px] font-semibold leading-snug text-ink">{copy.headline}</h4>
+                      <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">{copy.finding}</p>
+                      <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-faint"><span className="font-medium text-ink-dim">Why it matters:</span> {copy.whyItMatters}</p>
+                      {signal.changeCondition && (
+                        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint"><span className="font-medium text-ink-dim">What would change this:</span> {signal.changeCondition}</p>
+                      )}
 
+                      <details className="mt-3 border-t border-line/60 pt-2 text-[10.5px] text-ink-faint">
+                        <summary className="cursor-pointer font-medium text-ink-dim">Technical and source details</summary>
+                        <p className="mono mt-2">Rule {signal.ruleId} v{signal.ruleVersion} · {words(signal.kind)} · {words(signal.evidenceState)}</p>
                       {signal.arithmetic && signal.arithmetic.length > 0 && (
-                        <div className="mt-3 border-t border-line/60 pt-3" aria-label={`Arithmetic receipts for ${signal.headline}`}>
+                        <div className="mt-3" aria-label={`Arithmetic receipts for ${signal.headline}`}>
                           <p className="eyebrow">Arithmetic receipts</p>
                           <div className="mt-2 grid gap-2 sm:grid-cols-2">
                             {signal.arithmetic.map((receipt, index) => (
@@ -885,7 +896,7 @@ export function PointInTimeIntelligencePanel({
                       )}
 
                       {sources.length > 0 && (
-                        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 pt-2 text-[10.5px] text-ink-faint">
+                        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-ink-faint">
                           <span>{sources.length} source reference{sources.length === 1 ? "" : "s"}</span>
                           {sources.map((source) => {
                             if (!source) return null;
@@ -898,6 +909,7 @@ export function PointInTimeIntelligencePanel({
                           })}
                         </div>
                       )}
+                      </details>
                     </li>
                   );
                 })}

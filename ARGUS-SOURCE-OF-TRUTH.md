@@ -155,6 +155,15 @@ the deep dive beneath that dossier spine. Provider diagnostics, axes,
 source excerpts, hashes, and methodology stay available there. The DEV
 `?design-preview=dossier` harness stays a fixture-only preview.
 
+Public Decision Intelligence uses a reader-facing translation layer. The
+default report shows plain-language findings, key measurements, the current
+conclusion, the next question to verify, and the evidence change that should
+trigger a new report. Internal rule IDs, scorer packets, schema terms,
+lineage states, arithmetic inputs, and provider diagnostics remain preserved
+under collapsed technical details. They do not appear as public headlines,
+metric labels, or badge stacks. Each public finding carries one primary status;
+priority, domain, and selected-view emphasis are supporting text.
+
 One governing count controls open questions across the header, summary, report
 rail, persisted report, and public report. Optional vendor failures do not become
 fake investment questions.
