@@ -51,8 +51,10 @@ import {
   buildResearchPlan,
   finalizeResearchPlan,
   researchPlanAllows,
+  type ResearchCapability,
   type ResearchIntent,
 } from "../src/lib/researchDirector";
+import { restrictResearchPlan } from "../src/lib/gapInvestigation";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
   COLLECTION_ANALYST_RESERVE_MS,
@@ -3318,6 +3320,12 @@ interface RunAuditOptions {
   organizationId?: string;
   analystDeadlineAt?: number;
   intent?: ResearchIntent;
+  /** Server-derived from one frozen saved plan. Never accept these values directly from a browser. */
+  authorizedResearchScope?: {
+    taskIds: readonly string[];
+    capabilities: readonly ResearchCapability[];
+    delegates: readonly string[];
+  };
   tokenAddress?: string;
   tokenChain?: string;
   tokenSymbol?: string;
@@ -3397,6 +3405,25 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
 
 async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
   const runtimeStartedAt = Date.now();
+  const authorizedCapabilities = options?.authorizedResearchScope?.capabilities;
+  const authorizedCapabilitySet = authorizedCapabilities ? new Set(authorizedCapabilities) : null;
+  const capabilityIsAuthorized = (...capabilities: ResearchCapability[]): boolean =>
+    !authorizedCapabilitySet || capabilities.some((capability) => authorizedCapabilitySet.has(capability));
+  const authorizedDelegates = options?.authorizedResearchScope
+    ? new Set(options.authorizedResearchScope.delegates)
+    : null;
+  const adapterDelegates: Record<string, readonly string[]> = {
+    x: ["x-profile", "twitterapi", "official-x"],
+    github: ["github"],
+    peopledatalabs: ["peopledatalabs"],
+    "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
+    dexscreener: ["dexscreener"],
+    coingecko: ["coingecko"],
+    onchain: ["direct-chain-rpc", "wallet-graph"],
+    "basic-facts": ["basic-facts"],
+  };
+  const adapterIsAuthorized = (adapter: Adapter): boolean => !authorizedDelegates
+    || (adapterDelegates[adapter.id] ?? []).some((delegate) => authorizedDelegates.has(delegate));
   // The DeFiLlama reader coalesces reads of the same URL for a short window so
   // one protocol document is not pulled three times per scan. That window is
   // already far shorter than a scan, but a warm serverless container can start
@@ -3443,6 +3470,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const seededEvidence = fixture ? toEvidence(fixture) : null;
   const liveSeedEvidence = seededEvidence ? downgradeFixtureEvidenceForLive(seededEvidence) : null;
   const liveProviders = ADAPTERS.filter((adapter) =>
+    adapterIsAuthorized(adapter)
+    &&
     KEYED.has(adapter.id)
     && adapter.available()
     && (!liveSeedEvidence || !adapter.applicable || adapter.applicable(liveSeedEvidence)),
@@ -3698,14 +3727,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   if (!fixture) {
     const stageStartedAt = startRuntimeStage("cold-intake");
     await resolveProfile(ctx);
-    await projectTokenPass();
+    if (capabilityIsAuthorized("token_and_market", "project_fundamentals")) {
+      await projectTokenPass();
+    }
     // Provider-backed backing/traction enrichment for a verified project token:
     // DeFiLlama TVL + funding (free), with a Monid/Akta private-company fallback
     // for funding + founder identity only when the free funding source is empty
     // (cost control — Monid enrichment is metered). Additive and never-throws;
     // feeds P4 (backing/partners) and P5 (traction) so an established project is
     // no longer published INCOMPLETE for a missing backing axis.
-    if (evidence.projectToken?.verified) {
+    if (evidence.projectToken?.verified && capabilityIsAuthorized("token_and_market", "project_fundamentals")) {
       const projectName = evidence.projectToken.name;
       const protocolLookupName = defiLlamaLookupName(projectName);
       try {
@@ -3885,7 +3916,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // into explicit evidence questions with allowlisted specialist delegates.
   // It does not decide whether a provider succeeded and never creates facts;
   // the frozen check ledger remains the authority for every outcome.
-  let researchPlan = buildResearchPlan(evidence, options?.intent ?? "investment_due_diligence");
+  let researchPlan = restrictResearchPlan(
+    buildResearchPlan(evidence, options?.intent ?? "investment_due_diligence"),
+    authorizedCapabilities,
+  );
   evidence.researchPlan = researchPlan;
   emit({
     phase: "Director",
@@ -3920,6 +3954,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   };
 
   const runAdapter = async (a: Adapter): Promise<void> => {
+    if (!adapterIsAuthorized(a)) {
+      laneProviderRows.push({
+        id: a.id,
+        label: a.label,
+        state: "skipped",
+        detail: "outside the frozen gap-investigation authorization",
+        observedAt: new Date().toISOString(),
+      });
+      return;
+    }
     // Stop launching new provider work once the collection budget is spent, so a
     // large multi-venture/high-connectivity subject leaves time to score and
     // persist instead of running to the function ceiling. Already-running
@@ -4048,7 +4092,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // the report claiming no known team while verified founder facts sat in the
   // ledger.
   hydrateProjectTeamFromVerifiedFacts(evidence);
-  const revisedResearchPlan = buildResearchPlan(evidence, researchPlan.intent);
+  const revisedResearchPlan = restrictResearchPlan(
+    buildResearchPlan(evidence, researchPlan.intent),
+    authorizedCapabilities,
+  );
   researchPlan = { ...revisedResearchPlan, createdAt: researchPlan.createdAt };
   evidence.researchPlan = researchPlan;
   emit({
@@ -4062,7 +4109,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const recoveredProjectSite = !officialWebsiteBeforeBasicFacts
     && officialWebsiteAfterBasicFacts !== null
     && rolesAfterBasicFacts.includes(SubjectClass.PROJECT);
-  if (recoveredProjectSite) {
+  if (recoveredProjectSite && capabilityIsAuthorized("official_facts", "project_fundamentals")) {
     // A suspended or provider-missing project account can only reveal its
     // official site during source verification. Re-run the two deterministic
     // website-dependent collectors now that the exact account ↔ domain binding
@@ -4077,14 +4124,22 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     rolesAfterBasicFacts = providerBackedRoles(evidence);
     evidence.roles = rolesAfterBasicFacts;
   }
-  if (fixture || (recoveredProjectSite && !evidence.projectToken?.verified)) {
+  if (
+    capabilityIsAuthorized("token_and_market", "project_fundamentals")
+    && (fixture || (recoveredProjectSite && !evidence.projectToken?.verified))
+  ) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
   } else {
     evidence.roles = rolesAfterBasicFacts;
   }
-  await organizationSafetyPass();
-  if (recoveredProjectSite && evidence.projectToken?.verified && !evidence.protocolTvl) {
+  if (capabilityIsAuthorized("legal_and_adverse")) await organizationSafetyPass();
+  if (
+    recoveredProjectSite
+    && evidence.projectToken?.verified
+    && !evidence.protocolTvl
+    && capabilityIsAuthorized("project_fundamentals", "legal_and_adverse")
+  ) {
     try {
       await recoverProjectProtocolIncidentEvidence(ctx);
     } catch (error) {
@@ -4100,13 +4155,15 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // The canonical token binding is final at this point, including the recovery
   // path for sparse or suspended project profiles. Only that verified binding
   // may select a chain and address for the fixed-block control read.
-  await evmControlRealityPass();
+  if (capabilityIsAuthorized("people_and_control", "token_and_market")) await evmControlRealityPass();
   // The official domain may only be recovered during the basic-facts pass
   // (common for suspended or sparse X profiles). Run company leadership only
   // after that exact domain is known. Never fall back to a company-name match.
   const recoveredCompanyLookup = evidence.projectToken?.homepage
     ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
   if (
+    capabilityIsAuthorized("people_and_control", "project_fundamentals")
+    &&
     !fixture
     && recoveredCompanyLookup
     && rolesAfterBasicFacts.includes(SubjectClass.PROJECT)
@@ -4135,7 +4192,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // projection can mint a source-backed venture-financing fact. Self-gated on
   // MONID_API_KEY and never-throws; skipped for fixtures so canary runs stay
   // deterministic.
-  if (!fixture && !evidence.companyEnrichment && evidence.roles.includes(SubjectClass.FOUNDER)) {
+  if (
+    capabilityIsAuthorized("portfolio_and_outcomes", "project_fundamentals")
+    && !fixture
+    && !evidence.companyEnrichment
+    && evidence.roles.includes(SubjectClass.FOUNDER)
+  ) {
     const primaryVenture = deriveFounderVentureCandidate(evidence);
     emit({
       phase: "Founder",
@@ -4300,15 +4362,20 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     recordAdverseUnavailable("the collection time budget was reached before the adverse, scam, and rug sweep ran, so no adverse search was attempted");
     emit({ phase: "Collect", label: "Signal passes skipped", detail: "Collection time budget reached; skipping enrichment passes to leave time to score and persist a partial report.", tone: "warn" });
   } else {
-    const signalPasses: Promise<void>[] = [
-      trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
+    const signalPasses: Promise<void>[] = [];
+    if (capabilityIsAuthorized("token_and_market")) {
+      signalPasses.push(trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
         emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
-      }),
-    ];
-    if (env("TWITTERAPI_KEY")) {
+      }));
+    } else {
+      checkTracker.provider("token-lifecycle", "Promoted-token lifecycle", "skipped", "outside the frozen gap-investigation authorization");
+    }
+    if (capabilityIsAuthorized("official_facts", "counter_evidence") && env("TWITTERAPI_KEY")) {
       signalPasses.push(trackedPass("post-cadence", "Posting cadence", ["twitterapi"], () => postCadence(ctx), (e) => {
         emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" });
       }));
+    } else if (!capabilityIsAuthorized("official_facts", "counter_evidence")) {
+      checkTracker.provider("post-cadence", "Posting cadence", "skipped", "outside the frozen gap-investigation authorization");
     } else {
       checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
     }
@@ -4378,7 +4445,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // who quietly stopped listing it. Each lookup is paid, so this is bounded to
   // founders and C-level and capped at three, and it runs only when a project
   // has both a name to match and named leaders to check.
-  if (evidence.roles.includes(SubjectClass.PROJECT) && (evidence.webTeam?.length ?? 0) > 0) {
+  if (
+    capabilityIsAuthorized("people_and_control")
+    && evidence.roles.includes(SubjectClass.PROJECT)
+    && (evidence.webTeam?.length ?? 0) > 0
+  ) {
     const leaderCompany = evidence.projectToken?.name?.trim() || evidence.profile.display_name.trim();
     try {
       const departures = await checkLeaderDepartures(evidence.webTeam ?? [], leaderCompany);

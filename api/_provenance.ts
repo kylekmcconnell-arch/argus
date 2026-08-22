@@ -847,6 +847,11 @@ export interface PersistReportVersionBundleInput {
   cost: unknown;
 }
 
+export interface PersistGapInvestigationProposalBundleInput extends PersistReportVersionBundleInput {
+  authorizationId: string;
+  executionReceipts: unknown;
+}
+
 /** Persist the immutable parent and every frozen provenance child atomically. */
 export async function persistReportVersionBundle(
   credentials: ServiceCredentials,
@@ -898,6 +903,63 @@ export async function persistReportVersionBundle(
     || row?.axis_evidence_count !== provenance.axisEvidence.length
   ) {
     throw new Error("immutable report bundle returned inconsistent child counts");
+  }
+  return reportVersionId;
+}
+
+/**
+ * Persist one inactive proposal and its candidate provenance atomically. The
+ * database RPC restores the exact source projection in the same transaction;
+ * this function never calls the activation path.
+ */
+export async function persistGapInvestigationProposalBundle(
+  credentials: ServiceCredentials,
+  input: PersistGapInvestigationProposalBundleInput,
+): Promise<string> {
+  const provenance = prepareProvenanceRows(
+    { organizationId: input.organizationId, attestationState: input.attestationState },
+    input.payload,
+    input.checks,
+  );
+  const response = await fetch(`${credentials.url}/rest/v1/rpc/persist_gap_investigation_proposal_bundle`, {
+    method: "POST",
+    headers: serviceHeaders(credentials.key),
+    body: JSON.stringify({
+      p_authorization_id: input.authorizationId,
+      p_organization_id: input.organizationId,
+      p_kind: input.kind,
+      p_canonical_ref: input.canonicalRef,
+      p_query: input.query,
+      p_created_by: input.createdBy,
+      p_payload: input.payload,
+      p_run_id: input.runId,
+      p_attestation_state: input.attestationState,
+      p_verdict: input.verdict,
+      p_score: input.score,
+      p_completeness_state: input.completenessState,
+      p_methodology_version: input.methodologyVersion,
+      p_provider_snapshot: input.providerSnapshot,
+      p_cost: input.cost,
+      p_evidence_items: provenance.evidenceItems,
+      p_check_runs: provenance.checkRuns,
+      p_axis_evidence: provenance.axisEvidence,
+      p_execution_receipts: input.executionReceipts,
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) {
+    throw new Error(`gap investigation proposal write failed (${response.status}): ${(await response.text()).slice(0, 240)}`);
+  }
+  const result = await response.json() as unknown;
+  const row = Array.isArray(result) ? asRecord(result[0]) : null;
+  const reportVersionId = typeof row?.report_version_id === "string" ? row.report_version_id : "";
+  if (!reportVersionId) throw new Error("gap investigation proposal write returned no id");
+  if (
+    row?.evidence_count !== provenance.evidenceItems.length
+    || row?.check_count !== provenance.checkRuns.length
+    || row?.axis_evidence_count !== provenance.axisEvidence.length
+  ) {
+    throw new Error("gap investigation proposal write returned inconsistent child counts");
   }
   return reportVersionId;
 }

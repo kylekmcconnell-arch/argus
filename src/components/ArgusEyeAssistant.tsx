@@ -42,6 +42,22 @@ interface EyeAnswer {
       sourceCount: number;
       counterSignalIds: string[];
     }>;
+    authorizationPreview?: {
+      gapId: string;
+      gapPrompt: string;
+      taskIds: string[];
+      timeBudgetSeconds: number;
+      estimatedCostCeilingUsd: number;
+    };
+  };
+  followUp?: {
+    state: "running" | "proposed" | "partial" | "promoted" | "rolled_back" | "error";
+    note?: string;
+    authorizationId?: string;
+    proposedReportVersionId?: string;
+    reviewPath?: string;
+    observedCostUsd?: number;
+    costOutcome?: string;
   };
   state: "loading" | "ready" | "error";
 }
@@ -278,6 +294,26 @@ export function ArgusEyeAssistant({
             .filter((item) => item.signalId)
             .slice(0, 5)
           : [],
+        authorizationPreview: (() => {
+          const preview = rawRoute.authorizationPreview !== null && typeof rawRoute.authorizationPreview === "object"
+            ? rawRoute.authorizationPreview as Record<string, unknown>
+            : null;
+          const previewTaskIds = strings(preview?.taskIds, 8);
+          return preview
+            && typeof preview.gapId === "string"
+            && typeof preview.gapPrompt === "string"
+            && typeof preview.timeBudgetSeconds === "number"
+            && typeof preview.estimatedCostCeilingUsd === "number"
+            && previewTaskIds.length
+            ? {
+                gapId: preview.gapId,
+                gapPrompt: preview.gapPrompt,
+                taskIds: previewTaskIds,
+                timeBudgetSeconds: preview.timeBudgetSeconds,
+                estimatedCostCeilingUsd: preview.estimatedCostCeilingUsd,
+              }
+            : undefined;
+        })(),
       } : undefined;
       setAnswers((current) => current.map((turn) => turn.id === id ? {
         ...turn,
@@ -295,6 +331,77 @@ export function ArgusEyeAssistant({
         answer: "ARGUS could not reach the frozen report evidence.",
         state: "error",
       } : turn));
+    }
+  };
+
+  const authorizeFollowUp = async (answer: EyeAnswer) => {
+    const preview = answer.investigationRoute?.authorizationPreview;
+    if (!preview || !reportVersionId || answer.followUp?.state === "running") return;
+    setAnswers((current) => current.map((turn) => turn.id === answer.id
+      ? { ...turn, followUp: { state: "running", note: "Running the bounded specialist plan…" } }
+      : turn));
+    try {
+      const response = await fetch("/api/gap-investigation", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sourceReportVersionId: reportVersionId,
+          gapId: preview.gapId,
+          taskIds: preview.taskIds,
+          timeBudgetSeconds: preview.timeBudgetSeconds,
+          acceptedCostCeilingUsd: preview.estimatedCostCeilingUsd,
+        }),
+      });
+      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      const followUpState = body.status === "proposed" ? "proposed" : body.status === "partial" ? "partial" : "error";
+      setAnswers((current) => current.map((turn) => turn.id === answer.id ? {
+        ...turn,
+        followUp: {
+          state: response.ok ? followUpState : "error",
+          note: typeof body.note === "string" ? body.note : response.ok
+            ? "The proposed report version is inactive until an analyst promotes it."
+            : "The bounded investigation could not produce a proposal.",
+          authorizationId: typeof body.authorizationId === "string" ? body.authorizationId : undefined,
+          proposedReportVersionId: typeof body.proposedReportVersionId === "string" ? body.proposedReportVersionId : undefined,
+          reviewPath: typeof body.reviewPath === "string" ? body.reviewPath : undefined,
+          observedCostUsd: typeof body.observedCostUsd === "number" ? body.observedCostUsd : undefined,
+          costOutcome: typeof body.costOutcome === "string" ? body.costOutcome : undefined,
+        },
+      } : turn));
+    } catch {
+      setAnswers((current) => current.map((turn) => turn.id === answer.id
+        ? { ...turn, followUp: { state: "error", note: "ARGUS could not complete the bounded investigation." } }
+        : turn));
+    }
+  };
+
+  const mutateFollowUp = async (answer: EyeAnswer, action: "promote" | "rollback") => {
+    const authorizationId = answer.followUp?.authorizationId;
+    if (!authorizationId) return;
+    if (action === "promote" && !window.confirm("Promote this reviewed proposal to the active report?")) return;
+    try {
+      const response = await fetch("/api/gap-investigation", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ authorizationId, action }),
+      });
+      const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+      setAnswers((current) => current.map((turn) => turn.id === answer.id ? {
+        ...turn,
+        followUp: response.ok
+          ? {
+              ...turn.followUp,
+              state: action === "promote" ? "promoted" : "rolled_back",
+              note: action === "promote"
+                ? "The proposal passed the guarded activation path and is now active."
+                : "The proposal was rolled back and remains inactive.",
+            }
+          : { ...turn.followUp, state: "error", note: typeof body.note === "string" ? body.note : "The proposal action failed." },
+      } : turn));
+    } catch {
+      setAnswers((current) => current.map((turn) => turn.id === answer.id
+        ? { ...turn, followUp: { ...turn.followUp, state: "error", note: "ARGUS could not update the proposal." } }
+        : turn));
     }
   };
 
@@ -479,6 +586,54 @@ export function ArgusEyeAssistant({
                         )}
                       </div>
                     </details>
+                  )}
+                  {answer.investigationRoute?.authorizationPreview && (
+                    <div className="mt-2.5 rounded-lg border border-caution/25 bg-caution/5 px-2.5 py-2.5">
+                      <p className="text-[10.5px] font-semibold text-ink">Bounded evidence-gap investigation</p>
+                      <p className="mt-1 text-[10.5px] leading-relaxed text-ink-dim">
+                        {answer.investigationRoute.authorizationPreview.gapPrompt}
+                      </p>
+                      <p className="mono mt-1.5 text-[9px] uppercase tracking-[0.06em] text-ink-faint">
+                        {answer.investigationRoute.authorizationPreview.taskIds.length} saved task{answer.investigationRoute.authorizationPreview.taskIds.length === 1 ? "" : "s"}
+                        {" · "}{Math.round(answer.investigationRoute.authorizationPreview.timeBudgetSeconds / 60)} minute limit
+                        {" · "}${answer.investigationRoute.authorizationPreview.estimatedCostCeilingUsd.toFixed(2)} estimated ceiling
+                      </p>
+                      {!answer.followUp && (
+                        <button
+                          type="button"
+                          onClick={() => void authorizeFollowUp(answer)}
+                          className="mt-2 rounded-md bg-caution px-2.5 py-1.5 text-[10px] font-semibold text-white transition hover:opacity-90"
+                        >
+                          Authorize investigation
+                        </button>
+                      )}
+                      {answer.followUp && (
+                        <div className="mt-2 border-t border-caution/20 pt-2 text-[10.5px] leading-relaxed text-ink-dim">
+                          <p>{answer.followUp.note}</p>
+                          {typeof answer.followUp.observedCostUsd === "number" && (
+                            <p className="mt-1 text-ink-faint">
+                              Observed estimated cost ${answer.followUp.observedCostUsd.toFixed(2)}
+                              {answer.followUp.costOutcome === "estimate_exceeded" ? " · ceiling exceeded, proposal marked partial" : " · within ceiling"}
+                            </p>
+                          )}
+                          {(answer.followUp.state === "proposed" || answer.followUp.state === "partial") && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {answer.followUp.reviewPath && (
+                                <a href={answer.followUp.reviewPath} className="rounded-md border border-signal/25 px-2 py-1 text-[10px] font-medium text-signal-lift hover:bg-signal-soft">
+                                  Review proposed report
+                                </a>
+                              )}
+                              <button type="button" onClick={() => void mutateFollowUp(answer, "promote")} className="rounded-md bg-signal px-2 py-1 text-[10px] font-semibold text-on-signal">
+                                Promote after review
+                              </button>
+                              <button type="button" onClick={() => void mutateFollowUp(answer, "rollback")} className="rounded-md border border-line px-2 py-1 text-[10px] text-ink-dim">
+                                Roll back
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                   {answer.uncertainties.length > 0 && (
                     <div className="mt-2.5 rounded-lg border border-caution/20 bg-caution/5 px-2.5 py-2">
