@@ -33022,6 +33022,7 @@ function evmSafety(gp, sim) {
   const creatorShare = num4(gp?.creator_percent);
   return {
     available: !!gp || !!s,
+    contractPropertiesAssessed: !!gp,
     simChecked: !!s,
     honeypot: t12(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t12(gp?.is_honeypot) || t12(gp?.cannot_sell_all),
@@ -33075,6 +33076,7 @@ function solanaSafety(sol) {
   const freezable = solFlag(sol?.freezable);
   return {
     available: !!sol,
+    contractPropertiesAssessed: !!sol,
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
     honeypotOnchain: sol?.non_transferable === "1",
@@ -33121,6 +33123,7 @@ function solanaSafety(sol) {
 function emptySafety() {
   return {
     available: false,
+    contractPropertiesAssessed: false,
     simChecked: false,
     honeypot: false,
     honeypotOnchain: false,
@@ -33655,6 +33658,13 @@ async function runTokenAudit(input, emit, opts) {
     liquidityUsd,
     vol24,
     ageDays,
+    marketEvidence: {
+      mcap: pair.marketCap != null && Number.isFinite(pair.marketCap),
+      fdv: pair.fdv != null && Number.isFinite(pair.fdv),
+      liquidityUsd: pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd),
+      vol24: pair.volume?.h24 != null && Number.isFinite(pair.volume.h24),
+      ageDays: pair.pairCreatedAt != null && Number.isFinite(pair.pairCreatedAt)
+    },
     // Keep the raw instant, not just the day count derived from it above. The
     // operator trace ages the deployer wallet against this launch, and a wallet
     // minutes older than the token it launched is 0 days old in every direction.

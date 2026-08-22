@@ -2,7 +2,7 @@
 
 Published field manual: [Claude artifact](https://claude.ai/code/artifact/4599c1f2-73cb-462c-9382-65282945a087)
 
-Last reconciled: July 14, 2026
+Last reconciled: August 22, 2026
 
 Product version: 3.0
 
@@ -145,6 +145,12 @@ team, product, perimeter, coverage, verdict). Headings are counts and
 recorded states only. The display name is not a bind key. First-party
 named team is not independently corroborated. Provenance colour is
 source-of-truth, not pass/fail.
+
+Token reports use a separate chronological spine from `buildTokenStory()`:
+launch, liquidity, holders, contract, presence, and gaps. Headline market
+figures carry provenance. Missing collector coverage is a first-class
+unestablished beat, not silence. A sources table ranks recorded collectors
+by how many token figures cite them. Person and token beats stay separate.
 
 1. the source-backed investment case;
 2. what could break the thesis; and
