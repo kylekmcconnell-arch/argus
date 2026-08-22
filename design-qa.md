@@ -1,32 +1,32 @@
-# ARGUS referral profile photo QA
+# ARGUS public Decision Intelligence QA
 
 - Final result: passed
-- Reviewed state: authenticated Referrals workspace with the production sidebar and named profile photos for Kyle and Enigma
-- Browser viewport: 1280 × 900
-- Kyle source: `/var/folders/h7/6njc4p9d12s5cjfrwk2sr2080000gn/T/codex-clipboard-0fb6b838-9d2b-4aed-b915-7ec9c9b0cfcd.png` (400 × 400)
-- Enigma source: `/Users/kyle/Downloads/sGyYhRBo_400x400.jpg` (399 × 399)
-- Implementation capture: `/tmp/argus-referral-avatars.png` (1280 × 900)
-- Combined comparison: `/tmp/argus-referral-avatar-comparison.png` (1730 × 900)
+- Reviewed state: saved project report with internal scorer measurements, an integrity-gate finding, open questions, and four selectable decision views
+- Browser viewport: 1280 × 720
+- Source captures: `/Users/kyle/Downloads/Screenshot 2026-08-22 at 4.20.26 PM.png`, `/Users/kyle/Downloads/Screenshot 2026-08-22 at 4.21.35 PM.png`, and `/Users/kyle/Downloads/Screenshot 2026-08-22 at 4.22.03 PM.png`
+- Implementation captures: `/tmp/argus-report-language-audit/implementation-top.png`, `/tmp/argus-report-language-audit/implementation-evidence.png`, and `/tmp/argus-report-language-audit/implementation-findings.png`
+- Combined comparisons: `/tmp/argus-report-language-audit/evidence-comparison.png` and `/tmp/argus-report-language-audit/findings-comparison.png`
 
-## Findings
+## Comparison findings
 
-No actionable P0, P1, or P2 visual issues remain. Both supplied photos are rendered from unmodified repository assets with centered `object-cover` crops. Enigma's face and glowing eyes remain legible at the 40 px leaderboard size. Kyle's seated portrait remains recognizable in the current-user row and the 28 px sidebar account badge.
+No actionable P0, P1, or P2 visual issues remain. The original public grid
+included `solid` and `P3_token_conduct` scorer output. The replacement grid keeps
+the underlying ten measurements but surfaces eight decision-relevant values with
+reader-facing titles. Raw values remain available in the collapsed technical
+ledger.
 
-## Identity and fallback behavior
+The original signal register used five competing badges and exposed
+`intelligence-integrity-gate v1`. The replacement uses one primary `Report issue`
+status, explains that three items were excluded because their sources could not be
+traced, and keeps the rule ID behind a collapsed technical disclosure.
 
-- `Kyle` and `Kyle McConnell` map to the supplied color portrait.
-- `Enigma` maps to the supplied black-and-white portrait.
-- Similar but unapproved names such as `Another Kyle` and `Enigma Labs` do not inherit either photo.
-- Every unmapped identity retains the existing initial avatar fallback.
-- Images are decorative beside visible names, so empty image alt text avoids duplicated screen-reader announcements.
+## Fidelity and interaction review
 
-## Layout and runtime checks
-
-- The sidebar keeps its existing dimensions and alignment with the larger photo asset.
-- Leaderboard rows remain aligned across avatar, name, credits, access, qualified referrals, and masked code columns.
-- The active Referrals sidebar item and current-user row remain visually distinct.
-- Browser console inspection returned no errors or warnings.
-- Focused avatar and referral component tests passed.
-- Production build passed.
+- Existing warm-paper surfaces, Young Serif display type, Geist UI type, mono data labels, spacing, borders, and deep-green priority treatment are preserved.
+- Content hierarchy, card alignment, wrapping, padding, and section rhythm remain intact at the tested viewport.
+- The four report views remain keyboard tabs and continue to change emphasis without changing the complete finding set.
+- Technical measurement, source, rule, arithmetic, and question details remain inspectable through native disclosures.
+- Browser console inspection returned no application errors or warnings.
+- Visual QA iterated once after the first capture to correct the decision-view article in the conclusion copy.
 
 final result: passed
