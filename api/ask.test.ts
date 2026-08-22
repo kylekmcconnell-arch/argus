@@ -569,6 +569,113 @@ describe("ask this immutable report", () => {
     expect(providerFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("returns a deterministic bounded graph path with a receipt for every hop", async () => {
+    const stored = structuredClone(storedInvestigationVersion());
+    const payload = stored.report.payload as Record<string, unknown>;
+    const token = payload.token as Record<string, unknown>;
+    token.graph = {
+      nodes: [
+        { type: "Token", key: "$STONKBROKER", label: "$STONKBROKER", subject: true },
+        { type: "Person", key: "@ClutchMarkets", label: "@ClutchMarkets" },
+      ],
+      edges: [{
+        src: "$STONKBROKER",
+        dst: "@ClutchMarkets",
+        type: "ISSUED_BY",
+        source_url: "https://clutch.example/token",
+        source_class: "official_subject",
+        evidence_state: "verified",
+      }],
+    };
+    harness.loadExactVersionReport.mockResolvedValue(stored);
+    const providerFetch = vi.fn().mockResolvedValue(providerResponse({
+      answer: "The frozen graph records one source-receipted issuance edge.",
+      basis: "cited_evidence",
+      citationUrls: ["https://clutch.example/token"],
+    }));
+    vi.stubGlobal("fetch", providerFetch);
+    const { captured, response } = responseCapture();
+
+    await handler(request({ question: "Trace the connection to @ClutchMarkets" }) as never, response as never);
+
+    expect(captured.body).toMatchObject({
+      investigationRoute: {
+        reasoningMode: "trace_connection",
+        graphPathReceipt: {
+          state: "complete",
+          paths: [{
+            nodeKeys: ["$STONKBROKER", "@ClutchMarkets"],
+            pathLength: 1,
+            evidenceState: "verified",
+            edges: [expect.objectContaining({
+              relationship: "ISSUED_BY",
+              sourceReceipt: expect.objectContaining({ sourceUrl: "https://clutch.example/token" }),
+            })],
+          }],
+        },
+      },
+    });
+    const providerBody = JSON.parse(String((providerFetch.mock.calls[0]?.[1] as RequestInit)?.body));
+    expect(providerSystem(providerBody)).toContain("A bounded path is not a verified path");
+  });
+
+  it("keeps counterweights separate from typed artifact contradictions", async () => {
+    const stored = structuredClone(storedInvestigationVersion());
+    const payload = stored.report.payload as Record<string, unknown>;
+    const projectAccount = payload.projectAccount as Record<string, unknown>;
+    projectAccount.basicFacts = [{
+      factId: "fact:launch-date",
+      predicate: "launch_date",
+      value: "Clutch launched in 2024.",
+      status: "conflicted",
+      attributionScope: "direct_subject",
+      sources: [
+        {
+          url: "https://clutch.example/history",
+          provider: "official-site",
+          sourceClass: "official_subject",
+          relation: "supports",
+          excerpt: "Clutch launched in 2024.",
+          contentHash: "support-hash",
+          capturedAt: "2026-08-22T10:00:00Z",
+          artifactVerified: true,
+        },
+        {
+          url: "https://registry.example/filing",
+          provider: "public-registry",
+          sourceClass: "public_registry",
+          relation: "contradicts",
+          excerpt: "The registry records a different 2024 launch date.",
+          contentHash: "conflict-hash",
+          capturedAt: "2026-08-22T10:01:00Z",
+          artifactVerified: true,
+        },
+      ],
+    }];
+    harness.loadExactVersionReport.mockResolvedValue(stored);
+    const providerFetch = vi.fn().mockResolvedValue(providerResponse({
+      answer: "The two independent 2024 artifacts remain unresolved.",
+      basis: "cited_evidence",
+      citationUrls: ["https://clutch.example/history", "https://registry.example/filing"],
+    }));
+    vi.stubGlobal("fetch", providerFetch);
+    const { captured, response } = responseCapture();
+
+    await handler(request({ question: "What evidence conflicts about the launch?" }) as never, response as never);
+
+    expect(captured.body).toMatchObject({
+      investigationRoute: {
+        contradictions: [{
+          factId: "fact:launch-date",
+          status: "unresolved",
+          timeAlignment: "aligned",
+          sourceIndependence: "independent",
+          resolutionArtifact: expect.stringContaining("current authoritative artifact"),
+        }],
+      },
+    });
+  });
+
   it("fails closed when the exact version is not in the authenticated organization", async () => {
     harness.loadExactVersionReport.mockResolvedValue(null);
     const providerFetch = vi.fn();
