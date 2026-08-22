@@ -14,12 +14,12 @@ export function WorkspacePageHeader({
   meta?: ReactNode;
 }) {
   return (
-    <header className="border-b border-line/70 pb-5">
+    <header className="border-b border-line/70 pb-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           {eyebrow && <div className="eyebrow mb-2">{eyebrow}</div>}
-          <h1 className="display-sm text-[24px] text-ink">{title}</h1>
-          <div className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
+          <h1 className="display-sm text-[28px] leading-tight text-ink sm:text-[32px]">{title}</h1>
+          <div className="mt-2 max-w-2xl text-[14px] leading-relaxed text-ink-dim">
             {description}
           </div>
         </div>
