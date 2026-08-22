@@ -19,6 +19,7 @@ import {
   buildGraphPathReceipt,
   buildTypedContradictionReceipts,
 } from "../src/lib/reasoningReceipts.js";
+import { authorizeGapInvestigation } from "../src/lib/gapInvestigation.js";
 import { claudeMessages, grokChat, providerFallbacksEnabled } from "./_llm";
 
 // Exact-version storage verification performs bounded organization-scoped reads
@@ -891,8 +892,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     packet.intelligence as unknown as IntelligenceSpineSnapshot,
     history.map((turn) => turn.question),
   );
+  const savedPlan = packet.researchPlan as unknown as ResearchPlan;
+  const openTaskIds = (savedPlan?.tasks ?? [])
+    .filter((task) => directedRoute.taskIds.includes(task.id))
+    .filter((task) => (task.state === "planned" || task.state === "partial" || task.state === "unavailable") && task.blockedBy.length === 0)
+    .map((task) => task.id)
+    .slice(0, 8);
+  let authorizationPreview: {
+    gapId: string;
+    gapPrompt: string;
+    taskIds: string[];
+    timeBudgetSeconds: number;
+    estimatedCostCeilingUsd: number;
+  } | undefined;
+  if (directedRoute.answerMode === "investigate_evidence_gap" && directedRoute.unresolvedQuestions[0] && openTaskIds.length) {
+    try {
+      const preview = authorizeGapInvestigation({
+        payload: { researchPlan: packet.researchPlan, intelligence: packet.intelligence },
+        gapId: directedRoute.unresolvedQuestions[0].id,
+        requestedTaskIds: openTaskIds,
+        timeBudgetSeconds: 300,
+        // Preview only. The execution request must return this exact server
+        // estimate as the user's explicit accepted ceiling.
+        acceptedCostCeilingUsd: 50,
+      });
+      authorizationPreview = {
+        gapId: preview.gap.id,
+        gapPrompt: preview.gap.prompt,
+        taskIds: preview.requestedTaskIds,
+        timeBudgetSeconds: preview.timeBudgetSeconds,
+        estimatedCostCeilingUsd: preview.estimatedCostCeilingUsd,
+      };
+    } catch {
+      // Frozen-report Q&A remains available when a bounded execution scope
+      // cannot be constructed. No provider call is made from this preview.
+    }
+  }
   const investigationRoute = {
     ...directedRoute,
+    authorizationPreview,
     referentResolution,
     graphPathReceipt: buildGraphPathReceipt(question, directedRoute.reasoningMode, packet),
     contradictions: buildTypedContradictionReceipts(packet),
