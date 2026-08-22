@@ -112,14 +112,11 @@ describe("AppShell mobile navigation drawer", () => {
     expect(credits).not.toBeNull();
     expect(account?.contains(credits)).toBe(true);
     expect(credits?.classList.contains("fixed")).toBe(false);
-    const dialog = container.querySelector<HTMLDialogElement>("dialog[aria-labelledby='early-access-title']");
+    expect(container.querySelector("dialog[aria-labelledby='early-access-title']")).toBeNull();
+    await act(async () => credits?.click());
+    const dialog = container.querySelector<HTMLDialogElement>("dialog[aria-labelledby='early-access-title'][open]");
     expect(dialog).not.toBeNull();
     expect(account?.contains(dialog)).toBe(false);
-
-    const showModal = vi.fn();
-    Object.defineProperty(dialog, "showModal", { configurable: true, value: showModal });
-    await act(async () => credits?.click());
-    expect(showModal).toHaveBeenCalledOnce();
   });
 
   it("keeps the closed drawer inert and exposes it as a modal dialog only while open", async () => {

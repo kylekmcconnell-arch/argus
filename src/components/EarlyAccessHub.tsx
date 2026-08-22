@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { CopyIcon, WalletIcon, XIcon } from "@phosphor-icons/react";
 import { ReferralLeaderboard } from "./ReferralLeaderboard";
@@ -41,10 +41,10 @@ function money(cents: number): string {
 }
 
 export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const [data, setData] = useState<AccountSnapshot | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
   const load = async () => {
     try {
@@ -75,11 +75,20 @@ export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null })
     });
   }, []);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen]);
+
   const open = () => {
     void load();
-    dialogRef.current?.showModal();
+    setIsOpen(true);
   };
-  const close = () => dialogRef.current?.close();
+  const close = () => setIsOpen(false);
   const referralLink = data ? `${window.location.origin}/?view=join&ref=${data.referral.code}` : "";
 
   const copy = async () => {
@@ -104,14 +113,18 @@ export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null })
         triggerRoot,
       ) : null}
 
-      <dialog
-        ref={dialogRef}
-        aria-labelledby="early-access-title"
-        className="m-auto max-h-[88dvh] w-[min(1080px,calc(100%-2rem))] overflow-y-auto rounded-xl border border-line bg-void p-0 text-ink shadow-2xl backdrop:bg-black/70"
-        onClick={(event) => {
-          if (event.target === dialogRef.current) close();
-        }}
-      >
+      {isOpen && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4"
+          onClick={close}
+        >
+          <dialog
+            open
+            aria-modal="true"
+            aria-labelledby="early-access-title"
+            className="relative m-0 max-h-[88dvh] w-[min(1080px,100%)] overflow-y-auto rounded-xl border border-line bg-void p-0 text-ink shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-line bg-void/95 px-5 py-4 backdrop-blur">
           <div>
             <div className="eyebrow">Early access account</div>
@@ -185,7 +198,9 @@ export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null })
             </>
           )}
         </div>
-      </dialog>
+          </dialog>
+        </div>
+      )}
     </>
   );
 }
