@@ -25,7 +25,7 @@
     "quality": "npm run truth:check && npm run canary:offline && npm run calibrate && npm test && npm run typecheck",
     "seed:local-report": "tsx scripts/seed-local-report.ts",
     "check-env": "tsx scripts/check-env.ts",
-    "test:db": "supabase test db supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql supabase/tests/approved_signin_security.sql supabase/tests/early_access_growth.sql supabase/tests/growth_waitlist_credits.sql",
+    "test:db": "supabase test db supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql supabase/tests/gap_investigation_proposals.sql supabase/tests/approved_signin_security.sql supabase/tests/early_access_growth.sql supabase/tests/growth_waitlist_credits.sql",
     "lint": "eslint .",
     "preview": "vite preview"
   },
