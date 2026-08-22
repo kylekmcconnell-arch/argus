@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "oenbot": {
+      "url": "https://oenbot.com/api/mcp",
+      "headers": {
+        "CF-Access-Client-Id": "${env:OENBOT_CLOUD_AGENT_ACCESS_CLIENT_ID}",
+        "CF-Access-Client-Secret": "${env:OENBOT_CLOUD_AGENT_ACCESS_CLIENT_SECRET}"
+      }
+    }
+  }
+}
