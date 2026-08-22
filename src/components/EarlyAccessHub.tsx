@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { CopyIcon, WalletIcon, XIcon } from "@phosphor-icons/react";
 import { ReferralLeaderboard } from "./ReferralLeaderboard";
 import { PricingGrid } from "./PricingGrid";
@@ -39,7 +40,7 @@ function money(cents: number): string {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(cents / 100);
 }
 
-export function EarlyAccessHub({ compact = false }: { compact?: boolean }) {
+export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [data, setData] = useState<AccountSnapshot | null>(null);
   const [error, setError] = useState("");
@@ -90,16 +91,18 @@ export function EarlyAccessHub({ compact = false }: { compact?: boolean }) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={open}
-        className={`mt-1 flex min-h-9 w-full items-center rounded-md border border-line/80 bg-panel/45 py-2 text-[12.5px] font-medium text-ink-dim transition hover:border-signal/45 hover:bg-panel hover:text-ink ${compact ? "justify-center px-0" : "gap-2.5 px-2.5"}`}
-        aria-label="Open credits, pricing, and referrals"
-        title={compact ? (data?.credit ? `${data.credit.balance.toFixed(1)} credits` : "Credits") : undefined}
-      >
-        <WalletIcon size={17} className="text-ink-faint" aria-hidden />
-        <span className={compact ? "sr-only" : undefined}>{data?.credit ? `${data.credit.balance.toFixed(1)} credits` : "Credits"}</span>
-      </button>
+      {triggerRoot ? createPortal(
+        <button
+          type="button"
+          onClick={open}
+          className="mt-1 flex min-h-9 w-full items-center gap-2.5 rounded-md border border-line/80 bg-panel/45 px-2.5 py-2 text-[12.5px] font-medium text-ink-dim transition hover:border-signal/45 hover:bg-panel hover:text-ink"
+          aria-label="Open credits, pricing, and referrals"
+        >
+          <WalletIcon size={17} className="text-ink-faint" aria-hidden />
+          <span>{data?.credit ? `${data.credit.balance.toFixed(1)} credits` : "Credits"}</span>
+        </button>,
+        triggerRoot,
+      ) : null}
 
       <dialog
         ref={dialogRef}

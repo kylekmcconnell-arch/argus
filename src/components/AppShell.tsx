@@ -24,6 +24,7 @@ export function AppShell({
   view: NavTarget | "audit";
 }) {
   const [open, setOpen] = useState(false);
+  const [creditTriggerRoot, setCreditTriggerRoot] = useState<HTMLDivElement | null>(null);
   const [mobile, setMobile] = useState(() => (
     typeof window !== "undefined"
       && typeof window.matchMedia === "function"
@@ -76,8 +77,10 @@ export function AppShell({
         open={open}
         mobile={mobile}
         onClose={open ? closeDrawer : undefined}
-        accountDetails={<EarlyAccessHub />}
+        accountDetails={<div ref={setCreditTriggerRoot} />}
       />
+
+      <EarlyAccessHub triggerRoot={creditTriggerRoot} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* mobile top bar */}
