@@ -64,6 +64,7 @@ const ProjectView = lazy(() => import("./components/ProjectView").then((module) 
 const ProjectsPage = lazy(() => import("./components/ProjectsPage").then((module) => ({ default: module.ProjectsPage })));
 const ProvidersPage = lazy(() => import("./components/ProvidersPage").then((module) => ({ default: module.ProvidersPage })));
 const RadarPage = lazy(() => import("./components/RadarPage").then((module) => ({ default: module.RadarPage })));
+const ReferralsPage = lazy(() => import("./components/ReferralsPage").then((module) => ({ default: module.ReferralsPage })));
 const PolymarketTraderRun = lazy(() => import("./components/PolymarketTraderRun").then((module) => ({ default: module.PolymarketTraderRun })));
 const ReconPage = lazy(() => import("./components/ReconPage").then((module) => ({ default: module.ReconPage })));
 const Report = lazy(() => import("./components/Report").then((module) => ({ default: module.Report })));
@@ -123,7 +124,7 @@ function CaseBriefLoadingDialog() {
 }
 
 type Phase =
-  | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
+  | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "referrals" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "threat"
@@ -1343,7 +1344,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "threat" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "alerts" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
+    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "threat" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "alerts" || phase === "referrals" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
       ? phase
       : "idle";
   const personReportPrivate = (dossier?.viewPersistence ?? dossier?.persistence)?.state === "private";
@@ -1396,6 +1397,8 @@ export default function App() {
       {phase === "watchlist" && <WatchlistPage onAudit={onSafeAudit} />}
 
       {phase === "alerts" && <AlertsPage onOpen={onOpenRecent} />}
+
+      {phase === "referrals" && <ReferralsPage />}
 
       {phase === "recon" && <ReconPage key={storedRecon ? `stored:${storedRecon.retrieval.url}:${storedReconVersionContext?.reportVersionId ?? "legacy"}` : reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialRecon={storedRecon ?? undefined} initialVersionContext={storedReconVersionContext ?? undefined} initialPrivate={privateMode} onAudit={onSafeAudit} onInvestigate={onSafeInvestigationAudit} onOpenRecent={onOpenRecent} onOpenBrief={!evidenceReviewVersionId && !privateMode && storedReconBriefTarget ? () => setCaseBriefTarget(storedReconBriefTarget) : undefined} onStartFresh={leaveEvidenceReview} />}
 

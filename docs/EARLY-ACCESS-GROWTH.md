@@ -62,6 +62,8 @@ Every waitlist identity and admitted member gets a referral code. Attribution oc
 
 Public rows expose public names, ranks, access state, and counts. They never expose email addresses.
 
+Authenticated members also have a first-class Referrals workspace in the main sidebar. Opening it calls the existing account growth endpoint, which creates a missing referral profile before returning the member's personal link. The workspace keeps the public board access-focused: ranks, qualified referrals, investigation credits, access state, and masked code tails. It does not expose commission, cash, or payout controls.
+
 ### Subscription revenue share
 
 Default: a referrer earns 20% of collected subscription revenue from a referred customer. Of that commission:
