@@ -357,15 +357,15 @@ describe("PointInTimeIntelligencePanel", () => {
         : question),
     });
 
-    const thesis = container.querySelector('[aria-label="Point in time thesis"]');
-    expect(thesis?.textContent).toContain("Thesis withheld");
-    expect(thesis?.textContent).toContain("no usable support, risk, or mixed signal");
+    const thesis = container.querySelector('[aria-label="Current report conclusion"]');
+    expect(thesis?.textContent).toContain("Conclusion limited");
+    expect(thesis?.textContent).toContain("does not support a conclusion");
     expect(signalIds(container)).toHaveLength(base.signals.length);
 
     const alpha = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
       .find((tab) => tab.textContent === "Alpha research");
     act(() => alpha?.click());
-    expect(container.querySelector('[aria-label="Point in time thesis"]')?.textContent).toContain("Conditional thesis");
+    expect(container.querySelector('[aria-label="Current report conclusion"]')?.textContent).toContain("Current read");
     expect(signalIds(container)).toHaveLength(base.signals.length);
   });
 
@@ -373,23 +373,22 @@ describe("PointInTimeIntelligencePanel", () => {
     const value = snapshot();
     render(value, false);
 
-    const thesis = container.querySelector('[aria-label="Point in time thesis"]');
-    expect(thesis?.textContent).toContain("Thesis withheld");
-    expect(thesis?.textContent).toContain("parent report is not decision-ready");
-    expect(thesis?.textContent).toContain("will not construct a thesis");
+    const thesis = container.querySelector('[aria-label="Current report conclusion"]');
+    expect(thesis?.textContent).toContain("Conclusion limited");
+    expect(thesis?.textContent).toContain("does not have enough completed evidence");
     expect(signalIds(container)).toHaveLength(value.signals.length);
     expect(container.querySelector('[aria-labelledby$="-cases-title"]')?.textContent)
-      .toContain("No grounded recheck trigger is available");
+      .toContain("No specific refresh trigger is supported");
   });
 
   it("withholds a derived thesis under identity failure and adverse governing verdicts", () => {
     for (const verdict of ["UNVERIFIABLE_IDENTITY", "FAIL", "AVOID"]) {
       render(snapshot(), true, verdict);
 
-      const thesis = container.querySelector('[aria-label="Point in time thesis"]');
-      expect(thesis?.textContent, verdict).toContain("Thesis withheld");
-      expect(thesis?.textContent, verdict).toContain(`governing report verdict is ${verdict}`);
-      expect(thesis?.textContent, verdict).toContain("cannot override");
+      const thesis = container.querySelector('[aria-label="Current report conclusion"]');
+      expect(thesis?.textContent, verdict).toContain("Conclusion limited");
+      expect(thesis?.textContent, verdict).toContain(`report result is ${verdict}`);
+      expect(thesis?.textContent, verdict).toContain("cannot replace it");
       expect(thesis?.textContent, verdict).not.toContain("is the strongest support");
     }
   });
@@ -403,21 +402,21 @@ describe("PointInTimeIntelligencePanel", () => {
         : question),
     }, true, "CAUTION");
 
-    const thesis = container.querySelector('[aria-label="Point in time thesis"]');
-    expect(thesis?.textContent).toContain("Conditional thesis");
-    expect(thesis?.textContent).toContain("Within the governing CAUTION report");
+    const thesis = container.querySelector('[aria-label="Current report conclusion"]');
+    expect(thesis?.textContent).toContain("Current read");
+    expect(thesis?.textContent).toContain("This report is CAUTION");
   });
 
   it("withholds a lens thesis across an uncollected critical priority question", () => {
     render(snapshot());
 
-    const thesis = container.querySelector('[aria-label="Point in time thesis"]');
-    expect(thesis?.textContent).toContain("Thesis withheld");
-    expect(thesis?.textContent).toContain("critical priority question is unresolved, unavailable, or not collected");
-    expect(thesis?.textContent).toContain("cannot convert those absences into decision evidence");
+    const thesis = container.querySelector('[aria-label="Current report conclusion"]');
+    expect(thesis?.textContent).toContain("Conclusion limited");
+    expect(thesis?.textContent).toContain("one critical question has not been answered");
+    expect(thesis?.textContent).toContain("Missing evidence is not treated as a favorable result");
     expect(thesis?.textContent).not.toContain("is the strongest support");
     expect(container.querySelector('[aria-labelledby$="-cases-title"]')?.textContent)
-      .toContain("No grounded recheck trigger is available");
+      .toContain("No specific refresh trigger is supported");
   });
 
   it("withholds a lens thesis when a critical priority question is unresolved", () => {
@@ -429,8 +428,8 @@ describe("PointInTimeIntelligencePanel", () => {
         : question),
     });
 
-    expect(container.querySelector('[aria-label="Point in time thesis"]')?.textContent)
-      .toContain("Thesis withheld");
+    expect(container.querySelector('[aria-label="Current report conclusion"]')?.textContent)
+      .toContain("Conclusion limited");
   });
 
   it("states that a missing opposite-polarity signal is bounded absence, not evidence", () => {
@@ -446,16 +445,16 @@ describe("PointInTimeIntelligencePanel", () => {
       : item);
     render({ ...value, signals, questions, lenses });
 
-    expect(container.querySelector('[aria-label="Point in time thesis"]')?.textContent)
-      .toContain("that is not evidence that no pressure exists");
+    expect(container.querySelector('[aria-label="Current report conclusion"]')?.textContent)
+      .toContain("That does not mean no risk exists");
   });
 
   it("shows arithmetic receipts, capture bounds, and every coverage domain without making a provider call", () => {
     render(snapshot());
 
-    expect(container.textContent).toContain("Score-neutral / saved-snapshot derivation");
-    expect(container.textContent).toContain("does not change the ARGUS score");
-    expect(container.textContent).toContain("makes no provider call when rendered");
+    expect(container.textContent).toContain("Saved report");
+    expect(container.textContent).toContain("or change the ARGUS score");
+    expect(container.textContent).toContain("does not refresh in the background");
     expect(container.textContent).toContain("Aug 1, 2026");
     expect(container.textContent).toContain("10:00 UTC to Aug 1, 2026");
     expect(container.textContent).toContain("10:30 UTC");
@@ -495,13 +494,27 @@ describe("PointInTimeIntelligencePanel", () => {
         evidenceState: "reported_context",
         sourceRefs: ["source:official"],
         window: { kind: "scheduled", asOf: capturedLate, end: "2026-09-01T00:00:00.000Z" },
+      }, {
+        id: "project_strength_tier:p3-token-conduct",
+        domain: "supply",
+        label: "P3_token_conduct deterministic scorer-packet evidence tier",
+        unit: "text",
+        entityKey: "token:arg",
+        valueType: "text",
+        value: "solid",
+        evidenceState: "reported_context",
+        sourceRefs: [],
       }],
     });
 
-    expect(container.querySelector('[data-testid="priority-measurements"]')?.textContent)
-      .toContain("Exit liquidity");
+    const publicMeasurements = container.querySelector('[data-testid="priority-measurements"]')?.textContent;
+    expect(publicMeasurements).toContain("Exit liquidity");
+    expect(publicMeasurements).not.toContain("P3_token_conduct");
+    expect(publicMeasurements).not.toContain("solid");
     expect(container.querySelector('[data-testid="complete-measurement-ledger"]')?.textContent)
       .toContain("Market capitalization");
+    expect(container.querySelector('[data-testid="complete-measurement-ledger"]')?.textContent)
+      .toContain("P3_token_conduct deterministic scorer-packet evidence tier");
     expect(container.querySelector('[aria-label="Frozen event chronology"]')?.textContent)
       .toContain("Next reported unlock date");
     expect(container.querySelector('[data-testid="complete-source-ledger"]')?.textContent)
@@ -526,8 +539,8 @@ describe("PointInTimeIntelligencePanel", () => {
       }],
     });
 
-    expect(container.textContent).toContain("Dated source window");
-    expect(container.textContent).toContain("1 saved reference has no valid capture timestamp and is not bounded by this window");
+    expect(container.textContent).toContain("Evidence dates");
+    expect(container.textContent).toContain("1 source reference has no recorded capture time");
   });
 
   it("counts unique artifacts rather than inflating repeated lineage references", () => {
@@ -543,7 +556,7 @@ describe("PointInTimeIntelligencePanel", () => {
 
     expect(container.querySelector('[data-stat="unique-artifacts"]')?.textContent).toBe("1");
     expect(container.querySelector('[data-stat="lineage-origins"]')?.textContent).toBe("1");
-    expect(container.textContent).toContain("2 lineage references");
+    expect(container.textContent).toContain("2 saved source references");
   });
 
   it("renders every question and basis in the complete frozen ledger", () => {
@@ -569,12 +582,10 @@ describe("PointInTimeIntelligencePanel", () => {
     });
 
     const conditionalCases = container.querySelector('[aria-labelledby$="-cases-title"]');
-    expect(conditionalCases?.textContent).toContain("Priority recheck trigger");
-    expect(conditionalCases?.textContent).toContain("Current case");
-    expect(conditionalCases?.textContent).toContain("Evidence still needed");
-    expect(conditionalCases?.textContent).toContain("If:");
-    expect(conditionalCases?.textContent).toContain("Then:");
-    expect(conditionalCases?.textContent).toContain("Direction must come from the new evidence");
+    expect(conditionalCases?.textContent).toContain("Refresh the report when");
+    expect(conditionalCases?.textContent).toContain("What this report says now");
+    expect(conditionalCases?.textContent).toContain("Verify next");
+    expect(conditionalCases?.textContent).toContain("A new report may strengthen, weaken, or leave the conclusion unchanged");
     expect(conditionalCases?.textContent).not.toContain("case under this lens strengthens");
     expect(conditionalCases?.textContent).not.toContain("current evidence case under this lens breaks");
     expect(conditionalCases?.textContent).not.toMatch(/probability|price target|expected return/i);

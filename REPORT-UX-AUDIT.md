@@ -9,6 +9,30 @@ ARGUS already looks and feels like a serious investigation product. Its largest 
 
 A score can summarize the evidence that exists. It cannot substitute for evidence that was never collected. Positive verdicts therefore need a separate due-diligence readiness gate.
 
+## 2026-08-22 public-language follow-up
+
+Production report captures showed typed internal evidence rendered directly in
+the public reading path: scorer values such as `solid`, `P3_token_conduct`
+evidence bands, a five-badge signal taxonomy, and rule IDs such as
+`intelligence-integrity-gate v1`. The evidence was auditable but the presentation
+required readers to decode the report engine before understanding the finding.
+
+The shared Decision Intelligence panel now separates those layers:
+
+1. key evidence uses reader-facing names and excludes scorer packets and internal
+   status measurements from the default grid;
+2. the former conditional-cases block is framed as when to refresh, what the
+   report says now, and what to verify next;
+3. finding cards use one primary status and plain-language integrity warnings;
+4. rule IDs, raw measurement labels, source lineage, and arithmetic remain in
+   collapsed technical details; and
+5. lens selection changes emphasis and ordering without changing saved evidence.
+
+Fixture-driven visual QA used the exact confusing production states supplied in
+the audit and confirmed the replacement at a 1280 × 720 browser viewport. Local
+captures are stored under `/tmp/argus-report-language-audit/` and remain outside
+version control.
+
 ## 2026-07-13 decision standard, implementation in validation
 
 The report must read like a sharp investment memo before it reads like a data

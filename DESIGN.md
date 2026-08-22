@@ -138,6 +138,19 @@ pair holds AA in both themes):
 - Composition is cascade-safe: `.chip`, `.verdict-pill`, `.btn-chip`, `.finding` consume
   `var(--tint, neutral)` themselves, so `chip tint-avoid` works regardless of order.
 
+### 2.2 · Public report language
+
+The first reading layer is written for a decision maker, not for the report
+engine. Never expose rule IDs, schema versions, scorer-packet names,
+evidence-band labels, snake_case identifiers, or lineage implementation terms
+as public headings or metric names. Preserve them in a collapsed technical
+details disclosure so expert readers can still audit the report.
+
+Finding cards use one primary status chip. Severity, domain, and selected-view
+priority are supporting text, not additional colored badges. Report sections
+answer four questions in order: what ARGUS found, why it matters, what remains
+unknown, and what new evidence should trigger a fresh report.
+
 ## 3 · Component idioms (classes in index.css)
 
 Rhythm rule: `.panel` is the ONLY bordered container. Interiors are ledger-style —
