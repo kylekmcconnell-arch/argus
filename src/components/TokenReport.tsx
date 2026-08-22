@@ -27,6 +27,8 @@ import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 import { LinkEntity } from "./LinkEntity";
 import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
 import { Unknowns } from "./Unknowns";
+import { TokenHeadlineStats, TokenStory } from "./TokenStory";
+import { buildTokenStory } from "../lib/tokenStory";
 import { SecondOpinion } from "./SecondOpinion";
 import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
@@ -39,6 +41,7 @@ import {
   ChartDonut,
   ClipboardText,
   Database,
+  FileText,
   Graph,
   Plus,
   ShareNetwork,
@@ -198,6 +201,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
     .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
   const otherLinks = d.socials.filter((x) => x.label !== "site" && !/x\.com|twitter\.com/i.test(x.url));
+  const story = buildTokenStory(d);
   const [watched, setWatched] = useState(() => isWatched(d.address));
   const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
   const [copiedTxt, setCopiedTxt] = useState(false);
@@ -390,12 +394,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             </div>
             <ProjectLinks className="mt-2" website={projectSite} xHandle={d.projectX ?? d.cg?.twitter} links={d.socials} />
           </div>
-          <div className="flex flex-wrap gap-2">
-            <div className="stat-tile"><div className="stat-label">mcap</div><div className="stat-value mt-0.5">{money(d.mcap)}</div></div>
-            <div className="stat-tile" title="Value if every token were circulating"><div className="stat-label">All-token value (FDV)</div><div className="stat-value mt-0.5">{money(d.fdv)}</div></div>
-            <div className="stat-tile"><div className="stat-label">liquidity</div><div className="stat-value mt-0.5">{money(d.liquidityUsd)}</div></div>
-            <div className="stat-tile"><div className="stat-label">24h vol</div><div className="stat-value mt-0.5">{money(d.vol24)}</div></div>
-          </div>
+          <TokenHeadlineStats figures={story.headline} />
         </div>
 
         {/* what the project actually does — CoinGecko's own blurb */}
@@ -474,6 +473,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             items={[
               { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#report-risks", label: "Risks", icon: <ChartDonut size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#token-story", label: "The file", icon: <FileText size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#token-evidence", label: "Sources", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#token-relationships", label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#token-methodology", label: "Checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
@@ -497,13 +497,13 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           capturedAt={capturedAt}
         />
 
+        <TokenStory dossier={d} />
+
         {!shareView && (
           <div className="mt-4">
             <SecondOpinion id="token-challenge" dossier={d} panelCostToken={panelCostToken} onRescan={onRescan} />
           </div>
         )}
-
-        <div id="token-evidence" className="scroll-mt-28" aria-hidden="true" />
 
         <div className="mt-4">
           <MarketPerformancePanel
@@ -532,11 +532,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} {...(panelCostToken ? { panelCostToken } : {})} />
           </div>
         )}
-
-        {/* negative space — what the scan couldn't confirm (unknowns are signal) */}
-        <div className="mt-4">
-          <Unknowns dossier={d} />
-        </div>
 
         {!gp && (
           <div className="mt-3 panel px-4 py-3 text-[12.5px] text-ink-dim">
