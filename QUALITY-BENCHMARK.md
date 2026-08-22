@@ -45,7 +45,9 @@ cannot reproduce the same evidence after reopen fails.
 The adviser experience also fails when the first viewport does not clearly show
 the verdict or readiness state, one-sentence rationale, one to three material
 risks, and the next action; when internal axis IDs or provider failures occupy the
-decision layer; or when a required token chart or citation is missing.
+decision layer; when a required token chart or citation is missing; when a token
+report hides recorded collector gaps below a complete-looking score; or when a
+sourced token figure and an unestablished one look the same.
 
 ## Live founder canaries
 
