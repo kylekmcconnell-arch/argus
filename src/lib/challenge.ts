@@ -1,5 +1,5 @@
 /* The challenge contract: any surface that shows a scored claim can send the
-   reader to the console with the disputed context attached. AskReport is the
+   reader to the shared Argus Eye with the disputed context attached. The Eye is the
    single listener; the event carries display context only — never evidence —
    so nothing here can be confused with stored data.
 

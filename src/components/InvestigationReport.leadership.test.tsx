@@ -21,7 +21,7 @@ vi.mock("./MethodologyChecklist", () => ({ MethodologyChecklist: () => null }));
 vi.mock("./ArkhamName", () => ({ ArkhamName: () => null }));
 vi.mock("./AddInfo", () => ({ AddInfo: () => null }));
 vi.mock("./LinkEntity", () => ({ LinkEntity: () => null }));
-vi.mock("./AskReport", () => ({ AskReport: () => null }));
+vi.mock("./ArgusEyeAssistant", () => ({ ArgusEyeAssistant: () => null }));
 vi.mock("./ArkhamGraphBridge", () => ({ ArkhamGraphBridge: () => null }));
 vi.mock("./Counterparties", () => ({ Counterparties: () => null }));
 vi.mock("./RiskPaths", () => ({ RiskPaths: () => null }));

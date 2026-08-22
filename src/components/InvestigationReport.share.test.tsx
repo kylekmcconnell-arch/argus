@@ -32,8 +32,8 @@ vi.mock("./MethodologyChecklist", () => ({
 vi.mock("./ArkhamName", () => ({ ArkhamName: () => null }));
 vi.mock("./AddInfo", () => ({ AddInfo: () => { harness.livePanel("add-info"); return null; } }));
 vi.mock("./LinkEntity", () => ({ LinkEntity: () => { harness.livePanel("link-entity"); return null; } }));
-vi.mock("./AskReport", () => ({
-  AskReport: (props: Record<string, unknown>) => {
+vi.mock("./ArgusEyeAssistant", () => ({
+  ArgusEyeAssistant: (props: Record<string, unknown>) => {
     harness.askReport(props);
     return <div data-panel="ask-report" />;
   },
@@ -638,7 +638,7 @@ describe("investigation exact sharing", () => {
     }));
 
     expect(harness.askReport).toHaveBeenLastCalledWith(expect.objectContaining({
-      subject: "$ARG",
+      inv: expect.objectContaining({ token: expect.objectContaining({ symbol: "ARG" }) }),
       reportVersionId,
     }));
 
@@ -818,6 +818,7 @@ describe("investigation exact sharing", () => {
     expect(buttonLabels.some((label) => label.includes("Watch"))).toBe(false);
     expect(container.querySelector('a[href="#investigation-challenge"]')).toBeNull();
     expect(container.textContent).not.toContain("Ask about this report");
+    expect(harness.askReport).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain("What could change the result");
     // The reading surfaces stay: the report body and the PDF export.
     expect(buttonLabels.some((label) => label === "Export PDF")).toBe(true);
