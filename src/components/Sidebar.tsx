@@ -28,6 +28,7 @@ import {
 } from "@phosphor-icons/react";
 import { useArgusAuth } from "../auth-context";
 import { ArgusMark } from "./ArgusMark";
+import { Avatar } from "./Avatar";
 import { verdictMeta } from "../lib/verdict";
 import { getWatchlist } from "../lib/watchlist";
 import { auditReadinessLabel, mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
@@ -41,6 +42,7 @@ import type { ReportKind } from "../lib/reports";
 import { normalizeSubjectRef } from "../lib/subjectRef";
 import { recentReportHref } from "../lib/recentReportRoute";
 import { currentArgusTheme, nextArgusTheme, setArgusTheme, type ArgusTheme } from "../lib/theme";
+import { profilePhotoForName } from "../lib/profilePhotos";
 
 // Subject thumbnail: the real logo/photo, falling back to a letter if it is
 // missing or fails to load (unavatar/favicon/dexscreener can 404).
@@ -157,7 +159,15 @@ function AnalystBadge({ compact = false }: { compact?: boolean }) {
   const initial = (name[0] || "?").toUpperCase();
   return (
     <div className={`mt-1 flex items-center rounded-md py-1.5 ${compact ? "justify-center gap-1 px-0" : "gap-2.5 px-2.5"}`}>
-      <span title={compact ? `${name} · ${auth.role}` : undefined} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-signal text-[12.5px] font-semibold text-white">{initial}</span>
+      <span title={compact ? `${name} · ${auth.role}` : undefined}>
+        <Avatar
+          src={profilePhotoForName(name)}
+          letter={initial}
+          size={28}
+          rounded="rounded-full"
+          letterClass="text-[12.5px] font-semibold"
+        />
+      </span>
       <div className={compact ? "sr-only" : "min-w-0 flex-1"}>
         <div className="truncate text-[13.5px] text-ink">{name}</div>
         <div className="truncate text-[11px] text-ink-dim">{auth.role} · verified</div>

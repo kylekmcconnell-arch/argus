@@ -49,6 +49,7 @@ describe("ReferralLeaderboard", () => {
     expect(text).toContain("Live access");
     expect(text).toContain("Credits earned");
     expect(text).toContain("16");
+    expect(node.querySelector("img")?.getAttribute("src")).toBe("/referral-avatars/enigma.jpg");
     expect(text).not.toContain("Cash");
     expect(text).not.toContain("Revshare");
   });
