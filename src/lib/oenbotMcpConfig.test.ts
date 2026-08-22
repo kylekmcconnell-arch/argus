@@ -1,9 +1,10 @@
+// Vitest runs this file in Node; the application tsconfig intentionally omits Node globals.
+// @ts-expect-error -- test-only access to the checked-in Cursor MCP client config.
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const mcp = JSON.parse(
-  readFileSync(resolve(process.cwd(), ".cursor/mcp.json"), "utf8"),
+  readFileSync(new URL("../../.cursor/mcp.json", import.meta.url), "utf8"),
 ) as {
   mcpServers?: {
     oenbot?: {
