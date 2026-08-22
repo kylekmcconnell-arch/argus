@@ -1,4 +1,6 @@
 import { ReferralsPage, type ReferralSnapshot } from "../components/ReferralsPage";
+import { AppShell } from "../components/AppShell";
+import { AuthContext } from "../auth-context";
 
 const previewData: ReferralSnapshot = {
   access: "member",
@@ -10,7 +12,7 @@ const previewData: ReferralSnapshot = {
     rank: 3,
     bonusPerQualifiedReferral: 2,
     leaderboard: [
-      { rank: 1, publicName: "Source Atlas", code: "SOURCEATLAS1", access: "admitted", qualifiedReferrals: 28, paidReferrals: 0, revshareEarnedCents: 0, revsharePercent: 0, creditEarnedCents: 0, cashEarnedCents: 0, isCurrentUser: false },
+      { rank: 1, publicName: "Enigma", code: "ENIGMA000001", access: "admitted", qualifiedReferrals: 28, paidReferrals: 0, revshareEarnedCents: 0, revsharePercent: 0, creditEarnedCents: 0, cashEarnedCents: 0, isCurrentUser: false },
       { rank: 2, publicName: "Chain Sleuth", code: "CHAINSLEUTH2", access: "admitted", qualifiedReferrals: 19, paidReferrals: 0, revshareEarnedCents: 0, revsharePercent: 0, creditEarnedCents: 0, cashEarnedCents: 0, isCurrentUser: false },
       { rank: 3, publicName: "Kyle", code: "ARGUSKYLE88", access: "admitted", qualifiedReferrals: 12, paidReferrals: 0, revshareEarnedCents: 0, revsharePercent: 0, creditEarnedCents: 0, cashEarnedCents: 0, isCurrentUser: true },
       { rank: 4, publicName: "Ledger Lens", code: "LEDGERLENS4", access: "waitlist", qualifiedReferrals: 9, paidReferrals: 0, revshareEarnedCents: 0, revsharePercent: 0, creditEarnedCents: 0, cashEarnedCents: 0, isCurrentUser: false },
@@ -21,8 +23,15 @@ const previewData: ReferralSnapshot = {
 
 export function ReferralsPreview() {
   return (
-    <div className="min-h-screen bg-void">
-      <ReferralsPage initialData={previewData} />
-    </div>
+    <AuthContext.Provider value={{
+      user: { id: "preview-kyle", email: "kyle@example.com", displayName: "Kyle" },
+      organizationId: "preview-argus",
+      role: "owner",
+      signOut: async () => undefined,
+    }}>
+      <AppShell onNav={() => undefined} onAudit={() => undefined} view="referrals">
+        <ReferralsPage initialData={previewData} />
+      </AppShell>
+    </AuthContext.Provider>
   );
 }

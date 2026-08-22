@@ -1,4 +1,6 @@
 import type { LeaderboardRow } from "../lib/growth";
+import { profilePhotoForName } from "../lib/profilePhotos";
+import { Avatar } from "./Avatar";
 
 function letter(name: string): string {
   return (name.replace(/[^A-Za-z0-9]/g, "")[0] || "?").toUpperCase();
@@ -44,12 +46,13 @@ export function ReferralLeaderboard({
                 <td className="mono px-3 py-3 text-[12.5px] text-ink-faint">#{row.rank}</td>
                 <td className="px-3 py-4">
                   <div className="flex items-center gap-2.5">
-                    <span
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line bg-panel-2 text-[12.5px] font-medium text-signal-lift"
-                      aria-hidden
-                    >
-                      {letter(row.publicName)}
-                    </span>
+                    <Avatar
+                      src={profilePhotoForName(row.publicName)}
+                      letter={letter(row.publicName)}
+                      size={40}
+                      rounded="rounded-full"
+                      letterClass="text-[12.5px] font-medium"
+                    />
                     <div className="min-w-0">
                       <div className="truncate text-[13.5px] font-medium text-ink">
                         {row.publicName}{row.isCurrentUser ? " · you" : ""}
