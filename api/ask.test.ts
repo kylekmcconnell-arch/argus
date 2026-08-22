@@ -475,6 +475,100 @@ describe("ask this immutable report", () => {
     expect(providerUser(providerBody)).toContain("What does that imply about control?");
   });
 
+  it("binds a pronoun to the one frozen founder named by the prior user question", async () => {
+    harness.loadExactVersionReport.mockResolvedValue(storedInvestigationVersion());
+    const providerFetch = vi.fn().mockResolvedValue(providerResponse({
+      answer: "The project-attributed founder remains @0xSimpleFarmer.",
+      basis: "project_attribution",
+      citationUrls: [PROJECT_ATTRIBUTION_SOURCE],
+    }));
+    vi.stubGlobal("fetch", providerFetch);
+    const { captured, response } = responseCapture();
+
+    await handler(request({
+      question: "What about him?",
+      history: [{ question: "Who is the founder?", answer: "Untrusted prior answer." }],
+    }) as never, response as never);
+
+    expect(captured.body).toMatchObject({
+      investigationRoute: {
+        referentResolution: {
+          state: "resolved",
+          resolved: { key: "x:0xsimplefarmer", label: "@0xSimpleFarmer", kind: "person" },
+          requiresClarification: false,
+        },
+      },
+    });
+    const providerBody = JSON.parse(String((providerFetch.mock.calls[0]?.[1] as RequestInit)?.body));
+    expect(providerUser(providerBody)).toContain("conversationReferents");
+    expect(providerUser(providerBody)).toContain("x:0xsimplefarmer");
+    expect(providerSystem(providerBody)).toContain("referentResolution is authoritative");
+    expect(providerSystem(providerBody)).toContain("Never choose, replace, or invent a referent");
+  });
+
+  it("asks for clarification and spends nothing when two frozen founders fit", async () => {
+    const stored = structuredClone(storedInvestigationVersion());
+    const payload = stored.report.payload as Record<string, unknown>;
+    const projectAccount = payload.projectAccount as { evidence: { associates: Array<Record<string, unknown>> } };
+    projectAccount.evidence.associates.push({
+      associate_key: "@SecondFounder",
+      relation: "team:Founder",
+      notes: "The project also identifies @SecondFounder as founder.",
+      evidence_url: "https://x.com/ClutchMarkets/status/2",
+      provider: "official-x",
+      artifact_verified: true,
+      evidence_origin: "deterministic",
+    });
+    harness.loadExactVersionReport.mockResolvedValue(stored);
+    const providerFetch = vi.fn();
+    vi.stubGlobal("fetch", providerFetch);
+    const { captured, response } = responseCapture();
+
+    await handler(request({
+      question: "What about her?",
+      history: [{ question: "Who is the founder?", answer: "Untrusted prior answer." }],
+    }) as never, response as never);
+
+    expect(captured.status).toBe(200);
+    expect(captured.body).toMatchObject({
+      note: expect.stringContaining("name the intended entity"),
+      investigationRoute: {
+        referentResolution: {
+          state: "ambiguous",
+          requiresClarification: true,
+          candidates: expect.arrayContaining([
+            expect.objectContaining({ key: "x:0xsimplefarmer" }),
+            expect.objectContaining({ key: "x:secondfounder" }),
+          ]),
+        },
+      },
+    });
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("resolves wallet ordinals from the frozen register before model reasoning", async () => {
+    harness.loadExactVersionReport.mockResolvedValue(storedInvestigationVersion());
+    const providerFetch = vi.fn().mockResolvedValue(providerResponse({
+      answer: "The second recorded wallet is the unlabeled funding wallet.",
+      basis: "coverage_record",
+      citationUrls: [],
+    }));
+    vi.stubGlobal("fetch", providerFetch);
+    const { captured, response } = responseCapture();
+
+    await handler(request({ question: "Who controls the second wallet?" }) as never, response as never);
+
+    expect(captured.body).toMatchObject({
+      investigationRoute: {
+        referentResolution: {
+          state: "resolved",
+          resolved: { key: "wallet:0xfunder", kind: "wallet" },
+        },
+      },
+    });
+    expect(providerFetch).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed when the exact version is not in the authenticated organization", async () => {
     harness.loadExactVersionReport.mockResolvedValue(null);
     const providerFetch = vi.fn();
