@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties, type ReactNode } from "react";
 import {
   BellIcon,
   BuildingsIcon,
@@ -197,6 +197,7 @@ export function Sidebar({
   mobile = false,
   compact: requestedCompact = false,
   onClose,
+  accountDetails,
 }: {
   onNav: (t: NavTarget) => void;
   onAudit: (handle: string) => void;
@@ -207,6 +208,7 @@ export function Sidebar({
   mobile?: boolean;
   compact?: boolean;
   onClose?: () => void;
+  accountDetails?: ReactNode;
 }) {
   const auth = useArgusAuth();
   const deployStale = useDeployFreshness();
@@ -303,6 +305,7 @@ export function Sidebar({
       <NavItem compact={compact} icon={ClockCounterClockwiseIcon} label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
       <ThemeToggle compact={compact} />
       <AnalystBadge compact={compact} />
+      {accountDetails}
     </div>
   );
   return (

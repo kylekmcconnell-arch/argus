@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ListIcon } from "@phosphor-icons/react";
 import { Sidebar, type NavTarget } from "./Sidebar";
 import { ArgusMark } from "./ArgusMark";
+import { EarlyAccessHub } from "./EarlyAccessHub";
 import type { ReportKind } from "../lib/reports";
 
 // Persistent shell: left rail + scrolling main. On mobile the rail becomes a
@@ -75,6 +76,7 @@ export function AppShell({
         open={open}
         mobile={mobile}
         onClose={open ? closeDrawer : undefined}
+        accountDetails={<EarlyAccessHub />}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">
