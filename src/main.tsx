@@ -30,6 +30,8 @@ const LandingPreview = lazy(() => import('./dev/LandingPreview.tsx').then((modul
 const ResearchLoadingPreview = lazy(() => import('./dev/ResearchLoadingPreview.tsx').then((module) => ({ default: module.ResearchLoadingPreview })))
 // eslint-disable-next-line react-refresh/only-export-components
 const SocialActivityPreview = lazy(() => import('./dev/SocialActivityPreview.tsx').then((module) => ({ default: module.SocialActivityPreview })))
+// eslint-disable-next-line react-refresh/only-export-components
+const NavigationConsolidationPreview = lazy(() => import('./dev/NavigationConsolidationPreview.tsx').then((module) => ({ default: module.NavigationConsolidationPreview })))
 
 // Observe 401s from ARGUS API routes so an expired session is stated once
 // instead of surfacing as a page of quietly dead panels.
@@ -81,6 +83,8 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><ResearchLoadingPreview /></Suspense>
       ) : designPreview === 'social-activity' ? (
         <Suspense fallback={null}><SocialActivityPreview /></Suspense>
+      ) : designPreview === 'navigation-consolidation' ? (
+        <Suspense fallback={null}><NavigationConsolidationPreview /></Suspense>
       ) : sharedReportToken ? (
         <Suspense fallback={null}><SharedReportView token={sharedReportToken} /></Suspense>
       ) : publicView === 'leaderboard' ? (

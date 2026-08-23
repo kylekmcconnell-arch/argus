@@ -92,6 +92,16 @@ beforeEach(() => {
   harness.fetchReportState.mockReset();
   harness.auditToken.mockReset();
   harness.rebaseline.mockReset();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    alerts: [{
+      ref: "alert-1",
+      subject: "@founder",
+      label: "@founder",
+      type: "drift",
+      detail: "Liquidity fell below the saved baseline.",
+      at: Date.now(),
+    }],
+  }), { status: 200 })));
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -100,9 +110,20 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 describe("WatchlistPage decision-safe verdicts", () => {
+  it("shows sweep alerts on the Watchlist instead of requiring a separate page", async () => {
+    harness.fetchReportState.mockResolvedValue(personLookup("PASS", 91, "complete"));
+
+    await renderPage();
+    await vi.waitFor(() => expect(container.textContent).toContain("Recent alerts"));
+
+    expect(container.textContent).toContain("Liquidity fell below the saved baseline.");
+    expect(container.textContent).toContain("ARGUS does not monitor in the background.");
+  });
+
   it.each(["partial", "failed"] as const)(
     "never renders a %s positive report as PASS",
     async (completenessState) => {

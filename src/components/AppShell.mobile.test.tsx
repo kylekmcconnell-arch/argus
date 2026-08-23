@@ -9,11 +9,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const harness = vi.hoisted(() => ({
   signOut: vi.fn(),
   runs: [] as Array<Record<string, unknown>>,
+  role: "owner" as "owner" | "analyst" | "viewer",
 }));
 
 vi.mock("../auth-context", () => ({
   useArgusAuth: () => ({
-    role: "owner",
+    role: harness.role,
     user: { displayName: "Kyle McConnell", email: "kyle@example.com" },
     signOut: harness.signOut,
   }),
@@ -80,6 +81,7 @@ function menuButton(): HTMLButtonElement {
 beforeEach(() => {
   vi.clearAllMocks();
   harness.runs = [];
+  harness.role = "owner";
   storageValues.clear();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => storageValues.get(key) ?? null,
@@ -102,6 +104,18 @@ afterEach(async () => {
 });
 
 describe("AppShell mobile navigation drawer", () => {
+  it("keeps discovery and monitoring visible without duplicating investigation engines", async () => {
+    await renderShell();
+
+    const navigation = drawer().querySelector<HTMLElement>("nav[aria-label='Primary']");
+    expect(navigation?.textContent).toContain("New investigation");
+    expect(navigation?.textContent).toContain("Radar");
+    expect(navigation?.textContent).toContain("Watchlist");
+    expect(navigation?.textContent).not.toContain("Threat scan");
+    expect(navigation?.textContent).not.toContain("Website check");
+    expect(navigation?.textContent).not.toContain("Alerts");
+  });
+
   it("keeps the credit balance inside the verified account section", async () => {
     await renderShell();
 
@@ -117,6 +131,39 @@ describe("AppShell mobile navigation drawer", () => {
     const dialog = container.querySelector<HTMLDialogElement>("dialog[aria-labelledby='early-access-title'][open]");
     expect(dialog).not.toBeNull();
     expect(account?.contains(dialog)).toBe(false);
+  });
+
+  it("places referrals directly beneath credits for every member", async () => {
+    await renderShell();
+
+    const account = drawer().querySelector<HTMLElement>("[data-sidebar-account]");
+    const credits = account?.querySelector<HTMLButtonElement>("button[aria-label='Open credits, pricing, and referrals']");
+    const referrals = [...(account?.querySelectorAll<HTMLButtonElement>("button") ?? [])]
+      .find((button) => button.textContent?.includes("Referrals"));
+
+    expect(credits).not.toBeNull();
+    expect(referrals).toBeDefined();
+    if (!credits || !referrals) throw new Error("Account navigation did not render");
+    expect(credits.compareDocumentPosition(referrals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the Admin group to owners", async () => {
+    await renderShell();
+    expect(drawer().textContent).toContain("Admin");
+    expect(drawer().textContent).toContain("Data sources");
+    expect(drawer().textContent).toContain("Access & activity");
+    expect(drawer().textContent).toContain("Changelog");
+  });
+
+  it("hides the Admin group from non-owners while keeping referrals", async () => {
+    harness.role = "analyst";
+    await renderShell();
+
+    expect(drawer().textContent).not.toContain("Admin");
+    expect(drawer().textContent).not.toContain("Data sources");
+    expect(drawer().textContent).not.toContain("Access & activity");
+    expect(drawer().textContent).not.toContain("Changelog");
+    expect(drawer().textContent).toContain("Referrals");
   });
 
   it("keeps the closed drawer inert and exposes it as a modal dialog only while open", async () => {
