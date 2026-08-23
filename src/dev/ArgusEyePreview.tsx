@@ -86,7 +86,18 @@ function previewInvestigation(): Investigation {
       live: true,
       notableFollowers: [],
       contradictions: [],
-      webTeam: [],
+      webTeam: [{
+        name: "Dillon",
+        handle: "@trustdev_eth",
+        role: "Operator",
+        evidence: 'Their current X bio states "Shipping real-time dApps on Solana + EVM ex @clutchmarkets".',
+        source: "project scan",
+        sourceUrl: "https://x.com/ClutchMarkets/status/1",
+        provider: "twitterapi",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        handleProvenance: "subject_first_party",
+      }],
       leaderDepartures: [],
       basicFacts: [
         {
