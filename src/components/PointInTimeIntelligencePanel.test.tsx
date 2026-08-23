@@ -473,10 +473,16 @@ describe("PointInTimeIntelligencePanel", () => {
       "treasury",
       "legal",
     ]));
-    expect(container.querySelector('[data-coverage-domain="liquidity"]')?.textContent).toContain("Measured");
-    expect(container.querySelector('[data-coverage-domain="governance"]')?.textContent).toContain("Partial");
-    expect(container.querySelector('[data-coverage-domain="treasury"]')?.textContent).toContain("Not Collected");
-    expect(container.textContent).toContain("It is not confidence that the subject is safe");
+    expect(container.querySelector('[data-coverage-domain="liquidity"]')?.textContent)
+      .toContain("1 saved fact. No questions remain unanswered.");
+    expect(container.querySelector('[data-coverage-domain="governance"]')?.textContent)
+      .toContain("0 saved facts. 1 question remains unanswered.");
+    expect(container.querySelector('[data-coverage-domain="treasury"]')?.textContent)
+      .toContain("0 saved facts. 1 question remains unanswered.");
+    expect(container.textContent).toContain("Missing evidence is never treated as a pass");
+    expect(container.textContent).not.toContain("Lens priority");
+    const coverageMap = container.querySelector('[aria-label="What this report checked"]');
+    expect(coverageMap?.textContent).not.toMatch(/\bPartial\b|\bMeasured\b|\bNot Collected\b/);
   });
 
   it("exposes prioritized measurements, dated events, and exact source lineage", () => {

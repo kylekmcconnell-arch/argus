@@ -5,7 +5,6 @@ import type {
   DecisionLensId,
   DerivedIntelligenceSignal,
   IntelligenceDomain,
-  IntelligenceDomainCoverage,
   IntelligenceMeasurement,
   IntelligenceQuestion,
   IntelligenceSpineSnapshot,
@@ -90,16 +89,6 @@ const SEVERITY_RANK: Record<DerivedIntelligenceSignal["severity"], number> = {
   medium: 1,
   low: 2,
   context: 3,
-};
-
-const COVERAGE_TONE: Record<IntelligenceDomainCoverage["state"], string> = {
-  measured: "tint-pass",
-  reported: "tint-signal",
-  partial: "tint-caution",
-  unresolved: "tint-caution",
-  unavailable: "tint-avoid",
-  not_collected: "tint-caution",
-  not_applicable: "tint-neutral",
 };
 
 const OPEN_QUESTION_STATES = new Set<IntelligenceQuestion["state"]>([
@@ -449,8 +438,8 @@ export function PointInTimeIntelligencePanel({
         ? `This report is ${normalizedGoverningVerdict}. ${derivedThesis}`
         : derivedThesis;
   const measurementIndex = new Map(snapshot.measurements.map((measurement) => [measurement.id, measurement]));
+  const questionIndex = new Map(allQuestions.map((question) => [question.id, question]));
   const sourceIndex = new Map(snapshot.sources.map((source) => [source.id, source]));
-  const activeChangeConditions = new Set(selectedLens.changeConditions.map((condition) => publicIntelligenceText(condition).toLowerCase()));
   const changeConditions = uniqueText([
     ...selectedLens.changeConditions,
     ...lenses.flatMap((lens) => lens.changeConditions),
@@ -977,7 +966,6 @@ export function PointInTimeIntelligencePanel({
                   <li key={`${condition}-${index}`} className="panel-inset flex items-start gap-3 px-3 py-2.5 text-[12px] leading-relaxed text-ink-dim">
                     <span className="mono mt-0.5 shrink-0 text-[10.5px] text-ink-faint">{String(index + 1).padStart(2, "0")}</span>
                     <span className="min-w-0 flex-1">{condition}</span>
-                    {activeChangeConditions.has(condition.toLowerCase()) && <span className="chip tint-signal shrink-0">Lens priority</span>}
                   </li>
                 ))}
               </ol>
@@ -991,34 +979,45 @@ export function PointInTimeIntelligencePanel({
           <section className="mt-5" aria-labelledby={`${panelId}-coverage-title`}>
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <p className="eyebrow text-signal-lift">Coverage</p>
-                <h3 id={`${panelId}-coverage-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Domain coverage map</h3>
+                <p className="eyebrow text-signal-lift">Report coverage</p>
+                <h3 id={`${panelId}-coverage-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">What this report checked</h3>
               </div>
               <p className="ml-auto max-w-xl text-right text-[11px] leading-relaxed text-ink-faint">
-                Coverage records what was measured or asked. It is not confidence that the subject is safe.
+                Each topic shows the facts saved and questions still unanswered. Missing evidence is never treated as a pass.
               </p>
             </div>
-            <div className="mt-3 grid gap-2 md:grid-cols-2" aria-label="Domain coverage map">
+            <div className="mt-3 grid gap-2 md:grid-cols-2" aria-label="What this report checked">
               {orderedDomains.map((domain) => {
                 const record = coverageIndex.get(domain) ?? {
                   domain,
                   state: "not_collected" as const,
-                  measurementIds: [],
-                  questionIds: [],
+                  measurementIds: snapshot.measurements
+                    .filter((measurement) => measurement.domain === domain)
+                    .map((measurement) => measurement.id),
+                  questionIds: allQuestions
+                    .filter((question) => question.domain === domain)
+                    .map((question) => question.id),
                   detail: "No domain coverage record exists in this snapshot.",
                 };
-                const priority = priorityIndex.has(domain);
+                const factCount = record.measurementIds.filter((measurementId) => {
+                  const measurement = measurementIndex.get(measurementId);
+                  return measurement ? isPublicMeasurement(measurement) : false;
+                }).length;
+                const openQuestionCount = record.questionIds.filter((questionId) => {
+                  const question = questionIndex.get(questionId);
+                  return question ? OPEN_QUESTION_STATES.has(question.state) : false;
+                }).length;
+                const detail = factCount === 0 && record.questionIds.length === 0
+                  ? "This report did not check this topic."
+                  : `${factCount} saved fact${factCount === 1 ? "" : "s"}. ${openQuestionCount > 0
+                    ? `${openQuestionCount} question${openQuestionCount === 1 ? " remains" : "s remain"} unanswered.`
+                    : "No questions remain unanswered."}`;
                 return (
-                  <article key={domain} data-coverage-domain={domain} className={`panel-inset p-3 ${COVERAGE_TONE[record.state]}`}>
+                  <article key={domain} data-coverage-domain={domain} className="panel-inset p-3">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <h4 className="text-[12.5px] font-semibold text-ink">{words(domain)}</h4>
-                      <span className="chip ml-auto">{words(record.state)}</span>
-                      {priority && <span className="chip tint-signal">Lens priority</span>}
                     </div>
-                    <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">{record.detail}</p>
-                    <p className="mono mt-2 text-[10px] text-ink-faint">
-                      {record.measurementIds.length} measures · {record.questionIds.length} questions
-                    </p>
+                    <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">{detail}</p>
                   </article>
                 );
               })}
