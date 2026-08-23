@@ -6,6 +6,7 @@ import type {
   IntelligenceSignalPolarity,
   IntelligenceSignalSeverity,
 } from "../intelligence/types";
+import { plainLanguageSummary } from "./plainLanguage";
 
 const INTERNAL_MEASUREMENT_PREFIXES = ["project_strength_"];
 
@@ -87,7 +88,72 @@ export interface PublicSignalCopy {
   headline: string;
   finding: string;
   whyItMatters: string;
+  changeCondition: string;
   tone: string;
+}
+
+const STRENGTH_LABELS: Record<string, string> = {
+  none: "not enough evidence to assess",
+  assessed_null: "checked, but no reliable supporting evidence was confirmed",
+  adverse: "evidence raises concerns",
+  emerging: "early or limited evidence",
+  solid: "strong evidence",
+  exceptional: "very strong evidence",
+};
+
+function sentenceCase(value: string): string {
+  const cleaned = value.trim();
+  return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : cleaned;
+}
+
+function publicDate(value: string): string {
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+function strengthBandSummary(value: string): string | null {
+  const matches = [...value.matchAll(/(?:^|;\s*)([^:;]+):\s*(none|assessed_null|adverse|emerging|solid|exceptional)\s*\((-?\d+(?:\.\d+)?)\s+to\s+(-?\d+(?:\.\d+)?)\)/gi)];
+  if (matches.length === 0) return null;
+  return matches.map((match) => {
+    const area = sentenceCase(plainLanguageSummary(match[1] ?? "Area"));
+    const tier = STRENGTH_LABELS[(match[2] ?? "").toLowerCase()] ?? "evidence reviewed";
+    const minimum = Number(match[3]);
+    const maximum = Number(match[4]);
+    const range = minimum === maximum ? `${minimum} points` : `${minimum}–${maximum} points`;
+    return `${area}: ${tier} (${range}).`;
+  }).join(" ");
+}
+
+/**
+ * Reader-facing copy for saved intelligence. This deliberately runs at the
+ * presentation boundary so older immutable reports benefit without rewriting
+ * their stored evidence or rule receipts.
+ */
+export function publicIntelligenceText(value: string): string {
+  const bands = strengthBandSummary(value);
+  if (bands) return bands;
+  return plainLanguageSummary(value)
+    .replace(/\bscorer[- ]packet\b/gi, "saved evidence review")
+    .replace(/\baxis-level evidence ranges\b/gi, "evidence strength in each area")
+    .replace(/\bassessed[-_ ]null\b/gi, "checked, but not confirmed")
+    .replace(/\blineage contract\b/gi, "source-link check")
+    .replace(/\blineage\b/gi, "source trail")
+    .replace(/\bfail-closed integrity events?\b/gi, "items withheld by the source-link check")
+    .replace(/\bdeterministic\b/gi, "rule-based")
+    .replace(/\bfrozen\b/gi, "saved")
+    .replace(/\bbounded subset\b/gi, "limited set of evidence")
+    .replace(/\bbounded\b/gi, "limited")
+    .replace(/\bpublic-surface boundar(?:y|ies)\b/gi, "online record dates")
+    .replace(/\blaunch boundar(?:y|ies)\b/gi, "online record dates")
+    .replace(/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)\b/g, (date) => publicDate(date))
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function publicSignalCopy(signal: DerivedIntelligenceSignal): PublicSignalCopy {
@@ -101,16 +167,48 @@ export function publicSignalCopy(signal: DerivedIntelligenceSignal): PublicSigna
         ? `${eventCount} report item${eventCount === "1" ? "" : "s"} failed the source-link check. ARGUS excluded those items instead of treating them as evidence.`
         : "Some report items failed the source-link check. ARGUS excluded them instead of treating them as evidence.",
       whyItMatters: "A conclusion should not influence a decision unless its sources and calculations can be checked.",
+      changeCondition: "Run the report again after the affected sources are linked correctly.",
       tone: "tint-avoid",
+    };
+  }
+
+  if (signal.ruleId === "project-strength-band-summary") {
+    return {
+      status: "Context",
+      priority: "Context",
+      headline: "How strong the evidence is in each area",
+      finding: strengthBandSummary(signal.finding)
+        ?? publicIntelligenceText(signal.finding),
+      whyItMatters: "This shows which parts of the report rest on stronger evidence and which parts still need confirmation. It does not add points or make an investment recommendation.",
+      changeCondition: "Run the report again when new reliable evidence becomes available.",
+      tone: "tint-neutral",
+    };
+  }
+
+  if (signal.ruleId === "launch-boundary-gap") {
+    const dates = [...signal.finding.matchAll(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z\b/g)].map((match) => match[0]);
+    const months = signal.finding.match(/(?:a|about)\s+(\d[\d,]*)-month gap/i)?.[1];
+    const finding = dates.length >= 2
+      ? `The earliest account or domain record we found dates to ${publicDate(dates[0] ?? "")}. The other appeared on ${publicDate(dates[1] ?? "")}${months ? `, about ${months} months later` : ""}. This may reflect a later website or account launch, a rebrand, or earlier community activity. It does not prove when the project began or indicate wrongdoing.`
+      : publicIntelligenceText(signal.finding);
+    return {
+      status: "Context",
+      priority: "Context",
+      headline: "The project's online footprint appeared in two stages",
+      finding,
+      whyItMatters: "The date gap is a useful prompt to compare the project's website, accounts, and stated launch history.",
+      changeCondition: "Run the report again if an older official account, website record, or launch announcement is found.",
+      tone: "tint-neutral",
     };
   }
 
   return {
     status: POLARITY_LABELS[signal.polarity],
     priority: SEVERITY_LABELS[signal.severity],
-    headline: signal.headline,
-    finding: signal.finding,
-    whyItMatters: signal.whyItMatters,
+    headline: publicIntelligenceText(signal.headline),
+    finding: publicIntelligenceText(signal.finding),
+    whyItMatters: publicIntelligenceText(signal.whyItMatters),
+    changeCondition: publicIntelligenceText(signal.changeCondition),
     tone: signal.polarity === "risk"
       ? "tint-avoid"
       : signal.polarity === "support"

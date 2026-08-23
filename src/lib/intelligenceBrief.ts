@@ -4,6 +4,7 @@ import type {
   IntelligenceQuestion,
   IntelligenceSpineSnapshot,
 } from "../intelligence/types";
+import { publicQuestionStateLabel, publicSignalCopy } from "./intelligencePresentation";
 
 export interface IntelligenceBriefItem {
   id: string;
@@ -53,24 +54,22 @@ function unique(values: readonly string[]): string[] {
 
 function signalProvenance(signal: DerivedIntelligenceSignal, sourceCount: number): string {
   const evidence = signal.evidenceState === "verified"
-    ? "Verified saved evidence"
+    ? "Verified evidence"
     : signal.evidenceState === "measured"
-      ? "Measured saved evidence"
+      ? "Direct measurement"
       : signal.evidenceState === "bounded"
-        ? "Bounded saved evidence"
-        : "Source-reported context";
-  return `${evidence} · score-neutral derivation${sourceCount > 0 ? ` · ${sourceCount} source${sourceCount === 1 ? "" : "s"}` : ""}`;
+        ? "Limited observation"
+        : "Reported by a source";
+  return `${evidence}${sourceCount > 0 ? ` · ${sourceCount} source${sourceCount === 1 ? "" : "s"}` : ""}`;
 }
 
 function signalItem(signal: DerivedIntelligenceSignal): IntelligenceBriefItem {
   const sourceRefs = unique(signal.sourceRefs);
-  const headline = sentence(signal.headline);
+  const copy = publicSignalCopy(signal);
   return {
     id: `intelligence-signal:${signal.id}`,
-    title: signal.evidenceState === "reported_context"
-      ? `Source-reported context: ${headline.charAt(0).toLowerCase()}${headline.slice(1)}`
-      : headline,
-    detail: [sentence(signal.finding), sentence(signal.whyItMatters)].filter(Boolean).join(" "),
+    title: sentence(copy.headline),
+    detail: [sentence(copy.finding), sentence(copy.whyItMatters)].filter(Boolean).join(" "),
     provenance: signalProvenance(signal, sourceRefs.length),
     domain: signal.domain,
     sourceRefs,
@@ -79,12 +78,12 @@ function signalItem(signal: DerivedIntelligenceSignal): IntelligenceBriefItem {
 
 function questionItem(question: IntelligenceQuestion): IntelligenceBriefItem {
   const sourceRefs = unique(question.sourceRefs);
-  const state = question.state.replaceAll("_", " ");
+  const materiality = question.materiality.charAt(0).toUpperCase() + question.materiality.slice(1);
   return {
     id: `intelligence-question:${question.id}`,
     title: sentence(question.prompt),
     detail: sentence(question.basis),
-    provenance: `${question.materiality} question · ${state} · score-neutral`,
+    provenance: `${materiality} question · ${publicQuestionStateLabel(question.state)}`,
     domain: question.domain,
     sourceRefs,
   };

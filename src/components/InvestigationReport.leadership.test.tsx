@@ -318,8 +318,9 @@ describe("leadership currency on the team card", () => {
     expect(shortAnswer).toContain("Operational control remains concentrated");
     expect(shortAnswer).toContain("Who can move the project treasury?");
     expect(shortAnswer).toContain("authority was not established");
-    expect(shortAnswer).toContain("Important context");
-    expect(shortAnswer).toContain("reported by a source context: a dated leadership transition is recorded");
+    expect(shortAnswer).toContain("Other useful context");
+    expect(shortAnswer).toContain("A dated leadership transition is recorded");
+    expect(shortAnswer).not.toContain("reported by a source context");
   });
 
   it("states a project-attributed founder role without claiming the identity or control is verified", () => {

@@ -276,8 +276,8 @@ export function InvestigationDecisionCanvas({
               <div className="mt-6">
                 <ReportCanvasNarrativeSection
                   id="report-important-context"
-                  title="Important context"
-                  description="Relevant saved observations that are neither support nor an adverse finding."
+                  title="Other useful context"
+                  description="Facts worth knowing that do not raise or lower the result on their own."
                   tone="neutral"
                   items={narrativeItems("context", context, evidenceHref)}
                   emptyCopy=""
