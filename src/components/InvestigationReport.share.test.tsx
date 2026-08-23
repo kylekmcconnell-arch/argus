@@ -313,6 +313,7 @@ describe("investigation exact sharing", () => {
     expect(capital?.textContent).toContain("Value if all tokens circulated $990.28M");
     expect(capital?.textContent).toContain("Company ownership · not token ownership");
     expect(capital?.textContent).toContain("Token market value · not company valuation");
+    expect(container.textContent).not.toContain("Large market");
   });
 
   it("drops legacy Monid team rows that cannot be tied to the official project domain", () => {

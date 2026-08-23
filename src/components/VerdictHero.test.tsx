@@ -45,6 +45,8 @@ describe("VerdictHero", () => {
     expect(host.textContent).toContain("Open the evidence below for every source and calculation.");
 
     expect(host.textContent).not.toMatch(/record holds|carries the file|the drag is|full basis sits/i);
+    expect(host.textContent).not.toMatch(/a document or the chain says so|ARGUS worked it out|nobody has evidenced this/i);
+    expect(host.querySelector('[aria-label="How to read the dotted figures"]')).toBeNull();
     expect(host.querySelectorAll('.prov-value[title="Derived by ARGUS"]')).toHaveLength(2);
   });
 });

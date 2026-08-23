@@ -871,11 +871,6 @@ export function InvestigationReport({
   const fullyDilutedValue = token.fdv
     ?? projectAccount?.projectToken?.fdvUsd
     ?? undefined;
-  const establishedAsset = Boolean(
-    (token.cg?.rank != null && token.cg.rank <= 250)
-    || (marketCap != null && marketCap >= 100_000_000)
-    || (token.cg?.cexCount != null && token.cg.cexCount >= 10),
-  );
   const projectSourceBackedVentures = (projectAccount?.evidence.ventures ?? [])
     .filter((venture) => venture.evidence_origin !== "model_lead" && venture.artifact_verified === true);
   const projectUnverifiedVentureCount = (projectAccount?.evidence.ventures ?? [])
@@ -1441,11 +1436,6 @@ export function InvestigationReport({
               <p className="eyebrow">Token investigation</p>
               <h1 className="display-sm mt-0.5 text-[30px] leading-none text-ink sm:text-[34px]">{`$${token.symbol}`}</h1>
             </div>
-            {establishedAsset && (
-              <span className="chip tint-signal mb-0.5">
-                Large market
-              </span>
-            )}
             {canShare && <CopyTldrButton base={tldrBase} mint={mintShareUrl} className="mb-0.5 ml-auto" />}
           </div>
 
@@ -1648,7 +1638,6 @@ export function InvestigationReport({
             <section className={`panel investigation-hero-card investigation-market-card p-5 ${readiness.status === "ready" ? "" : "order-3 lg:col-span-2 xl:col-span-1"}`} aria-label="Market size">
               <div className="flex items-center justify-between gap-3">
                 <span className="eyebrow">Market and ownership</span>
-                {establishedAsset && <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-signal-lift">Large market</span>}
               </div>
               {token.safety?.lpTopUnlockedEoaPct != null && token.safety.lpTopUnlockedEoaPct >= 50 && (
                 <a href="#investigation-visuals" className="mt-3 block rounded-lg border border-caution/40 bg-caution/5 px-3 py-2.5 hover:border-caution/70">
