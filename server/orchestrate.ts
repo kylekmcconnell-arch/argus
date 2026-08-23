@@ -102,6 +102,7 @@ import {
   companyEnrichmentMatchesOfficialDomain,
 } from "./adapters/monid";
 import { collectOperatorLaunches, describeLaunchHistory } from "./adapters/operatorLaunches";
+import { collectSocialActivity } from "./socialActivity";
 import {
   hydrateOfficialProjectIdentityFromFacts,
   verifiedOfficialProjectIdentity,
@@ -4040,6 +4041,29 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   }
   let rolesAfterBasicFacts = providerBackedRoles(evidence);
   evidence.roles = rolesAfterBasicFacts;
+  if (rolesAfterBasicFacts.includes(SubjectClass.PROJECT)) {
+    const socialStageStartedAt = startRuntimeStage("social-activity");
+    evidence.socialActivity = await collectSocialActivity({
+      handle: evidence.profile.handle,
+      ticker: evidence.projectToken?.symbol ?? ctx.tokenSymbol,
+      projectName: evidence.projectToken?.name ?? evidence.profile.display_name,
+    });
+    const social = evidence.socialActivity;
+    emit({
+      phase: "Research",
+      label: social.state === "complete"
+        ? "Social activity captured"
+        : social.state === "partial"
+          ? "Social activity partly captured"
+          : "Social activity unavailable",
+      detail: social.state === "complete"
+        ? `${social.windows.last7Days.uniqueAccounts?.toLocaleString() ?? 0} unique public X accounts matched the project over seven days.`
+        : social.note,
+      source: "X API v2",
+      tone: social.state === "complete" ? "neutral" : "warn",
+    });
+    finishRuntimeStage("social-activity", socialStageStartedAt);
+  }
   // AFTER the roles are updated, never before. The hydration bails unless
   // evidence.roles already carries PROJECT, and the sparse or suspended
   // accounts it exists to rescue are exactly the ones whose PROJECT

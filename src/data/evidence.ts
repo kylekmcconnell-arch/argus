@@ -4,6 +4,7 @@
 
 import type { CandleSummary } from "../lib/priceHistory";
 import type { EvmControlRealitySnapshot } from "./evmControlReality";
+import type { SocialActivitySnapshot } from "./socialActivity";
 import type {
   SubjectClass,
   Venture,
@@ -988,6 +989,8 @@ export interface CollectedEvidence {
   evmControlReality?: EvmControlRealitySnapshot;
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
   protocolFunding?: ProtocolFundingSnapshot;
+  /** Frozen public X conversation breadth and volume. Never affects safety scoring. */
+  socialActivity?: SocialActivitySnapshot;
   /**
    * A FOUNDER subject's verified-venture canonical token, resolved with the
    * same official-X / official-domain binding a project audit uses but scoped

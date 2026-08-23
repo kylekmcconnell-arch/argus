@@ -1,11 +1,11 @@
 // Authenticated API: GET /api/v1/token?address=<contract> (or ?url=...).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { ResolvedInput, RunnableTokenInput } from "../../src/lib/resolveInput.js";
-import { auditToken, resolveInput } from "../_collector.js";
+import { auditToken, collectSocialActivity, resolveInput } from "../_collector.js";
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 import { screenSanctionedAddresses } from "../_sanctions-core.js";
 
-export const config = { maxDuration: 30 };
+export const config = { maxDuration: 60 };
 
 const isRunnableTokenInput = (input: ResolvedInput): input is RunnableTokenInput =>
   input.kind === "token"
@@ -52,7 +52,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Inject the direct OFAC screener so this server path records a real
     // sanctions outcome (and applies the AVOID cap) rather than skipping the
     // browser-only same-origin fetch.
-    const d = await auditToken(input, undefined, { screenSanctions: screenSanctionedAddresses });
+    const d = await auditToken(input, undefined, {
+      screenSanctions: screenSanctionedAddresses,
+      collectSocialActivity,
+    });
     if (!d) {
       res.status(404).json({ error: "no DEX pair found for this contract" });
       return;
@@ -76,6 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       holders: { top: d.topHolders, insiderPct: d.insiderPct, bundleCount: d.bundleCount, bundleRisk: d.bundleRisk },
       corroboration: d.cg,
       provenance: { projectX: d.projectX, deployer: d.deployer },
+      social_activity: d.socialActivity ?? null,
       axes: d.axes,
       findings: d.findings,
       links: { app: `https://argus-one-flax.vercel.app/?t=${d.address}` },

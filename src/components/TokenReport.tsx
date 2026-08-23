@@ -6,6 +6,7 @@ import { printReportPdf } from "../lib/printPdf";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import { deployerRoleLabel, sameWalletAddress, type TokenDossier } from "../token/audit";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
+import { SocialActivityPanel } from "./SocialActivityPanel";
 import { EmbeddedThreatScan } from "./ThreatScanPage";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
@@ -38,6 +39,7 @@ import {
   ArrowLeft,
   Briefcase,
   ChartDonut,
+  ChatsCircle,
   ClipboardText,
   Database,
   FileText,
@@ -481,6 +483,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#report-risks", label: "Risks", icon: <ChartDonut size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#token-story", label: "The file", icon: <FileText size={16} weight="duotone" aria-hidden="true" /> },
+              ...(d.socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
               { href: "#token-evidence", label: "Sources", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#token-relationships", label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#token-methodology", label: "Checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
@@ -520,6 +523,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             onLoadCurrentIntelligence={loadCurrentIntelligence}
           />
         </div>
+
+        {d.socialActivity && <SocialActivityPanel snapshot={d.socialActivity} className="mt-4" />}
 
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         {showCurrentIntelligence && panelCostToken && (

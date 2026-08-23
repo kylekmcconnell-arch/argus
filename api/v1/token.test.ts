@@ -6,6 +6,7 @@ vi.mock("../_collector.js", async () => {
   return {
     resolveInput: vi.fn(resolveInput),
     auditToken: vi.fn(),
+    collectSocialActivity: vi.fn(),
   };
 });
 

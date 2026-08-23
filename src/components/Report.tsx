@@ -103,6 +103,7 @@ import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief } from "../lib/intelligenceBrief";
+import { SocialActivityPanel } from "./SocialActivityPanel";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -3335,6 +3336,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   .map((fact) => fact.predicate)).size,
               }] : []),
               ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
+              ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
               { href: "#decision-basis", label: "Why this score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
               { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
               ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Sources", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
@@ -3385,6 +3387,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="mt-3">
             <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
           </div>
+        )}
+
+        {f.socialActivity && roles.includes(SubjectClass.PROJECT) && (
+          <SocialActivityPanel snapshot={f.socialActivity} className="mt-3" />
         )}
 
         <DiligenceEvidenceLedgers
