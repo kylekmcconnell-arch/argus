@@ -20,7 +20,7 @@ describe("ReferralLeaderboard", () => {
     node = null;
   });
 
-  it("renders Fomo-style rank, referrer, credit, and access columns without cash", () => {
+  it("renders rank, referrer, investigation credit, cash, and access columns", () => {
     node = document.createElement("div");
     document.body.appendChild(node);
     root = createRoot(node);
@@ -47,10 +47,11 @@ describe("ReferralLeaderboard", () => {
     expect(text).toContain("#1");
     expect(text).toContain("Enigma · you");
     expect(text).toContain("Live access");
-    expect(text).toContain("Credits earned");
+    expect(text).toContain("Investigation credits");
     expect(text).toContain("16");
+    expect(text).toContain("Cash earned");
+    expect(text).toContain("$14.85");
     expect(node.querySelector("img")?.getAttribute("src")).toBe("/referral-avatars/enigma.jpg");
-    expect(text).not.toContain("Cash");
     expect(text).not.toContain("Revshare");
   });
 });

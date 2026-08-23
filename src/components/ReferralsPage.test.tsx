@@ -28,6 +28,18 @@ describe("ReferralsPage", () => {
         qualified: 3,
         rank: 2,
         bonusPerQualifiedReferral: 2,
+        commission: {
+          earnedCents: 1_980,
+          creditCents: 495,
+          cashCents: 1_485,
+          payableCashCents: 0,
+        },
+        revenueShare: {
+          commissionPercent: 20,
+          creditSplitPercent: 25,
+          cashSplitPercent: 75,
+          cashPayoutsActive: false,
+        },
         leaderboard: [{
           rank: 1,
           publicName: "Grace",
@@ -55,12 +67,20 @@ describe("ReferralsPage", () => {
     await act(async () => { root.render(<ReferralsPage />); });
     await act(async () => { await Promise.resolve(); });
     const text = node.textContent || "";
-    expect(text).toContain("ARGUS REFERRALS");
+    expect(text).toContain("Investigate more.Earn when your network does.");
     expect(text).toContain("Code ARGUS123");
-    expect(text).toContain("Credits earned6");
+    expect(text).toContain("Investigation credits earned+6");
+    expect(text).toContain("Cash earned$14.85");
+    expect(text).toContain("20% subscription reward");
+    expect(text).toContain("Cash balance is being tracked");
     expect(text).toContain("Grace");
     expect(text).toContain("••••5678");
     expect(text).not.toContain("HIDDEN5678");
-    expect(text).not.toContain("payout");
+    expect(text).toContain("Cash payouts are not active yet");
+
+    const copyButton = [...node.querySelectorAll("button")].find((button) => button.textContent?.includes("Copy invite link"));
+    await act(async () => { copyButton?.click(); });
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining("ref=ARGUS123"));
+    expect(node.textContent).toContain("Copied");
   });
 });

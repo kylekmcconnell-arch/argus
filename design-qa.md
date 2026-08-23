@@ -125,6 +125,50 @@ The paired artifact compares the supplied desktop source with the available narr
 
 No P3 follow-up is required for this focused hierarchy change.
 
+---
+
+# Design QA — referral credits and cash earnings (issue #146)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-22 at 4.48.55 PM.png`
+- Source focus crop: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/referrals-146/source-referrals-crop.png`
+- Final light implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/referrals-146/implementation-light-top-final.png`
+- Dark implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/referrals-146/implementation-dark-top-v2.png`
+- Lower-page implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/referrals-146/implementation-narrow-lower.png`
+- Combined comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/referrals-146/comparison-top-final.png`
+- Source pixels: 3396 × 2028 at 144dpi; implementation pixels and CSS viewport: 673 × 1504 at 1× browser capture density
+- State: authenticated member, light and dark themes, representative current-user earnings, payout tracking inactive
+
+## Findings and iteration history
+
+The source exposed one P1 product-hierarchy gap: it described referral credits but did not present the existing subscription commission, cash split, earned balance, or payout state. The page read like an access leaderboard rather than an earnings product.
+
+The first implementation comparison added a direct earnings narrative, a 20% reward term, the existing 25% credit / 75% cash split, a real total earned value, a separate cash-earned value, a primary invite action, four operational metrics, an explanatory reward model, and cash/credit columns in the leaderboard. No referral link, masked code, rank, access state, qualified count, available-credit balance, or leaderboard row was removed.
+
+The first dark-theme pass found one P2 contrast and brand-consistency issue: the shared dark `on-signal` token rendered black text on a bright green earnings card. The final pass locally fixes the card foreground to white, deepens the brand green, quiets the internal panels, and raises secondary-label opacity. The post-fix light and dark captures have no remaining P0, P1, or P2 finding.
+
+The source is a wide 2× desktop screenshot and the controllable in-app browser was a 673px-wide panel. The combined artifact therefore evaluates hierarchy, density, content preservation, and responsive behavior rather than claiming pixel-identical desktop geometry. At desktop breakpoints the existing workspace remains fluid and the hero uses the intended two-column story/earnings composition.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing ARGUS system sans and mono families remain. The new editorial headline, tabular money, compact labels, and leaderboard values use the established hierarchy and optical weights.
+- Spacing and layout rhythm: the flat stack becomes a clear story, earnings surface, invite action, metric grid, reward explanation, and leaderboard. Existing workspace gutters and fluid full-width behavior remain.
+- Colors and visual tokens: panel, line, sidebar, ink, and signature-green tokens remain the base. The earnings card uses a deeper mix of the ARGUS green with a white local foreground in both themes.
+- Image quality and assets: the existing ArgusMark and profile-photo behavior are preserved. New functional symbols are real Phosphor icons; no placeholder art, custom SVG, CSS illustration, or emoji was introduced.
+- Copy and content: the page now states both earning paths without promising unavailable payouts. It uses the existing `commission`, `revenueShare`, `cashPayoutsActive`, credit balance, rank, and leaderboard fields.
+- Responsive behavior: at 673px the hero stacks, metrics form a two-column grid, the invite control remains usable, reward steps stay readable, and the leaderboard retains its intentional horizontal table scroll rather than clipping data.
+
+## Interaction and accessibility checks
+
+- `Copy invite link` writes the full personal URL and changes visibly to `Copied`.
+- The invite link remains read-only and labeled; the earnings and performance surfaces have named regions.
+- Cash is labeled as earned while payout availability is stated separately. When payouts are inactive, the UI says the balance is tracked and does not claim it is payable.
+- The public leaderboard continues to expose only masked code tails.
+- Light and dark renders preserve white-on-green earnings text and visible focusable controls.
+
+## Follow-up polish
+
+No P3 follow-up is required for this focused redesign.
+
 final result: passed
 
 ---
