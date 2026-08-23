@@ -95,6 +95,19 @@ export default async function middleware(request: Request): Promise<Response> {
     );
   }
 
+  // OENBOT's provider-cost view is a server-to-server read-only feed. Its
+  // dedicated token is not a Supabase user session; admit only this exact path
+  // before the generic JWT gate. The handler repeats the check.
+  if (pathname === "/api/provider-billing") {
+    const feedToken = process.env.ARGUS_BILLING_FEED_TOKEN;
+    const authz = request.headers.get("authorization") || "";
+    if (feedToken && timingSafeEqual(authz, `Bearer ${feedToken}`)) return next();
+    return Response.json(
+      { error: "authentication_required", message: "This endpoint is an authenticated operations feed." },
+      { status: 401, headers: { "cache-control": "no-store", "www-authenticate": 'Bearer realm="ARGUS provider telemetry"' } },
+    );
+  }
+
   // Telegram calls the webhook with its own secret header (no bearer); the
   // handler validates x-telegram-bot-api-secret-token and fails closed, same
   // defense-in-depth shape as the cron route.
