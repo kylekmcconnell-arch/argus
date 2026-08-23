@@ -2,8 +2,8 @@
 var PROVIDERS = [
   { id: "claude-research", label: "Claude (optional fallback research)", env: ["ANTHROPIC_API_KEY"], free: false, feeds: "optional cited-research fallback when ARGUS_PROVIDER_FALLBACKS is on" },
   { id: "grok", label: "Grok (primary LLM + X/web discovery)", env: ["XAI_API_KEY"], free: false, feeds: "analyst scoring, extract, vision, testimonial acknowledgment, recent activity, sentiment, portfolio and fund-scale leads" },
-  { id: "twitterapi", label: "twitterapi.io (X follow graph)", env: ["TWITTERAPI_KEY"], free: false, feeds: "follower/following graph, profile, account age" },
-  { id: "x-api-bearer", label: "Official X API v2 (authenticity + social activity)", env: ["X_API_BEARER"], free: false, feeds: "optional x-authenticity fallback; frozen project conversation counts, author breadth, momentum and concentration" },
+  { id: "twitterapi", label: "twitterapi.io (X intelligence)", env: ["TWITTERAPI_KEY"], free: false, feeds: "follower/following graph, profile, account age, bounded project conversation fallback" },
+  { id: "x-api-bearer", label: "Official X API v2 (optional authenticity + social activity)", env: ["X_API_BEARER"], free: false, feeds: "optional x-authenticity and social-activity provider; twitterapi.io remains the production fallback" },
   { id: "safebrowsing", label: "Google Safe Browsing", env: ["GOOGLE_SAFE_BROWSING_KEY"], free: false, feeds: "optional best-recall site-safety; GoPlus/URLhaus/heuristics still run" },
   { id: "coingecko", label: "CoinGecko", env: ["COINGECKO_API_KEY"], free: true, feeds: "token price/mcap, call performance (K2)" },
   { id: "cryptorank", label: "CryptoRank", env: ["CRYPTORANK_API_KEY"], free: false, feeds: "market intel: rank, ATH drawdown, dilution, unlock/vesting flags" },
@@ -30895,10 +30895,13 @@ function socialActivityScore(input) {
 
 // server/socialActivity.ts
 var X_API = "https://api.x.com/2";
+var TWITTERAPI_IO = "https://api.twitterapi.io/twitter/tweet/advanced_search";
 var HOUR_MS = 60 * 60 * 1e3;
 var DAY_MS4 = 24 * HOUR_MS;
 var POST_READ_USD = 5e-3;
 var COUNTS_REQUEST_USD = 5e-3;
+var TWITTERAPI_IO_POST_USD = 15e-5;
+var TWITTERAPI_IO_SLICE_MS = 6 * HOUR_MS;
 var asRecord6 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 function normalizedHandle3(value) {
   const handle = value.trim().replace(/^@/, "");
@@ -30940,7 +30943,7 @@ function emptyWindow(start, end) {
     authorCoverageComplete: false
   };
 }
-function unavailableSnapshot2(identity, now, reason, note) {
+function unavailableSnapshot2(identity, now, reason, note, provider = "x-api-v2") {
   const end = new Date(now.getTime() - 3e4);
   const last24Start = new Date(end.getTime() - DAY_MS4);
   const previous24Start = new Date(end.getTime() - 2 * DAY_MS4);
@@ -30948,7 +30951,7 @@ function unavailableSnapshot2(identity, now, reason, note) {
   const fallback = identity ?? { handle: "@unknown", query: "" };
   return {
     schemaVersion: 1,
-    provider: "x-api-v2",
+    provider,
     state: "unavailable",
     capturedAt: now.toISOString(),
     sourceUrl: sourceUrl(fallback.query),
@@ -31045,14 +31048,14 @@ async function collectSearch(fetchImpl, bearer, query, start, end, maxPosts) {
   } while (nextToken && posts.size < maxPosts);
   return { ok: true, posts: [...posts.values()], complete, oldestAt, requests, postReads };
 }
-function countPosts(buckets, start, end) {
-  if (!buckets.length) return null;
+function countPosts(buckets, start, end, countsComplete) {
+  if (!countsComplete && !buckets.length) return null;
   return buckets.reduce((sum, bucket) => {
     const bucketStart = Date.parse(bucket.start);
     return bucketStart >= start.getTime() && bucketStart < end.getTime() ? sum + bucket.postCount : sum;
   }, 0);
 }
-function windowFrom(posts, buckets, start, end, search) {
+function windowFrom(posts, buckets, start, end, search, countsComplete) {
   const rows = posts.filter((post) => {
     const at = Date.parse(post.createdAt);
     return at >= start.getTime() && at < end.getTime();
@@ -31061,10 +31064,84 @@ function windowFrom(posts, buckets, start, end, search) {
   return {
     start: start.toISOString(),
     end: end.toISOString(),
-    postCount: countPosts(buckets, start, end),
+    postCount: countPosts(buckets, start, end, countsComplete),
     uniqueAccounts: search.ok ? new Set(rows.map((post) => post.authorId)).size : null,
     inspectedPosts: rows.length,
     authorCoverageComplete
+  };
+}
+function twitterApiIoPost(row) {
+  const record4 = asRecord6(row);
+  const author = asRecord6(record4.author);
+  const id = typeof record4.id === "string" ? record4.id : null;
+  const authorId = typeof author.id === "string" ? author.id : typeof author.userName === "string" ? author.userName.toLowerCase() : null;
+  const createdAt = typeof record4.createdAt === "string" ? record4.createdAt : null;
+  const text2 = typeof record4.text === "string" ? record4.text : "";
+  const isRepost = record4.retweeted_tweet !== void 0 && record4.retweeted_tweet !== null || /^RT\s+@/i.test(text2);
+  if (!id || !authorId || !createdAt || isRepost || !Number.isFinite(Date.parse(createdAt))) return null;
+  return { id, authorId, createdAt: new Date(createdAt).toISOString() };
+}
+function hourlyBuckets(posts, start, end) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const post of posts) {
+    const hour = Math.floor(Date.parse(post.createdAt) / HOUR_MS) * HOUR_MS;
+    counts.set(hour, (counts.get(hour) ?? 0) + 1);
+  }
+  const buckets = [];
+  for (let at = Math.floor(start.getTime() / HOUR_MS) * HOUR_MS; at < end.getTime(); at += HOUR_MS) {
+    buckets.push({
+      start: new Date(at).toISOString(),
+      end: new Date(at + HOUR_MS).toISOString(),
+      postCount: counts.get(at) ?? 0
+    });
+  }
+  return buckets;
+}
+async function collectTwitterApiIo(fetchImpl, key, query, start, end, maxPosts) {
+  const posts = /* @__PURE__ */ new Map();
+  let requests = 0;
+  let successfulRequests = 0;
+  let billedRows = 0;
+  let complete = true;
+  for (let sliceEnd = end.getTime(); sliceEnd > start.getTime() && posts.size < maxPosts; sliceEnd -= TWITTERAPI_IO_SLICE_MS) {
+    const sliceStart = Math.max(start.getTime(), sliceEnd - TWITTERAPI_IO_SLICE_MS);
+    const url = new URL(TWITTERAPI_IO);
+    url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(sliceStart / 1e3)} until_time:${Math.ceil(sliceEnd / 1e3)}`);
+    url.searchParams.set("queryType", "Latest");
+    requests += 1;
+    let payload = null;
+    try {
+      const response = await fetchImpl(url, {
+        headers: { "x-api-key": key },
+        signal: AbortSignal.timeout(15e3)
+      });
+      if (response.ok) payload = asRecord6(await response.json());
+      else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
+    } catch (error) {
+      const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
+      recordCall("twitterapi", "social-search", 0, reason, "failed");
+    }
+    if (!payload) {
+      complete = false;
+      continue;
+    }
+    successfulRequests += 1;
+    const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
+    billedRows += rows.length;
+    recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
+    for (const row of rows) {
+      const post = twitterApiIoPost(row);
+      if (post && posts.size < maxPosts) posts.set(post.id, post);
+    }
+    if (payload.has_next_page === true || posts.size >= maxPosts) complete = false;
+  }
+  const values = [...posts.values()];
+  if (posts.size >= maxPosts) complete = false;
+  const oldestAt = complete && values.length ? Math.min(...values.map((post) => Date.parse(post.createdAt))) : null;
+  return {
+    search: { ok: successfulRequests > 0, posts: values, complete, oldestAt, requests, postReads: billedRows },
+    buckets: hourlyBuckets(values, start, end),
+    estimatedUsd: Math.round(billedRows * TWITTERAPI_IO_POST_USD * 1e4) / 1e4
   };
 }
 function top10Share(posts, complete) {
@@ -31079,18 +31156,20 @@ async function collectSocialActivity(rawIdentity, options = {}) {
   const identity = buildSocialActivityQuery(rawIdentity);
   if (!identity) return unavailableSnapshot2(identity, now, "invalid_identity", "The official X account was not bound, so ARGUS did not run a social activity search.");
   const bearer = options.bearer === void 0 ? env("X_API_BEARER") : options.bearer ?? void 0;
-  if (!bearer) return unavailableSnapshot2(identity, now, "not_configured", "Social activity was not collected because official X search access is not configured.");
+  const twitterApiKey = options.twitterApiKey === void 0 ? env("TWITTERAPI_KEY") : options.twitterApiKey ?? void 0;
+  if (!bearer && !twitterApiKey) return unavailableSnapshot2(identity, now, "not_configured", "Social activity was not collected because X search access is not configured.");
+  const provider = bearer ? "x-api-v2" : "twitterapi-io";
   const configuredMax = Number(env("ARGUS_SOCIAL_ACTIVITY_MAX_POSTS") || "200");
   const maxPosts = Math.min(500, Math.max(10, Math.round(options.maxPosts ?? configuredMax)));
   const fetchImpl = options.fetchImpl ?? fetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1e3));
-  const cacheKey = `social-activity:v1:${identity.query}:${maxPosts}:${cacheWindow}`;
+  const cacheKey = `social-activity:v1:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
   if (!options.fetchImpl) {
     const cached = await cacheGet(cacheKey, { operation: "social-activity-hit", meta: "15 minute activity snapshot" });
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
-        if (parsed.schemaVersion === 1 && parsed.provider === "x-api-v2") return parsed;
+        if (parsed.schemaVersion === 1 && (parsed.provider === "x-api-v2" || parsed.provider === "twitterapi-io")) return parsed;
       } catch {
       }
     }
@@ -31099,16 +31178,17 @@ async function collectSocialActivity(rawIdentity, options = {}) {
   const last24Start = new Date(end.getTime() - DAY_MS4);
   const previous24Start = new Date(end.getTime() - 2 * DAY_MS4);
   const last7Start = new Date(end.getTime() - 7 * DAY_MS4);
-  const [counts, search] = await Promise.all([
+  const twitterApiIo = !bearer && twitterApiKey ? await collectTwitterApiIo(fetchImpl, twitterApiKey, identity.query, last7Start, end, maxPosts) : null;
+  const [counts, search] = twitterApiIo ? [{ ok: twitterApiIo.search.complete, buckets: twitterApiIo.buckets }, twitterApiIo.search] : await Promise.all([
     collectCounts(fetchImpl, bearer, identity.query, last7Start, end),
     collectSearch(fetchImpl, bearer, identity.query, last7Start, end, maxPosts)
   ]);
   if (!counts.ok && !search.ok) {
-    return unavailableSnapshot2(identity, now, "provider_failed", "X did not return usable activity data. No zero or clean result was inferred.");
+    return unavailableSnapshot2(identity, now, "provider_failed", "X did not return usable activity data. No zero or clean result was inferred.", provider);
   }
-  const last24Hours = windowFrom(search.posts, counts.buckets, last24Start, end, search);
-  const previous24Hours = windowFrom(search.posts, counts.buckets, previous24Start, last24Start, search);
-  const last7Days = windowFrom(search.posts, counts.buckets, last7Start, end, search);
+  const last24Hours = windowFrom(search.posts, counts.buckets, last24Start, end, search, counts.ok);
+  const previous24Hours = windowFrom(search.posts, counts.buckets, previous24Start, last24Start, search, counts.ok);
+  const last7Days = windowFrom(search.posts, counts.buckets, last7Start, end, search, counts.ok);
   const concentration = top10Share(search.posts, last7Days.authorCoverageComplete);
   const activeDays = counts.ok ? new Set(counts.buckets.filter((bucket) => bucket.postCount > 0).map((bucket) => bucket.start.slice(0, 10))).size : null;
   const score = last24Hours.uniqueAccounts !== null && previous24Hours.uniqueAccounts !== null && last7Days.uniqueAccounts !== null && last7Days.authorCoverageComplete && concentration !== null && activeDays !== null ? socialActivityScore({
@@ -31121,7 +31201,7 @@ async function collectSocialActivity(rawIdentity, options = {}) {
   const state = counts.ok && last7Days.authorCoverageComplete ? "complete" : "partial";
   const snapshot = {
     schemaVersion: 1,
-    provider: "x-api-v2",
+    provider,
     state,
     capturedAt: now.toISOString(),
     sourceUrl: sourceUrl(identity.query),
@@ -31143,9 +31223,9 @@ async function collectSocialActivity(rawIdentity, options = {}) {
       searchRequests: search.requests,
       postReads: search.postReads,
       maxPosts,
-      estimatedUsd: Math.round(((counts.ok ? COUNTS_REQUEST_USD : 0) + search.postReads * POST_READ_USD) * 1e4) / 1e4
+      estimatedUsd: twitterApiIo?.estimatedUsd ?? Math.round(((counts.ok ? COUNTS_REQUEST_USD : 0) + search.postReads * POST_READ_USD) * 1e4) / 1e4
     },
-    note: state === "complete" ? "Public X posts matched to the bound project identifiers. Reposts are excluded." : `ARGUS inspected ${search.posts.length.toLocaleString()} posts before the configured limit. Unique-account counts are minimums.`
+    note: state === "complete" ? `Public X posts matched to the bound project identifiers through ${provider === "x-api-v2" ? "the official X API" : "twitterapi.io"}. Reposts are excluded.` : `ARGUS inspected ${search.posts.length.toLocaleString()} posts before the configured limit. Unique-account counts are minimums.`
   };
   if (!options.fetchImpl) void cacheSet(cacheKey, JSON.stringify(snapshot));
   return snapshot;

@@ -21,7 +21,7 @@ export interface SocialActivityBucket {
 
 export interface SocialActivitySnapshot {
   schemaVersion: 1;
-  provider: "x-api-v2";
+  provider: "x-api-v2" | "twitterapi-io";
   state: SocialActivityState;
   capturedAt: string;
   sourceUrl: string;

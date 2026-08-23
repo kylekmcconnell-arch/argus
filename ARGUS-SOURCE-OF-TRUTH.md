@@ -170,11 +170,13 @@ under collapsed technical details. They do not appear as public headlines,
 metric labels, or badge stacks. Each public finding carries one primary status;
 priority, domain, and selected-view emphasis are supporting text.
 
-Project and token reports may also freeze a Social activity snapshot from the
-official X API. The first reading layer leads with distinct public accounts,
+Project and token reports may also freeze a Social activity snapshot from X.
+The collector prefers the official X API when its bearer exists and otherwise
+uses the already configured twitterapi.io advanced-search provider. The first
+reading layer leads with distinct public accounts,
 not raw post volume, across explicit 24-hour and seven-day windows. It also
 shows post volume, change against the previous 24 hours, and the share produced
-by the ten most active accounts. Reposts are excluded from the query.
+by the ten most active accounts. Reposts are excluded from the saved rows.
 
 Social activity is descriptive context, not evidence that a project is safe,
 legitimate, investable, or popular with real customers. Its separate activity

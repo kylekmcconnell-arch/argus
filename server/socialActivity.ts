@@ -9,10 +9,13 @@ import {
 } from "../src/data/socialActivity";
 
 const X_API = "https://api.x.com/2";
+const TWITTERAPI_IO = "https://api.twitterapi.io/twitter/tweet/advanced_search";
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const POST_READ_USD = 0.005;
 const COUNTS_REQUEST_USD = 0.005;
+const TWITTERAPI_IO_POST_USD = 0.00015;
+const TWITTERAPI_IO_SLICE_MS = 6 * HOUR_MS;
 
 type JsonRecord = Record<string, unknown>;
 const asRecord = (value: unknown): JsonRecord =>
@@ -28,6 +31,7 @@ export interface SocialActivityCollectorOptions {
   now?: Date;
   fetchImpl?: typeof fetch;
   bearer?: string | null;
+  twitterApiKey?: string | null;
   maxPosts?: number;
 }
 
@@ -107,6 +111,7 @@ function unavailableSnapshot(
   now: Date,
   reason: SocialActivitySnapshot["unavailableReason"],
   note: string,
+  provider: SocialActivitySnapshot["provider"] = "x-api-v2",
 ): SocialActivitySnapshot {
   const end = new Date(now.getTime() - 30_000);
   const last24Start = new Date(end.getTime() - DAY_MS);
@@ -115,7 +120,7 @@ function unavailableSnapshot(
   const fallback = identity ?? { handle: "@unknown", query: "" };
   return {
     schemaVersion: 1,
-    provider: "x-api-v2",
+    provider,
     state: "unavailable",
     capturedAt: now.toISOString(),
     sourceUrl: sourceUrl(fallback.query),
@@ -235,8 +240,8 @@ async function collectSearch(
   return { ok: true, posts: [...posts.values()], complete, oldestAt, requests, postReads };
 }
 
-function countPosts(buckets: SocialActivityBucket[], start: Date, end: Date): number | null {
-  if (!buckets.length) return null;
+function countPosts(buckets: SocialActivityBucket[], start: Date, end: Date, countsComplete: boolean): number | null {
+  if (!countsComplete && !buckets.length) return null;
   return buckets.reduce((sum, bucket) => {
     const bucketStart = Date.parse(bucket.start);
     return bucketStart >= start.getTime() && bucketStart < end.getTime() ? sum + bucket.postCount : sum;
@@ -249,6 +254,7 @@ function windowFrom(
   start: Date,
   end: Date,
   search: SearchResult,
+  countsComplete: boolean,
 ): SocialActivityWindow {
   const rows = posts.filter((post) => {
     const at = Date.parse(post.createdAt);
@@ -258,10 +264,101 @@ function windowFrom(
   return {
     start: start.toISOString(),
     end: end.toISOString(),
-    postCount: countPosts(buckets, start, end),
+    postCount: countPosts(buckets, start, end, countsComplete),
     uniqueAccounts: search.ok ? new Set(rows.map((post) => post.authorId)).size : null,
     inspectedPosts: rows.length,
     authorCoverageComplete,
+  };
+}
+
+function twitterApiIoPost(row: unknown): SearchPost | null {
+  const record = asRecord(row);
+  const author = asRecord(record.author);
+  const id = typeof record.id === "string" ? record.id : null;
+  const authorId = typeof author.id === "string"
+    ? author.id
+    : typeof author.userName === "string"
+      ? author.userName.toLowerCase()
+      : null;
+  const createdAt = typeof record.createdAt === "string" ? record.createdAt : null;
+  const text = typeof record.text === "string" ? record.text : "";
+  const isRepost = record.retweeted_tweet !== undefined && record.retweeted_tweet !== null
+    || /^RT\s+@/i.test(text);
+  if (!id || !authorId || !createdAt || isRepost || !Number.isFinite(Date.parse(createdAt))) return null;
+  return { id, authorId, createdAt: new Date(createdAt).toISOString() };
+}
+
+function hourlyBuckets(posts: SearchPost[], start: Date, end: Date): SocialActivityBucket[] {
+  const counts = new Map<number, number>();
+  for (const post of posts) {
+    const hour = Math.floor(Date.parse(post.createdAt) / HOUR_MS) * HOUR_MS;
+    counts.set(hour, (counts.get(hour) ?? 0) + 1);
+  }
+  const buckets: SocialActivityBucket[] = [];
+  for (let at = Math.floor(start.getTime() / HOUR_MS) * HOUR_MS; at < end.getTime(); at += HOUR_MS) {
+    buckets.push({
+      start: new Date(at).toISOString(),
+      end: new Date(at + HOUR_MS).toISOString(),
+      postCount: counts.get(at) ?? 0,
+    });
+  }
+  return buckets;
+}
+
+async function collectTwitterApiIo(
+  fetchImpl: typeof fetch,
+  key: string,
+  query: string,
+  start: Date,
+  end: Date,
+  maxPosts: number,
+): Promise<{ search: SearchResult; buckets: SocialActivityBucket[]; estimatedUsd: number }> {
+  const posts = new Map<string, SearchPost>();
+  let requests = 0;
+  let successfulRequests = 0;
+  let billedRows = 0;
+  let complete = true;
+
+  for (let sliceEnd = end.getTime(); sliceEnd > start.getTime() && posts.size < maxPosts; sliceEnd -= TWITTERAPI_IO_SLICE_MS) {
+    const sliceStart = Math.max(start.getTime(), sliceEnd - TWITTERAPI_IO_SLICE_MS);
+    const url = new URL(TWITTERAPI_IO);
+    url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(sliceStart / 1000)} until_time:${Math.ceil(sliceEnd / 1000)}`);
+    url.searchParams.set("queryType", "Latest");
+    requests += 1;
+    let payload: JsonRecord | null = null;
+    try {
+      const response = await fetchImpl(url, {
+        headers: { "x-api-key": key },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (response.ok) payload = asRecord(await response.json());
+      else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
+    } catch (error) {
+      const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
+      recordCall("twitterapi", "social-search", 0, reason, "failed");
+    }
+    if (!payload) {
+      complete = false;
+      continue;
+    }
+    successfulRequests += 1;
+    const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
+    billedRows += rows.length;
+    recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
+    for (const row of rows) {
+      const post = twitterApiIoPost(row);
+      if (post && posts.size < maxPosts) posts.set(post.id, post);
+    }
+    if (payload.has_next_page === true || posts.size >= maxPosts) complete = false;
+  }
+
+  const values = [...posts.values()];
+  if (posts.size >= maxPosts) complete = false;
+  const oldestAt = complete && values.length ? Math.min(...values.map((post) => Date.parse(post.createdAt))) : null;
+  return {
+    search: { ok: successfulRequests > 0, posts: values, complete, oldestAt, requests, postReads: billedRows },
+    buckets: hourlyBuckets(values, start, end),
+    estimatedUsd: Math.round(billedRows * TWITTERAPI_IO_POST_USD * 10000) / 10000,
   };
 }
 
@@ -281,19 +378,21 @@ export async function collectSocialActivity(
   const identity = buildSocialActivityQuery(rawIdentity);
   if (!identity) return unavailableSnapshot(identity, now, "invalid_identity", "The official X account was not bound, so ARGUS did not run a social activity search.");
   const bearer = options.bearer === undefined ? env("X_API_BEARER") : options.bearer ?? undefined;
-  if (!bearer) return unavailableSnapshot(identity, now, "not_configured", "Social activity was not collected because official X search access is not configured.");
+  const twitterApiKey = options.twitterApiKey === undefined ? env("TWITTERAPI_KEY") : options.twitterApiKey ?? undefined;
+  if (!bearer && !twitterApiKey) return unavailableSnapshot(identity, now, "not_configured", "Social activity was not collected because X search access is not configured.");
+  const provider: SocialActivitySnapshot["provider"] = bearer ? "x-api-v2" : "twitterapi-io";
 
   const configuredMax = Number(env("ARGUS_SOCIAL_ACTIVITY_MAX_POSTS") || "200");
   const maxPosts = Math.min(500, Math.max(10, Math.round(options.maxPosts ?? configuredMax)));
   const fetchImpl = options.fetchImpl ?? fetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1000));
-  const cacheKey = `social-activity:v1:${identity.query}:${maxPosts}:${cacheWindow}`;
+  const cacheKey = `social-activity:v1:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
   if (!options.fetchImpl) {
     const cached = await cacheGet(cacheKey, { operation: "social-activity-hit", meta: "15 minute activity snapshot" });
     if (cached) {
       try {
         const parsed = JSON.parse(cached) as SocialActivitySnapshot;
-        if (parsed.schemaVersion === 1 && parsed.provider === "x-api-v2") return parsed;
+        if (parsed.schemaVersion === 1 && (parsed.provider === "x-api-v2" || parsed.provider === "twitterapi-io")) return parsed;
       } catch {
         // A malformed cache row is ignored and never becomes report evidence.
       }
@@ -304,17 +403,22 @@ export async function collectSocialActivity(
   const previous24Start = new Date(end.getTime() - 2 * DAY_MS);
   const last7Start = new Date(end.getTime() - 7 * DAY_MS);
 
-  const [counts, search] = await Promise.all([
-    collectCounts(fetchImpl, bearer, identity.query, last7Start, end),
-    collectSearch(fetchImpl, bearer, identity.query, last7Start, end, maxPosts),
-  ]);
+  const twitterApiIo = !bearer && twitterApiKey
+    ? await collectTwitterApiIo(fetchImpl, twitterApiKey, identity.query, last7Start, end, maxPosts)
+    : null;
+  const [counts, search] = twitterApiIo
+    ? [{ ok: twitterApiIo.search.complete, buckets: twitterApiIo.buckets } satisfies CountsResult, twitterApiIo.search] as const
+    : await Promise.all([
+        collectCounts(fetchImpl, bearer!, identity.query, last7Start, end),
+        collectSearch(fetchImpl, bearer!, identity.query, last7Start, end, maxPosts),
+      ]);
   if (!counts.ok && !search.ok) {
-    return unavailableSnapshot(identity, now, "provider_failed", "X did not return usable activity data. No zero or clean result was inferred.");
+    return unavailableSnapshot(identity, now, "provider_failed", "X did not return usable activity data. No zero or clean result was inferred.", provider);
   }
 
-  const last24Hours = windowFrom(search.posts, counts.buckets, last24Start, end, search);
-  const previous24Hours = windowFrom(search.posts, counts.buckets, previous24Start, last24Start, search);
-  const last7Days = windowFrom(search.posts, counts.buckets, last7Start, end, search);
+  const last24Hours = windowFrom(search.posts, counts.buckets, last24Start, end, search, counts.ok);
+  const previous24Hours = windowFrom(search.posts, counts.buckets, previous24Start, last24Start, search, counts.ok);
+  const last7Days = windowFrom(search.posts, counts.buckets, last7Start, end, search, counts.ok);
   const concentration = top10Share(search.posts, last7Days.authorCoverageComplete);
   const activeDays = counts.ok
     ? new Set(counts.buckets.filter((bucket) => bucket.postCount > 0).map((bucket) => bucket.start.slice(0, 10))).size
@@ -336,7 +440,7 @@ export async function collectSocialActivity(
   const state = counts.ok && last7Days.authorCoverageComplete ? "complete" : "partial";
   const snapshot: SocialActivitySnapshot = {
     schemaVersion: 1,
-    provider: "x-api-v2",
+    provider,
     state,
     capturedAt: now.toISOString(),
     sourceUrl: sourceUrl(identity.query),
@@ -358,10 +462,11 @@ export async function collectSocialActivity(
       searchRequests: search.requests,
       postReads: search.postReads,
       maxPosts,
-      estimatedUsd: Math.round(((counts.ok ? COUNTS_REQUEST_USD : 0) + search.postReads * POST_READ_USD) * 10000) / 10000,
+      estimatedUsd: twitterApiIo?.estimatedUsd
+        ?? Math.round(((counts.ok ? COUNTS_REQUEST_USD : 0) + search.postReads * POST_READ_USD) * 10000) / 10000,
     },
     note: state === "complete"
-      ? "Public X posts matched to the bound project identifiers. Reposts are excluded."
+      ? `Public X posts matched to the bound project identifiers through ${provider === "x-api-v2" ? "the official X API" : "twitterapi.io"}. Reposts are excluded.`
       : `ARGUS inspected ${search.posts.length.toLocaleString()} posts before the configured limit. Unique-account counts are minimums.`,
   };
   if (!options.fetchImpl) void cacheSet(cacheKey, JSON.stringify(snapshot));

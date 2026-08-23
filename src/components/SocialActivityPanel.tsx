@@ -44,7 +44,7 @@ function Chart({ buckets, label }: { buckets: SocialActivityBucket[]; label: str
 
 function unavailableCopy(snapshot: SocialActivitySnapshot): string {
   if (snapshot.unavailableReason === "not_configured") {
-    return "Official X search is not connected, so this report cannot measure the conversation yet.";
+    return "X search is not connected, so this report cannot measure the conversation yet.";
   }
   if (snapshot.unavailableReason === "invalid_identity") {
     return "ARGUS could not bind an official X account for this project, so it did not run a broad social search.";

@@ -79,11 +79,33 @@ describe("social activity collector", () => {
   });
 
   it("does not turn a missing credential into zero activity", async () => {
-    const snapshot = await collectSocialActivity({ handle: "@clutch" }, { now: NOW, bearer: null });
+    const snapshot = await collectSocialActivity({ handle: "@clutch" }, { now: NOW, bearer: null, twitterApiKey: null });
     expect(snapshot.state).toBe("unavailable");
     expect(snapshot.unavailableReason).toBe("not_configured");
     expect(snapshot.windows.last24Hours.postCount).toBeNull();
     expect(snapshot.windows.last24Hours.uniqueAccounts).toBeNull();
     expect(snapshot.activityScore).toBeNull();
+  });
+
+  it("uses the configured twitterapi.io search key when the official bearer is absent", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe("/twitter/tweet/advanced_search");
+      expect(url.searchParams.get("query")).toContain("since_time:");
+      expect(url.searchParams.get("query")).not.toContain("-is:retweet");
+      expect(new Headers(init?.headers).get("x-api-key")).toBe("existing-key");
+      return response({ tweets: [], has_next_page: false, next_cursor: "" });
+    }) as typeof fetch;
+
+    const snapshot = await collectSocialActivity(
+      { handle: "@clutch", ticker: "CLUTCH", projectName: "Clutch Markets" },
+      { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl, maxPosts: 40 },
+    );
+
+    expect(snapshot.provider).toBe("twitterapi-io");
+    expect(snapshot.state).toBe("complete");
+    expect(snapshot.windows.last24Hours).toMatchObject({ postCount: 0, uniqueAccounts: 0, authorCoverageComplete: true });
+    expect(snapshot.activityScore).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(28);
   });
 });
