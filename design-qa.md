@@ -495,3 +495,34 @@ The focused side-by-side comparison was required because the full source include
 - P3: the generated source uses a denser chart whose apparent time span conflicts with its 24-hour label. The implementation favors data correctness with one bar per captured hour.
 
 final result: passed
+
+---
+
+# Design QA — remove saved example from New Investigation (2026-08-23)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-23 at 12.07.57 AM.png`, with the user's explicit direction to remove the shown saved-report strip
+- Desktop implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/remove-saved-example/implementation-desktop.jpg`
+- Mobile implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/remove-saved-example/implementation-mobile.jpg`
+- Focused comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/remove-saved-example/comparison-focused.png`
+- Viewports: 1440 × 1000 desktop and 390 × 844 mobile at browser-normalized 1× capture density
+- State: authenticated light-theme New Investigation page, default decision intent, empty subject input
+
+## Findings and comparison history
+
+The source contained the saved-Uniswap explainer, divider, and action the user asked to remove. The implementation removes the entire region and its landing-specific routing prop, then closes the layout directly from the provider-cost disclosure into the report-method section. The focused comparison shows the removed strip on the left and the clean handoff on the right. No actionable P0, P1, or P2 issue remains after the first comparison.
+
+## Required fidelity surfaces
+
+- Fonts and typography: unchanged; existing ARGUS landing hierarchy remains.
+- Spacing and layout rhythm: the empty strip and its border are removed; the next section retains the existing 48px responsive chapter gap.
+- Colors and tokens: unchanged; existing light and dark tokens remain.
+- Image quality and assets: unchanged; no image or icon asset was added or replaced.
+- Copy and content: only the user-targeted saved-example copy and link were removed. Investigation inputs, intent choices, privacy, provider-cost disclosure, report outcomes, and navigation remain.
+
+## Verification
+
+- Desktop and mobile in-app browser renders contain zero saved-example text and zero console errors or warnings.
+- Mobile body width equals viewport width at 390px, with no horizontal overflow.
+- Focused landing and App routing tests pass (41 tests); TypeScript and scoped ESLint pass.
+
+final result: passed

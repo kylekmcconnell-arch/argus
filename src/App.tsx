@@ -1368,7 +1368,7 @@ export default function App() {
           <span>Opened in a separate tab so the Case Brief draft remains intact.</span>
         </div>
       )}
-      {phase === "idle" && <Landing onAudit={onHomeAudit} onAbout={() => setPhase("about")} onOpenSavedReport={onOpenRecent} />}
+      {phase === "idle" && <Landing onAudit={onHomeAudit} onAbout={() => setPhase("about")} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
 
