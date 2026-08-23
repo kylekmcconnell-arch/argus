@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("./ArgusMark", () => ({ HeroBackdrop: () => null, ArgusMark: () => null }));
+vi.mock("./ArgusMark", () => ({
+  HeroBackdrop: () => null,
+  ArgusMark: ({ tone }: { tone?: string }) => <div data-argus-eye-tone={tone} />,
+}));
 vi.mock("./ScoreTicker", () => ({ ScoreTicker: () => null }));
 vi.mock("../lib/recentScored", () => ({ recentScored: () => [] }));
 
@@ -48,6 +51,7 @@ describe("Landing fresh audit launch", () => {
     expect(container.textContent).not.toContain("See the finished experience");
     expect(container.textContent).not.toContain("Try a live token");
     expect(container.textContent).not.toMatch(/\$(PEPE|SHIB|UNI)\b/);
+    expect(container.querySelector('[data-argus-eye-tone="brand"]')).not.toBeNull();
 
     await act(async () => {
       const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
