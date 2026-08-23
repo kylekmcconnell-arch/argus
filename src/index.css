@@ -1541,12 +1541,27 @@ h1.display-sm {
   72%, 100% { transform: scale(1.9); opacity: 0; }
 }
 
+/* The sidebar seal watches the room without behaving like a loading spinner.
+   Only the pupil moves; the iris and calibrated point field stay anchored. */
+@keyframes argus-eye-observe {
+  0%, 14%, 100% { transform: translate3d(0, 0, 0); }
+  22%, 36% { transform: translate3d(1px, -0.45px, 0); }
+  46%, 60% { transform: translate3d(-0.75px, 0.55px, 0); }
+  70%, 84% { transform: translate3d(0.55px, 0.8px, 0); }
+  92% { transform: translate3d(0, 0, 0); }
+}
+
 .argus-eye-field,
 .argus-eye-iris,
+.argus-eye-pupil,
 .argus-eye-live-ring,
 .argus-eye-evidence-pulse {
   transform-box: fill-box;
   transform-origin: center;
+}
+.argus-eye-pupil--observe {
+  animation: argus-eye-observe 13.5s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+  will-change: transform;
 }
 .argus-eye-iris--searching,
 .argus-eye-iris--focused {
@@ -1637,6 +1652,7 @@ h1.display-sm {
   .scan-bar::after { animation: none; width: 100%; opacity: 0.4; }
   .pulse-ring::after { animation: none; opacity: 0; }
   .argus-eye-iris,
+  .argus-eye-pupil,
   .argus-eye-live-ring,
   .argus-eye-evidence-pulse { animation: none; transform: none; }
   .argus-eye-live-ring,

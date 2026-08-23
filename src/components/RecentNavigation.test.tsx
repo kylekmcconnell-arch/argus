@@ -20,8 +20,8 @@ vi.mock("../auth-context", () => ({
 }));
 
 vi.mock("./ArgusMark", () => ({
-  ArgusMark: ({ size, tone }: { size?: number; tone?: string }) => (
-    <svg data-argus-eye-tone={tone} width={size} height={size} aria-hidden="true" />
+  ArgusMark: ({ size, tone, variant }: { size?: number; tone?: string; variant?: string }) => (
+    <svg data-argus-eye-tone={tone} data-argus-eye-variant={variant} width={size} height={size} aria-hidden="true" />
   ),
 }));
 vi.mock("../lib/watchlist", () => ({ getWatchlist: () => [] }));
@@ -105,8 +105,9 @@ describe("Recent report controls", () => {
     expect(container.textContent).not.toContain("v2.2");
 
     const brandMark = container.querySelector<SVGSVGElement>('aside svg[data-argus-eye-tone="brand"]');
-    expect(brandMark?.getAttribute("width")).toBe("32");
-    expect(brandMark?.getAttribute("height")).toBe("32");
+    expect(brandMark?.getAttribute("width")).toBe("36");
+    expect(brandMark?.getAttribute("height")).toBe("36");
+    expect(brandMark?.getAttribute("data-argus-eye-variant")).toBe("seal");
 
     const activeNav = container.querySelector<HTMLButtonElement>('aside button[aria-current="page"]');
     expect(activeNav).not.toBeNull();

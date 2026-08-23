@@ -323,9 +323,9 @@ export function Sidebar({
     >
       {/* brand */}
       <div className={`flex min-h-16 items-center gap-2 border-b border-line/70 ${compact ? "justify-center px-2" : "px-4"}`}>
-        <button type="button" onClick={() => nav("idle")} title={compact ? "ARGUS home" : undefined} className={`flex min-w-0 items-center rounded-md text-left ${compact ? "justify-center" : "flex-1 gap-2.5"}`}>
-          <ArgusMark size={32} tone="brand" />
-          <span className={compact ? "sr-only" : "display text-[15px] tracking-[0.02em] text-ink"}>ARGUS</span>
+        <button type="button" onClick={() => nav("idle")} title={compact ? "ARGUS home" : undefined} className={`flex min-w-0 items-center rounded-md text-left ${compact ? "justify-center" : "flex-1 gap-3"}`}>
+          <ArgusMark size={36} tone="brand" variant="seal" pupilMotion="observe" />
+          <span className={compact ? "sr-only" : "text-[17px] font-semibold tracking-[0.045em] text-ink"}>ARGUS</span>
         </button>
         {deployStale && !compact && (
           <button

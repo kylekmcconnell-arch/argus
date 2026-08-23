@@ -38,6 +38,17 @@ describe("ARGUS eye marks", () => {
     expect(svg.querySelector('circle[fill="var(--color-signal)"]')).toBeNull();
   });
 
+  it("renders the compact instrument seal with a fixed iris and independently observing pupil", () => {
+    const svg = renderSvg(<ArgusMark size={36} tone="brand" variant="seal" pupilMotion="observe" />);
+
+    expect(svg.getAttribute("data-argus-eye-variant")).toBe("seal");
+    expect(svg.getAttribute("width")).toBe("36");
+    expect(svg.querySelector(".argus-eye-seal-field")).not.toBeNull();
+    expect(svg.querySelectorAll('circle[fill="var(--color-brand)"]')).toHaveLength(1);
+    expect(svg.querySelector(".argus-eye-pupil")?.getAttribute("class")).toContain("argus-eye-pupil--observe");
+    expect(svg.querySelector(".argus-eye-iris--searching")).toBeNull();
+  });
+
   it("moves the complete live iris as one searching eye and pulses on evidence", () => {
     const svg = renderSvg(
       <ArgusMark size={88} live motion="searching" eventKey="2:Evidence:Profile returned" />,

@@ -5,6 +5,7 @@
 interface Dot { x: number; y: number; r: number; o: number }
 
 export type ArgusEyeMotion = "idle" | "searching" | "focused" | "settling";
+export type ArgusMarkVariant = "eye" | "seal";
 
 // Builds the dot field for an eye spanning x∈[x0,x1], centered at cy, amplitude A.
 function eyeDots(
@@ -38,19 +39,80 @@ function eyeDots(
   return { dots, irisX, irisY, irisR };
 }
 
+// The instrument seal is a compact, rounded field of calibrated points. Its
+// eye aperture is intentionally quiet so the brand iris remains the focal point.
+function sealDots(): Dot[] {
+  const dots: Dot[] = [];
+  const step = 8;
+  for (let x = 14; x <= 86; x += step) {
+    for (let y = 14; y <= 86; y += step) {
+      const cornerX = Math.max(0, 22 - Math.min(x, 100 - x));
+      const cornerY = Math.max(0, 22 - Math.min(y, 100 - y));
+      if (Math.hypot(cornerX, cornerY) > 11) continue;
+
+      const dx = Math.abs(x - 50) / 35;
+      const aperture = 16 * Math.max(0, 1 - dx ** 1.7);
+      if (x >= 18 && x <= 82 && Math.abs(y - 50) <= aperture) continue;
+
+      const drift = ((x * 17 + y * 11) % 9) / 9;
+      const r = 2.25 + (1 - (x - 14) / 72) * 0.75 + drift * 0.32;
+      dots.push({ x, y, r, o: 0.5 + (1 - (x - 14) / 72) * 0.26 });
+    }
+  }
+  return dots;
+}
+
 export function ArgusMark({
   size = 28,
   live = false,
   motion = live ? "searching" : "idle",
   eventKey,
   tone = "neutral",
+  variant = "eye",
+  pupilMotion = "none",
 }: {
   size?: number;
   live?: boolean;
   motion?: ArgusEyeMotion;
   eventKey?: string;
   tone?: "neutral" | "brand";
+  variant?: ArgusMarkVariant;
+  pupilMotion?: "none" | "observe";
 }) {
+  if (variant === "seal") {
+    const dots = sealDots();
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 100 100"
+        fill="none"
+        aria-hidden="true"
+        focusable="false"
+        className="argus-eye-mark argus-eye-mark--seal"
+        data-argus-eye-state="idle"
+        data-argus-eye-tone={tone}
+        data-argus-eye-variant="seal"
+      >
+        <g fill="var(--color-ink-faint)" className="argus-eye-field argus-eye-seal-field">
+          {dots.map((d, i) => (
+            <circle key={i} cx={d.x} cy={d.y} r={d.r} opacity={d.o} />
+          ))}
+        </g>
+        <path
+          d="M17 50C28 35 40 29 53 29C66 29 77 37 84 50C76 63 65 71 52 71C39 71 28 64 17 50Z"
+          fill="var(--color-sidebar)"
+          className="argus-eye-seal-aperture"
+        />
+        <circle cx="54" cy="50" r="13.5" fill={tone === "brand" ? "var(--color-brand)" : "var(--color-signal)"} />
+        <g className={`argus-eye-pupil${pupilMotion === "observe" ? " argus-eye-pupil--observe" : ""}`}>
+          <circle cx="54" cy="50" r="6.25" fill="var(--color-eye-pupil)" />
+          <circle cx="57.6" cy="46.4" r="2.3" fill="var(--color-on-brand)" opacity="0.96" />
+        </g>
+      </svg>
+    );
+  }
+
   // The live eye keeps a complete dotted field behind the moving iris. Static
   // brand marks retain the tailored cutout around their fixed iris position.
   const { dots, irisX, irisY, irisR } = eyeDots(12, 88, 50, 23, 4.6, 0.66, !live);
@@ -66,6 +128,7 @@ export function ArgusMark({
       className="argus-eye-mark"
       data-argus-eye-state={eyeState}
       data-argus-eye-tone={tone}
+      data-argus-eye-variant="eye"
     >
       <g fill="var(--color-ink-faint)" className={live ? "argus-eye-field argus-eye-field--live" : "argus-eye-field"}>
         {dots.map((d, i) => (

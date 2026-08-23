@@ -49,6 +49,58 @@ final result: passed
 
 ---
 
+# Design QA — sidebar instrument-seal logo (2026-08-23)
+
+## Comparison target
+
+- Source visual truth: `docs/design-qa/sidebar-logo-2026-08-23/source-option-3.png`
+- Browser implementation: `docs/design-qa/sidebar-logo-2026-08-23/implementation-desktop-v1.png`
+- Focused header capture: `docs/design-qa/sidebar-logo-2026-08-23/implementation-header-v1.png`
+- Combined comparison: `docs/design-qa/sidebar-logo-2026-08-23/comparison-v1.png`
+- Viewport: 1440 × 900 CSS pixels at device scale 1
+- Source pixels: 1536 × 1024; focused source crop: 800 × 270
+- Implementation pixels: full browser transport 933 × 900; focused header capture 247 × 64 at 1:1 CSS density
+- Normalization: the selected concept's lockup and the implementation header were each isolated, then scaled to the same 800px comparison width. The 247 × 64 focused capture is the fidelity source for spacing and mark legibility because it preserves CSS-pixel density.
+- State: authenticated light-theme landing preview, sidebar expanded, brand pupil in its slow observing loop
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- Fonts and typography: the implementation uses the existing ARGUS interface family at 17px/600 with restrained 0.045em tracking, matching the selected concept's firm sans-serif wordmark without importing a conflicting display face.
+- Spacing and layout rhythm: the 36px seal sits inside the existing 64px navigation header with 16px leading inset and a 12px mark-to-word gap. The lockup fits the 248px sidebar without changing downstream navigation alignment.
+- Colors and visual tokens: the iris uses `--color-brand`, the pupil uses `--color-eye-pupil`, the highlight uses the on-brand token, and the calibrated point field inherits the existing neutral ink token. Light and dark modes therefore remain token-driven.
+- Image quality and asset fidelity: the selected rounded point-field seal, white eye aperture, jade iris, black pupil, and compact wordmark proportions are all present. The mark remains a sharp scalable vector component so the pupil can move independently; no low-resolution crop from the concept board is shipped in the product.
+- Copy and content: the wordmark remains exactly `ARGUS`; no version badge or extra header copy was introduced.
+- Motion and accessibility: only the pupil moves. The iris, aperture, and point field remain fixed. The browser reported the `argus-eye-observe` animation at 13.5 seconds, and the reduced-motion media rule disables the pupil transform and animation.
+
+## Full and focused comparison evidence
+
+The full browser render confirms the new lockup stays visually subordinate to the investigation command and does not disturb the sidebar's navigation rhythm. The focused combined comparison confirms the selected option's distinctive square point field, cut-through eye, green iris, dark pupil, and bold wordmark survive at the real 36px mark size. A focused comparison was required because the logo is too small to judge reliably in the full application capture.
+
+## Comparison history
+
+### Iteration 1
+
+- Earlier findings: none at P0/P1/P2. The first browser comparison preserved the selected silhouette, proportions, color hierarchy, and intended header density.
+- Fixes made: no post-comparison visual correction was required.
+- Post-fix visual evidence: `docs/design-qa/sidebar-logo-2026-08-23/comparison-v1.png`.
+
+## Runtime checks
+
+- Verified the logo renders at 36 × 36 CSS pixels inside a 247 × 64 header.
+- Verified the pupil is a separate animated group and the field and iris remain fixed.
+- Checked the browser console after the final render: no errors or warnings.
+- Passed 9 focused component/navigation tests and the production build.
+
+## Follow-up polish
+
+- P3: the generated concept uses slightly irregular rasterized dots, while the product seal uses a cleaner calibrated vector field for small-size sharpness and theme support.
+
+final result: passed
+
+---
+
 # Design QA — compact landing question sequence (2026-08-23)
 
 - Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-23 at 10.55.16 AM.png`
