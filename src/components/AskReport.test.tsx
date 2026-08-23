@@ -115,7 +115,7 @@ describe("AskReport", () => {
     act(() => toggle?.click());
 
     expect(container.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(true);
-    expect(container.textContent).toContain("Save required");
+    expect(container.textContent).toContain("Save this report to ask questions about @alice");
     expect(providerFetch).not.toHaveBeenCalled();
   });
 });
