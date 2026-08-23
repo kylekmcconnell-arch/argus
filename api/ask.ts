@@ -19,7 +19,22 @@ import {
   buildGraphPathReceipt,
   buildTypedContradictionReceipts,
 } from "../src/lib/reasoningReceipts.js";
-import { claudeMessages, grokChat, providerFallbacksEnabled } from "./_llm";
+import {
+  claudeAnalystModel,
+  claudeMessages,
+  grokAnalystModel,
+  grokChat,
+  grokUsageFromChat,
+  providerFallbacksEnabled,
+} from "./_llm";
+import {
+  buildEyeQuestionTelemetry,
+  claudeUsageFromMessages,
+  normalizeGrokUsage,
+  publicEyeTelemetry,
+  type EyeProvider,
+  type EyeUsage,
+} from "./_eyeTelemetry";
 
 // Exact-version storage verification performs bounded organization-scoped reads
 // before the model call. Keep enough headroom for both stages to fail closed.
@@ -886,6 +901,7 @@ function parseGroundedAnswer(
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const questionStartedAt = Date.now();
   if (req.method !== "POST") { res.status(405).json({ error: "POST required" }); return; }
   const body = parseBody(req);
   if (!body) { res.status(400).json({ error: "invalid JSON body" }); return; }
@@ -985,6 +1001,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     let rawAnswer = "";
+    let answerProvider: EyeProvider | null = null;
+    let answerModel = "";
+    let answerUsage: EyeUsage = { inputTokens: null, outputTokens: null };
     if (xai) {
       const grok = await grokChat({
         key: xai,
@@ -993,7 +1012,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         maxTokens: 1300,
         timeoutMs: 24000,
       });
-      if (grok.ok) rawAnswer = grok.text.trim();
+      if (grok.ok) {
+        rawAnswer = grok.text.trim();
+        answerProvider = "grok";
+        answerModel = grokAnalystModel();
+        answerUsage = normalizeGrokUsage(grokUsageFromChat(grok.data));
+      }
       else if (!providerFallbacksEnabled() || !anthropic) {
         res.status(200).json({ available: true, note: `grok ${grok.status || "failed"}`, investigationRoute });
         return;
@@ -1012,6 +1036,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
       rawAnswer = claude.text.trim();
+      answerProvider = "claude";
+      answerModel = claudeAnalystModel();
+      answerUsage = claudeUsageFromMessages(claude.data);
     }
     const grounded = parseGroundedAnswer(rawAnswer, allowedSourceUrls, {
       hasProjectAttributions: Array.isArray(packet.projectAttributions) && packet.projectAttributions.length > 0,
@@ -1024,6 +1051,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
       return;
     }
+    if (!answerProvider) throw new Error("answer provider missing");
+    const graphPathReceipt = record(investigationRoute.graphPathReceipt);
+    const contradictions = Array.isArray(investigationRoute.contradictions)
+      ? investigationRoute.contradictions
+      : [];
+    const graphReceiptRequired = investigationRoute.reasoningMode === "trace_connection";
+    const contradictionReceiptRequired = investigationRoute.reasoningMode === "challenge_thesis";
+    const receiptCompleteness = {
+      graphPath: !graphReceiptRequired || Object.keys(graphPathReceipt).length > 0,
+      contradictions: !contradictionReceiptRequired || Array.isArray(contradictions),
+      citations: grounded.basis !== "cited_evidence" || grounded.citations.length > 0,
+      complete: false,
+    };
+    receiptCompleteness.complete = receiptCompleteness.graphPath
+      && receiptCompleteness.contradictions
+      && receiptCompleteness.citations;
+    const telemetryEvent = buildEyeQuestionTelemetry({
+      organizationId: auth.organizationId,
+      reportVersionId,
+      question,
+      provider: answerProvider,
+      model: answerModel,
+      usage: answerUsage,
+      latencyMs: Date.now() - questionStartedAt,
+      route: investigationRoute,
+      answerBasis: grounded.basis,
+      abstained: grounded.basis === "not_established",
+      receiptCompleteness,
+    });
     res.status(200).json({
       available: true,
       reportVersionId,
@@ -1034,6 +1090,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       uncertainties: grounded.uncertainties,
       whatWouldChange: grounded.whatWouldChange,
       investigationRoute,
+      telemetry: publicEyeTelemetry(telemetryEvent),
     });
   } catch {
     res.status(200).json({ available: true, note: "Ask failed. No report-grounded answer was produced.", investigationRoute });

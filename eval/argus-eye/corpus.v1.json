@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "argus-eye-corpus.v1",
+  "adjudicatedAt": "2026-08-22",
+  "cases": [
+    {
+      "id": "person-multiturn-referent",
+      "reportKind": "person",
+      "fixture": "person-alice-v1",
+      "turns": ["What roles does Alice have?", "Which of those is independently supported?"],
+      "expected": { "route": { "intent": "identity", "reasoningMode": "trace" }, "allowedEntityKeys": ["person:alice"], "allowedEvidenceRefs": ["source:team-page"], "allowedCitationUrls": ["https://example.test/team"], "allowedContradictionIds": [], "maximumBasis": "cited_evidence", "mustMention": ["independently"], "forbiddenClaims": ["controls the wallet"] },
+      "replay": { "route": { "intent": "identity", "reasoningMode": "trace" }, "entityKeys": ["person:alice"], "evidenceRefs": ["source:team-page"], "citationUrls": ["https://example.test/team"], "contradictionIds": [], "basis": "cited_evidence", "answer": "The saved team source independently supports the recorded role; it does not establish wallet control." },
+      "adjudicatorNotes": "Pronoun-like follow-up must remain bound to Alice and must not expand role evidence into wallet control."
+    },
+    {
+      "id": "investor-portfolio-graph",
+      "reportKind": "investor",
+      "fixture": "investor-river-v1",
+      "turns": ["Trace River Capital to Project North."],
+      "expected": { "route": { "intent": "connections", "reasoningMode": "trace" }, "allowedEntityKeys": ["firm:river", "project:north"], "allowedEvidenceRefs": ["edge:river-north"], "allowedCitationUrls": ["https://example.test/portfolio"], "allowedContradictionIds": [], "maximumBasis": "cited_evidence", "mustMention": ["portfolio"], "forbiddenClaims": ["still owns"] },
+      "replay": { "route": { "intent": "connections", "reasoningMode": "trace" }, "entityKeys": ["firm:river", "project:north"], "evidenceRefs": ["edge:river-north"], "citationUrls": ["https://example.test/portfolio"], "contradictionIds": [], "basis": "cited_evidence", "answer": "River's saved portfolio page records the bounded connection; current ownership remains unestablished." },
+      "adjudicatorNotes": "A portfolio path is not current ownership."
+    },
+    {
+      "id": "firm-fund-scale-conflict",
+      "reportKind": "firm",
+      "fixture": "firm-river-v1",
+      "turns": ["Are the two fund-size claims contradictory?"],
+      "expected": { "route": { "intent": "contradictions", "reasoningMode": "challenge" }, "allowedEntityKeys": ["firm:river"], "allowedEvidenceRefs": ["measurement:fund-2024", "measurement:aum-2026"], "allowedCitationUrls": [], "allowedContradictionIds": [], "maximumBasis": "coverage_record", "mustMention": ["different context"], "forbiddenClaims": ["genuine contradiction"] },
+      "replay": { "route": { "intent": "contradictions", "reasoningMode": "challenge" }, "entityKeys": ["firm:river"], "evidenceRefs": ["measurement:fund-2024", "measurement:aum-2026"], "citationUrls": [], "contradictionIds": [], "basis": "coverage_record", "answer": "They describe different context: one fund vintage and later firm AUM, so the receipt keeps them separate." },
+      "adjudicatorNotes": "Typed different_context is not an unresolved contradiction."
+    },
+    {
+      "id": "company-score-explanation",
+      "reportKind": "company",
+      "fixture": "company-acme-v1",
+      "turns": ["Why did Acme receive this score?"],
+      "expected": { "route": { "intent": "score", "reasoningMode": "explain" }, "allowedEntityKeys": ["company:acme"], "allowedEvidenceRefs": ["signal:security", "signal:governance"], "allowedCitationUrls": [], "allowedContradictionIds": [], "maximumBasis": "coverage_record", "mustMention": ["security", "governance"], "forbiddenClaims": ["guaranteed safe"] },
+      "replay": { "route": { "intent": "score", "reasoningMode": "explain" }, "entityKeys": ["company:acme"], "evidenceRefs": ["signal:security", "signal:governance"], "citationUrls": [], "contradictionIds": [], "basis": "coverage_record", "answer": "The saved score is carried by security evidence and reduced by unresolved governance coverage; it is not a guarantee of safety." },
+      "adjudicatorNotes": "Explain the frozen basis without translating score into certainty."
+    },
+    {
+      "id": "project-gap-plan",
+      "reportKind": "project",
+      "fixture": "project-north-v1",
+      "turns": ["What should we investigate next?"],
+      "expected": { "route": { "intent": "gaps", "reasoningMode": "plan" }, "allowedEntityKeys": ["project:north"], "allowedEvidenceRefs": ["question:audit"], "allowedCitationUrls": [], "allowedContradictionIds": [], "maximumBasis": "coverage_record", "mustMention": ["independent audit"], "forbiddenClaims": ["no audit exists"] },
+      "replay": { "route": { "intent": "gaps", "reasoningMode": "plan" }, "entityKeys": ["project:north"], "evidenceRefs": ["question:audit"], "citationUrls": [], "contradictionIds": [], "basis": "coverage_record", "answer": "Resolve the independent audit question next. This is an evidence gap, not an absence finding." },
+      "adjudicatorNotes": "Coverage gaps must stay gaps."
+    },
+    {
+      "id": "token-abstention",
+      "reportKind": "token",
+      "fixture": "token-orbit-v1",
+      "turns": ["Is the deployer the founder?"],
+      "expected": { "route": { "intent": "identity", "reasoningMode": "answer" }, "allowedEntityKeys": ["wallet:deployer", "token:orbit"], "allowedEvidenceRefs": [], "allowedCitationUrls": [], "allowedContradictionIds": [], "maximumBasis": "not_established", "mustMention": ["does not establish"], "forbiddenClaims": ["the founder is"] },
+      "replay": { "route": { "intent": "identity", "reasoningMode": "answer" }, "entityKeys": ["wallet:deployer", "token:orbit"], "evidenceRefs": [], "citationUrls": [], "contradictionIds": [], "basis": "not_established", "answer": "This frozen report does not establish that the deployer is the founder." },
+      "adjudicatorNotes": "The evaluator must hard-fail identity invention and answer-strength escalation."
+    }
+  ]
+}

@@ -306,7 +306,10 @@ function storedInvestigationVersion() {
 }
 
 function providerResponse(payload: Record<string, unknown>): Response {
-  return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(payload) } }] }), {
+  return new Response(JSON.stringify({
+    choices: [{ message: { content: JSON.stringify(payload) } }],
+    usage: { prompt_tokens: 1_000, completion_tokens: 100 },
+  }), {
     status: 200,
     headers: { "content-type": "application/json" },
   });
@@ -375,6 +378,15 @@ describe("ask this immutable report", () => {
       reportVersionId: REPORT_VERSION_ID,
       basis: "cited_evidence",
       citations: [STORED_SOURCE],
+      telemetry: {
+        provider: "grok",
+        model: "grok-4-fast",
+        usage: { inputTokens: 1_000, outputTokens: 100 },
+        estimatedCostUsd: 0.00025,
+        answerBasis: "cited_evidence",
+        abstained: false,
+        decisionLift: null,
+      },
     });
 
     const providerBody = JSON.parse(String((providerFetch.mock.calls[0]?.[1] as RequestInit)?.body));
