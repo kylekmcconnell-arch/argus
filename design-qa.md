@@ -49,6 +49,38 @@ final result: passed
 
 ---
 
+# Public early-access home design QA (2026-08-23)
+
+## Comparison target
+
+- Source visual truth: `docs/design-qa/public-access-home-2026-08-23/source-landing.png`
+- Desktop implementation: `docs/design-qa/public-access-home-2026-08-23/implementation-desktop-v1.png`
+- Mobile implementation: `docs/design-qa/public-access-home-2026-08-23/implementation-mobile-v1.png`
+- Side-by-side comparison: `docs/design-qa/public-access-home-2026-08-23/comparison-v1.png`
+- Viewports: 1440 × 1000 desktop and 390 × 844 mobile
+- State: logged out, empty early-access code
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- Typography and hierarchy retain the authenticated landing's exact decision-first headline, display treatment, restrained eyebrow, and compact supporting copy.
+- The public page removes workspace navigation, decision cards, and report-method detail because those controls require membership. The remaining login and code-entry actions are visible without competing with the headline.
+- The existing ARGUS eye, brand-green iris, neutral page tokens, line treatment, radii, and mono labels are reused. No new visual asset or one-off icon language was introduced.
+- Desktop keeps the eye as a quiet counterweight. Mobile removes the decorative eye so the headline and access form remain above the fold without horizontal overflow.
+- An empty code cannot be submitted. Entered codes normalize to uppercase before the guarded join flow receives them. Login and request-access paths remain separate and explicit.
+
+## Interaction checks
+
+- Entered `argus-7`, observed `ARGUS-7`, and submitted it through the preview callback.
+- Selected `Log in` and observed the preview callback.
+- Confirmed the request-access link targets `/?view=join`.
+- Confirmed desktop and mobile accessible structure includes one named access-code field, a disabled empty submit action, and an explicit login control.
+
+final result: passed
+
+---
+
 # Design QA — brand-green landing eye (2026-08-23)
 
 - Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-23 at 12.08.33 AM.png`
