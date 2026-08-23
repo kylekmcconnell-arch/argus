@@ -174,7 +174,7 @@ export function Landing({
           </aside>
         </div>
 
-        <section aria-labelledby="investigation-lenses-title" className="mt-12 border-t border-line/70 pt-8">
+        <section aria-labelledby="investigation-lenses-title" className="mt-10 border-t border-line/70 pt-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="eyebrow">How the report resolves the decision</div>
@@ -184,19 +184,21 @@ export function Landing({
               See how ARGUS works <ArrowRightIcon size={14} aria-hidden />
             </button>
           </div>
-          <div className="landing-lens-sequence mt-6 grid divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div className="landing-lens-sequence mt-5 grid divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             {INVESTIGATION_LENSES.map(({ icon: Icon, title, detail }, index) => (
-              <div key={title} className="relative py-5 sm:px-8 sm:first:pl-0 sm:last:pr-0">
-                <span className="landing-lens-number">{index + 1}</span>
-                <Icon size={22} className="mt-4 text-ink-dim" aria-hidden />
-                <h3 className="mt-3 text-[15px] font-medium text-ink">{title}</h3>
-                <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">{detail}</p>
+              <div key={title} className="landing-lens-item relative py-4 sm:px-8 sm:first:pl-0 sm:last:pr-0">
+                <div className="landing-lens-heading">
+                  <span className="landing-lens-number">{String(index + 1).padStart(2, "0")}</span>
+                  <Icon size={20} className="text-ink-dim" aria-hidden />
+                  <h3 className="text-[15px] font-medium text-ink">{title}</h3>
+                </div>
+                <p className="landing-lens-detail mt-2.5 text-[12.5px] leading-relaxed text-ink-dim">{detail}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <div className="pt-10 text-[11px] text-ink-faint">Research only · not financial advice</div>
+        <div className="pt-7 text-[11px] text-ink-faint">Research only · not financial advice</div>
       </div>
     </div>
   );

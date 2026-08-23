@@ -1710,7 +1710,23 @@ h1.display-sm {
 .landing-focus-select:focus-visible { border-color: var(--color-brand); box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-brand) 14%, transparent); }
 .landing-method-rail { border-left: 1px solid var(--color-line); padding-left: clamp(1.5rem, 3vw, 2.5rem); }
 .landing-method-eye { display: flex; min-height: 190px; align-items: center; justify-content: center; }
-.landing-lens-number { font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--color-brand); }
+.landing-lens-heading { display: grid; grid-template-columns: auto 20px minmax(0, 1fr); align-items: center; gap: .65rem; }
+.landing-lens-number {
+  display: inline-flex;
+  min-width: 30px;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in oklab, var(--color-brand) 26%, var(--color-line));
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-brand) 7%, var(--color-panel));
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 620;
+  letter-spacing: .08em;
+  color: var(--color-brand);
+}
+.landing-lens-detail { padding-left: 4.15rem; }
 
 /* Logged-out entry — intentionally quieter than the authenticated workspace. */
 .public-access-home { display: flex; flex-direction: column; }
@@ -1842,6 +1858,7 @@ h1.display-sm {
   .landing-command-meta { align-items: flex-start; }
   .landing-focus-control { width: 100%; flex-direction: column; align-items: flex-start; gap: .45rem; }
   .landing-focus-select-wrap, .landing-focus-select { width: 100%; }
+  .landing-lens-detail { padding-left: 0; }
   .public-access-codebar { grid-template-columns: minmax(0, 1fr); overflow: visible; border: 0; background: transparent; box-shadow: none; }
   .public-access-codebar input { min-height: 54px; border: 1px solid var(--color-control-line); border-radius: var(--radius-md); background: var(--color-panel); }
   .public-access-codebar button { margin-top: .65rem; border-radius: var(--radius-md); }

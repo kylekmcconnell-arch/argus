@@ -49,6 +49,48 @@ final result: passed
 
 ---
 
+# Design QA — compact landing question sequence (2026-08-23)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-23 at 10.55.16 AM.png`
+- Desktop implementation: `docs/design-qa/landing-lenses-2026-08-23/implementation-desktop-v2.png`
+- Mobile implementation: `docs/design-qa/landing-lenses-2026-08-23/implementation-mobile-v1.png`
+- Focused side-by-side comparison: `docs/design-qa/landing-lenses-2026-08-23/comparison-v1.png`
+- Source pixels: 2880 × 866
+- Focused implementation pixels: 1057 × 321
+- Mobile implementation pixels: 390 × 844
+- Viewports: 1440 × 900 desktop and 390 × 844 mobile at browser-normalized 1× capture density
+- State: authenticated light-theme New Investigation preview, default research focus, empty subject input
+- Normalization: the source and focused desktop implementation were each normalized to 1400px wide and placed in one side-by-side comparison. The source is a high-density, content-only crop; the implementation is the rendered main-content region without application chrome.
+
+## Findings and comparison history
+
+The source stacked the step number, icon, heading, and description as four separate vertical beats, leaving each question visually suspended in a tall column. That was the only actionable P2 issue in the first comparison.
+
+The implementation fixes it by placing a two-digit step marker, the existing Phosphor icon, and the question on one shared baseline. Supporting copy follows immediately underneath, section padding is reduced, and the research disclaimer closes the page sooner. The three desktop columns still share equal tracks and separators; mobile keeps the sequence stacked but each item remains a compact two-beat row. The post-fix comparison and mobile capture show no remaining actionable P0, P1, or P2 differences.
+
+## Required fidelity surfaces
+
+- Fonts and typography: the existing ARGUS display, body, and mono hierarchy is preserved. The smaller mono marker now behaves as sequence metadata instead of a separate content row.
+- Spacing and layout rhythm: the section header gap, item padding, marker-to-title spacing, and footer gap are reduced. Desktop content aligns on one shared header baseline; mobile retains readable separation without the original tall stacks.
+- Colors and visual tokens: the marker uses the existing brand, panel, and line tokens with restrained tinting. No new palette or gradient is introduced.
+- Image and asset fidelity: no new imagery is required. Existing Phosphor icons are reused; no custom SVG, CSS illustration, emoji, or placeholder asset is introduced.
+- Copy and content: all three questions, explanations, the How ARGUS works action, and the research disclaimer remain unchanged.
+
+## Verification
+
+- Focused Landing tests: 4 passed.
+- Production build: passed.
+- Mobile body and document widths equal the 390px viewport; no horizontal overflow.
+- Browser console: 0 errors and 0 warnings after the final mobile render.
+
+## Follow-up polish
+
+- No P3 follow-up is required for this scoped refinement.
+
+final result: passed
+
+---
+
 # Public early-access home design QA (2026-08-23)
 
 ## Comparison target
