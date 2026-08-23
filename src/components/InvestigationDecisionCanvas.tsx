@@ -66,6 +66,29 @@ function CaseColumn({ id, title, tone, items, emptyCopy, pushNote, challengeAnch
         : tone === "signal" ? "var(--color-signal)"
           : "var(--color-ink-faint)";
   const pushable = Boolean(pushNote && challengeAnchorId);
+  const visibleItems = items.slice(0, 3);
+  const additionalItems = items.slice(3);
+
+  const renderItem = (item: DecisionCanvasItem, index: number, keyPrefix: string) => {
+    const label = plainDecisionText(item.label);
+    return (
+      <li key={`${keyPrefix}-${index}`} className="border-b border-line/60 py-3 pl-5 text-[15px] leading-relaxed text-ink" style={{ position: "relative" }}>
+        <span aria-hidden="true" className="absolute left-0 top-3" style={{ color: headerColor }}>–</span>
+        {label}
+        {item.detail && <span className="mt-0.5 block text-[12.5px] leading-snug text-ink-faint">{plainDecisionText(item.detail)}</span>}
+        {pushable && (
+          <button
+            type="button"
+            onClick={() => requestChallenge(label, challengeAnchorId!)}
+            className="mono mt-1.5 block cursor-pointer text-[10px] font-medium uppercase tracking-[0.12em] text-caution opacity-80 transition hover:opacity-100"
+          >
+            Challenge · add what we&#39;re missing ›
+          </button>
+        )}
+      </li>
+    );
+  };
+
   return (
     <section id={id} className="min-w-0 scroll-mt-28">
       <h3
@@ -76,27 +99,22 @@ function CaseColumn({ id, title, tone, items, emptyCopy, pushNote, challengeAnch
         {pushable && <span className="text-ink-faint"> · click to push</span>}
       </h3>
       {items.length ? (
-        <ul aria-label={title}>
-          {items.map((item, index) => {
-            const label = plainDecisionText(item.label);
-            return (
-              <li key={`${title}-${index}`} className="border-b border-line/60 py-3 pl-5 text-[15px] leading-relaxed text-ink" style={{ position: "relative" }}>
-                <span aria-hidden="true" className="absolute left-0 top-3" style={{ color: headerColor }}>–</span>
-                {label}
-                {item.detail && <span className="mt-0.5 block text-[12.5px] leading-snug text-ink-faint">{plainDecisionText(item.detail)}</span>}
-                {pushable && (
-                  <button
-                    type="button"
-                    onClick={() => requestChallenge(label, challengeAnchorId!)}
-                    className="mono mt-1.5 block cursor-pointer text-[10px] font-medium uppercase tracking-[0.12em] text-caution opacity-80 transition hover:opacity-100"
-                  >
-                    Challenge · add what we&#39;re missing ›
-                  </button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <ul aria-label={title}>
+            {visibleItems.map((item, index) => renderItem(item, index, title))}
+          </ul>
+          {additionalItems.length > 0 && (
+            <details className="decision-evidence-more group border-b border-line/60">
+              <summary className="mono flex min-h-11 cursor-pointer list-none items-center gap-2 py-2.5 text-[10.5px] font-medium uppercase tracking-[0.1em] text-signal-lift [&::-webkit-details-marker]:hidden">
+                <span>Review {additionalItems.length} more evidence {additionalItems.length === 1 ? "point" : "points"}</span>
+                <span aria-hidden="true" className="text-[9px] transition-transform group-open:rotate-180">▾</span>
+              </summary>
+              <ul aria-label={`Additional ${title.toLowerCase()}`}>
+                {additionalItems.map((item, index) => renderItem(item, index, `${title}-additional`))}
+              </ul>
+            </details>
+          )}
+        </>
       ) : (
         <p className="mt-3 text-[12.5px] leading-relaxed text-ink-faint">{emptyCopy}</p>
       )}
@@ -209,10 +227,10 @@ export function InvestigationDecisionCanvas({
     <section id="report-summary" className="story-chapter report-section mt-6 scroll-mt-28">
       <header className="report-section-heading">
         <div>
-          <p className="eyebrow text-signal-lift">01 · Short answer</p>
-          <h2 className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">The case in 30 seconds</h2>
+          <p className="eyebrow text-signal-lift">01 · Decision brief</p>
+          <h2 className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">The decision in one screen</h2>
           <p className="story-chapter-description mt-2 max-w-2xl leading-relaxed text-ink-dim">
-            The strongest support, the main concerns, and the most important unanswered questions.
+            What holds, what could break, and the evidence that would change the call.
           </p>
         </div>
         <div className="shrink-0 text-left sm:text-right">

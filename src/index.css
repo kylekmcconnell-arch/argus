@@ -405,6 +405,51 @@
   border-radius: 12px;
   filter: drop-shadow(0 12px 22px color-mix(in oklab, var(--color-void) 12%, transparent));
 }
+.decision-argument-card {
+  min-height: 112px;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  padding: 14px;
+  background: color-mix(in oklab, var(--color-panel-2) 34%, transparent);
+}
+.decision-argument-support dt {
+  color: var(--color-pass);
+}
+.decision-argument-concern {
+  border-color: color-mix(in oklab, var(--color-caution) 38%, var(--color-line));
+  background: color-mix(in oklab, var(--color-caution) 5%, var(--color-panel));
+}
+.decision-argument-concern dt {
+  color: var(--color-caution);
+}
+.decision-argument-change dt {
+  color: var(--color-signal-lift);
+}
+.decision-evidence-more summary:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+}
+.evidence-appendix {
+  border-top: 1px solid var(--color-line-2);
+  border-bottom: 1px solid var(--color-line);
+}
+.evidence-appendix-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 2px;
+}
+.evidence-appendix-summary:focus-visible {
+  border-radius: 8px;
+  outline: 2px solid var(--color-signal);
+  outline-offset: 4px;
+}
+.evidence-appendix-body {
+  border-top: 1px solid var(--color-line);
+  padding-bottom: 18px;
+}
 .clearance-boundary {
   border-color: color-mix(in oklab, var(--tint) 34%, var(--color-line));
   background:
@@ -481,6 +526,13 @@
   }
   .investigation-story-cover::before {
     inset-inline: -8px;
+  }
+  .evidence-appendix-summary {
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .decision-argument-card {
+    min-height: auto;
   }
 }
 

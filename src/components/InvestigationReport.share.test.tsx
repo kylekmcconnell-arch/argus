@@ -611,13 +611,13 @@ describe("investigation exact sharing", () => {
     const chapterLabels = [...container.querySelectorAll<HTMLElement>(".story-chapter .report-section-heading > div > .eyebrow")]
       .map((label) => label.textContent);
     expect(chapterLabels).toEqual([
-      "01 · Short answer",
+      "01 · Decision brief",
       "02 · Why",
       "03 · Market",
       "04 · People",
       "05 · Connections",
       "06 · Challenge",
-      "07 · Scan details",
+      "07 · Method",
     ]);
     expect(container.textContent).toContain("What ARGUS checked");
     expect(container.textContent).not.toContain("What to verify next");
@@ -656,11 +656,11 @@ describe("investigation exact sharing", () => {
       .map((link) => link.getAttribute("href"));
     expect(hrefs).toEqual([
       "#report-summary",
-      "#investigation-why",
+      "#report-risks",
       "#investigation-visuals",
       "#investigation-people",
-      "#investigation-challenge",
       "#investigation-methodology",
+      "#investigation-challenge",
     ]);
     for (const href of hrefs) {
       expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();

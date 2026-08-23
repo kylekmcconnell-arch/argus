@@ -1487,40 +1487,75 @@ export function InvestigationReport({
             </div>
           )}
 
-          <div className="investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          <div className="investigation-story-nav sticky top-[101px] z-20 mt-5 sm:top-[65px]">
+            <ReportCanvasSectionNav
+              sticky={false}
+              label="Report story"
+              items={[
+                { href: "#report-summary", label: "Brief", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
+                { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
+                { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
+                { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
+                ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
+                ...(token.axes?.length ? [{ href: "#composition" as const, label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> }] : []),
+                { href: "#investigation-methodology", label: "Method", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
+                ...(!shareView ? [{ href: "#investigation-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
+              ]}
+            />
+          </div>
+
+          <InvestigationDecisionCanvas
+            verdictLabel={observedTokenMeta.label}
+            favorable={favorableVerdict}
+            verdictTone={decisionCanvasTone}
+            argument={verdictArgument}
+            decisionLensId={projectAccount?.intelligence ? decisionLensId : undefined}
+            onDecisionLensChange={projectAccount?.intelligence ? setDecisionLensId : undefined}
+            supports={supportItems}
+            concerns={concernItems}
+            context={intelligenceBrief.context.map((item) => ({
+              label: item.title,
+              detail: `${item.detail} ${item.provenance}`.trim(),
+            }))}
+            nextSteps={nextStepItems}
+            verified={verifiedItems}
+            openQuestions={openQuestionItems}
+            coveragePercent={readiness.coveragePercent}
+            successful={readiness.successful}
+            applicable={readiness.applicable}
+            capturedAt={capturedAt}
+            evidenceHref="#investigation-evidence"
+            methodologyHref="#investigation-methodology"
+            challengeAnchorId={shareView ? null : "investigation-challenge"}
+          />
+
+          <div className={`investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 ${readiness.status === "ready" ? "" : "xl:grid-cols-3"}`}>
+            {readiness.status !== "ready" && (
             <section
-              className={`panel investigation-hero-card flex flex-col ${readiness.status === "ready" ? "p-5" : "order-2 p-4 lg:p-5"}`}
-              aria-label={readiness.status === "ready" ? "Risk score" : "Preliminary risk score"}
+              className="panel investigation-hero-card order-2 flex flex-col p-4 lg:p-5"
+              aria-label="Preliminary risk score"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="eyebrow">{readiness.status === "ready" ? "Risk score" : "Preliminary risk score"}</span>
-                {readiness.status === "ready" ? (
-                  <VerdictPill verdict={token.verdict} score={token.score} large />
-                ) : (
-                  <StatusPill
-                    label="EARLY SCORE"
-                    color="var(--color-caution)"
-                    score={token.score}
-                    title="This is an unfinished score, not a PASS or investment verdict."
-                  />
-                )}
+                <span className="eyebrow">Preliminary risk score</span>
+                <StatusPill
+                  label="EARLY SCORE"
+                  color="var(--color-caution)"
+                  score={token.score}
+                  title="This is an unfinished score, not a PASS or investment verdict."
+                />
               </div>
-              <div className={`${readiness.status === "ready" ? "mt-4" : "mt-2.5"} flex items-center gap-4`}>
-                {readiness.status !== "ready" && (
-                  <ScoreRing
-                    score={token.score}
-                    verdict={token.verdict}
-                    size={104}
-                    bands={false}
-                  />
-                )}
+              <div className="mt-2.5 flex items-center gap-4">
+                <ScoreRing
+                  score={token.score}
+                  verdict={token.verdict}
+                  size={104}
+                  bands={false}
+                />
                 <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-ink-dim">
-                  {readiness.status === "ready"
-                    ? "This score uses the checks that finished. It is not an approval to buy or invest."
-                    : "Based only on finished checks. Do not rely on this score until the required checks finish."}
+                  Based only on finished checks. Do not rely on this score until the required checks finish.
                 </p>
               </div>
-              <div className={`${readiness.status === "ready" ? "mt-auto" : "mt-3"} border-t border-line/70 pt-3`}>
+              <div className="mt-3 border-t border-line/70 pt-3">
                 <p className="mono text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Score only · not financial advice</p>
                 <ScoreContextStrip
                   subjectRef={token.address}
@@ -1530,6 +1565,7 @@ export function InvestigationReport({
                 />
               </div>
             </section>
+            )}
 
             <section
               className={`panel investigation-hero-card investigation-readiness-card flex flex-col p-5 tint-var ${readiness.status === "ready" ? "" : "order-1"}`}
@@ -1604,11 +1640,19 @@ export function InvestigationReport({
               </div>
             </section>
 
-            <section className={`panel investigation-hero-card investigation-market-card p-5 lg:col-span-2 xl:col-span-1 ${readiness.status === "ready" ? "" : "order-3"}`} aria-label="Market size">
+            <section className={`panel investigation-hero-card investigation-market-card p-5 ${readiness.status === "ready" ? "" : "order-3 lg:col-span-2 xl:col-span-1"}`} aria-label="Market size">
               <div className="flex items-center justify-between gap-3">
-                <span className="eyebrow">Market size</span>
+                <span className="eyebrow">Market and ownership</span>
                 {establishedAsset && <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-signal-lift">Large market</span>}
               </div>
+              {token.safety?.lpTopUnlockedEoaPct != null && token.safety.lpTopUnlockedEoaPct >= 50 && (
+                <a href="#investigation-visuals" className="mt-3 block rounded-lg border border-caution/40 bg-caution/5 px-3 py-2.5 hover:border-caution/70">
+                  <span className="mono text-[10px] uppercase tracking-[0.1em] text-caution">Primary control risk</span>
+                  <span className="mt-1 block text-[13px] font-medium leading-snug text-ink">
+                    {token.safety.lpTopUnlockedEoaPct.toFixed(0)}% of liquidity is held by one unlocked wallet
+                  </span>
+                </a>
+              )}
               <div className="mt-4">
                 <p className="display-sm text-[27px] leading-none text-ink">{money(marketCap)}</p>
                 <p className="mono mt-1.5 text-[10px] uppercase tracking-[0.1em] text-ink-faint">Current market value</p>
@@ -1637,14 +1681,30 @@ export function InvestigationReport({
             </section>
           </div>
 
+          {noticedSignals.length > 0 && (
+            <section className="panel mt-3 p-4" aria-label="What Argus noticed">
+              <NoticedRail signals={noticedSignals} />
+            </section>
+          )}
+
           {/* the composition: the file's table of contents, Auric File framing.
               The account's dimensions lead with the team; the token's follow.
-              Two recorded scores stay two honest strips, never blended. */}
+              Two recorded scores stay two honest strips, never blended. The
+              full ledger is progressively disclosed after the decision brief. */}
           {token.axes?.length > 0 && (
-            <section id="composition" className="af-doc mt-10 scroll-mt-28">
-              <p className="af-sec-label">The composition</p>
-              <h2 className="af-h2 mt-3">{accountAxes.length > 0 ? "Every dimension. Two honest scores." : compositionHeadline(token.axes.length)}</h2>
-              <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
+            <details id="composition" className="evidence-appendix af-doc group mt-8 scroll-mt-28">
+              <summary className="evidence-appendix-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <div>
+                  <p className="af-sec-label">Evidence ledger</p>
+                  <h2 className="af-h2 mt-2">{accountAxes.length > 0 ? "Two separate scores. Every dimension preserved." : compositionHeadline(token.axes.length)}</h2>
+                  <p className="af-prose mt-2">Open the complete score math and every evidence chapter.</p>
+                </div>
+                <span className="mono shrink-0 text-[10.5px] uppercase tracking-[0.1em] text-signal-lift">
+                  <span className="group-open:hidden">Open evidence</span>
+                  <span className="hidden group-open:inline">Close evidence</span>
+                </span>
+              </summary>
+              <div className="evidence-appendix-body">
             {accountAxes.length > 0 && (
               <ScoreComposition
                 heading={`The project account · ${projectAccount?.handle ?? "its own 100"}`}
@@ -1674,29 +1734,23 @@ export function InvestigationReport({
               capNote={token.capApplied ? `limited to ${token.score}` : null}
               challengeAnchor={shareView ? null : "#investigation-challenge"}
             />
-            </section>
-          )}
-
-          {/* the reading spine: Auric File chapters only (Enigma: do not use
+            {/* the reading spine: Auric File chapters only (Enigma: do not use
               the dossier-beats layout here; it stays available as the
               standalone sharing format). */}
-          <div className="af-doc">
-          {projectAccount?.projectStrengthBands && (
-            <DimensionChapters
-              chapters={personDimensionChapters(projectAccount.projectStrengthBands)}
-              checksHref="#investigation-methodology"
-            />
-          )}
-          <DimensionChapters
-            chapters={tokenDimensionChapters(token)}
-            checksHref="#investigation-methodology"
-          />
-          </div>
-
-          {noticedSignals.length > 0 && (
-            <section className="panel mt-3 p-4" aria-label="What Argus noticed">
-              <NoticedRail signals={noticedSignals} />
-            </section>
+                <div className="af-doc">
+                {projectAccount?.projectStrengthBands && (
+                  <DimensionChapters
+                    chapters={personDimensionChapters(projectAccount.projectStrengthBands)}
+                    checksHref="#investigation-methodology"
+                  />
+                )}
+                <DimensionChapters
+                  chapters={tokenDimensionChapters(token)}
+                  checksHref="#investigation-methodology"
+                />
+                </div>
+              </div>
+            </details>
           )}
 
           {(requiredGapChecks.length > 0 || readiness.status !== "ready") && <section
@@ -1782,48 +1836,6 @@ export function InvestigationReport({
           )}
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
-
-        <div className="investigation-story-nav sticky top-[101px] z-20 mt-6 sm:top-[65px]">
-          <ReportCanvasSectionNav
-            sticky={false}
-            label="Report story"
-            items={[
-              ...(token.axes?.length ? [{ href: "#composition" as const, label: "The composition", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              { href: "#report-summary", label: "The short answer", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
-              ...(projectAccount?.intelligence ? [{ href: "#decision-intelligence" as const, label: "Deep dive", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              { href: "#investigation-why", label: "Why", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
-              ...(!shareView ? [{ href: "#investigation-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              { href: "#investigation-methodology", label: "Scan details", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
-            ]}
-          />
-        </div>
-
-        <InvestigationDecisionCanvas
-          verdictLabel={observedTokenMeta.label}
-          favorable={favorableVerdict}
-          verdictTone={decisionCanvasTone}
-          argument={verdictArgument}
-          decisionLensId={projectAccount?.intelligence ? decisionLensId : undefined}
-          onDecisionLensChange={projectAccount?.intelligence ? setDecisionLensId : undefined}
-          supports={supportItems}
-          concerns={concernItems}
-          context={intelligenceBrief.context.map((item) => ({
-            label: item.title,
-            detail: `${item.detail} ${item.provenance}`.trim(),
-          }))}
-          nextSteps={nextStepItems}
-          verified={verifiedItems}
-          openQuestions={openQuestionItems}
-          coveragePercent={readiness.coveragePercent}
-          successful={readiness.successful}
-          applicable={readiness.applicable}
-          capturedAt={capturedAt}
-          evidenceHref="#investigation-evidence"
-          methodologyHref="#investigation-methodology"
-        />
 
         {projectAccount?.intelligence && (
           <PointInTimeIntelligencePanel
@@ -2372,9 +2384,9 @@ export function InvestigationReport({
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="story-chapter story-chapter-muted report-section mt-7">
           <ReportSectionHeading
-            index={chapterLabel(scanDetailsChapterNumber, "Scan details")}
-            title="What ARGUS checked"
-            description="Open each list to see what finished, what needs attention, and what could not be completed."
+            index={chapterLabel(scanDetailsChapterNumber, "Method")}
+            title="Method and raw evidence"
+            description="What ARGUS checked, what finished, and what stayed open. The full audit trail remains available without competing with the decision story above."
           />
           <div className="mt-3 space-y-3">
             <MethodologyChecklist
@@ -2410,10 +2422,18 @@ export function InvestigationReport({
             source read, launch provenance, tokenomics, checklist - shares the
             1h scan cache with the standalone Threat scan surface. */}
         {!shareView && (
-          <div className="mt-4 panel p-5">
-            <div className="eyebrow mb-1">Threat scan</div>
-            <EmbeddedThreatScan address={token.address} chain={token.chain} />
-          </div>
+          <details className="panel group mt-4 overflow-hidden">
+            <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
+              <span>
+                <span className="eyebrow block">Threat flags · lower is better</span>
+                <span className="mt-1 block text-[12px] text-ink-faint">Open the separate contract threat scanner and its raw categories.</span>
+              </span>
+              <span aria-hidden="true" className="mono text-[10px] uppercase tracking-[0.1em] text-signal-lift transition-transform group-open:rotate-180">▾</span>
+            </summary>
+            <div className="border-t border-line px-5 pb-5 pt-3">
+              <EmbeddedThreatScan address={token.address} chain={token.chain} />
+            </div>
+          </details>
         )}
 
         <div className="mt-4 panel p-4 text-[12.5px] leading-relaxed text-ink-faint">
