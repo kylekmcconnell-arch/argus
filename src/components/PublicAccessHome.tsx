@@ -38,7 +38,7 @@ export function PublicAccessHome({
             Start with the decision.<br />ARGUS builds the evidence.
           </h1>
           <p className="mt-6 max-w-[610px] text-[15px] leading-relaxed text-ink-dim">
-            Forensic due diligence for people, projects, tokens, and websites—built into one clear report.
+            Forensic due diligence for people, projects, tokens, and websites, built into one clear report.
           </p>
 
           <form onSubmit={submit} className="mt-10 max-w-[600px]">
@@ -74,7 +74,7 @@ export function PublicAccessHome({
         <aside className="public-access-eye rise-in" aria-label="ARGUS intelligence">
           <ArgusMark size={210} live motion="focused" tone="brand" />
           <p className="mt-7 max-w-[250px] text-center text-[12px] leading-relaxed text-ink-faint">
-            Evidence, risks, and unanswered questions—clearly separated.
+            Evidence, risks, and unanswered questions, clearly separated.
           </p>
         </aside>
       </main>
