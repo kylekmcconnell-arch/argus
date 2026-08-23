@@ -48,7 +48,8 @@ export function FeedbackButton() {
       <button
         type="button"
         onClick={() => dialogRef.current?.showModal()}
-        className="group fixed bottom-4 right-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-signal/40 bg-signal text-white shadow-lg transition hover:w-[124px] hover:justify-start hover:gap-2 hover:px-3 focus-visible:w-[124px] focus-visible:justify-start focus-visible:gap-2 focus-visible:px-3"
+        className="feedback-launcher group fixed z-50 flex h-11 w-11 items-center justify-center rounded-full border border-signal/40 bg-signal text-white shadow-lg transition hover:w-[124px] hover:justify-start hover:gap-2 hover:px-3 focus-visible:w-[124px] focus-visible:justify-start focus-visible:gap-2 focus-visible:px-3"
+        data-testid="feedback-launcher"
         aria-label="Give feedback to the ARGUS team"
       >
         <ChatCenteredTextIcon size={19} aria-hidden />

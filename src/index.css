@@ -1154,6 +1154,39 @@ h1.display-sm {
   .argus-eye-evidence-pulse { opacity: 0; }
 }
 
+/* Global floating actions share one bottom-right rail. The secondary feedback
+   launcher sits above ARGUS Eye instead of competing for the same hit target.
+   While the Eye panel is open, feedback yields the rail so it cannot sit under
+   the panel. Safe-area insets keep both controls clear of mobile browser chrome. */
+.argus-eye-assistant {
+  right: calc(env(safe-area-inset-right, 0px) + 1rem);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+}
+
+.feedback-launcher {
+  right: calc(env(safe-area-inset-right, 0px) + 1rem);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 5rem);
+}
+
+:root:has(.argus-eye-assistant [aria-expanded="true"]) .feedback-launcher {
+  visibility: hidden;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(0.5rem);
+}
+
+@media (min-width: 640px) {
+  .argus-eye-assistant {
+    right: calc(env(safe-area-inset-right, 0px) + 1.25rem);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
+  }
+
+  .feedback-launcher {
+    right: calc(env(safe-area-inset-right, 0px) + 1.25rem);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 5.25rem);
+  }
+}
+
 /* Print / export-PDF: strip the app chrome so a threat report saves clean. */
 /* Export PDF: the website on paper. src/lib/printTheme.ts flips the app to the
    light theme for the print pass, so every token below IS the site's own light

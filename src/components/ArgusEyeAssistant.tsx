@@ -307,7 +307,7 @@ export function ArgusEyeAssistant({
   };
 
   return (
-    <div id={anchorId} className="fixed bottom-4 right-4 z-[70] sm:bottom-5 sm:right-5" data-testid="argus-eye-assistant">
+    <div id={anchorId} className="argus-eye-assistant fixed z-[70]" data-testid="argus-eye-assistant">
       {open && (
         <section
           id="argus-eye-panel"

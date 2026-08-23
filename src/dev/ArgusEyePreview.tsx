@@ -1,6 +1,7 @@
 import type { Investigation } from "../lib/investigation";
 import { AuthContext } from "../auth-context";
 import { AppShell } from "../components/AppShell";
+import { FeedbackButton } from "../components/FeedbackButton";
 import { InvestigationReport } from "../components/InvestigationReport";
 
 const REPORT_VERSION_ID = "00000000-0000-4000-8000-000000000777";
@@ -238,6 +239,7 @@ export function ArgusEyePreview() {
       role: "owner",
       signOut: async () => undefined,
     }}>
+      <FeedbackButton />
       <AppShell onNav={() => undefined} onAudit={() => undefined} activeHandle="$STONKBROKER" view="audit">
         <InvestigationReport
           inv={inv}
