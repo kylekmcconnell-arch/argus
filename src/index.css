@@ -22,6 +22,12 @@
   --color-accent-tint: #1d1d1f;
   --color-eye-pupil: #050505;
 
+  /* ARGUS identity green. Kept separate from semantic pass states so brand
+     emphasis never changes the meaning of report evidence. */
+  --color-brand: #00c805;
+  --color-brand-dim: #00a904;
+  --color-on-brand: #061006;
+
   --color-pass: #00c805;
   --color-caution: #d68a00;
   --color-fail: #eb5151;
@@ -77,6 +83,10 @@
   --color-on-signal: #ffffff;
   --color-accent-tint: #ececea;
   --color-eye-pupil: #141414;
+
+  --color-brand: #00a86b;
+  --color-brand-dim: #008f5b;
+  --color-on-brand: #04120d;
 
   --color-pass: #00a86b;
   --color-caution: #b87300;
@@ -537,12 +547,12 @@
 }
 
 .sidebar-nav-active {
-  background: var(--color-ink);
-  color: var(--color-void);
-  box-shadow: none;
+  background: var(--color-brand);
+  color: var(--color-on-brand);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 18%, transparent);
 }
 .sidebar-nav-active:hover {
-  background: color-mix(in oklab, var(--color-ink) 88%, var(--color-void));
+  background: color-mix(in oklab, var(--color-brand) 86%, var(--color-brand-dim));
 }
 .app-sidebar .sidebar-case-active {
   background: var(--color-panel-2);
@@ -748,6 +758,14 @@ summary {
 }
 .btn-primary:disabled {
   opacity: 0.4;
+}
+
+.btn-brand {
+  background: var(--color-brand);
+  color: var(--color-on-brand);
+}
+.btn-brand:hover {
+  background: color-mix(in oklab, var(--color-brand) 86%, var(--color-brand-dim));
 }
 
 .landing-cta-signal {

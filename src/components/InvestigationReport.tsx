@@ -1340,7 +1340,7 @@ export function InvestigationReport({
           </span>
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {onOpenBrief && (
-              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact investigation case" className="btn-primary flex min-h-11 shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium">
+              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact investigation case" className="btn-primary btn-brand flex min-h-11 shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium">
                 <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
               </button>
             )}

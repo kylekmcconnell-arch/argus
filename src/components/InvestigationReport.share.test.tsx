@@ -223,6 +223,7 @@ describe("investigation exact sharing", () => {
     const caseBrief = [...(toolbar?.querySelectorAll("button") ?? [])]
       .find((button) => button.textContent?.includes("Case brief"));
     expect(caseBrief?.className).toContain("btn-primary");
+    expect(caseBrief?.className).toContain("btn-brand");
     expect(caseBrief?.className).not.toContain("hidden");
     const mobileActions = toolbar?.querySelector("details");
     expect(mobileActions?.textContent).toContain("Challenge report");
