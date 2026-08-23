@@ -798,12 +798,10 @@ function collectProvenanceRows(
 }
 
 const unbindProvenanceRow = (row: JsonRecord): JsonRecord => {
-  const {
-    organization_id: _organizationId,
-    report_version_id: _reportVersionId,
-    attestation_state: _attestationState,
-    ...unbound
-  } = row;
+  const unbound = { ...row };
+  delete unbound.organization_id;
+  delete unbound.report_version_id;
+  delete unbound.attestation_state;
   return unbound;
 };
 

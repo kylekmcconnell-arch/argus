@@ -284,7 +284,8 @@ describe("ARGUS Eye floating assistant", () => {
     vi.stubGlobal("fetch", fetchMock);
     act(() => root.render(<ArgusEyeAssistant subject="@alice" reportVersionId={reportVersionId} />));
     clickByLabel("Ask ARGUS Eye about this report");
-    const prompt = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("investment thesis"));
+    const prompt = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("change the conclusion"));
+    expect(prompt).toBeTruthy();
     await act(async () => prompt!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 
     expect(container.textContent).toContain("Bounded evidence-gap investigation");

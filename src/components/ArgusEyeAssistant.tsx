@@ -586,7 +586,9 @@ export function ArgusEyeAssistant({
                           {typeof answer.followUp.observedCostUsd === "number" && (
                             <p className="mt-1 text-ink-faint">
                               Observed estimated cost ${answer.followUp.observedCostUsd.toFixed(2)}
-                              {answer.followUp.costOutcome === "estimate_exceeded" ? " · ceiling exceeded, proposal marked partial" : " · within ceiling"}
+                              {answer.followUp.costOutcome === "estimate_exceeded"
+                                ? " · approved ceiling reached; the proposal remains inactive and needs more evidence"
+                                : " · within ceiling"}
                             </p>
                           )}
                           {(answer.followUp.state === "proposed" || answer.followUp.state === "partial") && (
