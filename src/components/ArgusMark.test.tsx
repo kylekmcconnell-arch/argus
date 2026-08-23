@@ -23,10 +23,19 @@ describe("ARGUS eye marks", () => {
     expect(svg.querySelectorAll('circle[fill="var(--color-on-signal)"]')).toHaveLength(1);
     expect(svg.querySelector('circle[fill="var(--color-void)"]')).toBeNull();
     expect(svg.getAttribute("data-argus-eye-state")).toBe("idle");
+    expect(svg.getAttribute("data-argus-eye-tone")).toBe("neutral");
     expect(svg.getAttribute("aria-hidden")).toBe("true");
     expect(svg.getAttribute("focusable")).toBe("false");
     expect(svg.querySelector(".argus-eye-live-ring")).toBeNull();
     expect(svg.querySelector(".argus-eye-evidence-pulse")).toBeNull();
+  });
+
+  it("uses the ARGUS identity green when the brand tone is requested", () => {
+    const svg = renderSvg(<ArgusMark size={32} tone="brand" />);
+
+    expect(svg.getAttribute("data-argus-eye-tone")).toBe("brand");
+    expect(svg.querySelectorAll('circle[fill="var(--color-brand)"]')).toHaveLength(1);
+    expect(svg.querySelector('circle[fill="var(--color-signal)"]')).toBeNull();
   });
 
   it("moves the complete live iris as one searching eye and pulses on evidence", () => {

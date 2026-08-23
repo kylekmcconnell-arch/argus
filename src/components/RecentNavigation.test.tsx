@@ -19,7 +19,11 @@ vi.mock("../auth-context", () => ({
   }),
 }));
 
-vi.mock("./ArgusMark", () => ({ ArgusMark: () => <span>ARGUS</span> }));
+vi.mock("./ArgusMark", () => ({
+  ArgusMark: ({ size, tone }: { size?: number; tone?: string }) => (
+    <svg data-argus-eye-tone={tone} width={size} height={size} aria-hidden="true" />
+  ),
+}));
 vi.mock("../lib/watchlist", () => ({ getWatchlist: () => [] }));
 vi.mock("../lib/analyst", () => ({ getAnalyst: () => "Kyle McConnell" }));
 vi.mock("../lib/avatars", () => ({ auditImage: () => null }));
@@ -97,15 +101,19 @@ describe("Recent report controls", () => {
       );
     });
 
-    expect(container.textContent).toContain("v3.0");
+    expect(container.textContent).not.toContain("v3.0");
     expect(container.textContent).not.toContain("v2.2");
+
+    const brandMark = container.querySelector<SVGSVGElement>('aside svg[data-argus-eye-tone="brand"]');
+    expect(brandMark?.getAttribute("width")).toBe("32");
+    expect(brandMark?.getAttribute("height")).toBe("32");
 
     const activeNav = container.querySelector<HTMLButtonElement>('aside button[aria-current="page"]');
     expect(activeNav).not.toBeNull();
     expect(activeNav?.className.split(/\s+/)).toContain("sidebar-nav-active");
     const activeRail = activeNav?.querySelector<HTMLElement>('span.absolute[aria-hidden="true"]');
     expect(activeRail).not.toBeNull();
-    expect(activeRail?.className.split(/\s+/)).toEqual(expect.arrayContaining(["inset-y-1", "left-0", "w-[2px]", "bg-on-signal/80"]));
+    expect(activeRail?.className.split(/\s+/)).toEqual(expect.arrayContaining(["inset-y-1", "left-0", "w-[2px]", "bg-on-brand/75"]));
 
     const sidebarLink = [...container.querySelectorAll<HTMLAnchorElement>("aside a")]
       .find((link) => link.textContent?.includes("@gakonst") && link.textContent.includes("handle"));
