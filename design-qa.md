@@ -1,58 +1,48 @@
-**Source visual truth**
+# Design QA — investigation report storytelling
 
-- `/Users/kyle/Downloads/Screenshot 2026-08-22 at 4.49.57 PM.png`
-- Source pixels: 3396 × 2112 (`@2x`; 1698 × 1056 CSS-equivalent desktop viewport).
-- State: authenticated `$STONKBROKER` investigation report, dark theme, desktop sidebar and report toolbar visible.
+- Source visual truth: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/stonkbroker-report-audit/01-verdict-opening.png`
+- Implementation screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/stonkbroker-report-implementation/design-qa-implementation-mobile-top.png`
+- Combined comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/stonkbroker-report-implementation/design-qa-comparison-mobile.png`
+- Additional responsive evidence: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/stonkbroker-report-implementation/design-qa-implementation-desktop.png`, `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/stonkbroker-report-implementation/design-qa-implementation-mobile-expanded.png`
+- Source pixels: 673 × 1513
+- Implementation pixels: 658 × 1173 from a 673 × 1200 CSS viewport; the in-app browser excludes its scrollbar from the captured image width
+- Density normalization: source and implementation were compared at the same 673px design width; the implementation was scaled from 658px to 673px only for the side-by-side comparison
+- State: light theme, saved `$STONKBROKER` report, evidence ledger collapsed for the primary comparison
 
-**Implementation evidence**
+## Findings
 
-- Browser-rendered dark screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/argus-green-accent/implementation-dark.png`
-- Browser-rendered light screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/argus-green-accent/implementation-light.png`
-- Full comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/argus-green-accent/comparison-full.png`
-- Focused header comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/argus-green-accent/comparison-focus.png`
-- Implementation pixels: 3396 × 2112 (`deviceScaleFactor: 2`; 1698 × 1056 CSS viewport).
-- Density normalization: source browser chrome was removed with a 56 px top crop; source and implementation content were compared at equal pixel width and equal 2056 px content height.
-- State: desktop report shell, selected navigation, dark and light themes, Case Brief visible.
+No actionable P0, P1, or P2 differences remain.
 
-**Findings**
+- The prior visual truth led with the verdict but then repeated the 93 score in a separate card before reaching the decision brief. The implementation keeps the existing verdict and provenance treatment, removes the duplicate ready-state score card, and places the decision brief immediately beneath the story navigation.
+- The approved editorial hierarchy is visible at the first viewport: verdict → clear section navigation → strongest evidence / sharpest concern / change condition → ranked support and concern lists.
+- The sharpest concern has a distinct amber boundary and remains text-labeled; meaning does not rely on color alone.
+- Evidence is not removed. Additional support/concern items and the complete score ledger remain available through native, keyboard-operable disclosure controls.
+- The narrow layout has no document-level horizontal overflow (`document.body.scrollWidth` 662px at a 673px viewport). The section navigation retains its intentional internal horizontal scrolling behavior.
+- The evidence disclosure was opened in-browser and exposed all five score rows. No console warnings or errors were recorded in the clean verification tab.
 
-- No actionable P0/P1/P2 differences remain on the four requested surfaces.
-- The green selected navigation is intentionally more prominent than the black source state and remains visually contained within the existing rail geometry.
-- The Case Brief button changes from neutral white/black to the same ARGUS green without changing its size, placement, or interaction affordance.
-- The eye grows from 26 to 32 CSS px and keeps the existing dotted vector asset; only its iris changes to brand green.
-- The `v3.0` chip is cleanly removed without leaving a visible spacing gap.
+## Required fidelity surfaces
 
-**Required fidelity surfaces**
+- Fonts and typography: existing ARGUS sans/mono hierarchy is preserved. The verdict remains the primary display statement; evidence metadata remains mono; the decision brief adds no unrelated font treatment.
+- Spacing and layout rhythm: the new decision argument uses three equal cards on wide screens and a single readable stack on narrow screens. Above-the-fold hierarchy is materially clearer without compressing body copy.
+- Colors and visual tokens: only existing pass, caution, signal, ink, panel, and line tokens are used. No new palette or gradient was introduced.
+- Image quality and asset fidelity: no new raster or illustrative assets were required. Existing Phosphor icons and ARGUS report primitives are reused; no CSS, inline-SVG, emoji, or placeholder art was added.
+- Copy and content: the original score, verdict, support, concern, check progress, saved timestamp, and evidence language remain present. Navigation uses the approved plain labels: Brief, Risks, Market, People, Evidence, Method, Challenge.
 
-- Fonts and typography: unchanged families, weights, sizes, line heights, and wrapping. The focused comparison shows no typography drift caused by the accent pass.
-- Spacing and layout rhythm: the 64 px sidebar header, 248 px rail, toolbar height, pill radii, and control spacing remain stable. No document-level horizontal overflow was detected.
-- Colors and visual tokens: dark brand `rgb(0, 200, 5)` on `rgb(6, 16, 6)` is 8.54:1; light brand `rgb(0, 168, 107)` on `rgb(4, 18, 13)` is 6.21:1. Both exceed WCAG AA for normal text.
-- Image quality and asset fidelity: the existing ARGUS vector mark is retained at 32 CSS px with no rasterization, halo, crop, or replacement asset.
-- Copy and content: only `v3.0` is removed. Report copy, evidence, scores, labels, and toolbar actions are unchanged.
+## Interaction checks
 
-**Primary interactions tested**
+- Story navigation renders and resolves to report anchors.
+- Evidence disclosure starts collapsed and opens successfully.
+- Five score rows appear after opening the evidence ledger.
+- Additional evidence disclosures preserve items beyond the three ranked leads.
+- No Vite error overlay appeared.
+- Clean verification tab console: 0 errors, 0 warnings.
 
-- Selected navigation renders with `aria-current="page"` and the brand foreground/background pair.
-- Case Brief renders as the existing primary action with the additive `btn-brand` treatment.
-- Theme switching was verified in light and dark rendered states.
-- Browser console warnings/errors: none in the final capture harness.
+## Comparison history
 
-**Comparison history**
+First comparison: no P0/P1/P2 fidelity issues were found. The implementation intentionally omits application chrome in the dev-only visual harness; production verification will cover the authenticated report shell after deployment. No visual-fix loop was required.
 
-- Initial pass: implementation screenshot capture was blocked by the selected in-app browser.
-- Fix: user approved a headless browser solely for pixel capture. A real browser render was captured at the source viewport and combined with the source image.
-- Post-fix evidence: `comparison-full.png` and `comparison-focus.png` show the requested emphasis changes without P0/P1/P2 layout, typography, asset, or copy regressions.
+## Follow-up polish
 
-**Implementation checklist**
-
-- [x] Use ARGUS green for active navigation.
-- [x] Remove the sidebar version badge.
-- [x] Increase the sidebar eye and color its iris with the brand token.
-- [x] Use the same brand green for Case Brief.
-- [x] Verify both themes, contrast, responsive width, interactions, console, tests, typecheck, build, and lint.
-
-**Follow-up polish**
-
-- None required for this scope.
+- P3: consider replacing the persistent provenance legend with a small help popover in a later iteration. It remains unchanged here to avoid reducing evidence transparency.
 
 final result: passed
