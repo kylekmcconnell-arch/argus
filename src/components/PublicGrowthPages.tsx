@@ -35,7 +35,7 @@ export function PublicNav({ current }: { current: "leaderboard" | "pricing" | "j
         {link("leaderboard", "Leaderboard")}
         {link("pricing", "Pricing")}
         {link("join", "Request access")}
-        <a href="/" className="btn-primary px-3 py-1.5 text-[12.5px]">Sign in</a>
+        <a href="/?view=login" className="btn-primary px-3 py-1.5 text-[12.5px]">Sign in</a>
       </nav>
     </header>
   );

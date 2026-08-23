@@ -6,6 +6,7 @@ import {
   type AuthValue,
 } from "./auth-context";
 import { ArgusMark } from "./components/ArgusMark";
+import { PublicAccessHome } from "./components/PublicAccessHome";
 import { WaitlistPortal } from "./components/WaitlistPortal";
 import {
   createAuthenticatedFetch,
@@ -183,6 +184,17 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [passkeySending, setPasskeySending] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
   const [authenticatedButDenied, setAuthenticatedButDenied] = useState(false);
+  const [showSignIn, setShowSignIn] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("view") === "login",
+  );
+
+  useEffect(() => {
+    const syncPublicRoute = () => {
+      setShowSignIn(new URLSearchParams(window.location.search).get("view") === "login");
+    };
+    window.addEventListener("popstate", syncPublicRoute);
+    return () => window.removeEventListener("popstate", syncPublicRoute);
+  }, []);
 
   const validate = useCallback(async (session: Session | null, validationId: number) => {
     setProfile(null);
@@ -334,18 +346,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
   };
 
-  if (!authConfigured) {
-    return (
-      <GateShell>
-        <h1 className="mt-6 text-[20px] font-medium tracking-[-0.01em] text-ink">Authentication setup required</h1>
-        <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
-          Set <span className="mono text-ink">VITE_SUPABASE_URL</span> and{" "}
-          <span className="mono text-ink">VITE_SUPABASE_PUBLISHABLE_KEY</span>, then rebuild ARGUS.
-        </p>
-      </GateShell>
-    );
-  }
-
   if (loading) {
     return (
       <GateShell>
@@ -377,8 +377,56 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (!authenticatedButDenied && !showSignIn) {
+    return (
+      <PublicAccessHome
+        onLogin={() => {
+          window.history.pushState({}, "", "/?view=login");
+          setShowSignIn(true);
+        }}
+        onCode={(code) => {
+          window.location.assign(`/?view=join&ref=${encodeURIComponent(code)}`);
+        }}
+      />
+    );
+  }
+
+  if (!authConfigured) {
+    return (
+      <GateShell>
+        <button
+          type="button"
+          onClick={() => {
+            window.history.pushState({}, "", "/");
+            setShowSignIn(false);
+          }}
+          className="mt-6 text-[12px] text-ink-dim underline underline-offset-4 hover:text-ink"
+        >
+          Back to home
+        </button>
+        <h1 className="mt-5 text-[20px] font-medium tracking-[-0.01em] text-ink">Authentication setup required</h1>
+        <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
+          Set <span className="mono text-ink">VITE_SUPABASE_URL</span> and{" "}
+          <span className="mono text-ink">VITE_SUPABASE_PUBLISHABLE_KEY</span>, then rebuild ARGUS.
+        </p>
+      </GateShell>
+    );
+  }
+
   return (
     <GateShell>
+      {!authenticatedButDenied && (
+        <button
+          type="button"
+          onClick={() => {
+            window.history.pushState({}, "", "/");
+            setShowSignIn(false);
+          }}
+          className="mt-6 text-[12px] text-ink-dim underline underline-offset-4 hover:text-ink"
+        >
+          Back to home
+        </button>
+      )}
       <h1 className="mt-6 text-[20px] font-medium tracking-[-0.01em] text-ink">
         {authenticatedButDenied ? "Access not provisioned" : "Investigator sign in"}
       </h1>
