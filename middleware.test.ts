@@ -180,7 +180,7 @@ describe("Case Brief middleware policy", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("meters an analyst augmentation POST", async () => {
+  it("allows an analyst augmentation POST without a hidden daily API counter", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         id: "00000000-0000-4000-8000-000000000010",
@@ -190,8 +190,7 @@ describe("Case Brief middleware policy", () => {
         organization_id: "00000000-0000-4000-8000-000000000001",
         role: "analyst",
         active: true,
-      }]))
-      .mockResolvedValueOnce(jsonResponse([{ allowed: true, remaining: 299 }]));
+      }]));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await middleware(new Request("https://argus.example/api/augment", {
@@ -202,7 +201,8 @@ describe("Case Brief middleware policy", () => {
 
     expect(response.status).toBe(204);
     expect(next).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/rest/v1/rpc/consume_usage_quota"))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/rest/v1/rpc/consume_usage_quota"))).toBe(false);
   });
 
   it("requires owner access for augmentation review views", async () => {
@@ -275,7 +275,7 @@ describe("Case Brief middleware policy", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("allows and meters an owner augmentation PATCH decision", async () => {
+  it("allows an owner augmentation PATCH decision without a hidden daily API counter", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         id: "00000000-0000-4000-8000-000000000010",
@@ -285,8 +285,7 @@ describe("Case Brief middleware policy", () => {
         organization_id: "00000000-0000-4000-8000-000000000001",
         role: "owner",
         active: true,
-      }]))
-      .mockResolvedValueOnce(jsonResponse([{ allowed: true, remaining: 1499 }]));
+      }]));
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await middleware(new Request("https://argus.example/api/augment", {
@@ -297,18 +296,11 @@ describe("Case Brief middleware policy", () => {
 
     expect(response.status).toBe(204);
     expect(next).toHaveBeenCalledTimes(1);
-    const quotaCall = fetchMock.mock.calls.find(([input]) => String(input).includes("/rest/v1/rpc/consume_usage_quota"));
-    expect(quotaCall).toBeDefined();
-    expect(JSON.parse(String(quotaCall?.[1]?.body))).toMatchObject({
-      p_organization_id: "00000000-0000-4000-8000-000000000001",
-      p_user_id: "00000000-0000-4000-8000-000000000010",
-      p_route: "/api/augment",
-      p_metadata: { method: "PATCH" },
-      p_units: 1,
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/rest/v1/rpc/consume_usage_quota"))).toBe(false);
   });
 
-  it("fails open (allows) when the usage quota RPC is unreachable", async () => {
+  it("does not consult usage accounting before a protected report write", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         id: "00000000-0000-4000-8000-000000000010",
@@ -318,43 +310,18 @@ describe("Case Brief middleware policy", () => {
         organization_id: "00000000-0000-4000-8000-000000000001",
         role: "owner",
         active: true,
-      }]))
-      .mockResolvedValueOnce(jsonResponse({ error: "statement timeout" }, 503));
+      }]));
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await middleware(new Request("https://argus.example/api/augment", {
-      method: "PATCH",
+    const response = await middleware(new Request("https://argus.example/api/report", {
+      method: "POST",
       headers: { authorization: "Bearer owner-token", "content-type": "application/json" },
-      body: JSON.stringify({ action: "approve", id: "00000000-0000-4000-8000-000000000101" }),
+      body: "{}",
     }));
 
-    // A transient quota-RPC outage must not hard-block a metered request.
     expect(response.status).toBe(204);
     expect(next).toHaveBeenCalledOnce();
-  });
-
-  it("still enforces a genuine over-budget response with 429", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({
-        id: "00000000-0000-4000-8000-000000000010",
-        email_confirmed_at: "2026-07-11T00:00:00.000Z",
-      }))
-      .mockResolvedValueOnce(jsonResponse([{
-        organization_id: "00000000-0000-4000-8000-000000000001",
-        role: "owner",
-        active: true,
-      }]))
-      .mockResolvedValueOnce(jsonResponse([{ allowed: false, remaining: 0 }]));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const response = await middleware(new Request("https://argus.example/api/augment", {
-      method: "PATCH",
-      headers: { authorization: "Bearer owner-token", "content-type": "application/json" },
-      body: JSON.stringify({ action: "approve", id: "00000000-0000-4000-8000-000000000101" }),
-    }));
-
-    expect(response.status).toBe(429);
-    expect(next).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not allow a viewer to mutate Case Brief", async () => {

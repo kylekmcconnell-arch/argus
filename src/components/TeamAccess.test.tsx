@@ -29,7 +29,7 @@ const pendingMember = {
   lastSignInAt: null,
   createdAt: "2026-07-11T00:39:59.000Z",
   updatedAt: "2026-07-11T00:39:59.000Z",
-  budget: { balance: 10, dailyLimit: 3, lastGrantAt: "2026-07-11T00:39:59.000Z" },
+  budget: { balance: 10, lastGrantAt: "2026-07-11T00:39:59.000Z" },
 };
 
 let container: HTMLDivElement;
@@ -105,7 +105,7 @@ describe("TeamAccess invitation recovery", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await act(async () => root.render(<TeamAccess />));
-    await vi.waitFor(() => expect(container.textContent).toContain("10.0 credits available · 3/day"));
+    await vi.waitFor(() => expect(container.textContent).toContain("10.0 credits available · no daily cap"));
     const add = [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent === "add 5 test credits");
     expect(add).toBeDefined();

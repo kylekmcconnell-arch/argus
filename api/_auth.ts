@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { CREDIT_MILLIS, EARLY_ACCESS_DAILY_LIMIT } from "../src/lib/growth.js";
+import { CREDIT_MILLIS } from "../src/lib/growth.js";
 
 export type ArgusRole = "owner" | "analyst" | "viewer";
 
@@ -251,12 +251,7 @@ export interface QuotaResult {
   remaining: number;
   creditRemaining?: number;
   error?: string;
-  reason?: "daily_investigation_limit_reached" | "credit_budget_exhausted";
-}
-
-function positiveInt(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value || "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  reason?: "credit_budget_exhausted";
 }
 
 export async function consumeInvestigationQuota(
@@ -266,99 +261,42 @@ export async function consumeInvestigationQuota(
 ): Promise<QuotaResult> {
   const credentials = serviceCredentials();
   if (!credentials) return { allowed: false, used: 0, remaining: 0, error: "storage_not_configured" };
-
-  const dailyLimit =
-    auth.role === "owner"
-      ? positiveInt(process.env.ARGUS_OWNER_DAILY_INVESTIGATION_LIMIT, 100)
-      : positiveInt(process.env.ARGUS_DAILY_INVESTIGATION_LIMIT, EARLY_ACCESS_DAILY_LIMIT);
-
-  // The daily investigation limit is a soft guardrail. If the usage RPC is
-  // transiently unreachable (Supabase latency blip, cold connection), fail OPEN
-  // so a bookkeeping hiccup never kills a multi-minute scan the user is waiting
-  // on. Enforcement resumes automatically the moment the RPC recovers, and a
-  // genuine over-limit response (RPC succeeds, allowed=false) is still enforced.
-  const failOpen = (): QuotaResult => ({ allowed: true, used: 0, remaining: dailyLimit });
+  // Owners operate the workspace and are deliberately not credit-limited.
+  // Everyone else uses the visible investigation-credit ledger. There is no
+  // second daily request counter hidden behind that balance.
+  if (auth.role === "owner") return { allowed: true, used: 0, remaining: -1 };
   try {
-    const response = await fetch(`${credentials.url}/rest/v1/rpc/consume_usage_quota`, {
+    const response = await fetch(`${credentials.url}/rest/v1/rpc/consume_investigation_credit`, {
       method: "POST",
       headers: serviceHeaders(credentials.key),
       body: JSON.stringify({
         p_organization_id: auth.organizationId,
         p_user_id: auth.userId,
-        p_event_type: "investigation.started",
-        p_route: route,
-        p_daily_limit: dailyLimit,
-        p_metadata: metadata,
+        p_idempotency_key: `investigation:${auth.userId}:${route}:${crypto.randomUUID()}`,
+        p_cost_millis: CREDIT_MILLIS,
       }),
-      // Fail-open handles a slow RPC, so a modest timeout suffices; kept in step
-      // with the Edge middleware's api.budget check (both ~8s over the ~5s cold
-      // RPC), and short enough not to stall a scan waiting on a wedged call.
       signal: AbortSignal.timeout(8_000),
     });
     if (!response.ok) {
-      console.error("[quota] RPC failed; allowing (fail-open)", response.status, (await response.text()).slice(0, 300));
-      return failOpen();
+      console.error("[credits] ledger RPC failed", response.status, (await response.text()).slice(0, 300));
+      return { allowed: false, used: 0, remaining: 0, error: "credit_ledger_unavailable" };
     }
     const rows = (await response.json()) as unknown;
     const row = Array.isArray(rows) && rows[0] && typeof rows[0] === "object"
       ? (rows[0] as Record<string, unknown>)
       : null;
     if (!row) {
-      console.error("[quota] RPC returned no row; allowing (fail-open)");
-      return failOpen();
+      return { allowed: false, used: 0, remaining: 0, error: "credit_ledger_unavailable" };
     }
-    const daily = {
-      allowed: row.allowed === true,
-      used: typeof row.used === "number" ? row.used : 0,
-      remaining: typeof row.remaining === "number" ? row.remaining : 0,
-    };
-    if (!daily.allowed || auth.role === "owner") return daily;
-
-    try {
-      const utcDate = new Date().toISOString().slice(0, 10);
-      const creditResponse = await fetch(`${credentials.url}/rest/v1/rpc/consume_investigation_credit`, {
-        method: "POST",
-        headers: serviceHeaders(credentials.key),
-        body: JSON.stringify({
-          p_organization_id: auth.organizationId,
-          p_user_id: auth.userId,
-          p_idempotency_key: `investigation:${auth.userId}:${route}:${utcDate}:${daily.used}`,
-          p_cost_millis: CREDIT_MILLIS,
-        }),
-        signal: AbortSignal.timeout(8_000),
-      });
-      if (!creditResponse.ok) {
-        console.error("[quota] credit RPC failed", creditResponse.status, (await creditResponse.text()).slice(0, 300));
-        return { allowed: false, used: daily.used, remaining: daily.remaining, error: "credit_ledger_unavailable" };
-      }
-      const creditRows = (await creditResponse.json()) as unknown;
-      const credit = Array.isArray(creditRows) && creditRows[0] && typeof creditRows[0] === "object"
-        ? creditRows[0] as Record<string, unknown>
-        : null;
-      if (!credit) {
-        return { allowed: false, used: daily.used, remaining: daily.remaining, error: "credit_ledger_unavailable" };
-      }
-      if (credit.allowed !== true) {
-        return {
-          allowed: false,
-          used: daily.used,
-          remaining: daily.remaining,
-          creditRemaining: 0,
-          reason: "credit_budget_exhausted",
-        };
-      }
-      return {
-        ...daily,
-        creditRemaining: typeof credit.balance_millis === "number"
-          ? Math.max(0, credit.balance_millis / CREDIT_MILLIS)
-          : undefined,
-      };
-    } catch (creditError) {
-      console.error("[quota] credit check failed; denying", creditError);
-      return { allowed: false, used: daily.used, remaining: daily.remaining, error: "credit_ledger_unavailable" };
+    const creditRemaining = typeof row.balance_millis === "number"
+      ? Math.max(0, row.balance_millis / CREDIT_MILLIS)
+      : 0;
+    if (row.allowed !== true) {
+      return { allowed: false, used: 0, remaining: creditRemaining, creditRemaining, reason: "credit_budget_exhausted" };
     }
+    return { allowed: true, used: 1, remaining: creditRemaining, creditRemaining };
   } catch (error) {
-    console.error("[quota] check failed; allowing (fail-open)", error);
-    return failOpen();
+    console.error("[credits] ledger check failed", error, metadata);
+    return { allowed: false, used: 0, remaining: 0, error: "credit_ledger_unavailable" };
   }
 }

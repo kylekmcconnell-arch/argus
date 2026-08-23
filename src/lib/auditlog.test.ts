@@ -80,4 +80,18 @@ describe("reconcileAuditOutcome (chip vs active-report truth)", () => {
     reconcileAuditOutcome("@stanikulechov", "person", { verdict: "PASS", score: 80, coverage: "provisional" });
     expect(store.get("argus:auditlog")).toBe(before);
   });
+
+  it("can reconcile a hydrated projection without writing historical rows back", async () => {
+    const store = stubStorage();
+    const fetchMock = vi.mocked(fetch);
+    reconcileAuditOutcome(
+      "@stanikulechov",
+      "person",
+      { verdict: "PASS", score: 82, coverage: "complete" },
+      { persist: false },
+    );
+    await Promise.resolve();
+    expect(JSON.parse(store.get("argus:auditlog")!)[0]).toMatchObject({ score: 82, coverage: "complete" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

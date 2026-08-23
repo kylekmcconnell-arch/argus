@@ -20,7 +20,19 @@ export type ReportLifecycleAction = "archive" | "restore";
 
 export type ReportSyncResult =
   | { state: "persisted"; reportVersionId: string; panelCostToken: string }
-  | { state: "failed" };
+  | { state: "failed"; reason: string };
+
+const RETRYABLE_SAVE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
+function reportSaveFailure(status: number, serverError?: string): string {
+  if (status === 401) return "Your sign-in expired before the report could be saved.";
+  if (status === 403) return "Your account does not have permission to save this report.";
+  if (status === 413) return "The report was too large to save.";
+  if (serverError === "storage_not_configured") return "Report storage is not configured.";
+  return "Report storage did not accept the save.";
+}
+
+const pause = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 export interface ReportSubject {
   kind: ReportKind;
@@ -111,32 +123,66 @@ export async function syncReport(
   verdict?: string,
   score?: number | null,
 ): Promise<ReportSyncResult> {
-  try {
-    const checkRuns = reportChecks(kind, payload);
-    const completenessState = reportCompleteness(kind, payload, checkRuns);
-    const response = await fetch("/api/report", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind, ref, query, payload, verdict, score, checkRuns, completenessState }),
-      signal: AbortSignal.timeout(25_000),
-    });
-    if (!response.ok) return { state: "failed" };
-    const body = (await response.json().catch(() => ({}))) as {
-      reportVersionId?: unknown;
-      panelCostToken?: unknown;
-    };
-    if (typeof body.reportVersionId !== "string" || typeof body.panelCostToken !== "string") {
-      return { state: "failed" };
+  const checkRuns = reportChecks(kind, payload);
+  const completenessState = reportCompleteness(kind, payload, checkRuns);
+  // The server binds this id to the immutable version. Every retry below sends
+  // the same value, so a response lost after a successful commit cannot create
+  // duplicate report versions or charge downstream work twice.
+  const clientRunId = crypto.randomUUID();
+  const requestBody = JSON.stringify({
+    kind,
+    ref,
+    query,
+    payload,
+    verdict,
+    score,
+    checkRuns,
+    completenessState,
+    clientRunId,
+  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch("/api/report", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: requestBody,
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (!response.ok) {
+        if (RETRYABLE_SAVE_STATUS.has(response.status) && attempt < 2) {
+          await pause(250 * (attempt + 1));
+          continue;
+        }
+        const failure = (await response.json().catch(() => ({}))) as { error?: unknown };
+        return {
+          state: "failed",
+          reason: reportSaveFailure(
+            response.status,
+            typeof failure.error === "string" ? failure.error : undefined,
+          ),
+        };
+      }
+      const body = (await response.json().catch(() => ({}))) as {
+        reportVersionId?: unknown;
+        panelCostToken?: unknown;
+      };
+      if (typeof body.reportVersionId !== "string" || typeof body.panelCostToken !== "string") {
+        return { state: "failed", reason: "Report storage returned an incomplete save receipt." };
+      }
+      return {
+        state: "persisted",
+        reportVersionId: body.reportVersionId,
+        panelCostToken: body.panelCostToken,
+      };
+    } catch {
+      if (attempt < 2) {
+        await pause(250 * (attempt + 1));
+        continue;
+      }
+      return { state: "failed", reason: "The report save timed out or lost its connection." };
     }
-    return {
-      state: "persisted",
-      reportVersionId: body.reportVersionId,
-      panelCostToken: body.panelCostToken,
-    };
-  } catch {
-    /* offline or no backend — the session cache still holds it */
-    return { state: "failed" };
   }
+  return { state: "failed", reason: "The report could not be saved." };
 }
 
 export interface StoredReport {

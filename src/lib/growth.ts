@@ -4,7 +4,6 @@ export const REFERRAL_BONUS_MILLIS = 2_000;
 export const REVENUE_SHARE_COMMISSION_BPS = 2_000;
 export const CREDIT_SPLIT_PERCENT = 25;
 export const CASH_SPLIT_PERCENT = 75;
-export const EARLY_ACCESS_DAILY_LIMIT = 3;
 export const MAX_MANUAL_TEST_GRANT_CREDITS = 10;
 export const OBSERVED_REPORT_COST_USD = {
   average: 1.11,
@@ -23,7 +22,6 @@ export const ARGUS_PLANS = [
     monthlyUsd: 0,
     investigationCredits: 10,
     seats: 1,
-    dailyLimit: EARLY_ACCESS_DAILY_LIMIT,
     description: "One-time test budget for admitted testers. No card required.",
   },
   {
@@ -32,7 +30,6 @@ export const ARGUS_PLANS = [
     monthlyUsd: 129,
     investigationCredits: 20,
     seats: 1,
-    dailyLimit: 8,
     extraPack: { credits: 10, usd: 59 },
     description: "For an individual investigator running recurring diligence.",
   },
@@ -42,7 +39,6 @@ export const ARGUS_PLANS = [
     monthlyUsd: 399,
     investigationCredits: 60,
     seats: 5,
-    dailyLimit: 20,
     extraPack: { credits: 10, usd: 59 },
     description: "For diligence teams that need five seats and owner controls.",
   },

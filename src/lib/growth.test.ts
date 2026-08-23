@@ -17,7 +17,7 @@ describe("growth pricing and commission", () => {
   it("keeps one investigation as one credit and a 10-credit tester grant", () => {
     expect(creditsFromMillis(STARTING_CREDIT_MILLIS)).toBe(10);
     expect(ARGUS_PLANS.map((plan) => plan.id)).toEqual(["early_access", "analyst", "team"]);
-    expect(ARGUS_PLANS[0]?.dailyLimit).toBe(3);
+    expect(ARGUS_PLANS.every((plan) => !("dailyLimit" in plan))).toBe(true);
     expect(ARGUS_PLANS[1]?.extraPack).toEqual({ credits: 10, usd: 59 });
   });
 

@@ -228,6 +228,20 @@ change:
 6. Record only observed production behavior as shipped. Keep unverified targets
    labeled as validation work.
 
+## August 23, 2026 reliability policy
+
+ARGUS does not place a hidden daily unit counter in front of report routes or a
+separate daily investigation counter in front of a funded member. Non-owner
+investigations use the visible investigation-credit ledger; owners remain
+unlimited. Authentication and role authorization still apply to every protected
+route. Usage events remain telemetry and never decide whether a report endpoint
+may run or whether a completed report may be saved.
+
+Report persistence retries transient failures with one client run id so a lost
+response cannot create duplicate immutable versions. Loading shared audit
+history is read-only; reconciliation may adjust the browser's current projection
+but may not replay historical rows into the write endpoint.
+
 ## July 14, 2026 reconciliation
 
 Full-clearance coverage policy. A recorded outcome for every applicable check

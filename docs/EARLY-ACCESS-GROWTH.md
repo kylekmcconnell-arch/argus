@@ -8,12 +8,12 @@ ARGUS meters standard investigations with investigation credits instead of expos
 
 ### Launch pricing
 
-| Plan | Monthly price | Included investigations | Seats | Daily guardrail | Additional credits |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Early access | $0 | 10 one-time | 1 | 3/day | not sold |
-| Analyst | $129 | 20/month | 1 | 8/day | $59 per 10 |
-| Team | $399 | 60/month | 5 | 20/day | $59 per 10 |
-| Enterprise | custom | contract | custom | contract | contract |
+| Plan | Monthly price | Included investigations | Seats | Additional credits |
+| --- | ---: | ---: | ---: | ---: |
+| Early access | $0 | 10 one-time | 1 | not sold |
+| Analyst | $129 | 20/month | 1 | $59 per 10 |
+| Team | $399 | 60/month | 5 | $59 per 10 |
+| Enterprise | custom | contract | custom | contract |
 
 A full rescan may later consume more than one credit after sufficient live cost data exists. The first implementation keeps the unit understandable: one standard investigation equals one credit.
 
@@ -39,7 +39,7 @@ Market context is deliberately secondary to measured ARGUS cost. [Nansen Pro](ht
 2. ARGUS emails a one-time link. Opening it proves email possession and places the person on the waitlist, not in the product.
 3. ARGUS then asks them to register a passkey. Subsequent sign-in prefers the discoverable passkey. Email remains recovery.
 4. Rank on the public referral leaderboard (`/?view=leaderboard`) determines earlier product access. Owners can admit a waitlist identity from Access and activity.
-5. Admitted testers receive workspace membership, the 10-credit starting grant, and the early-access daily guardrail.
+5. Admitted testers receive workspace membership and the 10-credit starting grant.
 
 Supabase passkeys are experimental. The relying-party ID must be selected once and kept stable. Production should use the canonical ARGUS domain; previews need allowed origins under the same RP ID or a separate preview Auth project.
 
@@ -47,8 +47,8 @@ Supabase passkeys are experimental. The relying-party ID must be selected once a
 
 - Every admitted tester receives an idempotent 10-credit starting grant.
 - Owners can add five test credits from Access and activity. Each server request is capped at 10 credits and protected by a client-generated idempotency key.
-- Non-owner investigations debit one credit and remain under the 3/day early-access guardrail unless `ARGUS_DAILY_INVESTIGATION_LIMIT` is set.
-- Credit exhaustion fails closed. Daily quota still fails open on storage blips.
+- Non-owner investigations debit one visible credit. There is no separate daily request or investigation cap.
+- Credit exhaustion fails closed. A credit-ledger outage reports an explicit error instead of silently starting unpaid work.
 - The credit ledger is append-only. Adjustments and refunds are new rows, never balance rewrites.
 - Extra credit packs are listed on pricing. Checkout stays off until billing is authorized.
 - A 20-person cohort has a maximum initial allocation of 200 reports: about $222 at the current average provider cost or $452 at p90. This is the beta reserve, not a user charge.

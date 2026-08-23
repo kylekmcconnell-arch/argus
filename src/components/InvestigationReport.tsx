@@ -1430,7 +1430,11 @@ export function InvestigationReport({
         )}
         {(persistenceFailed || persistenceMissingCapability) && (
           <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
-            Post-scan intelligence is paused because this investigation could not be saved. Rescan before spending on supplemental providers.
+            <strong className="block text-ink">This report is visible now, but it was not saved.</strong>
+            <span className="mt-1 block">It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.</span>
+            {inv.persistence?.state === "failed" && inv.persistence.reason && (
+              <span className="mt-1 block text-ink-dim">{inv.persistence.reason}</span>
+            )}
           </div>
         )}
         {showCurrentIntelligence && <RingAlert handle={"$" + token.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}

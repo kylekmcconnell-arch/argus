@@ -5,11 +5,9 @@
 // trace during collection: the token audit calls it on the resolved deployer to
 // record who funded it and any mixer / hacker / sanctioned exposure.
 //
-// Unlike the keyless /api/sanctions screen (viewer-reachable + unmetered), this
-// route is deliberately left analyst-metered by middleware: Arkham is a paid
-// subscription with finite credits, so the daily API-budget gate is the abuse
-// guard against burning them. Budget exhaustion degrades the trace to "not run"
-// (never a false clean), which the checklist records as unknown.
+// Unlike the keyless /api/sanctions screen, this route requires analyst access.
+// Shared caching prevents repeated reads for the same address. Provider usage
+// is recorded as telemetry, but it never blocks the rest of a funded scan.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import { providerAddressKey } from "../src/lib/providerAddress.js";

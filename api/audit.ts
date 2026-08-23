@@ -253,18 +253,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
   if (!quota.allowed) {
-    const tomorrow = new Date();
-    tomorrow.setUTCHours(24, 0, 0, 0);
-    res.setHeader("Retry-After", Math.max(1, Math.ceil((tomorrow.getTime() - Date.now()) / 1_000)));
     res.status(429).json({
-      error: quota.reason === "credit_budget_exhausted"
-        ? "credit_budget_exhausted"
-        : "daily_investigation_limit_reached",
+      error: "credit_budget_exhausted",
       used: quota.used,
       remaining: 0,
-      message: quota.reason === "credit_budget_exhausted"
-        ? "This test budget is used up. Ask your workspace owner to add more investigation credits."
-        : undefined,
+      message: "This test budget is used up. Ask your workspace owner to add more investigation credits.",
     });
     return;
   }
@@ -273,7 +266,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-store, no-transform",
     "x-accel-buffering": "no",
-    "x-argus-quota-remaining": String(quota.remaining),
+    ...(typeof quota.creditRemaining === "number"
+      ? { "x-argus-credit-remaining": String(quota.creditRemaining) }
+      : {}),
     connection: "keep-alive",
   });
   res.flushHeaders?.();
@@ -287,7 +282,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   };
   const emit = (step: TraceStep) => send("step", step);
-  send("quota", { remaining: quota.remaining });
+  if (typeof quota.creditRemaining === "number") {
+    send("credits", { remaining: quota.creditRemaining });
+  }
   const heartbeat = setInterval(() => {
     try {
       res.write(": argus-heartbeat\n\n");

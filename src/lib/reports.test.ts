@@ -11,6 +11,7 @@ import {
   reportChecks,
   reportCompleteness,
   resolveStoredCases,
+  syncReport,
   storedSiteRecon,
 } from "./reports";
 import type { TokenDossier } from "../token/audit";
@@ -68,6 +69,75 @@ describe("person report synchronization", () => {
     expect(checks.length).toBeGreaterThan(1);
     expect(checks.find((check) => check.label === "Profile-photo authenticity")?.status).toBe("unknown");
     expect(reportCompleteness("person", legacyDossier, checks)).toBe("partial");
+  });
+});
+
+describe("report save reliability", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("retries a transient failure with the same idempotent client run id", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "temporarily_unavailable" }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        reportVersionId: "00000000-0000-4000-8000-000000000123",
+        panelCostToken: "signed-panel-token",
+      }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(syncReport(
+      "token",
+      "0x1111111111111111111111111111111111111111",
+      "$TEST",
+      {
+        address: "0x1111111111111111111111111111111111111111",
+        versionContext: {
+          caseId: "00000000-0000-4000-8000-000000000120",
+          reportVersionId: "00000000-0000-4000-8000-000000000121",
+          version: 1,
+          completenessState: "partial",
+          attestationState: "analyst_submitted",
+          methodologyVersion: "test",
+          createdAt: "2026-08-23T00:00:00.000Z",
+          checks: [],
+        },
+      } as unknown as TokenDossier,
+    )).resolves.toMatchObject({ state: "persisted" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const first = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { clientRunId: string };
+    const second = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as { clientRunId: string };
+    expect(first.clientRunId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(second.clientRunId).toBe(first.clientRunId);
+  });
+
+  it("does not retry an authorization failure and returns plain-language state", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "insufficient_role" }), { status: 403 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(syncReport(
+      "token",
+      "0x1111111111111111111111111111111111111111",
+      "$TEST",
+      {
+        address: "0x1111111111111111111111111111111111111111",
+        versionContext: {
+          caseId: "00000000-0000-4000-8000-000000000120",
+          reportVersionId: "00000000-0000-4000-8000-000000000121",
+          version: 1,
+          completenessState: "partial",
+          attestationState: "analyst_submitted",
+          methodologyVersion: "test",
+          createdAt: "2026-08-23T00:00:00.000Z",
+          checks: [],
+        },
+      } as unknown as TokenDossier,
+    )).resolves.toEqual({
+      state: "failed",
+      reason: "Your account does not have permission to save this report.",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
 

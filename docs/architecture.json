@@ -231,7 +231,7 @@
   "entity_facts": "knowledge base: verified facts write-back every audit, fact-level freshness read-through when ARGUS_ENTITY_REUSE=on; source capturedAt governs freshness, not the row updated_at; historical funding and security incidents may carry forward but always trigger a fresh update search; NEVER stores legal/sanctions/adverse; NEVER stores or reuses providerProjection facts (market/TVL/fee captures are regenerated free each run - reuse compounds stale duplicates)",
   "provider_cache": "server/cache.ts",
   "provider_usage_events + report_cost_lines": "cost telemetry",
-  "argus_members": "auth + RBAC + quotas (api/_auth.ts, consume_usage_quota RPC)",
+  "argus_members": "auth + RBAC; analyst investigations debit the visible credit ledger in api/_auth.ts",
   "clientLocal": "src/lib/auditlog.ts localStorage log (reconciled to ACTIVE version on case open)",
   "audit_log": "shared analyst activity rail. The row is written SERVER-side in persistServerDossier keyed client_id = userId:reportVersionId, because the browser-only write silently lost completed scans when a tab crashed between save and render; the client sync uses the same id so both collapse onto one entry"
  },
