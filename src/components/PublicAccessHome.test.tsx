@@ -26,6 +26,9 @@ describe("PublicAccessHome", () => {
     const onLogin = vi.fn();
     await act(async () => root.render(<PublicAccessHome onLogin={onLogin} onCode={vi.fn()} />));
 
+    expect(container.querySelector("h1")?.textContent).toBe("What would you like to investigate?");
+    expect(container.textContent).toContain("Enter a token, wallet, website, project, or person. ARGUS will gather the evidence and explain what it finds.");
+
     const login = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Log in");
     expect(login).toBeTruthy();
     expect(container.querySelector('a[href="/?view=join"]')?.textContent).toBe("Request access");
