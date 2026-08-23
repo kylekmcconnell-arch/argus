@@ -4,7 +4,7 @@ import {
   type ReportCanvasTone,
   type ReportCanvasNarrativeItem,
 } from "./ReportCanvasPrimitives";
-import { plainLanguageSummary } from "../lib/plainLanguage";
+import { publicCheckLabel } from "../lib/plainLanguage";
 import { requestChallenge } from "../lib/challenge";
 import type { VerdictArgument } from "../lib/reportInsights";
 import type { DecisionLensId } from "../intelligence/types";
@@ -16,15 +16,14 @@ export interface DecisionCanvasItem {
 }
 
 function plainDecisionText(value: string): string {
-  return plainLanguageSummary(value)
-    .replace(/\s*\((?:evm|solana)\)\s*/gi, " ")
+  return publicCheckLabel(value)
     .trim()
-    .replace(/^Resolve deployer trail$/i, "Who deployed the contract")
+    .replace(/^Resolve deployer trail$/i, "Who created the token")
     .replace(/^Resolve bytecode fingerprint$/i, "Copied contract code")
-    .replace(/^Check deployer trail$/i, "Who deployed the contract")
+    .replace(/^Check deployer trail$/i, "Who created the token")
     .replace(/^Check bytecode fingerprint$/i, "Copied contract code")
     .replace(/^Resolve wallet clustering$/i, "Connected holder wallets")
-    .replace(/^Resolve operator\s*\/\s*funding trace$/i, "Where the deployer’s funds came from")
+    .replace(/^Resolve operator\s*\/\s*funding trace$/i, "Where the token creator’s funds came from")
     .replace(/^Resolve holder distribution$/i, "Large holder distribution")
     .replace(/^Corroborated on CoinGecko/i, "Listed on CoinGecko")
     .replace(/\bWallet clustering\b/gi, "Connected holder wallets")
@@ -49,7 +48,7 @@ function plainDecisionText(value: string): string {
 /* The case grid, in the storytelling voice: two open columns under mono
    colored headers, hairline rows with a dash marker. This is written for a
    human deciding, not a machine parsing. Items in the pushable column carry
-   "Challenge · add what we're missing", which opens the ask console seeded
+   "Question this finding", which opens the ask console seeded
    with that exact concern. */
 function CaseColumn({ id, title, tone, items, emptyCopy, pushNote, challengeAnchorId }: {
   id?: string;
@@ -82,7 +81,7 @@ function CaseColumn({ id, title, tone, items, emptyCopy, pushNote, challengeAnch
             onClick={() => requestChallenge(label, challengeAnchorId!)}
             className="mono mt-1.5 block cursor-pointer text-[10px] font-medium uppercase tracking-[0.12em] text-caution opacity-80 transition hover:opacity-100"
           >
-            Challenge · add what we&#39;re missing ›
+            Question this finding ›
           </button>
         )}
       </li>
@@ -96,7 +95,7 @@ function CaseColumn({ id, title, tone, items, emptyCopy, pushNote, challengeAnch
         style={{ color: headerColor }}
       >
         {title}
-        {pushable && <span className="text-ink-faint"> · click to push</span>}
+        {pushable && <span className="text-ink-faint"> · open to question</span>}
       </h3>
       {items.length ? (
         <>
@@ -228,14 +227,14 @@ export function InvestigationDecisionCanvas({
       <header className="report-section-heading">
         <div>
           <p className="eyebrow text-signal-lift">01 · Decision brief</p>
-          <h2 className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">The decision in one screen</h2>
+          <h2 className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">What this report means</h2>
           <p className="story-chapter-description mt-2 max-w-2xl leading-relaxed text-ink-dim">
-            What holds, what could break, and the evidence that would change the call.
+            The strongest evidence, the main risks, and what to check next.
           </p>
         </div>
         <div className="shrink-0 text-left sm:text-right">
-          <p className="mono text-[22px] font-semibold tabular-nums text-ink">{coveragePercent}%</p>
-          <p className="mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{successful}/{applicable} checks</p>
+          <p className="mono text-[22px] font-semibold tabular-nums text-ink">{applicable === 0 ? "Not available" : `${coveragePercent}%`}</p>
+          <p className="mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{applicable === 0 ? "No checks saved" : `${successful}/${applicable} checks`}</p>
         </div>
       </header>
 
@@ -268,7 +267,7 @@ export function InvestigationDecisionCanvas({
                 items={countervailingItems}
                 emptyCopy={favorable
                   ? "No risk or major unanswered question is recorded in this saved report."
-                  : "No sourced positive finding is recorded in this saved report."}
+                  : "ARGUS did not confirm a positive finding in this saved report."}
                 pushNote={favorable}
                 challengeAnchorId={challengeAnchorId}
               />
@@ -287,18 +286,22 @@ export function InvestigationDecisionCanvas({
             )}
           </div>
 
-          <aside className="border-t border-line/60 bg-panel-2/20 px-4 py-5 lg:border-l lg:border-t-0" aria-label="Scan progress">
+          <aside className="border-t border-line/60 bg-panel-2/20 px-4 py-5 lg:border-l lg:border-t-0" aria-label="Report checks">
             <section aria-label="Checks finished">
               <div className="flex items-center gap-2">
                 <Database size={17} weight="duotone" aria-hidden="true" className="text-signal-lift" />
-                <h3 className="eyebrow text-ink-dim">Scan progress</h3>
-                <span className="mono ml-auto text-[13.5px] font-semibold text-ink">{coveragePercent}%</span>
+                <h3 className="eyebrow text-ink-dim">Report checks</h3>
+                <span className="mono ml-auto text-[13.5px] font-semibold text-ink">{applicable === 0 ? "Not available" : `${coveragePercent}%`}</span>
               </div>
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line" role="progressbar" aria-label="Checks finished" aria-valuemin={0} aria-valuemax={100} aria-valuenow={coveragePercent}>
-                <div className="h-full rounded-full bg-signal" style={{ width: `${Math.max(0, Math.min(100, coveragePercent))}%` }} />
-              </div>
+              {applicable > 0 && (
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line" role="progressbar" aria-label="Checks finished" aria-valuemin={0} aria-valuemax={100} aria-valuenow={coveragePercent}>
+                  <div className="h-full rounded-full bg-signal" style={{ width: `${Math.max(0, Math.min(100, coveragePercent))}%` }} />
+                </div>
+              )}
               <p className="mt-2 text-[11px] leading-snug text-ink-faint">
-                {successful} finished, {openQuestions.length} open.
+                {applicable === 0
+                  ? "No check results were saved."
+                  : `${successful} finished, ${openQuestions.length} open.`}
               </p>
             </section>
 
@@ -307,7 +310,7 @@ export function InvestigationDecisionCanvas({
                 title="Check next"
                 items={nextSteps}
                 href={methodologyHref}
-                emptyCopy="All checks finished."
+                emptyCopy={applicable === 0 ? "No required check results were saved." : "No checks remain open."}
                 limit={4}
               />
               <DecisionLedgerList

@@ -49,6 +49,65 @@ final result: passed
 
 ---
 
+## Issue #124 follow-up · full investigation-report language
+
+- Source visual truth:
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-audit/01-report-opening.png`
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-audit/03-people.png`
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-audit/04-connections.png`
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-audit/05-method.png`
+- Implementation screenshots:
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-qa/01-opening-desktop-v2.jpg`
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-qa/03-people-desktop-v2.jpg`
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-qa/04-connections-desktop-v3.jpg`
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-qa/05-method-desktop.jpg`
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-qa/06-opening-mobile-390x844.jpg`
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-qa/07-people-mobile-390x844.jpg`
+  - `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/full-report-language-qa/08-method-mobile-390x844.jpg`
+- Viewports: 1280 × 720 desktop and 390 × 844 mobile.
+- Pixel dimensions and density: desktop source and implementation captures are 1280 × 720 and were compared at equal size in the same image input. The in-app browser reports a 1280 × 720 CSS viewport at DPR 2 and returns a normalized 1280 × 720 capture. Mobile captures are 390 × 844 at DPR 1 with no density normalization required.
+- State: light theme, saved `$STONKBROKER` investigation, default disclosures collapsed; connection list and one Technical IDs disclosure were also opened.
+
+### Findings
+
+No actionable P0, P1, or P2 findings remain in the changed report path.
+
+- The decision opening now says what the report means, names the main risk, and says what to check next. A report with no saved check register says `No checks saved` instead of presenting `0/0` as a completed state.
+- People copy distinguishes the project account, the wallet that created the token, people named by the project, and people confirmed by an independent source. Raw role enums and `deployer` no longer appear in the default reading path.
+- Connections use readable node and relationship labels. Canonical node IDs and edge enums remain available only after opening `Readable connection list` and `Technical IDs`.
+- Method navigation now targets the method chapter heading itself. Desktop and mobile captures show the correct landing position.
+- A full DOM reading-path scan found zero default-path occurrences of `deployer`, `project_attributed`, `score floor`, `Evidence record`, `raw evidence`, `Source reported`, `N/A`, `held_by`, `deployed_by`, or `funded_by`.
+
+### Required fidelity surfaces
+
+- Fonts and typography: existing ARGUS display, body, and mono hierarchy is unchanged. Longer public labels wrap cleanly on desktop and mobile without clipping or loss of hierarchy.
+- Spacing and layout rhythm: no CSS, token, radius, shadow, or grid changes were made. Existing cards and chapter spacing remain aligned across the before/after comparisons.
+- Colors and visual tokens: unchanged. Existing pass, caution, signal, ink, panel, and line tokens remain the only colors in the report.
+- Image quality and asset fidelity: no images, logos, illustrations, or icons were added or replaced. Existing Phosphor icons and report primitives remain intact.
+- Copy and content: scores, saved data, sources, and technical IDs remain unchanged. Only deterministic presentation labels, explanatory empty states, and section navigation changed.
+- Responsive behavior: 390 × 844 opening, People, and Method states show clean wrapping, stacked cards, usable controls, and no visible horizontal overflow. The story navigation retains its existing intentional horizontal scroll.
+- Accessibility and behavior: semantic headings, links, buttons, progress state, native details disclosures, and keyboard-operable graph actions remain. The no-check state omits a misleading progressbar.
+
+### Interaction checks
+
+- Brief, Market, People, Connections, Method, and Challenge story links resolve to unique report targets.
+- Method lands with `What ARGUS checked` visible at the top of the chapter.
+- `Readable connection list` opens successfully; `Technical IDs` reveals the unchanged `DEPLOYED_BY`/`HELD_BY` typed records only on request.
+- Shared reports reuse `InvestigationReport`; print and PDF export print the same rendered DOM.
+- Browser console check found one existing React key warning from `LaunchPanel`. That component is outside this PR and the warning reproduced after clean reloads; no changed report component produced a new console error.
+
+### Comparison history
+
+First audit pass found three blocking issues: P1 internal vocabulary across the default report path, P1 Method navigation landing above its heading, and P2 `0/0` language that read as completed. The implementation added one deterministic public vocabulary layer, moved the Method target to the chapter, and added a distinct no-register state. The second desktop/mobile pass found no remaining P0/P1/P2 report mismatch. Focused paired comparisons were completed for the opening, People, Connections, and Method sections.
+
+### Follow-up polish
+
+- P3, outside this PR: fix the pre-existing `LaunchPanel` list-key warning in its own issue so the preview console is fully clean.
+
+final result: passed
+
+---
+
 ## Issue #120 follow-up · plain-language verdict hero
 
 - Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-22 at 7.46.30 PM.png`

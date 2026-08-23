@@ -182,7 +182,7 @@ describe("deriveVerdictArgument", () => {
     const argument = deriveVerdictArgument({ verdict: "CAUTION", supports: [], concerns: [] });
     expect(argument.forLine).toBeNull();
     expect(argument.againstLine).toBe("The concern here is coverage: too little verified evidence, not adverse findings.");
-    expect(argument.moveLine).toBe("No checks remain open; a rescan would test whether this result still holds.");
+    expect(argument.moveLine).toBe("No checks remain open. A new scan would show whether this result still holds.");
   });
 
   it("does not invent a concern for a clean pass", () => {
@@ -193,7 +193,18 @@ describe("deriveVerdictArgument", () => {
       nextChecks: [],
     });
     expect(argument.againstLine).toBeNull();
-    expect(argument.moveLine).toContain("rescan");
+    expect(argument.moveLine).toContain("new scan");
+  });
+
+  it("does not call an empty 0-of-0 register complete", () => {
+    const argument = deriveVerdictArgument({
+      verdict: "CAUTION",
+      supports: [],
+      concerns: [],
+      nextChecks: [],
+      applicableChecks: 0,
+    });
+    expect(argument.moveLine).toBe("No check results were saved with this report. Run a new scan before relying on it.");
   });
 });
 

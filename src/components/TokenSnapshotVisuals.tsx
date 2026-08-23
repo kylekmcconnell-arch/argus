@@ -41,7 +41,7 @@ function PriceMomentum({ priceChange }: { priceChange: NonNullable<TokenDossier[
                   className="mono text-[11.5px] tabular-nums"
                   style={{ color: value == null ? "var(--color-ink-faint)" : value >= 0 ? "var(--color-pass)" : "var(--color-avoid)" }}
                 >
-                  {value == null ? "N/A" : `${value > 0 ? "+" : ""}${value.toFixed(1)}%`}
+                  {value == null ? "Not available" : `${value > 0 ? "+" : ""}${value.toFixed(1)}%`}
                 </span>
               </div>
               <div className="relative mt-2 h-2 overflow-hidden rounded-full bg-line/60" aria-hidden="true">
@@ -176,7 +176,7 @@ function ForensicAxes({ token }: { token: TokenDossier }) {
     <figure className="panel-inset px-3.5 py-3" aria-labelledby="snapshot-forensic-axes">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <figcaption id="snapshot-forensic-axes" className="eyebrow">Score breakdown</figcaption>
-        <span className="mono text-[10.5px] text-ink-faint">{token.score ?? "N/A"}/100 saved score</span>
+        <span className="mono text-[10.5px] text-ink-faint">{token.score == null ? "Score not available" : `${token.score}/100 saved score`}</span>
       </div>
       <div className="mt-2.5 grid gap-x-6 gap-y-2 lg:grid-cols-2">
         {token.axes.map((axis) => {

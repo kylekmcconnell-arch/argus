@@ -240,7 +240,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(counterweight).not.toContain("CoinGecko returned no matching asset");
 
     const recordedOutcomes = container.querySelector('section[aria-label="Finished checks"]')?.textContent ?? "";
-    expect(recordedOutcomes).toContain("Market intelligence");
+    expect(recordedOutcomes).toContain("Market data");
   });
 
   it("keeps every current-data panel paused on an immutable snapshot until explicit opt-in", () => {

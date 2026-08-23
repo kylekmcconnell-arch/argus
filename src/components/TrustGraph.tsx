@@ -1,35 +1,20 @@
 import { useId, useRef, useState } from "react";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { canonical, type SubjectConnection } from "../graph/network";
-
-const EDGE_LABEL: Record<string, string> = {
-  ASSOCIATES_WITH: "associates",
-  FOUNDED: "founded",
-  PROMOTED: "promoted",
-  CLAIMED_ENDORSEMENT: "claims endorsement",
-  ADVISED: "advised",
-  SERVICED: "serviced",
-  CONTROLS_WALLET: "wallet",
-  FLAGS: "flags",
-  WORKED_ON: "worked on",
-  FUNDED: "funded",
-  TEAM: "team",
-  INVESTED_IN: "invested in",
-  AFFILIATED_WITH: "affiliated with",
-  COMMIT_EMAIL: "commit email",
-};
+import { publicEntityLabel, publicRelationshipLabel } from "../lib/plainLanguage";
 
 function nodeStyle(n: PanoptesNode, e?: PanoptesEdge): { fill: string; ring: string; label: string } {
-  if (n.subject) return { fill: "var(--color-signal)", ring: "var(--color-signal)", label: String(n.key) };
+  const label = publicEntityLabel(String(n.key), String(n.type), typeof n.label === "string" ? n.label : undefined);
+  if (n.subject) return { fill: "var(--color-signal)", ring: "var(--color-signal)", label };
   if (n.type === "DeceptionFinding") return { fill: "var(--color-avoid)", ring: "var(--color-avoid)", label: "deception" };
-  if (n.outcome === "Rug" || n.was_rug) return { fill: "var(--color-avoid)", ring: "var(--color-avoid)", label: String(n.key) };
-  if (n.outcome === "Acquisition" || n.outcome === "IPO") return { fill: "var(--color-pass)", ring: "var(--color-pass)", label: String(n.key) };
-  if (e?.verdict === "Unconfirmed") return { fill: "var(--color-panel-2)", ring: "var(--color-caution)", label: String(n.key) };
+  if (n.outcome === "Rug" || n.was_rug) return { fill: "var(--color-avoid)", ring: "var(--color-avoid)", label };
+  if (n.outcome === "Acquisition" || n.outcome === "IPO") return { fill: "var(--color-pass)", ring: "var(--color-pass)", label };
+  if (e?.verdict === "Unconfirmed") return { fill: "var(--color-panel-2)", ring: "var(--color-caution)", label };
   if (e?.risk === "high_concentration" || (e?.type === "HELD_BY" && e?.verdict === "Contradicted")) {
-    return { fill: "var(--color-panel-2)", ring: "var(--color-caution)", label: String(n.key) };
+    return { fill: "var(--color-panel-2)", ring: "var(--color-caution)", label };
   }
-  if (e?.verdict === "Contradicted") return { fill: "var(--color-panel-2)", ring: "var(--color-avoid)", label: String(n.key) };
-  return { fill: "var(--color-panel-2)", ring: "var(--color-line-2)", label: String(n.key) };
+  if (e?.verdict === "Contradicted") return { fill: "var(--color-panel-2)", ring: "var(--color-avoid)", label };
+  return { fill: "var(--color-panel-2)", ring: "var(--color-line-2)", label };
 }
 
 const trunc = (s: string, n = 16) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
@@ -94,6 +79,11 @@ export function TrustGraph({
 
   const subject = nodes.find((n) => n.subject)!;
   if (!subject) return null;
+  const subjectLabel = publicEntityLabel(
+    String(subject.key),
+    String(subject.type),
+    typeof subject.label === "string" ? subject.label : undefined,
+  );
 
   // Inner rings: direct entities plus one bounded second hop. The second hop is
   // required for correct affiliated-fund attribution (person → fund → project);
@@ -207,7 +197,7 @@ export function TrustGraph({
         onClickCapture={onClickCapture}
         style={{ cursor: "grab" }}
       >
-        <title id={graphTitleId}>Relationship map for {String(subject.key)}</title>
+        <title id={graphTitleId}>{`Relationship map for ${subjectLabel}`}</title>
         <desc id={graphDescriptionId}>
           Interactive relationship map. Navigable people and companies can be opened with Enter or Space. The complete readable relationship ledger follows the map.
         </desc>
@@ -236,7 +226,7 @@ export function TrustGraph({
                     otherwise only on the hovered spoke */}
                 {p.edge && (!dense || focused) && (
                   <text x={(x1 + p.x) / 2} y={(y1 + p.y) / 2 - 3} textAnchor="middle" className="mono" fontSize="9" fill={focused ? "var(--color-ink-dim)" : "var(--color-ink-faint)"}>
-                    {EDGE_LABEL[p.edge.type] ?? p.edge.type.toLowerCase()}
+                    {publicRelationshipLabel(p.edge.type)}
                   </text>
                 )}
               </g>
@@ -266,10 +256,10 @@ export function TrustGraph({
                 onBlur={() => setHover((h) => (h === p.id ? null : h))}
                 role={act ? "button" : undefined}
                 tabIndex={act ? 0 : undefined}
-                aria-label={act ? `Open ${String(p.node.key)}. ${p.edge ? EDGE_LABEL[p.edge.type] ?? p.edge.type.toLowerCase() : "Connected entity"}.` : undefined}
+                aria-label={act ? `Open ${st.label}. ${p.edge ? publicRelationshipLabel(p.edge.type) : "Connected entity"}.` : undefined}
                 style={{ cursor: act ? "pointer" : "inherit" }}
               >
-                <title>{`${p.node.key}${p.edge ? ` · ${EDGE_LABEL[p.edge.type] ?? p.edge.type.toLowerCase()}` : ""}`}</title>
+                <title>{`${st.label}${p.edge ? ` · ${publicRelationshipLabel(p.edge.type)}` : ""}`}</title>
                 <circle cx={p.x} cy={p.y} r={focused ? 7 : 6} fill={st.fill} stroke={st.ring} strokeWidth="1.5" />
                 {act && <circle cx={p.x} cy={p.y} r={10} fill="none" stroke={st.ring} strokeWidth="1" opacity="0.3" />}
                 <text x={p.x} y={p.y + (p.y < cy ? -11 : 17)} textAnchor="middle" className="mono" fontSize={focused ? 9 : labelSize} fontWeight={focused ? 600 : 400} fill={focused ? "var(--color-ink)" : "var(--color-ink-dim)"}>
@@ -310,7 +300,7 @@ export function TrustGraph({
           <g>
             <circle cx={cx} cy={cy} r={26} fill="none" stroke="var(--color-signal)" strokeWidth="1" opacity="0.25" />
             <circle cx={cx} cy={cy} r={11} fill="var(--color-signal)" />
-            <text x={cx} y={cy + 30} textAnchor="middle" className="mono" fontSize="10" fill="var(--color-ink)">{trunc(subject.key, 20)}</text>
+            <text x={cx} y={cy + 30} textAnchor="middle" className="mono" fontSize="10" fill="var(--color-ink)">{trunc(subjectLabel, 20)}</text>
           </g>
         </g>
         </svg>
@@ -328,7 +318,7 @@ export function TrustGraph({
 
       <details className="panel-inset mt-3 overflow-hidden">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12.5px] font-medium text-ink">
-          <span id={ledgerTitleId}>Relationship ledger</span>
+          <span id={ledgerTitleId}>Readable connection list</span>
           <span className="mono text-[11px] text-ink-faint">{peri.length + connections.length} links</span>
           <span className="mono ml-auto text-[11px] text-signal-lift">view readable list</span>
         </summary>
@@ -339,20 +329,32 @@ export function TrustGraph({
             {peri.map((entry, index) => {
               const edge = entry.edge;
               const action = nodeAction(entry.node, onAudit, onOpenProject);
-              const relation = edge ? EDGE_LABEL[edge.type] ?? edge.type.toLowerCase() : "connected to";
+              const relation = edge ? publicRelationshipLabel(edge.type) : "is connected to";
               const status = relationshipStatus(edge);
+              const sourceLabel = publicEntityLabel(String(edge?.src ?? subject.key));
+              const targetLabel = publicEntityLabel(
+                String(edge?.dst ?? entry.node.key),
+                String(entry.node.type),
+                typeof entry.node.label === "string" ? entry.node.label : undefined,
+              );
               return (
                 <li key={`${entry.depth}:${entry.node.key}:${index}`} className="grid gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
                       <span className="chip chip-sm">{entry.depth === 1 ? "direct" : "second hop"}</span>
                       <span className="mono text-ink-faint">from</span>
-                      <span className="mono truncate text-ink">{edge?.src ?? subject.key}</span>
+                      <span className="truncate text-ink">{sourceLabel}</span>
                       <span className="text-ink-dim">{relation}</span>
                       <span className="mono text-ink-faint">to</span>
-                      <span className="mono truncate text-ink">{edge?.dst ?? entry.node.key}</span>
+                      <span className="truncate text-ink">{targetLabel}</span>
                     </div>
-                    <p className="mt-1 text-[11px] text-ink-faint">Entity type: {String(entry.node.type)}</p>
+                    <p className="mt-1 text-[11px] text-ink-faint">{String(entry.node.type)} connection</p>
+                    {edge && (
+                      <details className="mt-1 text-[10px] text-ink-faint">
+                        <summary className="cursor-pointer">Technical IDs</summary>
+                        <p className="mt-1 break-all font-mono">{edge.src} · {edge.type} · {edge.dst}</p>
+                      </details>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 sm:justify-end">
                     <span className={`chip ${status.tone}`}>{status.label}</span>
@@ -373,7 +375,7 @@ export function TrustGraph({
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
                       <span className="chip chip-sm">cross-audit</span>
-                      <span className="mono text-ink">{String(subject.key)}</span>
+                      <span className="text-ink">{subjectLabel}</span>
                       <span className="text-ink-dim">shares {connection.ties.length} {connection.ties.length === 1 ? "entity" : "entities"} with</span>
                       <span className="mono text-ink">{connection.other}</span>
                     </div>

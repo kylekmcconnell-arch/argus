@@ -172,7 +172,7 @@ describe("MarketPerformancePanel", () => {
     ));
 
     expect(container.textContent).toContain("Market rank");
-    expect(container.textContent).toContain("Not captured");
+    expect(container.textContent).toContain("Not available");
     expect(container.textContent).toContain("Rank was not available");
     expect(container.textContent).not.toContain("CoinGecko global rank");
   });

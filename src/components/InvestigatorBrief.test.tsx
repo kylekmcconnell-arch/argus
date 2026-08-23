@@ -63,8 +63,8 @@ describe("VerdictArgumentBlock", () => {
     }} />));
 
     expect(container.textContent).not.toContain("Strongest evidence");
-    expect(container.textContent).toContain("Sharpest concern");
+    expect(container.textContent).toContain("Main risk");
     expect(container.textContent).toContain("honeypot confirmed");
-    expect(container.textContent).toContain("What would change it");
+    expect(container.textContent).toContain("What to check next");
   });
 });

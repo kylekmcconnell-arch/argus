@@ -514,9 +514,9 @@ function evidenceTreatmentLabel({
   if (status === "lead") return "Candidate only. This item is not confirmed and is not used in the score.";
   if (status === "conflicted") return "Conflicted evidence. ARGUS has not selected a clean governing answer.";
   if (attributionScope === "identity_unresolved") return "Identity unresolved. The record is excluded from the verdict until the source binds it to the exact subject.";
-  if (providerProjection === true) return "Provider projection. This remains source-reported context and cannot set a score floor.";
-  if (floorEligible === false) return "Supporting context. This record is kept outside the score floor under ARGUS evidence rules.";
-  return "Saved fact record. The source receipts below show the proof context available to this report.";
+  if (providerProjection === true) return "Reported by a source. ARGUS saved this as context but did not independently confirm it, so it did not affect the score.";
+  if (floorEligible === false) return "Additional context. This item did not affect the score.";
+  return "Saved fact. Open the sources below to see what supports this answer.";
 }
 
 function dedupeSources(sources: readonly BasicFactSourceView[]): BasicFactSourceView[] {
@@ -582,19 +582,19 @@ function EvidenceAuditDisclosure({
   const compactTreatment = status === "lead"
     ? "Lead"
     : providerProjection === true
-      ? `Source reported, recorded ${statusLabel}`
+      ? `Reported by a source, saved as ${statusLabel}`
       : floorEligible === false
-        ? `Supporting context, recorded ${statusLabel}`
+        ? `Additional context, saved as ${statusLabel}`
         : attributionScope === "identity_unresolved"
           ? `Identity unresolved, recorded ${statusLabel}`
           : statusLabel;
 
   return (
-    <details className="group mt-2 border-t border-line/50 pt-2" aria-label={`Evidence status and source proof for ${label}`}>
+    <details className="group mt-2 border-t border-line/50 pt-2" aria-label={`Sources and technical details for ${label}`}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[10.5px] text-ink-faint marker:content-none">
-        <span className="font-medium text-ink-dim">Evidence record</span>
+        <span className="font-medium text-ink-dim">Sources and technical details</span>
         <span className="text-right">
-          {compactTreatment} · {receipts.length} {receipts.length === 1 ? "receipt" : "receipts"}
+          {compactTreatment} · {receipts.length} {receipts.length === 1 ? "source" : "sources"}
         </span>
       </summary>
       <div className="mt-2 rounded-lg border border-line/60 bg-panel-2/35 p-2.5">
@@ -637,7 +637,7 @@ function EvidenceAuditDisclosure({
         <p className="mt-2 text-[10.5px] leading-relaxed text-ink-faint">{treatment}</p>
 
         {receipts.length > 0 ? (
-          <div className="mt-2 space-y-2" role="list" aria-label={`Source proof receipts for ${label}`}>
+          <div className="mt-2 space-y-2" role="list" aria-label={`Saved sources for ${label}`}>
             {receipts.map((source, index) => {
               const safeUrl = safeHttpUrl(source.url);
               const rawUrl = source.url?.trim();
@@ -700,7 +700,7 @@ function EvidenceAuditDisclosure({
           </div>
         ) : (
           <p className="mt-2 rounded-md border border-caution/30 bg-caution/[0.04] p-2 text-[10.5px] leading-relaxed text-caution">
-            No source proof receipt was included with this item.
+            No saved source was included with this item.
           </p>
         )}
       </div>
@@ -979,7 +979,7 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
         {!strictlyVerified ? (
           <ProvenanceTag
             state={sourceReported ? { tier: "derived" } : { tier: "sourced" }}
-            label={sourceReported ? "Source reported" : "Supporting context"}
+            label={sourceReported ? "Reported by a source" : "Additional context"}
             className="shrink-0"
           />
         ) : fact.status === "corroborated" ? (
@@ -996,8 +996,8 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
       {!strictlyVerified && (
         <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-faint">
           {sourceReported
-            ? "Source-attributed context. Not independently verified and not used to set a score floor."
-            : "Corroborated context. Kept outside the score floor under ARGUS's evidence rules."}
+            ? "The source made this claim. ARGUS did not independently confirm it, and it did not affect the score."
+            : "Another source supported this context, but it did not affect the score."}
         </p>
       )}
       {hard && (
@@ -1104,7 +1104,7 @@ export function BasicFactsPanel({
             <p className="eyebrow text-signal-lift">Key facts</p>
             <h2 id={`${id}-title`} className="mt-1 text-[19px] font-semibold tracking-tight text-ink">What you need to know</h2>
             <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-              Confirmed facts are shown first, followed by context kept outside the score floor. Open a source to check any answer.
+              Confirmed facts are shown first, followed by additional context that did not affect the score. Open a source to check any answer.
             </p>
           </div>
           <div className="panel-inset flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-[11px]" aria-label="Basic facts found">
@@ -1117,7 +1117,7 @@ export function BasicFactsPanel({
                 {supportingAffiliationCount} source-backed {supportingAffiliationCount === 1 ? "affiliation" : "affiliations"} elsewhere
               </span>
             )}
-            {reported > 0 && <span className="text-signal-lift">{reported} source reported</span>}
+            {reported > 0 && <span className="text-signal-lift">{reported} reported by a source</span>}
             {supporting > 0 && <span className="text-signal-lift">{supporting} supporting context</span>}
             {checkedEmpty > 0 && <span className="text-ink-dim">{checkedEmpty} with no result</span>}
             {conflicted > 0 && <span className="text-avoid">{conflicted} where sources disagree</span>}
@@ -1171,9 +1171,9 @@ export function BasicFactsPanel({
       {contextRows.length > 0 && (
         <div className="border-t border-signal/20 bg-signal/[0.025] px-4 py-4 sm:px-5" aria-label="Context-only basic facts">
           <div>
-            <h3 className="text-[13px] font-semibold text-ink">Context outside the score</h3>
+            <h3 className="text-[13px] font-semibold text-ink">Additional context</h3>
             <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
-              Useful provider or corroborated context, kept separate from facts that qualify to set a score floor.
+              Useful information from a provider or another source. It did not affect the score.
             </p>
           </div>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">

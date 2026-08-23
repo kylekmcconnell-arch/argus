@@ -183,10 +183,10 @@ describe("BasicFactsPanel", () => {
       );
     });
 
-    const disclosure = container.querySelector<HTMLDetailsElement>('details[aria-label^="Evidence status and source proof"]');
+    const disclosure = container.querySelector<HTMLDetailsElement>('details[aria-label^="Sources and technical details"]');
     expect(disclosure).not.toBeNull();
     expect(disclosure?.open).toBe(false);
-    expect(disclosure?.querySelector("summary")?.textContent).toContain("Verified · 1 receipt");
+    expect(disclosure?.querySelector("summary")?.textContent).toContain("Verified · 1 source");
     expect(container.querySelector('[aria-label="Confirmed basic facts"]')?.textContent).toContain("Verified");
 
     act(() => disclosure?.querySelector("summary")?.click());
@@ -248,9 +248,9 @@ describe("BasicFactsPanel", () => {
     });
 
     const conflicted = container.querySelector('[aria-label="Conflicted basic facts"]');
-    const disclosure = conflicted?.querySelector<HTMLDetailsElement>('details[aria-label^="Evidence status and source proof"]');
+    const disclosure = conflicted?.querySelector<HTMLDetailsElement>('details[aria-label^="Sources and technical details"]');
     expect(conflicted?.querySelector("li > div span.chip")?.textContent).toContain("Conflicted");
-    expect(disclosure?.querySelector("summary")?.textContent).toContain("Conflicted · 2 receipts");
+    expect(disclosure?.querySelector("summary")?.textContent).toContain("Conflicted · 2 sources");
     expect(disclosure?.querySelectorAll('[role="listitem"]')).toHaveLength(2);
     expect(disclosure?.textContent).toContain("Relation: Supports");
     expect(disclosure?.textContent).toContain("Relation: Contradicts");
@@ -304,16 +304,16 @@ describe("BasicFactsPanel", () => {
     });
 
     const context = container.querySelector('[aria-label="Context-only basic facts"]');
-    const projectionDisclosure = context?.querySelector<HTMLDetailsElement>('details[aria-label^="Evidence status and source proof"]');
+    const projectionDisclosure = context?.querySelector<HTMLDetailsElement>('details[aria-label^="Sources and technical details"]');
     const leadArea = container.querySelector('[aria-label="Unverified basic fact leads"]');
-    const leadDisclosure = leadArea?.querySelector<HTMLDetailsElement>('li details[aria-label^="Evidence status and source proof"]');
+    const leadDisclosure = leadArea?.querySelector<HTMLDetailsElement>('li details[aria-label^="Sources and technical details"]');
 
     expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("0 confirmed");
-    expect(context?.textContent).toContain("Source reported");
-    expect(projectionDisclosure?.querySelector("summary")?.textContent).toContain("Source reported, recorded Verified · 1 receipt");
-    expect(projectionDisclosure?.textContent).toContain("Provider projection. This remains source-reported context and cannot set a score floor.");
+    expect(context?.textContent).toContain("Reported by a source");
+    expect(projectionDisclosure?.querySelector("summary")?.textContent).toContain("Reported by a source, saved as Verified · 1 source");
+    expect(projectionDisclosure?.textContent).toContain("ARGUS saved this as context but did not independently confirm it, so it did not affect the score.");
     expect(leadArea?.textContent).toContain("Not confirmed and not used in the score");
-    expect(leadDisclosure?.querySelector("summary")?.textContent).toContain("Lead · 1 receipt");
+    expect(leadDisclosure?.querySelector("summary")?.textContent).toContain("Lead · 1 source");
     expect(leadDisclosure?.textContent).toContain("Recorded statusLead");
     expect(leadDisclosure?.textContent).toContain("Fact artifact verificationNot artifact verified");
     expect(leadDisclosure?.textContent).toContain("Evidence originmodel_lead");
@@ -411,10 +411,10 @@ describe("BasicFactsPanel", () => {
     expect(container.querySelector('[aria-label="Key verified answers"]')).toBeNull();
     expect(container.querySelector('[aria-label="Confirmed basic facts"]')).toBeNull();
     expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("0 confirmed");
-    expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("1 source reported");
-    expect(container.querySelector('[aria-label="Context-only basic facts"]')?.textContent).toContain("Source reported");
+    expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("1 reported by a source");
+    expect(container.querySelector('[aria-label="Context-only basic facts"]')?.textContent).toContain("Reported by a source");
     expect(container.querySelector('[aria-label="Context-only basic facts"]')?.textContent)
-      .toContain("Not independently verified and not used to set a score floor");
+      .toContain("did not independently confirm it, and it did not affect the score");
     expect(container.querySelector('[aria-label="Context-only basic facts"] .sr-only')).toBeNull();
     expect(container.querySelector('[aria-label="Unverified basic fact leads"]')).toBeNull();
   });
@@ -440,9 +440,9 @@ describe("BasicFactsPanel", () => {
     const context = container.querySelector('[aria-label="Context-only basic facts"]');
     expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("0 confirmed");
     expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent).toContain("1 supporting context");
-    expect(context?.textContent).toContain("Supporting context");
-    expect(context?.textContent).toContain("Kept outside the score floor under ARGUS's evidence rules");
-    expect(context?.textContent).not.toContain("Not independently verified");
+    expect(context?.textContent).toContain("Additional context");
+    expect(context?.textContent).toContain("did not affect the score");
+    expect(context?.textContent).not.toContain("did not independently confirm");
   });
 
   it("removes leads already answered by confirmed facts while keeping unmatched people visible", () => {
