@@ -3,7 +3,7 @@
 //   - DexScreener: market, liquidity, volume, txns, age, socials.
 //   - GoPlus: contract safety (honeypot, mint authority, ownership, tax, holders).
 
-import { retryFetch } from "../lib/retry";
+import { retryFetch, retryFetchWithFreshTimeout } from "../lib/retry";
 
 export interface DexPair {
   chainId: string;
@@ -612,10 +612,9 @@ export function largestInsiderClusterPercent(networks: readonly RugcheckInsiderN
 
 export async function rugcheckReport(mint: string, fetchImpl: typeof fetch = fetch): Promise<RugcheckReport | null> {
   try {
-    const res = await fetchImpl(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, {
-      signal: AbortSignal.timeout(12_000),
+    const res = await retryFetchWithFreshTimeout(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, 15_000, {
       headers: { accept: "application/json" },
-    });
+    }, 2, fetchImpl);
     if (!res.ok) return null;
     const d = (await res.json()) as {
       creator?: unknown;

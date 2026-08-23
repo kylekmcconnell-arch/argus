@@ -104,4 +104,19 @@ describe("GET /api/site-history", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("gives the slow CDX lookup its observed response window", async () => {
+    vi.useFakeTimers();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes("/cdx/search/cdx")) return emptyCdx();
+      if (url.includes("/wayback/available")) return emptyAvailability();
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+
+    await run();
+
+    expect(timeoutSpy).toHaveBeenCalledWith(16_000);
+  });
 });

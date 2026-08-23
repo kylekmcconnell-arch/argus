@@ -74,7 +74,9 @@ async function oldestVersions(domain: string): Promise<ArchiveResult<Snap[]>> {
   const qs = `?url=${encodeURIComponent(domain)}&output=json&filter=statuscode:200&collapse=digest&fl=timestamp,original&limit=8`;
   let lastError = "CDX lookup failed";
   for (let attempt = 0; attempt < 3; attempt++) {
-    const response = await getArchiveText(CDX + qs, 8000);
+    // CDX commonly answers in 11–15 seconds. Three 16-second attempts plus
+    // bounded backoff remain below this function's 60-second ceiling.
+    const response = await getArchiveText(CDX + qs, 16_000);
     if (!response.ok) {
       lastError = response.error;
     } else {

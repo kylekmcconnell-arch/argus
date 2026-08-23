@@ -17,3 +17,25 @@ export async function retryFetch(input: string, init?: RequestInit, attempts = 3
   }
   throw lastErr;
 }
+
+/** Retry a slow provider with a new AbortSignal for every attempt. */
+export async function retryFetchWithFreshTimeout(
+  input: string,
+  timeoutMs: number,
+  init: Omit<RequestInit, "signal"> = {},
+  attempts = 2,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const response = await fetchImpl(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      if (response.ok || (response.status !== 429 && response.status < 500)) return response;
+      lastErr = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastErr = error;
+    }
+    if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** i));
+  }
+  throw lastErr;
+}

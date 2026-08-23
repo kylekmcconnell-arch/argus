@@ -286,8 +286,11 @@ export function judge( // exported for unit tests only
     else if (hp.highTaxWallets > 0) { add(12); warnings.push(`${hp.highTaxWallets} wallet${hp.highTaxWallets === 1 ? " is" : "s are"} taxed far above the advertised rate - per-address tax manipulation`); }
     else positives.push(`${hp.holdersAnalyzed} real holders' sells simulated - exits work for actual wallets, not just the test wallet`);
   }
-  if (hp?.maxSellPct != null && hp.maxSellPct > 0 && hp.maxSellPct < 0.5) { add(12); warnings.push(`Max sell is capped at ${hp.maxSellPct.toFixed(2)}% of supply - exits are rationed`); }
-
+  const sellLimitWarning = honeypotSellLimitWarning(hp);
+  if (sellLimitWarning) {
+    add(12);
+    warnings.push(sellLimitWarning);
+  }
   // --- Solana deep report (RugCheck) ---
   if (rc) {
     // RugCheck's own normalized score (higher = riskier) adjudicates its named
@@ -570,6 +573,11 @@ export function judge( // exported for unit tests only
     : "No mechanical red flags (not financial advice)";
 
   return { verdict, risk, action, flags, warnings, positives };
+}
+
+export function honeypotSellLimitWarning(hp: HoneypotDeep | null): string | null {
+  const flag = hp?.flags.find((candidate) => /sell_limit/i.test(candidate.code));
+  return flag ? `${flag.text} (Honeypot.is)` : null;
 }
 
 // Default for callers (tests) that predate classification.
