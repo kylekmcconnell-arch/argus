@@ -391,10 +391,18 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               <span>{d.dexId}</span>
               <span className="mono">{d.address.slice(0, 6)}…{d.address.slice(-4)}</span>
             </div>
-            <ProjectLinks className="mt-2" website={projectSite} xHandle={d.projectX ?? d.cg?.twitter} links={d.socials} />
           </div>
           <TokenHeadlineStats figures={story.headline} />
         </div>
+
+        <ProjectLinks
+          className="mt-3"
+          website={projectSite}
+          xHandle={d.projectX ?? d.cg?.twitter}
+          contractAddress={d.address}
+          chain={d.chain}
+          links={d.socials}
+        />
 
         {/* what the project actually does — CoinGecko's own blurb */}
         {d.cg?.description && (

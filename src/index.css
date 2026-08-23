@@ -670,6 +670,136 @@
   padding: 1px 5px;
 }
 
+/* Project identity rail: the official site leads, community and research
+   destinations share one quiet ledger, and the contract remains a dedicated
+   copy action. Variable link sets collapse without leaving empty columns. */
+.project-identity-rail {
+  gap: 18px;
+  padding-block: 17px;
+  border-block: 1px solid var(--color-line);
+}
+.project-identity-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+.project-identity-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 520;
+  line-height: 1;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+.project-identity-primary,
+.project-identity-contract {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--color-line-2);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--color-panel) 82%, transparent);
+  padding: 10px 13px;
+  color: var(--color-ink);
+}
+.project-identity-primary {
+  font-size: 14px;
+  font-weight: 570;
+  transition: border-color var(--motion-fast) var(--ease-premium), color var(--motion-fast) var(--ease-premium), background var(--motion-fast) var(--ease-premium);
+}
+.project-identity-primary:hover,
+.project-identity-primary:focus-visible {
+  border-color: color-mix(in oklab, var(--color-brand) 48%, var(--color-line-2));
+  background: color-mix(in oklab, var(--color-brand) 4%, var(--color-panel));
+}
+.project-identity-resources {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: stretch;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.project-identity-resources::-webkit-scrollbar {
+  display: none;
+}
+.project-identity-resource {
+  display: inline-flex;
+  min-width: 62px;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-left: 1px solid var(--color-line);
+  padding-inline: 12px;
+  font-size: 11px;
+  line-height: 1.1;
+  color: color-mix(in oklab, var(--color-ink) 82%, var(--color-ink-dim));
+  transition: color var(--motion-fast) var(--ease-premium), background var(--motion-fast) var(--ease-premium);
+}
+.project-identity-resource:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+.project-identity-resource:hover,
+.project-identity-resource:focus-visible {
+  color: var(--color-ink);
+  background: color-mix(in oklab, var(--color-brand) 4%, transparent);
+}
+.project-identity-contract {
+  color: var(--color-ink-dim);
+}
+.project-identity-chain {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.project-identity-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--color-line);
+}
+.project-identity-contract-button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-ink);
+  transition: color var(--motion-fast) var(--ease-premium), background var(--motion-fast) var(--ease-premium);
+}
+.project-identity-contract-button:hover,
+.project-identity-contract-button:focus-visible {
+  background: color-mix(in oklab, var(--color-brand) 7%, transparent);
+}
+.project-identity-contract-button.is-copied {
+  color: var(--color-brand);
+}
+.project-identity-contract-button > svg {
+  color: var(--color-brand-dim);
+}
+@media (max-width: 639px) {
+  .project-identity-rail {
+    gap: 14px;
+  }
+  .project-identity-resources {
+    flex-wrap: wrap;
+    row-gap: 10px;
+    overflow: visible;
+  }
+  .project-identity-resource {
+    min-width: 56px;
+    padding-inline: 10px;
+  }
+}
+
 /* The ONE verdict treatment (PASS/FAIL/CAUTION/AVOID/…): dot + stamped word.
    fail gets a hollow dot so fail-vs-avoid survives small sizes and CVD. */
 .verdict-pill {
