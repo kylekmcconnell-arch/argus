@@ -25,6 +25,8 @@ A normal activation call rejects a proposed version. An active analyst must expl
 
 ## Current increment
 
-Execution is available for saved person and organization dossiers handled by the person collector. Other report kinds fail closed until their specialist collectors expose the same bounded task contract.
+Execution is available for saved person reports and saved token + project investigations. For a token + project investigation, the authorization re-runs only the saved project-account specialist plan, replaces that project-account evidence inside a copy of the source investigation, and preserves the source token, market, contract, liquidity, recon, and wallet evidence unchanged. The result remains an inactive proposed investigation version until an analyst promotes it.
+
+Standalone token-only reports fail closed because the token collector does not yet expose the same task-bound specialist contract. The UI does not offer a bounded investigation when no compatible saved research plan exists.
 
 The migration in `supabase/migrations/20260822160000_gap_investigation_proposals.sql` must be reviewed and explicitly approved before it is applied to production. Application deployment alone does not create or alter these production tables or functions.

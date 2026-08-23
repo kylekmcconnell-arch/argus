@@ -193,6 +193,16 @@ One governing count controls open questions across the header, summary, report
 rail, persisted report, and public report. Optional vendor failures do not become
 fake investment questions.
 
+An analyst may explicitly authorize one saved open question for bounded follow-up.
+The authorization is bound to the active immutable source version, saved task
+plan, actor, expiry, time budget, and accepted server-estimated cost ceiling. It
+can create only an inactive proposed version. Person reports re-run the bounded
+person collector; token + project investigations re-run the bounded saved project
+account plan while preserving the source token, market, contract, liquidity,
+recon, and wallet evidence. Promotion remains a separate guarded analyst action.
+Standalone token-only reports fail closed until the token collector exposes the
+same task-bound contract.
+
 ## Release canaries
 
 The full live gates and expected outcomes live in `QUALITY-BENCHMARK.md`. The

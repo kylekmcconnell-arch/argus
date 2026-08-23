@@ -15,6 +15,7 @@ import { loadExactVersionReport } from "./report.js";
 import { persistGapInvestigationProposalBundle } from "./_provenance.js";
 import { recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
 import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
+import { reportChecks, reportCompleteness } from "../src/lib/reports.js";
 import {
   authorizeGapInvestigation,
   GapInvestigationAuthorizationError,
@@ -27,7 +28,9 @@ export const config = { maxDuration: 600 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const METHODOLOGY_VERSION = "argus-person-v5-project-strength-bands";
+const INVESTIGATION_METHODOLOGY_VERSION = "argus-investigation-v2-terminal-outcomes";
 type JsonRecord = Record<string, unknown>;
+type SupportedGapReportKind = "person" | "investigation";
 
 const record = (value: unknown): JsonRecord =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -96,16 +99,16 @@ function traceReceipt(step: TraceStep): JsonRecord {
   };
 }
 
-function proposalPayload(
-  dossier: Dossier,
+function proposalPayload<T extends JsonRecord>(
+  payload: T,
   auth: AuthContext,
   authorizationId: string,
   sourceReportVersionId: string,
   scope: AuthorizedResearchScope,
   observedCostUsd: number,
-): Dossier & { gapInvestigation: JsonRecord } {
+): T & { gapInvestigation: JsonRecord } {
   return {
-    ...dossier,
+    ...payload,
     gapInvestigation: {
       schemaVersion: 1,
       publicationState: "proposed",
@@ -124,6 +127,62 @@ function proposalPayload(
       budgetOutcome: observedCostUsd > scope.estimatedCostCeilingUsd ? "estimate_exceeded" : "within_estimate",
       createdAt: new Date().toISOString(),
     },
+  };
+}
+
+function projectAccountHandle(payload: unknown): string {
+  const root = record(payload);
+  return text(record(root.projectAccount).handle, 80).replace(/^@/, "")
+    || text(root.projectX, 80).replace(/^@/, "");
+}
+
+function collectorHandle(kind: SupportedGapReportKind, report: JsonRecord, payload: unknown): string {
+  const handle = kind === "person"
+    ? text(report.ref, 80).replace(/^@/, "")
+    : projectAccountHandle(payload);
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+    throw new Error(kind === "person"
+      ? "source report is not bound to a valid person handle"
+      : "token and project report is not bound to a valid project account handle");
+  }
+  return handle;
+}
+
+function proposedReportPayload(
+  kind: SupportedGapReportKind,
+  sourcePayload: unknown,
+  dossier: Dossier,
+): JsonRecord {
+  if (kind === "person") return dossier as unknown as JsonRecord;
+  return {
+    ...record(sourcePayload),
+    projectAccount: dossier,
+    projectAccountAudit: {
+      state: "complete",
+      note: "The authorized project-account follow-up completed and is preserved in this proposed report version.",
+    },
+  };
+}
+
+function reportProjection(kind: SupportedGapReportKind, report: JsonRecord, payload: JsonRecord, dossier: Dossier) {
+  if (kind === "person") {
+    return {
+      verdict: typeof dossier.report?.composite_verdict === "string"
+        ? dossier.report.composite_verdict.slice(0, 40)
+        : null,
+      score: typeof dossier.report?.governing_score === "number"
+        ? dossier.report.governing_score
+        : null,
+    };
+  }
+  const token = record(payload.token);
+  return {
+    verdict: text(token.verdict, 40) || text(report.verdict, 40) || null,
+    score: typeof token.score === "number" && Number.isFinite(token.score)
+      ? token.score
+      : typeof report.score === "number" && Number.isFinite(report.score)
+        ? report.score
+        : null,
   };
 }
 
@@ -153,13 +212,14 @@ async function authorizeAndExecute(
   }
   const report = record(exact.report);
   const kind = text(report.kind, 40);
-  if (kind !== "person") {
+  if (kind !== "person" && kind !== "investigation") {
     res.status(409).json({
-      error: "person_report_required",
-      note: "This increment runs bounded follow-up collection for person and organization dossiers only.",
+      error: "supported_report_required",
+      note: "Bounded follow-up is available for person reports and saved token + project investigations.",
     });
     return;
   }
+  const supportedKind: SupportedGapReportKind = kind;
   const payload = report.payload;
   let scope: AuthorizedResearchScope;
   try {
@@ -227,8 +287,7 @@ async function authorizeAndExecute(
       gapId: scope.gap.id,
       taskIds: scope.taskIds,
     }];
-    const handle = text(report.ref, 80).replace(/^@/, "");
-    if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) throw new Error("source report is not bound to a valid person handle");
+    const handle = collectorHandle(supportedKind, report, payload);
     const startedAt = Date.now();
     const dossier = await runAudit(handle, (step) => {
       if (receipts.length < 199) receipts.push(traceReceipt(step));
@@ -248,28 +307,31 @@ async function authorizeAndExecute(
     const observedCostUsd = typeof costRecord.usd === "number" && Number.isFinite(costRecord.usd)
       ? Math.max(0, costRecord.usd)
       : 0;
+    const proposedBase = proposedReportPayload(supportedKind, payload, dossier);
     const proposed = proposalPayload(
-      dossier,
+      proposedBase,
       auth,
       authorizationId,
       sourceReportVersionId,
       scope,
       observedCostUsd,
     );
-    const verdict = typeof dossier.report?.composite_verdict === "string"
-      ? dossier.report.composite_verdict.slice(0, 40)
-      : null;
-    const score = typeof dossier.report?.governing_score === "number"
-      ? dossier.report.governing_score
-      : null;
-    const attestationState = dossier.live ? "server_collected" as const : "analyst_submitted" as const;
-    const requestedCompleteness = dossier.completeness_state === "complete" ? "complete" : "partial";
+    const { verdict, score } = reportProjection(supportedKind, report, proposed, dossier);
+    const attestationState = supportedKind === "person" && dossier.live
+      ? "server_collected" as const
+      : "analyst_submitted" as const;
+    const checks = supportedKind === "person"
+      ? dossier.checkRuns ?? []
+      : reportChecks("investigation", proposed);
+    const requestedCompleteness = supportedKind === "person"
+      ? dossier.completeness_state === "complete" ? "complete" : "partial"
+      : reportCompleteness("investigation", proposed, checks);
     const completenessState = observedCostUsd > scope.estimatedCostCeilingUsd
       ? "partial" as const
       : coverageQualifiedCompleteness({
           completeness: requestedCompleteness,
           attestation: attestationState,
-          checks: dossier.checkRuns ?? [],
+          checks,
         });
     receipts.push({
       phase: "completion",
@@ -285,19 +347,21 @@ async function authorizeAndExecute(
     const proposedReportVersionId = await persistGapInvestigationProposalBundle(credentials, {
       authorizationId,
       organizationId: auth.organizationId,
-      kind: "person",
-      canonicalRef: handle.toLowerCase(),
-      query: text(report.query, 200) || `@${handle}`,
+      kind: supportedKind,
+      canonicalRef: supportedKind === "person" ? handle.toLowerCase() : text(report.ref, 500),
+      query: text(report.query, 200) || (supportedKind === "person" ? `@${handle}` : text(report.ref, 200)),
       createdBy: auth.userId,
       payload: proposed,
-      checks: dossier.checkRuns,
+      checks,
       runId,
       attestationState,
       verdict,
       score,
       completenessState,
       methodologyVersion: process.env.ARGUS_METHODOLOGY_VERSION
-        || (dossier.axisCitationVersion === 1 ? METHODOLOGY_VERSION : null),
+        || (supportedKind === "person"
+          ? dossier.axisCitationVersion === 1 ? METHODOLOGY_VERSION : null
+          : INVESTIGATION_METHODOLOGY_VERSION),
       providerSnapshot: dossier.providerSnapshot ?? {},
       cost: dossier.cost ?? {},
       executionReceipts: receipts.slice(0, 200),

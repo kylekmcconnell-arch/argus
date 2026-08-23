@@ -5,6 +5,8 @@ const {
   loadExactVersionReport,
   persistGapInvestigationProposalBundle,
   recordProviderUsageBatch,
+  reportChecks,
+  reportCompleteness,
   requireArgusAuth,
   runAudit,
 } = vi.hoisted(() => ({
@@ -12,6 +14,8 @@ const {
   loadExactVersionReport: vi.fn(),
   persistGapInvestigationProposalBundle: vi.fn(),
   recordProviderUsageBatch: vi.fn(),
+  reportChecks: vi.fn(),
+  reportCompleteness: vi.fn(),
   requireArgusAuth: vi.fn(),
   runAudit: vi.fn(),
 }));
@@ -26,6 +30,7 @@ vi.mock("./report.js", () => ({ loadExactVersionReport }));
 vi.mock("./_collector.js", () => ({ runAudit }));
 vi.mock("./_provenance.js", () => ({ persistGapInvestigationProposalBundle }));
 vi.mock("./_cache.js", () => ({ recordProviderUsageBatch }));
+vi.mock("../src/lib/reports.js", () => ({ reportChecks, reportCompleteness }));
 
 import handler from "./gap-investigation";
 
@@ -160,6 +165,11 @@ describe("gap investigation API", () => {
       providerSnapshot: {},
     });
     persistGapInvestigationProposalBundle.mockResolvedValue(PROPOSAL_ID);
+    reportChecks.mockReturnValue([
+      { checkId: "contract-safety", label: "Contract safety", status: "confirmed" },
+      { checkId: "project-team-identity", label: "Project team", status: "unavailable" },
+    ]);
+    reportCompleteness.mockReturnValue("partial");
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(AUTHORIZATION_ID), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
@@ -226,6 +236,94 @@ describe("gap investigation API", () => {
     }) as never, res as never);
     expect(captured.status).toBe(409);
     expect(captured.body).toMatchObject({ error: "research_task_not_allowed" });
+    expect(consumeInvestigationQuota).not.toHaveBeenCalled();
+    expect(runAudit).not.toHaveBeenCalled();
+  });
+
+  it("updates the project account inside a token and project investigation without replacing frozen token evidence", async () => {
+    const address = "0x0000000000000000000000000000000000000105";
+    const investigationPayload = {
+      token: {
+        address,
+        symbol: "GAP",
+        verdict: "CAUTION",
+        score: 61,
+        liquidityUsd: 125_000,
+      },
+      projectX: "@gap_project",
+      projectAccount: {
+        ...payload,
+        handle: "gap_project",
+      },
+      projectAccountAudit: { state: "complete", note: "Original saved project account audit." },
+    };
+    loadExactVersionReport.mockResolvedValueOnce({
+      caseStatus: "open",
+      report: {
+        kind: "investigation",
+        ref: address,
+        query: "$GAP",
+        payload: investigationPayload,
+        verdict: "CAUTION",
+        score: 61,
+      },
+    });
+
+    const { res, captured } = response();
+    await handler(request("POST", {
+      sourceReportVersionId: SOURCE_ID,
+      gapId: "gap.track-record",
+      taskIds: ["portfolio"],
+      timeBudgetSeconds: 300,
+      acceptedCostCeilingUsd: 3.5,
+    }) as never, res as never);
+
+    expect(captured.status).toBe(201);
+    expect(runAudit).toHaveBeenCalledWith("gap_project", expect.any(Function), expect.objectContaining({
+      authorizedResearchScope: expect.objectContaining({ taskIds: ["portfolio", "identity", "synthesis"] }),
+    }));
+    expect(reportChecks).toHaveBeenCalledWith("investigation", expect.objectContaining({
+      token: investigationPayload.token,
+      projectAccount: expect.objectContaining({ display_name: "Alice Example" }),
+      gapInvestigation: expect.objectContaining({ publicationState: "proposed" }),
+    }));
+    expect(persistGapInvestigationProposalBundle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        kind: "investigation",
+        canonicalRef: address,
+        query: "$GAP",
+        verdict: "CAUTION",
+        score: 61,
+        attestationState: "analyst_submitted",
+        methodologyVersion: "argus-investigation-v2-terminal-outcomes",
+        payload: expect.objectContaining({
+          token: investigationPayload.token,
+          projectAccount: expect.objectContaining({ display_name: "Alice Example" }),
+        }),
+      }),
+    );
+  });
+
+  it("fails closed for standalone token reports without a task-bound project collector", async () => {
+    loadExactVersionReport.mockResolvedValueOnce({
+      caseStatus: "open",
+      report: { kind: "token", ref: "0x0000000000000000000000000000000000000105", payload: {} },
+    });
+    const { res, captured } = response();
+    await handler(request("POST", {
+      sourceReportVersionId: SOURCE_ID,
+      gapId: "gap.track-record",
+      taskIds: ["portfolio"],
+      timeBudgetSeconds: 300,
+      acceptedCostCeilingUsd: 3.5,
+    }) as never, res as never);
+
+    expect(captured.status).toBe(409);
+    expect(captured.body).toMatchObject({
+      error: "supported_report_required",
+      note: expect.stringContaining("token + project investigations"),
+    });
     expect(consumeInvestigationQuota).not.toHaveBeenCalled();
     expect(runAudit).not.toHaveBeenCalled();
   });

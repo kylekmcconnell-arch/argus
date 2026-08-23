@@ -4,7 +4,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, pg_catalog;
-select plan(1);
+select plan(2);
 
 insert into public.organizations (id, slug, name)
 values ('00000000-0000-4000-8000-000000000105', 'gap-proposal-test', 'Gap Proposal Test');
@@ -212,5 +212,77 @@ end;
 $gap_proposal_contract$;
 
 select pass('gap investigations preserve the active source and require explicit guarded promotion');
+
+do $token_project_authorization$
+declare
+  v_source uuid;
+  v_authorization uuid;
+begin
+  select persisted.report_version_id into v_source
+  from public.persist_report_version(
+    '00000000-0000-4000-8000-000000000105',
+    'investigation',
+    '0x0000000000000000000000000000000000000105',
+    '$GAP',
+    '00000000-0000-4000-8000-000000000106',
+    '{
+      "token":{"address":"0x0000000000000000000000000000000000000105","symbol":"GAP","verdict":"CAUTION","score":61},
+      "projectX":"@gap_project",
+      "projectAccount":{
+        "handle":"gap_project",
+        "researchPlan":{
+          "schemaVersion":1,
+          "tasks":[{
+            "id":"project-team",
+            "capability":"team_and_leadership",
+            "state":"unavailable",
+            "blockedBy":[],
+            "delegates":["official-domain"]
+          }]
+        },
+        "intelligence":{
+          "questions":[{
+            "id":"project.team",
+            "prompt":"Who leads the project?",
+            "state":"unresolved"
+          }]
+        }
+      }
+    }'::jsonb,
+    'gap-investigation-source',
+    'analyst_submitted',
+    'CAUTION',
+    61,
+    'partial',
+    'argus-investigation-v2-terminal-outcomes',
+    '{}'::jsonb,
+    '{}'::jsonb
+  ) persisted;
+
+  perform public.activate_report_version(
+    '00000000-0000-4000-8000-000000000105',
+    v_source
+  );
+  v_authorization := public.authorize_gap_investigation(
+    '00000000-0000-4000-8000-000000000105',
+    v_source,
+    'project.team',
+    'Who leads the project?',
+    array['project-team'],
+    array['project-team'],
+    array['team_and_leadership'],
+    array['official-domain'],
+    '00000000-0000-4000-8000-000000000106',
+    now() + interval '10 minutes',
+    300,
+    1.50
+  );
+  if v_authorization is null then
+    raise exception 'token and project investigation authorization returned no id';
+  end if;
+end;
+$token_project_authorization$;
+
+select pass('token and project investigations authorize their nested saved project plan');
 select * from finish();
 rollback;
