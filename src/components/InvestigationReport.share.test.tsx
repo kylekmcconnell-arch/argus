@@ -582,6 +582,10 @@ describe("investigation exact sharing", () => {
 
     expect(container.textContent).toContain("Built by Erik Voorhees, Teana Baker-Taylor");
     expect(container.textContent).toContain("Team evidence");
+    expect(container.querySelector("#team-diligence-heading")?.textContent).toContain("People tied to the project");
+    expect(container.querySelector('[aria-label="Team evidence summary"]')?.textContent).toContain("2source-grounded identities");
+    expect(container.querySelector('[aria-label="Team evidence summary"]')?.textContent).toContain("2confirmed founders");
+    expect(container.querySelectorAll(".team-person-card")).toHaveLength(2);
     expect(container.textContent).toContain("Founders (2)");
     // The handle-only "@twistartups · CEO" row (a media account bound to a
     // project-owned role by the post scan) must not render as team at all.

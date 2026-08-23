@@ -83,6 +83,48 @@ The supplied source showed two P2 consistency issues identified by the user: gre
 
 No P3 follow-up is required for this focused color-state correction.
 
+---
+
+# Design QA — team diligence emphasis (issue #142)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-22 at 10.45.44 PM.png`
+- Source focus crop: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/team-section-142/source-team-crop.png`
+- Implementation screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/team-section-142/implementation-narrow.png`
+- Dark implementation screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/team-section-142/implementation-dark-narrow.png`
+- Combined comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/team-section-142/comparison.png`
+- Source: 3478 × 1714 physical pixels at desktop density; focused crop 2900 × 1150 pixels, normalized to 1000px wide
+- Implementation viewport: 673 × 1504 CSS pixels in the in-app browser
+- State: light theme, saved `$STONKBROKER` investigation with one source-grounded operator and one project-claimed founder
+
+## Findings and iteration history
+
+The source comparison exposed one P1 hierarchy issue: the team evidence was a compact row with no visible distinction between verified people, claimed people, and identity gaps. It appeared less important than the token and creator summaries even though identity is a core diligence question.
+
+The implementation promotes People with a direct chapter title, a dedicated diligence surface, a three-part evidence summary, larger person cards, visible roles, and separated source-grounded versus project-claimed identities. No actionable P0, P1, or P2 issue remains after the first paired comparison. The section is deliberately taller than the token and creator cards and remains readable at the narrow viewport.
+
+The paired artifact compares the supplied desktop source with the available narrow in-app browser viewport, so it is a hierarchy and responsive comparison rather than a pixel-geometry match. The component retains its existing two-column desktop grid and uses the new full-width team panel beneath it.
+
+## Required fidelity surfaces
+
+- Typography: existing ARGUS sans and mono families remain; the team title now uses the chapter's editorial display scale and person names use a stronger readable weight.
+- Spacing and rhythm: the panel gains clear header, summary, roster, and claim zones while staying on the existing report grid and spacing tokens.
+- Colors and surfaces: existing panel, line, ink, signal-green, caution, and shadow tokens are reused in light and dark themes.
+- Assets and icons: real Phosphor people and warning icons are used. Existing avatar behavior is preserved; no placeholder art or custom SVG was introduced.
+- Copy and information: all names, roles, evidence, source links, leader-currency records, advisor data, and review actions remain. New counts are derived from the same existing team collections.
+- Responsive behavior: at 673px the summary remains three readable columns, person evidence wraps without clipping, and project claims retain their review action. At 639px and below the header, summary, and person cards stack to one column.
+
+## Interaction and accessibility checks
+
+- The People story link lands at the promoted chapter.
+- The diligence panel has a named region and its count strip has an accessible summary label.
+- Role-proof and project-claim source links remain external links.
+- Each resolvable person retains the existing Review action and audit limit behavior.
+- Focused component tests cover the heading, summary counts, founder count, and rendered person-card count.
+
+## Follow-up polish
+
+No P3 follow-up is required for this focused hierarchy change.
+
 final result: passed
 
 ---

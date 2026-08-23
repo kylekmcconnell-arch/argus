@@ -58,6 +58,9 @@ import {
   ShareNetwork,
   ShieldWarning,
   Star,
+  UserFocus,
+  UsersThree,
+  WarningCircle,
 } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { SecondOpinion } from "./SecondOpinion";
@@ -1106,6 +1109,9 @@ export function InvestigationReport({
   const advisors = (projectAccount?.evidence.testimonials ?? []).filter((t) => t.claimed_relationship === "advisor");
   const founderTeam = teamPeople.filter((person) => /\b(?:co[- ]?founder|founder|creator)\b/i.test(person.role ?? ""));
   const otherNamedTeam = teamPeople.filter((person) => !founderTeam.includes(person));
+  const teamIdentityGapCount = [...publishedTeamClaims, ...supplementalTeamLeads]
+    .filter((person, index, people) => people.findIndex((candidate) => sameTeamIdentity(candidate, person)) === index)
+    .length;
   const teamGroups = [
     { label: "Founders", people: founderTeam },
     { label: "Other named team", people: otherNamedTeam },
@@ -1921,8 +1927,8 @@ export function InvestigationReport({
         <div id="investigation-people" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
             index="04 · People"
-            title="Project account, token creator, and team"
-            description="See the official project account, the wallet that created the token, and the people publicly tied to the project."
+            title="Who is behind this project"
+            description="Team identity is a core diligence question. Start with the people and roles supported by sources, then review the project account and token creator."
           />
           <div id="investigation-evidence" className="scroll-mt-28 grid gap-3 lg:grid-cols-2">
           {/* on-chain */}
@@ -2037,26 +2043,56 @@ export function InvestigationReport({
           </Card>
           </div>
           <div id="investigation-team" className="mt-3 scroll-mt-28">
-            <Card title="Team evidence">
+            <section className="team-diligence-card panel" aria-labelledby="team-diligence-heading">
+              <header className="team-diligence-header">
+                <div>
+                  <div className="eyebrow">Team evidence</div>
+                  <h3 id="team-diligence-heading" className="mt-1 text-[clamp(22px,2.2vw,30px)] font-medium leading-tight tracking-[-0.025em] text-ink">
+                    People tied to the project
+                  </h3>
+                  <p className="mt-2 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim">
+                    Separate source-grounded identities from names claimed by the project and candidates that still need verification.
+                  </p>
+                </div>
+                <span className={teamPeople.length > 0 ? "verdict-pill tint-pass" : "verdict-pill tint-caution"}>
+                  {teamPeople.length > 0 ? `${teamPeople.length} source-grounded` : "identity gap open"}
+                </span>
+              </header>
+
+              <div className="team-diligence-summary" aria-label="Team evidence summary">
+                <div className="team-diligence-stat">
+                  <UsersThree size={22} weight="duotone" aria-hidden />
+                  <span><strong>{teamPeople.length}</strong><small>source-grounded {teamPeople.length === 1 ? "identity" : "identities"}</small></span>
+                </div>
+                <div className="team-diligence-stat">
+                  <UserFocus size={22} weight="duotone" aria-hidden />
+                  <span><strong>{founderTeam.length}</strong><small>confirmed {founderTeam.length === 1 ? "founder" : "founders"}</small></span>
+                </div>
+                <div className={`team-diligence-stat ${teamIdentityGapCount > 0 ? "is-open" : ""}`}>
+                  <WarningCircle size={22} weight="duotone" aria-hidden />
+                  <span><strong>{teamIdentityGapCount}</strong><small>{teamIdentityGapCount === 1 ? "identity" : "identities"} still to verify</small></span>
+                </div>
+              </div>
+
               {teamPeople.length > 0 ? (
                 <div>
-                  <p className="text-[12.5px] leading-relaxed text-ink-dim">
+                  <p className="mt-5 text-[13px] leading-relaxed text-ink-dim">
                     {teamPeople.length} source-grounded {teamPeople.length === 1 ? "person is" : "people are"} tied to this project. People are grouped by their published role.
                   </p>
-                  <div className="mt-3 space-y-3">
+                  <div className="mt-4 space-y-5">
                     {teamGroups.map((group) => (
                       <section key={group.label} aria-label={group.label}>
-                        <div className="eyebrow">{group.label} ({group.people.length})</div>
-                        <div className="mt-1.5 space-y-1.5">
+                        <div className="eyebrow text-ink-dim">{group.label} ({group.people.length})</div>
+                        <div className="mt-2.5 grid gap-2.5 xl:grid-cols-2">
                           {group.people.map((m) => {
                             const roleProof = normalizedPublicUrl(m.sourceUrl);
                             return (
-                            <div key={m.handle ?? m.name} className="flex items-start justify-between gap-2">
-                              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
-                                <span className="text-[12.5px] text-ink">{m.name}</span>
-                                {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
-                                {m.role && <span className="text-[11px] text-ink-faint">{formatRoleLabel(m.role)}</span>}
+                            <div key={m.handle ?? m.name} className="team-person-card">
+                              <span className="team-person-main">
+                                <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={40} rounded="rounded-full" letterClass="text-[13px]" />
+                                <span className="text-[15.5px] font-medium text-ink">{m.name}</span>
+                                {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11.5px] text-ink-faint">{m.handle}</span>}
+                                {m.role && <span className="chip tint-signal normal-case tracking-normal">{formatRoleLabel(m.role)}</span>}
                                 {m.linkedin && (
                                   <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                                 )}
@@ -2081,13 +2117,13 @@ export function InvestigationReport({
                                   );
                                 })}
                                 <span className="chip normal-case tracking-normal">{plainLanguageSummary(m.source)}</span>
-                                {m.evidence && <span className="min-w-full pl-7 text-[10.5px] leading-relaxed text-ink-faint">{m.evidence}</span>}
+                                {m.evidence && <span className="team-person-evidence">{m.evidence}</span>}
                               </span>
                               {m.handle ? (
                                 <button
                                   onClick={() => auditFounder(m.handle!)}
                                   disabled={spent >= MAX_FOUNDER_AUDITS}
-                                  className="btn-chip tint-signal shrink-0 disabled:opacity-40"
+                                  className="btn-secondary min-h-9 shrink-0 px-3 text-[11.5px] disabled:opacity-40"
                                 >
                                   {spent >= MAX_FOUNDER_AUDITS ? "review limit reached" : "Review"}
                                 </button>
@@ -2261,7 +2297,7 @@ export function InvestigationReport({
                   <p className="mt-2 text-[12.5px] leading-snug text-ink-faint">A claimed advisor who has never publicly acknowledged the project may be a misleading name-drop.</p>
                 </div>
               )}
-            </Card>
+            </section>
           </div>
         </div>
 
