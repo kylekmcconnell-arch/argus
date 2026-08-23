@@ -198,7 +198,7 @@ describe("a Solana LP lock RugCheck already answered", () => {
     expect(lock?.tone).toBe("good");
     expect(lock?.source).toBe("rugcheck");
     expect(lock?.claim).toMatch(/rugcheck/i);
-    expect(dossier!.findings.some((f) => /LP lock was not measured/.test(f.claim))).toBe(false);
+    expect(dossier!.findings.some((f) => /liquidity protection is unverified/i.test(f.claim))).toBe(false);
     expect(dossier!.axes.find((axis) => axis.key === "T1")?.rationale).toContain("LP locked");
   });
 
@@ -208,10 +208,12 @@ describe("a Solana LP lock RugCheck already answered", () => {
 
     expect(dossier!.safety.lpAssessed).toBe(true);
     expect(dossier!.safety.lpLocked).toBe(false);
-    const lock = dossier!.findings.find((f) => /LP locked|liquidity is not lock protected/i.test(f.claim));
+    const lock = dossier!.findings.find((f) => /liquidity locked.*may be removable/i.test(f.claim));
     expect(lock?.tone).toBe("warn");
     expect(lock?.source).toBe("rugcheck");
     expect(lock?.claim).toMatch(/rugcheck/i);
+    expect(lock?.claim).toContain("may be removable");
+    expect(lock?.claim).not.toMatch(/GoPlus returned|free data tier|not scored/i);
     expect(dossier!.axes.find((axis) => axis.key === "T1")?.rationale).toContain("LP not locked");
   });
 
@@ -221,9 +223,9 @@ describe("a Solana LP lock RugCheck already answered", () => {
 
     expect(dossier!.safety.lpAssessed).toBe(false);
     expect(dossier!.safety.lpLockedPct).toBe(0);
-    expect(dossier!.findings.some((f) => /LP lock was not measured/.test(f.claim))).toBe(true);
+    expect(dossier!.findings.some((f) => /liquidity protection is unverified/i.test(f.claim))).toBe(true);
     expect(JSON.stringify(dossier!.findings)).not.toContain("4200");
-    expect(dossier!.axes.find((axis) => axis.key === "T1")?.rationale).toContain("LP lock not measured");
+    expect(dossier!.axes.find((axis) => axis.key === "T1")?.rationale).toContain("liquidity protection unverified");
   });
 
   it("does not publish 'not lock protected' from a zero RugCheck never evidenced", async () => {
@@ -234,7 +236,7 @@ describe("a Solana LP lock RugCheck already answered", () => {
     // unlocked one. This is the same failure as the old GoPlus branch, one
     // provider over.
     expect(dossier!.safety.lpAssessed).toBe(false);
-    expect(dossier!.findings.some((f) => /LP lock was not measured/.test(f.claim))).toBe(true);
+    expect(dossier!.findings.some((f) => /liquidity protection is unverified/i.test(f.claim))).toBe(true);
     expect(dossier!.findings.some((f) => /not lock protected/i.test(f.claim))).toBe(false);
   });
 
@@ -244,7 +246,7 @@ describe("a Solana LP lock RugCheck already answered", () => {
 
     expect(dossier!.safety.lpAssessed).toBe(true);
     expect(dossier!.safety.lpLocked).toBe(false);
-    const lock = dossier!.findings.find((f) => /not lock protected/i.test(f.claim));
+    const lock = dossier!.findings.find((f) => /liquidity locked.*may be removable/i.test(f.claim));
     expect(lock?.tone).toBe("warn");
     expect(lock?.source).toBe("rugcheck");
   });
@@ -254,7 +256,11 @@ describe("a Solana LP lock RugCheck already answered", () => {
     const dossier = await scan();
 
     expect(dossier!.safety.lpAssessed).toBe(false);
-    expect(dossier!.findings.some((f) => /LP lock was not measured/.test(f.claim))).toBe(true);
+    const finding = dossier!.findings.find((f) => /liquidity protection is unverified/i.test(f.claim));
+    expect(finding).toMatchObject({ tone: "warn", source: "argus" });
+    expect(finding?.claim).toContain("may be able to remove it");
+    expect(finding?.claim).toContain("locker record with an unlock date");
+    expect(finding?.claim).not.toMatch(/free data tier|not scored|GoPlus returned/i);
   });
 
   it("does not overwrite an LP lock GoPlus did report", async () => {

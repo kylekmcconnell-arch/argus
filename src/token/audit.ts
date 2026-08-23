@@ -641,7 +641,7 @@ async function runTokenAudit(
       step({
         phase: "Contract",
         label: "LP lock",
-        detail: `RugCheck reports ${rug.lpLockedPct.toFixed(1)}% of the liquidity locked. GoPlus returned no LP holder records for this mint.`,
+        detail: `RugCheck reports ${rug.lpLockedPct.toFixed(1)}% of the liquidity locked.`,
         source: "rugcheck",
         tone: rug.lpLockedPct >= 50 ? "good" : "warn",
       });
@@ -826,13 +826,13 @@ async function runTokenAudit(
     // a burn or a single unlocked wallet is a GoPlus LP row.
     const lockedByRugcheck = lpLockSource === "rugcheck";
     if (s.lpBurnedPct >= 50) findings.push({ claim: `Liquidity is burned (~${s.lpBurnedPct.toFixed(0)}%) and permanently removed; it cannot be pulled.`, tone: "good", source: "goplus" });
-    else if (s.lpLockedPct >= 50) findings.push({ claim: lockedByRugcheck ? `RugCheck reports liquidity is locked (~${s.lpLockedPct.toFixed(0)}%). This is RugCheck's reading of the pool, since GoPlus returns no LP holder records on this chain.` : `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: lpLockSource });
+    else if (s.lpLockedPct >= 50) findings.push({ claim: lockedByRugcheck ? `RugCheck reports liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).` : `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: lpLockSource });
     else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet and can be pulled at any time.`, tone: "bad", source: "goplus" });
     else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet and removable at will.`, tone: "warn", source: "goplus" });
     // No usable LP record is not the same fact as an unlocked pool. Asserting
     // the latter told readers that USDC's liquidity "does not appear locked".
-    else if (s.lpAssessed) findings.push({ claim: lockedByRugcheck ? `RugCheck reports only ~${s.lpLockedPct.toFixed(0)}% of the LP locked, so the liquidity is not lock protected. This is RugCheck's reading of the pool, since GoPlus returns no LP holder records on this chain.` : "Liquidity does not appear locked or burned.", tone: "warn", source: lpLockSource });
-    else findings.push({ claim: "LP lock was not measured: the free data tier returned no LP holder records for this chain. Not scored either way.", tone: "warn", source: "goplus" });
+    else if (s.lpAssessed) findings.push({ claim: lockedByRugcheck ? `RugCheck reports only ~${s.lpLockedPct.toFixed(0)}% of the liquidity locked. Most liquidity is not protected by a verified lock or burn and may be removable.` : "The LP records reviewed do not show meaningful lock or burn protection. Whoever controls the liquidity may be able to remove it.", tone: "warn", source: lpLockSource });
+    else findings.push({ claim: "Liquidity protection is unverified. ARGUS could not confirm that the pool's liquidity is locked or permanently burned. Until a locker record with an unlock date, a burn transaction, or equivalent on-chain custody proof is verified, whoever controls the liquidity may be able to remove it.", tone: "warn", source: "argus" });
   }
 
   // ---- RugCheck's own assessments of a Solana mint ----
@@ -1016,7 +1016,7 @@ async function runTokenAudit(
   else if (s.available && s.lpAssessed) { aT1 = clamp(aT1 - 3, 0, 24); lpNote = ", LP not locked"; }
   // No usable LP record: the lock is UNKNOWN. Scoring it as loose told readers
   // that USDC's liquidity "does not appear locked or burned" and docked it.
-  else if (s.available) { lpNote = ", LP lock not measured"; }
+  else if (s.available) { lpNote = ", liquidity protection unverified"; }
   axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${lpNote}.` });
 
   let aT2 = 26;
