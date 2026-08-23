@@ -66,6 +66,11 @@ const POLARITY_LABELS: Record<IntelligenceSignalPolarity, string> = {
   unknown: "Needs review",
 };
 
+const PUBLIC_SIGNAL_HEADLINES: Record<string, string> = {
+  "strict-product-description": "Direct sources describe what the product does",
+  "goplus-fired-contract-flag": "GoPlus reported a contract or deployer warning",
+};
+
 export function publicMeasurementTitle(measurement: IntelligenceMeasurement): string {
   return MEASUREMENT_TITLES[measurement.id] ?? measurement.label;
 }
@@ -205,7 +210,8 @@ export function publicSignalCopy(signal: DerivedIntelligenceSignal): PublicSigna
   return {
     status: POLARITY_LABELS[signal.polarity],
     priority: SEVERITY_LABELS[signal.severity],
-    headline: publicIntelligenceText(signal.headline),
+    headline: PUBLIC_SIGNAL_HEADLINES[signal.ruleId]
+      ?? publicIntelligenceText(signal.headline),
     finding: publicIntelligenceText(signal.finding),
     whyItMatters: publicIntelligenceText(signal.whyItMatters),
     changeCondition: publicIntelligenceText(signal.changeCondition),

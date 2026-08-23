@@ -72,6 +72,24 @@ describe("public Decision Intelligence presentation", () => {
     expect(`${copy.headline} ${copy.finding}`).not.toContain("integrity-gate");
   });
 
+  it("turns internal product and GoPlus rule headlines into attributed reader language", () => {
+    const support = publicSignalCopy(signal({
+      ruleId: "strict-product-description",
+      polarity: "support",
+      headline: "Product description has strict direct-subject sourcing",
+    }));
+    const concern = publicSignalCopy(signal({
+      ruleId: "goplus-fired-contract-flag",
+      polarity: "risk",
+      headline: "GoPlus reports a fired contract or deployer flag",
+    }));
+
+    expect(support.headline).toBe("Direct sources describe what the product does");
+    expect(concern.headline).toBe("GoPlus reported a contract or deployer warning");
+    expect(`${support.headline} ${concern.headline}`).not.toMatch(/strict direct-subject|fired .* flag/i);
+    expect(concern.headline).toContain("GoPlus");
+  });
+
   it("translates legacy scorer bands without changing their ranges or treating checked-empty evidence as negative", () => {
     const copy = publicSignalCopy(signal({
       id: "project_strength_band_summary",
