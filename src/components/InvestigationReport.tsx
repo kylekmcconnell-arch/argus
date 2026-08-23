@@ -1468,6 +1468,7 @@ export function InvestigationReport({
             ]}
             xHandle={projectX ?? token.cg?.twitter}
             contractAddress={token.address}
+            chain={token.chain}
             links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
           />
 

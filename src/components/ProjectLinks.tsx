@@ -1,16 +1,16 @@
-// A compact row of the project's official links (website, socials, and the
-// contract address) for the TOP of a report. Shared across the token,
-// investigation, and site reports so the same links show in the same place
-// everywhere. Classifies each URL to a clean platform label, dedupes (one X,
-// one Telegram, one per website host), and orders website-first.
+// The project's identity rail for the TOP of a report. Shared across token and
+// investigation reports so the official site, community/research destinations,
+// and contract always have the same hierarchy. Classifies each URL to a clean
+// platform label, dedupes (one X, one Telegram, one per website host), and
+// orders website-first.
 //
 // The contract address is the one item a reader routinely needs to carry
 // somewhere else (an explorer, a wallet, a group chat), so it copies in one
 // click rather than forcing a manual selection of a 42-character string.
 import { useState } from "react";
 import {
-  BookOpen, Check, Copy, DiscordLogo, GithubLogo, GlobeSimple, LinkSimple,
-  RedditLogo, TelegramLogo, XLogo, YoutubeLogo,
+  ArrowSquareOut, BookOpen, Check, Copy, Cube, DiscordLogo, GithubLogo,
+  GlobeSimple, LinkSimple, RedditLogo, TelegramLogo, XLogo, YoutubeLogo,
 } from "@phosphor-icons/react";
 
 type RawLink = { label?: string; url: string };
@@ -19,9 +19,9 @@ type IconType = typeof GlobeSimple;
 const RULES: [RegExp, string, number, IconType][] = [
   [/(?:x\.com|twitter\.com)\//i, "X", 1, XLogo],
   [/t\.me|telegram/i, "Telegram", 2, TelegramLogo],
-  [/discord(?:\.gg|app\.com|\.com)/i, "Discord", 3, DiscordLogo],
-  [/github\.com/i, "GitHub", 4, GithubLogo],
-  [/(?:docs\.|gitbook|readthedocs)/i, "Docs", 5, BookOpen],
+  [/(?:docs\.|gitbook|readthedocs)/i, "Docs", 3, BookOpen],
+  [/discord(?:\.gg|app\.com|\.com)/i, "Discord", 4, DiscordLogo],
+  [/github\.com/i, "GitHub", 5, GithubLogo],
   [/medium\.com|mirror\.xyz|substack\.com/i, "Blog", 6, BookOpen],
   [/youtube\.com|youtu\.be/i, "YouTube", 7, YoutubeLogo],
   [/reddit\.com/i, "Reddit", 8, RedditLogo],
@@ -29,7 +29,17 @@ const RULES: [RegExp, string, number, IconType][] = [
   [/warpcast\.com|farcaster/i, "Farcaster", 10, LinkSimple],
 ];
 
-function classify(url: string): { label: string; pri: number; Icon: IconType } {
+const LABEL_RULES: [RegExp, string, number, IconType][] = [
+  [/^(?:x|twitter)$/i, "X", 1, XLogo],
+  [/telegram/i, "Telegram", 2, TelegramLogo],
+  [/docs?|documentation|gitbook|whitepaper/i, "Docs", 3, BookOpen],
+  [/discord/i, "Discord", 4, DiscordLogo],
+  [/github/i, "GitHub", 5, GithubLogo],
+];
+
+function classify(url: string, explicitLabel?: string): { label: string; pri: number; Icon: IconType } {
+  const hint = explicitLabel?.trim() ?? "";
+  for (const [re, name, pri, Icon] of LABEL_RULES) if (re.test(hint)) return { label: name, pri, Icon };
   for (const [re, name, pri, Icon] of RULES) if (re.test(url)) return { label: name, pri, Icon };
   try {
     return { label: new URL(url).hostname.replace(/^www\./, ""), pri: 0, Icon: GlobeSimple };
@@ -40,6 +50,16 @@ function classify(url: string): { label: string; pri: number; Icon: IconType } {
 
 const shortAddress = (value: string): string =>
   value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
+
+const CHAIN_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  arbitrum: "Arbitrum",
+  base: "Base",
+  bsc: "BNB Chain",
+  ethereum: "Ethereum",
+  polygon: "Polygon",
+  robinhood: "Robinhood Chain",
+  solana: "Solana",
+});
 
 function CopyAddress({ address }: { address: string }) {
   const [copied, setCopied] = useState(false);
@@ -54,11 +74,11 @@ function CopyAddress({ address }: { address: string }) {
       }}
       title={`Copy contract address ${address}`}
       aria-label={`Copy contract address ${address}`}
-      className="chip mono normal-case tracking-normal transition hover:text-ink"
+      className={`project-identity-contract-button ${copied ? "is-copied" : ""}`}
     >
       {copied
-        ? <Check size={12} weight="bold" aria-hidden />
-        : <Copy size={12} weight="duotone" aria-hidden />}
+        ? <Check size={16} weight="bold" aria-hidden />
+        : <Copy size={16} weight="duotone" aria-hidden />}
       {copied ? "Copied" : shortAddress(address)}
     </button>
   );
@@ -70,6 +90,7 @@ export function ProjectLinks({
   websites,
   xHandle,
   contractAddress,
+  chain,
   className,
 }: {
   links?: RawLink[];
@@ -79,6 +100,8 @@ export function ProjectLinks({
   xHandle?: string | null;
   /** Token contract, rendered as a one-click copy chip. */
   contractAddress?: string | null;
+  /** Network label shown alongside the copyable contract. */
+  chain?: string | null;
   className?: string;
 }) {
   const urls: Array<{ url: string; explicitLabel?: string }> = [];
@@ -90,45 +113,100 @@ export function ProjectLinks({
   push(website);
   for (const item of websites ?? []) push(item.url, item.label);
   if (xHandle) push(`https://x.com/${xHandle.replace(/^@/, "")}`);
-  for (const l of links ?? []) push(l.url);
+  for (const l of links ?? []) push(l.url, l.label);
 
   // Dedupe by label: one chip per platform (and one per distinct website host).
   const seen = new Set<string>();
   const items = urls
     .map(({ url, explicitLabel }) => {
-      const classified = classify(url);
-      return { url, ...classified, label: explicitLabel?.trim() || classified.label };
+      const classified = classify(url, explicitLabel);
+      return {
+        url,
+        ...classified,
+        label: classified.pri === 0 ? explicitLabel?.trim() || classified.label : classified.label,
+      };
     })
     .filter((it) => {
       // Social products dedupe by platform. Websites dedupe by hostname so a
       // token landing page and the protocol/company site can coexist.
       const k = it.pri === 0
         ? `site:${new URL(it.url).hostname.replace(/^www\./, "").toLowerCase()}`
-        : `platform:${classify(it.url).label.toLowerCase()}`;
+        : `platform:${it.pri}:${it.label.toLowerCase()}`;
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
     })
     .sort((a, b) => a.pri - b.pri);
 
+  const primary = items.find((item) => item.pri === 0);
+  const resources = primary ? items.filter((item) => item !== primary) : items;
   const address = contractAddress?.trim();
   if (!items.length && !address) return null;
+  const groupCount = Number(Boolean(primary)) + Number(resources.length > 0) + Number(Boolean(address));
+  const layout = groupCount === 3
+    ? "lg:grid-cols-[minmax(220px,1.1fr)_minmax(280px,2fr)_minmax(220px,auto)]"
+    : groupCount === 2
+      ? "sm:grid-cols-2"
+      : "grid-cols-1";
+  const chainKey = chain?.trim().toLowerCase() ?? "";
+  const chainLabel = chainKey
+    ? CHAIN_LABELS[chainKey] ?? chainKey.replace(/\b\w/g, (letter) => letter.toUpperCase())
+    : "Contract";
+
   return (
-    <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ""}`}>
-      {items.map((l) => (
-        <a
-          key={l.url}
-          href={l.url}
-          target="_blank"
-          rel="noreferrer"
-          title={l.url}
-          className="chip normal-case tracking-normal transition hover:text-ink"
-        >
-          <l.Icon size={12} weight="duotone" aria-hidden />
-          {l.label}
-        </a>
-      ))}
-      {address && <CopyAddress address={address} />}
-    </div>
+    <section
+      aria-label="Official project links"
+      className={`project-identity-rail grid ${layout} ${className ?? ""}`}
+    >
+      {primary && (
+        <div className="project-identity-group">
+          <div className="project-identity-label">Project</div>
+          <a
+            href={primary.url}
+            target="_blank"
+            rel="noreferrer"
+            title={primary.url}
+            className="project-identity-primary"
+          >
+            <GlobeSimple size={23} weight="duotone" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{primary.label}</span>
+            <ArrowSquareOut size={16} weight="bold" aria-hidden />
+          </a>
+        </div>
+      )}
+
+      {resources.length > 0 && (
+        <div className="project-identity-group min-w-0">
+          <div className="project-identity-label">Resources &amp; community</div>
+          <div className="project-identity-resources">
+            {resources.map((link) => (
+              <a
+                key={link.url}
+                href={link.url}
+                target="_blank"
+                rel="noreferrer"
+                title={link.url}
+                className="project-identity-resource"
+              >
+                <link.Icon size={21} weight="duotone" aria-hidden />
+                <span>{link.label}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {address && (
+        <div className="project-identity-group">
+          <div className="project-identity-label">Contract</div>
+          <div className="project-identity-contract">
+            <Cube size={18} weight="duotone" aria-hidden />
+            <span className="project-identity-chain">{chainLabel}</span>
+            <span className="project-identity-divider" aria-hidden />
+            <CopyAddress address={address} />
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

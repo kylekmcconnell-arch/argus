@@ -49,6 +49,49 @@ final result: passed
 
 ---
 
+# Design QA — project identity rail (issue #134)
+
+- Selected visual target: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/project-identity-rail-134/selected-option-1.png`
+- Light implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/project-identity-rail-134/implementation-light-v2.jpg`
+- Dark implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/project-identity-rail-134/implementation-dark.jpg`
+- Mobile implementation stage: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/project-identity-rail-134/implementation-mobile-stage-v3.jpg`
+- Full paired comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/project-identity-rail-134/comparison-full-v2.jpg`
+- Focused paired comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/project-identity-rail-134/comparison-rail-focused-v2.jpg`
+- Desktop viewport: 1280 × 720 CSS pixels
+- Mobile iframe viewport: 390 × 844 CSS pixels
+- State: representative Interfold project with official site, X, Telegram, Docs, Discord, GitHub, Ethereum contract, and report verdict
+
+## Findings and iteration history
+
+The first implementation comparison retained the selected three-part hierarchy but the resource labels and contract metadata were slightly denser than the target. The second pass tuned group spacing, icon scale, label hierarchy, and the signature-green copy affordance. No actionable P0, P1, or P2 differences remain after the second paired comparison.
+
+The implementation intentionally uses the existing ARGUS report type scale and surface tokens rather than copying the larger concept scale literally. The selected hierarchy is preserved: one dominant official-project destination, a quiet icon ledger for supporting resources, and a distinct contract block.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing ARGUS sans and mono families are retained, with uppercase mono group labels and compact readable destination labels.
+- Spacing and layout rhythm: the rail spans the report width, uses the report's border rhythm, and collapses from three columns to two or one according to available groups and viewport width.
+- Colors and visual tokens: existing ink, panel, line, and signature-green brand tokens are used in light and dark themes.
+- Assets and icons: real Phosphor platform and utility icons are used; no drawn or placeholder icons were introduced.
+- Copy and content: every supplied URL remains available. Labels are normalized to X, Telegram, Docs, Discord, and GitHub, while the official site label, chain, and copyable contract remain explicit.
+- Responsive behavior: at 390px, `innerWidth`, `documentElement.clientWidth`, `body.scrollWidth`, and `documentElement.scrollWidth` all measured 390px, confirming no document-level horizontal overflow. Resource items wrap while preserving tap targets.
+
+## Interaction and console checks
+
+- Official project and resource destinations retain external-link behavior.
+- The contract button copies the full address and changes its visible state to `Copied`.
+- Empty groups collapse without blank columns; this behavior is covered by a focused component test.
+- Light and dark renderings completed successfully.
+- Browser console check found 0 errors and 0 warnings in the isolated component preview.
+
+## Follow-up polish
+
+No P3 follow-up is required for this component.
+
+final result: passed
+
+---
+
 # Design QA — fluid authenticated workspace (issue #130)
 
 - Source screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/fluid-workspace-issue-130/providers-source.jpg`
