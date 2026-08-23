@@ -11,6 +11,10 @@
 
 const RISK = "https://api.arkm.com/risk/address/";
 const INTEL = "https://api.arkm.com/intelligence/address/";
+export const ARKHAM_RISK_BATCH = "https://api.arkm.com/risk/address/batch";
+export const ARKHAM_INTEL_BATCH = "https://api.arkm.com/intelligence/address_enriched/batch/all";
+const RISK_BATCH_LIMIT = 200;
+const INTEL_BATCH_LIMIT = 1000;
 
 export interface ArkhamRiskPath {
   seed: string;
@@ -66,6 +70,27 @@ const CATEGORY_SCORES = [
   ["token_blacklist_score", "blacklisted token"],
 ] as const;
 
+function shapeBriefing(d: Record<string, unknown>): ArkhamRiskBriefing {
+  const categoryScores = CATEGORY_SCORES
+    .map(([field, category]) => ({ category, score: Number(d[field] ?? 0) }))
+    .filter((entry) => Number.isFinite(entry.score) && entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return {
+    level: String(d.risk_level ?? "NONE"),
+    score: Number(d.max_score ?? 0),
+    greatestCategory: cleanText(d.greatest_risk_category),
+    incomingUsd: Number(d.risk_weighted_incoming_usd ?? 0),
+    outgoingUsd: Number(d.risk_weighted_outgoing_usd ?? 0),
+    hopDistance: Number.isFinite(Number(d.hop_distance)) ? Number(d.hop_distance) : undefined,
+    updatedAt: cleanText(d.updated_at),
+    categoryScores,
+  };
+}
+
+export type SeedLabeller = (
+  addresses: readonly string[],
+) => Promise<{ names: Map<string, { name?: string; type?: string }>; calls: number; succeeded: number }>;
+
 async function seedName(addr: string, key: string, usage: { calls: number; succeeded: number }): Promise<{ name?: string; type?: string }> {
   usage.calls += 1;
   try {
@@ -82,7 +107,11 @@ async function seedName(addr: string, key: string, usage: { calls: number; succe
  * seed by USD contribution, category scores, and each seed's Arkham entity.
  * Never throws; returns available:false on any provider failure.
  */
-export async function fetchAddressRiskPaths(address: string, key: string): Promise<ArkhamRiskResult> {
+export async function fetchAddressRiskPaths(
+  address: string,
+  key: string,
+  labelSeeds?: SeedLabeller,
+): Promise<ArkhamRiskResult> {
   const usage = { calls: 0, succeeded: 0 };
   try {
     usage.calls += 1;
@@ -103,7 +132,16 @@ export async function fetchAddressRiskPaths(address: string, key: string): Promi
       if (!ex || Number(p?.contribution_usd ?? 0) > Number(ex?.contribution_usd ?? 0)) bySeed.set(s, p);
     }
     const top = [...bySeed.values()].sort((a, b) => Number(b?.contribution_usd ?? 0) - Number(a?.contribution_usd ?? 0)).slice(0, 6);
-    const labels = await Promise.all(top.map((p) => seedName(String(p.seed_address), key, usage)));
+    const seeds = top.map((p) => String(p.seed_address));
+    let labels: { name?: string; type?: string }[];
+    if (labelSeeds) {
+      const batched = await labelSeeds(seeds);
+      usage.calls += batched.calls;
+      usage.succeeded += batched.succeeded;
+      labels = seeds.map((seed) => batched.names.get(seed.toLowerCase()) ?? {});
+    } else {
+      labels = await Promise.all(seeds.map((seed) => seedName(seed, key, usage)));
+    }
     const paths: ArkhamRiskPath[] = top.map((p, i) => ({
       seed: String(p.seed_address),
       seedName: labels[i].name,
@@ -116,22 +154,126 @@ export async function fetchAddressRiskPaths(address: string, key: string): Promi
       firstAt: cleanText(p?.first_ts),
       lastAt: cleanText(p?.last_ts),
     }));
-    const categoryScores = CATEGORY_SCORES
-      .map(([field, category]) => ({ category, score: Number(d[field] ?? 0) }))
-      .filter((entry) => Number.isFinite(entry.score) && entry.score > 0)
-      .sort((a, b) => b.score - a.score);
-    const briefing: ArkhamRiskBriefing = {
-      level: String(d.risk_level ?? "NONE"),
-      score: Number(d.max_score ?? 0),
-      greatestCategory: cleanText(d.greatest_risk_category),
-      incomingUsd: Number(d.risk_weighted_incoming_usd ?? 0),
-      outgoingUsd: Number(d.risk_weighted_outgoing_usd ?? 0),
-      hopDistance: Number.isFinite(Number(d.hop_distance)) ? Number(d.hop_distance) : undefined,
-      updatedAt: cleanText(d.updated_at),
-      categoryScores,
-    };
-    return { available: true, paths, briefing, calls: usage.calls, succeeded: usage.succeeded };
+    return { available: true, paths, briefing: shapeBriefing(d), calls: usage.calls, succeeded: usage.succeeded };
   } catch {
     return { available: false, paths: [], calls: usage.calls, succeeded: usage.succeeded };
   }
+}
+
+export type ArkhamLaneOutcome = "answered" | "unentitled" | "unavailable";
+
+export interface ArkhamBatchResult<T> {
+  outcome: ArkhamLaneOutcome;
+  rows: Map<string, T>;
+  status?: number;
+  calls: number;
+  succeeded: number;
+}
+
+export interface ArkhamAddressLabel {
+  name?: string;
+  type?: string;
+  twitter?: string;
+  website?: string;
+  isCex: boolean;
+  isService: boolean;
+  isContract: boolean;
+}
+
+export interface ArkhamAddressRisk extends ArkhamRiskBriefing {
+  isSeed: boolean;
+}
+
+const empty = <T,>(outcome: ArkhamLaneOutcome, calls: number, status?: number): ArkhamBatchResult<T> =>
+  ({ outcome, rows: new Map<string, T>(), status, calls, succeeded: 0 });
+
+async function postBatch(
+  url: string,
+  addresses: readonly string[],
+  key: string,
+  timeoutMs: number,
+): Promise<{ outcome: ArkhamLaneOutcome; rows: Map<string, Record<string, unknown>>; status?: number }> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "API-Key": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ addresses }),
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    return { outcome: "unavailable", rows: new Map() };
+  }
+  if (response.status === 402 || response.status === 403) {
+    return { outcome: "unentitled", rows: new Map(), status: response.status };
+  }
+  if (!response.ok) return { outcome: "unavailable", rows: new Map(), status: response.status };
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { outcome: "unavailable", rows: new Map(), status: response.status };
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { outcome: "unavailable", rows: new Map(), status: response.status };
+  }
+  const envelope = (body as { addresses?: unknown }).addresses;
+  const container = envelope && typeof envelope === "object" && !Array.isArray(envelope)
+    ? envelope as Record<string, unknown>
+    : body as Record<string, unknown>;
+  const rows = new Map<string, Record<string, unknown>>();
+  for (const [address, row] of Object.entries(container)) {
+    if (row && typeof row === "object" && !Array.isArray(row)) {
+      rows.set(address.toLowerCase(), row as Record<string, unknown>);
+    }
+  }
+  return { outcome: "answered", rows, status: response.status };
+}
+
+export async function fetchAddressLabelsBatch(
+  addresses: readonly string[],
+  key: string,
+  timeoutMs = 12_000,
+): Promise<ArkhamBatchResult<ArkhamAddressLabel>> {
+  const targets = [...new Set(addresses.filter(Boolean))].slice(0, INTEL_BATCH_LIMIT);
+  if (!targets.length) return empty<ArkhamAddressLabel>("answered", 0);
+  const { outcome, rows, status } = await postBatch(ARKHAM_INTEL_BATCH, targets, key, timeoutMs);
+  if (outcome !== "answered") return empty<ArkhamAddressLabel>(outcome, 1, status);
+  const labels = new Map<string, ArkhamAddressLabel>();
+  for (const [address, row] of rows) {
+    const entity = row.arkhamEntity && typeof row.arkhamEntity === "object"
+      ? row.arkhamEntity as Record<string, unknown>
+      : {};
+    const label = row.arkhamLabel && typeof row.arkhamLabel === "object"
+      ? row.arkhamLabel as Record<string, unknown>
+      : {};
+    const type = cleanText(entity.type)?.toLowerCase();
+    labels.set(address, {
+      name: cleanText(entity.name) ?? cleanText(label.name),
+      type,
+      twitter: cleanText(entity.twitter),
+      website: cleanText(entity.website),
+      isCex: type === "cex",
+      isService: Boolean(entity.service) || type === "cex",
+      isContract: row.contract === true || row.isUserAddress === false,
+    });
+  }
+  return { outcome: "answered", rows: labels, status, calls: 1, succeeded: 1 };
+}
+
+export async function fetchAddressRiskBatch(
+  addresses: readonly string[],
+  key: string,
+  timeoutMs = 15_000,
+): Promise<ArkhamBatchResult<ArkhamAddressRisk>> {
+  const targets = [...new Set(addresses.filter(Boolean))].slice(0, RISK_BATCH_LIMIT);
+  if (!targets.length) return empty<ArkhamAddressRisk>("answered", 0);
+  const { outcome, rows, status } = await postBatch(ARKHAM_RISK_BATCH, targets, key, timeoutMs);
+  if (outcome !== "answered") return empty<ArkhamAddressRisk>(outcome, 1, status);
+  const risks = new Map<string, ArkhamAddressRisk>();
+  for (const [address, row] of rows) {
+    risks.set(address, { ...shapeBriefing(row), isSeed: row.is_seed === true });
+  }
+  return { outcome: "answered", rows: risks, status, calls: 1, succeeded: 1 };
 }

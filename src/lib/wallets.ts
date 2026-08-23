@@ -25,3 +25,21 @@ export function walletTier(w: { link_tier?: string; notes?: string }): WalletTie
   if (w.link_tier === "SelfDoxxed" || notes.includes("self-disclosed")) return { rank: 1, label: "Self-disclosed", color: "var(--color-signal-dim)" };
   return { rank: 2, label: w.link_tier || "Attributed", color: "var(--color-ink-faint)" };
 }
+
+export function walletScreenView(status: string): { label: string; tint: string } {
+  switch (status) {
+    case "screened": return { label: "Exposure found", tint: "tint-avoid" };
+    case "no_exposure_found": return { label: "Screened · no exposure", tint: "tint-pass" };
+    case "not_attributable": return { label: "Contract, not a wallet", tint: "tint-neutral" };
+    default: return { label: "Not screened", tint: "tint-unverifiable" };
+  }
+}
+
+export function walletBindingLabel(binding: string): string {
+  switch (binding) {
+    case "farcaster_verified": return "Farcaster-verified control";
+    case "self_disclosed": return "published by the subject";
+    case "handle_name_guess": return "handle-name match (unconfirmed)";
+    default: return binding;
+  }
+}

@@ -41,7 +41,7 @@ import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
 import { ProjectLinks } from "./ProjectLinks";
 import { xAvatar, personAvatar } from "../lib/avatars";
-import { explorer, shortAddr, walletTier } from "../lib/wallets";
+import { explorer, shortAddr, walletBindingLabel, walletScreenView, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
@@ -4064,6 +4064,38 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                               )}
                             </div>
                           )}
+                          {w.screen && (() => {
+                            const view = walletScreenView(w.screen.status);
+                            const risk = w.screen.risk;
+                            return (
+                              <div className="mt-1.5">
+                                <div className="flex flex-wrap gap-1">
+                                  <span className={`chip ${view.tint}`}>{view.label}</span>
+                                  {w.screen.entity?.name && (
+                                    <span className="chip">
+                                      {w.screen.entity.name}{w.screen.entity.type ? ` · ${w.screen.entity.type}` : ""}
+                                    </span>
+                                  )}
+                                  {risk && (
+                                    <span className="chip tint-avoid">
+                                      {risk.level} {risk.score}/100{risk.greatestCategory ? ` · ${risk.greatestCategory}` : ""}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="mt-1 text-[11px] leading-snug text-ink-faint">{w.screen.detail}</p>
+                                {risk?.topSources.slice(0, 3).map((source) => (
+                                  <p key={source.seed} className="mt-0.5 text-[11px] leading-snug text-ink-faint">
+                                    {source.direction === "backward" ? "Funded from" : "Sent to"} {source.seedName || shortAddr(source.seed)}
+                                    {source.category ? ` (${source.category})` : ""} · {source.hops} hop{source.hops === 1 ? "" : "s"}
+                                    {source.usd > 0 ? ` · $${Math.round(source.usd).toLocaleString()}` : ""}
+                                  </p>
+                                ))}
+                                <p className="mt-1 text-[10.5px] leading-snug text-ink-faint">
+                                  Arkham · address {walletBindingLabel(w.screen.binding)} · checked {new Date(w.screen.capturedAt).toLocaleString()}
+                                </p>
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}

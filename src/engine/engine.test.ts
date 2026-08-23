@@ -462,6 +462,32 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(r.score_total!).toBeLessThanOrEqual(35);
   });
 
+  it("does not treat a screened contract as a subject-controlled wallet", () => {
+    const a = new Audit("@contract_reference", { subject_class: SubjectClass.KOL });
+    a.setIdentity("Unverified");
+    a.addWallet({
+      address: "0xcontract",
+      chain: "base",
+      link_tier: "SelfDoxxed",
+      sold_into_own_promo: true,
+      screen: {
+        status: "not_attributable",
+        detail: "This address is a contract, not a user wallet.",
+        provider: "arkham",
+        endpoints: ["address_enriched/batch/all"],
+        capturedAt: "2026-08-23T00:00:00.000Z",
+        binding: "self_disclosed",
+      },
+    });
+    for (const [ax, s] of [["K1_identity_roster", 8], ["K2_call_performance", 20], ["K3_disclosure_deletion", 10], ["K4_onchain_conduct", 5], ["K5_cabal_fud", 10]] as [string, number][]) {
+      a.setAxis(ax, s);
+    }
+
+    const result = a.finalize();
+    expect(result.cap_applied).not.toBe("wallet_sold_into_promo");
+    expect(a.toPanoptes().edges).not.toContainEqual(expect.objectContaining({ type: "CONTROLS_WALLET" }));
+  });
+
   it("INVESTOR pseudonymous -> scored, not gated", () => {
     const a = new Audit("@anon_fund", { subject_class: SubjectClass.INVESTOR });
     a.setIdentity("Unverified");
