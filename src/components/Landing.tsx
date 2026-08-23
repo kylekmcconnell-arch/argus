@@ -158,7 +158,7 @@ export function Landing({
           </section>
 
           <aside aria-labelledby="investigation-output-title" className="landing-method-rail rise-in">
-            <div className="landing-method-eye"><ArgusMark size={150} live motion="focused" /></div>
+            <div className="landing-method-eye"><ArgusMark size={150} live motion="focused" tone="brand" /></div>
             <div className="mt-8">
               <div id="investigation-output-title" className="eyebrow text-signal-lift">What the report resolves</div>
               <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">

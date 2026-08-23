@@ -46,6 +46,39 @@ First comparison: no P0/P1/P2 fidelity issues were found. The implementation int
 - P3: consider replacing the persistent provenance legend with a small help popover in a later iteration. It remains unchanged here to avoid reducing evidence transparency.
 
 final result: passed
+
+---
+
+# Design QA — brand-green landing eye (2026-08-23)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-23 at 12.08.33 AM.png`
+- Browser-rendered implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/landing-green-eye/implementation.png`
+- Focused source/implementation comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/landing-green-eye/comparison-eye.png`
+- Source and implementation pixels: 1325 × 704 each
+- CSS viewport: 1325 × 704 at browser-normalized 1× density; no density normalization required
+- State: authenticated New Investigation preview, default decision intent, empty subject, light theme; dark theme checked separately
+
+## Findings and comparison history
+
+The source shows the landing method eye with a black focal circle. The implementation changes that circle to the existing ARGUS brand-green tone while preserving the halftone field, live focus motion, highlight, size, and surrounding layout. The first focused comparison found no actionable P0, P1, or P2 difference beyond the requested color change, so no visual correction loop was required.
+
+## Required fidelity surfaces
+
+- Fonts and typography: unchanged.
+- Spacing and layout rhythm: unchanged; the eye remains a 150px mark in the existing method rail.
+- Colors and visual tokens: the mark now resolves through `--color-brand` (`#00a86b` in light mode and `#00c805` in dark mode) instead of the neutral interaction token.
+- Image quality and asset fidelity: the existing scalable `ArgusMark` asset is reused; no rasterization, replacement, or hand-drawn approximation was introduced.
+- Copy and content: unchanged.
+
+## Verification
+
+- Browser DOM reports `data-argus-eye-tone="brand"`; computed focal-circle fills are `rgb(0, 168, 107)` in light mode and `rgb(0, 200, 5)` in dark mode.
+- The page remains exactly viewport-wide at 1325px with no horizontal overflow.
+- Light/dark theme switching was exercised; browser console errors and warnings: none.
+- Focused Landing and ArgusMark tests pass (9 tests); TypeScript, scoped ESLint, and production build pass.
+
+final result: passed
+
 ---
 
 # Design QA — decision landing and live research (2026-08-23)
