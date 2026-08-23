@@ -162,6 +162,34 @@ function storedVersion() {
             unresolvedQuestionIds: ["question:control"],
             changeConditions: ["Resolve legal and practical control."],
           }],
+          entityScorecards: [{
+            id: "entity_scorecard:individual_investor:x:gakonst",
+            entityKey: "x:gakonst",
+            role: "individual_investor",
+            label: "Individual investor scorecard",
+            governingScoreImpact: "none",
+            axes: [{
+              id: "portfolio",
+              label: "Confirmed portfolio",
+              state: "established",
+              ledgerRowIds: ["entity_ledger:portfolio:measurement:portfolio-count"],
+              measurementRefs: ["measurement:portfolio-count"],
+              sourceRefs: ["entity:profile"],
+            }],
+          }],
+          entityLedger: [{
+            id: "entity_ledger:portfolio:measurement:portfolio-count",
+            kind: "portfolio",
+            entityKey: "x:gakonst",
+            role: "individual_investor",
+            label: "Verified portfolio relationships",
+            value: 6,
+            state: "verified",
+            sourceRefs: ["entity:profile"],
+            measurementRefs: ["measurement:portfolio-count"],
+            asOf: "2026-07-12T04:00:00.000Z",
+            changeCondition: "Recompute when a counterparty-bound relationship changes.",
+          }],
         },
         evidence: {
           ventures: [{ project_name: "Hyperliquid", artifact_verified: true, evidence_origin: "provider" }],
@@ -364,6 +392,8 @@ describe("ask this immutable report", () => {
     expect(prompt).toContain("Six relationships passed the saved binding rules");
     expect(prompt).toContain("Control remains unresolved in this capture");
     expect(prompt).toContain(INTELLIGENCE_SOURCE);
+    expect(prompt).toContain("Individual investor scorecard");
+    expect(prompt).toContain("entity_ledger:portfolio:measurement:portfolio-count");
     expect(providerSystem(providerBody)).toContain("saved report-wide evidence spine");
     expect(providerSystem(providerBody)).toContain("Preserve every evidenceState and question state exactly");
     expect(providerSystem(providerBody)).toContain("deterministic investigation directive");

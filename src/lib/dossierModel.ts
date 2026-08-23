@@ -13,6 +13,7 @@ import {
   provenanceForCheckStatus,
   type ProvenanceState,
 } from "./provenance";
+import type { EntityLedgerRow, EntityScorecard } from "../intelligence/entityScorecards";
 
 export interface DossierReceiptSource {
   url: string;
@@ -120,6 +121,8 @@ export interface Dossier {
   openQuestions: string[];
   lenses: Lens[];
   measures: KeyMeasure[];
+  entityScorecards: EntityScorecard[];
+  entityLedger: EntityLedgerRow[];
   cost: { usd: number | null; estimated: boolean } | null;
   beats: DossierBeat[];
   /** Recorded documents only, sorted by how many dossier figures cite them. */
@@ -687,6 +690,8 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
         domain: str(m.domain) || "other",
       }))
       .filter((m) => m.label && m.value),
+    entityScorecards: arr<EntityScorecard>((payload.intelligence as Record<string, unknown>)?.entityScorecards),
+    entityLedger: arr<EntityLedgerRow>((payload.intelligence as Record<string, unknown>)?.entityLedger),
     openQuestions: arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown>)?.signals)
       .filter((sig) => str(sig.kind) === "coverage_gap")
       .map((sig) => str(sig.finding))

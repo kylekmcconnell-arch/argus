@@ -84,6 +84,51 @@ describe("DossierReport", () => {
     expect(container.textContent).not.toContain("7c51822f");
   });
 
+  it("renders a role scorecard and typed evidence ledger without a second score", () => {
+    const payload = livePayload();
+    payload.intelligence = {
+      entityScorecards: [{
+        id: "entity_scorecard:agency:@clutchmarkets",
+        entityKey: "@clutchmarkets",
+        role: "agency",
+        label: "Agency scorecard",
+        governingScoreImpact: "none",
+        axes: [{
+          id: "identity",
+          label: "Agency identity",
+          state: "established",
+          ledgerRowIds: ["entity_ledger:career:role"],
+          measurementRefs: ["role"],
+          sourceRefs: ["source:role"],
+        }],
+      }],
+      entityLedger: [{
+        id: "entity_ledger:career:role",
+        kind: "career",
+        entityKey: "@clutchmarkets",
+        role: "agency",
+        label: "Current role",
+        value: "Market operator",
+        state: "verified",
+        sourceRefs: ["source:role"],
+        measurementRefs: ["role"],
+        asOf: "2026-08-22T00:00:00.000Z",
+        changeCondition: "Recompute when the role changes.",
+      }],
+    };
+    render(payload);
+    expect(container.textContent).toContain("Agency scorecard");
+    expect(container.textContent).toContain("Evidence coverage for this role");
+    expect(container.textContent).toContain("Agency identity");
+    expect(container.textContent).toContain("Evidence established · 1 record");
+    expect(container.textContent).toContain("Open role evidence · 1");
+    expect(container.textContent).not.toContain("Agency score:");
+    const open = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Open role evidence"));
+    act(() => { open!.click(); });
+    expect(container.textContent).toContain("Market operator");
+    expect(container.textContent).toContain("career · verified");
+  });
+
   it("derives the perimeter from recorded unbound sources", () => {
     render(livePayload());
     expect(container.textContent).toContain("Sources that do not name this subject");
