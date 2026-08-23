@@ -240,4 +240,75 @@ describe("ARGUS Eye floating assistant", () => {
       answer: expect.stringContaining("stronger identity-bound source"),
     })]);
   });
+
+  it("shows the exact authorization bounds and keeps the proposal inactive", async () => {
+    const authorizationId = "00000000-0000-4000-8000-000000000205";
+    const proposalId = "00000000-0000-4000-8000-000000000305";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        answer: "The frozen report leaves the track record unresolved.",
+        investigationRoute: {
+          intent: "investment_due_diligence",
+          reasoningMode: "plan_investigation",
+          inheritedIntent: false,
+          answerMode: "investigate_evidence_gap",
+          explanation: "The open track-record question needs new evidence.",
+          delegates: ["portfolio-web"],
+          blockedBy: [],
+          unresolvedQuestions: [{ id: "gap.track-record", prompt: "What is the verified track record?", state: "unresolved", materiality: "critical" }],
+          evidenceFocus: [],
+          changeConditions: [],
+          claimChains: [],
+          authorizationPreview: {
+            gapId: "gap.track-record",
+            gapPrompt: "What is the verified track record?",
+            taskIds: ["portfolio"],
+            timeBudgetSeconds: 300,
+            estimatedCostCeilingUsd: 3.5,
+          },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authorizationId,
+        proposedReportVersionId: proposalId,
+        status: "proposed",
+        active: false,
+        observedCostUsd: 1.2,
+        costOutcome: "within_estimate",
+        reviewPath: `/?version=${proposalId}`,
+      }), { status: 201, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        authorizationId,
+        status: "rolled_back",
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    act(() => root.render(<ArgusEyeAssistant subject="@alice" reportVersionId={reportVersionId} />));
+    clickByLabel("Ask ARGUS Eye about this report");
+    const prompt = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("change the conclusion"));
+    expect(prompt).toBeTruthy();
+    await act(async () => prompt!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(container.textContent).toContain("Bounded evidence-gap investigation");
+    expect(container.textContent).toContain("5 minute limit");
+    expect(container.textContent).toContain("$3.50 estimated ceiling");
+    const authorize = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Authorize investigation"));
+    await act(async () => authorize!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    const executeBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(executeBody).toEqual({
+      sourceReportVersionId: reportVersionId,
+      gapId: "gap.track-record",
+      taskIds: ["portfolio"],
+      timeBudgetSeconds: 300,
+      acceptedCostCeilingUsd: 3.5,
+    });
+    expect(container.textContent).toContain("inactive until an analyst promotes it");
+    expect(container.textContent).toContain("Observed estimated cost $1.20 · within ceiling");
+    expect(container.querySelector(`a[href="/?version=${proposalId}"]`)).toBeTruthy();
+
+    const rollback = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Roll back"));
+    await act(async () => rollback!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(container.textContent).toContain("remains inactive");
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({ authorizationId, action: "rollback" });
+  });
 });

@@ -20,6 +20,9 @@ The build does not ship when any of these are true:
 - a blocked website fetch becomes evidence that the product is dead;
 - a company legal event is attributed to a founder without an exact source;
 - a public stock is shown as a crypto token, or vice versa.
+- a bounded follow-up mutates its frozen source report, automatically activates
+  a proposal, expands beyond saved tasks, or drops the frozen token evidence from
+  a token + project investigation.
 
 Passing the obvious-facts gate is necessary but not sufficient. At least one
 live founder and one live project canary must also produce a decision-changing
