@@ -423,7 +423,7 @@ export function DossierReport({
         </header>
       )}
 
-      <div className={`mx-auto grid max-w-[1240px] grid-cols-1 gap-12 ${theatrical ? "px-6" : "mt-7"} lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]`}>
+      <div className={`grid w-full grid-cols-1 gap-12 ${theatrical ? "report-frame" : "mt-7"} lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]`}>
         <div>
           {beats.map((b) => (
             <section

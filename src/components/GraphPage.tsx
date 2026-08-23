@@ -57,7 +57,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
   }, [activeCat, buckets]);
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
+    <div className="workspace-frame">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="display-sm text-[24px] text-ink">Connections</h1>

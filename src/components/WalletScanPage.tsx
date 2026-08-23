@@ -49,7 +49,7 @@ function Report({ scan }: { scan: WalletScan }) {
   const t = scan.totals;
   const atRiskPct = t.valueUsd > 0 ? (t.atRiskUsd / t.valueUsd) * 100 : 0;
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-16">
+    <div className="report-frame pb-16">
       <div className="py-6">
         <div className="mono text-[11px] text-ink-faint">{scan.chain} · {shortAddr(scan.address)}</div>
         <h1 className="mt-1 text-[22px] font-semibold text-ink">Wallet triage</h1>

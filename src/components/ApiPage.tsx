@@ -49,7 +49,7 @@ function Endpoint({ method, path, desc, params, curl, response }: { method: stri
 
 export function ApiPage() {
   return (
-    <div className="mx-auto max-w-3xl px-6 py-12">
+    <div className="workspace-frame">
       <h1 className="display-sm text-[24px] text-ink">API</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         Programmatic access to ARGUS for funds, launchpads, and internal bots. Every investigation endpoint

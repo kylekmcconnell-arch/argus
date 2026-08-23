@@ -55,7 +55,7 @@ export function TrendingPage({ onOpen }: { onOpen: (ref: string) => void }) {
   const rangeLabel = (RANGES.find((r) => r.ms === rangeMs)?.label ?? "All time").toLowerCase();
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
+    <div className="workspace-frame">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2.5 display-sm text-[24px] text-ink">

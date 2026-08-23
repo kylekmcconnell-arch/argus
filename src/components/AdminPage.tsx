@@ -143,7 +143,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
   );
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-12">
+    <div className="workspace-frame">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="display-sm text-[24px] text-ink">Audit log</h1>

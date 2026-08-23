@@ -58,7 +58,7 @@ export function ReferralsPage({ initialData = null }: { initialData?: ReferralSn
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1280px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="workspace-frame">
       <header className="overflow-hidden rounded-xl border border-line-2 bg-sidebar px-5 py-6 text-ink shadow-sm sm:px-7 sm:py-8">
         <div className="flex items-center gap-4 sm:gap-5">
           <ArgusMark size={52} live motion="focused" />

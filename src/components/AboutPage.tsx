@@ -54,7 +54,7 @@ function Card({ title, body }: { title: string; body: string }) {
 
 export function AboutPage({ onStart }: { onStart: () => void }) {
   return (
-    <div className="mx-auto max-w-3xl px-6 py-12">
+    <div className="workspace-frame">
       <div className="mb-5">
         <ArgusMark size={36} />
       </div>

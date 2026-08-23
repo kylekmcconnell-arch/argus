@@ -74,7 +74,7 @@ export function PolymarketTraderRun({ wallet, onReset }: { wallet: string; onRes
   }, [wallet]);
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-6">
+    <div className="workspace-frame">
       {state.phase === "loading" && (
         <section className="panel px-4 py-4 sm:px-5" role="status" aria-live="polite">
           <p className="eyebrow">Polymarket record</p>

@@ -92,7 +92,7 @@ export function ProjectView({
   return (
     <div className="relative min-h-full pb-24">
       <header className="sticky top-0 z-20 border-b border-line bg-void/85 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-5 py-3">
+        <div className="report-frame flex items-center gap-3 py-3">
           <button onClick={onReset} className="flex items-center gap-1.5 text-[13px] text-ink-dim transition hover:text-ink">
             <ArrowLeft aria-hidden="true" size={15} weight="bold" />
             Home
@@ -101,7 +101,7 @@ export function ProjectView({
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-5">
+      <div className="report-frame">
         <div className="mt-6">
           <h1 className="display-sm text-[24px] text-ink">{project.name}</h1>
           <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">

@@ -643,7 +643,7 @@ function Report({ scan }: { scan: ThreatScan }) {
   const m = VERDICT_META[call.verdict];
   const rs = useLedgerStats();
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-16">
+    <div className="report-frame pb-16">
       {/* header — the standard scan-output hero: panel, serif subject, ring */}
       <div className="panel mt-6 flex items-start gap-5 p-5 max-sm:flex-col">
         <RiskRing risk={call.risk} verdict={call.verdict} />
@@ -907,7 +907,7 @@ export function ThreatLanding({ onScan }: { onScan: (ref: string, mode: "token" 
 
   if (mode === "receipts") {
     return (
-      <div className="mx-auto max-w-3xl px-4 pt-10">
+      <div className="workspace-frame">
         {tabs}
         <ThreatReceipts onOpen={(addr) => onScan(addr, "token")} />
       </div>
@@ -993,7 +993,7 @@ export function ThreatScanPage({ input, onError }: { input: ResolvedInput; onErr
   if (scan) return (
     <div>
       {cachedAgeMs != null && (
-        <div className="mx-auto mt-3 flex max-w-3xl items-center justify-between gap-3 rounded-lg border border-line px-4 py-2">
+        <div className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-lg border border-line px-4 py-2 sm:mx-6 lg:mx-12">
           <span className="mono text-[11px] text-ink-faint">saved scan · {Math.max(1, Math.round(cachedAgeMs / 60000))}m old · shared links reuse scans for 1h</span>
           <button onClick={rescan} className="mono rounded border border-line px-2.5 py-1 text-[11px] text-ink-dim transition hover:border-signal hover:text-ink">rescan now ↻</button>
         </div>

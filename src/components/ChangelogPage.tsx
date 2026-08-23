@@ -37,7 +37,7 @@ export function ChangelogPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
+    <div className="workspace-frame">
       <h1 className="display-sm text-[24px] text-ink">Changelog</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         Everything shipped to ARGUS, newest first, labeled by who pushed it. Live from the repo.

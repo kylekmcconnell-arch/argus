@@ -324,7 +324,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
   return (
     <>
       {openRecent && <ScoreTicker onOpen={openRecent} label="Recent website checks · open a saved report" filter={(e) => e.kind === "site"} />}
-    <div className="mx-auto max-w-3xl px-6 py-12">
+    <div className="workspace-frame">
       <h1 className="display-sm text-[24px] text-ink">Check a project website</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         Enter a project's website. ARGUS reads what the site says about the product, team, funding, and token.
