@@ -4,10 +4,9 @@
 //   - RugCheck (Solana): full risk report — 30+ named risk patterns, insider
 //     networks, LP locker identity. The Solana counterpart of GoPlus's depth.
 //   - Honeypot.is deep fields (EVM): the parts the base audit discards — per-
-//     holder sell analysis (failed sellers, siphoned wallets), max buy/sell
-//     caps, and the human-readable honeypot reason.
+//     holder sell analysis, supported summary flags, and honeypot reason.
 import { apiFetch } from "./net";
-import { retryFetch } from "../lib/retry";
+import { retryFetch, retryFetchWithFreshTimeout } from "../lib/retry";
 
 // ---- RugCheck (Solana) ----
 export interface RugcheckRisk {
@@ -29,9 +28,7 @@ export interface RugcheckReport {
 
 export async function rugcheckReport(mint: string): Promise<RugcheckReport | null> {
   try {
-    const res = await retryFetch(`https://api.rugcheck.xyz/v1/tokens/${mint}/report`, {
-      signal: AbortSignal.timeout(12000),
-    });
+    const res = await retryFetchWithFreshTimeout(`https://api.rugcheck.xyz/v1/tokens/${mint}/report`, 15_000);
     if (!res.ok) return null;
     const d = (await res.json()) as any;
     const networks: any[] = d.insiderNetworks ?? [];
@@ -65,8 +62,6 @@ export async function rugcheckReport(mint: string): Promise<RugcheckReport | nul
 export interface HoneypotDeep {
   isHoneypot: boolean;
   reason: string | null;
-  maxBuyPct: number | null; // max buy as % of supply, when enforced
-  maxSellPct: number | null;
   // per-holder sell analysis: the check nobody else runs. A selective honeypot
   // lets the sim wallet sell while real holders can't; this catches it.
   holdersAnalyzed: number;
@@ -74,7 +69,7 @@ export interface HoneypotDeep {
   siphoned: number; // wallets whose sells were siphoned (taxed ~100%)
   highTaxWallets: number;
   averageTax: number;
-  flags: { text: string; severity: string }[];
+  flags: { code: string; text: string; severity: string }[];
 }
 
 const HP_CHAIN: Record<string, string> = { ethereum: "1", bsc: "56", base: "8453" };
@@ -226,21 +221,18 @@ export async function honeypotDeep(chain: string, address: string): Promise<Hone
     if (!res.ok) return null;
     const d = (await res.json()) as any;
     const h = d.holderAnalysis ?? {};
-    const pctOf = (x: any) => {
-      const n = Number(x?.tokenPercent ?? x?.percent ?? NaN);
-      return Number.isFinite(n) ? n * (n <= 1 ? 100 : 1) : null;
-    };
+    const summaryFlags = Array.isArray(d.summary?.flags) ? d.summary.flags : [];
+    const legacyFlags = Array.isArray(d.flags) ? d.flags : [];
     return {
       isHoneypot: !!d.honeypotResult?.isHoneypot,
       reason: d.honeypotResult?.honeypotReason ?? null,
-      maxBuyPct: pctOf(d.simulationResult?.maxBuy),
-      maxSellPct: pctOf(d.simulationResult?.maxSell),
       holdersAnalyzed: Number(h.holders ?? 0),
       holdersFailed: Number(h.failed ?? 0),
       siphoned: Number(h.siphoned ?? 0),
       highTaxWallets: Number(h.highTaxWallets ?? 0),
       averageTax: Number(h.averageTax ?? 0),
-      flags: (d.flags ?? []).map((f: any) => ({
+      flags: [...summaryFlags, ...legacyFlags].map((f: any) => ({
+        code: String(f.flag ?? f),
         text: String(f.description ?? f.flag ?? f),
         severity: String(f.severity ?? "medium"),
       })),
