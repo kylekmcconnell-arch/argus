@@ -243,10 +243,6 @@
 .af-kv-v { font-family: var(--font-mono); font-size: 13px; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
 .af-back { display: inline-block; margin-top: 30px; font-family: var(--font-mono); font-size: 10.5px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-ink-dim); text-decoration: none; background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 9999px; padding: 9px 17px; transition: color 0.15s, border-color 0.15s; }
 .af-back:hover { color: var(--color-ink); border-color: var(--color-signal); }
-.af-legend { display: flex; gap: 22px; flex-wrap: wrap; padding: 14px 0; border-bottom: 1px solid var(--color-line); }
-.af-legend span { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em; color: var(--color-ink-dim); display: inline-flex; align-items: center; gap: 7px; }
-.af-legend i { width: 7px; height: 7px; border-radius: 9999px; flex: none; }
-
 /* Provenance-dotted value (DESIGN.md 2.1, design-and-ui): a figure whose
    underline says where it came from. The receipt (passage, source, chain of
    custody) opens on hover or keyboard focus; without a receipt the underline
