@@ -221,7 +221,7 @@ describe("AuditConsole", () => {
   it("labels an empty resolution without inventing provider activity", async () => {
     await renderConsole({ steps: [], kind: "resolution" });
 
-    expect(container?.textContent).toContain("Finding @subject");
+    expect(container?.textContent).toContain("Finding the right match for @subject");
     expect(container?.textContent).toContain("Finding the right match");
     expect(container?.textContent).not.toContain("Checking @subject");
     expect(container?.textContent).not.toContain("Live check");

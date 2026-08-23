@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-vi.mock("./ArgusMark", () => ({ HeroBackdrop: () => null }));
+vi.mock("./ArgusMark", () => ({ HeroBackdrop: () => null, ArgusMark: () => null }));
 vi.mock("./ScoreTicker", () => ({ ScoreTicker: () => null }));
 vi.mock("../lib/recentScored", () => ({ recentScored: () => [] }));
 
@@ -65,7 +65,7 @@ describe("Landing fresh audit launch", () => {
     const form = container.querySelector<HTMLFormElement>("form");
     expect(input).not.toBeNull();
     expect(form).not.toBeNull();
-    expect(input?.placeholder).toBe("@handle, contract, or project");
+    expect(input?.placeholder).toBe("@handle, contract, project, or website");
     const trace = container.querySelector<HTMLElement>(".investigation-trace");
     expect(trace).not.toBeNull();
     expect(trace?.getAttribute("aria-hidden")).toBe("true");
@@ -90,7 +90,7 @@ describe("Landing fresh audit launch", () => {
     expect(onAudit).toHaveBeenCalledWith("existingfounder", false, "investment_due_diligence");
     const button = container.querySelector<HTMLButtonElement>("button[type='submit']");
     expect(button?.disabled).toBe(true);
-    expect(button?.textContent).toContain("Starting fresh audit");
+    expect(button?.textContent).toContain("Starting…");
   });
 
   it("releases the submission lock when launch routing rejects", async () => {
@@ -137,15 +137,14 @@ describe("Landing fresh audit launch", () => {
     });
 
     const input = container.querySelector<HTMLInputElement>("#investigation-subject");
-    const select = container.querySelector<HTMLSelectElement>("#investigation-intent");
+    const identityOption = Array.from(container.querySelectorAll<HTMLButtonElement>("button[aria-pressed]"))
+      .find((button) => button.textContent?.includes("Reveal identity and control"));
     const form = container.querySelector<HTMLFormElement>("form");
     await act(async () => {
       const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
       inputSetter?.call(input, "@clutchmarkets");
       input?.dispatchEvent(new Event("input", { bubbles: true }));
-      const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
-      selectSetter?.call(select, "identity_and_control");
-      select?.dispatchEvent(new Event("change", { bubbles: true }));
+      identityOption?.click();
     });
     await act(async () => {
       form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -153,5 +152,20 @@ describe("Landing fresh audit launch", () => {
     });
 
     expect(onAudit).toHaveBeenCalledWith("@clutchmarkets", false, "identity_and_control");
+  });
+
+  it("presents four decision lenses with one selected at a time", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<Landing onAudit={() => undefined} onAbout={() => undefined} />));
+
+    const options = Array.from(container.querySelectorAll<HTMLButtonElement>("button[aria-pressed]"));
+    expect(options).toHaveLength(4);
+    expect(options.filter((option) => option.getAttribute("aria-pressed") === "true")).toHaveLength(1);
+
+    await act(async () => options[2]?.click());
+    expect(options[2]?.getAttribute("aria-pressed")).toBe("true");
+    expect(options[0]?.getAttribute("aria-pressed")).toBe("false");
   });
 });

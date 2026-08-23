@@ -2,35 +2,45 @@ import { useRef, useState } from "react";
 import {
   ArrowRightIcon,
   CheckCircleIcon,
-  ClockCounterClockwiseIcon,
-  CurrencyEthIcon,
-  DatabaseIcon,
+  CurrencyDollarIcon,
   FingerprintSimpleIcon,
+  HandshakeIcon,
   MagnifyingGlassIcon,
   QuestionIcon,
   ShieldCheckIcon,
+  TrendUpIcon,
+  UsersThreeIcon,
   WaveformIcon,
 } from "@phosphor-icons/react";
-import { HeroBackdrop } from "./ArgusMark";
+import { ArgusMark, HeroBackdrop } from "./ArgusMark";
 import { PrivateToggle } from "./PrivateToggle";
 import { recentReportHref } from "../lib/recentReportRoute";
 import type { ResearchIntent } from "../lib/researchDirector";
 
 const INVESTIGATION_OUTPUTS = [
-  { icon: CheckCircleIcon, label: "What checks out", detail: "Facts we could confirm, with links to the sources." },
-  { icon: QuestionIcon, label: "What needs attention", detail: "Risks, conflicts, and important facts we could not confirm." },
-  { icon: DatabaseIcon, label: "What to check next", detail: "The questions that matter most before you make a decision." },
-  { icon: ClockCounterClockwiseIcon, label: "A saved report", detail: "Come back later, rescan it, and see what changed." },
+  { icon: CheckCircleIcon, label: "Confirmed evidence", detail: "Facts we could confirm, with links to the sources." },
+  { icon: ShieldCheckIcon, label: "Decision-changing risks", detail: "Risks, conflicts, and important facts we could not confirm." },
+  { icon: QuestionIcon, label: "Open questions", detail: "The questions that matter most before you make a decision." },
 ] as const;
 
 const INVESTIGATION_LENSES = [
-  { icon: FingerprintSimpleIcon, title: "Who is behind it", detail: "The people involved, their roles, and what they control." },
-  { icon: CurrencyEthIcon, title: "Token and money risks", detail: "Contract powers, large holders, liquidity, sanctions, and connected wallets." },
-  { icon: ShieldCheckIcon, title: "What is still unknown", detail: "Missing facts and the most important questions to answer next." },
+  { icon: UsersThreeIcon, title: "Who is behind it", detail: "The people involved, their roles, and what they control." },
+  { icon: CurrencyDollarIcon, title: "Where the money and control sit", detail: "Contract powers, large holders, liquidity, sanctions, and connected wallets." },
+  { icon: QuestionIcon, title: "What remains unknown", detail: "Missing facts and the most important questions to answer next." },
 ] as const;
 
-// The front door is a decision-oriented investigation canvas. Previous cases
-// remain in the persistent rail instead of competing with the primary task.
+const INVESTIGATION_INTENTS: ReadonlyArray<{
+  value: ResearchIntent;
+  icon: typeof CurrencyDollarIcon;
+  title: string;
+  detail: string;
+}> = [
+  { value: "investment_due_diligence", icon: CurrencyDollarIcon, title: "Invest or allocate capital", detail: "Should I invest or allocate capital?" },
+  { value: "alpha_discovery", icon: TrendUpIcon, title: "Find differentiated upside", detail: "Where might strong signals be overlooked?" },
+  { value: "counterparty_risk", icon: HandshakeIcon, title: "Assess a counterparty", detail: "Is this counterparty safe to work with?" },
+  { value: "identity_and_control", icon: FingerprintSimpleIcon, title: "Reveal identity and control", detail: "Who is behind it, and what do they control?" },
+];
+
 export function Landing({
   onAudit,
   onAbout,
@@ -55,139 +65,133 @@ export function Landing({
     } catch {
       // The app owns the explicit failure state; Home only releases its lock.
     } finally {
-      // A successful launch normally unmounts Home. If navigation is declined
-      // or the launch rejects before that happens, let the analyst retry.
       launchingRef.current = false;
       setLaunching(false);
     }
   };
 
   return (
-    <div className="relative min-h-full overflow-hidden">
-      <HeroBackdrop className="pointer-events-none absolute bottom-[-80px] left-[30%] z-0 h-[300px] w-[78%] opacity-20 max-md:bottom-[-15px] max-md:left-[5%] max-md:h-[240px] max-md:w-[120%] max-md:opacity-15" />
+    <div className="landing-decision-page relative min-h-full overflow-hidden">
+      <HeroBackdrop className="landing-decision-backdrop pointer-events-none absolute z-0" />
 
-      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-10 lg:py-16">
-        <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-12">
-          <section aria-labelledby="landing-title" className="rise-in">
+      <div className="relative z-10 mx-auto w-full max-w-[1440px] px-5 py-10 sm:px-8 lg:px-12 lg:py-14 xl:px-16">
+        <div className="landing-decision-grid">
+          <section aria-labelledby="landing-title" className="rise-in min-w-0">
             <div className="eyebrow">Start a new investigation</div>
-            <h1 id="landing-title" className="display mt-3 max-w-3xl text-[48px] leading-[1.02] text-ink max-md:text-[34px]">
-              Know what you’re backing before capital moves.
+            <h1 id="landing-title" className="landing-decision-title display mt-4 text-ink">
+              Start with the decision.<br />ARGUS builds the evidence.
             </h1>
 
             <p className="mt-5 max-w-2xl text-[15px] leading-relaxed text-ink-dim">
-              Enter an X account, token address, or project website. ARGUS shows what looks credible,
-              what looks risky, and what still needs checking.
+              Enter an X account, token address, contract, project, or website. ARGUS shows what looks
+              credible, what looks risky, and what still needs checking.
             </p>
 
-            {/* primary investigation input */}
+            <fieldset className="landing-intent-grid mt-9" aria-label="What are you trying to decide?">
+              <legend className="sr-only">What are you trying to decide?</legend>
+              {INVESTIGATION_INTENTS.map(({ value: option, icon: Icon, title, detail }) => {
+                const selected = intent === option;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setIntent(option)}
+                    className={`landing-intent-option ${selected ? "is-selected" : ""}`}
+                  >
+                    <span className="landing-intent-icon"><Icon size={24} weight={selected ? "bold" : "regular"} aria-hidden /></span>
+                    <strong>{title}</strong>
+                    <span>{detail}</span>
+                  </button>
+                );
+              })}
+            </fieldset>
+
             <form
-              onSubmit={(e) => {
-                e.preventDefault();
+              onSubmit={(event) => {
+                event.preventDefault();
                 void launchFreshAudit(value.trim());
               }}
               aria-busy={launching}
-              className="panel soft-shadow mt-8 w-full p-5 sm:p-6"
+              className="mt-8 w-full"
             >
-              <label htmlFor="investigation-subject" className="eyebrow">Subject</label>
-              <div className="investigation-control relative mt-2.5">
-                <MagnifyingGlassIcon size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint" aria-hidden />
+              <label htmlFor="investigation-subject" className="sr-only">Subject</label>
+              <div className="landing-command-bar relative">
+                <MagnifyingGlassIcon size={19} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink-faint" aria-hidden />
                 <input
                   id="investigation-subject"
                   value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  placeholder="@handle, contract, or project"
-                  className="field mono min-h-12 w-full py-3 pl-10 pr-4 text-[13.5px] sm:pr-20"
+                  onChange={(event) => setValue(event.target.value)}
+                  placeholder="@handle, contract, project, or website"
+                  className="landing-command-input mono w-full py-3 pl-12 pr-4 text-[14px]"
                   aria-describedby="subject-help fresh-audit-note"
                   autoComplete="off"
                   autoCapitalize="none"
                   enterKeyHint="go"
                   spellCheck={false}
                   required
-                  autoFocus
                 />
-                <span className="investigation-trace pointer-events-none absolute right-3 top-1/2 hidden items-center sm:flex" aria-hidden="true">
+                <span className="investigation-trace pointer-events-none absolute right-[205px] top-1/2 hidden -translate-y-1/2 items-center sm:flex" aria-hidden="true">
                   <WaveformIcon size={42} weight="thin" />
                 </span>
-              </div>
-              <p id="subject-help" className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-                We’ll work out whether it is a person, token, website, or project.
-              </p>
-
-              <div className="mt-4">
-                <label htmlFor="investigation-intent" className="eyebrow">What are you trying to decide?</label>
-                <select
-                  id="investigation-intent"
-                  value={intent}
-                  onChange={(event) => setIntent(event.target.value as ResearchIntent)}
-                  className="field mt-2 min-h-11 w-full px-3 py-2.5 text-[12.5px]"
-                >
-                  <option value="investment_due_diligence">Should I invest or allocate capital?</option>
-                  <option value="alpha_discovery">Where is the differentiated upside or alpha?</option>
-                  <option value="counterparty_risk">Can I safely work with or back this counterparty?</option>
-                  <option value="identity_and_control">Who is really behind it and what do they control?</option>
-                </select>
-                <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-faint">ARGUS uses this to prioritize specialists and follow-up questions. Safety and identity gates are never waived.</p>
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line/70 pt-4">
-                <PrivateToggle on={priv} onToggle={setPriv} />
                 <button
                   type="submit"
                   disabled={launching || !value.trim()}
                   aria-describedby="fresh-audit-note"
-                  className="btn-primary landing-cta-signal ml-auto flex min-h-10 items-center gap-2 px-4 py-2 text-[13.5px] font-medium disabled:cursor-wait"
+                  className="btn-primary landing-command-submit flex items-center justify-center gap-2 text-[13.5px] font-medium disabled:cursor-wait"
                 >
-                  {launching ? "Starting fresh audit…" : "Start investigation"}
+                  {launching ? "Starting…" : "Start investigation"}
                   <ArrowRightIcon size={16} weight="bold" aria-hidden />
                 </button>
               </div>
+              <p id="subject-help" className="sr-only">We’ll work out whether it is a person, token, website, or project.</p>
+
+              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+                <PrivateToggle on={priv} onToggle={setPriv} />
+                <p className="text-[11px] leading-relaxed text-ink-faint">
+                  ARGUS prioritizes specialists around your decision. Safety and identity gates are never waived.
+                </p>
+              </div>
             </form>
-            <p id="fresh-audit-note" className="mt-2.5 text-[11px] leading-relaxed text-ink-faint">
+
+            <p id="fresh-audit-note" className="mt-3 text-[11px] leading-relaxed text-ink-faint">
               A new scan checks current sources and may use paid data. Open a recent case to reuse saved results.
             </p>
 
-            <div className="panel-inset mt-4 flex flex-wrap items-center gap-3 px-3.5 py-3" aria-label="Saved report example">
-              <div className="min-w-0 flex-1">
-                <div className="eyebrow">See a completed investigation</div>
-                <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
-                  Frozen to its saved date · opens read-only with no new provider calls.
-                </p>
-              </div>
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line/70 pt-5" aria-label="Saved report example">
+              <p className="text-[11.5px] leading-relaxed text-ink-faint">
+                See the finished experience without starting a new provider run. Frozen to its saved date · no new provider calls.
+              </p>
               <a
                 href={recentReportHref("uniswap", "person")}
                 onClick={(event) => {
-                  if (
-                    !onOpenSavedReport
-                    || event.button !== 0
-                    || event.metaKey
-                    || event.ctrlKey
-                    || event.shiftKey
-                    || event.altKey
-                  ) return;
+                  if (!onOpenSavedReport || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                   event.preventDefault();
                   void onOpenSavedReport("uniswap", "person");
                 }}
-                className="btn-secondary inline-flex min-h-11 shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium"
+                className="btn-ghost inline-flex min-h-9 shrink-0 items-center gap-2 text-[12.5px] font-medium text-signal-lift"
               >
                 Open saved Uniswap report
                 <ArrowRightIcon size={14} weight="bold" aria-hidden />
               </a>
             </div>
-
           </section>
 
-          <aside aria-labelledby="investigation-output-title" className="panel rise-in overflow-hidden">
-            <div className="border-b border-line px-5 py-4.5">
-              <div id="investigation-output-title" className="eyebrow">What you’ll get</div>
-              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A clear result with the evidence behind it.</p>
+          <aside aria-labelledby="investigation-output-title" className="landing-method-rail rise-in">
+            <div className="landing-method-eye"><ArgusMark size={150} live motion="focused" /></div>
+            <div className="mt-8">
+              <div id="investigation-output-title" className="eyebrow text-signal-lift">What the report resolves</div>
+              <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
+                A decision brief assembled from the file, not a list of disconnected checks.
+              </p>
             </div>
-            <div className="divide-y divide-line/70">
+            <div className="mt-5 divide-y divide-line/70 border-y border-line/70">
               {INVESTIGATION_OUTPUTS.map(({ icon: Icon, label, detail }) => (
-                <div key={label} className="flex gap-3 px-5 py-4">
-                  <Icon size={18} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden />
+                <div key={label} className="flex gap-3 py-5">
+                  <Icon size={19} className="mt-0.5 shrink-0 text-signal-lift" aria-hidden />
                   <div>
-                    <div className="text-[13.5px] font-medium text-ink">{label}</div>
-                    <div className="mt-1 text-[11px] leading-relaxed text-ink-faint">{detail}</div>
+                    <div className="text-[14px] font-medium text-ink">{label}</div>
+                    <div className="mt-1 text-[12px] leading-relaxed text-ink-dim">{detail}</div>
                   </div>
                 </div>
               ))}
@@ -195,20 +199,21 @@ export function Landing({
           </aside>
         </div>
 
-        <section aria-labelledby="investigation-lenses-title" className="mt-12 border-t border-line/70 pt-7">
+        <section aria-labelledby="investigation-lenses-title" className="mt-12 border-t border-line/70 pt-8">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <div className="eyebrow">What ARGUS checks</div>
-              <h2 id="investigation-lenses-title" className="display-sm mt-2 text-[18px] text-ink">Three questions, one report.</h2>
+              <div className="eyebrow">How the report resolves the decision</div>
+              <h2 id="investigation-lenses-title" className="display-sm mt-2 text-[21px] text-ink">One investigation. Three questions.</h2>
             </div>
             <button type="button" onClick={onAbout} className="btn-ghost flex min-h-9 items-center gap-1.5 text-[12.5px] text-signal-lift">
               See how ARGUS works <ArrowRightIcon size={14} aria-hidden />
             </button>
           </div>
-          <div className="mt-5 grid divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            {INVESTIGATION_LENSES.map(({ icon: Icon, title, detail }) => (
-              <div key={title} className="py-4 sm:px-5 sm:first:pl-0 sm:last:pr-0">
-                <Icon size={20} className="text-ink-faint" aria-hidden />
+          <div className="landing-lens-sequence mt-6 grid divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            {INVESTIGATION_LENSES.map(({ icon: Icon, title, detail }, index) => (
+              <div key={title} className="relative py-5 sm:px-8 sm:first:pl-0 sm:last:pr-0">
+                <span className="landing-lens-number">{index + 1}</span>
+                <Icon size={22} className="mt-4 text-ink-dim" aria-hidden />
                 <h3 className="mt-3 text-[15px] font-medium text-ink">{title}</h3>
                 <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">{detail}</p>
               </div>
@@ -216,9 +221,7 @@ export function Landing({
           </div>
         </section>
 
-        <div className="pt-10 text-[11px] text-ink-faint">
-          Research only · not financial advice
-        </div>
+        <div className="pt-10 text-[11px] text-ink-faint">Research only · not financial advice</div>
       </div>
     </div>
   );

@@ -1,168 +1,105 @@
 import type { ComponentType } from "react";
 import {
-  ChartLineUpIcon,
-  CrosshairIcon,
-  DatabaseIcon,
-  FingerprintSimpleIcon,
-  GitBranchIcon,
-  GlobeSimpleIcon,
-  MagnifyingGlassIcon,
-  ShieldCheckIcon,
-  UsersThreeIcon,
-  WalletIcon,
+  ChartLineUpIcon, CheckCircleIcon, CrosshairIcon, DatabaseIcon,
+  FingerprintSimpleIcon, GitBranchIcon, GlobeSimpleIcon, MagnifyingGlassIcon,
+  ShieldCheckIcon, UsersThreeIcon, WalletIcon,
 } from "@phosphor-icons/react";
 import type { TraceStep } from "../data/evidence";
-import {
-  deriveInvestigationProgress,
-  type InvestigationProgressKind,
-  type InvestigationStageState,
-} from "../lib/investigationProgress";
+import { deriveInvestigationProgress, type InvestigationProgressKind, type InvestigationStageState } from "../lib/investigationProgress";
 import { ArgusMark, type ArgusEyeMotion } from "./ArgusMark";
 
 type StageIcon = ComponentType<{ size?: number; weight?: "regular" | "bold" | "fill"; "aria-hidden"?: boolean }>;
-
 const STAGE_ICONS: Record<string, StageIcon> = {
-  subject: FingerprintSimpleIcon,
-  resolve: FingerprintSimpleIcon,
-  evidence: DatabaseIcon,
-  market: ChartLineUpIcon,
-  contract: ShieldCheckIcon,
-  corroborate: MagnifyingGlassIcon,
-  network: GitBranchIcon,
-  analysis: MagnifyingGlassIcon,
-  finalize: ShieldCheckIcon,
-  token: ShieldCheckIcon,
-  identity: FingerprintSimpleIcon,
-  funding: WalletIcon,
-  site: GlobeSimpleIcon,
-  people: UsersThreeIcon,
-  complete: ShieldCheckIcon,
+  subject: FingerprintSimpleIcon, resolve: FingerprintSimpleIcon, evidence: DatabaseIcon,
+  market: ChartLineUpIcon, contract: ShieldCheckIcon, corroborate: MagnifyingGlassIcon,
+  network: GitBranchIcon, analysis: MagnifyingGlassIcon, finalize: ShieldCheckIcon,
+  token: ShieldCheckIcon, identity: FingerprintSimpleIcon, funding: WalletIcon,
+  site: GlobeSimpleIcon, people: UsersThreeIcon, complete: ShieldCheckIcon,
 };
 
 function StageStateIcon({ state, icon: Icon }: { state: InvestigationStageState; icon: StageIcon }) {
-  if (state === "active") return <CrosshairIcon size={17} weight="bold" aria-hidden />;
-  return <Icon size={17} weight={state === "observed" ? "bold" : "regular"} aria-hidden />;
+  if (state === "active") return <CrosshairIcon size={18} weight="bold" aria-hidden />;
+  if (state === "observed") return <CheckCircleIcon size={18} weight="fill" aria-hidden />;
+  return <Icon size={18} weight="regular" aria-hidden />;
 }
 
-export function InvestigationProgressCanvas({
-  kind,
-  steps,
-  working,
-  hop,
-}: {
-  kind: InvestigationProgressKind;
-  steps: TraceStep[];
-  working: boolean;
-  hop?: string;
+export function InvestigationProgressCanvas({ kind, subject = "the subject", subtitle, steps, working, hop }: {
+  kind: InvestigationProgressKind; subject?: string; subtitle?: string; steps: TraceStep[]; working: boolean; hop?: string;
 }) {
   const progress = deriveInvestigationProgress({ kind, steps, working, hop });
   const latestKey = progress.latestEvent
     ? `${steps.length}:${progress.latestEvent.phase}:${progress.latestEvent.label}`
     : `empty:${kind}:${working}`;
   const activeStage = progress.stages.find((stage) => stage.state === "active")?.key;
-  const eyeMotion: ArgusEyeMotion = !working
-    ? "idle"
-    : activeStage === "finalize" || activeStage === "complete"
-      ? "settling"
-      : activeStage === "analysis"
-        ? "focused"
-        : "searching";
+  const eyeMotion: ArgusEyeMotion = !working ? "idle"
+    : activeStage === "finalize" || activeStage === "complete" ? "settling"
+      : activeStage === "analysis" ? "focused" : "searching";
+  const headline = kind === "resolution" ? `Finding the right match for ${subject}` : `Building the case on ${subject}`;
 
   return (
-    <section className="panel overflow-hidden" aria-label="Investigation progress">
-      <div className="grid lg:grid-cols-[minmax(0,1.05fr)_minmax(300px,0.95fr)]">
-        <div className="relative border-b border-line p-5 sm:p-6 lg:border-b-0 lg:border-r">
-          <div className="grid gap-5 sm:grid-cols-[112px_minmax(0,1fr)] sm:items-center">
-            <div className="relative flex h-28 w-28 items-center justify-center rounded-full bg-accent-tint ring-1 ring-signal/15">
-              <ArgusMark
-                size={88}
-                live={working}
-                motion={eyeMotion}
-                eventKey={progress.latestEvent ? latestKey : undefined}
-              />
-            </div>
-
-            <div className="min-w-0">
-              <div className="eyebrow text-signal-lift">Current activity</div>
-              <div key={latestKey} className="rise-in mt-1">
-                <div className="display-sm text-[19px] text-ink">{progress.currentLabel}</div>
-                {progress.latestEvent ? (
-                  <p className="mt-1 line-clamp-3 text-[12.5px] leading-relaxed text-ink-dim">
-                    {progress.latestEvent.detail}
-                  </p>
-                ) : (
-                  <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
-                    {working
-                      ? kind === "resolution"
-                        ? "ARGUS is confirming the official name and links before searching sources."
-                        : "ARGUS is waiting for the first result."
-                      : "No results came back from this check."}
-                  </p>
-                )}
-              </div>
-            </div>
+    <section className="research-command-deck" aria-label="Investigation progress">
+      <div className="research-command-main">
+        <div>
+          <div className="research-live-label">
+            <span className={working ? "research-live-dot motion-safe:animate-pulse" : "research-live-dot is-idle"} />
+            {kind === "resolution" ? "SUBJECT RESOLUTION" : working ? "LIVE RESEARCH" : "RESEARCH COMPLETE"}
           </div>
+          <h1 className="research-command-title">{headline}</h1>
+          {subtitle && <p className="research-command-subtitle">{subtitle}</p>}
+        </div>
 
-          <dl className="mt-5 grid grid-cols-3 gap-2 border-t border-line/70 pt-4">
-            <div>
-              <dt className="stat-label">Updates</dt>
-              <dd className="stat-value">{progress.eventCount}</dd>
-            </div>
-            <div>
-              <dt className="stat-label">Sources checked</dt>
-              <dd className="stat-value">{progress.observedSources.length}</dd>
-            </div>
-            <div>
-              <dt className="stat-label">Things to review</dt>
-              <dd className="stat-value">{progress.attentionCount}</dd>
-            </div>
-          </dl>
-
-          <div className="mt-4 min-h-6">
-            {progress.observedSources.length ? (
-              <div className="flex flex-wrap gap-1.5" aria-label="Sources checked">
-                {progress.observedSources.slice(0, 6).map((source) => (
-                  <span key={source.toLowerCase()} className="chip">{source}</span>
-                ))}
-                {progress.observedSources.length > 6 && (
-                  <span className="chip">+{progress.observedSources.length - 6}</span>
-                )}
-              </div>
-            ) : (
-              <span className="mono text-[11px] text-ink-faint">No sources checked yet</span>
-            )}
+        <div className="research-observation">
+          <div className="research-eye-stage" aria-hidden="true">
+            <ArgusMark size={148} live={working} motion={eyeMotion} eventKey={progress.latestEvent ? latestKey : undefined} />
+          </div>
+          <div key={latestKey} className="rise-in min-w-0">
+            <div className="eyebrow text-signal-lift">Latest observed evidence</div>
+            <div className="research-observation-title">{progress.currentLabel}</div>
+            <p className="research-observation-detail">
+              {progress.latestEvent?.detail ?? (working
+                ? kind === "resolution"
+                  ? "ARGUS is confirming the official name and links before searching sources."
+                  : "ARGUS is waiting for the first result."
+                : "No results came back from this check.")}
+            </p>
+            {progress.latestEvent?.source && <div className="research-observation-source">Source · {progress.latestEvent.source}</div>}
           </div>
         </div>
 
-        <div className="bg-panel-2/35 p-5 sm:p-6">
-          <div className="eyebrow">What ARGUS is checking</div>
-          <ol className="mt-3 space-y-1.5" aria-label="Check progress">
-            {progress.stages.map((stage) => {
-              const Icon = STAGE_ICONS[stage.key] ?? DatabaseIcon;
-              return (
-                <li
-                  key={stage.key}
-                  className={`flex min-h-10 items-center gap-3 rounded-md px-3 py-2 ${
-                    stage.state === "active"
-                      ? "tint-signal tint-strong"
-                      : stage.state === "observed"
-                        ? "text-ink-dim"
-                        : "text-ink-faint"
-                  }`}
-                >
-                  <span className={stage.state === "active" ? "motion-safe:animate-pulse text-signal" : ""}>
-                    <StageStateIcon state={stage.state} icon={Icon} />
-                  </span>
-                  <span className="min-w-0 flex-1 text-[12.5px] font-medium">{stage.label}</span>
-                  <span className="mono text-[10px] uppercase tracking-[0.08em]">
-                    {stage.state === "active" ? "checking" : stage.state === "observed" ? "done" : "waiting"}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
+        <div className="research-command-footer">
+          <span>{kind === "resolution" ? "Subject resolution" : "Live source search"}</span>
+          <span className="research-background-note">You can leave. This scan continues in the background.</span>
         </div>
       </div>
+
+      <aside className="research-stage-rail">
+        <div className="eyebrow">Research sequence</div>
+        <ol className="research-stage-list" aria-label="Check progress">
+          {progress.stages.map((stage, index) => {
+            const Icon = STAGE_ICONS[stage.key] ?? DatabaseIcon;
+            return (
+              <li key={stage.key} className={`research-stage-item is-${stage.state}`}>
+                <span className="research-stage-order">{String(index + 1).padStart(2, "0")}</span>
+                <span className="research-stage-icon"><StageStateIcon state={stage.state} icon={Icon} /></span>
+                <span className="research-stage-label">{stage.label}</span>
+                <span className="research-stage-state">{stage.state === "active" ? "checking" : stage.state === "observed" ? "done" : "waiting"}</span>
+              </li>
+            );
+          })}
+        </ol>
+
+        <dl className="research-proof-stats">
+          <div><dt>Observed events</dt><dd>{progress.eventCount}</dd></div>
+          <div><dt>Sources checked</dt><dd>{progress.observedSources.length}</dd></div>
+          <div><dt>Review flags</dt><dd>{progress.attentionCount}</dd></div>
+        </dl>
+        <div className="research-sources" aria-label="Sources checked">
+          {progress.observedSources.length ? progress.observedSources.slice(0, 6).map((source) => (
+            <span key={source.toLowerCase()} className="chip">{source}</span>
+          )) : <span className="mono text-[10px] text-ink-faint">No sources checked yet</span>}
+          {progress.observedSources.length > 6 && <span className="chip">+{progress.observedSources.length - 6}</span>}
+        </div>
+      </aside>
     </section>
   );
 }

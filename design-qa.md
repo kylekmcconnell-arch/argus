@@ -49,6 +49,43 @@ final result: passed
 
 ---
 
+# Design QA — decision landing and live research (2026-08-23)
+
+- Landing direction: `/Users/kyle/.codex/generated_images/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/exec-0fab70c2-e935-4966-b00c-539ea4c04bac.png` (user-selected option 2)
+- Research direction: `/Users/kyle/.codex/generated_images/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/exec-34412396-e99d-4481-97aa-aaa17d8437f1.png` (user-selected option 1)
+- Desktop implementations: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/decision-research-release/landing-desktop.jpg`, `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/decision-research-release/research-desktop.jpg` at 1440 × 1000
+- Mobile implementations: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/decision-research-release/landing-mobile.jpg`, `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/decision-research-release/research-mobile.jpg` at 390 × 844
+- Paired evidence: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/decision-research-release/landing-comparison.png`, `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/decision-research-release/research-comparison.png`
+- State: light and dark themes; authenticated shell; representative observed trace fixture for the dev-only loading harness
+
+## Findings and iteration history
+
+1. Landing hierarchy and intent rail match the selected decision-first direction while retaining ARGUS's real privacy control, provider-spend disclosure, saved-report route, green identity, and sidebar.
+2. Mobile landing initially opened scrolled to the command field because of automatic focus. Removing automatic focus restored the intended story order; the stacked command icon was also realigned to its input.
+3. Research matches the selected command-deck hierarchy: live state, subject, latest observed evidence, stage rail, and evidence ledger. Every status, source, and count is derived from trace events; no percentage, ETA, timestamp, or provider activity is simulated.
+4. The evidence ledger's first row was partially clipped with four fixture events and a waiting row. Its event viewport was increased while preserving user-controlled scroll and jump-to-latest behavior for longer runs.
+5. Responsive checks passed at 1440 × 1000 and 390 × 844. Dark theme, semantic headings, pressed intent state, busy state, polite event announcement, reduced-motion scrolling, and background-run copy remain legible and usable.
+6. No unresolved P0, P1, or P2 visual or interaction issue remains.
+
+## Required fidelity surfaces
+
+- Typography: existing ARGUS sans and mono hierarchy is preserved, with editorial display scale used only for the decision and live-research story.
+- Spacing and rhythm: wide layouts use the full post-sidebar canvas; landing choices and research stages collapse cleanly to a single-column mobile reading order.
+- Colors and assets: only existing panel, line, ink, signature-green, semantic status tokens, ARGUS mark, and Phosphor icons are used. No gradient, placeholder art, or fabricated provider mark was added.
+- Copy and information: all current inputs, privacy behavior, provider-spend disclosure, background-run behavior, source detail, status tone, and final-report pathways remain.
+
+## Verification
+
+- Complete Vitest suite: 3,668 tests passed.
+- Scoped ESLint for every changed TypeScript/TSX file: passed. Repository-wide ESLint continues to report the pre-existing 440-error backlog outside this release.
+- TypeScript client, server, and API projects: passed.
+- Production build: passed.
+- In-app browser: desktop, mobile, light, and dark renders checked; no preview console error or warning observed.
+
+final result: passed
+
+---
+
 # Design QA — white-on-green controls and floating launchers (issue #140)
 
 - Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-22 at 10.43.01 PM.png`, with the user's verbal override that green-filled text should be white and both floating launchers should be green
