@@ -10,7 +10,6 @@ interface AccountSnapshot {
   credit: {
     balance: number;
     startingGrant: number;
-    dailyLimit: number;
     ledger: Array<{ amount: number; reason: string; createdAt: string }>;
   } | null;
   referral: {
@@ -59,10 +58,10 @@ export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null })
   };
 
   useEffect(() => {
-    void load();
+    const initialLoad = window.setTimeout(() => { void load(); }, 0);
     const params = new URLSearchParams(window.location.search);
     const code = params.get("ref")?.trim().toUpperCase();
-    if (!code) return;
+    if (!code) return () => window.clearTimeout(initialLoad);
     void fetch("/api/account-growth", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -73,6 +72,7 @@ export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null })
       window.history.replaceState({}, "", next);
       void load();
     });
+    return () => window.clearTimeout(initialLoad);
   }, []);
 
   useEffect(() => {
@@ -146,7 +146,7 @@ export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null })
                   <div className="stat-label">Available</div>
                   <div className="stat-value mt-1">{data.credit ? data.credit.balance.toFixed(1) : "0.0"}</div>
                   <div className="mt-1 text-[11px] text-ink-faint">
-                    {data.credit ? `${data.credit.startingGrant} starting · ${data.credit.dailyLimit}/day` : "investigation credits"}
+                    {data.credit ? `${data.credit.startingGrant} starting grant · no daily cap` : "investigation credits"}
                   </div>
                 </div>
                 <div className="stat-tile">

@@ -18,7 +18,6 @@ export function PricingGrid({ plans, checkoutActive }: { plans: readonly ArgusPl
           <ul className="mt-3 space-y-1 text-[12.5px] text-ink-dim">
             <li>{plan.investigationCredits} investigation credits</li>
             <li>{plan.seats} {plan.seats === 1 ? "seat" : "seats"}</li>
-            <li>{plan.dailyLimit} investigations/day guardrail</li>
             {"extraPack" in plan && plan.extraPack && (
               <li>{`$${plan.extraPack.usd} per ${plan.extraPack.credits} extra credits`}</li>
             )}

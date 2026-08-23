@@ -159,6 +159,7 @@ describe("report case lifecycle API", () => {
   it("relies on atomic immutable persistence without a second projection write", async () => {
     const address = "0x00000000000000000000000000000000000000aa";
     const versionId = "00000000-0000-4000-8000-000000000301";
+    const clientRunId = "00000000-0000-4000-8000-000000000302";
     persistReportVersionBundle.mockResolvedValue(versionId);
     const { res, captured } = response();
 
@@ -168,6 +169,7 @@ describe("report case lifecycle API", () => {
         ref: address,
         query: "$TEST",
         payload: { address },
+        clientRunId,
         completenessState: "complete",
         checkRuns: [{ label: "Contract safety", status: "unknown" }],
       },
@@ -181,6 +183,7 @@ describe("report case lifecycle API", () => {
         completenessState: "partial",
         checks: [{ label: "Contract safety", status: "unknown" }],
         methodologyVersion: "argus-token-v2-terminal-outcomes",
+        runId: clientRunId,
       }),
     );
     expect(activateReportVersion).toHaveBeenCalledWith(

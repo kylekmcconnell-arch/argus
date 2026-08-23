@@ -95,7 +95,7 @@ export function PublicPricingPage() {
         <div className="eyebrow">Pricing</div>
         <h1 className="display mt-2 text-[32px] text-ink md:text-[44px]">Investigation credits, not raw API bills</h1>
         <p className="mt-3 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-          One credit funds one standard investigation. Early testers start with a 10-credit budget and a 3/day guardrail.
+          One credit funds one standard investigation. Early testers start with a 10-credit budget and no separate daily cap.
           Extra credit packs will be available once billing is connected.
         </p>
         <div className="mt-8">

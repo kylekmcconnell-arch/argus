@@ -367,7 +367,6 @@ export async function accountSnapshot(
     credit: {
       balance: Math.max(0, balanceMillis / CREDIT_MILLIS),
       startingGrant: STARTING_CREDIT_MILLIS / CREDIT_MILLIS,
-      dailyLimit: ARGUS_PLANS[0].dailyLimit,
       ledger: ledger.map((row) => ({
         amount: Number(row.amount_millis || 0) / CREDIT_MILLIS,
         reason: row.reason,

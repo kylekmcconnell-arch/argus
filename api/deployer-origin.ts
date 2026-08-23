@@ -10,12 +10,10 @@
 // the pattern api/deployer-risk.ts set for the Arkham trace, and returns the
 // same wire shape so a caller can swap between the two.
 //
-// Like that sibling it is deliberately left analyst-metered by middleware rather
-// than re-checking auth here: Helius is a keyed subscription (no per-call
-// marginal cost), so the daily API-budget gate is the abuse guard, and there is
-// no persisted report version to attach a cost line to yet. The gated
-// /api/deployer stays for post-persist panels, which do have a version and do
-// bill against it.
+// Like that sibling it requires analyst access in middleware rather than
+// re-checking auth here. Helius has no per-call marginal cost and this scan-time
+// read has no persisted report version yet. The gated /api/deployer stays for
+// post-persist panels, which do have a version and can attach a cost line.
 //
 // The RPC walk below is a port of the one in api/deployer.ts. Only the walk is
 // duplicated: every user-facing sentence is imported from that file, so the two
@@ -38,13 +36,26 @@ export const config = { maxDuration: 30 };
 
 const MAX_SIG_PAGES = 10; // 1000 sigs/page; bounds pagination on busy wallets
 interface ProviderUsage { calls: number; succeeded: number }
+interface SignatureRow { signature: string; blockTime?: number | null }
+interface TransactionRow {
+  blockTime?: number;
+  transaction?: { message?: {
+    instructions?: unknown[];
+    accountKeys?: Array<string | { pubkey: string }>;
+  } };
+  meta?: {
+    innerInstructions?: Array<{ instructions?: unknown[] }>;
+    preBalances?: number[];
+    postBalances?: number[];
+  };
+}
 
 // Well-known Solana CEX hot wallets. A funder match here means the trail leads
 // back to a KYC'd exchange account (a real subpoena target), not an anonymous
 // wallet. It says where the SOL CAME FROM; it says nothing about where any of it
 // went afterwards.
 
-async function rpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<any> {
+async function rpc<T>(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<T> {
   usage.calls += 1;
   const res = await fetch(url, {
     method: "POST",
@@ -53,10 +64,10 @@ async function rpc(url: string, method: string, params: unknown, usage: Provider
     signal: AbortSignal.timeout(12000),
   });
   if (!res.ok) throw new Error(`rpc ${method} ${res.status}`);
-  const d = (await res.json()) as any;
-  if (d.error) throw new Error(`rpc ${method}: ${d.error.message}`);
+  const d = (await res.json()) as { error?: { message?: unknown }; result?: T };
+  if (d.error) throw new Error(`rpc ${method}: ${String(d.error.message ?? "unknown error")}`);
   usage.succeeded += 1;
-  return d.result;
+  return d.result as T;
 }
 
 // Walk getSignaturesForAddress back to the wallet's very first signatures. We
@@ -64,9 +75,9 @@ async function rpc(url: string, method: string, params: unknown, usage: Provider
 // the token mint itself; the funding sits in a neighbouring early tx.
 async function oldestActivity(url: string, wallet: string, usage: ProviderUsage, maxPages = MAX_SIG_PAGES): Promise<{ oldestSigs: string[]; firstBlockTime: number | null; truncated: boolean }> {
   let before: string | undefined;
-  let lastBatch: any[] = [];
+  let lastBatch: SignatureRow[] = [];
   for (let pages = 0; pages < maxPages; pages++) {
-    const batch: any[] = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage);
+    const batch = await rpc<SignatureRow[]>(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage);
     if (!batch?.length) break;
     lastBatch = batch;
     if (batch.length < 1000) {
@@ -93,20 +104,20 @@ interface SeedFunding { source: string; lamports: number | null; fundedAt: numbe
 // opposite direction.
 async function inboundFunding(url: string, wallet: string, sigs: string[], usage: ProviderUsage): Promise<SeedFunding | null> {
   for (const sig of sigs) {
-    const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
+    const tx = await rpc<TransactionRow | null>(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
     if (!tx) continue;
     const fundedAt = typeof tx.blockTime === "number" ? tx.blockTime : null;
-    const direct = inboundFundingFromInstructions(tx.transaction?.message?.instructions, wallet);
+    const direct = inboundFundingFromInstructions(tx.transaction?.message?.instructions ?? [], wallet);
     if (direct) return { ...direct, fundedAt };
     for (const inner of tx.meta?.innerInstructions ?? []) {
-      const s = inboundFundingFromInstructions(inner.instructions, wallet);
+      const s = inboundFundingFromInstructions(inner.instructions ?? [], wallet);
       if (s) return { ...s, fundedAt };
     }
     // Balance-delta fallback: if the wallet gained SOL in this tx, the account
     // that lost the most SOL is the funder. The amount reported is what the
     // WALLET gained, not what the payer lost: the payer's drop also carries the
     // fee, and the credited amount is the checkable one.
-    const keys: string[] = (tx.transaction?.message?.accountKeys ?? []).map((k: any) => (typeof k === "string" ? k : k.pubkey));
+    const keys = (tx.transaction?.message?.accountKeys ?? []).map((key) => (typeof key === "string" ? key : key.pubkey));
     const pre: number[] = tx.meta?.preBalances ?? [];
     const post: number[] = tx.meta?.postBalances ?? [];
     const wi = keys.indexOf(wallet);

@@ -372,7 +372,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
         {(persistenceFailed || persistenceMissingCapability) && (
           <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
-            Post-scan intelligence is paused because this report could not be saved. Rescan before spending on supplemental providers.
+            <strong className="block text-ink">This report is visible now, but it was not saved.</strong>
+            <span className="mt-1 block">It will disappear when you leave this page. Run the scan again to create a saved version before opening extra research.</span>
+            {livePersistence?.state === "failed" && livePersistence.reason && (
+              <span className="mt-1 block text-ink-dim">{livePersistence.reason}</span>
+            )}
           </div>
         )}
         {showCurrentIntelligence && <RingAlert handle={"$" + d.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}

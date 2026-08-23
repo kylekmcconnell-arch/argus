@@ -54,7 +54,7 @@ export function ApiPage() {
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         Programmatic access to ARGUS for funds, launchpads, and internal bots. Every investigation endpoint
         requires an active analyst account and a Supabase access token. Send it as a Bearer token; workspace
-        membership and daily investigation limits are enforced server-side.
+        membership and investigation credits are enforced server-side. There is no separate daily request cap.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-ink-faint">
         <span>Base URL <span className="mono text-ink-dim">{BASE}</span></span>

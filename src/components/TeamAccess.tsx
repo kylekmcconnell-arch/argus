@@ -13,7 +13,6 @@ interface WorkspaceMember {
   updatedAt: string;
   budget: {
     balance: number;
-    dailyLimit: number;
     lastGrantAt: string | null;
   };
 }
@@ -324,7 +323,7 @@ export function TeamAccess() {
                 <span className="mt-0.5 block text-[11px] text-ink-faint">
                   {member.role === "owner"
                     ? "owner investigations are not credit-limited"
-                    : `${member.budget.balance.toFixed(1)} credits available · ${member.budget.dailyLimit}/day`}
+                    : `${member.budget.balance.toFixed(1)} credits available · no daily cap`}
                 </span>
               </span>
               {member.role === "analyst" && member.active && (

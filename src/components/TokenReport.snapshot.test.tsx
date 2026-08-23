@@ -324,7 +324,7 @@ describe("token report supplemental evidence boundary", () => {
       },
     }));
 
-    expect(container.textContent).toContain("Post-scan intelligence is paused");
+    expect(container.textContent).toContain("This report is visible now, but it was not saved.");
     expect(harness.livePanel).not.toHaveBeenCalled();
     expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
   });

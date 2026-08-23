@@ -14,7 +14,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-describe("consumeInvestigationQuota resilience", () => {
+describe("consumeInvestigationQuota credit policy", () => {
   beforeEach(() => {
     vi.stubEnv("SUPABASE_URL", "https://database.example");
     vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test_key");
@@ -24,48 +24,45 @@ describe("consumeInvestigationQuota resilience", () => {
     vi.unstubAllEnvs();
   });
 
-  it("fails open (allows, no error) when the usage RPC returns non-ok", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "statement timeout" }, 503)));
+  it("keeps owners unlimited without consulting a daily counter or credit ledger", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
     const quota = await consumeInvestigationQuota(auth, "/api/audit");
     expect(quota.allowed).toBe(true);
-    expect(quota.error).toBeUndefined();
+    expect(quota.remaining).toBe(-1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("fails open when the usage RPC connection throws (e.g. timeout)", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("The operation was aborted due to timeout"); }));
-    const quota = await consumeInvestigationQuota(auth, "/api/audit");
-    expect(quota.allowed).toBe(true);
-    expect(quota.error).toBeUndefined();
-  });
-
-  it("still blocks a genuine over-limit response (RPC succeeds, allowed=false)", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([{ allowed: false, used: 100, remaining: 0 }])));
-    const quota = await consumeInvestigationQuota(auth, "/api/audit");
-    expect(quota.allowed).toBe(false);
-    expect(quota.error).toBeUndefined();
-  });
-
-  it("blocks an analyst when the credit ledger is exhausted", async () => {
+  it("blocks an analyst only when the visible credit ledger is exhausted", async () => {
     const analyst: AuthContext = { ...auth, role: "analyst", email: "analyst@example.com" };
-    vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(jsonResponse([{ allowed: true, used: 1, remaining: 2 }]))
-      .mockResolvedValueOnce(jsonResponse([{ allowed: false, balance_millis: 0 }])));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([{ allowed: false, balance_millis: 0 }])));
     const quota = await consumeInvestigationQuota(analyst, "/api/audit");
     expect(quota.allowed).toBe(false);
     expect(quota.reason).toBe("credit_budget_exhausted");
   });
 
-  it("allows and reports usage when under the limit", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([{ allowed: true, used: 3, remaining: 97 }])));
-    const quota = await consumeInvestigationQuota(auth, "/api/audit");
-    expect(quota).toMatchObject({ allowed: true, used: 3, remaining: 97 });
+  it("allows an analyst and reports the visible remaining credits", async () => {
+    const analyst: AuthContext = { ...auth, role: "analyst", email: "analyst@example.com" };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse([{ allowed: true, balance_millis: 9_000 }])));
+    const quota = await consumeInvestigationQuota(analyst, "/api/audit");
+    expect(quota).toMatchObject({ allowed: true, used: 1, remaining: 9, creditRemaining: 9 });
   });
 
-  it("passes an abort signal (bounded timeout) on the quota call", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse([{ allowed: true, used: 1, remaining: 99 }]));
+  it("fails closed with an explicit ledger error when credits cannot be checked", async () => {
+    const analyst: AuthContext = { ...auth, role: "analyst", email: "analyst@example.com" };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: "statement timeout" }, 503)));
+    const quota = await consumeInvestigationQuota(analyst, "/api/audit");
+    expect(quota).toMatchObject({ allowed: false, error: "credit_ledger_unavailable" });
+  });
+
+  it("uses one bounded credit-ledger request and never calls daily usage accounting", async () => {
+    const analyst: AuthContext = { ...auth, role: "analyst", email: "analyst@example.com" };
+    const fetchMock = vi.fn(async () => jsonResponse([{ allowed: true, balance_millis: 9_000 }]));
     vi.stubGlobal("fetch", fetchMock);
-    await consumeInvestigationQuota(auth, "/api/audit");
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    await consumeInvestigationQuota(analyst, "/api/audit");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain("/consume_investigation_credit");
+    expect(url).not.toContain("consume_usage_quota");
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 });

@@ -270,7 +270,6 @@ describe("workspace member budgets", () => {
     ]);
     expect(budgets.get(MEMBER_ID)).toEqual({
       balance: 14,
-      dailyLimit: 3,
       lastGrantAt: "2026-08-03T00:00:00Z",
     });
   });

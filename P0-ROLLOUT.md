@@ -11,7 +11,7 @@ public sharing.
 - Server-owned `owner`, `analyst`, and `viewer` workspace roles.
 - Tenant scoping on cases, reports, graph contributions, audit events, usage,
   evidence, and share links.
-- Daily investigation limits plus weighted API budgets before paid work starts.
+- Visible investigation credits before paid work starts; no hidden daily route or investigation counter.
 - Immutable report versions with idempotent run IDs and attestation state.
 - Server-derived contributors, verdict projections, and evidence provenance.
 - Public report cards backed by random capability links; URL parameters cannot
@@ -94,6 +94,6 @@ back while either application version may still be serving traffic.
   founders/tokens, then track false-pass and false-avoid rates per methodology
   version.
 - Add production observability for provider latency, unavailability, report
-  persistence failures, quota denials, and evidence coverage drift.
+  persistence failures, credit denials, and evidence coverage drift.
 - Remove the temporary legacy cross-tenant unique indexes after every deployed
   writer uses organization-scoped conflict keys.

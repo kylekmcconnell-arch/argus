@@ -519,9 +519,12 @@ async function createImmutableVersion(
     createdBy: auth.userId,
     payload,
     checks: raw.checkRuns,
-    // Client-computed token/site reports never choose an idempotency key for
-    // a server-attested run. Each explicit submission is a new version.
-    runId: null,
+    // A client save may be retried after a transient network or function
+    // failure. Binding those attempts to one UUID keeps the immutable write
+    // idempotent while each new scan still creates its own version.
+    runId: typeof raw.clientRunId === "string" && UUID.test(raw.clientRunId)
+      ? raw.clientRunId
+      : null,
     attestationState: "analyst_submitted",
     verdict: typeof row.verdict === "string" ? row.verdict : null,
     score: typeof row.score === "number" ? row.score : null,

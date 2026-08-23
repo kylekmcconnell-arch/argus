@@ -38,43 +38,7 @@ const VIEWER_GET_PATHS = new Set([
   "/api/sanctions",
 ]);
 const OWNER_PATHS = new Set(["/api/reclassify", "/api/members", "/api/waitlist"]);
-const UNMETERED_COLLABORATION_PATHS = new Set(["/api/case-brief"]);
 const ROLE_RANK: Record<string, number> = { viewer: 0, analyst: 1, owner: 2 };
-const ROUTE_UNITS: Record<string, number> = {
-  "/api/audit": 15,
-  "/api/v1/person": 15,
-  "/api/v1/token": 1,
-  // The threat scanner's AI code read is a real Anthropic call; weight it like
-  // the other single-model panels so a burst of scans is metered against the
-  // daily budget instead of billing as 1. (The scan's other threat endpoints —
-  // oft, burns, migration, wallet-holdings — are keyless and correctly bill as 1.)
-  "/api/code-review": 4,
-  // Keyless but expensive: a budgeted ~40s adaptive eth_getLogs walk of the
-  // token's whole recent transfer ledger.
-  "/api/behindledger": 3,
-  "/api/sell-structure": 3,
-  "/api/site-safety": 2,
-  "/api/x-authenticity": 1,
-  "/api/cohort": 4,
-  "/api/wallet-taxonomy": 3,
-  "/api/launch": 2,
-  "/api/sweep": 12,
-  "/api/vc-portfolio": 6,
-  "/api/challenge-verdict": 4,
-  "/api/ask": 3,
-  "/api/reclassify": 4,
-  "/api/pfp-check": 2,
-  "/api/identity-sweep": 3,
-  "/api/project-docs": 3,
-  "/api/legal-screen": 2,
-  "/api/namesake": 3,
-  "/api/x-find": 3,
-  "/api/recon-team": 3,
-  // Nine keyless upstream requests per call. They cost no money, so this weight
-  // is rate-limit accounting only: without an entry it billed as 1 and a burst
-  // of trader lookups counted as a ninth of the traffic it actually made.
-  "/api/polymarket-trader": 5,
-};
 
 export const config = {
   matcher: "/api/:path*",
@@ -243,63 +207,8 @@ export default async function middleware(request: Request): Promise<Response> {
     return Response.json({ error: "insufficient_role", requiredRole }, { status: 403 });
   }
 
-  let apiBudgetRemaining: number | null = null;
-  if (
-    ROLE_RANK[requiredRole] >= ROLE_RANK.analyst
-    && !UNMETERED_COLLABORATION_PATHS.has(pathname)
-    && !(pathname === "/api/augment" && request.method === "GET")
-  ) {
-    const configuredLimit = Number.parseInt(
-      role === "owner"
-        ? process.env.ARGUS_OWNER_DAILY_API_UNITS || "1500"
-        : process.env.ARGUS_DAILY_API_UNITS || "300",
-      10,
-    );
-    const dailyLimit = Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : 300;
-    const quotaResponse = await fetch(`${supabaseUrl}/rest/v1/rpc/consume_usage_quota`, {
-      method: "POST",
-      headers: { ...serviceHeaders, "content-type": "application/json" },
-      body: JSON.stringify({
-        p_organization_id: organizationId,
-        p_user_id: user.id,
-        p_event_type: "api.budget",
-        p_route: pathname,
-        p_daily_limit: dailyLimit,
-        p_metadata: { method: request.method },
-        p_units: ROUTE_UNITS[pathname] || 1,
-      }),
-      // 8s (not longer): this is Edge middleware, so the whole auth + member +
-      // quota chain must stay under Vercel's ~25s wall-clock ceiling (8+8+8).
-      // Because the check now fails open, a modest timeout is safe — a slow RPC
-      // proceeds rather than blocking; it does not need to "ride out" latency.
-      signal: AbortSignal.timeout(8_000),
-    }).catch(() => null);
-    // Fail open when the usage RPC is unreachable: the daily API budget is a
-    // soft guardrail, and a transient Supabase blip must not turn every metered
-    // request (including a scan's persist) into a 503 outage. A genuine
-    // over-budget response (RPC succeeds, allowed=false) is still enforced.
-    if (!quotaResponse?.ok) {
-      console.warn("[middleware] usage quota RPC unavailable; allowing (fail-open)", pathname);
-    } else {
-      const quotaRows = (await quotaResponse.json().catch(() => [])) as Array<{
-        allowed?: unknown;
-        remaining?: unknown;
-      }>;
-      const quota = Array.isArray(quotaRows) ? quotaRows[0] : null;
-      if (quota?.allowed !== true) {
-        return Response.json({ error: "daily_api_budget_reached", remaining: 0 }, { status: 429 });
-      }
-      apiBudgetRemaining = typeof quota.remaining === "number" ? quota.remaining : null;
-    }
-  }
-
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-argus-user-id", user.id);
   requestHeaders.set("x-argus-role", role);
-  return next({
-    request: { headers: requestHeaders },
-    ...(apiBudgetRemaining === null
-      ? {}
-      : { headers: { "x-argus-api-budget-remaining": String(apiBudgetRemaining) } }),
-  });
+  return next({ request: { headers: requestHeaders } });
 }

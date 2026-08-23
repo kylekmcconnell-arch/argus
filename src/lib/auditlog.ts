@@ -177,6 +177,7 @@ export function reconcileAuditOutcome(
   ref: string,
   kind: AuditKind,
   outcome: { verdict?: string; score?: number | null; coverage?: string; summary?: string },
+  options: { persist?: boolean } = {},
 ): void {
   const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^[@$]/, "");
   const target = norm(ref);
@@ -197,7 +198,7 @@ export function reconcileAuditOutcome(
     if (index < 0 || !differs(rows[index])) return { rows, changed: false };
     const next = [...rows];
     next[index] = rewrite(rows[index]);
-    void syncEntryUpdate(next[index], sharedRow);
+    if (options.persist !== false) void syncEntryUpdate(next[index], sharedRow);
     return { rows: next, changed: true };
   };
   let changed = false;
@@ -255,18 +256,14 @@ export async function hydrateSharedLog(): Promise<void> {
           ...(typeof report.verdict === "string" ? { verdict: report.verdict } : {}),
           ...(typeof report.score === "number" || report.score === null ? { score: report.score } : {}),
           ...(coverage ? { coverage } : {}),
-        });
+        }, { persist: false });
       }
     } catch {
       /* the audit feed still works if the report library is temporarily unavailable */
     }
-    // Backfill: any LOCAL row the shared log has never seen (audits run before
-    // sync existed, or that failed to sync) gets pushed up now — so server-side
-    // maintenance (re-categorization, cleanups) can reach every audit, not just
-    // the ones that happened to sync.
-    const sharedIds = new Set(sharedCache.map((e) => (e.id.includes(":") ? e.id.slice(e.id.lastIndexOf(":") + 1) : e.id)));
-    const missing = getLog().filter((e) => !sharedIds.has(e.id)).slice(0, 40);
-    for (const e of missing) void syncEntry(e);
+    // Hydration is read-only. New audits sync when they are created; loading a
+    // page must never replay old browser rows or turn reconciliation into a
+    // burst of writes against the shared audit endpoint.
   } catch {
     /* stay local-only */
   }

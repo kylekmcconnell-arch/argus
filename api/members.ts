@@ -6,7 +6,7 @@ import {
   type ArgusRole,
 } from "./_auth.js";
 import { ensureGrowthProfile, ensureStartingCredits, grantManualTestCredits } from "./_growth.js";
-import { CREDIT_MILLIS, EARLY_ACCESS_DAILY_LIMIT, MAX_MANUAL_TEST_GRANT_CREDITS } from "../src/lib/growth.js";
+import { CREDIT_MILLIS, MAX_MANUAL_TEST_GRANT_CREDITS } from "../src/lib/growth.js";
 
 export const config = { maxDuration: 20 };
 
@@ -44,7 +44,6 @@ interface CreditRow {
 
 interface MemberBudget {
   balance: number;
-  dailyLimit: number;
   lastGrantAt: string | null;
 }
 
@@ -54,7 +53,6 @@ export function summarizeMemberBudgets(rows: CreditRow[]): Map<string, MemberBud
     if (!row.user_id) continue;
     const current = budgetByUser.get(row.user_id) || {
       balance: 0,
-      dailyLimit: EARLY_ACCESS_DAILY_LIMIT,
       lastGrantAt: null,
     };
     current.balance += Number(row.amount_millis || 0) / CREDIT_MILLIS;
@@ -141,7 +139,7 @@ async function resendPendingInvitation(
 function memberView(
   member: MemberRow,
   user?: User,
-  budget: MemberBudget = { balance: 0, dailyLimit: EARLY_ACCESS_DAILY_LIMIT, lastGrantAt: null },
+  budget: MemberBudget = { balance: 0, lastGrantAt: null },
 ) {
   return {
     userId: member.user_id,

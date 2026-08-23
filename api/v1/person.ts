@@ -136,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (quota.error) { res.status(503).json({ error: quota.error }); return; }
   if (!quota.allowed) {
     res.status(429).json({
-      error: quota.reason === "credit_budget_exhausted" ? "credit_budget_exhausted" : "daily_investigation_limit_reached",
+      error: "credit_budget_exhausted",
       remaining: 0,
     });
     return;
