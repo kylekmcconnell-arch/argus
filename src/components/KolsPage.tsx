@@ -68,7 +68,7 @@ export function KolsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, priv?
   const open = (ref: string, kind?: ReportKind) => onOpenRecent ? onOpenRecent(ref, kind) : onAudit(ref);
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
+    <div className="workspace-frame">
       <WorkspacePageHeader
         eyebrow="Influence intelligence"
         title="KOLs"

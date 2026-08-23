@@ -153,7 +153,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
+    <div className="workspace-frame">
       <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="display-sm text-[24px] text-ink">Watchlist</h1>

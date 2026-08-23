@@ -414,7 +414,7 @@ export function ProvidersPage({ previewData, previewUsage }: { previewData?: Pro
   const attention = evidenceHealth.filter((status) => status.label === "Last check failed" || status.label === "Last check partial").length;
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
+    <div className="workspace-frame">
       <h1 className="display-sm text-[24px] text-ink">Evidence sources</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         See where ARGUS gets outside facts, what each source can establish, and where its evidence stops. Models and product infrastructure are listed separately because they are not evidence.

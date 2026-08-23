@@ -49,6 +49,49 @@ final result: passed
 
 ---
 
+# Design QA — fluid authenticated workspace (issue #130)
+
+- Source screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/fluid-workspace-issue-130/providers-source.jpg`
+- Implementation screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/fluid-workspace-issue-130/providers-implementation.jpg`
+- Same-viewport comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/fluid-workspace-issue-130/providers-comparison.jpg`
+- Authenticated-shell implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/fluid-workspace-issue-130/referrals-implementation.jpg`
+- Viewport: 1280 × 720 CSS pixels for both source and implementation captures
+- State: light theme; evidence-source ledger and referrals workspace with representative data
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- The previous evidence-source page stopped at 1024px and left roughly 128px of unused canvas on each side. The implementation uses the available width with a 25px responsive gutter at this viewport.
+- The wider ledger materially improves scanability: source name, evidence scope, limit, availability, and last-check status occupy stable columns with less wrapping.
+- The authenticated referrals capture confirms the same fluid frame works inside the real post-sidebar canvas. Cards, metrics, referral controls, and the leaderboard align to one responsive gutter.
+- Descriptions retain their existing `max-w-2xl` reading measure. Only page-level caps were removed, so prose does not become an unreadably long line.
+- Focused scan landing and failure states remain deliberately narrow; completed scan reports, wallet holdings, project people, and provider ledgers use the fluid report/workspace canvas.
+
+## Required fidelity surfaces
+
+- Typography: unchanged ARGUS sans/mono hierarchy, weights, and text sizes.
+- Spacing and rhythm: one shared `workspace-frame` now controls horizontal and vertical page gutters; the existing `report-frame` remains the matched report-shell primitive.
+- Colors and surfaces: unchanged light/dark tokens, panel borders, shadows, radii, and semantic status colors.
+- Assets: no image, logo, icon, or illustration changes.
+- Copy and information: no data, labels, actions, report evidence, or disclosures were removed.
+- Responsive behavior: gutters use CSS `clamp()` and page width is uncapped; a structural regression test covers all 18 primary workspace routes, while focused forms retain local reading widths.
+
+## Interaction checks
+
+- Referral link and copy action remain present.
+- Provider status rows and source links remain present and readable.
+- The 1280px implementation has no document-level horizontal overflow (`documentWidth = 1265px`, matching the scrollbar-adjusted viewport).
+- Existing page-specific grids and tables retain their responsive breakpoints.
+
+## Comparison history
+
+The first matched comparison found no blocking fidelity issue. The change is intentionally limited to shell width and gutters; page content and behavior are unchanged.
+
+final result: passed
+
+---
+
 ## Issue #124 follow-up · full investigation-report language
 
 - Source visual truth:

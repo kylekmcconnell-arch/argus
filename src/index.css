@@ -145,8 +145,14 @@
 }
 
 @layer components {
-  /* Report shells should use the whole post-sidebar canvas. Responsive gutters
-     provide breathing room while inner narrative blocks keep readable measures. */
+  /* Authenticated workspace shells use the whole post-sidebar canvas. Responsive
+     gutters provide breathing room while inner prose and focused forms keep their
+     own readable measures. */
+  .workspace-frame {
+    width: 100%;
+    padding: clamp(1.5rem, 2.5vw, 3rem) clamp(1rem, 2vw, 3rem);
+  }
+
   .report-frame {
     width: 100%;
     padding-inline: clamp(1rem, 2vw, 3rem);

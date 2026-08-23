@@ -59,7 +59,7 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
   const fail = verdictMeta("FAIL").color;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-12">
+    <div className="workspace-frame">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="display-sm text-[24px] text-ink">Track record</h1>

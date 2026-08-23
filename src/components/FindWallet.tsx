@@ -152,7 +152,7 @@ export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: st
         label="Recent audits · click to open the report"
       />
       <header className="sticky top-0 z-20 border-b border-line bg-void/85 backdrop-blur">
-        <div className="mx-auto flex max-w-3xl items-center gap-3 px-5 py-3">
+        <div className="report-frame flex items-center gap-3 py-3">
           <button onClick={onReset} className="flex items-center gap-1.5 text-[13.5px] text-ink-dim transition hover:text-ink">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
             Home
@@ -161,7 +161,7 @@ export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: st
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-5">
+      <div className="report-frame">
         <div className="mt-6">
           <h1 className="display-sm text-[24px] text-ink">Find wallet</h1>
           <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">

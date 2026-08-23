@@ -101,7 +101,7 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
   );
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-10">
+    <div className="workspace-frame">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
