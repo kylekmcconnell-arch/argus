@@ -14,7 +14,6 @@ import {
 } from "@phosphor-icons/react";
 import { ArgusMark, HeroBackdrop } from "./ArgusMark";
 import { PrivateToggle } from "./PrivateToggle";
-import { recentReportHref } from "../lib/recentReportRoute";
 import type { ResearchIntent } from "../lib/researchDirector";
 
 const INVESTIGATION_OUTPUTS = [
@@ -44,11 +43,9 @@ const INVESTIGATION_INTENTS: ReadonlyArray<{
 export function Landing({
   onAudit,
   onAbout,
-  onOpenSavedReport,
 }: {
   onAudit: (handle: string, priv?: boolean, intent?: ResearchIntent) => void | Promise<void>;
   onAbout: () => void;
-  onOpenSavedReport?: (ref: string, kind: "person") => void | Promise<void>;
 }) {
   const [value, setValue] = useState("");
   const [priv, setPriv] = useState(false);
@@ -158,23 +155,6 @@ export function Landing({
               A new scan checks current sources and may use paid data. Open a recent case to reuse saved results.
             </p>
 
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line/70 pt-5" aria-label="Saved report example">
-              <p className="text-[11.5px] leading-relaxed text-ink-faint">
-                See the finished experience without starting a new provider run. Frozen to its saved date · no new provider calls.
-              </p>
-              <a
-                href={recentReportHref("uniswap", "person")}
-                onClick={(event) => {
-                  if (!onOpenSavedReport || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                  event.preventDefault();
-                  void onOpenSavedReport("uniswap", "person");
-                }}
-                className="btn-ghost inline-flex min-h-9 shrink-0 items-center gap-2 text-[12.5px] font-medium text-signal-lift"
-              >
-                Open saved Uniswap report
-                <ArrowRightIcon size={14} weight="bold" aria-hidden />
-              </a>
-            </div>
           </section>
 
           <aside aria-labelledby="investigation-output-title" className="landing-method-rail rise-in">

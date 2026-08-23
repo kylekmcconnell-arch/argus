@@ -23,34 +23,6 @@ afterEach(async () => {
 });
 
 describe("Landing fresh audit launch", () => {
-  it("opens the saved Uniswap example without starting a fresh audit", async () => {
-    const onAudit = vi.fn();
-    const onOpenSavedReport = vi.fn();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () => {
-      root?.render(
-        <Landing
-          onAudit={onAudit}
-          onAbout={() => undefined}
-          onOpenSavedReport={onOpenSavedReport}
-        />,
-      );
-    });
-
-    const example = container.querySelector<HTMLAnchorElement>('a[href="?s=uniswap&kind=person"]');
-    expect(example).not.toBeNull();
-    expect(example?.textContent).toContain("Open saved Uniswap report");
-    expect(container.textContent).toContain("Frozen to its saved date");
-    expect(container.textContent).toContain("no new provider calls");
-
-    await act(async () => example?.click());
-
-    expect(onOpenSavedReport).toHaveBeenCalledWith("uniswap", "person");
-    expect(onAudit).not.toHaveBeenCalled();
-  });
-
   it("discloses provider cost and suppresses duplicate submissions", async () => {
     const neverSettles = new Promise<void>(() => undefined);
     const onAudit = vi.fn(() => neverSettles);
@@ -72,6 +44,8 @@ describe("Landing fresh audit launch", () => {
     expect(trace?.querySelector("svg")).not.toBeNull();
     expect(container.textContent).toContain("A new scan checks current sources and may use paid data");
     expect(container.textContent).toContain("Open a recent case to reuse saved results");
+    expect(container.textContent).not.toContain("Open saved Uniswap report");
+    expect(container.textContent).not.toContain("See the finished experience");
     expect(container.textContent).not.toContain("Try a live token");
     expect(container.textContent).not.toMatch(/\$(PEPE|SHIB|UNI)\b/);
 

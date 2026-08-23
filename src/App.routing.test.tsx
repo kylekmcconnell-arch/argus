@@ -54,22 +54,15 @@ vi.mock("./components/AppShell", () => ({
 vi.mock("./components/Landing", () => ({
   Landing: ({
     onAudit,
-    onOpenSavedReport,
   }: {
     onAudit: (input: string, priv?: boolean) => void | Promise<void>;
-    onOpenSavedReport?: (ref: string, kind: "person") => void | Promise<void>;
   }) => (
-    <>
-      <button
-        data-testid="landing-run"
-        onClick={() => { void onAudit(harness.landingInput, harness.landingPrivate); }}
-      >
-        Run investigation
-      </button>
-      <button data-testid="landing-example" onClick={() => { void onOpenSavedReport?.("uniswap", "person"); }}>
-        Open saved Uniswap report
-      </button>
-    </>
+    <button
+      data-testid="landing-run"
+      onClick={() => { void onAudit(harness.landingInput, harness.landingPrivate); }}
+    >
+      Run investigation
+    </button>
   ),
 }));
 
@@ -730,38 +723,6 @@ describe("App routing safety", () => {
     await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
 
     expect(harness.fetchReportState).toHaveBeenCalledWith("typedfounder", "person");
-    expectNoRunnerStarted();
-  });
-
-  it("opens the Landing Uniswap example through stored-only report resolution", async () => {
-    harness.fetchReportState.mockResolvedValue({
-      status: "open",
-      report: {
-        kind: "person",
-        ref: "uniswap",
-        payload: {
-          handle: "@uniswap",
-          display_name: "Uniswap",
-          headline: "Saved Uniswap example",
-          report: {
-            composite_verdict: "PASS",
-            governing_score: 77,
-            identity_confidence: "Confirmed",
-            roles: ["PROJECT"],
-          },
-          evidence: { associates: [] },
-          checkRuns: [{ checkId: "identity-resolution", status: "confirmed" }],
-        },
-        versionContext: { caseId: "case-uniswap", reportVersionId: "version-uniswap" },
-      },
-    });
-
-    const view = await renderApp();
-    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='landing-example']")?.click());
-    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
-
-    expect(harness.fetchReportState).toHaveBeenCalledWith("uniswap", "person");
-    expect(harness.resolveStoredCases).not.toHaveBeenCalled();
     expectNoRunnerStarted();
   });
 
