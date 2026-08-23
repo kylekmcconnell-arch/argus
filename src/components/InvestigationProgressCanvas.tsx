@@ -50,7 +50,13 @@ export function InvestigationProgressCanvas({ kind, subject = "the subject", sub
 
         <div className="research-observation">
           <div className="research-eye-stage" aria-hidden="true">
-            <ArgusMark size={148} live={working} motion={eyeMotion} eventKey={progress.latestEvent ? latestKey : undefined} />
+            <ArgusMark
+              size={148}
+              live={working}
+              motion={eyeMotion}
+              eventKey={progress.latestEvent ? latestKey : undefined}
+              tone={working ? "brand" : "neutral"}
+            />
           </div>
           <div key={latestKey} className="rise-in min-w-0">
             <div className="eyebrow text-signal-lift">Latest observed evidence</div>

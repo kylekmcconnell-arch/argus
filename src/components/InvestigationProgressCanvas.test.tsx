@@ -70,6 +70,8 @@ describe("InvestigationProgressCanvas", () => {
     const iris = eye?.querySelector(".argus-eye-iris--searching");
     const liveRing = eye?.querySelector(".argus-eye-live-ring");
     expect(eye).not.toBeNull();
+    expect(eye?.getAttribute("data-argus-eye-tone")).toBe("brand");
+    expect(eye?.querySelectorAll('circle[fill="var(--color-brand)"]')).toHaveLength(1);
     expect(iris).not.toBeNull();
     expect(liveRing).not.toBeNull();
     expect(eye?.querySelector(".argus-eye-evidence-pulse")).toBeNull();
