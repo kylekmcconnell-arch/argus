@@ -59,7 +59,7 @@ export function plainScoreRationale(value: string): string {
       ?.replace(/^LP mostly in one wallet$/i, "most liquidity-provider tokens are held in one wallet")
       .replace(/^LP in one unlocked wallet$/i, "liquidity-provider tokens are held in one unlocked wallet")
       .replace(/^LP not locked$/i, "liquidity-provider tokens are not confirmed locked")
-      .replace(/^LP lock not measured$/i, "the liquidity lock was not measured")
+      .replace(/^LP lock not measured$/i, "liquidity protection is unverified")
       .replace(/^LP burned$/i, "the liquidity-provider tokens were burned")
       .replace(/^LP locked$/i, "the liquidity-provider tokens are locked");
     return qualifier

@@ -92,7 +92,7 @@ describe("market infrastructure is not a holder", () => {
     const dossier = await auditToken({ kind: "token", ref: MINT, via: "solana" }, undefined, { skipSim: true, force: true });
 
     const t1 = dossier!.axes.find((axis) => axis.key === "T1");
-    expect(t1?.rationale).toContain("LP lock not measured");
+    expect(t1?.rationale).toContain("liquidity protection unverified");
     expect(dossier!.findings.some((f) => /does not appear locked or burned/i.test(f.claim))).toBe(false);
   });
 
