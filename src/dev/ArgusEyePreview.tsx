@@ -248,6 +248,7 @@ export function ArgusEyePreview() {
           onOpenToken={() => undefined}
           onOpenProjectAccount={() => undefined}
           onReAudit={() => undefined}
+          onOpenBrief={() => undefined}
         />
       </AppShell>
     </AuthContext.Provider>

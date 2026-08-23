@@ -49,6 +49,44 @@ final result: passed
 
 ---
 
+# Design QA — white-on-green controls and floating launchers (issue #140)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-22 at 10.43.01 PM.png`, with the user's verbal override that green-filled text should be white and both floating launchers should be green
+- Light implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/green-controls-140/implementation-light-673x1504-v2.jpg`
+- Dark implementation: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/green-controls-140/implementation-dark-673x1504.jpg`
+- Focused before/after comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/green-controls-140/comparison-focused-v1.jpg`
+- Source pixels: 3478 × 1714 at 2× display density
+- Implementation pixels and CSS viewport: 673 × 1504 at normalized screenshot density
+- State: light and dark saved `$STONKBROKER` investigation; green Case Brief, active navigation, feedback launcher, and closed/open ARGUS Eye states
+
+## Findings and comparison history
+
+The supplied source showed two P2 consistency issues identified by the user: green-filled active controls used near-black foregrounds, while the two persistent report launchers used neutral black rather than the established brand green. The implementation applies a shared filled-brand treatment with white foregrounds. A focused before/after comparison confirms the requested contrast and color changes without altering control dimensions, position, typography, or surrounding report layout. No actionable P0, P1, or P2 findings remain.
+
+## Required fidelity surfaces
+
+- Fonts and typography: unchanged. Existing ARGUS sans and mono labels, weights, letter spacing, and icon sizing are preserved.
+- Spacing and layout rhythm: unchanged. The Case Brief pill, sidebar active row, 44px feedback target, 52px ARGUS Eye target, safe-area offsets, and collision-free rail retain their existing measurements.
+- Colors and visual tokens: filled controls use `brand-fill` (`#008754` light, `#008a03` dark) with `on-brand` white. Both pairs meet WCAG AA for normal text. The brighter signature-green `brand` token remains unchanged for marks and accents.
+- Image quality and assets: no raster, logo, or icon assets changed. Existing Phosphor icons remain sharp and correctly aligned.
+- Copy and content: unchanged. All report facts, actions, labels, and accessible names remain intact.
+
+## Interaction and responsive checks
+
+- ARGUS Eye opened and closed successfully; its launcher remains green with a white foreground in both states and keeps `aria-expanded` synchronized.
+- Feedback opened and closed successfully; it remains above the Eye and continues yielding while the Eye panel is open.
+- The narrow 673px × 1504px state preserves the toolbar scroll, floating-control clearance, and report reading width without a new overflow.
+- Focused component, theme-contrast, navigation, report, and snapshot tests passed (93 tests). The full suite passed 3,661 tests; three heavy person-report tests timed out only under full-suite CPU contention and passed when their two files were rerun alone (61 tests). Scoped ESLint, TypeScript, and the production build passed.
+- The in-app browser surface exposed interaction and DOM inspection but not a console-message API. Browser-triggered open/close interactions completed without a visible runtime failure; automated component tests cover both state transitions.
+
+## Follow-up polish
+
+No P3 follow-up is required for this focused color-state correction.
+
+final result: passed
+
+---
+
 # Design QA — project identity rail (issue #134)
 
 - Selected visual target: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/project-identity-rail-134/selected-option-1.png`

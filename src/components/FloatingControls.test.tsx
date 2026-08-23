@@ -28,7 +28,9 @@ describe("global floating controls", () => {
     act(() => root.render(<><FeedbackButton /><ArgusEyeAssistant subject="Preview report" /></>));
 
     expect(container.querySelector('[data-testid="feedback-launcher"]')?.classList.contains("feedback-launcher")).toBe(true);
+    expect(container.querySelector('[data-testid="feedback-launcher"]')?.classList.contains("floating-brand-launcher")).toBe(true);
     expect(container.querySelector('[data-testid="argus-eye-assistant"]')?.classList.contains("argus-eye-assistant")).toBe(true);
+    expect(container.querySelector('[aria-label="Ask ARGUS Eye about this report"]')?.classList.contains("floating-brand-launcher")).toBe(true);
 
   });
 

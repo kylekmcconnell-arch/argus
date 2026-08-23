@@ -2882,7 +2882,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 type="button"
                 onClick={onOpenBrief}
                 title="Open the analyst decision brief anchored to this exact person case"
-                className="btn-primary min-h-11 shrink-0 gap-1.5 px-3 text-[12.5px] font-medium"
+                className="btn-primary btn-brand min-h-11 shrink-0 gap-1.5 px-3 text-[12.5px] font-medium"
               >
                 <Briefcase aria-hidden="true" size={14} weight="bold" />
                 Case brief
