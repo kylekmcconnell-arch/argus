@@ -135,12 +135,19 @@ describe("ARGUS Eye floating assistant", () => {
     clickByLabel("Ask ARGUS Eye about this report");
     expect(container.textContent).toContain("Existing report and connections graph");
     expect(container.querySelector('[role="dialog"]')).toBeTruthy();
-    expect(container.textContent).toContain("Clutch Markets identifies @OxSimpleFarmer as Founder");
-    expect(container.textContent).toContain("Project attributed");
-    expect(container.textContent).toContain("Independent corroboration of the person behind the handle");
+    expect(container.textContent).toContain("Clutch Markets says @OxSimpleFarmer is Founder");
+    expect(container.textContent).toContain("has not independently confirmed who controls the project");
+    expect(container.textContent).toContain("Why ARGUS says this");
     expect(container.textContent).not.toContain("Open lead");
-    expect(container.querySelector('a[href="https://x.com/ClutchMarkets/status/1"]')?.textContent).toContain("Open project attribution");
-    expect(container.textContent).toContain("Conflict rejected");
+    expect(container.querySelector('a[href="https://x.com/ClutchMarkets/status/1"]')?.textContent).toContain("View the project's statement");
+    expect(container.textContent).toContain("ignored an unrelated search result");
+    expect(container.textContent).not.toContain("Evidence bound");
+    expect(container.textContent).not.toContain("Role evidence state");
+    expect(container.textContent).not.toContain("Conflict rejected");
+    expect(container.textContent).not.toContain("report-wide reasoning layer");
+    expect(container.textContent).toContain("Is this worth the risk?");
+    expect(container.textContent).toContain("What is the biggest concern?");
+    expect(container.textContent).toContain("What could change the conclusion?");
   });
 
   it("opens from the report deep link", () => {
@@ -195,7 +202,7 @@ describe("ARGUS Eye floating assistant", () => {
     act(() => root.render(<ArgusEyeAssistant inv={investigation()} reportVersionId={reportVersionId} />));
     clickByLabel("Ask ARGUS Eye about this report");
 
-    const prompt = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("investment thesis"));
+    const prompt = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("worth the risk"));
     expect(prompt).toBeTruthy();
     await act(async () => prompt!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 
@@ -204,18 +211,18 @@ describe("ARGUS Eye floating assistant", () => {
       body: expect.stringContaining(reportVersionId),
     }));
     expect(container.textContent).toContain("stronger identity-bound source");
-    expect(container.textContent).toContain("Reasoning chain");
+    expect(container.textContent).toContain("Why this answer");
     expect(container.textContent).toContain("Civil identity remains unresolved");
     expect(container.textContent).toContain("What would change this conclusion?");
-    expect(container.textContent).toContain("How ARGUS routed this question");
-    expect(container.textContent).toContain("challenge thesis");
-    expect(container.textContent).toContain("official-domain · public-web");
-    expect(container.textContent).toContain("Evidence selected for this question");
+    expect(container.textContent).toContain("Evidence checked");
+    expect(container.textContent).not.toContain("challenge thesis");
+    expect(container.textContent).not.toContain("official-domain · public-web");
+    expect(container.textContent).toContain("Information used");
     expect(container.textContent).toContain("The project publishes a founder role");
-    expect(container.textContent).toContain("complete lineage · 1 measurements · 1 sources");
-    expect(container.textContent).toContain("Reasoning boundary");
+    expect(container.textContent).toContain("Checked against 1 source and 1 saved fact");
+    expect(container.textContent).toContain("What this does not prove");
     expect(container.textContent).toContain("The role does not establish legal control.");
-    expect(container.textContent).toContain("Decisive evidence boundary");
+    expect(container.textContent).toContain("Still unanswered");
     expect(container.textContent).toContain("Which exact person is behind the founder handle?");
     expect(container.textContent).toContain("Source 1");
 

@@ -81,6 +81,59 @@ final result: passed
 
 ---
 
+# ARGUS Eye default-panel simplification QA
+
+## Comparison target
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-22 at 11.56.00 PM.png`
+- Browser implementation: `docs/design-qa/argus-eye-2026-08-23/implementation-v1.png`
+- Side-by-side comparison: `docs/design-qa/argus-eye-2026-08-23/comparison-v1.png`
+- Source pixels: 1287 × 1115
+- Browser viewport: 1289 × 1115 CSS pixels; captured page content is 1289 × 1037 pixels after browser chrome
+- Density normalization: device scale 1; the implementation was padded by 78 pixels at the bottom for an equal-height side-by-side canvas. No report or Eye content was scaled.
+- State: light theme, saved token/project report, ARGUS Eye open with no conversation yet
+
+## Findings
+
+No actionable P0, P1, or P2 issue remains in the focused Eye panel.
+
+- Information hierarchy: the problem state presented a product-mechanics subtitle, an evidence badge, a multi-paragraph lead card, a status row, a rejected-conflict warning, three long prompts, a dense input placeholder, and a policy footer at once. The implementation presents one plain-language takeaway, three short questions, and the input. Supporting verification is closed by default under `Why ARGUS says this`.
+- Fonts and typography: the implementation preserves the report's existing sans and mono families, compact header, and established weights. The takeaway now has one clear bold level; secondary copy no longer competes with it.
+- Spacing and layout rhythm: the same 390-pixel panel, report alignment, radii, and token spacing remain. Removing two default rows and shortening the prompts materially reduces panel height and scanning effort without changing the surrounding report.
+- Colors and visual tokens: the implementation reuses the existing signal header, neutral panel, border, and ink tokens. It removes the default red warning block and green status chip because those colors implied a decision before the user asked a question.
+- Image and asset fidelity: there are no raster assets in this component. Existing Phosphor icons are retained; no replacement or custom-drawn asset was introduced.
+- Copy and content: internal language including `evidence bound`, `role evidence state`, `conflict rejected`, `canonical identity`, and `report-wide reasoning layer` no longer appears in the default UI. The project attribution is now stated as what the project says and what ARGUS has not independently confirmed.
+- Accessibility: dialog, close button, launcher expanded state, textbox label, suggested-question buttons, and details disclosure remain semantic and keyboard-addressable.
+
+## Focused comparison evidence
+
+The side-by-side full view is also the focused comparison because both panels are large enough for their complete default-state copy and controls to remain readable. The left side demonstrates the excessive simultaneous layers; the right side demonstrates the shorter reading path while preserving the same report position and visual language.
+
+## Comparison history
+
+### Iteration 1
+
+- Initial P1: internal evidence and routing terminology dominated the first-time experience.
+- Initial P1: the rejected-lead warning looked like a project risk even though it represented an unrelated search result.
+- Initial P2: the three long prompts and explanatory footer made the panel feel like documentation rather than a chat tool.
+- Fixes: rewrote the takeaway in plain language, moved attribution support and the ignored result into one closed disclosure, shortened all prompts, simplified the input, and removed default mechanics labels and footer copy.
+- Post-fix evidence: `docs/design-qa/argus-eye-2026-08-23/implementation-v1.png` and `docs/design-qa/argus-eye-2026-08-23/comparison-v1.png`.
+
+## Primary interactions and runtime checks
+
+- Opened and closed the Eye from its floating launcher; both states were visible and the launcher retained `aria-expanded` behavior.
+- Opened `Why ARGUS says this` and verified the plain-language attribution, ignored-result explanation, and source link.
+- Entered a question in the textbox and verified the input accepted it.
+- Unit coverage exercised suggested-question submission and evidence-backed answer rendering.
+- One existing React list-key warning from `LaunchPanel` appeared in the full report preview. It is outside `ArgusEyeAssistant`, predates this focused change, and no new Eye console warning or error appeared.
+
+## Follow-up polish
+
+No P3 follow-up is required for this focused simplification.
+
+final result: passed
+---
+
 # Design QA — decision landing and live research (2026-08-23)
 
 - Landing direction: `/Users/kyle/.codex/generated_images/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/exec-0fab70c2-e935-4966-b00c-539ea4c04bac.png` (user-selected option 2)

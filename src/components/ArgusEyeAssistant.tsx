@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
-  CheckCircle,
   Eye,
   LinkSimple,
   ShieldWarning,
@@ -90,19 +89,15 @@ export function ArgusEyeAssistant({
   const intelligence = useMemo<{
     headline: string;
     detail: string;
-    status: string;
-    tone: "pass" | "context" | "caution";
     rejectedLead?: BasicFactLead;
-    person: string;
     sourceUrl?: string;
   }>(() => {
     if (!inv) {
       return {
-        headline: `Interrogate the saved case for ${requestSubject}`,
-        detail: "ARGUS Eye can explain the governing conclusion, trace its saved evidence, challenge the thesis, and name the exact evidence that would change it.",
-        status: reportVersionId ? "Report bound" : "Save required",
-        tone: reportVersionId ? "context" as const : "caution" as const,
-        person: requestSubject,
+        headline: reportVersionId
+          ? `Ask anything about the saved report for ${requestSubject}.`
+          : `Save this report to ask questions about ${requestSubject}.`,
+        detail: "ARGUS answers from the information saved in this report and says when the evidence is missing.",
       };
     }
     const verifiedTeam = [
@@ -126,33 +121,24 @@ export function ArgusEyeAssistant({
 
     if (founder) {
       return {
-        headline: `Trace ${founder.name}'s real influence on ${label}`,
-        detail: `${founder.name} is source-bound as ${founder.role}. The report does not treat that attribution as proof of legal control, ownership, or wallet control.`,
-        status: "Source bound",
-        tone: "pass" as const,
+        headline: `${founder.name} is listed as ${founder.role}, but that does not prove they control ${label}.`,
+        detail: `ARGUS verified the published role. It did not find enough evidence to confirm legal ownership or control of the project's wallets.`,
         rejectedLead,
-        person: founder.name,
       };
     }
     if (publishedFounder) {
       const role = String(publishedFounder.relation).replace(/^team:\s*/i, "");
       return {
-        headline: `${label} identifies ${publishedFounder.associate_key} as ${role}`,
-        detail: `This establishes the project's own published role attribution. Independent corroboration of the person behind the handle, legal ownership, wallet control, and operational authority remains open.`,
-        status: "Project attributed",
-        tone: "context" as const,
+        headline: `${label} says ${publishedFounder.associate_key} is ${role}. ARGUS has not independently confirmed who controls the project.`,
+        detail: `The role comes from the project's own account. The report does not yet confirm the person's identity, legal ownership, or control of the project's wallets.`,
         rejectedLead,
-        person: publishedFounder.associate_key,
         sourceUrl: publishedFounder.evidence_url,
       };
     }
     return {
-      headline: `Resolve the people controlling ${label}`,
-      detail: "The frozen report does not yet contain an independently verified founder or operator. Start with official historical claims, then corroborate them outside the project.",
-      status: "Unresolved",
-      tone: "caution" as const,
+      headline: `ARGUS could not confirm who controls ${label}.`,
+      detail: "The saved report does not contain enough independent evidence to verify a founder or operator.",
       rejectedLead,
-      person: label,
     };
   }, [inv, reportVersionId, requestSubject]);
 
@@ -319,10 +305,9 @@ export function ArgusEyeAssistant({
             <Eye size={18} weight="duotone" aria-hidden="true" />
             <div className="min-w-0">
               <p className="mono text-[10px] font-semibold uppercase tracking-[0.11em]">ARGUS EYE</p>
-              <p className="truncate text-[10px] opacity-80">Talk to the report-wide reasoning layer</p>
+              <p className="truncate text-[10px] opacity-80">Ask about this report</p>
             </div>
-            <span className="mono ml-auto rounded border border-white/25 px-1.5 py-0.5 text-[8.5px] uppercase tracking-[0.08em]">{reportVersionId ? "Evidence bound" : "Save required"}</span>
-            <button type="button" onClick={() => setOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-lg transition hover:bg-white/10" aria-label="Close ARGUS Eye">
+            <button type="button" onClick={() => setOpen(false)} className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg transition hover:bg-white/10" aria-label="Close ARGUS Eye">
               <X size={16} weight="bold" aria-hidden="true" />
             </button>
           </header>
@@ -332,7 +317,7 @@ export function ArgusEyeAssistant({
               <div className="mb-2.5 flex items-start gap-2 rounded-lg border border-caution/25 bg-caution/5 px-3 py-2.5">
                 <ShieldWarning size={15} weight="duotone" className="mt-0.5 shrink-0 text-caution" aria-hidden="true" />
                 <p className="min-w-0 flex-1 text-[10.5px] leading-relaxed text-ink-dim">
-                  <span className="font-semibold text-ink">Challenging:</span> {challengeContext}
+                  <span className="font-semibold text-ink">Focus:</span> {challengeContext}
                 </p>
                 <button type="button" onClick={() => setChallengeContext(null)} aria-label="Clear challenge context" className="text-[10px] text-ink-faint transition hover:text-ink">Clear</button>
               </div>
@@ -341,40 +326,32 @@ export function ArgusEyeAssistant({
               <div className="flex items-start gap-2.5">
                 <Sparkle size={16} weight="duotone" className="mt-0.5 shrink-0 text-signal-lift" aria-hidden="true" />
                 <div className="min-w-0">
-                  <p className="eyebrow">What matters now</p>
+                  <p className="eyebrow">Start here</p>
                   <p className="mt-1 text-[12.5px] font-semibold leading-snug text-ink">{intelligence.headline}</p>
-                  <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">{intelligence.detail}</p>
+                </div>
+              </div>
+              <details className="mt-2.5 border-t border-line/70 pt-2.5">
+                <summary className="cursor-pointer text-[10.5px] font-medium text-signal-lift">Why ARGUS says this</summary>
+                <div className="mt-1.5 space-y-2 text-[10.5px] leading-relaxed text-ink-dim">
+                  <p>{intelligence.detail}</p>
+                  {intelligence.rejectedLead && (
+                    <p>ARGUS ignored an unrelated search result: {intelligence.rejectedLead.sourceTitle || intelligence.rejectedLead.value}.</p>
+                  )}
                   {intelligence.sourceUrl && (
-                    <a href={intelligence.sourceUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-[10.5px] font-medium text-signal-lift hover:underline">
-                      <LinkSimple size={12} aria-hidden="true" /> Open project attribution
+                    <a href={intelligence.sourceUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-medium text-signal-lift hover:underline">
+                      <LinkSimple size={12} aria-hidden="true" /> View the project's statement
                     </a>
                   )}
                 </div>
-              </div>
-              <div className="mt-3 flex items-center border-t border-line/70 pt-2.5">
-                {intelligence.tone === "pass"
-                  ? <CheckCircle size={15} weight="fill" className="mr-1.5 text-pass" aria-hidden="true" />
-                  : <ShieldWarning size={15} weight="duotone" className="mr-1.5 text-caution" aria-hidden="true" />}
-                <span className="text-[10.5px] text-ink-faint">Role evidence state</span>
-                <span className={`chip ml-auto ${intelligence.tone === "pass" ? "tint-pass" : intelligence.tone === "context" ? "tint-signal" : "tint-caution"}`}>{intelligence.status}</span>
-              </div>
+              </details>
             </div>
-
-            {intelligence.rejectedLead && (
-              <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-avoid/20 bg-avoid/5 px-3 py-2.5">
-                <ShieldWarning size={15} weight="duotone" className="mt-0.5 shrink-0 text-avoid" aria-hidden="true" />
-                <p className="text-[10.5px] leading-relaxed text-ink-dim">
-                  <span className="font-semibold text-ink">Conflict rejected:</span> {intelligence.rejectedLead.sourceTitle || intelligence.rejectedLead.value} did not bind to this project's canonical identity.
-                </p>
-              </div>
-            )}
 
             {answers.length === 0 && (
               <div className="mt-3 grid gap-1.5" aria-label="Suggested questions">
                 {[
-                  "Give me the investment thesis and strongest counter-thesis.",
-                  `Trace the strongest connections around ${intelligence.person}.`,
-                  "Challenge the conclusion and tell me what would change it.",
+                  "Is this worth the risk?",
+                  "What is the biggest concern?",
+                  "What could change the conclusion?",
                 ].map((prompt) => (
                   <button
                     key={prompt}
@@ -398,12 +375,12 @@ export function ArgusEyeAssistant({
                     <div className="mr-2 rounded-xl rounded-bl-sm border border-line bg-panel-2 px-3 py-2.5">
                   <div className="flex items-center gap-1.5">
                     <Eye size={14} weight="duotone" className="text-signal-lift" aria-hidden="true" />
-                    <span className="mono text-[9px] uppercase tracking-[0.09em] text-ink-faint">Report-wide conclusion</span>
+                    <span className="mono text-[9px] uppercase tracking-[0.09em] text-ink-faint">Answer</span>
                   </div>
                   <p className={`mt-1.5 text-[11.5px] leading-relaxed ${answer.state === "error" ? "text-caution" : "text-ink-dim"}`}>{answer.answer}</p>
-                  {answer.reasoningSteps.length > 0 && (
-                    <div className="mt-2.5 border-t border-line/70 pt-2.5">
-                      <p className="eyebrow">Reasoning chain</p>
+                  {(answer.reasoningSteps.length > 0 || answer.citations.length > 0) && (
+                    <details className="mt-2.5 border-t border-line/70 pt-2.5">
+                      <summary className="cursor-pointer text-[10.5px] font-medium text-signal-lift">Why this answer</summary>
                       <ol className="mt-1.5 space-y-1.5">
                         {answer.reasoningSteps.map((step, index) => (
                           <li key={`${index}-${step}`} className="flex gap-2 text-[10.5px] leading-relaxed text-ink-dim">
@@ -412,38 +389,40 @@ export function ArgusEyeAssistant({
                           </li>
                         ))}
                       </ol>
-                    </div>
+                      {answer.citations.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {answer.citations.map((url, index) => (
+                            <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="chip inline-flex items-center gap-1 normal-case tracking-normal text-signal-lift hover:border-signal/40">
+                              <LinkSimple size={11} aria-hidden="true" /> Source {index + 1}
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </details>
                   )}
                   {answer.investigationRoute && (
-                    <details className="mt-2.5 rounded-lg border border-signal/20 bg-signal-soft/45 px-2.5 py-2" open={answer.investigationRoute.answerMode === "investigate_evidence_gap"}>
-                      <summary className="cursor-pointer text-[10.5px] font-medium text-signal-lift">How ARGUS routed this question</summary>
+                    <details className="mt-2.5 rounded-lg border border-signal/20 bg-signal-soft/45 px-2.5 py-2">
+                      <summary className="cursor-pointer text-[10.5px] font-medium text-signal-lift">Evidence checked</summary>
                       <div className="mt-1.5 space-y-1.5 text-[10.5px] leading-relaxed text-ink-dim">
                         <p>{answer.investigationRoute.explanation}</p>
-                        <p className="mono text-[9.5px] text-ink-faint">{answer.investigationRoute.intent.replaceAll("_", " ")} · {answer.investigationRoute.reasoningMode.replaceAll("_", " ")} · {answer.investigationRoute.answerMode.replaceAll("_", " ")}</p>
                         {answer.investigationRoute.inheritedIntent && (
-                          <p className="text-ink-faint">This follow-up inherits the prior question's decision goal. Earlier answers were not treated as evidence.</p>
-                        )}
-                        {answer.investigationRoute.delegates.length > 0 && (
-                          <p><span className="font-medium text-ink">Specialists:</span> {answer.investigationRoute.delegates.join(" · ")}</p>
-                        )}
-                        {answer.investigationRoute.blockedBy.length > 0 && (
-                          <p className="text-caution"><span className="font-medium">Identity gates:</span> {answer.investigationRoute.blockedBy.join(" · ")}</p>
+                          <p className="text-ink-faint">This follows from your previous question. Earlier answers were not treated as evidence.</p>
                         )}
                         {answer.investigationRoute.evidenceFocus.length > 0 && (
                           <div className="border-t border-signal/15 pt-1.5">
-                            <p className="font-medium text-ink">Evidence selected for this question</p>
+                            <p className="font-medium text-ink">Information used</p>
                             <ul className="mt-1 space-y-1">
                               {answer.investigationRoute.evidenceFocus.map((item) => (
                                 <li key={item.id}>
-                                  • {item.headline} <span className="text-ink-faint">({item.evidenceState} · {item.polarity})</span>
+                                  • {item.headline}
                                   {answer.investigationRoute?.claimChains.find((chain) => chain.signalId === item.id) && (() => {
                                     const chain = answer.investigationRoute!.claimChains.find((candidate) => candidate.signalId === item.id)!;
                                     return (
                                       <span className="mt-0.5 block pl-2 text-[9.5px] text-ink-faint">
-                                        {chain.lineageState} lineage · {chain.measurementCount} measurements · {chain.sourceCount} sources{chain.counterSignalIds.length ? ` · ${chain.counterSignalIds.length} counterweights` : ""}
+                                        Checked against {chain.sourceCount} source{chain.sourceCount === 1 ? "" : "s"} and {chain.measurementCount} saved fact{chain.measurementCount === 1 ? "" : "s"}.
                                         {chain.inferenceBoundary && (
                                           <details className="mt-0.5">
-                                            <summary className="cursor-pointer text-signal-lift">Reasoning boundary</summary>
+                                            <summary className="cursor-pointer text-signal-lift">What this does not prove</summary>
                                             <span className="mt-0.5 block leading-relaxed">{chain.inferenceBoundary}</span>
                                           </details>
                                         )}
@@ -455,37 +434,33 @@ export function ArgusEyeAssistant({
                             </ul>
                             {(answer.investigationRoute.evidenceFocusOmitted ?? 0) > 0 && (
                               <p className="mt-1 text-ink-faint">
-                                {answer.investigationRoute.evidenceFocusOmitted} further saved signal
-                                {answer.investigationRoute.evidenceFocusOmitted === 1 ? " was" : "s were"} relevant but not
-                                carried into this answer. Every high-severity adverse signal is always included.
+                                {answer.investigationRoute.evidenceFocusOmitted} other relevant saved item
+                                {answer.investigationRoute.evidenceFocusOmitted === 1 ? " was" : "s were"} not shown here. Serious risks are always included.
                               </p>
                             )}
                           </div>
                         )}
                         {answer.investigationRoute.unresolvedQuestions.length > 0 && (
-                          <ul className="space-y-1 border-t border-signal/15 pt-1.5">
-                            {answer.investigationRoute.unresolvedQuestions.map((item) => (
-                              <li key={item.id}>• {item.prompt} <span className="text-ink-faint">({item.materiality} · {item.state})</span></li>
-                            ))}
-                          </ul>
-                        )}
-                        {answer.investigationRoute.changeConditions.length > 0 && (
-                          <details className="border-t border-signal/15 pt-1.5">
-                            <summary className="cursor-pointer font-medium text-ink">Decisive evidence boundary</summary>
+                          <div className="border-t border-signal/15 pt-1.5">
+                            <p className="font-medium text-ink">Still unanswered</p>
                             <ul className="mt-1 space-y-1">
-                              {answer.investigationRoute.changeConditions.map((condition) => <li key={condition}>• {condition}</li>)}
+                            {answer.investigationRoute.unresolvedQuestions.map((item) => (
+                              <li key={item.id}>• {item.prompt}</li>
+                            ))}
                             </ul>
-                          </details>
+                          </div>
                         )}
                       </div>
                     </details>
                   )}
                   {answer.uncertainties.length > 0 && (
                     <div className="mt-2.5 rounded-lg border border-caution/20 bg-caution/5 px-2.5 py-2">
-                      <p className="eyebrow">What remains uncertain</p>
-                      <ul className="mt-1 space-y-1 text-[10.5px] leading-relaxed text-ink-dim">
-                        {answer.uncertainties.map((gap) => <li key={gap}>• {gap}</li>)}
-                      </ul>
+                      <details>
+                        <summary className="cursor-pointer text-[10.5px] font-medium text-caution">What ARGUS could not confirm</summary>
+                        <ul className="mt-1 space-y-1 text-[10.5px] leading-relaxed text-ink-dim">
+                          {answer.uncertainties.map((gap) => <li key={gap}>• {gap}</li>)}
+                        </ul>
+                      </details>
                     </div>
                   )}
                   {answer.whatWouldChange.length > 0 && (
@@ -495,15 +470,6 @@ export function ArgusEyeAssistant({
                         {answer.whatWouldChange.map((change) => <li key={change}>• {change}</li>)}
                       </ul>
                     </details>
-                  )}
-                  {answer.citations.length > 0 && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5 border-t border-line/70 pt-2">
-                      {answer.citations.map((url, index) => (
-                        <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="chip inline-flex items-center gap-1 normal-case tracking-normal text-signal-lift hover:border-signal/40">
-                          <LinkSimple size={11} aria-hidden="true" /> Source {index + 1}
-                        </a>
-                      ))}
-                    </div>
                   )}
                     </div>
                   </div>
@@ -526,7 +492,7 @@ export function ArgusEyeAssistant({
                 }}
                 disabled={!reportVersionId}
                 rows={2}
-                placeholder={reportVersionId ? "Ask a follow-up, trace a connection, or challenge a claim…" : "Save this report to ask ARGUS"}
+                placeholder={reportVersionId ? "Ask anything about this report…" : "Save this report to ask ARGUS"}
                 className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-[11.5px] leading-relaxed text-ink outline-none placeholder:text-ink-faint disabled:opacity-60"
                 aria-label="Ask ARGUS Eye"
               />
@@ -534,7 +500,6 @@ export function ArgusEyeAssistant({
                 <ArrowUp size={15} weight="bold" aria-hidden="true" />
               </button>
             </div>
-            <p className="mt-2 text-center text-[9.5px] leading-snug text-ink-faint">The Eye reasons across this report's frozen evidence and remembers this conversation. It will not fill evidence gaps with guesses.</p>
           </form>
         </section>
       )}
