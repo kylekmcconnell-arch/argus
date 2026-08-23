@@ -80,9 +80,9 @@ describe("supporting-page truth states", () => {
       root.render(<ProvidersPage />);
     });
 
-    await vi.waitFor(() => expect(container.textContent).toContain("Unavailable"));
-    expect(container.textContent).toContain("Latest visible request failed");
-    expect(container.textContent).toContain("See which outside sources ARGUS can use and whether recent checks worked");
+    await vi.waitFor(() => expect(container.textContent).toContain("Last check failed"));
+    expect(container.textContent).toContain("This does not prove a continuing outage");
+    expect(container.textContent).toContain("what each source can establish, and where its evidence stops");
   });
 
   it("does not call an unconfigured or cached provider healthy", async () => {
@@ -115,10 +115,11 @@ describe("supporting-page truth states", () => {
       root.render(<ProvidersPage />);
     });
 
-    await vi.waitFor(() => expect(container.textContent).toContain("Not configured"));
+    await vi.waitFor(() => expect(container.textContent).toContain("Not connected"));
     expect(container.textContent).toContain("served from cache");
-    expect(container.textContent?.toLowerCase()).toContain("recently healthy0");
-    expect(container.textContent?.toLowerCase()).toContain("needs attention1");
+    expect(container.textContent?.toLowerCase()).toContain("available here1/2");
+    expect(container.textContent?.toLowerCase()).toContain("recent check issues0");
+    expect(container.textContent).not.toContain("Healthy");
   });
 
   it("gives actionable graph nodes a keyboard path and a readable equivalent", () => {

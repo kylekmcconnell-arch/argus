@@ -24,6 +24,46 @@ afterEach(() => {
 });
 
 describe("Providers immutable usage trail", () => {
+  it("counts only active evidence sources and separates operational services", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "/api/keys-status") {
+        return Promise.resolve(new Response(JSON.stringify({
+          providers: [
+            { label: "Grok (xAI)", powers: "Reasoning", limits: "Not evidence.", source: "console.x.ai", tier: "paid", kind: "model", lifecycle: "active", configured: true },
+            { label: "Supabase", powers: "Storage", limits: "Not evidence.", source: "supabase.com", tier: "infra", kind: "infrastructure", lifecycle: "active", configured: true },
+            { label: "Reddit OAuth", powers: "Retired", limits: "Does not run.", source: "reddit.com", tier: "optional", kind: "evidence", lifecycle: "retired", category: "Web and public records", configured: true },
+            { label: "twitterapi.io", powers: "X profiles", limits: "Platform observation.", source: "twitterapi.io", tier: "paid", kind: "evidence", lifecycle: "active", category: "Identity and people", configured: true },
+          ],
+          keyless: [
+            { label: "CourtListener", powers: "Court captions", limits: "Namesake lead only.", source: "courtlistener.com", tier: "keyless", kind: "evidence", lifecycle: "active", category: "Safety and legal", configured: true },
+          ],
+        }), { status: 200 }));
+      }
+      if (url === "/api/provider-usage?limit=40") {
+        return Promise.resolve(new Response(JSON.stringify({
+          available: true,
+          window: { limit: 40, eventCount: 0 },
+          totals: { eventCount: 0, calls: 0, usd: 0 },
+          events: [],
+        }), { status: 200 }));
+      }
+      throw new Error(`unexpected request ${url}`);
+    }));
+
+    await act(async () => {
+      root.render(<ProvidersPage />);
+    });
+    await vi.waitFor(() => expect(container.textContent?.toLowerCase()).toContain("evidence sources2"));
+
+    expect(container.textContent).toContain("Identity and people");
+    expect(container.textContent).toContain("Safety and legal");
+    const operational = container.querySelector("details");
+    expect(operational?.textContent).toContain("Grok (xAI)");
+    expect(operational?.textContent).toContain("Supabase");
+    expect(operational?.textContent).toContain("Reddit OAuth");
+  });
+
   it("renders exact-version provider events and recent totals", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((input: string | URL | Request) => {
       const url = String(input);
@@ -58,8 +98,8 @@ describe("Providers immutable usage trail", () => {
     });
     await vi.waitFor(() => expect(container.textContent).toContain("argus.example · site saved report v4"));
 
-    expect(container.textContent).toContain("Saved source activity");
-    expect(container.textContent).toContain("all recorded history");
+    expect(container.textContent).toContain("Recent saved-report activity");
+    expect(container.textContent).toContain("account ledger totals");
     expect(container.textContent).toContain("9 events");
     expect(container.textContent).toContain("17 calls");
     expect(container.textContent).toContain("$0.125001 estimated");

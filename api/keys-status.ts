@@ -1,51 +1,25 @@
 // Provider / API-key status. GET /api/keys-status
 //
-// Peace-of-mind panel for Kyle + Enigma: which keys are configured, what each
-// powers, where to top up, and live usage where the provider exposes it. Reports
-// only CONFIGURED/NOT — never a secret value. Real dollar balances aren't
-// API-exposed for most providers, so this shows plugged-in-or-not + usage.
+// One typed catalog drives the public evidence explanation and the private
+// credential inventory. Reports only configuration state, never a secret value.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { listSerperPurchases } from "../server/serperPurchases.js";
+import { PROVIDER_CATALOG, type ProviderCatalogEntry } from "../src/lib/providerCatalog.js";
 
 export const config = { maxDuration: 15 };
 
-interface Prov { key: string; alternativeKeys?: string[]; also?: string; label: string; powers: string; source: string; tier: "paid" | "optional" | "infra"; live?: "github" }
+const PROVIDERS = PROVIDER_CATALOG.filter((provider) => provider.tier !== "keyless");
+const KEYLESS = PROVIDER_CATALOG.filter((provider) => provider.tier === "keyless");
 
-const PROVIDERS: Prov[] = [
-  { key: "XAI_API_KEY", label: "Grok (xAI)", powers: "Primary LLM: analyst, extract, vision, plus live web + X search", source: "console.x.ai", tier: "paid" },
-  { key: "ANTHROPIC_API_KEY", label: "Claude (Anthropic)", powers: "Optional fallback LLM when ARGUS_PROVIDER_FALLBACKS is on", source: "console.anthropic.com", tier: "optional" },
-  { key: "OPENROUTER_API_KEY", label: "OpenRouter", powers: "Optional cheap-extract fallback when ARGUS_PROVIDER_FALLBACKS is on", source: "openrouter.ai", tier: "optional" },
-  { key: "TWITTERAPI_KEY", label: "twitterapi.io", powers: "X profile, posts, follower/following graph", source: "twitterapi.io", tier: "paid" },
-  { key: "X_API_BEARER", label: "Official X API v2", powers: "Optional x-authenticity fallback if twitterapi.io cannot read the bio", source: "developer.x.com", tier: "optional" },
-  { key: "GOOGLE_SAFE_BROWSING_KEY", label: "Google Safe Browsing", powers: "Optional best-recall site-safety; GoPlus, URLhaus, and page heuristics still run without it", source: "console.cloud.google.com", tier: "optional" },
-  { key: "SERPER_API_KEY", label: "Serper (grounded search)", powers: "grounded web search for reverse-bio / extra checks", source: "serper.dev", tier: "paid" },
-  { key: "HELIUS_API_KEY", label: "Helius (Solana)", powers: "Core: attributed-wallet activity. Supplemental: deployer, funding, mint, and serial-launch traces", source: "dashboard.helius.dev", tier: "paid" },
-  { key: "GITHUB_TOKEN", label: "GitHub", powers: "Org/repos + commit-author forensics", source: "github.com/settings/tokens", tier: "paid", live: "github" },
-  { key: "PDL_API_KEY", label: "People Data Labs", powers: "Professional identity records", source: "dashboard.peopledatalabs.com", tier: "paid" },
-  { key: "REDDIT_CLIENT_ID", also: "REDDIT_CLIENT_SECRET", label: "Reddit OAuth", powers: "Retired from the core collector (API access was not approved); row stays for credential inventory only", source: "reddit.com/prefs/apps", tier: "optional" },
-  { key: "SUPABASE_SECRET_KEY", alternativeKeys: ["SUPABASE_SERVICE_ROLE_KEY"], also: "SUPABASE_URL", label: "Supabase", powers: "Shared trust graph + shared audit log", source: "supabase.com/dashboard", tier: "infra" },
-  { key: "COINGECKO_API_KEY", label: "CoinGecko Pro", powers: "Higher-rate token data (free tier works without)", source: "coingecko.com/api", tier: "optional" },
-  { key: "CRYPTORANK_API_KEY", label: "CryptoRank", powers: "Market intel: rank, ATH drawdown, dilution, funding/vesting/unlock flags", source: "cryptorank.io/api", tier: "optional" },
-  { key: "CRUNCHBASE_API_KEY", label: "Crunchbase", powers: "Retired from the core collector; DeFiLlama and Monid/Akta cover funding and backing", source: "crunchbase.com", tier: "optional" },
-  { key: "ETHERSCAN_API_KEY", label: "Etherscan (multichain)", powers: "EVM deployer, contract-creation & funding traces (Ethereum/Base/BSC/Arbitrum/…)", source: "etherscan.io/apis", tier: "optional" },
-  { key: "ARKHAM_API_KEY", label: "Arkham", powers: "Supplemental wallet labels, counterparties, holdings, and risk paths", source: "arkhamintelligence.com", tier: "optional" },
-  { key: "BITQUERY_API_KEY", label: "Bitquery", powers: "Credential reserved for the next frozen EVM collector; it does not currently run or attest audits", source: "bitquery.io", tier: "optional" },
-];
-
-// Keyless sources: always on, no key. Same shape as PROVIDERS so the UI renders
-// them as identical rows (not a separate hard-to-read chip cluster).
-const KEYLESS: { label: string; powers: string; source: string }[] = [
-  { label: "DexScreener", powers: "Token market, liquidity & pair data", source: "dexscreener.com" },
-  { label: "GoPlus + honeypot.is", powers: "Contract safety + honeypot simulation", source: "gopluslabs.io" },
-  { label: "GeckoTerminal", powers: "On-chain DEX price history & OHLCV", source: "geckoterminal.com" },
-  { label: "Wayback Machine", powers: "Deleted-content archaeology (site diffs)", source: "archive.org" },
-  { label: "Farcaster / Warpcast", powers: "Casts + connected-wallet lookups", source: "warpcast.com" },
-  { label: "memory.lol", powers: "X handle-change history (rebrands)", source: "memory.lol" },
-  { label: "Telegram", powers: "Public cross-platform handle presence checks", source: "t.me" },
-  { label: "web3.bio / ENS / Bonfida", powers: "Name → wallet resolution", source: "web3.bio" },
-  { label: "RDAP", powers: "Domain registration + age", source: "rdap.org" },
-  { label: "SEC EDGAR", powers: "US securities filings", source: "sec.gov" },
-];
+function credentialConfigured(provider: ProviderCatalogEntry): boolean {
+  const primary = provider.env ?? [];
+  if (!primary.length) return true;
+  const alternatives = provider.alternativeEnv ?? [];
+  const primaryConfigured = provider.id === "supabase"
+    ? primary.some((key) => !!process.env[key]) || alternatives.some((key) => !!process.env[key])
+    : primary.every((key) => !!process.env[key]);
+  return primaryConfigured && (provider.alsoEnv ?? []).every((key) => !!process.env[key]);
+}
 
 interface GithubRateLimit {
   remaining?: unknown;
@@ -77,22 +51,43 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
   const ghUsage = gh ? await githubUsage(gh) : null;
 
   const providers = PROVIDERS.map((p) => {
-    const hasCredential = !!process.env[p.key] || (p.alternativeKeys ?? []).some((key) => !!process.env[key]);
-    const configured = hasCredential && (!p.also || !!process.env[p.also]);
+    const configured = credentialConfigured(p);
     return {
+      id: p.id,
       label: p.label,
       powers: p.powers,
+      limits: p.limits,
       source: p.source,
       tier: p.tier,
+      kind: p.kind,
+      lifecycle: p.lifecycle,
+      category: p.category,
+      availableWithoutCredential: p.availableWithoutCredential ?? false,
       configured,
       usage: p.live === "github" && configured && ghUsage ? `${ghUsage.remaining}/${ghUsage.limit} calls left · resets ${ghUsage.resetsIn}` : undefined,
-      // Compact purchase ledger for Serper only — never a live credit probe.
-      ...(p.key === "SERPER_API_KEY" ? { purchases: listSerperPurchases() } : {}),
+      // Compact purchase ledger for Serper only. Never a live credit probe.
+      ...(p.id === "serper" ? { purchases: listSerperPurchases() } : {}),
     };
   });
 
   // Keyless sources rendered as identical rows: always-on, no key, no top-up.
-  const keyless = KEYLESS.map((k) => ({ label: k.label, powers: k.powers, source: k.source, tier: "keyless" as const, configured: true }));
+  const keyless = KEYLESS.map((k) => ({
+    id: k.id,
+    label: k.label,
+    powers: k.powers,
+    limits: k.limits,
+    source: k.source,
+    tier: "keyless" as const,
+    kind: k.kind,
+    lifecycle: k.lifecycle,
+    category: k.category,
+    availableWithoutCredential: true,
+    configured: true,
+  }));
 
-  res.status(200).json({ providers, keyless, note: "Dollar balances aren't API-exposed for most providers; this shows configured + live usage where available." });
+  res.status(200).json({
+    providers,
+    keyless,
+    note: "Credential presence is not a live availability test. Recent request outcomes appear separately when recorded.",
+  });
 }
