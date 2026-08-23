@@ -185,10 +185,13 @@ describe("token report supplemental evidence boundary", () => {
     expect(hrefs).toEqual([
       "#report-summary",
       "#report-risks",
+      "#token-story",
       "#token-evidence",
       "#token-relationships",
       "#token-methodology",
     ]);
+    expect(container.textContent).toContain("What was not verified");
+    expect(container.textContent).toContain("No CoinGecko record was captured");
     for (const href of hrefs) {
       expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
     }
