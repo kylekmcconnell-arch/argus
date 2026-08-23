@@ -308,7 +308,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </span>
           <div className="scrollbar-none order-3 flex w-full items-center gap-2 overflow-x-auto pb-1 sm:order-none sm:ml-auto sm:w-auto sm:justify-end sm:overflow-visible sm:pb-0">
             {onOpenBrief && (
-              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact token case" className="btn-primary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
+              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact token case" className="btn-primary btn-brand flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
                 <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
               </button>
             )}

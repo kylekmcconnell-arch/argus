@@ -544,7 +544,7 @@ export function ArgusEyeAssistant({
         onClick={toggle}
         aria-expanded={open}
         aria-controls="argus-eye-panel"
-        className={`ml-auto flex h-13 items-center gap-2 rounded-full border px-3.5 shadow-[0_12px_34px_rgba(28,82,196,0.28)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_42px_rgba(28,82,196,0.34)] ${open ? "border-signal/30 bg-panel text-signal-lift" : "border-signal bg-signal text-on-signal"}`}
+        className={`floating-brand-launcher ml-auto flex h-13 items-center gap-2 rounded-full border px-3.5 transition hover:-translate-y-0.5 ${open ? "brightness-95" : ""}`}
         aria-label={open ? "Hide ARGUS Eye" : "Ask ARGUS Eye about this report"}
       >
         <Eye size={21} weight="duotone" aria-hidden="true" />

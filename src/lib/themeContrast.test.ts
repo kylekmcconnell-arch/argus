@@ -130,6 +130,7 @@ describe("ARGUS theme contrast", () => {
   ])("keeps button text and panel control boundaries accessible in %s mode", (_theme, block) => {
     const onSignal = block.includes("--color-on-signal") ? token(block, "on-signal") : token(dark, "on-signal");
     expect(contrast(onSignal, token(block, "signal"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(token(block, "on-brand"), token(block, "brand-fill"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(token(block, "control-line"), token(block, "panel"))).toBeGreaterThanOrEqual(3);
   });
 
