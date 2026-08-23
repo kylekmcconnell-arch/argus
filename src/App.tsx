@@ -1310,6 +1310,7 @@ export default function App() {
   }, [closeCaseBriefForNavigation, setDossier, setInvestigation, setPhase, setQuery]);
 
   const onNav = useCallback((t: NavTarget) => {
+    if ((t === "admin" || t === "providers" || t === "changelog") && role !== "owner") return;
     if (!closeCaseBriefForNavigation()) return;
     safeAuditRequestRef.current += 1;
     setPersonBriefTarget(null);
@@ -1336,7 +1337,7 @@ export default function App() {
       if (window.location.search.includes("threat=")) window.history.replaceState({}, "", window.location.pathname);
     }
     setPhase(t);
-  }, [closeCaseBriefForNavigation, leaveEvidenceReview, setDossier, setPhase, setPrivateMode, setQuery, setReconUrl]);
+  }, [role, closeCaseBriefForNavigation, leaveEvidenceReview, setDossier, setPhase, setPrivateMode, setQuery, setReconUrl]);
 
   const personAudit = phase === "running" || phase === "live" || phase === "report";
   const inAudit = personAudit || phase === "token-run" || phase === "token-report" || phase === "investigation" || phase === "investigation-report" || phase === "resolving" || phase === "token-choice";
@@ -1373,9 +1374,9 @@ export default function App() {
 
       {phase === "api" && <ApiPage />}
 
-      {phase === "providers" && <ProvidersPage />}
+      {phase === "providers" && role === "owner" && <ProvidersPage />}
 
-      {phase === "changelog" && <ChangelogPage />}
+      {phase === "changelog" && role === "owner" && <ChangelogPage />}
 
       {phase === "dossiers" && <DossiersPage onOpen={onOpen} onOpenBrief={setCaseBriefTarget} />}
 
@@ -1406,7 +1407,7 @@ export default function App() {
 
       {phase === "find" && <FindWallet onAudit={onSafeAudit} onReset={reset} onOpenRecent={onOpenRecent} />}
 
-      {phase === "admin" && <AdminPage onAudit={onSafeAudit} />}
+      {phase === "admin" && role === "owner" && <AdminPage onAudit={onSafeAudit} />}
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 

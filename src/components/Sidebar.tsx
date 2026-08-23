@@ -299,10 +299,10 @@ export function Sidebar({
     <div className={`${mobile ? "mt-4" : "mt-auto"} border-t border-line py-2.5 ${compact ? "px-2" : "px-2.5"}`} data-sidebar-account>
       <NavItem compact={compact} icon={InfoIcon} label="How it works" active={view === "about"} onClick={() => nav("about")} />
       <NavItem compact={compact} icon={CodeIcon} label="API" active={view === "api"} onClick={() => nav("api")} />
-      <NavItem compact={compact} icon={ClockCounterClockwiseIcon} label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
       <ThemeToggle compact={compact} />
       <AnalystBadge compact={compact} />
       {accountDetails}
+      <NavItem compact={compact} icon={UserPlusIcon} label="Referrals" active={view === "referrals"} onClick={() => nav("referrals")} />
     </div>
   );
   return (
@@ -385,10 +385,14 @@ export function Sidebar({
           <NavItem compact={compact} icon={FilesIcon} label="All cases" active={view === "dossiers"} onClick={() => nav("dossiers")} />
           <NavItem compact={compact} icon={StarIcon} label="Watchlist" active={view === "watchlist"} onClick={() => nav("watchlist")} badge={getWatchlist().length || undefined} />
 
-          <NavGroup compact={compact} label="Workspace" />
-          <NavItem compact={compact} icon={UserPlusIcon} label="Referrals" active={view === "referrals"} onClick={() => nav("referrals")} />
-          <NavItem compact={compact} icon={PlugsConnectedIcon} label="Data sources" active={view === "providers"} onClick={() => nav("providers")} />
-          <NavItem compact={compact} icon={KeyIcon} label={auth.role === "owner" ? "Access & activity" : "Activity log"} active={view === "admin"} onClick={() => nav("admin")} />
+          {auth.role === "owner" && (
+            <>
+              <NavGroup compact={compact} label="Admin" />
+              <NavItem compact={compact} icon={PlugsConnectedIcon} label="Data sources" active={view === "providers"} onClick={() => nav("providers")} />
+              <NavItem compact={compact} icon={KeyIcon} label="Access & activity" active={view === "admin"} onClick={() => nav("admin")} />
+              <NavItem compact={compact} icon={ClockCounterClockwiseIcon} label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
+            </>
+          )}
         </nav>
 
         {/* recent cases */}
