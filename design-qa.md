@@ -150,4 +150,49 @@ The first comparison found no P0/P1/P2 visual mismatch because the change uses
 the existing #119 layout and tokens without modification. No visual-fix loop
 was required.
 
+---
+
+# Design QA — global floating controls (issue #128)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-22 at 8.26.17 PM.png`
+- Implementation screenshots: `/Users/kyle/.codex/visualizations/2026/08/22/argus-eye-feedback-issue-128/qa-desktop-closed.png`, `/Users/kyle/.codex/visualizations/2026/08/22/argus-eye-feedback-issue-128/qa-desktop-open.png`, `/Users/kyle/.codex/visualizations/2026/08/22/argus-eye-feedback-issue-128/qa-mobile-closed.png`, `/Users/kyle/.codex/visualizations/2026/08/22/argus-eye-feedback-issue-128/qa-mobile-open.png`
+- Focused implementation comparison: `/Users/kyle/.codex/visualizations/2026/08/22/argus-eye-feedback-issue-128/qa-desktop-focused.png`
+- Source pixels: 3172 × 506, supplied as a 2× crop representing a 1586 × 253 CSS-pixel region
+- Desktop viewport: 1586 × 900 CSS pixels; focused comparison: bottom 1586 × 253 CSS pixels
+- Mobile viewport: 390 × 844 CSS pixels
+- Density normalization: the source was evaluated at half its physical pixel dimensions; the implementation focused crop uses the corresponding CSS dimensions
+- State: light theme, saved token report, ARGUS Eye closed and open
+
+## Findings and iteration history
+
+Initial source comparison found one P1 interaction defect: the 52px ARGUS Eye launcher and 44px feedback launcher occupied the same bottom-right slot, with the higher-z-index Eye obscuring most of the feedback target.
+
+First implementation comparison: no actionable P0, P1, or P2 differences remain.
+
+- Closed desktop: feedback occupies the rail above ARGUS Eye with a 12px visible gap. Measured bounds were feedback `y=772..816` and Eye `y=828..880`.
+- Open desktop: the secondary feedback launcher yields while the 390px Eye panel is open, so no hidden or ambiguous hit target remains beneath the panel.
+- Closed mobile: the same 12px separation remains at 390px wide with no horizontal document overflow (`body.scrollWidth = 390`).
+- Open mobile: the Eye panel fits between `x=8..374`; feedback is hidden and has `pointer-events: none` while the panel is active.
+- Bottom and right placement includes browser safe-area insets at both mobile and desktop breakpoints.
+
+## Required fidelity surfaces
+
+- Fonts and typography: unchanged; both controls retain the existing ARGUS mono/sans labels.
+- Spacing and layout rhythm: only the floating rail position changed. The report cards, sidebar, toolbar, and recent report redesign are untouched.
+- Colors and visual tokens: unchanged; the existing signal, panel, line, ink, and on-signal tokens remain in use.
+- Assets and icons: unchanged; existing Phosphor Eye and ChatCenteredText icons are reused.
+- Copy: unchanged; `ARGUS EYE`, `Give feedback`, and all accessible labels remain intact.
+
+## Interaction checks
+
+- Both closed launchers remain separately visible and clickable with 44px-or-larger targets.
+- ARGUS Eye opens and closes from its existing button; `aria-expanded` exposes the state used by the collision rule.
+- Feedback is removed from pointer and visibility flow only while the Eye panel is open, then returns to its reserved rail slot when the panel closes.
+- Desktop and mobile screenshots show no launcher overlap or document-level horizontal overflow.
+- One pre-existing React key warning from `LaunchPanel` appeared in the full report preview. It is outside the floating controls, predates this change, and no new console error or warning was introduced by the controls.
+
+## Follow-up polish
+
+No P3 follow-up is required for this focused collision fix.
+
 final result: passed
