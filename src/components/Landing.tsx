@@ -1,14 +1,12 @@
 import { useRef, useState } from "react";
 import {
   ArrowRightIcon,
+  CaretDownIcon,
   CheckCircleIcon,
   CurrencyDollarIcon,
-  FingerprintSimpleIcon,
-  HandshakeIcon,
   MagnifyingGlassIcon,
   QuestionIcon,
   ShieldCheckIcon,
-  TrendUpIcon,
   UsersThreeIcon,
   WaveformIcon,
 } from "@phosphor-icons/react";
@@ -30,14 +28,13 @@ const INVESTIGATION_LENSES = [
 
 const INVESTIGATION_INTENTS: ReadonlyArray<{
   value: ResearchIntent;
-  icon: typeof CurrencyDollarIcon;
   title: string;
   detail: string;
 }> = [
-  { value: "investment_due_diligence", icon: CurrencyDollarIcon, title: "Invest or allocate capital", detail: "Should I invest or allocate capital?" },
-  { value: "alpha_discovery", icon: TrendUpIcon, title: "Find differentiated upside", detail: "Where might strong signals be overlooked?" },
-  { value: "counterparty_risk", icon: HandshakeIcon, title: "Assess a counterparty", detail: "Is this counterparty safe to work with?" },
-  { value: "identity_and_control", icon: FingerprintSimpleIcon, title: "Reveal identity and control", detail: "Who is behind it, and what do they control?" },
+  { value: "investment_due_diligence", title: "Investment due diligence", detail: "Prioritizes team, contract, liquidity, holders, and market evidence." },
+  { value: "alpha_discovery", title: "Differentiated upside", detail: "Prioritizes traction, portfolio outcomes, market signals, and overlooked strengths." },
+  { value: "counterparty_risk", title: "Counterparty risk", detail: "Prioritizes operating history, adverse evidence, conflicts, and project fundamentals." },
+  { value: "identity_and_control", title: "Identity and control", detail: "Prioritizes the people, entities, wallets, and authority behind the subject." },
 ];
 
 export function Landing({
@@ -52,6 +49,7 @@ export function Landing({
   const [intent, setIntent] = useState<ResearchIntent>("investment_due_diligence");
   const [launching, setLaunching] = useState(false);
   const launchingRef = useRef(false);
+  const selectedIntent = INVESTIGATION_INTENTS.find((option) => option.value === intent) ?? INVESTIGATION_INTENTS[0];
 
   const launchFreshAudit = async (subject: string) => {
     if (!subject || launchingRef.current) return;
@@ -84,33 +82,13 @@ export function Landing({
               credible, what looks risky, and what still needs checking.
             </p>
 
-            <fieldset className="landing-intent-grid mt-9" aria-label="What are you trying to decide?">
-              <legend className="sr-only">What are you trying to decide?</legend>
-              {INVESTIGATION_INTENTS.map(({ value: option, icon: Icon, title, detail }) => {
-                const selected = intent === option;
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => setIntent(option)}
-                    className={`landing-intent-option ${selected ? "is-selected" : ""}`}
-                  >
-                    <span className="landing-intent-icon"><Icon size={24} weight={selected ? "bold" : "regular"} aria-hidden /></span>
-                    <strong>{title}</strong>
-                    <span>{detail}</span>
-                  </button>
-                );
-              })}
-            </fieldset>
-
             <form
               onSubmit={(event) => {
                 event.preventDefault();
                 void launchFreshAudit(value.trim());
               }}
               aria-busy={launching}
-              className="mt-8 w-full"
+              className="mt-9 w-full"
             >
               <label htmlFor="investigation-subject" className="sr-only">Subject</label>
               <div className="landing-command-bar relative">
@@ -143,12 +121,29 @@ export function Landing({
               </div>
               <p id="subject-help" className="sr-only">We’ll work out whether it is a person, token, website, or project.</p>
 
-              <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="landing-command-meta mt-4">
+                <div className="landing-focus-control">
+                  <label htmlFor="research-focus" className="eyebrow shrink-0">Research focus</label>
+                  <div className="landing-focus-select-wrap">
+                    <select
+                      id="research-focus"
+                      value={intent}
+                      onChange={(event) => setIntent(event.target.value as ResearchIntent)}
+                      aria-describedby="research-focus-help"
+                      className="landing-focus-select"
+                    >
+                      {INVESTIGATION_INTENTS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.title}</option>
+                      ))}
+                    </select>
+                    <CaretDownIcon size={13} weight="bold" aria-hidden />
+                  </div>
+                </div>
                 <PrivateToggle on={priv} onToggle={setPriv} />
-                <p className="text-[11px] leading-relaxed text-ink-faint">
-                  ARGUS prioritizes specialists around your decision. Safety and identity gates are never waived.
-                </p>
               </div>
+              <p id="research-focus-help" className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                {selectedIntent.detail} Core safety and identity checks always run.
+              </p>
             </form>
 
             <p id="fresh-audit-note" className="mt-3 text-[11px] leading-relaxed text-ink-faint">

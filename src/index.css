@@ -1657,8 +1657,8 @@ h1.display-sm {
   bottom: calc(env(safe-area-inset-bottom, 0px) + 5rem);
 }
 
-/* Decision-first landing — option 2. The input remains the primary command,
-   but the question framing now determines the evidence plan before launch. */
+/* Decision-first landing — option 2. The subject remains the primary command;
+   research intent is a compact secondary control that still routes the plan. */
 .landing-decision-backdrop {
   right: -7rem;
   top: -5rem;
@@ -1676,38 +1676,6 @@ h1.display-sm {
   font-size: clamp(2.65rem, 5.1vw, 4.7rem);
   line-height: 0.98;
 }
-.landing-intent-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-block: 1px solid var(--color-line);
-}
-.landing-intent-option {
-  position: relative;
-  min-height: 160px;
-  padding: 1.35rem 1.15rem 1.25rem;
-  text-align: left;
-  color: var(--color-ink-dim);
-  border-right: 1px solid var(--color-line);
-  transition: background var(--motion-base) var(--ease-premium), color var(--motion-base) var(--ease-premium);
-}
-.landing-intent-option:last-child { border-right: 0; }
-.landing-intent-option::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 -1px;
-  height: 3px;
-  background: var(--color-brand);
-  opacity: 0;
-  transform: scaleX(0.4);
-  transition: opacity var(--motion-base), transform var(--motion-base) var(--ease-premium);
-}
-.landing-intent-option:hover { background: color-mix(in oklab, var(--color-panel) 70%, transparent); color: var(--color-ink); }
-.landing-intent-option.is-selected { background: var(--color-panel); color: var(--color-ink); }
-.landing-intent-option.is-selected::after { opacity: 1; transform: scaleX(1); }
-.landing-intent-option strong { display: block; margin-top: 1.25rem; font-size: 13px; font-weight: 620; line-height: 1.25; }
-.landing-intent-option > span:last-child { display: block; margin-top: .5rem; font-size: 11.5px; line-height: 1.45; color: var(--color-ink-faint); }
-.landing-intent-icon { display: inline-flex; color: var(--color-ink-faint); }
-.landing-intent-option.is-selected .landing-intent-icon { color: var(--color-brand); }
 .landing-command-bar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 200px;
@@ -1723,6 +1691,23 @@ h1.display-sm {
 .landing-command-submit { min-height: 62px; border-radius: 0; background: var(--color-brand-fill); color: var(--color-on-brand); }
 .landing-command-submit:hover:not(:disabled) { background: var(--color-brand-dim); }
 .landing-command-submit:disabled { opacity: .46; }
+.landing-command-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem 1.5rem; }
+.landing-focus-control { display: flex; min-width: 0; align-items: center; gap: .75rem; }
+.landing-focus-select-wrap { position: relative; display: inline-flex; align-items: center; color: var(--color-brand); }
+.landing-focus-select-wrap > svg { pointer-events: none; position: absolute; right: .65rem; }
+.landing-focus-select {
+  min-height: 34px;
+  appearance: none;
+  border: 1px solid var(--color-control-line);
+  border-radius: 999px;
+  background: var(--color-panel);
+  padding: .35rem 2rem .35rem .8rem;
+  font-size: 12px;
+  font-weight: 580;
+  color: var(--color-ink);
+  outline: 0;
+}
+.landing-focus-select:focus-visible { border-color: var(--color-brand); box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-brand) 14%, transparent); }
 .landing-method-rail { border-left: 1px solid var(--color-line); padding-left: clamp(1.5rem, 3vw, 2.5rem); }
 .landing-method-eye { display: flex; min-height: 190px; align-items: center; justify-content: center; }
 .landing-lens-number { font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; color: var(--color-brand); }
@@ -1798,9 +1783,6 @@ h1.display-sm {
   .research-proof-stats { margin-top: 1.5rem; }
 }
 @media (max-width: 760px) {
-  .landing-intent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .landing-intent-option:nth-child(2) { border-right: 0; }
-  .landing-intent-option:nth-child(-n+2) { border-bottom: 1px solid var(--color-line); }
   .landing-command-bar { grid-template-columns: minmax(0, 1fr); overflow: visible; border: 0; background: transparent; box-shadow: none; }
   .landing-command-input { min-height: 58px; border: 1px solid var(--color-control-line); border-radius: var(--radius-md); background: var(--color-panel); }
   .landing-command-bar > svg { top: 29px; transform: translateY(-50%); }
@@ -1819,9 +1801,9 @@ h1.display-sm {
   .research-ledger-row > div:nth-child(4) { grid-column: 3; grid-row: 1; }
 }
 @media (max-width: 480px) {
-  .landing-intent-grid { grid-template-columns: 1fr; }
-  .landing-intent-option { min-height: 130px; border-right: 0; border-bottom: 1px solid var(--color-line); }
-  .landing-intent-option:last-child { border-bottom: 0; }
+  .landing-command-meta { align-items: flex-start; }
+  .landing-focus-control { width: 100%; flex-direction: column; align-items: flex-start; gap: .45rem; }
+  .landing-focus-select-wrap, .landing-focus-select { width: 100%; }
   .research-stage-state { display: none; }
   .research-stage-item { grid-template-columns: 28px 24px minmax(0, 1fr); }
   .research-proof-stats { grid-template-columns: 1fr 1fr; }

@@ -115,14 +115,15 @@ describe("Landing fresh audit launch", () => {
     });
 
     const input = container.querySelector<HTMLInputElement>("#investigation-subject");
-    const identityOption = Array.from(container.querySelectorAll<HTMLButtonElement>("button[aria-pressed]"))
-      .find((button) => button.textContent?.includes("Reveal identity and control"));
+    const focus = container.querySelector<HTMLSelectElement>("#research-focus");
     const form = container.querySelector<HTMLFormElement>("form");
     await act(async () => {
       const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
       inputSetter?.call(input, "@clutchmarkets");
       input?.dispatchEvent(new Event("input", { bubbles: true }));
-      identityOption?.click();
+      const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+      selectSetter?.call(focus, "identity_and_control");
+      focus?.dispatchEvent(new Event("change", { bubbles: true }));
     });
     await act(async () => {
       form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -132,18 +133,17 @@ describe("Landing fresh audit launch", () => {
     expect(onAudit).toHaveBeenCalledWith("@clutchmarkets", false, "identity_and_control");
   });
 
-  it("presents four decision lenses with one selected at a time", async () => {
+  it("keeps research intent available without blocking the primary subject action", async () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
     await act(async () => root?.render(<Landing onAudit={() => undefined} onAbout={() => undefined} />));
 
-    const options = Array.from(container.querySelectorAll<HTMLButtonElement>("button[aria-pressed]"));
-    expect(options).toHaveLength(4);
-    expect(options.filter((option) => option.getAttribute("aria-pressed") === "true")).toHaveLength(1);
-
-    await act(async () => options[2]?.click());
-    expect(options[2]?.getAttribute("aria-pressed")).toBe("true");
-    expect(options[0]?.getAttribute("aria-pressed")).toBe("false");
+    const focus = container.querySelector<HTMLSelectElement>("#research-focus");
+    expect(focus).not.toBeNull();
+    expect(focus?.options).toHaveLength(4);
+    expect(focus?.value).toBe("investment_due_diligence");
+    expect(container.querySelector(".landing-intent-grid")).toBeNull();
+    expect(container.textContent).toContain("Core safety and identity checks always run");
   });
 });
