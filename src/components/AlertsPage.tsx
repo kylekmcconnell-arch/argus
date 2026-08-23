@@ -5,7 +5,7 @@ import { X } from "@phosphor-icons/react";
 // watched tokens and new connections to flagged subjects in the shared graph.
 // Nothing lands here automatically: alerts only exist when someone pressed
 // "Sweep now" on the Watchlist.
-type Alert = { ref: string; subject?: string; label?: string; type?: "drift" | "ring"; detail?: string; at?: number; ts?: string };
+export type Alert = { ref: string; subject?: string; label?: string; type?: "drift" | "ring"; detail?: string; at?: number; ts?: string };
 
 const TYPE_META: Record<string, { label: string; color: string }> = {
   drift: { label: "blockchain change", color: "var(--color-caution)" },
@@ -21,27 +21,37 @@ const ago = (a: Alert) => {
   return `${Math.floor(d / 24)}d ago`;
 };
 
-export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
+async function fetchAlerts(): Promise<Alert[]> {
+  const response = await fetch("/api/alerts");
+  const body = await response.json().catch(() => ({})) as { alerts?: Alert[]; message?: string };
+  if (!response.ok || !Array.isArray(body.alerts)) {
+    throw new Error(body.message || "ARGUS could not reach alert storage.");
+  }
+  return body.alerts;
+}
+
+export function AlertsFeed({
+  onOpen,
+  loadAlerts = fetchAlerts,
+}: {
+  onOpen: (ref: string) => void;
+  loadAlerts?: () => Promise<Alert[]>;
+}) {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [loadError, setLoadError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/alerts", { signal: controller.signal })
-      .then(async (response) => {
-        const body = await response.json().catch(() => ({})) as { alerts?: Alert[]; message?: string };
-        if (!response.ok || !Array.isArray(body.alerts)) {
-          throw new Error(body.message || "ARGUS could not reach alert storage.");
-        }
-        return body.alerts;
+    loadAlerts()
+      .then((nextAlerts) => {
+        if (!controller.signal.aborted) setAlerts(nextAlerts);
       })
-      .then(setAlerts)
       .catch((error) => {
         if (controller.signal.aborted) return;
         setLoadError(error instanceof Error ? error.message : "The alerts feed is unavailable.");
       });
     return () => controller.abort();
-  }, [reloadKey]);
+  }, [loadAlerts, reloadKey]);
 
   const dismiss = (ref: string) => {
     void fetch(`/api/alerts?ref=${encodeURIComponent(ref)}`, { method: "DELETE" }).catch(() => { /* offline */ });
@@ -49,15 +59,15 @@ export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
   };
 
   return (
-    <div className="workspace-frame">
-      <h1 className="display-sm text-[24px] text-ink">Alerts</h1>
-      <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-        What sweeps have flagged: verdict flips and liquidity drains on watched tokens, and watched subjects newly
-        connecting to flagged actors in the shared graph. Sweeps run only when you press Sweep now on the Watchlist;
-        nothing monitors in the background.
+    <section aria-labelledby="watchlist-alerts-title" className="mt-10 border-t border-line/70 pt-8">
+      <div className="eyebrow">Changes found by a sweep</div>
+      <h2 id="watchlist-alerts-title" className="display-sm mt-2 text-[20px] text-ink">Recent alerts</h2>
+      <p className="mt-1.5 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
+        Verdict changes, liquidity drains, and new links to flagged actors found when someone pressed Sweep now.
+        ARGUS does not monitor in the background.
       </p>
 
-      <div className="mt-6 space-y-2">
+      <div className="mt-5 space-y-2">
         {alerts == null && !loadError && <div className="text-[12.5px] text-ink-faint">loading alerts…</div>}
         {loadError && (
           <div className="panel px-4 py-4" role="alert">
@@ -83,7 +93,7 @@ export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
         )}
         {alerts != null && !loadError && alerts.length === 0 && (
           <div className="empty-state">
-            No alerts. Watch subjects, then run a sweep from the Watchlist.
+            No changes found yet. Run Sweep now to check the current watchlist.
           </div>
         )}
         {(alerts ?? []).map((a) => {
@@ -116,6 +126,18 @@ export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
           );
         })}
       </div>
+    </section>
+  );
+}
+
+export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
+  return (
+    <div className="workspace-frame">
+      <h1 className="display-sm text-[24px] text-ink">Alerts</h1>
+      <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
+        Alerts now live with the watchlist that creates them.
+      </p>
+      <AlertsFeed onOpen={onOpen} />
     </div>
   );
 }

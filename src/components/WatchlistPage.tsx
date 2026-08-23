@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { getWatchlist, removeWatch, rebaseline, hydrateSharedWatchlist, type WatchItem, type WatchSnapshot } from "../lib/watchlist";
+import { AlertsFeed, type Alert } from "./AlertsPage";
 import { auditToken } from "../token/audit";
 import { fetchReportState, reportCompleteness, type ReportLookup } from "../lib/reports";
 import { coverageQualifiedCompleteness, presentPublicReport, type PublicReportPresentation } from "../lib/reportPresentation";
@@ -97,8 +98,15 @@ function money(n?: number): string {
   return "$" + n.toFixed(0);
 }
 
-export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
+export function WatchlistPage({
+  onAudit,
+  alertsLoader,
+}: {
+  onAudit: (id: string) => void;
+  alertsLoader?: () => Promise<Alert[]>;
+}) {
   const [rows, setRows] = useState<Row[]>(() => getWatchlist().map((item) => ({ item, loading: true })));
+  const [alertsRefreshKey, setAlertsRefreshKey] = useState(0);
 
   const recheck = useCallback(async () => {
     const items = getWatchlist();
@@ -138,6 +146,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
       const d = await r.json();
       setSweep(d?.error ? `failed: ${String(d.error).slice(0, 80)}` : `checked ${d.checked} · ${d.alerts?.length ?? 0} new alert${(d.alerts?.length ?? 0) === 1 ? "" : "s"}`);
       recheck();
+      setAlertsRefreshKey((key) => key + 1);
     } catch {
       setSweep("failed: network");
     }
@@ -159,7 +168,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
           <h1 className="display-sm text-[24px] text-ink">Watchlist</h1>
           <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
             Saved investigations with an explicit baseline. Tokens refresh against current market data; people show
-            the latest stored report until a new investigation is run.
+            the latest stored report until a new investigation is run. Any changes found by a sweep appear below.
           </p>
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
@@ -167,7 +176,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
           <button
             onClick={onSweep}
             disabled={sweep === "running"}
-            title="Check the shared watchlist now for token changes and new links to flagged people, projects, or wallets. Any warning appears under Alerts. This only runs when you click it."
+            title="Check the shared watchlist now for token changes and new links to flagged people, projects, or wallets. Any warning appears below. This only runs when you click it."
             className="btn-chip tint-signal disabled:opacity-60"
           >
             {sweep === "running" ? "sweeping…" : "Sweep now"}
@@ -278,6 +287,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
           })}
         </div>
       )}
+      <AlertsFeed key={alertsRefreshKey} onOpen={onAudit} loadAlerts={alertsLoader} />
     </div>
   );
 }

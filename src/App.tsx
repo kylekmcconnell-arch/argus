@@ -48,7 +48,6 @@ import { consumeStaleChunkReloadNotice } from "./components/AppErrorBoundary";
 // route chunks after the investigator first opens them.
 const AboutPage = lazy(() => import("./components/AboutPage").then((module) => ({ default: module.AboutPage })));
 const AdminPage = lazy(() => import("./components/AdminPage").then((module) => ({ default: module.AdminPage })));
-const AlertsPage = lazy(() => import("./components/AlertsPage").then((module) => ({ default: module.AlertsPage })));
 const ApiPage = lazy(() => import("./components/ApiPage").then((module) => ({ default: module.ApiPage })));
 const ChangelogPage = lazy(() => import("./components/ChangelogPage").then((module) => ({ default: module.ChangelogPage })));
 const CaseBriefPanel = lazy(() => import("./components/CaseBriefPanel").then((module) => ({ default: module.CaseBriefPanel })));
@@ -124,7 +123,7 @@ function CaseBriefLoadingDialog() {
 }
 
 type Phase =
-  | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "referrals" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
+  | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "referrals" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "threat"
@@ -1344,7 +1343,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "threat" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "alerts" || phase === "referrals" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
+    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "threat" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "referrals" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
       ? phase
       : "idle";
   const personReportPrivate = (dossier?.viewPersistence ?? dossier?.persistence)?.state === "private";
@@ -1396,7 +1395,6 @@ export default function App() {
 
       {phase === "watchlist" && <WatchlistPage onAudit={onSafeAudit} />}
 
-      {phase === "alerts" && <AlertsPage onOpen={onOpenRecent} />}
 
       {phase === "referrals" && <ReferralsPage />}
 

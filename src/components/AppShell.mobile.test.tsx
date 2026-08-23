@@ -102,6 +102,18 @@ afterEach(async () => {
 });
 
 describe("AppShell mobile navigation drawer", () => {
+  it("keeps discovery and monitoring visible without duplicating investigation engines", async () => {
+    await renderShell();
+
+    const navigation = drawer().querySelector<HTMLElement>("nav[aria-label='Primary']");
+    expect(navigation?.textContent).toContain("New investigation");
+    expect(navigation?.textContent).toContain("Radar");
+    expect(navigation?.textContent).toContain("Watchlist");
+    expect(navigation?.textContent).not.toContain("Threat scan");
+    expect(navigation?.textContent).not.toContain("Website check");
+    expect(navigation?.textContent).not.toContain("Alerts");
+  });
+
   it("keeps the credit balance inside the verified account section", async () => {
     await renderShell();
 
