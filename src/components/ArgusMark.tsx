@@ -43,11 +43,13 @@ export function ArgusMark({
   live = false,
   motion = live ? "searching" : "idle",
   eventKey,
+  tone = "neutral",
 }: {
   size?: number;
   live?: boolean;
   motion?: ArgusEyeMotion;
   eventKey?: string;
+  tone?: "neutral" | "brand";
 }) {
   // The live eye keeps a complete dotted field behind the moving iris. Static
   // brand marks retain the tailored cutout around their fixed iris position.
@@ -63,6 +65,7 @@ export function ArgusMark({
       focusable="false"
       className="argus-eye-mark"
       data-argus-eye-state={eyeState}
+      data-argus-eye-tone={tone}
     >
       <g fill="var(--color-ink-faint)" className={live ? "argus-eye-field argus-eye-field--live" : "argus-eye-field"}>
         {dots.map((d, i) => (
@@ -93,7 +96,7 @@ export function ArgusMark({
             className="argus-eye-evidence-pulse"
           />
         )}
-        <circle cx={irisX} cy={irisY} r={irisR} fill="var(--color-signal)" />
+        <circle cx={irisX} cy={irisY} r={irisR} fill={tone === "brand" ? "var(--color-brand)" : "var(--color-signal)"} />
         {live ? (
           <>
             <circle cx={irisX} cy={irisY} r={irisR * 0.42} fill="var(--color-eye-pupil)" opacity="0.9" />
