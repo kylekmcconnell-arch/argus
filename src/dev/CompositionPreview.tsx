@@ -6,11 +6,11 @@ import { VerdictHero } from "../components/VerdictHero";
 import type { TokenDossier } from "../token/audit";
 
 const CHAPTER_FIXTURE = {
-  chain: "robinhood",
-  score: 60,
-  verdict: "CAUTION",
+  chain: "base",
+  score: 93,
+  verdict: "PASS",
   capApplied: null,
-  liquidityUsd: 114_100,
+  liquidityUsd: 3_071_603,
   mcap: 2_000_000,
   ageDays: 12,
   insiderPct: 14,
@@ -20,15 +20,16 @@ const CHAPTER_FIXTURE = {
     available: true, simChecked: false, honeypot: false, cannotSellAll: false,
     mintable: false, freezable: false, ownerRenounced: true, openSource: true,
     buyTax: 0, sellTax: 0, holderCount: 4872, topHolderPct: 12,
-    lpLocked: false, lpBurnedPct: 100, lpLockedPct: 0, lpTopUnlockedEoaPct: 0,
+    lpLocked: false, lpBurnedPct: 0, lpLockedPct: 0, lpTopUnlockedEoaPct: 63,
   },
   cg: { cexCount: 0, rank: 2103 },
   axes: [
-    { key: "T1", label: "Liquidity & lock", score: 22, weight: 24, rationale: "The launch pool's LP tokens were burned in full; the principal cannot be pulled." },
-    { key: "T2", label: "Contract safety", score: 20, weight: 26, rationale: "No owner powers found, but no simulation provider covers Robinhood Chain, so sell behavior is unsimulated." },
-    { key: "T4", label: "Holder distribution", score: 9, weight: 16, rationale: "Top non-pool wallet holds 12%; insider network net 14% of supply." },
-    { key: "T5", label: "Trading authenticity", score: 5, weight: 12, rationale: "6 bundled buys landed in the launch block; the rest of the tape reads organic." },
-    { key: "T6", label: "Maturity & presence", score: 4, weight: 10, rationale: "12 days old, no centralized listings yet, registry rank #2103." },
+    { key: "T2", label: "Contract safety", score: 26, weight: 26, rationale: "verified source, ownership renounced." },
+    { key: "T3", label: "Taxes & tradeability", score: 12, weight: 12, rationale: "buy 0% / sell 0% (simulated)." },
+    { key: "T4", label: "Holder distribution", score: 15, weight: 16, rationale: "Largest assessed wallet holds 1.98% of supply." },
+    { key: "T5", label: "Trading authenticity", score: 12, weight: 12, rationale: "No bundled launch pattern was recorded." },
+    { key: "T6", label: "Maturity & presence", score: 10, weight: 10, rationale: "The project has an established public footprint." },
+    { key: "T1", label: "Liquidity & lock", score: 18, weight: 24, rationale: "$3,071,603 pooled, LP mostly in one wallet." },
   ],
 } as unknown as TokenDossier;
 
@@ -119,7 +120,7 @@ export function CompositionPreview() {
         <p className="mt-8 text-[13.5px] text-ink-dim">
           The editorial verdict hero, rendered only when the readiness gate has passed.
         </p>
-        <VerdictHero token={CHAPTER_FIXTURE} savedLabel="Saved Aug 19, 2026" />
+        <VerdictHero token={CHAPTER_FIXTURE} savedLabel="Saved Aug 22, 2026" />
 
         <p className="mt-8 text-[13.5px] text-ink-dim">
           The reading spine: each dimension as a chapter with its judgment headline and fact ledger.

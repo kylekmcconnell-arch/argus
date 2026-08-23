@@ -137,8 +137,8 @@ describe("supporting-page truth states", () => {
     expect(html).toContain('role="button"');
     expect(html).toContain('tabindex="0"');
     expect(html).toContain("Open @peer");
-    expect(html).toContain("Relationship ledger");
-    expect(html).toContain("associates");
+    expect(html).toContain("Readable connection list");
+    expect(html).toContain("is associated with");
   });
 
   it("does not label a large token holder as a contradicted relationship", () => {
@@ -155,6 +155,11 @@ describe("supporting-page truth states", () => {
     );
 
     expect(html).toContain("High concentration");
+    expect(html).toContain("Token 0xabc");
+    expect(html).toContain("Wallet 0xdef");
+    expect(html).toContain("is held by");
+    expect(html).toContain("Technical IDs");
+    expect(html).toContain("token:base:0xabc · HELD_BY · wallet:base:0xdef");
     expect(html).not.toContain(">Contradicted<");
   });
 });

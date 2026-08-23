@@ -319,7 +319,7 @@ describe("leadership currency on the team card", () => {
     expect(shortAnswer).toContain("Who can move the project treasury?");
     expect(shortAnswer).toContain("authority was not established");
     expect(shortAnswer).toContain("Important context");
-    expect(shortAnswer).toContain("Source-reported context: a dated leadership transition is recorded");
+    expect(shortAnswer).toContain("reported by a source context: a dated leadership transition is recorded");
   });
 
   it("states a project-attributed founder role without claiming the identity or control is verified", () => {
@@ -352,12 +352,12 @@ describe("leadership currency on the team card", () => {
       webTeam: [],
     }));
 
-    expect(container.textContent).toContain("Clutch Markets identifies @0xSimpleFarmer as Founder");
-    expect(container.textContent).toContain("Project-attributed team (1)");
-    expect(container.textContent).toContain("project-attributed role");
-    expect(container.textContent).toContain("independent corroboration of identity, ownership, and control remains open");
+    expect(container.textContent).toContain("Clutch Markets names @0xSimpleFarmer as Founder");
+    expect(container.textContent).toContain("People named by the project (1)");
+    expect(container.textContent).toContain("named by the project");
+    expect(container.textContent).toContain("an independent source has not yet confirmed identity, ownership, or control");
     expect(container.textContent).not.toContain("Published names to verify");
-    expect(container.querySelector('a[href="https://x.com/ClutchMarkets/status/1"]')?.textContent).toContain("attribution source");
+    expect(container.querySelector('a[href="https://x.com/ClutchMarkets/status/1"]')?.textContent).toContain("See where the project said this");
   });
 
   it("renders the paid departure answer instead of dropping it", () => {

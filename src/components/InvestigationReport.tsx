@@ -76,7 +76,7 @@ import {
   type BasicFactLeadView,
   type BasicFactView,
 } from "./BasicFactsPanel";
-import { formatRoleLabel, plainLanguageSummary } from "../lib/plainLanguage";
+import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
 import { deriveIntelligenceBrief } from "../lib/intelligenceBrief";
 import { NoticedRail } from "./InvestigatorBrief";
@@ -346,7 +346,7 @@ function ReportSectionHeading({
 }
 
 function money(n?: number): string {
-  if (n == null) return "N/A";
+  if (n == null) return "Not available";
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
   if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
@@ -373,7 +373,7 @@ function UnfinishedCheckRow({ check, required }: {
         className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 py-2 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal ${expandable ? "cursor-pointer hover:bg-panel-2/40" : "cursor-default"}`}
       >
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-[12px] font-medium text-ink">{check.label}</span>
+          <span className="text-[12px] font-medium text-ink">{publicCheckLabel(check.label)}</span>
           {required && (
             <span className="mono rounded border border-current px-1 py-0.5 text-[9px] uppercase tracking-wider" style={{ color: "var(--color-avoid)" }}>required</span>
           )}
@@ -391,7 +391,7 @@ function UnfinishedCheckRow({ check, required }: {
           style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
         >
           <div className="overflow-hidden">
-            <p className="max-w-[56ch] pb-2 text-[11px] leading-snug text-ink-faint">{check.note}</p>
+            <p className="max-w-[56ch] pb-2 text-[11px] leading-snug text-ink-faint">{publicCheckNote(check.note!)}</p>
           </div>
         </div>
       )}
@@ -604,7 +604,7 @@ function CapitalStructurePanel({
   return (
     <section className="panel overflow-hidden" aria-label="Company funding and token market">
       <div className="border-b border-line/70 px-4 py-4 sm:px-5">
-        <p className="eyebrow text-signal-lift">Two separate kinds of capital</p>
+        <p className="eyebrow text-signal-lift">Company funding is not token value</p>
         <h3 className="mt-1 text-[17px] font-semibold text-ink">Company funding and the ${tokenSymbol} token</h3>
         <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">
           Company investors and token buyers own different things. The figures below should never be combined.
@@ -615,7 +615,7 @@ function CapitalStructurePanel({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="eyebrow">Company funding</span>
             <span className={`chip ${amountKnown ? "tint-signal" : fundingRecordFound ? "tint-caution" : ""}`}>
-              {amountKnown ? "EQUITY ROUND" : fundingRecordFound ? "FUNDING RECORD" : "NOT VERIFIED"}
+              {amountKnown ? "EQUITY ROUND" : fundingRecordFound ? "FUNDING RECORD" : "NOT CONFIRMED"}
             </span>
           </div>
           {amountKnown ? (
@@ -645,7 +645,7 @@ function CapitalStructurePanel({
             </>
           ) : (
             <>
-              <p className="mt-4 text-[16px] font-semibold text-ink">No company round verified</p>
+              <p className="mt-4 text-[16px] font-semibold text-ink">No public company funding round confirmed</p>
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
                 This report did not confirm a public company funding announcement.
               </p>
@@ -677,7 +677,7 @@ function CapitalStructurePanel({
         <article className="p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="eyebrow">${tokenSymbol} token</span>
-            <span className="chip tint-pass">CRYPTO ASSET</span>
+            <span className="chip tint-pass">TOKEN MARKET</span>
           </div>
           <p className="display-sm mt-4 text-[27px] leading-none text-ink">{money(tokenMarketCap)}</p>
           <p className="mt-1.5 text-[12px] text-ink-dim">Token market cap when this report was saved</p>
@@ -1249,18 +1249,18 @@ export function InvestigationReport({
     ...(readiness.status !== "ready" ? [{
       label: readinessLabel,
       detail: requiredGapChecks.length
-        ? `Finish ${requiredGapChecks.map((check) => check.label).join(", ")} before relying on this report.`
+        ? `Finish ${requiredGapChecks.map((check) => publicCheckLabel(check.label)).join(", ")} before relying on this report.`
         : readiness.guidance,
     }] : []),
   ].slice(0, 6);
   const requiredNextStepItems = requiredGapChecks
     .map((check) => ({
-      label: `Required: Check ${check.label.toLowerCase()}`,
+      label: `Required: ${publicCheckLabel(check.label)}`,
       detail: check.note,
     }));
   const enrichmentNextStepItems = enrichmentGapChecks
     .map((check) => ({
-      label: `Check ${check.label.toLowerCase()}`,
+      label: publicCheckLabel(check.label),
       detail: check.note,
     }));
   const nextStepItems = [
@@ -1286,6 +1286,7 @@ export function InvestigationReport({
     concerns: concernItems.map((item) => item.label),
     capReason: token.capApplied ? `The score is capped: ${token.capApplied.replace(/_/g, " ")}` : null,
     nextChecks: nextStepItems.map((item) => item.label),
+    applicableChecks: readiness.applicable,
   });
   // One paste, whole verdict: composed for group chats. The link is appended
   // at copy time (share link when mintable, app URL else).
@@ -1496,6 +1497,7 @@ export function InvestigationReport({
                 { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
                 { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
                 { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
+                ...(hasConnectionsChapter ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
                 ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
                 ...(token.axes?.length ? [{ href: "#composition" as const, label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> }] : []),
                 { href: "#investigation-methodology", label: "Method", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
@@ -1533,12 +1535,12 @@ export function InvestigationReport({
             {readiness.status !== "ready" && (
             <section
               className="panel investigation-hero-card order-2 flex flex-col p-4 lg:p-5"
-              aria-label="Preliminary risk score"
+              aria-label="Score while checks are open"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="eyebrow">Preliminary risk score</span>
+                <span className="eyebrow">Score while checks are open</span>
                 <StatusPill
-                  label="EARLY SCORE"
+                  label="CHECKS OPEN"
                   color="var(--color-caution)"
                   score={token.score}
                   title="This is an unfinished score, not a PASS or investment verdict."
@@ -1573,7 +1575,7 @@ export function InvestigationReport({
               aria-label="Report status"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="eyebrow">Safety checks</span>
+                <span className="eyebrow">Report checks</span>
                 <StatusPill label={readinessLabel} color={readinessColor} score={null} large />
               </div>
               <h2 className="mt-4 text-[17px] font-semibold leading-snug text-ink">
@@ -1626,15 +1628,17 @@ export function InvestigationReport({
                     <div className="flex items-center justify-between gap-3">
                       <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">Checks finished</span>
                       <span className="mono text-[11px] text-ink-dim">
-                        {readiness.successful}/{readiness.applicable} · {readiness.coveragePercent}%
+                        {readiness.applicable === 0 ? "No checks saved" : `${readiness.successful}/${readiness.applicable} · ${readiness.coveragePercent}%`}
                       </span>
                     </div>
-                    <progress
-                      className="readiness-progress mt-2"
-                      value={readiness.coveragePercent}
-                      max={100}
-                      aria-label={`Checks finished: ${readiness.coveragePercent}%`}
-                    />
+                    {readiness.applicable > 0 && (
+                      <progress
+                        className="readiness-progress mt-2"
+                        value={readiness.coveragePercent}
+                        max={100}
+                        aria-label={`Checks finished: ${readiness.coveragePercent}%`}
+                      />
+                    )}
                   </>
                 )}
               </div>
@@ -1660,7 +1664,7 @@ export function InvestigationReport({
               <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 xl:grid-cols-2" aria-label="Market size details">
                 <div>
                   <dt className="stat-label">Market rank</dt>
-                  <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg.rank}` : "N/A"}</dd>
+                  <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg.rank}` : "Not available"}</dd>
                 </div>
                 <div>
                   <dt className="stat-label" title="Estimated value if every token were available to trade.">Value if all circulate</dt>
@@ -1672,7 +1676,7 @@ export function InvestigationReport({
                 </div>
                 <div>
                   <dt className="stat-label">Holders</dt>
-                  <dd className="stat-value mt-1">{token.safety?.holderCount ? token.safety.holderCount.toLocaleString() : "N/A"}</dd>
+                  <dd className="stat-value mt-1">{token.safety?.holderCount ? token.safety.holderCount.toLocaleString() : "Not available"}</dd>
                 </div>
               </dl>
               <p className="mono mt-5 border-t border-line/70 pt-3 text-[10.5px] uppercase tracking-[0.08em] text-signal-lift">
@@ -1763,8 +1767,8 @@ export function InvestigationReport({
               <h2 className="mt-1 text-[14px] font-semibold text-ink">
                 {requiredGapChecks.length
                   ? unretryableGapChecks.length === requiredGapChecks.length
-                    ? `${requiredGapChecks.map((check) => check.label).join(", ")} could not run for this token.`
-                    : `${requiredGapChecks.map((check) => check.label).join(", ")} must finish before this report is ready.`
+                    ? `${requiredGapChecks.map((check) => publicCheckLabel(check.label)).join(", ")} could not run for this token.`
+                    : `${requiredGapChecks.map((check) => publicCheckLabel(check.label)).join(", ")} must finish before this report is ready.`
                   : readiness.status === "ready"
                     ? "Required safety checks are finished."
                     : "This report is not ready to rely on yet."}
@@ -1810,7 +1814,7 @@ export function InvestigationReport({
             </p>
           ) : publishedTeamClaims.length > 0 ? (
             <p className="mt-3 max-w-3xl text-[13.5px] font-medium leading-relaxed text-ink">
-              {projectAccount?.display_name || projectX || token.name} identifies {publishedTeamClaims.slice(0, 3).map((person) => `${person.handle || person.name}${person.role ? ` as ${formatRoleLabel(person.role)}` : ""}`).join(", ")}. This establishes the project's published role attribution; independent corroboration of identity, ownership, and control remains open.
+              {projectAccount?.display_name || projectX || token.name} names {publishedTeamClaims.slice(0, 3).map((person) => `${person.handle || person.name}${person.role ? ` as ${formatRoleLabel(person.role)}` : ""}`).join(", ")}. The project made these claims; an independent source has not yet confirmed identity, ownership, or control.
             </p>
           ) : (
             <p className="mt-3 max-w-3xl text-[13.5px] font-medium leading-relaxed text-ink">{inv.founderNote}</p>
@@ -1858,7 +1862,7 @@ export function InvestigationReport({
         <div id="investigation-why" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
             index="02 · Why"
-            title="Why ARGUS reached this result"
+            title="Why this report reached its result"
             description={showProjectBasicFacts
               ? "Start with the facts we could confirm. Possible leads stay separate so they are not mistaken for proof."
               : "Start with the saved evidence behind the score. Anything we could not confirm remains clearly marked below."}
@@ -1927,8 +1931,8 @@ export function InvestigationReport({
         <div id="investigation-people" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
             index="04 · People"
-            title="Project, deployer, and team"
-            description="See the official project account, the wallet that deployed the token, and the people publicly tied to the project."
+            title="Project account, token creator, and team"
+            description="See the official project account, the wallet that created the token, and the people publicly tied to the project."
           />
           <div id="investigation-evidence" className="scroll-mt-28 grid gap-3 lg:grid-cols-2">
           {/* on-chain */}
@@ -1938,7 +1942,7 @@ export function InvestigationReport({
               {readiness.status === "ready" ? (
                 <VerdictPill verdict={token.verdict} score={token.score} />
               ) : (
-                <StatusPill label="EARLY SCORE" color="var(--color-caution)" score={token.score} />
+                <StatusPill label="CHECKS OPEN" color="var(--color-caution)" score={token.score} />
               )}
             </div>
             <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">
@@ -1968,7 +1972,7 @@ export function InvestigationReport({
             <button onClick={onOpenToken} className="btn-chip tint-signal mt-3">Open token report</button>
           </Card>
 
-          <Card title="Project account and deployer">
+          <Card title="Project account and token creator">
             {/* project account — explicitly NOT a founder */}
             <div>
               <div className="eyebrow">Project account (not a founder)</div>
@@ -1995,7 +1999,7 @@ export function InvestigationReport({
             {token.deployer && (
               <div className="mt-2.5 border-t border-line/60 pt-2.5 text-[11px] text-ink-faint">
                 <div>
-                  Deployed by <ArkhamName address={token.deployer} chain={token.chain} labels={arkham} fallback={shortAddr(token.deployer)} className="text-ink-dim" />
+                  Token created by <ArkhamName address={token.deployer} chain={token.chain} labels={arkham} fallback={shortAddr(token.deployer)} className="text-ink-dim" />
                   {/* Whole days alone printed "0d" for a wallet 95 minutes old
                       at the launch, and said nothing about whether the age was
                       measured at the launch or at the scan. The shared fact
@@ -2009,7 +2013,7 @@ export function InvestigationReport({
                 </div>
                 {deployerTrail?.chain && deployerTrail.chain.length > 0 ? (
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                    <span className="text-ink-faint">money trail</span>
+                    <span className="text-ink-faint">where the creation funds came from</span>
                     <span className="chip normal-case tracking-normal">{shortAddr(token.deployer)}</span>
                     {deployerTrail.chain.map((h, i) => (
                       <span key={i} className="flex items-center gap-1">
@@ -2021,7 +2025,7 @@ export function InvestigationReport({
                         )}
                       </span>
                     ))}
-                    {!deployerTrail.terminatesAtCex && <span className="text-ink-faint">· trail cold</span>}
+                    {!deployerTrail.terminatesAtCex && <span className="text-ink-faint">· source not identified</span>}
                   </div>
                 ) : deployerTrail?.funder ? (
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -2034,9 +2038,9 @@ export function InvestigationReport({
                   </div>
                 ) : null}
                 {deployerTrail?.serialDeployer && (
-                  <span className="chip tint-avoid mt-1">serial deployer · {deployerTrail.tokensCreated}+ tokens</span>
+                  <span className="chip tint-avoid mt-1">repeat token creator · {deployerTrail.tokensCreated}+ tokens</span>
                 )}
-                {deployerTrail && <div className="mt-1 leading-snug">{deployerTrail.note}</div>}
+                {deployerTrail && <div className="mt-1 leading-snug">{publicCheckNote(deployerTrail.note)}</div>}
                 {!deployerTrail && <div className="mt-0.5">We could not confirm who owns the wallet that deployed the contract.</div>}
               </div>
             )}
@@ -2086,7 +2090,7 @@ export function InvestigationReport({
                                     </span>
                                   );
                                 })}
-                                <span className="chip normal-case tracking-normal">{m.source}</span>
+                                <span className="chip normal-case tracking-normal">{plainLanguageSummary(m.source)}</span>
                                 {m.evidence && <span className="min-w-full pl-7 text-[10.5px] leading-relaxed text-ink-faint">{m.evidence}</span>}
                               </span>
                               {m.handle ? (
@@ -2110,21 +2114,21 @@ export function InvestigationReport({
                 </div>
               ) : (
                 <div>
-                  <p className="text-[12.5px] font-medium text-ink">No independently corroborated team member was found.</p>
+                  <p className="text-[12.5px] font-medium text-ink">No team member was confirmed by an independent source.</p>
                   <p className="mt-1 text-[12px] leading-relaxed text-ink-faint">
                     {publishedTeamClaims.length > 0
-                      ? "The project-published role attribution is shown below. The stated role is separate from independent verification of the person, ownership, or operational control."
+                      ? "The people and roles named by the project are shown below. Those claims do not independently confirm identity, ownership, or control."
                       : recon?.team.state === "named"
-                        ? "The rendered project site published names below, but those first-party claims were not independently corroborated."
+                        ? "The project site published the names below, but an independent source has not confirmed them."
                       : recon ? recon.identityLine : inv.founderNote}
                   </p>
                 </div>
               )}
               {publishedTeamClaims.length > 0 && (
-                <section className="mt-3 border-t border-line/60 pt-3" aria-label="Project-attributed team">
-                  <div className="eyebrow">Project-attributed team ({publishedTeamClaims.length})</div>
+                <section className="mt-3 border-t border-line/60 pt-3" aria-label="People named by the project">
+                  <div className="eyebrow">People named by the project ({publishedTeamClaims.length})</div>
                   <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
-                    The project site or account identifies these people in the roles shown. ARGUS can state that attribution directly while keeping independent identity, ownership, wallet, and control verification separate.
+                    The project site or account names these people in the roles shown. An independent source has not yet confirmed their identity, ownership, wallet, or control.
                   </p>
                   <div className="mt-2 space-y-1.5">
                     {publishedTeamClaims.map((person) => (
@@ -2134,9 +2138,9 @@ export function InvestigationReport({
                           <span className="text-[12.5px] text-ink">{person.name}</span>
                           {person.handle && !teamNameLooksLikeHandle(person) && <span className="mono text-[11px] text-ink-faint">{person.handle}</span>}
                           {person.role && <span className="text-[11px] text-ink-faint">{formatRoleLabel(person.role)}</span>}
-                          <span className="chip normal-case tracking-normal">{person.source}</span>
+                          <span className="chip normal-case tracking-normal">{plainLanguageSummary(person.source)}</span>
                           {person.sourceUrl && (
-                            <a href={person.sourceUrl} target="_blank" rel="noreferrer" className="link-ext text-[11px]">attribution source</a>
+                            <a href={person.sourceUrl} target="_blank" rel="noreferrer" className="link-ext text-[11px]">See where the project said this</a>
                           )}
                           {person.evidence && <span className="min-w-full pl-7 text-[10.5px] leading-relaxed text-ink-faint">{person.evidence}</span>}
                         </span>
@@ -2312,7 +2316,7 @@ export function InvestigationReport({
               title="How these people and wallets connect"
               description="The graph shows recorded links. A link by itself does not mean wrongdoing."
             />
-            <Card title="Connection web · click any node to open it">
+            <Card title="Connection map · select a person, wallet, or project to open it">
               <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={showCurrentIntelligence ? connections : []} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
             </Card>
           </div>
@@ -2382,15 +2386,14 @@ export function InvestigationReport({
         )}
 
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
-        <div className="story-chapter story-chapter-muted report-section mt-7">
+        <div id="investigation-methodology" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
             index={chapterLabel(scanDetailsChapterNumber, "Method")}
-            title="Method and raw evidence"
-            description="What ARGUS checked, what finished, and what stayed open. The full audit trail remains available without competing with the decision story above."
+            title="What ARGUS checked"
+            description="See which checks finished, what remains open, and the saved sources behind the report."
           />
           <div className="mt-3 space-y-3">
             <MethodologyChecklist
-              id="investigation-methodology"
               checks={diligenceChecks}
               summaryLabel="Token checks"
             />
@@ -2425,8 +2428,8 @@ export function InvestigationReport({
           <details className="panel group mt-4 overflow-hidden">
             <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
               <span>
-                <span className="eyebrow block">Threat flags · lower is better</span>
-                <span className="mt-1 block text-[12px] text-ink-faint">Open the separate contract threat scanner and its raw categories.</span>
+                <span className="eyebrow block">Contract risk checks</span>
+                <span className="mt-1 block text-[12px] text-ink-faint">Open the separate contract scanner and its technical results.</span>
               </span>
               <span aria-hidden="true" className="mono text-[10px] uppercase tracking-[0.1em] text-signal-lift transition-transform group-open:rotate-180">▾</span>
             </summary>

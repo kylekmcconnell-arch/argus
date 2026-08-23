@@ -30,13 +30,13 @@ export function VerdictHero({ token, savedLabel }: {
           <h2 className="af-hero-title">{judgmentLine(token.verdict)}</h2>
           {why && (
             <p className="af-why">
-              <b>Why {token.score}: </b>
+              <b>Why it scored {token.score}: </b>
               {why.map((segment, index) => segment.figure ? (
                 <ProvenancedValue key={index} tier="derived">{segment.text}</ProvenancedValue>
               ) : (
                 <span key={index}>{segment.text}</span>
               ))}
-              {" "}The full basis sits in the chapters below.
+              {" "}Open the evidence below for every source and calculation.
             </p>
           )}
         </div>

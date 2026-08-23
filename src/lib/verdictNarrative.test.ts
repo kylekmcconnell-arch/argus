@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeWhy, judgmentLine } from "./verdictNarrative";
+import { composeWhy, judgmentLine, plainScoreRationale } from "./verdictNarrative";
 
 const axes = [
   { key: "T1", label: "Liquidity & lock", score: 22, weight: 24, rationale: "LP burned in full at launch" },
@@ -9,26 +9,42 @@ const axes = [
 
 describe("judgmentLine", () => {
   it("selects from the fixed table by recorded verdict, with a neutral default", () => {
-    expect(judgmentLine("PASS")).toBe("The record holds up.");
-    expect(judgmentLine("CAUTION")).toBe("Sound, with reservations.");
-    expect(judgmentLine("AVOID")).toBe("A disqualifying record.");
-    expect(judgmentLine("SOMETHING_NEW")).toBe("The state of the record.");
+    expect(judgmentLine("PASS")).toBe("Most checks passed. Review the remaining risks.");
+    expect(judgmentLine("CAUTION")).toBe("Important risks remain despite some positive checks.");
+    expect(judgmentLine("AVOID")).toBe("A critical issue makes this too risky.");
+    expect(judgmentLine("INCOMPLETE")).toBe("Too many checks are missing for a reliable verdict.");
+    expect(judgmentLine("UNVERIFIABLE_IDENTITY")).toBe("ARGUS could not verify who or what this report is about.");
+    expect(judgmentLine("SOMETHING_NEW")).toBe("This result needs review.");
+  });
+});
+
+describe("plainScoreRationale", () => {
+  it("explains contract and liquidity shorthand in reader language", () => {
+    expect(plainScoreRationale("verified source, ownership renounced."))
+      .toBe("The source code is verified, and ownership has been renounced.");
+    expect(plainScoreRationale("$3,071,603 pooled, LP mostly in one wallet."))
+      .toBe("The liquidity pool holds $3,071,603, but most liquidity-provider tokens are held in one wallet.");
+  });
+
+  it("keeps an unfamiliar recorded rationale intact and makes it a sentence", () => {
+    expect(plainScoreRationale("Listed for two years"))
+      .toBe("Listed for two years.");
   });
 });
 
 describe("composeWhy", () => {
-  it("leads with the strongest dimension and names the drag, in the engine's own words", () => {
+  it("leads with the strongest dimension and names the main concern in plain language", () => {
     const segments = composeWhy({ score: 62, capApplied: null, axes } as never)!;
     const text = segments.map((segment) => segment.text).join("");
 
-    expect(text.startsWith("Liquidity & lock carries the file at 22 of 24 points.")).toBe(true);
+    expect(text.startsWith("Liquidity setup scored 22 of 24 points.")).toBe(true);
     // The rationale gets a terminal period added when the engine omitted one.
     expect(text).toContain("LP burned in full at launch.");
-    expect(text).toContain("The drag is Holder distribution at 4 of 16.");
+    expect(text).toContain("The main concern is holder concentration, which scored 4 of 16 points.");
     expect(text).toContain("Top wallet holds 41% of supply.");
     // Score fractions are the dotted figures.
     expect(segments.filter((segment) => segment.figure).map((segment) => segment.text))
-      .toEqual(["22 of 24 points", "4 of 16"]);
+      .toEqual(["22 of 24 points", "4 of 16 points"]);
   });
 
   it("appends the cap sentence only when a cap was recorded", () => {

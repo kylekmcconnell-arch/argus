@@ -131,8 +131,8 @@ describe("private person report evidence boundary", () => {
     const summary = container.querySelector("#decision-summary")?.textContent ?? "";
     expect(summary).toContain("Strongest evidence");
     expect(summary).toContain("A verified operating record supports the base case");
-    expect(summary).toContain("Sharpest concern");
-    expect(summary).toContain("What would change it");
+    expect(summary).toContain("Main risk");
+    expect(summary).toContain("What to check next");
     expect(summary).toContain("A related-party relationship needs review");
     expect(summary).toContain("score-neutral derivation");
     expect(dossier.report.governing_score).toBe(base.report.governing_score);
@@ -243,7 +243,7 @@ describe("private person report evidence boundary", () => {
     expect(alert?.querySelector('a[href="https://x.com/driftprotocol"]')).not.toBeNull();
     expect(alert?.querySelector('a[href="https://defillama.com/protocol/drift"]')).not.toBeNull();
     const synthesis = container.querySelector('[aria-label="Case synthesis"]')?.textContent ?? "";
-    expect(synthesis).toContain("Sharpest concern");
+    expect(synthesis).toContain("Main risk");
     expect(synthesis).toContain("The score is limited because of:");
     expect(synthesis).toContain("Critical protocol loss");
   });
@@ -1629,7 +1629,7 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Current score 71");
     expect(container.textContent).not.toContain("score withheld");
     const synthesis = container.querySelector('[aria-label="Case synthesis"]')?.textContent ?? "";
-    expect(synthesis).toContain("What would change it");
+    expect(synthesis).toContain("What to check next");
     expect(synthesis).not.toContain("No checks remain open");
   });
 

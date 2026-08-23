@@ -304,6 +304,7 @@ export interface VerdictArgumentInputs {
   concerns?: readonly (string | null | undefined)[];
   capReason?: string | null;
   nextChecks?: readonly (string | null | undefined)[];
+  applicableChecks?: number;
 }
 
 export interface VerdictArgument {
@@ -347,6 +348,8 @@ export function deriveVerdictArgument(input: VerdictArgumentInputs): VerdictArgu
         : null,
     moveLine: next.length
       ? `${next.join("; ")}.`
-      : "No checks remain open; a rescan would test whether this result still holds.",
+      : input.applicableChecks === 0
+        ? "No check results were saved with this report. Run a new scan before relying on it."
+        : "No checks remain open. A new scan would show whether this result still holds.",
   };
 }
