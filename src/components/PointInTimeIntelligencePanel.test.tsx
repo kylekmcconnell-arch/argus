@@ -514,13 +514,13 @@ describe("PointInTimeIntelligencePanel", () => {
     expect(container.querySelector('[data-testid="complete-measurement-ledger"]')?.textContent)
       .toContain("Market capitalization");
     expect(container.querySelector('[data-testid="complete-measurement-ledger"]')?.textContent)
-      .toContain("P3_token_conduct deterministic scorer-packet evidence tier");
-    expect(container.querySelector('[aria-label="Frozen event chronology"]')?.textContent)
+      .not.toContain("P3_token_conduct deterministic scorer-packet evidence tier");
+    expect(container.querySelector('[aria-label="Saved event timeline"]')?.textContent)
       .toContain("Next reported unlock date");
     expect(container.querySelector('[data-testid="complete-source-ledger"]')?.textContent)
       .toContain("Official project documentation");
     expect(container.querySelector('[data-testid="complete-source-ledger"]')?.textContent)
-      .toContain("basicFacts.product");
+      .not.toContain("basicFacts.product");
     expect(container.querySelector('[data-testid="complete-source-ledger"]')?.textContent)
       .toContain("provider updated Aug 1, 2026");
   });
@@ -566,7 +566,7 @@ describe("PointInTimeIntelligencePanel", () => {
     const ledger = container.querySelector('[data-testid="complete-question-ledger"]');
     expect(ledger?.querySelectorAll("li")).toHaveLength(value.questions.length);
     for (const question of value.questions) {
-      expect(ledger?.textContent).toContain(question.id);
+      expect(ledger?.textContent).not.toContain(question.id);
       expect(ledger?.textContent).toContain(question.prompt);
       expect(ledger?.textContent).toContain(question.basis);
     }

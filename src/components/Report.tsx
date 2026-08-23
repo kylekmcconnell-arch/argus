@@ -3532,8 +3532,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             {intelligenceContextNarrative.length > 0 && (
               <ReportCanvasNarrativeSection
                 id="important-context"
-                title="Important context"
-                description="Relevant saved observations that are neither support nor an adverse finding."
+                title="Other useful context"
+                description="Facts worth knowing that do not raise or lower the result on their own."
                 tone="neutral"
                 items={intelligenceContextNarrative}
                 emptyCopy=""

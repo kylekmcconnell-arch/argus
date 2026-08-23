@@ -12,6 +12,7 @@ import {
   normalizeChain as normalizeGraphChain,
 } from "../graph/network";
 import { canonicalOfficialWebsite, isStrictFundScaleArtifact } from "../lib/fundScaleEvidence";
+import { axisLabel } from "../lib/verdict";
 import {
   portfolioRelationshipBinding,
   type PortfolioRelationshipBinding,
@@ -737,6 +738,31 @@ function projectAxisDomain(axis: string): IntelligenceDomain {
   if (axis.startsWith("P5_")) return "economics";
   if (axis.startsWith("P6_")) return "governance";
   return "identity";
+}
+
+const PUBLIC_STRENGTH_TIER: Record<string, string> = {
+  none: "not enough evidence to assess",
+  assessed_null: "checked, but no reliable supporting evidence was confirmed",
+  adverse: "evidence raises concerns",
+  emerging: "early or limited evidence",
+  solid: "strong evidence",
+  exceptional: "very strong evidence",
+};
+
+function publicStrengthBand(axis: string, tier: string, minimum: number, maximum: number): string {
+  const range = minimum === maximum ? `${minimum} points` : `${minimum}–${maximum} points`;
+  return `${axisLabel(axis)}: ${PUBLIC_STRENGTH_TIER[tier] ?? "evidence reviewed"} (${range})`;
+}
+
+function publicCalendarDate(value: string): string {
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
 }
 
 function buildSources(evidence: Readonly<CollectedEvidence>): IntelligenceSourceRef[] {
@@ -1662,9 +1688,9 @@ function buildMeasurements(evidence: Readonly<CollectedEvidence>): IntelligenceM
 
   if (derivedLaunchWindow) {
     const sourceRefs = ["snapshot:account-created-at", "snapshot:domain-registration", "snapshot:launch-window"];
-    measurements.push({ id: "launch_window_earliest_date", domain: "chronology", label: `Earliest observed ${derivedLaunchWindow.earliestSource} public-surface boundary`, unit: "date", valueType: "date", value: derivedLaunchWindow.earliest, entityKey, evidenceState: "bounded", sourceRefs });
-    measurements.push({ id: "launch_window_latest_date", domain: "chronology", label: `Latest observed ${derivedLaunchWindow.latestSource} public-surface boundary`, unit: "date", valueType: "date", value: derivedLaunchWindow.latest, entityKey, evidenceState: "bounded", sourceRefs });
-    addNumber(measurements, derivedLaunchWindow.gapMonths, { id: "launch_window_gap_months", domain: "chronology", label: "Recomputed gap between observed account and domain public-surface boundaries", unit: "months", entityKey, evidenceState: "bounded", sourceRefs });
+    measurements.push({ id: "launch_window_earliest_date", domain: "chronology", label: `Earliest ${derivedLaunchWindow.earliestSource} record found`, unit: "date", valueType: "date", value: derivedLaunchWindow.earliest, entityKey, evidenceState: "bounded", sourceRefs });
+    measurements.push({ id: "launch_window_latest_date", domain: "chronology", label: `Latest ${derivedLaunchWindow.latestSource} record found`, unit: "date", valueType: "date", value: derivedLaunchWindow.latest, entityKey, evidenceState: "bounded", sourceRefs });
+    addNumber(measurements, derivedLaunchWindow.gapMonths, { id: "launch_window_gap_months", domain: "chronology", label: "Time between the account and domain records", unit: "months", entityKey, evidenceState: "bounded", sourceRefs });
   }
 
   if (evidence.profile.profile_collection_state === "resolved") {
@@ -3220,10 +3246,10 @@ function buildSignals(
       domain: "governance",
       severity: "context",
       polarity: "neutral",
-      headline: "The scorer packet preserves axis-level evidence ranges",
-      finding: validBands.map(([axis, band]) => `${axis}: ${band.tier} (${band.minScore} to ${band.maxScore})`).join("; ") + ". These are deterministic evidence-band constraints from the frozen scorer packet, not new factual findings or investment recommendations.",
-      whyItMatters: "The ranges expose where verified records set a floor, where soft evidence only widens a ceiling, and where adverse or assessed-null evidence limits confidence.",
-      changeCondition: "Recompute only from a newly frozen scorer packet when the underlying evidence catalog changes.",
+      headline: "How strong the evidence is in each area",
+      finding: `${validBands.map(([axis, band]) => publicStrengthBand(axis, band.tier, band.minScore, band.maxScore)).join(". ")}. These ranges summarize the saved evidence; they do not add points or make an investment recommendation.`,
+      whyItMatters: "This shows which parts of the report rest on stronger evidence and which parts still need confirmation.",
+      changeCondition: "Run the report again when new reliable evidence becomes available.",
       evidenceState: "reported_context",
       measurementRefs,
       sourceRefs: validBands.map(([axis]) => projectStrengthSourceId(axis)),
@@ -4055,10 +4081,10 @@ function buildSignals(
       domain: "chronology",
       severity: "context",
       polarity: "neutral",
-      headline: "Observed account and domain launch boundaries are separated",
-      finding: `The earliest saved launch boundary is ${launchEarliest.value}; the latest is ${launchLatest.value}, a ${launchGapMonths}-month gap. These are observed account and domain boundaries, not a proved founding date, hidden relaunch, or deception finding.`,
-      whyItMatters: "The gap tells a reviewer where to reconcile product launch, domain history, account reuse, rebranding, and prelaunch community activity.",
-      changeCondition: "Recompute when an earlier primary launch artifact or a better-bound account or domain record is frozen.",
+      headline: "The project's online footprint appeared in two stages",
+      finding: `The earliest account or domain record we found dates to ${publicCalendarDate(launchEarliest.value)}. The other appeared on ${publicCalendarDate(launchLatest.value)}, about ${launchGapMonths} months later. This may reflect a later website or account launch, a rebrand, or earlier community activity. It does not prove when the project began or indicate wrongdoing.`,
+      whyItMatters: "The date gap is a useful prompt to compare the project's website, accounts, and stated launch history.",
+      changeCondition: "Run the report again if an older official account, website record, or launch announcement is found.",
       evidenceState: "bounded",
       measurementRefs,
       sourceRefs: refsFromMeasurements(measurementMap, measurementRefs),

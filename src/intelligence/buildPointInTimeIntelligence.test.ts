@@ -2268,7 +2268,7 @@ describe("buildPointInTimeIntelligence", () => {
       },
     }]);
     expect(capital?.finding).toContain("not protocol revenue, profit, treasury cash, valuation, or investor return");
-    expect(chronology?.finding).toContain("not a proved founding date, hidden relaunch, or deception finding");
+    expect(chronology?.finding).toContain("does not prove when the project began or indicate wrongdoing");
   });
 
   it("flags the unresolved scope bridge between an authentic audit engagement and current proxy code", () => {
@@ -2552,7 +2552,7 @@ describe("buildPointInTimeIntelligence", () => {
     expect(snapshot.measurements.find((row) => row.id === "project_strength_tier:P6_transparency_integrity"))
       .toMatchObject({ value: "adverse", evidenceState: "reported_context" });
     expect(snapshot.signals.find((signal) => signal.id === "project_strength_band_summary")?.finding)
-      .toContain("not new factual findings");
+      .toContain("do not add points or make an investment recommendation");
     const sourceIds = new Set(snapshot.sources.map((source) => source.id));
     for (const measurement of snapshot.measurements) {
       expect(measurement.sourceRefs.length, measurement.id).toBeGreaterThan(0);

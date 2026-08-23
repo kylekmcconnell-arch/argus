@@ -134,7 +134,8 @@ describe("private person report evidence boundary", () => {
     expect(summary).toContain("Main risk");
     expect(summary).toContain("What to check next");
     expect(summary).toContain("A related-party relationship needs review");
-    expect(summary).toContain("score-neutral derivation");
+    expect(summary).toContain("Verified evidence");
+    expect(summary).not.toContain("score-neutral derivation");
     expect(dossier.report.governing_score).toBe(base.report.governing_score);
 
     const synthesis = container.querySelector('[aria-label="Case synthesis"]')!;

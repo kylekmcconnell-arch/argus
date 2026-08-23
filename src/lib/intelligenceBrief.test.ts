@@ -121,11 +121,11 @@ describe("deriveIntelligenceBrief", () => {
 
     expect(brief.supports[0]).toMatchObject({
       title: "Three outcomes were verified.",
-      provenance: expect.stringContaining("Verified saved evidence"),
+      provenance: expect.stringContaining("Verified evidence"),
     });
     expect(brief.pressures[0]).toMatchObject({
-      title: "Source-reported context: control remains concentrated.",
-      provenance: expect.stringContaining("Source-reported context"),
+      title: "Control remains concentrated.",
+      provenance: expect.stringContaining("Reported by a source"),
     });
     expect(brief.questions).toEqual([expect.objectContaining({
       title: "Who legally owns the company?",
@@ -133,8 +133,8 @@ describe("deriveIntelligenceBrief", () => {
       provenance: expect.stringContaining("unavailable"),
     })]);
     expect(brief.context[0]).toMatchObject({
-      title: "Source-reported context: a leadership transition is recorded.",
-      provenance: expect.stringContaining("score-neutral derivation"),
+      title: "A leadership transition is recorded.",
+      provenance: expect.stringContaining("Reported by a source"),
     });
     expect(JSON.stringify(brief.questions)).not.toContain("unrelated credential");
   });
@@ -191,9 +191,9 @@ describe("deriveIntelligenceBrief", () => {
 
     const brief = deriveIntelligenceBrief(value);
 
-    expect(brief.supports[0]?.provenance).toContain("Verified saved evidence");
-    expect(brief.pressures[0]?.provenance).toContain("Source-reported context");
-    expect(brief.context[0]?.provenance).toContain("Source-reported context");
-    expect(brief.questions[0]?.provenance).toContain("score-neutral");
+    expect(brief.supports[0]?.provenance).toContain("Verified evidence");
+    expect(brief.pressures[0]?.provenance).toContain("Reported by a source");
+    expect(brief.context[0]?.provenance).toContain("Reported by a source");
+    expect(brief.questions[0]?.provenance).toContain("Check unavailable");
   });
 });

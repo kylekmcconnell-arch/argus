@@ -17,6 +17,7 @@ import {
   publicMeasurementTitle,
   publicQuestionStateLabel,
   publicSignalCopy,
+  publicIntelligenceText,
 } from "../lib/intelligencePresentation";
 
 const LENS_ORDER: DecisionLensId[] = [
@@ -161,7 +162,7 @@ function numberLabel(value: number, maximumFractionDigits = 2): string {
 }
 
 function measurementValue(measurement: IntelligenceMeasurement): string {
-  if (measurement.valueType === "date") return measurement.value;
+  if (measurement.valueType === "date") return timestampLabel(measurement.value);
   if (measurement.valueType === "text") {
     if (measurement.value === "true") return "Yes";
     if (measurement.value === "false") return "No";
@@ -333,21 +334,23 @@ function thesisText(
   pressure: DerivedIntelligenceSignal | undefined,
   lens: DecisionLens,
 ): string {
+  const supportHeadline = support ? publicSignalCopy(support).headline : null;
+  const pressureHeadline = pressure ? publicSignalCopy(pressure).headline : null;
   if (support && pressure) {
-    return `${cleanSentence(support.headline)} is the strongest support. ${cleanSentence(pressure.headline)} is the strongest pressure.`;
+    return `${cleanSentence(supportHeadline ?? support.headline)} is the strongest support. ${cleanSentence(pressureHeadline ?? pressure.headline)} is the strongest pressure.`;
   }
   if (support) {
-    return `${cleanSentence(support.headline)} is the strongest support. The saved evidence did not establish a pressure finding for the ${lens.label.toLowerCase()} view. That does not mean no risk exists.`;
+    return `${cleanSentence(supportHeadline ?? support.headline)} is the strongest support. The saved evidence did not establish a pressure finding for the ${lens.label.toLowerCase()} view. That does not mean no risk exists.`;
   }
   if (pressure) {
-    return `${cleanSentence(pressure.headline)} is the strongest pressure. The saved evidence did not establish a supporting finding for the ${lens.label.toLowerCase()} view. That does not mean no support exists.`;
+    return `${cleanSentence(pressureHeadline ?? pressure.headline)} is the strongest pressure. The saved evidence did not establish a supporting finding for the ${lens.label.toLowerCase()} view. That does not mean no support exists.`;
   }
   return `The saved evidence does not support a conclusion for the ${lens.label.toLowerCase()} view yet. That does not mean the subject is safe or unsafe.`;
 }
 
 function scenarioCondition(signal: DerivedIntelligenceSignal | undefined): string | null {
   const condition = signal?.changeCondition?.replace(/\s+/g, " ").trim();
-  return condition || null;
+  return condition ? publicIntelligenceText(condition) : null;
 }
 
 function SummaryCard({
@@ -447,12 +450,12 @@ export function PointInTimeIntelligencePanel({
         : derivedThesis;
   const measurementIndex = new Map(snapshot.measurements.map((measurement) => [measurement.id, measurement]));
   const sourceIndex = new Map(snapshot.sources.map((source) => [source.id, source]));
-  const activeChangeConditions = new Set(selectedLens.changeConditions.map((condition) => condition.toLowerCase()));
+  const activeChangeConditions = new Set(selectedLens.changeConditions.map((condition) => publicIntelligenceText(condition).toLowerCase()));
   const changeConditions = uniqueText([
     ...selectedLens.changeConditions,
     ...lenses.flatMap((lens) => lens.changeConditions),
     ...sortedSignals.map((signal) => signal.changeCondition),
-  ]);
+  ]).map(publicIntelligenceText);
   const coverageIndex = new Map(snapshot.coverage.map((record) => [record.domain, record]));
   const priorityDomains = selectedLens.domainPriority;
   const priorityIndex = new Map(priorityDomains.map((domain, index) => [domain, index]));
@@ -484,7 +487,8 @@ export function PointInTimeIntelligencePanel({
       || left.label.localeCompare(right.label)
       || left.id.localeCompare(right.id);
   });
-  const priorityMeasurements = orderedMeasurements.filter(isPublicMeasurement).slice(0, 12);
+  const publicMeasurements = orderedMeasurements.filter(isPublicMeasurement);
+  const priorityMeasurements = publicMeasurements.slice(0, 12);
   const chronologyMeasurements = snapshot.measurements
     .filter((measurement) => measurement.valueType === "date")
     .sort((left, right) => {
@@ -522,7 +526,7 @@ export function PointInTimeIntelligencePanel({
   };
 
   const recheckCondition = hasUsableThesis
-    ? selectedLens.changeConditions[0] ?? scenarioCondition(strongestPressure) ?? null
+    ? (selectedLens.changeConditions[0] ? publicIntelligenceText(selectedLens.changeConditions[0]) : scenarioCondition(strongestPressure)) ?? null
     : null;
   const evidenceNeeded = criticalDecisionGaps[0]?.prompt ?? questions[0]?.prompt ?? null;
 
@@ -712,17 +716,17 @@ export function PointInTimeIntelligencePanel({
             )}
 
             {chronologyMeasurements.length > 0 && (
-              <div className="panel-inset mt-3 overflow-hidden" aria-label="Frozen event chronology">
+              <div className="panel-inset mt-3 overflow-hidden" aria-label="Saved event timeline">
                 <div className="border-b border-line/60 px-4 py-3">
-                  <p className="eyebrow">Frozen event chronology</p>
-                  <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">Dates are provider or artifact observations. They are not reconstructed founding claims unless the cited measurement says so.</p>
+                  <p className="eyebrow">Saved event timeline</p>
+                  <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">These are dates found in saved sources. They are not treated as the project's founding date unless a cited source says so.</p>
                 </div>
                 <ol className="grid gap-px bg-line/50 md:grid-cols-2">
                   {chronologyMeasurements.map((measurement) => (
                     <li key={measurement.id} className="bg-panel px-4 py-3">
                       <p className="mono text-[11.5px] text-ink">{timestampLabel(String(measurement.value))}</p>
                       <p className="mt-1 text-[11.5px] leading-snug text-ink-dim">{measurement.label}</p>
-                      <p className="mt-1 text-[10px] text-ink-faint">{words(measurement.evidenceState)} · {words(measurement.domain)}</p>
+                      <p className="mt-1 text-[10px] text-ink-faint">{publicEvidenceLabel(measurement.evidenceState)} · {words(measurement.domain)}</p>
                     </li>
                   ))}
                 </ol>
@@ -731,20 +735,19 @@ export function PointInTimeIntelligencePanel({
 
             <details className="panel-inset mt-3 overflow-hidden" data-testid="complete-measurement-ledger">
               <summary className="cursor-pointer px-4 py-3 text-[12.5px] font-medium text-ink hover:bg-panel-2/60">
-                Technical measurement details · {orderedMeasurements.length} records
+                All saved measurements · {publicMeasurements.length} records
               </summary>
               <ol className="border-t border-line/60">
-                {orderedMeasurements.map((measurement) => {
+                {publicMeasurements.map((measurement) => {
                   const measurementSources = measurement.sourceRefs.map((id) => sourceIndex.get(id)).filter(Boolean);
                   return (
                     <li key={measurement.id} className="border-b border-line/50 px-4 py-3 last:border-b-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="chip">{words(measurement.domain)}</span>
-                        <span className="chip">{words(measurement.evidenceState)}</span>
-                        <span className="mono ml-auto text-[10px] text-ink-faint">{measurement.id}</span>
+                        <span className="chip">{publicEvidenceLabel(measurement.evidenceState)}</span>
                       </div>
                       <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                        <p className="text-[12.5px] font-medium text-ink">{measurement.label}</p>
+                        <p className="text-[12.5px] font-medium text-ink">{publicMeasurementTitle(measurement)}</p>
                         <p className="mono text-[12px] text-signal-lift">{measurementValue(measurement)}</p>
                       </div>
                       <p className="mt-1 text-[10.5px] leading-relaxed text-ink-faint">{measurementCaptureLabel(measurement, sourceIndex)}</p>
@@ -775,15 +778,14 @@ export function PointInTimeIntelligencePanel({
                   return (
                     <li key={source.id} className="border-b border-line/50 px-4 py-3 last:border-b-0">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="chip">{words(source.evidenceState)}</span>
+                        <span className="chip">{publicEvidenceLabel(source.evidenceState)}</span>
                         <span className="chip">{words(source.sourceClass)}</span>
-                        <span className="mono ml-auto text-[10px] text-ink-faint">{source.id}</span>
                       </div>
                       <h4 className="mt-2 text-[12.5px] font-medium leading-snug text-ink">
                         {href ? <a href={href} target="_blank" rel="noopener noreferrer" className="link-ext">{source.title}</a> : source.title}
                       </h4>
                       <p className="mt-1 text-[10.5px] leading-relaxed text-ink-faint">
-                        {source.provider} · ARGUS observed {source.capturedAt ? timestampLabel(source.capturedAt) : "time not recorded"}{source.providerUpdatedAt ? ` · provider updated ${timestampLabel(source.providerUpdatedAt)}` : ""} · {source.inputPath}
+                        {source.provider} · ARGUS observed {source.capturedAt ? timestampLabel(source.capturedAt) : "time not recorded"}{source.providerUpdatedAt ? ` · provider updated ${timestampLabel(source.providerUpdatedAt)}` : ""}
                       </p>
                       {source.excerpt && <p className="mt-2 text-[11.5px] leading-relaxed text-ink-dim">{source.excerpt}</p>}
                       {source.contentHashes && source.contentHashes.length > 0 && (
@@ -861,12 +863,12 @@ export function PointInTimeIntelligencePanel({
                       <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">{copy.finding}</p>
                       <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-faint"><span className="font-medium text-ink-dim">Why it matters:</span> {copy.whyItMatters}</p>
                       {signal.changeCondition && (
-                        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint"><span className="font-medium text-ink-dim">What would change this:</span> {signal.changeCondition}</p>
+                        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint"><span className="font-medium text-ink-dim">What would change this:</span> {copy.changeCondition}</p>
                       )}
 
                       <details className="mt-3 border-t border-line/60 pt-2 text-[10.5px] text-ink-faint">
                         <summary className="cursor-pointer font-medium text-ink-dim">Technical and source details</summary>
-                        <p className="mono mt-2">Rule {signal.ruleId} v{signal.ruleVersion} · {words(signal.kind)} · {words(signal.evidenceState)}</p>
+                        <p className="mt-2">{publicEvidenceLabel(signal.evidenceState)} · {sources.length} source reference{sources.length === 1 ? "" : "s"}</p>
                       {signal.arithmetic && signal.arithmetic.length > 0 && (
                         <div className="mt-3" aria-label={`Arithmetic receipts for ${signal.headline}`}>
                           <p className="eyebrow">Arithmetic receipts</p>
@@ -916,7 +918,7 @@ export function PointInTimeIntelligencePanel({
               </ol>
             ) : (
               <p className="panel-inset mt-3 px-4 py-3 text-[12px] leading-relaxed text-ink-faint">
-                No derived signal is stored in this snapshot. Coverage records remain visible below.
+                No finding is stored with this report. Completed and open checks remain visible below.
               </p>
             )}
           </section>
@@ -924,16 +926,16 @@ export function PointInTimeIntelligencePanel({
           <section className="mt-5" aria-labelledby={`${panelId}-questions-title`}>
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <p className="eyebrow text-signal-lift">Question ledger</p>
-                <h3 id={`${panelId}-questions-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Every tracked diligence question</h3>
+                <p className="eyebrow text-signal-lift">Report questions</p>
+                <h3 id={`${panelId}-questions-title`} className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Every question ARGUS checked</h3>
               </div>
               <p className="ml-auto max-w-xl text-right text-[11px] leading-relaxed text-ink-faint">
-                A related metric never answers a different question. Each state and basis comes from the frozen collection record.
+                A related number never answers a different question. Every answer and status comes from the evidence saved with this report.
               </p>
             </div>
             <details className="panel-inset mt-3 overflow-hidden" data-testid="complete-question-ledger">
               <summary className="cursor-pointer px-4 py-3 text-[12.5px] font-medium text-ink hover:bg-panel-2/60">
-                Open full ledger · {allQuestions.length} questions · {questions.length} open
+                Show all questions · {allQuestions.length} total · {questions.length} open
               </summary>
               <ol className="border-t border-line/60">
                 {allQuestions.map((question) => {
@@ -941,14 +943,13 @@ export function PointInTimeIntelligencePanel({
                   return (
                     <li key={question.id} className="border-b border-line/50 px-4 py-3 last:border-b-0">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <span className={`chip ${OPEN_QUESTION_STATES.has(question.state) ? "tint-caution" : "tint-pass"}`}>{words(question.state)}</span>
+                        <span className={`chip ${OPEN_QUESTION_STATES.has(question.state) ? "tint-caution" : "tint-pass"}`}>{publicQuestionStateLabel(question.state)}</span>
                         <span className="chip">{words(question.materiality)}</span>
                         <span className="chip">{words(question.domain)}</span>
-                        <span className="mono ml-auto text-[10px] text-ink-faint">{question.id}</span>
                       </div>
                       <h4 className="mt-2 text-[13px] font-semibold leading-snug text-ink">{question.prompt}</h4>
                       <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">{question.basis}</p>
-                      <p className="mono mt-2 text-[10px] text-ink-faint">{question.answerRefs.length} answer refs · {question.sourceRefs.length} source refs</p>
+                      <p className="mt-2 text-[10px] text-ink-faint">{question.answerRefs.length} saved answer{question.answerRefs.length === 1 ? "" : "s"} · {question.sourceRefs.length} source reference{question.sourceRefs.length === 1 ? "" : "s"}</p>
                       {sources.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] text-ink-faint">
                           {sources.map((source) => {

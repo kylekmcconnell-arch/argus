@@ -5,6 +5,7 @@ import {
   publicEvidenceLabel,
   publicMeasurementTitle,
   publicQuestionStateLabel,
+  publicIntelligenceText,
   publicSignalCopy,
 } from "./intelligencePresentation";
 
@@ -69,5 +70,41 @@ describe("public Decision Intelligence presentation", () => {
     expect(copy.headline).toContain("conclusions were withheld");
     expect(copy.finding).toContain("3 report items");
     expect(`${copy.headline} ${copy.finding}`).not.toContain("integrity-gate");
+  });
+
+  it("translates legacy scorer bands without changing their ranges or treating checked-empty evidence as negative", () => {
+    const copy = publicSignalCopy(signal({
+      id: "project_strength_band_summary",
+      ruleId: "project-strength-band-summary",
+      headline: "The scorer packet preserves axis-level evidence ranges",
+      finding: "P1_team_and_identity: solid (12 to 13); P2_product_and_execution: emerging (10 to 16); P3_token_conduct: solid (14 to 16); P4_backers_and_partnerships: assessed_null (0 to 0). These are deterministic evidence-band constraints from the frozen scorer packet.",
+      whyItMatters: "Assessed-null evidence limits confidence.",
+    }));
+
+    expect(copy.headline).toBe("How strong the evidence is in each area");
+    expect(copy.finding).toContain("Team and leadership: strong evidence (12–13 points)");
+    expect(copy.finding).toContain("Backers and partnerships: checked, but no reliable supporting evidence was confirmed (0 points)");
+    expect(JSON.stringify(copy)).not.toMatch(/scorer|assessed_null|P\d_|deterministic|frozen/i);
+  });
+
+  it("turns legacy launch timestamps into a readable, neutral explanation", () => {
+    const copy = publicSignalCopy(signal({
+      id: "launch_boundary_gap",
+      ruleId: "launch-boundary-gap",
+      headline: "Observed account and domain launch boundaries are separated",
+      finding: "The earliest saved launch boundary is 2024-08-31T14:43:47.000Z; the latest is 2026-03-03T16:49:55.000Z, a 18-month gap. These are observed account and domain boundaries, not a proved founding date, hidden relaunch, or deception finding.",
+    }));
+
+    expect(copy.headline).toBe("The project's online footprint appeared in two stages");
+    expect(copy.finding).toContain("August 31, 2024");
+    expect(copy.finding).toContain("March 3, 2026");
+    expect(copy.finding).toContain("does not prove when the project began or indicate wrongdoing");
+    expect(copy.finding).not.toMatch(/\d{4}-\d{2}-\d{2}T|boundar|hidden relaunch/i);
+  });
+
+  it("removes internal source-tracing vocabulary from generic saved findings", () => {
+    const copy = publicIntelligenceText("Part of the derived intelligence failed its lineage contract after 3 fail-closed integrity events.");
+    expect(copy).toContain("source-link check");
+    expect(copy).not.toMatch(/lineage contract|fail-closed|integrity events/i);
   });
 });
