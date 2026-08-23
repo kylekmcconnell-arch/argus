@@ -738,3 +738,47 @@ The source contained the saved-Uniswap explainer, divider, and action the user a
 - Focused landing and App routing tests pass (41 tests); TypeScript and scoped ESLint pass.
 
 final result: passed
+
+---
+
+# Design QA — condensed-header logo parity (2026-08-23)
+
+- Source visual truth: `docs/design-qa/mobile-logo-parity-2026-08-23/source-old-mobile-logo.png`, showing the inconsistent legacy eye in the condensed header
+- Browser implementation: `docs/design-qa/mobile-logo-parity-2026-08-23/implementation-mobile-v1.png`
+- Focused implementation: `docs/design-qa/mobile-logo-parity-2026-08-23/implementation-header-v1.png`
+- Combined comparison: `docs/design-qa/mobile-logo-parity-2026-08-23/comparison-v1.png`
+- Viewport: 390 × 844 CSS pixels at device scale 1; the in-app capture transport produced 395 × 795 pixels
+- Source pixels: 245 × 159; focused source header crop: 245 × 58
+- Implementation focused pixels: 390 × 56, preserving the native condensed-header CSS height
+- State: authenticated light-theme New Investigation page, mobile/condensed shell, drawer closed
+
+## Findings
+
+The P2 responsive identity mismatch shown in the source is resolved. No actionable P0, P1, or P2 differences remain.
+
+- Fonts and typography: the condensed wordmark now uses the same semibold interface treatment and 0.045em tracking as the expanded lockup, scaled to 14px for the 56px header.
+- Spacing and layout rhythm: the selected 28px seal replaces the 22px legacy almond without changing the menu target, 56px header height, or surrounding mobile content position.
+- Colors and visual tokens: the iris uses the ARGUS brand-green token and the remaining mark colors inherit the same theme-aware tokens as the expanded sidebar.
+- Image quality and asset fidelity: the condensed header now renders the selected option 3 point-field seal rather than the old eye. Its aperture, iris, pupil, and catchlight remain sharp at 28px.
+- Copy and content: the `ARGUS` wordmark and `New investigation` context are unchanged.
+- Motion and accessibility: the mobile mark uses the same slow pupil-only observing loop and the same reduced-motion override as the expanded logo.
+
+## Full and focused evidence
+
+The full mobile capture confirms the header remains stable above the responsive landing page. The focused before/after comparison was required to make the small mark legible and confirms that the old almond is gone while menu spacing and wordmark position remain consistent.
+
+## Comparison history
+
+### Iteration 1
+
+- Earlier finding: P2, the condensed header used the legacy default eye while the expanded sidebar used the selected option 3 seal.
+- Fix: passed the brand tone, seal variant, and observing pupil motion into the mobile AppShell header; aligned its wordmark treatment with the expanded header.
+- Post-fix evidence: `docs/design-qa/mobile-logo-parity-2026-08-23/comparison-v1.png`.
+
+## Runtime checks
+
+- Browser measurement: 28 × 28 seal inside a 395 × 56 rendered mobile header; `data-argus-eye-variant="seal"` and brand tone confirmed.
+- Browser console: zero errors and zero warnings.
+- Automated verification: 18 focused AppShell, mark, and navigation tests passed; production build passed.
+
+final result: passed

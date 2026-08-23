@@ -96,8 +96,8 @@ export function AppShell({
           >
             <ListIcon size={21} weight="regular" aria-hidden />
           </button>
-          <ArgusMark size={22} />
-          <span className="display text-[13.5px] tracking-[0.02em] text-ink">ARGUS</span>
+          <ArgusMark size={28} tone="brand" variant="seal" pupilMotion="observe" />
+          <span className="text-[14px] font-semibold tracking-[0.045em] text-ink">ARGUS</span>
           <span className="mono ml-auto hidden text-[10px] uppercase tracking-[0.12em] text-ink-faint sm:block">New investigation</span>
         </div>
 

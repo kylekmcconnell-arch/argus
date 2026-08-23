@@ -20,7 +20,18 @@ vi.mock("../auth-context", () => ({
   }),
 }));
 
-vi.mock("./ArgusMark", () => ({ ArgusMark: () => <span aria-hidden="true">ARGUS</span> }));
+vi.mock("./ArgusMark", () => ({
+  ArgusMark: ({ size, tone, variant, pupilMotion }: { size?: number; tone?: string; variant?: string; pupilMotion?: string }) => (
+    <svg
+      data-testid="argus-mark"
+      data-size={size}
+      data-tone={tone}
+      data-variant={variant}
+      data-pupil-motion={pupilMotion}
+      aria-hidden="true"
+    />
+  ),
+}));
 vi.mock("../lib/watchlist", () => ({ getWatchlist: () => [] }));
 vi.mock("../lib/analyst", () => ({ getAnalyst: () => "Kyle McConnell" }));
 vi.mock("../lib/avatars", () => ({ auditImage: () => null }));
@@ -106,6 +117,12 @@ afterEach(async () => {
 describe("AppShell mobile navigation drawer", () => {
   it("keeps discovery and monitoring visible without duplicating investigation engines", async () => {
     await renderShell();
+
+    const condensedMark = container.querySelector<SVGSVGElement>(".app-mobile-header [data-testid='argus-mark']");
+    expect(condensedMark?.getAttribute("data-size")).toBe("28");
+    expect(condensedMark?.getAttribute("data-tone")).toBe("brand");
+    expect(condensedMark?.getAttribute("data-variant")).toBe("seal");
+    expect(condensedMark?.getAttribute("data-pupil-motion")).toBe("observe");
 
     const navigation = drawer().querySelector<HTMLElement>("nav[aria-label='Primary']");
     expect(navigation?.textContent).toContain("New investigation");
