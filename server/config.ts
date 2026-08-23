@@ -13,8 +13,8 @@ export interface ProviderInfo {
 export const PROVIDERS: ProviderInfo[] = [
   { id: "claude-research", label: "Claude (optional fallback research)", env: ["ANTHROPIC_API_KEY"], free: false, feeds: "optional cited-research fallback when ARGUS_PROVIDER_FALLBACKS is on" },
   { id: "grok", label: "Grok (primary LLM + X/web discovery)", env: ["XAI_API_KEY"], free: false, feeds: "analyst scoring, extract, vision, testimonial acknowledgment, recent activity, sentiment, portfolio and fund-scale leads" },
-  { id: "twitterapi", label: "twitterapi.io (X follow graph)", env: ["TWITTERAPI_KEY"], free: false, feeds: "follower/following graph, profile, account age" },
-  { id: "x-api-bearer", label: "Official X API v2 (authenticity fallback)", env: ["X_API_BEARER"], free: false, feeds: "optional x-authenticity fallback; twitterapi.io is primary" },
+  { id: "twitterapi", label: "twitterapi.io (X intelligence)", env: ["TWITTERAPI_KEY"], free: false, feeds: "follower/following graph, profile, account age, bounded project conversation fallback" },
+  { id: "x-api-bearer", label: "Official X API v2 (optional authenticity + social activity)", env: ["X_API_BEARER"], free: false, feeds: "optional x-authenticity and social-activity provider; twitterapi.io remains the production fallback" },
   { id: "safebrowsing", label: "Google Safe Browsing", env: ["GOOGLE_SAFE_BROWSING_KEY"], free: false, feeds: "optional best-recall site-safety; GoPlus/URLhaus/heuristics still run" },
   { id: "coingecko", label: "CoinGecko", env: ["COINGECKO_API_KEY"], free: true, feeds: "token price/mcap, call performance (K2)" },
   { id: "cryptorank", label: "CryptoRank", env: ["CRYPTORANK_API_KEY"], free: false, feeds: "market intel: rank, ATH drawdown, dilution, unlock/vesting flags" },

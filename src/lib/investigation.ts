@@ -17,6 +17,7 @@
 //   - recon.team.state drives the founder section verbatim; a coverage gap is a
 //     gap, not an absence claim.
 import { auditToken, type TokenDossier } from "../token/audit";
+import { collectTokenSocialActivity } from "./socialActivityClient";
 import type { RunnableTokenInput } from "./resolveInput";
 import { runRecon, type Recon } from "../collect/recon";
 import { streamAudit, probeBackend } from "./live";
@@ -299,7 +300,7 @@ export function streamInvestigation(
       const token = await auditToken(
         input,
         (s) => { if (!aborted) h.onStep(s); },
-        { force: opts?.forceTokenAudit },
+        { force: opts?.forceTokenAudit, collectSocialActivity: collectTokenSocialActivity },
       );
       if (aborted) return;
       if (!token) { h.onError("Could not resolve that contract on any DEX."); return; }

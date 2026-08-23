@@ -6,6 +6,7 @@
 // onComplete does the data-side work (cache / persist / log / graph) regardless
 // of what the user is looking at.
 import { auditToken, type TokenDossier } from "../token/audit";
+import { collectTokenSocialActivity } from "./socialActivityClient";
 import { streamInvestigation, type Investigation } from "./investigation";
 import type { RunnableTokenInput } from "./resolveInput";
 import type { TraceStep } from "../data/evidence";
@@ -79,7 +80,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
       const d = await auditToken(
         input,
         (s) => { if (cancelled) return; count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(92, count * 18); emit(); },
-        { force: opts?.force },
+        { force: opts?.force, collectSocialActivity: collectTokenSocialActivity },
       );
       if (cancelled) return;
       if (!d) { run.status = "error"; run.error = "not_found"; emit(); }

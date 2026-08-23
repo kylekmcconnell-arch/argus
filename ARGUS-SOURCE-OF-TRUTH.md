@@ -170,6 +170,25 @@ under collapsed technical details. They do not appear as public headlines,
 metric labels, or badge stacks. Each public finding carries one primary status;
 priority, domain, and selected-view emphasis are supporting text.
 
+Project and token reports may also freeze a Social activity snapshot from X.
+The collector prefers the official X API when its bearer exists and otherwise
+uses the already configured twitterapi.io advanced-search provider. The first
+reading layer leads with distinct public accounts,
+not raw post volume, across explicit 24-hour and seven-day windows. It also
+shows post volume, change against the previous 24 hours, and the share produced
+by the ten most active accounts. Reposts are excluded from the saved rows.
+
+Social activity is descriptive context, not evidence that a project is safe,
+legitimate, investable, or popular with real customers. Its separate activity
+score never enters the ARGUS safety score, verdict, caps, readiness, or
+calibration. A complete score requires complete author pagination. When the
+configured post ceiling is reached, distinct-account counts publish as
+minimums, concentration and the activity score stay unknown, and the report
+states that limit in plain language. Missing X access or a failed provider read
+renders unavailable, never zero. Every snapshot preserves its query, capture
+time, source link, window boundaries, post-read ceiling, and estimated provider
+cost with the immutable report.
+
 One governing count controls open questions across the header, summary, report
 rail, persisted report, and public report. Optional vendor failures do not become
 fake investment questions.

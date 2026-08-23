@@ -7,6 +7,7 @@
 import type { RunnableTokenInput } from "../lib/resolveInput";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
 import type { TraceStep } from "../data/evidence";
+import type { SocialActivitySnapshot } from "../data/socialActivity";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { tokenEntityKey, walletEntityKey } from "../graph/network";
 import { fetchPriceHistory, type PriceHistory } from "../lib/priceHistory";
@@ -148,6 +149,8 @@ export interface TokenDossier {
   safety: NormalizedSafety;
   socials: { label: string; url: string }[];
   projectX: string | null;
+  /** Frozen X conversation breadth captured as part of this token scan. */
+  socialActivity?: SocialActivitySnapshot;
   deployer: string | null;
   /** Which source named the deployer, and whether it proved the creation. */
   deployerAttribution?: DeployerAttribution;
@@ -239,6 +242,11 @@ export interface DeployerRiskOutcome {
   completedAt: string;
 }
 export type ScreenDeployerRiskFn = (address: string) => Promise<DeployerRiskOutcome | undefined>;
+export type CollectTokenSocialActivityFn = (identity: {
+  handle: string;
+  ticker: string;
+  projectName: string;
+}) => Promise<SocialActivitySnapshot>;
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
@@ -515,11 +523,11 @@ const CACHE_TTL = 60_000;
 export async function auditToken(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn },
+  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
-  const key = `${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}`;
+  const key = `${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}`;
   const hit = opts?.force ? undefined : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
   const d = await runTokenAudit(input, emit, opts);
@@ -530,7 +538,7 @@ export async function auditToken(
 async function runTokenAudit(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn },
+  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn; collectSocialActivity?: CollectTokenSocialActivityFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const trace: TraceStep[] = [];
@@ -1104,6 +1112,13 @@ async function runTokenAudit(
     handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) ||
     handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) ||
     (cg?.twitter ? "@" + cg.twitter : null); // CoinGecko's official X account (blue-chip fallback)
+  const socialActivity = projectX && opts?.collectSocialActivity
+    ? await opts.collectSocialActivity({
+        handle: projectX,
+        ticker: pair.baseToken.symbol,
+        projectName: pair.baseToken.name,
+      }).catch(() => undefined)
+    : undefined;
   const deployer = deployerAttribution?.address ?? null;
   // What the report is allowed to call this wallet. Only a source that saw the
   // creation signed earns the word "deployer"; everything else is an address a
@@ -1232,7 +1247,7 @@ async function runTokenAudit(
     // page as the finding explaining that the 37% line is the pool itself.
     verdict, score, capApplied, headline, axes, safety: { ...s, topHolderPct: concentrationTopPct }, socials,
     holdersAssessed: holdersReliable,
-    projectX, deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
+    projectX, ...(socialActivity ? { socialActivity } : {}), deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
     topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
     sanctionsScreen,
     deployerRisk,

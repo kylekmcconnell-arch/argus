@@ -230,6 +230,8 @@ export interface Dossier {
   evmControlReality?: EvmControlRealitySnapshot;
   /** Frozen protocol fundamentals (DeFiLlama), for the hero strip. */
   protocolTvl?: CollectedEvidence["protocolTvl"];
+  /** Frozen public X conversation breadth and volume. Separate from the verdict. */
+  socialActivity?: CollectedEvidence["socialActivity"];
   protocolFunding?: CollectedEvidence["protocolFunding"];
   /** Frozen protocol fee totals (DeFiLlama); the second dated usage metric for the charts. */
   protocolFees?: CollectedEvidence["protocolFees"];
@@ -497,6 +499,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     days_since_post: ev.profile.days_since_post,
     identity_note: ev.profile.identity_note,
     prior_handles: ev.profile.prior_handles,
+    ...(ev.socialActivity ? { socialActivity: structuredClone(ev.socialActivity) } : {}),
     headline: ev.headline,
     live,
     ...(ev.axisCitationVersion === 1 && ev.axisEvidenceCatalog ? {
