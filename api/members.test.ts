@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   ensureGrowthProfile: vi.fn(),
   ensureStartingCredits: vi.fn(),
+  grantManualTestCredits: vi.fn(),
 }));
 
 vi.mock("@supabase/supabase-js", () => ({
@@ -26,9 +27,10 @@ vi.mock("./_auth.js", () => ({
 vi.mock("./_growth.js", () => ({
   ensureGrowthProfile: mocks.ensureGrowthProfile,
   ensureStartingCredits: mocks.ensureStartingCredits,
+  grantManualTestCredits: mocks.grantManualTestCredits,
 }));
 
-import handler from "./members";
+import handler, { summarizeMemberBudgets } from "./members";
 
 const ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
 const OWNER_ID = "00000000-0000-4000-8000-000000000010";
@@ -126,6 +128,7 @@ describe("workspace member invitation recovery", () => {
       createdAt: member.created_at,
     });
     mocks.ensureStartingCredits.mockResolvedValue(undefined);
+    mocks.grantManualTestCredits.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -211,5 +214,64 @@ describe("workspace member invitation recovery", () => {
       message: "Supabase could not resend the invitation.",
     });
     expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("lets an owner make an idempotent bounded grant to an active analyst", async () => {
+    useExistingMember();
+    mocks.listUsers.mockResolvedValue({ data: { users: [authUser(true)] }, error: null });
+    const analyst = { ...member, role: "analyst" };
+    const chain = {
+      eq: vi.fn(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: analyst, error: null }),
+    };
+    chain.eq.mockReturnValue(chain);
+    mocks.from.mockReturnValue({ select: vi.fn(() => chain) });
+    const { res, captured } = response();
+
+    await handler(request("PUT", {
+      userId: MEMBER_ID,
+      grantTestCredits: 5,
+      idempotencyKey: "00000000-0000-4000-8000-000000000030",
+    }), res);
+
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toMatchObject({ grantedCredits: 5 });
+    expect(mocks.grantManualTestCredits).toHaveBeenCalledWith(expect.anything(), {
+      userId: MEMBER_ID,
+      organizationId: ORGANIZATION_ID,
+      actorUserId: OWNER_ID,
+      credits: 5,
+      requestId: "00000000-0000-4000-8000-000000000030",
+    });
+  });
+
+  it("rejects grants above the hard per-request ceiling", async () => {
+    useExistingMember();
+    const { res, captured } = response();
+
+    await handler(request("PUT", {
+      userId: MEMBER_ID,
+      grantTestCredits: 11,
+      idempotencyKey: "00000000-0000-4000-8000-000000000030",
+    }), res);
+
+    expect(captured.statusCode).toBe(400);
+    expect(captured.body).toEqual({ error: "test_credit_grant_out_of_range" });
+    expect(mocks.grantManualTestCredits).not.toHaveBeenCalled();
+  });
+});
+
+describe("workspace member budgets", () => {
+  it("sums the append-only ledger and keeps the latest grant timestamp", () => {
+    const budgets = summarizeMemberBudgets([
+      { user_id: MEMBER_ID, amount_millis: 10_000, reason: "beta_start", created_at: "2026-08-01T00:00:00Z" },
+      { user_id: MEMBER_ID, amount_millis: -1_000, reason: "investigation_debit", created_at: "2026-08-02T00:00:00Z" },
+      { user_id: MEMBER_ID, amount_millis: 5_000, reason: "manual_adjustment", created_at: "2026-08-03T00:00:00Z" },
+    ]);
+    expect(budgets.get(MEMBER_ID)).toEqual({
+      balance: 14,
+      dailyLimit: 3,
+      lastGrantAt: "2026-08-03T00:00:00Z",
+    });
   });
 });

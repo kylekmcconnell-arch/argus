@@ -5,6 +5,7 @@ import {
   ARGUS_PLANS,
   CREDIT_MILLIS,
   DEFAULT_REVENUE_SHARE,
+  MAX_MANUAL_TEST_GRANT_CREDITS,
   REFERRAL_BONUS_MILLIS,
   REFERRAL_CODE,
   STARTING_CREDIT_MILLIS,
@@ -127,6 +128,37 @@ export async function ensureStartingCredits(
       reason: "beta_start",
       idempotency_key: `beta-start:${userId}`,
       metadata: { program: "early_access_2026" },
+    },
+    { onConflict: "organization_id,idempotency_key", ignoreDuplicates: true },
+  );
+  if (error) throw error;
+}
+
+export async function grantManualTestCredits(
+  client: SupabaseClient,
+  input: {
+    userId: string;
+    organizationId: string;
+    actorUserId: string;
+    credits: number;
+    requestId: string;
+  },
+): Promise<void> {
+  if (!Number.isInteger(input.credits) || input.credits < 1 || input.credits > MAX_MANUAL_TEST_GRANT_CREDITS) {
+    throw new Error("manual test-credit grant is outside the allowed range");
+  }
+  const { error } = await client.from("credit_ledger").upsert(
+    {
+      organization_id: input.organizationId,
+      user_id: input.userId,
+      amount_millis: input.credits * CREDIT_MILLIS,
+      reason: "manual_adjustment",
+      idempotency_key: `beta-manual:${input.userId}:${input.requestId}`,
+      metadata: {
+        program: "early_access_2026",
+        actorUserId: input.actorUserId,
+        grantCredits: input.credits,
+      },
     },
     { onConflict: "organization_id,idempotency_key", ignoreDuplicates: true },
   );

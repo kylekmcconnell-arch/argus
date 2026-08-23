@@ -263,7 +263,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       used: quota.used,
       remaining: 0,
       message: quota.reason === "credit_budget_exhausted"
-        ? "This early-access budget is spent. Buy more investigation credits to continue."
+        ? "This test budget is used up. Ask your workspace owner to add more investigation credits."
         : undefined,
     });
     return;

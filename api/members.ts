@@ -5,7 +5,8 @@ import {
   serviceCredentials,
   type ArgusRole,
 } from "./_auth.js";
-import { ensureGrowthProfile, ensureStartingCredits } from "./_growth.js";
+import { ensureGrowthProfile, ensureStartingCredits, grantManualTestCredits } from "./_growth.js";
+import { CREDIT_MILLIS, EARLY_ACCESS_DAILY_LIMIT, MAX_MANUAL_TEST_GRANT_CREDITS } from "../src/lib/growth.js";
 
 export const config = { maxDuration: 20 };
 
@@ -32,6 +33,38 @@ interface MemberEventRow {
   previous_state: Record<string, unknown>;
   next_state: Record<string, unknown>;
   created_at: string;
+}
+
+interface CreditRow {
+  user_id: string | null;
+  amount_millis: number;
+  reason: string;
+  created_at: string;
+}
+
+interface MemberBudget {
+  balance: number;
+  dailyLimit: number;
+  lastGrantAt: string | null;
+}
+
+export function summarizeMemberBudgets(rows: CreditRow[]): Map<string, MemberBudget> {
+  const budgetByUser = new Map<string, MemberBudget>();
+  for (const row of rows) {
+    if (!row.user_id) continue;
+    const current = budgetByUser.get(row.user_id) || {
+      balance: 0,
+      dailyLimit: EARLY_ACCESS_DAILY_LIMIT,
+      lastGrantAt: null,
+    };
+    current.balance += Number(row.amount_millis || 0) / CREDIT_MILLIS;
+    if (
+      (row.reason === "beta_start" || row.reason === "manual_adjustment")
+      && (!current.lastGrantAt || row.created_at > current.lastGrantAt)
+    ) current.lastGrantAt = row.created_at;
+    budgetByUser.set(row.user_id, current);
+  }
+  return budgetByUser;
 }
 
 function adminClient(): SupabaseClient | null {
@@ -105,7 +138,11 @@ async function resendPendingInvitation(
   return error;
 }
 
-function memberView(member: MemberRow, user?: User) {
+function memberView(
+  member: MemberRow,
+  user?: User,
+  budget: MemberBudget = { balance: 0, dailyLimit: EARLY_ACCESS_DAILY_LIMIT, lastGrantAt: null },
+) {
   return {
     userId: member.user_id,
     email: user?.email || "",
@@ -116,6 +153,7 @@ function memberView(member: MemberRow, user?: User) {
     lastSignInAt: user?.last_sign_in_at || null,
     createdAt: member.created_at,
     updatedAt: member.updated_at,
+    budget,
   };
 }
 
@@ -166,7 +204,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (req.method === "GET") {
-      const [memberResult, users, eventResult] = await Promise.all([
+      const [memberResult, users, eventResult, creditResult] = await Promise.all([
         client
           .from("argus_members")
           .select("user_id,organization_id,role,display_name,active,created_at,updated_at")
@@ -179,12 +217,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .eq("organization_id", auth.organizationId)
           .order("created_at", { ascending: false })
           .limit(25),
+        client
+          .from("credit_ledger")
+          .select("user_id,amount_millis,reason,created_at")
+          .eq("organization_id", auth.organizationId),
       ]);
       if (memberResult.error) throw memberResult.error;
       if (eventResult.error) throw eventResult.error;
+      if (creditResult.error) throw creditResult.error;
       const userById = new Map(users.map((user) => [user.id, user]));
+      const budgetByUser = summarizeMemberBudgets(creditResult.data as CreditRow[]);
       const members = (memberResult.data as MemberRow[]).map((member) =>
-        memberView(member, userById.get(member.user_id)),
+        memberView(member, userById.get(member.user_id), budgetByUser.get(member.user_id)),
       );
       const events = (eventResult.data as MemberEventRow[]).map((event) => ({
         id: event.id,
@@ -316,6 +360,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: "resend_invitation_must_be_boolean" });
       return;
     }
+    if (
+      body.grantTestCredits !== undefined
+      && (!Number.isInteger(body.grantTestCredits)
+        || Number(body.grantTestCredits) < 1
+        || Number(body.grantTestCredits) > MAX_MANUAL_TEST_GRANT_CREDITS)
+    ) {
+      res.status(400).json({ error: "test_credit_grant_out_of_range" });
+      return;
+    }
 
     const nextRole = roleValue(body.role) || existing.role;
     const nextActive = typeof body.active === "boolean" ? body.active : existing.active;
@@ -329,6 +382,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const nextDisplayName = body.displayName === undefined
       ? existing.display_name || email.split("@")[0]
       : cleanDisplayName(body.displayName, email);
+
+    if (body.grantTestCredits !== undefined) {
+      const requestId = typeof body.idempotencyKey === "string" && UUID.test(body.idempotencyKey)
+        ? body.idempotencyKey
+        : "";
+      if (!requestId) {
+        res.status(400).json({ error: "valid_idempotency_key_required" });
+        return;
+      }
+      if (existing.role !== "analyst" || !existing.active) {
+        res.status(409).json({
+          error: "active_analyst_required",
+          message: "Test credits can only be granted to an active analyst.",
+        });
+        return;
+      }
+      await grantManualTestCredits(client, {
+        userId,
+        organizationId: auth.organizationId,
+        actorUserId: auth.userId,
+        credits: Number(body.grantTestCredits),
+        requestId,
+      });
+      res.status(200).json({
+        member: memberView(existing, targetUser),
+        grantedCredits: Number(body.grantTestCredits),
+      });
+      return;
+    }
 
     if (body.resendInvitation === true) {
       if (!existing.active) {
