@@ -34,7 +34,7 @@ export function NoticedRail({ signals, max = 3 }: { signals: NoticedSignal[]; ma
               style={{ background: SEVERITY_COLOR[signal.severity] }}
             />
             <span className="min-w-0">
-              <strong className="font-semibold text-ink">{signal.headline}.</strong>{" "}
+              <strong className="font-semibold text-ink">{plainLanguageSummary(signal.headline)}.</strong>{" "}
               <span className="text-ink-dim">{plainLanguageSummary(signal.detail)}</span>
               {signal.anchor && (
                 <>
@@ -54,8 +54,8 @@ export function NoticedRail({ signals, max = 3 }: { signals: NoticedSignal[]; ma
 export function VerdictArgumentBlock({ argument }: { argument: VerdictArgument }) {
   const rows = [
     argument.forLine ? { label: "Strongest evidence", text: argument.forLine, tone: "support" } : null,
-    argument.againstLine ? { label: "Sharpest concern", text: argument.againstLine, tone: "concern" } : null,
-    { label: "What would change it", text: argument.moveLine, tone: "change" },
+    argument.againstLine ? { label: "Main risk", text: argument.againstLine, tone: "concern" } : null,
+    { label: "What to check next", text: argument.moveLine, tone: "change" },
   ].filter((row): row is { label: string; text: string; tone: string } => row !== null);
   return (
     <dl className="decision-argument-grid mt-3 grid gap-2 md:grid-cols-3" data-testid="verdict-argument">

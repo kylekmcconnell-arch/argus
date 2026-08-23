@@ -27,7 +27,7 @@ function finite(value: unknown): value is number {
 }
 
 function money(value?: number | null): string {
-  if (!finite(value)) return "Not captured";
+  if (!finite(value)) return "Not available in this saved report";
   if (value >= 1e12) return `$${(value / 1e12).toFixed(2)}T`;
   if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
   if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`;
@@ -36,7 +36,7 @@ function money(value?: number | null): string {
 }
 
 function price(value?: number | null): string {
-  if (!finite(value)) return "Not captured";
+  if (!finite(value)) return "Not available in this saved report";
   if (value === 0) return "$0";
   if (value < 0.01) return `$${value.toPrecision(3)}`;
   return `$${value.toLocaleString(undefined, { maximumFractionDigits: 4 })}`;
@@ -260,7 +260,7 @@ export function MarketPerformancePanel({
               <ShieldCheck size={12} weight="fill" aria-hidden="true" /> OFFICIAL TOKEN
             </span>
           )}
-          <span className="chip tint-pass">{captureDate ? `SAVED ${captureDate.toUpperCase()}` : "SAVED DATA"}</span>
+          <span className="chip tint-pass">{captureDate ? `SAVED ${captureDate.toUpperCase()}` : "SAVED REPORT"}</span>
           {(liveAth || liveMarketCap) && <span className="chip tint-caution">CURRENT DATA</span>}
         </div>
       </header>
@@ -291,7 +291,7 @@ export function MarketPerformancePanel({
                     : "var(--color-pass)",
             }}
           >
-            {performanceValue == null ? "Refresh required" : percent(performanceValue)}
+            {performanceValue == null ? "Check current data" : percent(performanceValue)}
           </dd>
           <dd className="mt-1 text-[10.5px] text-ink-faint">{performanceDetail}</dd>
         </div>
@@ -309,7 +309,7 @@ export function MarketPerformancePanel({
               ? `#${rank.toLocaleString()}`
               : hasCoinGeckoRankContext && token?.cg?.listed === false
                 ? "Not listed"
-                : "Not captured"}
+                : "Not available"}
           </dd>
           <dd className="mt-1 text-[10.5px] text-ink-faint">
             {hasCoinGeckoRankContext ? "CoinGecko global rank" : "Rank was not available"}

@@ -7,7 +7,7 @@ import {
   type ScanCheck,
   type CheckStatus,
 } from "../lib/scanChecklist";
-import { plainLanguageSummary } from "../lib/plainLanguage";
+import { publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { provenanceForCheckStatus } from "../lib/provenance";
 import { ProvenanceTag } from "./ProvenanceTag";
 
@@ -15,7 +15,7 @@ import { ProvenanceTag } from "./ProvenanceTag";
 // outcomes are separate. Collapsed by default so this reads as a trust footer.
 const META: Record<CheckStatus, { color: string; glyph: string; label: string }> = {
   confirmed: { color: "var(--color-pass)", glyph: "✓", label: "finished" },
-  reported: { color: "var(--color-signal)", glyph: "◇", label: "source reported" },
+  reported: { color: "var(--color-signal)", glyph: "◇", label: "reported by a source" },
   finding: { color: "var(--color-caution)", glyph: "▲", label: "needs attention" },
   "checked-empty": { color: "var(--color-ink-faint)", glyph: "○", label: "nothing found" },
   "not-applicable": { color: "var(--color-ink-faint)", glyph: "⊘", label: "not needed" },
@@ -32,41 +32,6 @@ const CORE_TOKEN_CHECK_IDS = new Set([
   "operator-funding-trace",
   "market-intelligence",
 ]);
-
-function plainCheckLabel(value: string): string {
-  return value
-    .replace(/\s*\((?:evm|solana)\)\s*/gi, " ")
-    .replace(/deployer trail/gi, "Who deployed the contract")
-    .replace(/bytecode fingerprint/gi, "Copied contract code")
-    .replace(/wallet clustering/gi, "Connected holder wallets")
-    .replace(/operator funding trace/gi, "Where the deployer’s funds came from")
-    .replace(/buy\s*\/\s*sell simulation/gi, "Buy and sell test")
-    .replace(/holder distribution/gi, "Large holders")
-    .replace(/contract safety/gi, "Contract controls")
-    .replace(/github forensics/gi, "Code history")
-    .replace(/code footprint\s*\(github\)/gi, "GitHub code history")
-    .replace(/trust graph reconciliation/gi, "Known connections")
-    .replace(/trust[- ]graph connections/gi, "Known connections")
-    .replace(/canonical project token/gi, "Official project token")
-    .replace(/traction and liveness/gi, "Usage and activity")
-    .replace(/identity resolution/gi, "Identity and role")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function plainCheckNote(value: string): string {
-  return plainLanguageSummary(value)
-    .replace(/redeployed-rug clone check;\s*completion outcome not recorded/gi, "We could not finish checking whether this contract copies code from a known scam.")
-    .replace(/completion outcome not recorded/gi, "This check did not finish.")
-    .replace(/provider unavailable/gi, "The data source did not respond.")
-    .replace(/corroborated/gi, "confirmed by more than one source")
-    .replace(/canonical/gi, "official")
-    .replace(/mint authority active/gi, "more tokens can be created")
-    .replace(/owner active/gi, "contract owner still has control")
-    .replace(/transfers can be paused/gi, "the owner can stop transfers")
-    .replace(/no elevated concentration surfaced/gi, "no unusual wallet concentration found")
-    .replace(/frozen/gi, "saved");
-}
 
 export function MethodologyChecklist({
   checks,
@@ -162,8 +127,8 @@ export function MethodologyChecklist({
                     <li key={`${check.label}-${index}`} className="flex items-start gap-2.5 rounded-lg px-2 py-1.5">
                       <span aria-hidden="true" className="mono mt-0.5 w-3.5 shrink-0 text-center text-[12.5px]" style={{ color: meta.color }}>{meta.glyph}</span>
                       <span className="min-w-0 flex-1">
-                        <span className="text-[12.5px] text-ink">{plainCheckLabel(check.label)}</span>
-                        {check.note && <span className="ml-2 text-[11px] text-ink-faint">{plainCheckNote(check.note)}</span>}
+                        <span className="text-[12.5px] text-ink">{publicCheckLabel(check.label)}</span>
+                        {check.note && <span className="ml-2 text-[11px] text-ink-faint">{publicCheckNote(check.note)}</span>}
                       </span>
                       {provenance ? (
                         <ProvenanceTag state={provenance} label={meta.label} className="shrink-0" />
@@ -177,7 +142,7 @@ export function MethodologyChecklist({
             </section>
           ))}
           <p className="px-2 py-1.5 text-[11px] leading-snug text-ink-faint">
-            Finished means a data source answered, even when it found nothing. Source reported means the context was retained but did not pass strict verification. Still open means the check did not finish.
+            Finished means a data source answered, even when it found nothing. Reported by a source means ARGUS saved the claim but did not independently confirm it. Still open means the check did not finish.
           </p>
         </div>
       )}

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatRoleLabel, plainLanguageSummary } from "./plainLanguage";
+import {
+  formatRoleLabel,
+  plainLanguageSummary,
+  publicCheckLabel,
+  publicCheckNote,
+  publicEntityLabel,
+  publicRelationshipLabel,
+} from "./plainLanguage";
 
 describe("plainLanguageSummary", () => {
   it("translates internal research shorthand without changing facts", () => {
@@ -29,6 +36,23 @@ describe("plainLanguageSummary", () => {
   it("keeps URLs, amounts, tickers, and names unchanged", () => {
     const text = "$VVV has $567M market cap. Source: https://venice.ai.";
     expect(plainLanguageSummary(text)).toBe(text);
+  });
+});
+
+describe("public report labels", () => {
+  it("turns check IDs into stable reader labels", () => {
+    expect(publicCheckLabel("deployer-trail-evm")).toBe("Who created the token");
+    expect(publicCheckLabel("trust-graph-reconciliation")).toBe("Known connections");
+    expect(publicCheckLabel("OFAC sanctions screen")).toBe("Sanctions screening");
+    expect(publicCheckNote("deployer unresolved; trace completion outcome not recorded"))
+      .toBe("ARGUS could not identify the token creator, so the funding check did not finish.");
+  });
+
+  it("keeps graph IDs typed while presenting readable nodes and relationships", () => {
+    expect(publicEntityLabel("wallet:base:0xdef")).toBe("Wallet 0xdef");
+    expect(publicEntityLabel("token:ethereum:0xabc", "Token", "$ARGUS")).toBe("$ARGUS");
+    expect(publicRelationshipLabel("DEPLOYED_BY")).toBe("was created by");
+    expect(publicRelationshipLabel("held_by")).toBe("is held by");
   });
 });
 

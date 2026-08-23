@@ -198,8 +198,8 @@ describe("investigation exact sharing", () => {
       },
     }), () => undefined, () => undefined);
 
-    expect(container.textContent).toContain("Preliminary risk score");
-    expect(container.textContent).toContain("EARLY SCORE 84");
+    expect(container.textContent).toContain("Score while checks are open");
+    expect(container.textContent).toContain("CHECKS OPEN 84");
     expect(container.textContent).not.toContain("PASS 84");
     expect(container.textContent).toContain("NOT READY");
     expect(container.textContent).toContain("Score only · not financial advice");
@@ -212,7 +212,7 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).not.toContain("Investigation incomplete");
 
     const statusCard = container.querySelector<HTMLElement>('[aria-label="Report status"]');
-    const scoreCard = container.querySelector<HTMLElement>('[aria-label="Preliminary risk score"]');
+    const scoreCard = container.querySelector<HTMLElement>('[aria-label="Score while checks are open"]');
     const marketCard = container.querySelector<HTMLElement>('[aria-label="Market size"]');
     expect(statusCard?.className).toContain("order-1");
     expect(scoreCard?.className).toContain("order-2");
@@ -234,8 +234,8 @@ describe("investigation exact sharing", () => {
     const statusCardDropdown = statusCard?.querySelector<HTMLDetailsElement>("details");
     expect(statusCardDropdown?.textContent).toContain("Checks finished");
     const unfinishedList = statusCardDropdown?.querySelector('[aria-label="Checks not finished"]');
-    expect(unfinishedList?.textContent).toContain("Trust-graph reconciliation");
-    expect(unfinishedList?.textContent).toContain("news-press");
+    expect(unfinishedList?.textContent).toContain("Known connections");
+    expect(unfinishedList?.textContent).toContain("News and press");
     expect(unfinishedList?.textContent).toContain("did not finish");
     expect(unfinishedList?.textContent).toContain("required");
     // Post-scan enrichment rows are not part of the counter and must not
@@ -492,7 +492,7 @@ describe("investigation exact sharing", () => {
     expect(reportedAnswers?.textContent).toContain("Venice");
     expect(reportedAnswers?.textContent).toContain("Erik Voorhees");
     expect(reportedAnswers?.textContent).toContain("Jesse Proudman");
-    expect(reportedAnswers?.textContent).toContain("Not independently verified");
+    expect(reportedAnswers?.textContent).toContain("did not independently confirm");
     const leadershipCards = [...(reportedAnswers?.querySelectorAll("li") ?? [])]
       .filter((card) => [...card.querySelectorAll("p")]
         .some((paragraph) => paragraph.textContent === "Who operates it today?"));
@@ -660,12 +660,16 @@ describe("investigation exact sharing", () => {
       "#report-risks",
       "#investigation-visuals",
       "#investigation-people",
+      "#investigation-relationships",
       "#investigation-methodology",
       "#investigation-challenge",
     ]);
     for (const href of hrefs) {
       expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
     }
+    const methodTargets = container.querySelectorAll("#investigation-methodology");
+    expect(methodTargets).toHaveLength(1);
+    expect(methodTargets[0]?.querySelector(".report-section-heading h2")?.textContent).toBe("What ARGUS checked");
 
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).toContain("Finished checks");
@@ -983,10 +987,10 @@ describe("investigation exact sharing", () => {
     }));
 
     const team = container.querySelector("#investigation-team");
-    expect(team?.textContent).toContain("No independently corroborated team member was found");
-    expect(team?.textContent).toContain("project-published role attribution is shown below");
+    expect(team?.textContent).toContain("No team member was confirmed by an independent source");
+    expect(team?.textContent).toContain("people and roles named by the project are shown below");
     expect(team?.textContent).not.toContain("Named on the project site: Ada Claim.");
-    expect(team?.textContent).toContain("Project-attributed team");
+    expect(team?.textContent).toContain("People named by the project");
     expect(team?.textContent).toContain("Ada Claim");
     expect(team?.textContent).toContain("Possible people to verify");
     expect(team?.textContent).toContain("Mira Model");
@@ -994,8 +998,8 @@ describe("investigation exact sharing", () => {
     expect(team?.textContent).toContain("GitHub contribution");
     expect(team?.textContent).toContain("not counted as team or verdict support");
     expect(container.querySelector("#report-summary")?.textContent).not.toMatch(/Mira Model|Tess Tagged|Gina Contributor/);
-    expect(container.textContent).toContain("Argus identifies Ada Claim as Founder");
-    expect(container.textContent).toContain("Project-attributed founder behind");
+    expect(container.textContent).toContain("Argus names Ada Claim as Founder");
+    expect(container.textContent).toContain("named by the project founder behind");
   });
 
   it("does not offer a share from a private investigation", () => {
