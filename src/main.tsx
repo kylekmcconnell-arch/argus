@@ -22,6 +22,8 @@ const CompositionPreview = lazy(() => import('./dev/CompositionPreview.tsx').the
 const ReferralsPreview = lazy(() => import('./dev/ReferralsPreview.tsx').then((module) => ({ default: module.ReferralsPreview })))
 // eslint-disable-next-line react-refresh/only-export-components
 const IntelligenceReportPreview = lazy(() => import('./dev/IntelligenceReportPreview.tsx').then((module) => ({ default: module.IntelligenceReportPreview })))
+// eslint-disable-next-line react-refresh/only-export-components
+const ProvidersPreview = lazy(() => import('./dev/ProvidersPreview.tsx').then((module) => ({ default: module.ProvidersPreview })))
 
 // Observe 401s from ARGUS API routes so an expired session is stated once
 // instead of surfacing as a page of quietly dead panels.
@@ -65,6 +67,8 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><ReferralsPreview /></Suspense>
       ) : designPreview === 'intelligence-report' ? (
         <Suspense fallback={null}><IntelligenceReportPreview /></Suspense>
+      ) : designPreview === 'providers' ? (
+        <Suspense fallback={null}><ProvidersPreview /></Suspense>
       ) : sharedReportToken ? (
         <Suspense fallback={null}><SharedReportView token={sharedReportToken} /></Suspense>
       ) : publicView === 'leaderboard' ? (

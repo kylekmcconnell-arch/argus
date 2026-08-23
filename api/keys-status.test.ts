@@ -4,9 +4,13 @@ import handler from "./keys-status";
 interface ProviderRow {
   label: string;
   powers: string;
+  limits?: string;
   configured: boolean;
   source?: string;
   tier?: string;
+  kind?: string;
+  lifecycle?: string;
+  availableWithoutCredential?: boolean;
   purchases?: Array<{ usd: number; credits: number; pack: string; active: boolean }>;
 }
 
@@ -57,7 +61,8 @@ describe("provider registry truth", () => {
     const keyless = captured.body?.keyless ?? [];
     expect(providers.find((provider) => provider.label === "Bitquery")).toMatchObject({
       configured: true,
-      powers: expect.stringContaining("does not currently run or attest audits"),
+      lifecycle: "reserved",
+      limits: expect.stringContaining("does not currently run or attest ARGUS reports"),
     });
     expect(providers.find((provider) => provider.label === "Reddit OAuth")).toMatchObject({ configured: true });
     expect(providers.find((provider) => provider.label === "Arkham")).toMatchObject({ configured: true });
@@ -66,12 +71,12 @@ describe("provider registry truth", () => {
     expect(providers.find((provider) => provider.label === "Google Safe Browsing")).toMatchObject({
       configured: false,
       tier: "optional",
-      powers: expect.stringContaining("GoPlus"),
+      limits: expect.stringContaining("GoPlus"),
     });
     expect(providers.find((provider) => provider.label === "Official X API v2")).toMatchObject({
       configured: false,
       tier: "optional",
-      powers: expect.stringContaining("twitterapi.io"),
+      limits: expect.stringContaining("does not independently verify"),
     });
   });
 
@@ -102,7 +107,7 @@ describe("provider registry truth", () => {
 
     expect(captured.body?.providers.find((provider) => provider.label === "Serper (grounded search)")).toMatchObject({
       configured: true,
-      powers: expect.stringContaining("grounded web search"),
+      powers: expect.stringContaining("Grounded web discovery"),
       source: "serper.dev",
       tier: "paid",
       purchases: [expect.objectContaining({
@@ -113,5 +118,28 @@ describe("provider registry truth", () => {
       })],
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("separates evidence, models, infrastructure, and inactive integrations", async () => {
+    const { captured, response } = responseHarness();
+    await handler({} as never, response as never);
+
+    const providers = captured.body?.providers ?? [];
+    const keyless = captured.body?.keyless ?? [];
+    expect(providers.find((provider) => provider.label === "Grok (xAI)"))
+      .toMatchObject({ kind: "model", lifecycle: "active" });
+    expect(providers.find((provider) => provider.label === "Supabase"))
+      .toMatchObject({ kind: "infrastructure", lifecycle: "active" });
+    expect(providers.find((provider) => provider.label === "Reddit OAuth"))
+      .toMatchObject({ kind: "evidence", lifecycle: "retired" });
+    expect(providers.find((provider) => provider.label === "CoinGecko"))
+      .toMatchObject({ kind: "evidence", lifecycle: "active", availableWithoutCredential: true });
+    expect(keyless.map((provider) => provider.label)).toEqual(expect.arrayContaining([
+      "DeFiLlama",
+      "RugCheck",
+      "CourtListener",
+      "Google News",
+      "URLhaus",
+    ]));
   });
 });

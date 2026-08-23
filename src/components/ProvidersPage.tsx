@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { arkhamProviderEnabled } from "../lib/providerCapabilities";
+import type { EvidenceCategory, ProviderKind, ProviderLifecycle } from "../lib/providerCatalog";
 
-// Peace-of-mind view for Kyle + Enigma: which API keys are plugged in, what each
-// powers, where to top up, and live usage where the provider exposes it. Keyed
-// and keyless sources render as identical rows so the whole stack reads uniformly.
+// Public-facing evidence catalog first, with provider operations kept secondary.
+// Credential presence and recent request outcomes remain separate truth states.
 type LedgerPurchase = {
   purchasedAt: string;
   usd: number;
@@ -12,7 +12,22 @@ type LedgerPurchase = {
   expiresAt: string;
   active?: boolean;
 };
-type Provider = { label: string; powers: string; source: string; tier: string; configured: boolean; usage?: string; disabled?: boolean; purchases?: LedgerPurchase[] };
+type Provider = {
+  id?: string;
+  label: string;
+  powers: string;
+  limits?: string;
+  source: string;
+  tier: string;
+  kind?: ProviderKind;
+  lifecycle?: ProviderLifecycle;
+  category?: EvidenceCategory;
+  availableWithoutCredential?: boolean;
+  configured: boolean;
+  usage?: string;
+  disabled?: boolean;
+  purchases?: LedgerPurchase[];
+};
 type SerperCredits = {
   configured: boolean;
   remaining: number | null;
@@ -37,12 +52,14 @@ type UsageEvent = {
   actor: string;
   report?: { kind: string; ref: string; label: string; version: number };
 };
-type UsageFeed = {
+export type ProviderUsageFeed = {
   available: boolean;
   events: UsageEvent[];
   window: { limit: number; eventCount: number };
   totals: { eventCount: number; calls: number; usd: number };
 };
+
+export type ProviderPageData = { providers: Provider[]; keyless: Provider[]; note?: string };
 
 const TIER_LABEL: Record<string, string> = {
   paid: "credential",
@@ -61,14 +78,24 @@ const PROVIDER_ALIASES: Record<string, string[]> = {
   "People Data Labs": ["peopledatalabs", "pdl"],
   "Reddit OAuth": ["reddit"],
   Supabase: ["supabase"],
-  "CoinGecko Pro": ["coingecko"],
+  CoinGecko: ["coingecko"],
   CryptoRank: ["cryptorank"],
   Crunchbase: ["crunchbase"],
   "Etherscan (multichain)": ["etherscan"],
   Arkham: ["arkham"],
   Bitquery: ["bitquery"],
   DexScreener: ["dexscreener"],
-  "GoPlus + honeypot.is": ["goplus", "honeypotis"],
+  GoPlus: ["goplus"],
+  "honeypot.is": ["honeypotis", "honeypot"],
+  RugCheck: ["rugcheck"],
+  DeFiLlama: ["defillama"],
+  "Monid and Akta": ["monid", "akta"],
+  GMGN: ["gmgn"],
+  Snapshot: ["snapshot"],
+  "Google News": ["googlenews", "news"],
+  CourtListener: ["courtlistener"],
+  "OFAC and OpenSanctions": ["ofac", "opensanctions", "sanctions"],
+  URLhaus: ["urlhaus"],
   GeckoTerminal: ["geckoterminal"],
   "Web archives": ["wayback", "archiveorg", "arquivo"],
   "Farcaster / Warpcast": ["farcaster", "warpcast"],
@@ -80,7 +107,7 @@ const PROVIDER_ALIASES: Record<string, string[]> = {
 };
 
 type ProviderHealth = {
-  label: "Healthy" | "Degraded" | "Unavailable" | "Configured" | "No key required" | "Not configured" | "Paused";
+  label: "Last check passed" | "Last check partial" | "Last check failed" | "Access set up" | "No key required" | "Optional source off" | "Not connected" | "Not active" | "Paused";
   tone: string;
   context: string;
 };
@@ -104,36 +131,44 @@ function providerHealth(provider: Provider, latest?: UsageEvent): ProviderHealth
       context: "This optional provider is disabled and does not affect report readiness.",
     };
   }
-  if (provider.tier !== "keyless" && !provider.configured) {
+  if (provider.lifecycle === "retired" || provider.lifecycle === "reserved") {
     return {
-      label: "Not configured",
-      tone: provider.tier === "optional" ? "tint-neutral" : "tint-avoid",
-      context: provider.tier === "optional" ? "Optional enrichment is not active." : "Required coverage is unavailable until this is configured.",
+      label: "Not active",
+      tone: "tint-neutral",
+      context: provider.lifecycle === "retired" ? "Retired from current reports." : "Reserved for future work and not used in current reports.",
     };
   }
+  if (provider.availableWithoutCredential && !provider.configured) {
+    return { label: "No key required", tone: "tint-neutral", context: "The free route works. No paid credential is configured." };
+  }
+  if (provider.tier !== "keyless" && !provider.configured) {
+    return provider.tier === "optional"
+      ? { label: "Optional source off", tone: "tint-neutral", context: "This optional source is not available in this deployment." }
+      : { label: "Not connected", tone: "tint-avoid", context: "A required credential is not configured." };
+  }
   if (latest?.status === "succeeded") {
-    return { label: "Healthy", tone: "tint-pass", context: `Latest visible request succeeded ${eventTime(latest.createdAt)}.` };
+    return { label: "Last check passed", tone: "tint-pass", context: `Latest request in this activity window succeeded ${eventTime(latest.createdAt)}.` };
   }
   if (latest?.status === "cached") {
     return {
-      label: provider.tier === "keyless" ? "No key required" : "Configured",
+      label: provider.tier === "keyless" ? "No key required" : "Access set up",
       tone: provider.tier === "keyless" ? "tint-neutral" : "tint-signal",
-      context: `Latest visible result was served from cache ${eventTime(latest.createdAt)}; no provider request occurred.`,
+      context: `Latest result in this activity window was served from cache ${eventTime(latest.createdAt)}; no provider request occurred.`,
     };
   }
   if (latest?.status === "partial") {
-    return { label: "Degraded", tone: "tint-caution", context: `Latest visible request was partial ${eventTime(latest.createdAt)}.` };
+    return { label: "Last check partial", tone: "tint-caution", context: `Latest request in this activity window was partial ${eventTime(latest.createdAt)}.` };
   }
   if (latest?.status === "failed") {
-    return { label: "Unavailable", tone: "tint-avoid", context: `Latest visible request failed ${eventTime(latest.createdAt)}.` };
+    return { label: "Last check failed", tone: "tint-avoid", context: `Latest request in this activity window failed ${eventTime(latest.createdAt)}. This does not prove a continuing outage.` };
   }
   if (provider.tier === "keyless") {
     return { label: "No key required", tone: "tint-neutral", context: "Availability is checked when an investigation runs." };
   }
   if (provider.configured) {
-    return { label: "Configured", tone: "tint-signal", context: "Credential present; no request appears in the latest activity window." };
+    return { label: "Access set up", tone: "tint-signal", context: "Credential present; no request appears in the latest activity window." };
   }
-  return { label: "Not configured", tone: "tint-avoid", context: "Required coverage is unavailable until this is configured." };
+  return { label: "Not connected", tone: "tint-avoid", context: "A required credential is not configured." };
 }
 
 function ProviderRow({
@@ -166,7 +201,14 @@ function ProviderRow({
         <span className="text-[13.5px] font-medium text-ink">{provider.label}</span>
         <span className="chip chip-sm ml-2">{TIER_LABEL[provider.tier] ?? provider.tier}</span>
       </div>
-      <p className="text-[12.5px] leading-relaxed text-ink-dim">{provider.powers}</p>
+      <div>
+        <p className="text-[12.5px] leading-relaxed text-ink-dim">{provider.powers}</p>
+        {provider.limits && (
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+            <span className="font-medium text-ink-dim">Limit:</span> {provider.limits}
+          </p>
+        )}
+      </div>
       <div className="min-w-0 md:text-right">
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
           <span className={`chip ${health.tone}`}>{health.label}</span>
@@ -282,14 +324,14 @@ function eventCost(event: UsageEvent): string {
   const meta = event.meta?.toLowerCase() ?? "";
   if (meta.includes("subscription") || meta.includes("keyed") || meta.includes("plan-priced")) return "plan-priced";
   if (meta.includes("keyless")) return "keyless";
-  return "$0 estimated";
+  return "cost not recorded";
 }
 
-export function ProvidersPage() {
+export function ProvidersPage({ previewData, previewUsage }: { previewData?: ProviderPageData; previewUsage?: ProviderUsageFeed } = {}) {
   const arkhamEnabled = arkhamProviderEnabled();
-  const [data, setData] = useState<{ providers: Provider[]; keyless: Provider[]; note?: string } | null>(null);
+  const [data, setData] = useState<ProviderPageData | null>(previewData ?? null);
   const [dataError, setDataError] = useState("");
-  const [usage, setUsage] = useState<UsageFeed | null>(null);
+  const [usage, setUsage] = useState<ProviderUsageFeed | null>(previewUsage ?? null);
   const [usageError, setUsageError] = useState("");
   const [serperCredits, setSerperCredits] = useState<SerperCredits | null>(null);
   const [serperCreditsLoading, setSerperCreditsLoading] = useState(false);
@@ -315,6 +357,7 @@ export function ProvidersPage() {
       .finally(() => setSerperCreditsLoading(false));
   };
   useEffect(() => {
+    if (previewData) return;
     const controller = new AbortController();
     fetch("/api/keys-status", { signal: controller.signal })
       .then(async (response) => {
@@ -322,7 +365,7 @@ export function ProvidersPage() {
         if (!response.ok || !Array.isArray(body.providers) || !Array.isArray(body.keyless)) {
           throw new Error(body.message || "Provider configuration is unavailable.");
         }
-        return { providers: body.providers, keyless: body.keyless, note: body.note };
+        return { providers: body.providers, keyless: body.keyless, note: body.note } as ProviderPageData;
       })
       .then((next) => {
         setData(next);
@@ -333,16 +376,17 @@ export function ProvidersPage() {
         setDataError(error instanceof Error ? error.message : "Provider configuration is unavailable.");
       });
     return () => controller.abort();
-  }, []);
+  }, [previewData]);
   useEffect(() => {
+    if (previewUsage) return;
     const controller = new AbortController();
     fetch("/api/provider-usage?limit=40", { signal: controller.signal })
       .then(async (response) => {
-        const body = await response.json().catch(() => ({})) as Partial<UsageFeed> & { message?: string };
+        const body = await response.json().catch(() => ({})) as Partial<ProviderUsageFeed> & { message?: string };
         if (!response.ok || !Array.isArray(body.events) || !body.window || !body.totals) {
           throw new Error(body.message || "Provider usage is unavailable.");
         }
-        return body as UsageFeed;
+        return body as ProviderUsageFeed;
       })
       .then((feed) => {
         setUsage(feed);
@@ -353,119 +397,131 @@ export function ProvidersPage() {
         setUsageError(error instanceof Error ? error.message : "Provider usage is unavailable.");
       });
     return () => controller.abort();
-  }, []);
+  }, [previewUsage]);
 
   const providers = (data?.providers ?? []).map((provider) =>
     provider.label === "Arkham" && !arkhamEnabled
       ? { ...provider, disabled: true }
       : provider);
   const keyless = data?.keyless ?? [];
-  const missing = providers.filter((p) => !p.disabled && !p.configured && p.tier !== "optional");
   const allProviders = [...providers, ...keyless];
-  const health = allProviders.map((provider) => providerHealth(provider, usage ? latestProviderEvent(provider, usage.events) : undefined));
-  const healthy = health.filter((status) => status.label === "Healthy").length;
-  const configured = providers.filter((provider) => !provider.disabled && provider.configured).length;
-  const attention = allProviders.filter((provider, index) => {
-    const status = health[index];
-    return status?.label === "Degraded"
-      || status?.label === "Unavailable"
-      || (provider.tier !== "optional" && provider.tier !== "keyless" && !provider.configured);
-  }).length;
+  const evidenceSources = allProviders.filter((provider) => (provider.kind ?? "evidence") === "evidence" && (provider.lifecycle ?? "active") === "active");
+  const supportingProviders = allProviders.filter((provider) => !evidenceSources.includes(provider));
+  const missing = evidenceSources.filter((provider) => !provider.disabled && !provider.configured && !provider.availableWithoutCredential && provider.tier === "paid");
+  const availableSources = evidenceSources.filter((provider) => !provider.disabled && (provider.configured || provider.availableWithoutCredential || provider.tier === "keyless"));
+  const categories = [...new Set(evidenceSources.map((provider) => provider.category ?? "Evidence catalog"))];
+  const evidenceHealth = evidenceSources.map((provider) => providerHealth(provider, usage ? latestProviderEvent(provider, usage.events) : undefined));
+  const attention = evidenceHealth.filter((status) => status.label === "Last check failed" || status.label === "Last check partial").length;
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
-      <h1 className="display-sm text-[24px] text-ink">Data sources and check status</h1>
+      <h1 className="display-sm text-[24px] text-ink">Evidence sources</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-        See which outside sources ARGUS can use and whether recent checks worked. “Connected” means access is set up.
-        “Healthy” means a recent check succeeded. Secret keys are never shown.
+        See where ARGUS gets outside facts, what each source can establish, and where its evidence stops. Models and product infrastructure are listed separately because they are not evidence.
       </p>
       {data && (
-        <div className="panel mt-5 grid grid-cols-2 gap-px overflow-hidden bg-line/60 sm:grid-cols-4" aria-label="Provider status summary">
+        <div className="panel mt-5 grid grid-cols-2 gap-px overflow-hidden bg-line/60 sm:grid-cols-4" aria-label="Evidence source summary">
           <div className="stat-tile rounded-none">
-            <span className="stat-label">sources</span>
-            <span className="stat-value">{allProviders.length}</span>
+            <span className="stat-label">evidence sources</span>
+            <span className="stat-value">{evidenceSources.length}</span>
           </div>
           <div className="stat-tile rounded-none">
-            <span className="stat-label">sources connected</span>
-            <span className="stat-value">{configured}/{providers.length}</span>
+            <span className="stat-label">coverage areas</span>
+            <span className="stat-value">{categories.length}</span>
           </div>
           <div className="stat-tile rounded-none">
-            <span className="stat-label">recently healthy</span>
-            <span className="stat-value text-pass">{usage ? healthy : "…"}</span>
+            <span className="stat-label">available here</span>
+            <span className="stat-value">{availableSources.length}/{evidenceSources.length}</span>
           </div>
           <div className="stat-tile rounded-none">
-            <span className="stat-label">needs attention</span>
+            <span className="stat-label">recent check issues</span>
             <span className={`stat-value ${attention > 0 ? "text-caution" : "text-ink"}`}>
-              {usage ? attention : missing.length > 0 ? `${missing.length}+` : "…"}
+              {usage ? attention : "…"}
             </span>
           </div>
         </div>
       )}
       {dataError && (
         <div className="panel mt-5 px-4 py-3" role="alert">
-          <p className="text-[13.5px] font-medium text-ink">Provider configuration could not be loaded</p>
-          <p className="mt-1 text-[12.5px] text-ink-dim">{dataError} This is a status failure, not confirmation that sources are unconfigured.</p>
+          <p className="text-[13.5px] font-medium text-ink">Evidence catalog could not be loaded</p>
+          <p className="mt-1 text-[12.5px] text-ink-dim">{dataError} This does not mean that ARGUS has no sources.</p>
         </div>
       )}
       {missing.length > 0 && (
         <div className="tint-caution mt-4 rounded-lg border px-3 py-2 text-[12.5px]">
-          {missing.length} required source{missing.length === 1 ? "" : "s"} not connected: {missing.map((m) => m.label).join(", ")}.
+          {missing.length} credential-required source{missing.length === 1 ? " is" : "s are"} not available in this deployment: {missing.map((m) => m.label).join(", ")}.
         </div>
       )}
 
-      <div className="panel mt-5 divide-y divide-line/60 overflow-hidden">
-        {/* keyed / optional / infra — the ones with a key to manage */}
-        {providers.map((provider) => (
-          <ProviderRow
-            key={provider.label}
-            provider={provider}
-            latest={usage ? latestProviderEvent(provider, usage.events) : undefined}
-            serperCredits={serperCredits}
-            serperCreditsLoading={serperCreditsLoading}
-            serperCreditsError={serperCreditsError}
-            onCheckSerperCredits={checkSerperCredits}
-          />
-        ))}
+      {!data && !dataError && <div className="panel mt-5 px-4 py-6 text-center text-[12.5px] text-ink-faint">loading evidence catalog…</div>}
 
-        {!data && !dataError && <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">loading source status…</div>}
+      {categories.map((category) => {
+        const rows = evidenceSources.filter((provider) => (provider.category ?? "Evidence catalog") === category);
+        return (
+          <section key={category} className="mt-5" aria-labelledby={`source-category-${category.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`}>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h2 id={`source-category-${category.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`} className="eyebrow">{category}</h2>
+              <span className="mono text-[11px] text-ink-faint">{rows.length} {rows.length === 1 ? "source" : "sources"}</span>
+            </div>
+            <div className="panel divide-y divide-line/60 overflow-hidden">
+              {rows.map((provider) => (
+                <ProviderRow
+                  key={provider.label}
+                  provider={provider}
+                  latest={usage ? latestProviderEvent(provider, usage.events) : undefined}
+                  serperCredits={serperCredits}
+                  serperCreditsLoading={serperCreditsLoading}
+                  serperCreditsError={serperCreditsError}
+                  onCheckSerperCredits={checkSerperCredits}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
 
-        {/* the bar: one labeled divider, then keyless sources as identical rows */}
-        {keyless.length > 0 && (
-          <div className="flex items-center gap-2 bg-void/40 px-4 py-2">
-            <span className="eyebrow">Sources without credentials</span>
-            <span className="mono ml-auto text-[11px] text-ink-faint">{keyless.length} sources</span>
+      {supportingProviders.length > 0 && (
+        <details className="panel mt-5 overflow-hidden">
+          <summary className="cursor-pointer px-4 py-3 text-[13px] font-medium text-ink">
+            Models, infrastructure, and inactive integrations
+            <span className="mono ml-2 text-[11px] font-normal text-ink-faint">{supportingProviders.length} listed separately</span>
+          </summary>
+          <p className="border-t border-line/60 bg-void/30 px-4 py-3 text-[12.5px] leading-relaxed text-ink-dim">
+            These services help ARGUS reason, save work, or preserve old configuration. They are not counted as outside evidence sources.
+          </p>
+          <div className="divide-y divide-line/60">
+            {supportingProviders.map((provider) => (
+              <ProviderRow
+                key={provider.label}
+                provider={provider}
+                latest={usage ? latestProviderEvent(provider, usage.events) : undefined}
+                serperCredits={serperCredits}
+                serperCreditsLoading={serperCreditsLoading}
+                serperCreditsError={serperCreditsError}
+                onCheckSerperCredits={checkSerperCredits}
+              />
+            ))}
           </div>
-        )}
-        {keyless.map((provider) => (
-          <ProviderRow
-            key={provider.label}
-            provider={provider}
-            latest={usage ? latestProviderEvent(provider, usage.events) : undefined}
-            serperCredits={serperCredits}
-            serperCreditsLoading={serperCreditsLoading}
-            serperCreditsError={serperCreditsError}
-            onCheckSerperCredits={checkSerperCredits}
-          />
-        ))}
-      </div>
+        </details>
+      )}
 
       {usageError && data && (
         <p className="mt-3 text-[12.5px] leading-relaxed text-caution" role="status">
-          Recent source activity could not be refreshed. The connection status above is still valid, but it may not reflect current availability.
+          Recent source activity could not be refreshed. Credential presence above is still known, but current availability is not.
         </p>
       )}
 
       <section className="mt-6" aria-labelledby="provider-usage-title">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 id="provider-usage-title" className="text-[15px] font-medium text-ink">Saved source activity</h2>
+            <h2 id="provider-usage-title" className="text-[15px] font-medium text-ink">Recent saved-report activity</h2>
             <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
-              Each saved report records which outside sources ran, whether they worked, and their estimated cost. New checks are added without changing older report records.
+              Saved reports record which providers ran, the recorded outcome, and any cost estimate the ledger has. The list below is a limited recent window; account totals can cover more history.
             </p>
           </div>
           {usage && (
             <div className="mono flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint">
-              <span className="rounded border border-line px-1.5 py-0.5">all recorded history</span>
+              <span className="rounded border border-line px-1.5 py-0.5">account ledger totals</span>
               <span className="rounded border border-line px-1.5 py-0.5">{usage.totals.eventCount} {usage.totals.eventCount === 1 ? "event" : "events"}</span>
               <span className="rounded border border-line px-1.5 py-0.5">{usage.totals.calls} calls</span>
               <span className="rounded border border-line px-1.5 py-0.5">{formatUsd(usage.totals.usd)} estimated</span>
