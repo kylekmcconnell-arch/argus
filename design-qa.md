@@ -46,3 +46,49 @@ First comparison: no P0/P1/P2 fidelity issues were found. The implementation int
 - P3: consider replacing the persistent provenance legend with a small help popover in a later iteration. It remains unchanged here to avoid reducing evidence transparency.
 
 final result: passed
+
+---
+
+## Issue #120 follow-up · plain-language verdict hero
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-22 at 7.46.30 PM.png`
+- Implementation screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/report-verdict-hero-120/implementation-desktop.png`
+- Narrow implementation screenshot: `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/report-verdict-hero-120/implementation-mobile.png`
+- Combined comparison: `/Users/kyle/.codex/visualizations/2026/08/22/01a02aec-d8e5-7933-a3d2-6f69aede22aa/report-verdict-hero-120/comparison.png`
+- Viewports: default desktop preview and 673 × 1200 narrow check
+- State: light theme, saved `$STONKBROKER` PASS report with score 93
+
+### Findings
+
+No actionable P0, P1, or P2 differences remain. The existing hero grid, score
+ring, typography, spacing, color tokens, provenance marks, and responsive
+stack are unchanged. Only the reader-facing copy changed. The longer headline
+wraps cleanly, the exact 26/26 and 18/24 figures stay visibly marked as derived,
+and the narrow page has no document-level horizontal overflow (658px body in a
+673px viewport).
+
+### Required fidelity surfaces
+
+- Fonts and typography: unchanged ARGUS display, body, and mono treatments.
+- Spacing and layout rhythm: no CSS or layout changes; the current two-column
+  hero and narrow stack remain intact.
+- Colors and visual tokens: unchanged PASS, ink, line, and provenance tokens.
+- Image quality and asset fidelity: no assets were added or replaced.
+- Copy and content: vague analyst phrases were replaced with a direct result,
+  plain descriptions of contract ownership and liquidity concentration, and a
+  clear evidence affordance. Recorded scores and rationales remain the inputs.
+
+### Interaction and console checks
+
+- Desktop and 673px narrow states rendered successfully in the in-app browser.
+- The hero remained readable with the score ring, saved date, and provenance
+  legend intact.
+- Console check: 0 errors and 0 warnings.
+
+### Comparison history
+
+The first comparison found no P0/P1/P2 visual mismatch because the change uses
+the existing #119 layout and tokens without modification. No visual-fix loop
+was required.
+
+final result: passed

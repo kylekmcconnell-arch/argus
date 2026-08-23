@@ -1,5 +1,14 @@
 # ARGUS investor-decision UX audit
 
+## Verdict hero language
+
+The opening verdict must read as a decision summary, not an analyst memo. Use a
+direct result, then explain the strongest scoring area and the main concern in
+everyday language. Keep the exact recorded score fractions and provenance marks,
+but do not publish phrases such as “the record holds up,” “carries the file,” or
+“the drag is.” Internal scoring shorthand belongs in the evidence ledger, not in
+the report headline.
+
 Date: 2026-07-10
 Flow reviewed: home → report library → completed person report → methodology → evidence ledger
 
