@@ -198,7 +198,7 @@ export function TeamAccess() {
   };
 
   const grantTestCredits = async (member: WorkspaceMember) => {
-    if (updatingUserId || resendingUserId || grantingUserId || member.role !== "analyst" || !member.active) return;
+    if (updatingUserId || resendingUserId || grantingUserId || member.role === "viewer" || !member.active) return;
     if (!window.confirm(`Add 50,000 beta credits to ${member.email}? This appends a permanent ledger grant.`)) return;
     setGrantingUserId(member.userId);
     setError("");
@@ -322,12 +322,10 @@ export function TeamAccess() {
                       : "invitation pending"} · {relativeTime(member.lastSignInAt)}
                 </span>
                 <span className="mt-0.5 block text-[11px] text-ink-faint">
-                  {member.role === "owner"
-                    ? "owner investigations are not credit-limited"
-                    : `${member.budget.balance.toFixed(1)} credits available · no daily cap`}
+                  {`${member.budget.balance.toFixed(1)} credits available · no daily cap`}
                 </span>
               </span>
-              {member.role === "analyst" && member.active && (
+              {member.role !== "viewer" && member.active && (
                 <button
                   type="button"
                   disabled={pending}

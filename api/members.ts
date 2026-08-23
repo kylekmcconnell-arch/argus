@@ -389,10 +389,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ error: "valid_idempotency_key_required" });
         return;
       }
-      if (existing.role !== "analyst" || !existing.active) {
+      if (existing.role === "viewer" || !existing.active) {
         res.status(409).json({
-          error: "active_analyst_required",
-          message: "Test credits can only be granted to an active analyst.",
+          error: "active_investigator_required",
+          message: "Beta credits can only be granted to an active owner or analyst.",
         });
         return;
       }

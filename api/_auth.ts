@@ -262,10 +262,8 @@ export async function consumeInvestigationQuota(
 ): Promise<QuotaResult> {
   const credentials = serviceCredentials();
   if (!credentials) return { allowed: false, used: 0, remaining: 0, error: "storage_not_configured" };
-  // Owners operate the workspace and are deliberately not credit-limited.
-  // Everyone else uses the visible investigation-credit ledger. There is no
-  // second daily request counter hidden behind that balance.
-  if (auth.role === "owner") return { allowed: true, used: 0, remaining: -1 };
+  // Every investigator, including workspace owners, uses the same visible
+  // credit ledger. Role controls administration, never hidden free usage.
   try {
     const response = await fetch(`${credentials.url}/rest/v1/rpc/consume_investigation_credit`, {
       method: "POST",
