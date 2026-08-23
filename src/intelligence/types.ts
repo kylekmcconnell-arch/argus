@@ -292,4 +292,8 @@ export interface IntelligenceSpineSnapshot {
   coverage: IntelligenceDomainCoverage[];
   signals: DerivedIntelligenceSignal[];
   lenses: DecisionLens[];
+  /** Score-neutral role views derived from this frozen entity spine. */
+  entityScorecards?: import("./entityScorecards").EntityScorecard[];
+  /** Typed rows used by entity reports and ARGUS Eye from the same lineage. */
+  entityLedger?: import("./entityScorecards").EntityLedgerRow[];
 }

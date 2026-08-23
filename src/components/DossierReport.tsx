@@ -175,6 +175,64 @@ function MeasureLedger({ measures }: { measures: KeyMeasure[] }) {
   );
 }
 
+const SCORECARD_STATE_COPY: Record<string, string> = {
+  established: "Evidence established",
+  partial: "Partly established",
+  open: "Still open",
+  not_collected: "Not collected",
+};
+
+/** Role-specific evidence coverage. This is deliberately not a second score. */
+function EntityScorecards({ dossier }: { dossier: Dossier }) {
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  if (!dossier.entityScorecards.length) return null;
+  return (
+    <div className="mt-7 max-w-[62ch] border-t border-line pt-6">
+      {dossier.entityScorecards.map((scorecard) => (
+        <section key={scorecard.id} aria-label={scorecard.label}>
+          <p className="mono text-[10px] uppercase tracking-[0.12em] text-signal-lift">Role-specific review</p>
+          <h3 className="mt-2 text-[17px] font-medium text-ink">{scorecard.label}</h3>
+          <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">
+            Evidence coverage for this role. It does not create or alter the governing ARGUS score.
+          </p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {scorecard.axes.map((axis) => (
+              <div key={axis.id} className="panel-inset px-3 py-2.5">
+                <p className="text-[12.5px] font-medium text-ink">{axis.label}</p>
+                <p className="mono mt-1 text-[10px] uppercase tracking-[0.08em] text-ink-faint">
+                  {SCORECARD_STATE_COPY[axis.state] ?? axis.state.replaceAll("_", " ")}
+                  {axis.ledgerRowIds.length ? ` · ${axis.ledgerRowIds.length} record${axis.ledgerRowIds.length === 1 ? "" : "s"}` : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+      {dossier.entityLedger.length > 0 && (
+        <div className="mt-4">
+          <button type="button" onClick={() => setLedgerOpen(!ledgerOpen)} className="chip tint-neutral normal-case tracking-normal text-ink-dim">
+            {ledgerOpen ? "Close role evidence" : `Open role evidence · ${dossier.entityLedger.length}`}
+          </button>
+          {ledgerOpen && (
+            <div className="mt-3 divide-y divide-line border-y border-line">
+              {dossier.entityLedger.map((row) => (
+                <div key={row.id} className="py-2.5">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="text-[12.5px] font-medium text-ink">{row.label}</span>
+                    <span className="mono text-[10px] uppercase text-ink-faint">{row.kind.replaceAll("_", " ")} · {row.state.replaceAll("_", " ")}</span>
+                  </div>
+                  <p className="mt-1 text-[12px] leading-relaxed text-ink-dim">{String(row.value)}</p>
+                  {row.asOf && <p className="mono mt-1 text-[10px] text-ink-faint">As of {row.asOf}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** "Go deeper" — the questions this beat left open, in the report's own words. */
 function RabbitHole({ questions }: { questions: string[] }) {
   const [open, setOpen] = useState(false);
@@ -547,6 +605,7 @@ export function DossierReport({
               {b.id === "coverage" && <RabbitHole questions={d.openQuestions} />}
               {b.id === "coverage" && <MeasureLedger measures={d.measures} />}
               {b.id === "verdict" && <LensPicker lenses={d.lenses} />}
+              {b.id === "verdict" && <EntityScorecards dossier={d} />}
 
               {b.id === "verdict" && (
                 <div className="mt-6 max-w-[54ch]">

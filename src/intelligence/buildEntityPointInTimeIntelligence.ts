@@ -29,6 +29,7 @@ import type {
   IntelligenceSubjectForm,
   SubjectFormAssessment,
 } from "./types";
+import { buildEntityScorecards } from "./entityScorecards";
 
 export type EntityIntelligenceKind =
   | "person"
@@ -1311,8 +1312,14 @@ export function buildEntityPointInTimeIntelligence(
     signals,
     lenses: [],
   };
-  return sanitizeIntelligenceSnapshot(snapshot, evidence, {
+  const sanitized = sanitizeIntelligenceSnapshot(snapshot, evidence, {
     domains: ENTITY_DOMAIN_ORDER,
     lensDefinitions: definitions,
   });
+  const roleViews = buildEntityScorecards(sanitized, evidence.roles);
+  return {
+    ...sanitized,
+    entityScorecards: roleViews.scorecards,
+    entityLedger: roleViews.ledger,
+  };
 }

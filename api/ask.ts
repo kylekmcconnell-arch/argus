@@ -314,6 +314,51 @@ function intelligenceSnapshot(value: unknown, addCitation: CitationCollector) {
     })
     .filter((lens) => lens.id);
 
+  const entityScorecards = (Array.isArray(intelligence.entityScorecards) ? intelligence.entityScorecards : [])
+    .slice(0, 4)
+    .map((value) => {
+      const scorecard = record(value);
+      return {
+        id: text(scorecard.id, 220),
+        entityKey: text(scorecard.entityKey, 180),
+        role: text(scorecard.role, 80),
+        label: text(scorecard.label, 200),
+        governingScoreImpact: text(scorecard.governingScoreImpact, 40),
+        axes: (Array.isArray(scorecard.axes) ? scorecard.axes : []).slice(0, 12).map((value) => {
+          const axis = record(value);
+          return {
+            id: text(axis.id, 120),
+            label: text(axis.label, 240),
+            state: text(axis.state, 40),
+            ledgerRowIds: (Array.isArray(axis.ledgerRowIds) ? axis.ledgerRowIds : []).map((id) => text(id, 220)).filter(Boolean).slice(0, 80),
+            measurementRefs: (Array.isArray(axis.measurementRefs) ? axis.measurementRefs : []).map((id) => text(id, 180)).filter(Boolean).slice(0, 80),
+            sourceRefs: (Array.isArray(axis.sourceRefs) ? axis.sourceRefs : []).map((id) => text(id, 180)).filter(Boolean).slice(0, 80),
+          };
+        }),
+      };
+    })
+    .filter((scorecard) => scorecard.id);
+
+  const entityLedger = (Array.isArray(intelligence.entityLedger) ? intelligence.entityLedger : [])
+    .slice(0, 160)
+    .map((value) => {
+      const row = record(value);
+      return {
+        id: text(row.id, 220),
+        kind: text(row.kind, 80),
+        entityKey: text(row.entityKey, 180),
+        role: text(row.role, 80),
+        label: text(row.label, 300),
+        value: typeof row.value === "number" && Number.isFinite(row.value) ? row.value : text(row.value, 600),
+        state: text(row.state, 80),
+        sourceRefs: (Array.isArray(row.sourceRefs) ? row.sourceRefs : []).map((id) => text(id, 180)).filter(Boolean).slice(0, 40),
+        measurementRefs: (Array.isArray(row.measurementRefs) ? row.measurementRefs : []).map((id) => text(id, 180)).filter(Boolean).slice(0, 20),
+        asOf: text(row.asOf, 80),
+        changeCondition: text(row.changeCondition, 800),
+      };
+    })
+    .filter((row) => row.id);
+
   return {
     schemaVersion: intelligence.schemaVersion,
     rulesetVersion: text(intelligence.rulesetVersion, 120),
@@ -336,6 +381,8 @@ function intelligenceSnapshot(value: unknown, addCitation: CitationCollector) {
     coverage,
     signals,
     lenses,
+    entityScorecards,
+    entityLedger,
   };
 }
 
