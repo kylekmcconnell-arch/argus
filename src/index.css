@@ -898,6 +898,249 @@
   }
 }
 
+/* Referrals is an earnings product: the story explains the value exchange,
+   the signal surface carries money, and the rest of the page stays quiet. */
+.referral-workspace {
+  padding-bottom: clamp(56px, 8vw, 104px);
+}
+.referral-earnings-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: clamp(28px, 4vw, 64px);
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--color-line-2);
+  border-radius: var(--radius-xl);
+  background: var(--color-sidebar);
+  padding: clamp(28px, 4vw, 58px);
+  box-shadow: var(--shadow-sm);
+}
+.referral-earnings-story {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+}
+.referral-term {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid color-mix(in oklab, var(--color-brand) 24%, var(--color-line));
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-panel) 92%, var(--color-brand) 8%);
+  padding: 8px 13px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.referral-term svg {
+  color: var(--color-brand-dim);
+}
+.referral-earnings-card {
+  --color-on-signal: #ffffff;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border-radius: var(--radius-xl);
+  background: color-mix(in oklab, var(--color-brand) 60%, #004b31);
+  padding: clamp(24px, 3vw, 36px);
+  box-shadow: 0 28px 70px -34px color-mix(in oklab, var(--color-brand) 70%, transparent);
+}
+.referral-earnings-breakdown {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 30px;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--color-on-signal) 20%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--color-on-signal) 18%, transparent);
+}
+.referral-earnings-breakdown > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  background: rgb(255 255 255 / 0.08);
+  padding: 16px;
+}
+.referral-earnings-breakdown span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10.5px;
+  color: color-mix(in oklab, var(--color-on-signal) 88%, transparent);
+}
+.referral-earnings-breakdown strong {
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--color-on-signal);
+}
+.referral-earnings-breakdown small {
+  margin-top: 5px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: color-mix(in oklab, var(--color-on-signal) 80%, transparent);
+}
+.referral-payout-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 28px;
+  color: var(--color-on-signal);
+}
+.referral-payout-state > span {
+  display: flex;
+  flex-direction: column;
+}
+.referral-payout-state strong {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.referral-payout-state small {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: color-mix(in oklab, var(--color-on-signal) 80%, transparent);
+}
+.referral-earnings-card .eyebrow {
+  color: rgb(255 255 255 / 0.84);
+}
+.referral-invite-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  margin-top: 20px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel);
+  padding: clamp(20px, 2.5vw, 32px);
+  box-shadow: var(--shadow-sm);
+}
+.referral-link-control {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+}
+.referral-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+.referral-metric-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 180px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel);
+  padding: 20px;
+}
+.referral-metric-card.is-signal {
+  border-color: color-mix(in oklab, var(--color-brand) 30%, var(--color-line));
+  background: color-mix(in oklab, var(--color-panel) 93%, var(--color-brand) 7%);
+}
+.referral-metric-icon {
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 26px;
+  border-radius: 50%;
+  background: var(--color-panel-2);
+  color: var(--color-brand-dim);
+}
+.referral-metric-value {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: clamp(27px, 3vw, 38px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  color: var(--color-ink);
+}
+.referral-metric-card p {
+  margin-top: 9px;
+  font-size: 11px;
+  color: var(--color-ink-faint);
+}
+.referral-how-it-works {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1.45fr);
+  gap: clamp(28px, 4vw, 64px);
+  margin-top: 44px;
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+  padding: 40px 0;
+}
+.referral-reward-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.referral-reward-steps article {
+  display: flex;
+  min-width: 0;
+  min-height: 190px;
+  flex-direction: column;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-panel);
+  padding: 18px;
+}
+.referral-reward-steps article > span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-ink-faint);
+}
+.referral-reward-steps article > svg {
+  margin-top: 28px;
+  color: var(--color-brand-dim);
+}
+.referral-reward-steps strong {
+  margin-top: 18px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.referral-reward-steps p {
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-ink-faint);
+}
+@media (max-width: 1023px) {
+  .referral-earnings-hero,
+  .referral-how-it-works {
+    grid-template-columns: 1fr;
+  }
+  .referral-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 639px) {
+  .referral-earnings-breakdown,
+  .referral-metric-grid,
+  .referral-reward-steps {
+    grid-template-columns: 1fr;
+  }
+  .referral-invite-card {
+    grid-template-columns: 1fr;
+  }
+  .referral-link-control {
+    flex-direction: column;
+  }
+  .referral-metric-card,
+  .referral-reward-steps article {
+    min-height: 0;
+  }
+}
+
 /* The ONE verdict treatment (PASS/FAIL/CAUTION/AVOID/…): dot + stamped word.
    fail gets a hollow dot so fail-vs-avoid survives small sizes and CVD. */
 .verdict-pill {
