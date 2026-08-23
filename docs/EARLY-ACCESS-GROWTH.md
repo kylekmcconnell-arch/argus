@@ -11,13 +11,27 @@ ARGUS meters standard investigations with investigation credits instead of expos
 | Plan | Monthly price | Included investigations | Seats | Daily guardrail | Additional credits |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Early access | $0 | 10 one-time | 1 | 3/day | not sold |
-| Analyst | $99 | 25/month | 1 | 10/day | $39 per 10 |
-| Team | $299 | 100/month | 5 | 30/day | $35 per 10 |
+| Analyst | $129 | 20/month | 1 | 8/day | $59 per 10 |
+| Team | $399 | 60/month | 5 | 20/day | $59 per 10 |
 | Enterprise | custom | contract | custom | contract | contract |
 
 A full rescan may later consume more than one credit after sufficient live cost data exists. The first implementation keeps the unit understandable: one standard investigation equals one credit.
 
 Prices are configuration, not an accounting source of truth. Paid checkout remains disabled until a billing provider, product/price IDs, webhook fulfillment, refund handling, and tax treatment are verified end to end.
+
+### Pricing basis
+
+The launch prices are a hypothesis that must be replaced or confirmed by the measured beta cycle. They use the current 30-day cost snapshot and conservatively reserve the configured 20% referral commission before calculating contribution margin.
+
+| Offer | Net revenue after referral share | Provider cost at average | Margin at average | Provider cost at p90 | Margin at p90 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Analyst · 20 credits | $103.20 | $22.20 | 78.5% | $45.20 | 56.2% |
+| Team · 60 credits | $319.20 | $66.60 | 79.1% | $135.60 | 57.5% |
+| Extra pack · 10 credits | $47.20 | $11.10 | 76.5% | $22.60 | 52.1% |
+
+These are contribution margins before fixed subscriptions, infrastructure, support, storage, retries, payment processing, refunds, and taxes. The executable pricing test prevents any configured paid offer from falling below 50% at the recorded p90 provider cost after referral share.
+
+Market context is deliberately secondary to measured ARGUS cost. [Nansen Pro](https://academy.nansen.ai/en/help/articles/9412804-about-nansen-pro) is currently $49/month annually or $69 monthly for a broad self-service analytics product. [Messari](https://messari.io/pricing) places institutional diligence and advanced APIs in its enterprise offering. ARGUS is positioned between those products: fewer units than a dashboard subscription, but each unit produces a saved, source-bound due-diligence report.
 
 ## Signup and passkeys
 
@@ -32,10 +46,12 @@ Supabase passkeys are experimental. The relying-party ID must be selected once a
 ## Early-access credits and limits
 
 - Every admitted tester receives an idempotent 10-credit starting grant.
+- Owners can add five test credits from Access and activity. Each server request is capped at 10 credits and protected by a client-generated idempotency key.
 - Non-owner investigations debit one credit and remain under the 3/day early-access guardrail unless `ARGUS_DAILY_INVESTIGATION_LIMIT` is set.
 - Credit exhaustion fails closed. Daily quota still fails open on storage blips.
 - The credit ledger is append-only. Adjustments and refunds are new rows, never balance rewrites.
 - Extra credit packs are listed on pricing. Checkout stays off until billing is authorized.
+- A 20-person cohort has a maximum initial allocation of 200 reports: about $222 at the current average provider cost or $452 at p90. This is the beta reserve, not a user charge.
 
 ## Feedback to Claude
 

@@ -5,6 +5,14 @@ export const REVENUE_SHARE_COMMISSION_BPS = 2_000;
 export const CREDIT_SPLIT_PERCENT = 25;
 export const CASH_SPLIT_PERCENT = 75;
 export const EARLY_ACCESS_DAILY_LIMIT = 3;
+export const MAX_MANUAL_TEST_GRANT_CREDITS = 10;
+export const OBSERVED_REPORT_COST_USD = {
+  average: 1.11,
+  median: 0.97,
+  p90: 2.26,
+  windowDays: 30,
+} as const;
+export const MIN_P90_CONTRIBUTION_MARGIN = 0.5;
 export const REFERRAL_CODE = /^[A-Z0-9]{8,20}$/;
 export const PUBLIC_NAME_MAX = 40;
 
@@ -21,22 +29,22 @@ export const ARGUS_PLANS = [
   {
     id: "analyst",
     name: "Analyst",
-    monthlyUsd: 99,
-    investigationCredits: 25,
+    monthlyUsd: 129,
+    investigationCredits: 20,
     seats: 1,
-    dailyLimit: 10,
-    extraPack: { credits: 10, usd: 39 },
+    dailyLimit: 8,
+    extraPack: { credits: 10, usd: 59 },
     description: "For an individual investigator running recurring diligence.",
   },
   {
     id: "team",
     name: "Team",
-    monthlyUsd: 299,
-    investigationCredits: 100,
+    monthlyUsd: 399,
+    investigationCredits: 60,
     seats: 5,
-    dailyLimit: 30,
-    extraPack: { credits: 10, usd: 35 },
-    description: "Shared workspace, pooled credits, and owner controls.",
+    dailyLimit: 20,
+    extraPack: { credits: 10, usd: 59 },
+    description: "For diligence teams that need five seats and owner controls.",
   },
 ] as const;
 
@@ -97,6 +105,30 @@ export interface CommissionSplit {
   commissionCents: number;
   creditCents: number;
   cashCents: number;
+}
+
+export interface PlanUnitEconomics {
+  netRevenueUsd: number;
+  providerCostUsd: number;
+  contributionMargin: number | null;
+}
+
+export function planUnitEconomics(
+  monthlyUsd: number,
+  investigationCredits: number,
+  providerCostPerReportUsd: number,
+  commissionPercent = DEFAULT_REVENUE_SHARE.commissionPercent,
+): PlanUnitEconomics {
+  const revenue = Math.max(0, monthlyUsd);
+  const credits = Math.max(0, investigationCredits);
+  const providerCost = Math.max(0, providerCostPerReportUsd) * credits;
+  const commission = Math.min(100, Math.max(0, commissionPercent));
+  const netRevenue = revenue * (1 - commission / 100);
+  return {
+    netRevenueUsd: netRevenue,
+    providerCostUsd: providerCost,
+    contributionMargin: netRevenue > 0 ? (netRevenue - providerCost) / netRevenue : null,
+  };
 }
 
 export function creditsFromMillis(millis: number): number {

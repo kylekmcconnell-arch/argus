@@ -25,7 +25,7 @@ export function PricingGrid({ plans, checkoutActive }: { plans: readonly ArgusPl
           </ul>
           {plan.monthlyUsd > 0 && (
             <button type="button" disabled={!checkoutActive} className="btn-primary mt-4 w-full py-2 text-[12.5px] disabled:opacity-50">
-              {checkoutActive ? "Continue to checkout" : "Billing connection pending"}
+              {checkoutActive ? "Continue to checkout" : "Billing not active"}
             </button>
           )}
         </article>

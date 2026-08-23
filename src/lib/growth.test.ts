@@ -3,6 +3,9 @@ import {
   ARGUS_PLANS,
   cleanPublicName,
   creditsFromMillis,
+  MIN_P90_CONTRIBUTION_MARGIN,
+  OBSERVED_REPORT_COST_USD,
+  planUnitEconomics,
   publicLeaderboardPayload,
   publicNameFromEmail,
   rankLeaderboard,
@@ -15,7 +18,21 @@ describe("growth pricing and commission", () => {
     expect(creditsFromMillis(STARTING_CREDIT_MILLIS)).toBe(10);
     expect(ARGUS_PLANS.map((plan) => plan.id)).toEqual(["early_access", "analyst", "team"]);
     expect(ARGUS_PLANS[0]?.dailyLimit).toBe(3);
-    expect(ARGUS_PLANS[1]?.extraPack).toEqual({ credits: 10, usd: 39 });
+    expect(ARGUS_PLANS[1]?.extraPack).toEqual({ credits: 10, usd: 59 });
+  });
+
+  it("keeps launch plans viable at measured p90 cost after referral share", () => {
+    for (const plan of ARGUS_PLANS.filter((candidate) => candidate.monthlyUsd > 0)) {
+      const economics = planUnitEconomics(
+        plan.monthlyUsd,
+        plan.investigationCredits,
+        OBSERVED_REPORT_COST_USD.p90,
+      );
+      expect(economics.contributionMargin, plan.name).toBeGreaterThanOrEqual(MIN_P90_CONTRIBUTION_MARGIN);
+    }
+    const pack = ARGUS_PLANS[1].extraPack;
+    expect(planUnitEconomics(pack.usd, pack.credits, OBSERVED_REPORT_COST_USD.p90).contributionMargin)
+      .toBeGreaterThanOrEqual(MIN_P90_CONTRIBUTION_MARGIN);
   });
 
   it("splits 20% of subscription revenue into 25% credits and 75% cash", () => {

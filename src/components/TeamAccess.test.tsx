@@ -29,6 +29,7 @@ const pendingMember = {
   lastSignInAt: null,
   createdAt: "2026-07-11T00:39:59.000Z",
   updatedAt: "2026-07-11T00:39:59.000Z",
+  budget: { balance: 10, dailyLimit: 3, lastGrantAt: "2026-07-11T00:39:59.000Z" },
 };
 
 let container: HTMLDivElement;
@@ -87,5 +88,29 @@ describe("TeamAccess invitation recovery", () => {
     await act(async () => root.render(<TeamAccess />));
     await vi.waitFor(() => expect(container.textContent).toContain("sign-in ready"));
     expect(container.textContent).not.toContain("resend invite");
+  });
+
+  it("shows an analyst budget and adds a bounded five-credit test grant", async () => {
+    const analyst = { ...pendingMember, role: "analyst", emailVerified: true };
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        expect(JSON.parse(String(init.body))).toMatchObject({
+          userId: analyst.userId,
+          grantTestCredits: 5,
+        });
+        return new Response(JSON.stringify({ member: analyst, grantedCredits: 5 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ members: [analyst], events: [] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await act(async () => root.render(<TeamAccess />));
+    await vi.waitFor(() => expect(container.textContent).toContain("10.0 credits available · 3/day"));
+    const add = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "add 5 test credits");
+    expect(add).toBeDefined();
+
+    await act(async () => add?.click());
+    await vi.waitFor(() => expect(container.textContent).toContain("Added 5 test credits"));
   });
 });

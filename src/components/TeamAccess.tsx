@@ -11,6 +11,11 @@ interface WorkspaceMember {
   lastSignInAt: string | null;
   createdAt: string;
   updatedAt: string;
+  budget: {
+    balance: number;
+    dailyLimit: number;
+    lastGrantAt: string | null;
+  };
 }
 
 interface MemberEvent {
@@ -28,6 +33,7 @@ interface MembersResponse {
   member?: WorkspaceMember;
   invitationSent?: boolean;
   invitationResent?: boolean;
+  grantedCredits?: number;
   error?: string;
   message?: string;
 }
@@ -78,6 +84,7 @@ export function TeamAccess() {
   const [inviting, setInviting] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
   const [resendingUserId, setResendingUserId] = useState<string | null>(null);
+  const [grantingUserId, setGrantingUserId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (auth.role !== "owner") return;
@@ -191,6 +198,30 @@ export function TeamAccess() {
     }
   };
 
+  const grantTestCredits = async (member: WorkspaceMember) => {
+    if (updatingUserId || resendingUserId || grantingUserId || member.role !== "analyst" || !member.active) return;
+    setGrantingUserId(member.userId);
+    setError("");
+    setNotice("");
+    try {
+      await responseBody(await fetch("/api/members", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          userId: member.userId,
+          grantTestCredits: 5,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      }));
+      setNotice(`Added 5 test credits for ${member.email}.`);
+      await load();
+    } catch (grantError) {
+      setError(grantError instanceof Error ? grantError.message : "The test budget could not be updated.");
+    } finally {
+      setGrantingUserId(null);
+    }
+  };
+
   return (
     <section className="panel mt-6 overflow-hidden" aria-labelledby="workspace-access-title">
       <div className="border-b border-line px-5 py-4">
@@ -269,7 +300,8 @@ export function TeamAccess() {
           const isSelf = member.userId === auth.user.id;
           const updating = updatingUserId === member.userId;
           const resending = resendingUserId === member.userId;
-          const pending = updating || resending;
+          const granting = grantingUserId === member.userId;
+          const pending = updating || resending || granting;
           return (
             <div key={member.userId} className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5 last:border-0">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] font-medium text-signal-lift">
@@ -289,7 +321,22 @@ export function TeamAccess() {
                       ? "sign-in ready"
                       : "invitation pending"} · {relativeTime(member.lastSignInAt)}
                 </span>
+                <span className="mt-0.5 block text-[11px] text-ink-faint">
+                  {member.role === "owner"
+                    ? "owner investigations are not credit-limited"
+                    : `${member.budget.balance.toFixed(1)} credits available · ${member.budget.dailyLimit}/day`}
+                </span>
               </span>
+              {member.role === "analyst" && member.active && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => void grantTestCredits(member)}
+                  className="btn-chip whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {granting ? "adding…" : "add 5 test credits"}
+                </button>
+              )}
               {!member.emailVerified && member.active && (
                 <button
                   type="button"
