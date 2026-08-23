@@ -35,10 +35,10 @@ export function PublicAccessHome({
         <section aria-labelledby="public-access-title" className="rise-in max-w-[850px]">
           <div className="eyebrow text-signal-lift">Private early access</div>
           <h1 id="public-access-title" className="public-access-title display mt-4 text-ink">
-            Start with the decision.<br />ARGUS builds the evidence.
+            What would you like to investigate?
           </h1>
           <p className="mt-6 max-w-[610px] text-[15px] leading-relaxed text-ink-dim">
-            Forensic due diligence for people, projects, tokens, and websites, built into one clear report.
+            Enter a token, wallet, website, project, or person. ARGUS will gather the evidence and explain what it finds.
           </p>
 
           <form onSubmit={submit} className="mt-10 max-w-[600px]">
