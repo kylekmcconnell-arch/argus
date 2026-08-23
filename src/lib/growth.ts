@@ -4,7 +4,7 @@ export const REFERRAL_BONUS_MILLIS = 2_000;
 export const REVENUE_SHARE_COMMISSION_BPS = 2_000;
 export const CREDIT_SPLIT_PERCENT = 25;
 export const CASH_SPLIT_PERCENT = 75;
-export const MAX_MANUAL_TEST_GRANT_CREDITS = 10;
+export const MAX_MANUAL_TEST_GRANT_CREDITS = 50_000;
 export const OBSERVED_REPORT_COST_USD = {
   average: 1.11,
   median: 0.97,

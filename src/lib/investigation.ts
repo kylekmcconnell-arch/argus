@@ -286,7 +286,7 @@ async function fetchTokenIdentity(symbol: string, name: string, contract: string
 export function streamInvestigation(
   input: RunnableTokenInput,
   h: InvestigationHandlers,
-  opts?: { forceTokenAudit?: boolean; intent?: import("./researchDirector").ResearchIntent },
+  opts?: { forceTokenAudit?: boolean; intent?: import("./researchDirector").ResearchIntent; creditKey?: string },
 ): () => void {
   let aborted = false;
   let abortLive: (() => void) | null = null;
@@ -418,7 +418,7 @@ export function streamInvestigation(
               tokenAddress: token.address,
               tokenChain: token.chain,
               tokenSymbol: token.symbol,
-            });
+            }, opts?.creditKey);
           });
           projectAccount = projectAuditResult.dossier;
           projectAccountAudit = projectAccount

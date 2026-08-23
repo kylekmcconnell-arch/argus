@@ -11,6 +11,7 @@ import { streamInvestigation, type Investigation } from "./investigation";
 import type { RunnableTokenInput } from "./resolveInput";
 import type { TraceStep } from "../data/evidence";
 import type { ResearchIntent } from "./researchDirector";
+import { reserveInvestigationCredit } from "./investigationCredits";
 
 export type ScanKind = "token" | "investigation";
 export interface ScanRun {
@@ -28,6 +29,7 @@ export interface ScanRun {
   hop?: string;       // investigation subtitle
   startedAt: number;
   intent?: ResearchIntent;
+  creditKey: string;
 }
 
 type Listener = () => void;
@@ -68,7 +70,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
 
-  const run: ScanRun = { id: `tok:${ref}:${Date.now()}`, kind: "token", ref, input: input.ref, label: trunc(input.ref), priv, steps: [], pct: 0, status: "running", startedAt: Date.now() };
+  const run: ScanRun = { id: `tok:${ref}:${Date.now()}`, kind: "token", ref, input: input.ref, label: trunc(input.ref), priv, steps: [], pct: 0, status: "running", startedAt: Date.now(), creditKey: crypto.randomUUID() };
   runs.set(key, run);
   emit();
 
@@ -76,6 +78,8 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
   aborts.set(key, () => { cancelled = true; });
   (async () => {
     try {
+      await reserveInvestigationCredit(run.creditKey, "token");
+      if (cancelled) return;
       let count = 0;
       const d = await auditToken(
         input,
@@ -104,17 +108,32 @@ export function startInvestigationScan(
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
 
-  const run: ScanRun = { id: `inv:${ref}:${Date.now()}`, kind: "investigation", ref, input: rawInput, label: trunc(rawInput.replace(/^[@$]/, "")), priv, steps: [], pct: 0, status: "running", startedAt: Date.now(), intent: opts?.intent };
+  const run: ScanRun = { id: `inv:${ref}:${Date.now()}`, kind: "investigation", ref, input: rawInput, label: trunc(rawInput.replace(/^[@$]/, "")), priv, steps: [], pct: 0, status: "running", startedAt: Date.now(), intent: opts?.intent, creditKey: crypto.randomUUID() };
   runs.set(key, run);
   emit();
 
-  let count = 0;
-  const abort = streamInvestigation(input, {
-    onStep: (s) => { count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(94, count * 7); emit(); },
-    onHop: (sub) => { run.hop = sub; emit(); },
-    onDone: (inv) => { run.status = "done"; run.result = inv; run.pct = 100; aborts.delete(key); emit(); onComplete?.(run); },
-    onError: () => { run.status = "error"; run.error = "error"; aborts.delete(key); emit(); },
-  }, { forceTokenAudit: opts?.force, intent: opts?.intent });
-  aborts.set(key, abort);
+  let cancelled = false;
+  aborts.set(key, () => { cancelled = true; });
+  void (async () => {
+    try {
+      await reserveInvestigationCredit(run.creditKey, "investigation");
+      if (cancelled) return;
+      let count = 0;
+      const abort = streamInvestigation(input, {
+        onStep: (s) => { count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(94, count * 7); emit(); },
+        onHop: (sub) => { run.hop = sub; emit(); },
+        onDone: (inv) => { run.status = "done"; run.result = inv; run.pct = 100; aborts.delete(key); emit(); onComplete?.(run); },
+        onError: (error) => { run.status = "error"; run.error = error; aborts.delete(key); emit(); },
+      }, { forceTokenAudit: opts?.force, intent: opts?.intent, creditKey: run.creditKey });
+      aborts.set(key, abort);
+    } catch (error) {
+      if (!cancelled) {
+        run.status = "error";
+        run.error = error instanceof Error ? error.message : String(error);
+        aborts.delete(key);
+        emit();
+      }
+    }
+  })();
   return run;
 }

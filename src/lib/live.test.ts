@@ -47,7 +47,7 @@ describe("audit SSE liveness", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/audit?handle=%40argus&intent=investment_due_diligence",
+      expect.stringMatching(/^\/api\/audit\?handle=%40argus&intent=investment_due_diligence&creditKey=[0-9a-f-]+$/),
       expect.objectContaining({ headers: { accept: "text/event-stream" } }),
     );
     expect(handlers.onStep).not.toHaveBeenCalled();
@@ -73,7 +73,7 @@ describe("audit SSE liveness", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/audit?handle=%40argus&intent=identity_and_control&private=1",
+      expect.stringMatching(/^\/api\/audit\?handle=%40argus&intent=identity_and_control&creditKey=[0-9a-f-]+&private=1$/),
       expect.any(Object),
     );
   });

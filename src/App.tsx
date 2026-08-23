@@ -490,7 +490,17 @@ export default function App() {
     onAudit(raw, priv, force);
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, setInvestigationInput, setPhase, setPrivateMode, setQuery, showPrivacyConflict]);
 
-  const onInvestigationError = useCallback(() => setPhase("notfound"), [setPhase]);
+  const onInvestigationError = useCallback((message: string) => {
+    setLiveError(message);
+    setCaseNotice({ reason: "launch-failed", ref: query, mode: "investigation" });
+    setPhase("notfound");
+  }, [query, setPhase]);
+
+  const onTokenError = useCallback((message: string) => {
+    setLiveError(message);
+    setCaseNotice({ reason: "launch-failed", ref: query, mode: "token" });
+    setPhase("notfound");
+  }, [query, setPhase]);
 
   // Threat scan: a standalone surface. Token mode resolves any token ref to the
   // threat report; wallet mode triages a wallet's holdings. A token address and
@@ -1415,7 +1425,7 @@ export default function App() {
       {phase === "project" && viewedProject && <ProjectView project={viewedProject} onAudit={viewedProject.privateMode ? onPrivateAudit : onSafeAudit} onReset={reset} record={!viewedProject.privateMode} panelCostToken={viewedProject.panelCostToken} />}
 
       {phase === "token-run" && tokenInput && (
-        <TokenRun input={tokenInput} onDone={onTokenDone} onError={() => setPhase("notfound")} />
+        <TokenRun input={tokenInput} onDone={onTokenDone} onError={onTokenError} />
       )}
 
       {phase === "token-report" && tokenDossier && <TokenReport key={`token:${tokenDossier.versionContext?.reportVersionId ?? tokenDossier.viewVersionContext?.reportVersionId ?? tokenDossier.persistence?.scanId ?? tokenDossier.viewPersistence?.scanId ?? tokenDossier.address}`} dossier={tokenDossier} onReset={reset} onAudit={tokenReportPrivate ? onPrivateAudit : onSafeAudit} onRescan={() => onAudit(tokenDossier.address, tokenReportPrivate, true)} onOpenBrief={!evidenceReviewVersionId && !privateMode && tokenBriefTarget ? () => setCaseBriefTarget(tokenBriefTarget) : undefined} />}

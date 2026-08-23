@@ -24,13 +24,13 @@ describe("consumeInvestigationQuota credit policy", () => {
     vi.unstubAllEnvs();
   });
 
-  it("keeps owners unlimited without consulting a daily counter or credit ledger", async () => {
-    const fetchMock = vi.fn();
+  it("charges owners through the same visible credit ledger", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse([{ allowed: true, balance_millis: 49_999_000 }]));
     vi.stubGlobal("fetch", fetchMock);
     const quota = await consumeInvestigationQuota(auth, "/api/audit");
     expect(quota.allowed).toBe(true);
-    expect(quota.remaining).toBe(-1);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(quota).toMatchObject({ used: 1, remaining: 49_999, creditRemaining: 49_999 });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("blocks an analyst only when the visible credit ledger is exhausted", async () => {
