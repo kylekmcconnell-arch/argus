@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 function env(key) {
   return process.env[key];
 }
+var GROK_ANALYST_MODEL = process.env.ARGUS_GROK_ANALYST_MODEL || process.env.ARGUS_GROK_MODEL || "grok-4-fast";
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
@@ -751,6 +752,20 @@ async function retryFetch(input, init, attempts = 3) {
   }
   throw lastErr;
 }
+async function retryFetchWithFreshTimeout(input, timeoutMs, init = {}, attempts = 2, fetchImpl = fetch) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const response = await fetchImpl(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
+      if (response.ok || response.status !== 429 && response.status < 500) return response;
+      lastErr = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastErr = error;
+    }
+    if (i < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 300 * 2 ** i));
+  }
+  throw lastErr;
+}
 
 // src/token/sources.ts
 var GOPLUS_CHAIN = {
@@ -1010,10 +1025,9 @@ function largestInsiderClusterPercent(networks) {
 }
 async function rugcheckReport(mint, fetchImpl = fetch) {
   try {
-    const res = await fetchImpl(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, {
-      signal: AbortSignal.timeout(12e3),
+    const res = await retryFetchWithFreshTimeout(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, 15e3, {
       headers: { accept: "application/json" }
-    });
+    }, 2, fetchImpl);
     if (!res.ok) return null;
     const d = await res.json();
     const creator = typeof d?.creator === "string" && SOLANA_ADDRESS2.test(d.creator.trim()) ? d.creator.trim() : null;
@@ -1174,6 +1188,7 @@ function evmSafety(gp, sim) {
   const creatorShare = num2(gp?.creator_percent);
   return {
     available: !!gp || !!s,
+    contractPropertiesAssessed: !!gp,
     simChecked: !!s,
     honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
@@ -1227,6 +1242,7 @@ function solanaSafety(sol) {
   const freezable = solFlag(sol?.freezable);
   return {
     available: !!sol,
+    contractPropertiesAssessed: !!sol,
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
     honeypotOnchain: sol?.non_transferable === "1",
@@ -1273,6 +1289,7 @@ function solanaSafety(sol) {
 function emptySafety() {
   return {
     available: false,
+    contractPropertiesAssessed: false,
     simChecked: false,
     honeypot: false,
     honeypotOnchain: false,
@@ -1315,7 +1332,7 @@ var CACHE_TTL = 6e4;
 async function auditToken(input, emit, opts) {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
-  const key = `${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}`;
+  const key = `${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}:${opts?.collectSocialActivity ? 1 : 0}`;
   const hit = opts?.force ? void 0 : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
   const d = await runTokenAudit(input, emit, opts);
@@ -1715,6 +1732,11 @@ async function runTokenAudit(input, emit, opts) {
     verdict = ceiling <= 10 ? "AVOID" : band(score);
   } else verdict = band(score);
   const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) || (cg?.twitter ? "@" + cg.twitter : null);
+  const socialActivity = projectX && opts?.collectSocialActivity ? await opts.collectSocialActivity({
+    handle: projectX,
+    ticker: pair.baseToken.symbol,
+    projectName: pair.baseToken.name
+  }).catch(() => void 0) : void 0;
   const deployer = deployerAttribution?.address ?? null;
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");
   const topHolders = rawHolders.slice(0, 10).map((h) => ({
@@ -1808,6 +1830,13 @@ async function runTokenAudit(input, emit, opts) {
     liquidityUsd,
     vol24,
     ageDays,
+    marketEvidence: {
+      mcap: pair.marketCap != null && Number.isFinite(pair.marketCap),
+      fdv: pair.fdv != null && Number.isFinite(pair.fdv),
+      liquidityUsd: pair.liquidity?.usd != null && Number.isFinite(pair.liquidity.usd),
+      vol24: pair.volume?.h24 != null && Number.isFinite(pair.volume.h24),
+      ageDays: pair.pairCreatedAt != null && Number.isFinite(pair.pairCreatedAt)
+    },
     // Keep the raw instant, not just the day count derived from it above. The
     // operator trace ages the deployer wallet against this launch, and a wallet
     // minutes older than the token it launched is 0 days old in every direction.
@@ -1826,6 +1855,7 @@ async function runTokenAudit(input, emit, opts) {
     socials,
     holdersAssessed: holdersReliable,
     projectX,
+    ...socialActivity ? { socialActivity } : {},
     deployer,
     ...deployerAttribution ? { deployerAttribution } : {},
     topHolders,

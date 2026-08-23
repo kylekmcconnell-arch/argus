@@ -13,6 +13,7 @@ import {
   resolveStoredCases,
   syncReport,
   storedSiteRecon,
+  withTokenGapInvestigationPlan,
 } from "./reports";
 import type { TokenDossier } from "../token/audit";
 import type { ReportVersionContext } from "./reportVersion";
@@ -69,6 +70,61 @@ describe("person report synchronization", () => {
     expect(checks.length).toBeGreaterThan(1);
     expect(checks.find((check) => check.label === "Profile-photo authenticity")?.status).toBe("unknown");
     expect(reportCompleteness("person", legacyDossier, checks)).toBe("partial");
+  });
+});
+
+describe("token gap investigation plan", () => {
+  const token = {
+    address: "0x1111111111111111111111111111111111111111",
+  } as unknown as TokenDossier;
+
+  it("freezes one integrated task for retryable checks the token audit can run", () => {
+    const planned = withTokenGapInvestigationPlan(token, [
+      {
+        checkId: "contract-safety",
+        label: "Contract safety",
+        status: "unavailable",
+        decisionCritical: true,
+      },
+      {
+        checkId: "documents-audits",
+        label: "Documents & audits",
+        status: "unknown",
+        decisionCritical: true,
+      },
+      {
+        checkId: "ofac-sanctions-address",
+        label: "OFAC sanctions screen",
+        status: "unavailable",
+        decisionCritical: true,
+        retryable: false,
+      },
+    ], "2026-08-23T12:00:00.000Z") as TokenDossier & {
+      researchPlan: { tasks: Array<{ id: string; checkIds: string[]; delegates: string[] }> };
+      intelligence: { questions: Array<{ id: string; prompt: string }> };
+    };
+
+    expect(planned.researchPlan.tasks).toHaveLength(1);
+    expect(planned.researchPlan.tasks[0]).toMatchObject({
+      id: "token-evidence-refresh",
+      checkIds: ["contract-safety"],
+    });
+    expect(planned.researchPlan.tasks[0].delegates).toContain("ofac-sdn");
+    expect(planned.intelligence.questions).toEqual([{
+      id: "token-gap:contract-safety",
+      prompt: "Can a fresh token scan complete the contract safety check?",
+      state: "unavailable",
+      materiality: "critical",
+    }]);
+  });
+
+  it("does not advertise a follow-up when only unsupported project-context gaps remain", () => {
+    expect(withTokenGapInvestigationPlan(token, [{
+      checkId: "documents-audits",
+      label: "Documents & audits",
+      status: "unknown",
+      decisionCritical: true,
+    }])).toBe(token);
   });
 });
 
