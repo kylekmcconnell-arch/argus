@@ -389,7 +389,7 @@ describe("PointInTimeIntelligencePanel", () => {
       expect(thesis?.textContent, verdict).toContain("Conclusion limited");
       expect(thesis?.textContent, verdict).toContain(`report result is ${verdict}`);
       expect(thesis?.textContent, verdict).toContain("cannot replace it");
-      expect(thesis?.textContent, verdict).not.toContain("is the strongest support");
+      expect(thesis?.textContent, verdict).not.toContain("Strongest supporting finding");
     }
   });
 
@@ -397,6 +397,19 @@ describe("PointInTimeIntelligencePanel", () => {
     const value = snapshot();
     render({
       ...value,
+      signals: value.signals.map((item) => item.id === "support-liquidity"
+        ? {
+            ...item,
+            ruleId: "strict-product-description",
+            headline: "Product description has strict direct-subject sourcing",
+          }
+        : item.id === "risk-control"
+          ? {
+              ...item,
+              ruleId: "goplus-fired-contract-flag",
+              headline: "GoPlus reports a fired contract or deployer flag",
+            }
+          : item),
       questions: value.questions.map((question) => question.id === "question:treasury"
         ? { ...question, state: "partial" }
         : question),
@@ -404,7 +417,10 @@ describe("PointInTimeIntelligencePanel", () => {
 
     const thesis = container.querySelector('[aria-label="Current report conclusion"]');
     expect(thesis?.textContent).toContain("Current read");
-    expect(thesis?.textContent).toContain("This report is CAUTION");
+    expect(thesis?.textContent).toContain("ARGUS rates this report CAUTION");
+    expect(thesis?.textContent).toContain("Strongest supporting finding: Direct sources describe what the product does.");
+    expect(thesis?.textContent).toContain("Strongest concern: GoPlus reported a contract or deployer warning.");
+    expect(thesis?.textContent).not.toMatch(/This report is CAUTION|strict direct-subject|fired .* flag/i);
   });
 
   it("withholds a lens thesis across an uncollected critical priority question", () => {
@@ -414,7 +430,7 @@ describe("PointInTimeIntelligencePanel", () => {
     expect(thesis?.textContent).toContain("Conclusion limited");
     expect(thesis?.textContent).toContain("one critical question has not been answered");
     expect(thesis?.textContent).toContain("Missing evidence is not treated as a favorable result");
-    expect(thesis?.textContent).not.toContain("is the strongest support");
+    expect(thesis?.textContent).not.toContain("Strongest supporting finding");
     expect(container.querySelector('[aria-labelledby$="-cases-title"]')?.textContent)
       .toContain("No specific refresh trigger is supported");
   });

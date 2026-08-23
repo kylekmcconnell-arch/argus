@@ -326,13 +326,13 @@ function thesisText(
   const supportHeadline = support ? publicSignalCopy(support).headline : null;
   const pressureHeadline = pressure ? publicSignalCopy(pressure).headline : null;
   if (support && pressure) {
-    return `${cleanSentence(supportHeadline ?? support.headline)} is the strongest support. ${cleanSentence(pressureHeadline ?? pressure.headline)} is the strongest pressure.`;
+    return `Strongest supporting finding: ${cleanSentence(supportHeadline ?? support.headline)}. Strongest concern: ${cleanSentence(pressureHeadline ?? pressure.headline)}.`;
   }
   if (support) {
-    return `${cleanSentence(supportHeadline ?? support.headline)} is the strongest support. The saved evidence did not establish a pressure finding for the ${lens.label.toLowerCase()} view. That does not mean no risk exists.`;
+    return `Strongest supporting finding: ${cleanSentence(supportHeadline ?? support.headline)}. The saved evidence did not establish a concern for the ${lens.label.toLowerCase()} view. That does not mean no risk exists.`;
   }
   if (pressure) {
-    return `${cleanSentence(pressureHeadline ?? pressure.headline)} is the strongest pressure. The saved evidence did not establish a supporting finding for the ${lens.label.toLowerCase()} view. That does not mean no support exists.`;
+    return `Strongest concern: ${cleanSentence(pressureHeadline ?? pressure.headline)}. The saved evidence did not establish a supporting finding for the ${lens.label.toLowerCase()} view. That does not mean no support exists.`;
   }
   return `The saved evidence does not support a conclusion for the ${lens.label.toLowerCase()} view yet. That does not mean the subject is safe or unsafe.`;
 }
@@ -435,7 +435,7 @@ export function PointInTimeIntelligencePanel({
       : criticalDecisionGaps.length > 0
         ? `ARGUS cannot publish a conclusion for the ${selectedLens.label.toLowerCase()} view because ${criticalDecisionGaps.length === 1 ? "one critical question has not been answered" : `${criticalDecisionGaps.length} critical questions have not been answered`}. Missing evidence is not treated as a favorable result.`
       : normalizedGoverningVerdict && normalizedGoverningVerdict !== "PASS"
-        ? `This report is ${normalizedGoverningVerdict}. ${derivedThesis}`
+        ? `ARGUS rates this report ${normalizedGoverningVerdict}. ${derivedThesis}`
         : derivedThesis;
   const measurementIndex = new Map(snapshot.measurements.map((measurement) => [measurement.id, measurement]));
   const questionIndex = new Map(allQuestions.map((question) => [question.id, question]));
