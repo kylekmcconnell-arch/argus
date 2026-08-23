@@ -14,7 +14,7 @@ export function TokenRun({
 }: {
   input: RunnableTokenInput;
   onDone: (d: TokenDossier, priv: boolean, scanId: string) => void;
-  onError: () => void;
+  onError: (message: string) => void;
 }) {
   const [, setTick] = useState(0);
   const terminalNotificationRef = useRef<string | null>(null);
@@ -32,7 +32,7 @@ export function TokenRun({
     if (run.status === "running" || terminalNotificationRef.current === notificationKey) return;
     terminalNotificationRef.current = notificationKey;
     if (run.status === "done" && run.result) onDone(run.result as TokenDossier, run.priv, run.id);
-    else if (run.status === "error") onError();
+    else if (run.status === "error") onError(run.error ?? "The token scan did not finish.");
   }, [onDone, onError, run, run?.status]);
 
   const label = input.ref.length > 20 ? input.ref.slice(0, 8) + "…" + input.ref.slice(-4) : input.ref;

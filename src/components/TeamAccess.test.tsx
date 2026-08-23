@@ -90,27 +90,28 @@ describe("TeamAccess invitation recovery", () => {
     expect(container.textContent).not.toContain("resend invite");
   });
 
-  it("shows an analyst budget and adds a bounded five-credit test grant", async () => {
+  it("shows an analyst budget and adds a confirmed beta grant", async () => {
     const analyst = { ...pendingMember, role: "analyst", emailVerified: true };
     const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       if (init?.method === "PUT") {
         expect(JSON.parse(String(init.body))).toMatchObject({
           userId: analyst.userId,
-          grantTestCredits: 5,
+          grantTestCredits: 50_000,
         });
-        return new Response(JSON.stringify({ member: analyst, grantedCredits: 5 }), { status: 200 });
+        return new Response(JSON.stringify({ member: analyst, grantedCredits: 50_000 }), { status: 200 });
       }
       return new Response(JSON.stringify({ members: [analyst], events: [] }), { status: 200 });
     });
     vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
 
     await act(async () => root.render(<TeamAccess />));
     await vi.waitFor(() => expect(container.textContent).toContain("10.0 credits available · no daily cap"));
     const add = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "add 5 test credits");
+      .find((button) => button.textContent === "add 50,000 beta credits");
     expect(add).toBeDefined();
 
     await act(async () => add?.click());
-    await vi.waitFor(() => expect(container.textContent).toContain("Added 5 test credits"));
+    await vi.waitFor(() => expect(container.textContent).toContain("Added 50,000 beta credits"));
   });
 });

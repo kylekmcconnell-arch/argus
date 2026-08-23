@@ -251,7 +251,7 @@ describe("workspace member invitation recovery", () => {
 
     await handler(request("PUT", {
       userId: MEMBER_ID,
-      grantTestCredits: 11,
+      grantTestCredits: 50_001,
       idempotencyKey: "00000000-0000-4000-8000-000000000030",
     }), res);
 

@@ -258,6 +258,7 @@ export async function consumeInvestigationQuota(
   auth: AuthContext,
   route: string,
   metadata: Record<string, unknown> = {},
+  idempotencyKey: string = crypto.randomUUID(),
 ): Promise<QuotaResult> {
   const credentials = serviceCredentials();
   if (!credentials) return { allowed: false, used: 0, remaining: 0, error: "storage_not_configured" };
@@ -272,7 +273,7 @@ export async function consumeInvestigationQuota(
       body: JSON.stringify({
         p_organization_id: auth.organizationId,
         p_user_id: auth.userId,
-        p_idempotency_key: `investigation:${auth.userId}:${route}:${crypto.randomUUID()}`,
+        p_idempotency_key: `investigation:${auth.userId}:${idempotencyKey}`,
         p_cost_millis: CREDIT_MILLIS,
       }),
       signal: AbortSignal.timeout(8_000),

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { CopyIcon, WalletIcon, XIcon } from "@phosphor-icons/react";
 import { ReferralLeaderboard } from "./ReferralLeaderboard";
@@ -45,7 +45,7 @@ export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null })
   const [copied, setCopied] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const response = await fetch("/api/account-growth", { signal: AbortSignal.timeout(12_000) });
       const body = await response.json() as AccountSnapshot & { message?: string };
@@ -55,7 +55,7 @@ export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null })
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Account details could not be loaded.");
     }
-  };
+  }, []);
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => { void load(); }, 0);
@@ -73,7 +73,13 @@ export function EarlyAccessHub({ triggerRoot }: { triggerRoot: Element | null })
       void load();
     });
     return () => window.clearTimeout(initialLoad);
-  }, []);
+  }, [load]);
+
+  useEffect(() => {
+    const refresh = () => { void load(); };
+    window.addEventListener("argus:credits-changed", refresh);
+    return () => window.removeEventListener("argus:credits-changed", refresh);
+  }, [load]);
 
   useEffect(() => {
     if (!isOpen) return;

@@ -245,9 +245,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const quota = await consumeInvestigationQuota(auth, "/api/audit", {
-    private: req.query.private === "1",
-  });
+  const creditKey = typeof req.query.creditKey === "string" ? req.query.creditKey.trim() : "";
+  if (creditKey && !/^[A-Za-z0-9:_-]{8,180}$/.test(creditKey)) {
+    res.status(400).json({
+      error: "invalid_idempotency_key",
+      message: "The scan identifier is invalid. Start the investigation again.",
+    });
+    return;
+  }
+  const quotaMetadata = { private: req.query.private === "1" };
+  const quota = creditKey
+    ? await consumeInvestigationQuota(auth, "/api/audit", quotaMetadata, creditKey)
+    : await consumeInvestigationQuota(auth, "/api/audit", quotaMetadata);
   if (quota.error) {
     res.status(503).json({ error: quota.error, message: "Usage controls are temporarily unavailable." });
     return;
@@ -256,8 +265,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(429).json({
       error: "credit_budget_exhausted",
       used: quota.used,
-      remaining: 0,
-      message: "This test budget is used up. Ask your workspace owner to add more investigation credits.",
+      remaining: quota.creditRemaining ?? quota.remaining,
+      message: "You have no investigation credits left. Ask a workspace owner to add credits before starting another scan.",
     });
     return;
   }

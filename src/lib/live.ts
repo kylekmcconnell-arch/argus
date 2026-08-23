@@ -59,6 +59,7 @@ export function streamAudit(
   h: LiveHandlers,
   intent: ResearchIntent = "investment_due_diligence",
   seed?: { tokenAddress?: string; tokenChain?: string; tokenSymbol?: string },
+  creditKey: string = crypto.randomUUID(),
 ): () => void {
   const ctrl = new AbortController();
   let settled = false;
@@ -80,7 +81,7 @@ export function streamAudit(
 
   (async () => {
     try {
-      const params = new URLSearchParams({ handle, intent });
+      const params = new URLSearchParams({ handle, intent, creditKey });
       if (priv) params.set("private", "1");
       if (seed?.tokenAddress && seed?.tokenChain) {
         params.set("address", seed.tokenAddress);
@@ -92,7 +93,13 @@ export function streamAudit(
         headers: { accept: "text/event-stream" },
       });
       if (!res.ok || !res.body) {
-        settle(() => h.onError("backend error"));
+        const body = await res.json().catch(() => null) as { message?: unknown; error?: unknown; remainingCredits?: unknown } | null;
+        const reason = typeof body?.message === "string"
+          ? body.message
+          : body?.error === "credit_budget_exhausted"
+            ? "You have no investigation credits left. Ask a workspace owner to add credits before starting another scan."
+            : `The investigation service returned ${res.status}. No report was created.`;
+        settle(() => h.onError(reason));
         return;
       }
       armWatchdog();

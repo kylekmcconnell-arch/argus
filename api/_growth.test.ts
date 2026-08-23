@@ -35,7 +35,7 @@ describe("manual tester credit grants", () => {
       organizationId: "org",
       userId: "user",
       actorUserId: "owner",
-      credits: 11,
+      credits: 50_001,
       requestId: "request",
     })).rejects.toThrow("outside the allowed range");
     expect(from).not.toHaveBeenCalled();

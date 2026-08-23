@@ -21,7 +21,7 @@ function cors(req: VercelRequest, res: VercelResponse): void {
   const allowed = new Set((process.env.ARGUS_CORS_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean));
   if (origin && allowed.has(origin)) res.setHeader("access-control-allow-origin", origin);
   res.setHeader("vary", "Origin");
-  res.setHeader("access-control-allow-headers", "Authorization, Content-Type");
+  res.setHeader("access-control-allow-headers", "Authorization, Content-Type, Idempotency-Key");
   res.setHeader("access-control-allow-methods", "GET, OPTIONS");
 }
 
@@ -132,12 +132,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: "pass ?handle=<@handle>" });
     return;
   }
-  const quota = await consumeInvestigationQuota(auth, "/api/v1/person", { kind: "person_api" });
+  const idempotencyHeader = req.headers["idempotency-key"];
+  const idempotencyKey = typeof idempotencyHeader === "string" ? idempotencyHeader.trim() : crypto.randomUUID();
+  if (!/^[A-Za-z0-9:_-]{8,180}$/.test(idempotencyKey)) {
+    res.status(400).json({ error: "invalid_idempotency_key", message: "Idempotency-Key must be 8 to 180 letters, numbers, colons, underscores, or hyphens." });
+    return;
+  }
+  const quota = await consumeInvestigationQuota(auth, "/api/v1/person", { kind: "person_api" }, idempotencyKey);
   if (quota.error) { res.status(503).json({ error: quota.error }); return; }
   if (!quota.allowed) {
     res.status(429).json({
       error: "credit_budget_exhausted",
-      remaining: 0,
+      remaining: quota.creditRemaining ?? quota.remaining,
+      message: "You have no investigation credits left. Ask a workspace owner to add credits before starting another scan.",
     });
     return;
   }

@@ -199,6 +199,7 @@ export function TeamAccess() {
 
   const grantTestCredits = async (member: WorkspaceMember) => {
     if (updatingUserId || resendingUserId || grantingUserId || member.role !== "analyst" || !member.active) return;
+    if (!window.confirm(`Add 50,000 beta credits to ${member.email}? This appends a permanent ledger grant.`)) return;
     setGrantingUserId(member.userId);
     setError("");
     setNotice("");
@@ -208,11 +209,11 @@ export function TeamAccess() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           userId: member.userId,
-          grantTestCredits: 5,
+          grantTestCredits: 50_000,
           idempotencyKey: crypto.randomUUID(),
         }),
       }));
-      setNotice(`Added 5 test credits for ${member.email}.`);
+      setNotice(`Added 50,000 beta credits for ${member.email}.`);
       await load();
     } catch (grantError) {
       setError(grantError instanceof Error ? grantError.message : "The test budget could not be updated.");
@@ -333,7 +334,7 @@ export function TeamAccess() {
                   onClick={() => void grantTestCredits(member)}
                   className="btn-chip whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-45"
                 >
-                  {granting ? "adding…" : "add 5 test credits"}
+                  {granting ? "adding…" : "add 50,000 beta credits"}
                 </button>
               )}
               {!member.emailVerified && member.active && (
