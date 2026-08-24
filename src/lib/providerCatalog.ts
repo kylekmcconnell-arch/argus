@@ -161,18 +161,6 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     availableWithoutCredential: true,
   },
   {
-    id: "cryptorank",
-    label: "CryptoRank",
-    powers: "Market rank, all-time-high drawdown, dilution, funding, vesting, and unlock records",
-    limits: "Schedules and classifications are provider records and are accepted only after the asset is joined to the exact contract.",
-    source: "cryptorank.io",
-    tier: "optional",
-    kind: "evidence",
-    lifecycle: "active",
-    category: "Markets and projects",
-    env: ["CRYPTORANK_API_KEY"],
-  },
-  {
     id: "dexscreener",
     label: "DexScreener",
     powers: "DEX pairs, liquidity, volume, and recent market activity",
@@ -464,4 +452,3 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
 export const ACTIVE_EVIDENCE_SOURCES = PROVIDER_CATALOG.filter(
   (provider) => provider.kind === "evidence" && provider.lifecycle === "active",
 );
-

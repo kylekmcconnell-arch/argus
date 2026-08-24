@@ -9,7 +9,6 @@ import type { TokenDossier } from "../token/audit";
 
 const harness = vi.hoisted(() => ({ operatorNetwork: vi.fn(), gmgnBundle: vi.fn() }));
 
-vi.mock("./MarketIntel", () => ({ MarketIntel: () => null }));
 vi.mock("./HolderForensics", () => ({ HolderForensics: () => null }));
 vi.mock("./WalletClusters", () => ({ WalletClusters: () => null }));
 vi.mock("./EntityConcentration", () => ({ EntityConcentration: () => null }));

@@ -1,5 +1,4 @@
 import { deployerRoleLabel, type TokenDossier } from "../token/audit";
-import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
 import { WalletClusters } from "./WalletClusters";
 import { OperatorNetwork } from "./OperatorNetwork";
@@ -33,7 +32,7 @@ function launchInstant(token: TokenDossier): number | null {
 // Unified on-chain forensic suite. The token and investigation reports both ran
 // the same seven panels but mounted them in different orders and hand-wired the
 // same props twice, so they drifted. This renders them in ONE canonical order
-// from a single TokenDossier: market intel → holder distribution → wallet
+// from a single TokenDossier: holder distribution → wallet
 // clustering → operator trace → (EVM) deployer trail → (EVM) bytecode → OFAC
 // sanctions. One source of truth for every token/investigation report.
 export function OnChainForensics({ token, onAudit, panelCostToken, record = true, mintedAt, projectHandle, projectWebsite }: { token: TokenDossier; onAudit: (h: string) => void; panelCostToken: string; record?: boolean; mintedAt?: string | number | null; projectHandle?: string | null; projectWebsite?: string | null }) {
@@ -57,8 +56,6 @@ export function OnChainForensics({ token, onAudit, panelCostToken, record = true
           </p>
         </section>
       )}
-      {/* rank, ATH drawdown, dilution, unlock flags */}
-      <MarketIntel symbol={token.symbol} contract={token.address} chain={token.chain} panelCostToken={panelCostToken} />
       {/* healthy base or a rug in a costume? */}
       <HolderForensics
         address={token.address}

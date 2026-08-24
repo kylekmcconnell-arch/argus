@@ -78,7 +78,6 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     configuredService("twitterapi", "twitterapi.io", process.env.TWITTERAPI_KEY, "configure TWITTERAPI_KEY"),
     configuredService("serper", "Serper (grounded search)", process.env.SERPER_API_KEY, "configure SERPER_API_KEY"),
     configuredService("openrouter", "OpenRouter (optional extract fallback)", process.env.OPENROUTER_API_KEY, "configure OPENROUTER_API_KEY"),
-    configuredService("cryptorank", "CryptoRank (unlock schedule)", process.env.CRYPTORANK_API_KEY, "configure CRYPTORANK_API_KEY"),
     // The rest of the keyed providers. This endpoint exists so a lane can be
     // confirmed provisioned WITHOUT spending on an audit, and it was answering
     // that question for six of the nineteen keys the code reads. The thirteen it

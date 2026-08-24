@@ -237,7 +237,7 @@ export interface Dossier {
   protocolFees?: CollectedEvidence["protocolFees"];
   /** Frozen float-control profile (GoPlus holder register) for the concentration bar. */
   holderProfile?: CollectedEvidence["holderProfile"];
-  /** Frozen upcoming-unlock schedule (CryptoRank), for the noticed rail and unlock pressure math. */
+  /** Legacy frozen CryptoRank schedule retained only so historical reports remain readable. */
   tokenUnlocks?: CollectedEvidence["tokenUnlocks"];
   /** Exact official-domain-bound licensed company record. */
   companyEnrichment?: CollectedEvidence["companyEnrichment"];

@@ -175,7 +175,7 @@ yet; graduation 4 units of pair asset (ETH/$STONKBROKER/tokenized stocks) into
 Uniswap V3, fee splitter → per-token staking vault. Revisit for factory address.
 
 **Off-DEX debuts:** ≥3 CEX listings without a launchpad fingerprint → likely
-exchange/ICO-era debut; vesting + unlock schedules live on cryptorank.io /
+exchange/ICO-era debut; vesting + unlock schedules require official project disclosures /
 CoinGecko/CMC token pages (full unlock-schedule integration = follow-up; needs a
 keyed source).
 

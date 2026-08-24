@@ -35,14 +35,13 @@ describe("provider readiness", () => {
     expect(captured.body).toMatchObject({
       available: true,
       mode: "configuration",
-      down: 10, // unconfigured required lanes only; retired and optional fallbacks are listed but not counted down
+      down: 9, // unconfigured required lanes only; retired and optional fallbacks are listed but not counted down
       services: [
         { id: "xai", ok: true },
         { id: "anthropic", ok: true },
         { id: "twitterapi", ok: false, detail: "not configured in this deployment" },
         { id: "serper", ok: true },
         { id: "openrouter", ok: false, detail: "not configured in this deployment" },
-        { id: "cryptorank", ok: false, detail: "not configured in this deployment" },
         { id: "helius", ok: false, detail: "not configured in this deployment" },
         { id: "etherscan", ok: false, detail: "not configured in this deployment" },
         { id: "arkham", ok: false, detail: "not configured in this deployment" },
@@ -79,7 +78,6 @@ describe("provider readiness", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "or-key");
     vi.stubEnv("ARGUS_EXTRACT_MODEL", "google/gemini-2.5-flash-lite");
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
-    vi.stubEnv("CRYPTORANK_API_KEY", "cr-key");
     vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
     const { res, captured } = response();
 
@@ -90,7 +88,6 @@ describe("provider readiness", () => {
         { id: "xai" }, { id: "anthropic" }, { id: "twitterapi" },
         { id: "serper", ok: true },
         { id: "openrouter", ok: true },
-        { id: "cryptorank", ok: true },
         { id: "helius" }, { id: "etherscan" }, { id: "arkham" }, { id: "pdl" },
         { id: "github" }, { id: "coingecko" }, { id: "crunchbase" }, { id: "reddit" }, { id: "gmgn" },
         { id: "safebrowsing" }, { id: "x-api-bearer" },

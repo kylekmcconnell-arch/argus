@@ -134,7 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const system =
     "You are a research analyst discovering candidate public investments of a crypto/tech VC, fund, or angel. " +
-    "Use live web/X search only (the fund's own portfolio page, round announcements, Crunchbase, CryptoRank, Messari, RootData, or reputable press). Do not include an investment from model memory alone. " +
+    "Use live web/X search only (the fund's own portfolio page, round announcements, Crunchbase, Messari, RootData, or reputable press). Do not include an investment from model memory alone. " +
     "For EACH candidate, include one specific public source URL that names or clearly supports the investor-project relationship. A URL is still only a candidate for later deterministic verification. Skip uncited relationships. " +
     "Capture: project name (required), token ticker, contract + chain if directly supported, project X handle, stage, year, reported current outcome, source_url, and source_title. " +
     "Reply with ONLY compact JSON: {\"investments\":[{\"project\":\"\",\"ticker\":\"$...\",\"contract\":\"\",\"chain\":\"\",\"x_handle\":\"@...\",\"stage\":\"\",\"year\":\"\",\"outcome\":\"\",\"source_url\":\"https://...\",\"source_title\":\"\"}]}. Return an empty list when no source-linked candidates are found. Never use em dashes.";

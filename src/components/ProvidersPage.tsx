@@ -79,7 +79,6 @@ const PROVIDER_ALIASES: Record<string, string[]> = {
   "Reddit OAuth": ["reddit"],
   Supabase: ["supabase"],
   CoinGecko: ["coingecko"],
-  CryptoRank: ["cryptorank"],
   Crunchbase: ["crunchbase"],
   "Etherscan (multichain)": ["etherscan"],
   Arkham: ["arkham"],

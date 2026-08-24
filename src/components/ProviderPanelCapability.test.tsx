@@ -10,7 +10,6 @@ import { GithubForensics } from "./GithubForensics";
 import { HolderForensics } from "./HolderForensics";
 import { Holdings } from "./Holdings";
 import { IdentitySweep } from "./IdentitySweep";
-import { MarketIntel } from "./MarketIntel";
 import { MoneyFlowStory } from "./MoneyFlowStory";
 import { PersonGithub } from "./PersonGithub";
 import { RiskPaths } from "./RiskPaths";
@@ -28,7 +27,6 @@ vi.mock("./ArkhamGraphBridge", () => ({ ArkhamGraphBridge: () => null }));
 const address = "0x4444444444444444444444444444444444444444";
 const capability = "signed-panel-capability";
 const expectedPaths = [
-  "/api/cryptorank",
   "/api/arkham?",
   "/api/arkham-counterparties",
   "/api/arkham-token-holders",
@@ -45,7 +43,6 @@ const expectedPaths = [
 function Panels({ panelCostToken }: { panelCostToken?: string }) {
   return (
     <>
-      <MarketIntel symbol="ARG" contract={address} chain="ethereum" panelCostToken={panelCostToken} />
       <HolderForensics
         address={address}
         chain="ethereum"
@@ -210,9 +207,8 @@ describe("provider panel capability boundary", () => {
     });
 
     await vi.waitFor(() => expect(container.textContent).not.toContain("Rescan required"));
-    const freshRequest = fetchMock.mock.calls.find(([url, init]) => (
-      String(url).startsWith("/api/cryptorank")
-      && (init as RequestInit | undefined)?.headers
+    const freshRequest = fetchMock.mock.calls.find(([, init]) => (
+      (init as RequestInit | undefined)?.headers
       && ((init as RequestInit).headers as Record<string, string>)["x-argus-panel-token"] === freshCapability
     ));
     expect(freshRequest).toBeDefined();

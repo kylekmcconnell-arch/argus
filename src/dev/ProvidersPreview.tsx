@@ -1,7 +1,7 @@
 import { ProvidersPage, type ProviderPageData, type ProviderUsageFeed } from "../components/ProvidersPage";
 import { PROVIDER_CATALOG } from "../lib/providerCatalog";
 
-const configured = new Set(["grok", "twitterapi", "github", "pdl", "serper", "helius", "coingecko", "cryptorank", "etherscan", "arkham", "gmgn", "supabase"]);
+const configured = new Set(["grok", "twitterapi", "github", "pdl", "serper", "helius", "coingecko", "etherscan", "arkham", "gmgn", "supabase"]);
 
 const previewData: ProviderPageData = {
   providers: PROVIDER_CATALOG.filter((provider) => provider.tier !== "keyless").map((provider) => ({

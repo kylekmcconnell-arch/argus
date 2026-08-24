@@ -29,7 +29,6 @@ import arkhamRiskPathsHandler from "./arkham-risk-paths";
 import arkhamTokenHoldersHandler from "./arkham-token-holders";
 import arkhamHandler from "./arkham";
 import clusterHandler from "./cluster";
-import cryptorankHandler from "./cryptorank";
 import deployerHandler from "./deployer";
 import evmClusterHandler from "./evm-cluster";
 import evmDeployerHandler from "./evm-deployer";
@@ -55,7 +54,6 @@ type Route = {
 };
 
 const routes: Route[] = [
-  { name: "cryptorank", handler: cryptorankHandler, query: { symbol: "ARGUS" }, costs: [{ provider: "cryptorank", op: "panel:cryptorank", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "arkham labels", handler: arkhamHandler, query: { address: ADDRESS }, costs: [{ provider: "arkham", op: "panel:arkham-labels", calls: 2, usd: 0, meta: "subscription/keyed" }] },
   { name: "arkham holdings", handler: arkhamHoldingsHandler, query: { address: ADDRESS, symbol: "ARGUS" }, costs: [{ provider: "arkham", op: "panel:arkham-holdings", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "arkham counterparties", handler: arkhamCounterpartiesHandler, query: { address: ADDRESS }, costs: [{ provider: "arkham", op: "panel:arkham-counterparties", calls: 1, usd: 0, meta: "subscription/keyed" }] },
@@ -109,7 +107,6 @@ describe("keyed supplemental route report capabilities", () => {
     requireArgusAuth.mockReset().mockResolvedValue({ organizationId: ORGANIZATION_ID, userId: USER_ID });
     resolvePanelCostVersion.mockReset().mockReturnValue(undefined);
     vi.stubEnv("ARKHAM_API_KEY", "arkham-key");
-    vi.stubEnv("CRYPTORANK_API_KEY", "cryptorank-key");
     vi.stubEnv("ETHERSCAN_API_KEY", "etherscan-key");
     vi.stubEnv("GITHUB_TOKEN", "github-key");
     vi.stubEnv("HELIUS_API_KEY", "helius-key");
