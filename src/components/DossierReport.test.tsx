@@ -71,7 +71,6 @@ const livePayload = (): Record<string, unknown> => ({
 describe("DossierReport", () => {
   it("renders buildDossier of the live payload, never the dynex fixture", () => {
     render(livePayload());
-    expect(container.textContent).toContain("CLUTCH");
     expect(container.textContent).toContain("@clutchmarkets");
     expect(container.textContent).toContain("This is the @clutchmarkets we audited. The site is bound.");
     expect(container.textContent).toContain("The project named 1 founder. Nobody else confirmed them.");
@@ -150,6 +149,23 @@ describe("DossierReport", () => {
   it("keeps the fixture harness header only in theatrical DEV mode", () => {
     render(livePayload(), true);
     expect(container.textContent).toContain("Design preview · derived from report 7c51822f");
+  });
+
+  it("uses the full-width report canvas without a duplicate pinned file in live reports", () => {
+    render(livePayload());
+    expect(container.querySelector('[data-dossier-layout="full-width"]')).not.toBeNull();
+    expect(container.querySelector(".dossier-pinned")).toBeNull();
+    expect(container.textContent).not.toContain("The file");
+    expect(container.querySelector("#dossier-subject h2")?.className).toContain("story-chapter-title");
+    expect(container.textContent).toContain("Sources behind this section");
+    expect(container.textContent).toContain("How ARGUS knows");
+  });
+
+  it("retains Enigma's split-story rail in the explicit theatrical preview", () => {
+    render(livePayload(), true);
+    expect(container.querySelector('[data-dossier-layout="split-story"]')).not.toBeNull();
+    expect(container.querySelector(".dossier-pinned")).not.toBeNull();
+    expect(container.textContent).toContain("The file");
   });
 
   it("renders immediately under reduced motion without IntersectionObserver", () => {

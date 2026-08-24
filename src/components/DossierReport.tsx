@@ -303,6 +303,39 @@ function Figure({ figure }: { figure: DossierFigure }) {
   );
 }
 
+/** Keep the source receipts available without making a second, pinned copy of the report. */
+function BeatReceipts({ figures }: { figures: DossierFigure[] }) {
+  if (!figures.length) return null;
+  return (
+    <details className="mt-6 max-w-[54ch] border-t border-line pt-3">
+      <summary className="cursor-pointer text-[12px] font-medium text-ink-dim">
+        Sources behind this section · {figures.length}
+      </summary>
+      <div className="mt-3 space-y-2.5 rounded-xl border border-line/70 bg-surface-subtle px-3.5 py-3">
+        {figures.map((figure, index) => (
+          <Figure key={`${figure.label}-${index}`} figure={figure} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function EvidenceOriginGuide() {
+  return (
+    <div className="mt-6 max-w-[54ch] border-t border-line pt-4">
+      <p className="text-[12px] font-medium text-ink">How ARGUS knows</p>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+        Sourced facts come from a saved document or account. Derived facts are calculations. Unestablished items still need evidence.
+      </p>
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        <ProvenanceTag state={{ tier: "sourced" }} />
+        <ProvenanceTag state={{ tier: "derived" }} />
+        <ProvenanceTag state={{ tier: "unestablished" }} />
+      </div>
+    </div>
+  );
+}
+
 function Stat({ n, k }: { n: string; k: string }) {
   return (
     <div>
@@ -413,6 +446,7 @@ export function DossierReport({
   const beatIds = beats.map((b) => b.id);
   const beatKey = beatIds.join("|");
   const reduced = useReducedMotion();
+  const staticLayout = reduced || typeof IntersectionObserver !== "function";
   const refs = useRef<Record<string, HTMLElement | null>>({});
   const [settledIds, setSettledIds] = useState<string[]>(() => (
     prefersReducedMotion() ? beatIds : beatIds.slice(0, 1)
@@ -421,11 +455,7 @@ export function DossierReport({
 
   useEffect(() => {
     const ids = beatKey.split("|").filter(Boolean);
-    if (reduced || typeof IntersectionObserver !== "function") {
-      setSettledIds(ids);
-      setCur(ids[0] ?? "");
-      return;
-    }
+    if (staticLayout) return;
 
     const settleUpTo = (id: string) => {
       const idx = ids.indexOf(id);
@@ -454,10 +484,10 @@ export function DossierReport({
     if (hash.startsWith("dossier-")) settleUpTo(hash.slice("dossier-".length));
 
     return () => io.disconnect();
-  }, [beatKey, reduced]);
+  }, [beatKey, staticLayout]);
 
-  const settled = (id: string) => reduced || settledIds.includes(id);
-  const upto = Math.max(0, beats.findIndex((b) => b.id === cur));
+  const settled = (id: string) => staticLayout || settledIds.includes(id);
+  const upto = staticLayout ? 0 : Math.max(0, beats.findIndex((b) => b.id === cur));
   const perimeter = beats.find((b) => b.id === "perimeter");
   const subjectHeading = beats.find((b) => b.id === "subject")?.heading ?? null;
   const beatMinH = theatrical ? "min-h-[82vh]" : "";
@@ -481,7 +511,12 @@ export function DossierReport({
         </header>
       )}
 
-      <div className={`grid w-full grid-cols-1 gap-12 ${theatrical ? "report-frame" : "mt-7"} lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]`}>
+      <div
+        data-dossier-layout={theatrical ? "split-story" : "full-width"}
+        className={`grid w-full grid-cols-1 gap-12 ${theatrical
+          ? "report-frame lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)]"
+          : "mt-7"}`}
+      >
         <div>
           {beats.map((b) => (
             <section
@@ -494,7 +529,9 @@ export function DossierReport({
               className={`dossier-block flex ${beatMinH} scroll-mt-28 flex-col justify-center ${theatrical ? "py-10" : "story-chapter report-section mt-7 py-6 first:mt-0"}`}
             >
               <p className="mono text-[10px] uppercase tracking-[0.14em] text-signal-lift">{b.kicker}</p>
-              <h2 className={`mt-3 max-w-[20ch] text-ink display ${theatrical ? "text-[32px] leading-[1.14]" : "text-[18px] leading-snug"}`}>
+              <h2 className={theatrical
+                ? "display mt-3 max-w-[20ch] text-[32px] leading-[1.14] text-ink"
+                : "story-chapter-title mt-3 max-w-[28ch] text-ink"}>
                 {b.heading}
               </h2>
 
@@ -629,6 +666,9 @@ export function DossierReport({
                   )}
                 </div>
               )}
+
+              {!theatrical && <BeatReceipts figures={b.figures} />}
+              {!theatrical && b.id === "verdict" && <EvidenceOriginGuide />}
             </section>
           ))}
           {d.sources.length > 0 && (
@@ -640,7 +680,9 @@ export function DossierReport({
               className={`dossier-block flex ${beatMinH} scroll-mt-28 flex-col justify-center ${theatrical ? "py-10" : "story-chapter report-section mt-7 py-6"}`}
             >
               <p className="mono text-[10px] uppercase tracking-[0.14em] text-signal-lift">Sources</p>
-              <h2 className={`mt-3 max-w-[20ch] text-ink display ${theatrical ? "text-[32px] leading-[1.14]" : "text-[18px] leading-snug"}`}>
+              <h2 className={theatrical
+                ? "display mt-3 max-w-[20ch] text-[32px] leading-[1.14] text-ink"
+                : "story-chapter-title mt-3 max-w-[28ch] text-ink"}>
                 {d.sources.length === 1
                   ? `1 recorded source. ${d.sources[0].factsCited} ${d.sources[0].factsCited === 1 ? "fact" : "facts"} cited.`
                   : `${d.sources.length} recorded sources. ${d.sources.reduce((n, s) => n + s.factsCited, 0)} facts cited.`}
@@ -651,12 +693,12 @@ export function DossierReport({
           {theatrical && <div className="h-[28vh]" />}
         </div>
 
-        <div className="dossier-pinned hidden lg:block">
+        {theatrical && <div className="dossier-pinned hidden lg:block">
           <div className={`${theatrical ? "sticky top-8 h-[calc(100vh-4rem)] py-8" : "sticky top-28 h-[calc(100vh-8rem)]"}`}>
             <div className="panel flex h-full flex-col overflow-hidden">
               <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
                 <span className="mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">The file</span>
-                <span className="mono text-[10px] text-ink-faint">{(reduced ? beats.length : Math.max(settledIds.length, 1))} / {beats.length}</span>
+                <span className="mono text-[10px] text-ink-faint">{(staticLayout ? beats.length : Math.max(settledIds.length, 1))} / {beats.length}</span>
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -716,7 +758,7 @@ export function DossierReport({
               </div>
             </div>
           </div>
-        </div>
+        </div>}
       </div>
     </div>
   );
