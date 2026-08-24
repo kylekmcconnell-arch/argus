@@ -79,4 +79,71 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain("Token safety checks");
     expect(html).toContain("Research and follow-up");
   });
+
+  it("shows one evidence-bound discovery with its proof and reversal condition", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        verdictLabel="Caution"
+        score={62}
+        favorable={false}
+        verdictTone="caution"
+        discovery={{
+          id: "usage-capital-divergence",
+          headline: "Usage and locked capital are moving in opposite directions",
+          consequence: "Fees fell 24% while locked value rose 18% over 30 days.",
+          reversalCondition: "A later 30-day window where fees and locked value move together would change this read.",
+          evidenceHref: "#token-market",
+        }}
+        supports={[]}
+        concerns={[]}
+        nextSteps={[]}
+        verified={[]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain('data-testid="decision-discovery"');
+    expect(html).toContain("ARGUS found");
+    expect(html).toContain("Open the proof");
+    expect(html).toContain("What would change it:");
+    expect(html).toContain('href="#token-market"');
+  });
+
+  it("renders a source-receipted relationship path without hiding the graph", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        verdictLabel="Caution"
+        score={62}
+        favorable={false}
+        verdictTone="caution"
+        discovery={{
+          id: "control-path:token>project>person",
+          headline: "$ARGUS connects to Ada through @argus",
+          consequence: "This source-backed path binds a named operator to the official project identity.",
+          reversalCondition: "A newer primary source that breaks a link would change this read.",
+          evidenceHref: "#relationships",
+          path: ["$ARGUS", "@argus", "Ada"],
+          receipts: [
+            { label: "Account receipt 1", href: "https://x.com/argus" },
+            { label: "Team receipt 2", href: "https://argus.example/team" },
+          ],
+        }}
+        supports={[]}
+        concerns={[]}
+        nextSteps={[]}
+        verified={[]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain("Source-backed path: $ARGUS to @argus to Ada");
+    expect(html).toContain("Open relationship graph");
+    expect(html).toContain('href="https://x.com/argus"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain("Team receipt 2");
+  });
 });

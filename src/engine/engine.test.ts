@@ -525,6 +525,29 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(graph.edges).not.toContainEqual(expect.objectContaining({ dst: "paradigm", type: "FOUNDED" }));
   });
 
+  it("preserves verified relationship receipts on graph edges", () => {
+    const audit = new Audit("@operator", { subject_class: SubjectClass.MEMBER });
+    audit.addVenture({
+      project_name: "Receipt Labs",
+      role: "Founder",
+      period: "2024-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://receipt.example/team",
+      provider: "official-site",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+
+    expect(audit.toPanoptes().edges).toContainEqual(expect.objectContaining({
+      dst: "receipt labs",
+      type: "FOUNDED",
+      source_url: "https://receipt.example/team",
+      provider: "official-site",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    }));
+  });
+
   it("keeps employment-like venture titles out of founder and investment edges", () => {
     const audit = new Audit("@operator", { subject_class: SubjectClass.MEMBER });
     for (const [project_name, role] of [

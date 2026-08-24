@@ -77,6 +77,61 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelector('[aria-label="Report result and check status"]')?.classList.contains("hidden")).toBe(true);
   });
 
+  it("promotes a fully sourced official-claim conflict into the shared decision brief", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier: Dossier = {
+      ...base,
+      graph: { nodes: [], edges: [] },
+      basicFacts: [{
+        factId: "fact:launch-date",
+        subjectKey: "@0xsupergemma",
+        predicate: "launched",
+        value: "The project launched in March 2024.",
+        normalizedValue: "the project launched in march 2024.",
+        status: "conflicted",
+        critical: true,
+        attributionScope: "direct_subject",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "public-web",
+        sources: [
+          {
+            url: "https://supergemma.example/history",
+            provider: "official-site",
+            sourceClass: "official_subject",
+            relation: "supports",
+            excerpt: "We launched in March 2024.",
+            contentHash: "official-launch-hash",
+            capturedAt: "2026-08-22T10:00:00Z",
+            artifactVerified: true,
+          },
+          {
+            url: "https://registry.example/supergemma",
+            provider: "public-registry",
+            sourceClass: "regulatory_or_onchain",
+            relation: "contradicts",
+            excerpt: "The registered launch occurred in September 2024.",
+            contentHash: "registry-launch-hash",
+            capturedAt: "2026-08-22T10:01:00Z",
+            artifactVerified: true,
+          },
+        ],
+      }],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const brief = container.querySelector('[data-canonical-decision-brief="true"]')!;
+    expect(brief.textContent).toContain("The official launch date conflicts with a registry or blockchain record");
+    expect(brief.textContent).toContain("ARGUS leaves the conflict unresolved");
+    expect(brief.textContent).toContain("Open both records");
+    expect(brief.querySelector('a[href="https://supergemma.example/history"]')).not.toBeNull();
+    expect(brief.querySelector('a[href="https://registry.example/supergemma"]')).not.toBeNull();
+    expect(brief.querySelector('a[href="#basic-facts"]')).not.toBeNull();
+  });
+
   it("promotes entity intelligence pressure into the report summary without changing the score", () => {
     const base = buildReport(SUBJECTS[1]);
     expect(base.intelligence).toBeDefined();

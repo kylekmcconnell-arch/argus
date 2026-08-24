@@ -33,6 +33,49 @@ export interface NoticedSignal {
   headline: string;
   detail: string;
   anchor?: string;
+  /**
+   * A report-opening discovery is stricter than a noticed signal. It must
+   * combine at least two saved facts and say what evidence would change the
+   * read. Single scanner metrics remain in the ordinary findings rail.
+   */
+  discovery?: {
+    factCount: number;
+    reversalCondition: string;
+  };
+}
+
+export interface DecisionDiscovery {
+  id: string;
+  headline: string;
+  consequence: string;
+  reversalCondition: string;
+  evidenceHref: string;
+  path?: string[];
+  receipts?: Array<{
+    label: string;
+    href: string;
+  }>;
+}
+
+/**
+ * Select one non-obvious, evidence-bound discovery for the decision brief.
+ * The signal rule owns the fact-count and reversal contract; this selector
+ * never upgrades a one-number scanner finding into an investigative claim.
+ */
+export function deriveDecisionDiscovery(signals: readonly NoticedSignal[]): DecisionDiscovery | null {
+  const signal = signals.find((candidate) =>
+    candidate.discovery
+    && candidate.discovery.factCount >= 2
+    && candidate.discovery.reversalCondition.trim().length > 0
+    && candidate.anchor?.startsWith("#"));
+  if (!signal?.discovery || !signal.anchor?.startsWith("#")) return null;
+  return {
+    id: signal.id,
+    headline: signal.headline,
+    consequence: signal.detail,
+    reversalCondition: signal.discovery.reversalCondition,
+    evidenceHref: signal.anchor as `#${string}`,
+  };
 }
 
 /**
@@ -179,6 +222,10 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
         headline: `The next unlock equals ${Math.round(daysOfVolume)} days of trading`,
         detail: `${usdCompact(unlockUsd)}${share} unlocks${when}, against ${usdCompact(input.volume24hUsd)} of typical daily volume.`,
         anchor: anchors.market,
+        discovery: {
+          factCount: 2,
+          reversalCondition: "A newly verified unlock schedule or materially higher sustained trading volume would change this read.",
+        },
       });
     }
   }
@@ -196,6 +243,10 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
       headline: "Usage and locked capital are moving in opposite directions",
       detail: `Fees ${fees} while locked value ${tvl} over 30 days.`,
       anchor: anchors.market,
+      discovery: {
+        factCount: 2,
+        reversalCondition: "A later 30-day window where fees and locked value move together would change this read.",
+      },
     });
   }
 
@@ -211,6 +262,10 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
         headline: `Only ${pct(input.circulatingPct)} of the supply is circulating`,
         detail: `The all-token value is ${ratio.toFixed(1)}x the market cap; most of the supply has not been released yet.`,
         anchor: anchors.market,
+        discovery: {
+          factCount: 3,
+          reversalCondition: "A verified supply update showing materially more tokens in circulation would change this read.",
+        },
       });
     }
   }
@@ -239,6 +294,14 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
         ? `No posts while the token still trades ${usdCompact(input.volume24hUsd)} a day.`
         : "A live project talks. Months of silence from the official account is a warning on its own.",
       anchor: anchors.account,
+      ...(isNum(input.volume24hUsd) && input.volume24hUsd >= 100_000
+        ? {
+            discovery: {
+              factCount: 2,
+              reversalCondition: "A verified new post from the official account, or evidence that the project moved accounts, would change this read.",
+            },
+          }
+        : {}),
     });
   }
 
@@ -264,6 +327,10 @@ export function deriveNoticedSignals(input: NoticedInputs): NoticedSignal[] {
         : `No independently corroborated team behind a ${usdCompact(input.marketCapUsd)} token`,
       detail: named,
       anchor: anchors.team,
+      discovery: {
+        factCount: 2,
+        reversalCondition: "Independent records binding the named people to their roles and practical control would change this read.",
+      },
     });
   }
 

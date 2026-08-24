@@ -56,6 +56,8 @@ import { ScoreComposition } from "./ScoreComposition";
 import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { deriveDecisionDiscovery, deriveNoticedSignals, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
+import { buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -198,6 +200,22 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const deployerLabel = deployerRoleLabel(attribution);
   const creatorPercentLabel = s.creatorPercent >= 10 ? `${s.creatorPercent.toFixed(0)}%` : `${s.creatorPercent.toFixed(1)}%`;
   const topSum = d.topHolders.reduce((a, h) => a + h.percent, 0);
+  const top10FromRows = top10ShareFromRows(d.topHolders, d.holdersAssessed);
+  const decisionDiscovery = deriveDecisionDiscovery(deriveNoticedSignals({
+    lpLockedPct: d.safetyChecked && d.safety.available && d.safety.lpAssessed !== false
+      ? (d.safety.lpLockedPct ?? 0) + (d.safety.lpBurnedPct ?? 0)
+      : null,
+    isConcentratedLiquidityPool: isConcentratedLiquidityPool(d.dexId, d.dexLabels),
+    largestHolderPct: d.safety?.topHolderPct,
+    top10HolderPct: top10FromRows,
+    assessedWalletCount: top10FromRows != null ? 10 : null,
+    top10HolderPctIsFloor: top10FromRows != null ? false : undefined,
+    marketCapUsd: d.mcap,
+    volume24hUsd: d.vol24,
+    athDrawdownPct: d.cg?.ath?.drawdownPct,
+    anchors: { market: "#token-market" },
+  }));
+  const controlPathDiscovery = buildPublicControlPathDiscovery([d.graph], "#token-relationships");
   const projectSite = d.socials.find((x) => x.label === "site" && /^https?:\/\//i.test(x.url))?.url;
   const projectDomain = projectSite ? projectSite.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase() : null;
   // The project's GitHub org (from its socials), for commit forensics — same
@@ -433,6 +451,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           scoreIsProvisional={readiness.status !== "ready"}
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
+          discovery={controlPathDiscovery ?? decisionDiscovery}
           supports={supportItems}
           concerns={concernItems}
           nextSteps={nextStepItems}
@@ -464,7 +483,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         )}
 
-        <div className="mt-4">
+        <div id="token-market" className="mt-4 scroll-mt-28">
           <MarketPerformancePanel
             token={d}
             showCurrentIntelligence={showCurrentIntelligence}

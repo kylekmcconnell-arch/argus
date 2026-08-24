@@ -106,7 +106,7 @@ describe("dossier finding scope", () => {
       { associate_handle: "@model_peer", relation: "possible teammate", provider: "grok", evidence_origin: "model_lead", artifact_verified: false },
     );
     evidence.webTeam = [
-      { name: "Verified Leader", handle: "@verified_leader", role: "CEO", source: "team page", provider: "team-page", evidence_origin: "deterministic", artifact_verified: true },
+      { name: "Verified Leader", handle: "@verified_leader", role: "CEO", source: "team page", sourceUrl: "https://subject.example/team", provider: "team-page", evidence_origin: "deterministic", artifact_verified: true },
       { name: "Model Lead", handle: "@model_leader", role: "CTO", source: "web search", provider: "grok", evidence_origin: "model_lead", artifact_verified: false },
       {
         name: "Verified Name",
@@ -136,6 +136,13 @@ describe("dossier finding scope", () => {
     expect(graphKeys.has("@model_leader")).toBe(false);
     expect(graphKeys.has("<unknown>")).toBe(false);
     expect(graphKeys.has("venture:model")).toBe(false);
+    expect(dossier.graph.edges).toContainEqual(expect.objectContaining({
+      dst: "@verified_leader",
+      type: "TEAM",
+      source_url: "https://subject.example/team",
+      provider: "team-page",
+      artifact_verified: true,
+    }));
     expect(dossier.evidence.associates.map((associate) => associate.associate_key)).toEqual(
       expect.arrayContaining(["@verified_peer", "@model_peer"]),
     );

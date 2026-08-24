@@ -369,7 +369,16 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     const pkey = canonicalEntityKey({ handle: verifiedHandle, name: p.name });
     if (!pkey) continue;
     if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, label: p.name, role: p.role } as PanoptesNode);
-    graph.edges.push({ src: subjectKey, dst: pkey, type: "TEAM", role: p.role });
+    graph.edges.push({
+      src: subjectKey,
+      dst: pkey,
+      type: "TEAM",
+      role: p.role,
+      ...(p.sourceUrl ? { source_url: p.sourceUrl } : {}),
+      ...(p.provider ? { provider: p.provider } : {}),
+      ...(p.evidence_origin ? { evidence_origin: p.evidence_origin } : {}),
+      artifact_verified: p.artifact_verified === true,
+    });
     for (const pr of verifiedProjects) {
       if (!pr.name) continue;
       const prKey = canonicalEntityKey({ name: pr.name });

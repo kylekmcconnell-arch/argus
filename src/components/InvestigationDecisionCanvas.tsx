@@ -1,4 +1,4 @@
-import { ArrowRight, ClockCounterClockwise, Database } from "@phosphor-icons/react";
+import { ArrowRight, ClockCounterClockwise, Database, Sparkle } from "@phosphor-icons/react";
 import {
   ReportCanvasNarrativeSection,
   type ReportCanvasTone,
@@ -6,7 +6,7 @@ import {
 } from "./ReportCanvasPrimitives";
 import { publicCheckLabel } from "../lib/plainLanguage";
 import { requestChallenge } from "../lib/challenge";
-import type { VerdictArgument } from "../lib/reportInsights";
+import type { DecisionDiscovery, VerdictArgument } from "../lib/reportInsights";
 import type { DecisionLensId } from "../intelligence/types";
 import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief";
 import { ScoreRing } from "./ScoreRing";
@@ -195,6 +195,7 @@ export function InvestigationDecisionCanvas({
   applicable,
   capturedAt,
   argument,
+  discovery,
   decisionLensId,
   onDecisionLensChange,
   evidenceHref = "#token-evidence",
@@ -210,6 +211,7 @@ export function InvestigationDecisionCanvas({
   favorable: boolean;
   verdictTone: ReportCanvasTone;
   argument?: VerdictArgument | undefined;
+  discovery?: DecisionDiscovery | null | undefined;
   decisionLensId?: DecisionLensId | undefined;
   onDecisionLensChange?: ((lensId: DecisionLensId) => void) | undefined;
   supports: DecisionCanvasItem[];
@@ -287,6 +289,53 @@ export function InvestigationDecisionCanvas({
       </header>
 
       <div className="panel mt-3 overflow-hidden">
+        {discovery && (
+          <section
+            className="border-b border-line/70 bg-panel-2/30 px-5 py-4"
+            aria-label="ARGUS discovery"
+            data-testid="decision-discovery"
+          >
+            <div className="flex items-start gap-3">
+              <Sparkle aria-hidden="true" size={18} weight="duotone" className="mt-0.5 shrink-0 text-signal-lift" />
+              <div className="min-w-0">
+                <p className="eyebrow text-signal-lift">ARGUS found</p>
+                <h3 className="mt-1 text-[16px] font-semibold leading-snug text-ink">{plainDecisionText(discovery.headline)}</h3>
+                {discovery.path && discovery.path.length >= 2 && (
+                  <p className="mono mt-2 text-[10.5px] uppercase tracking-[0.08em] text-ink-dim" aria-label={`Source-backed path: ${discovery.path.join(" to ")}`}>
+                    {discovery.path.map((node, index) => (
+                      <span key={`${node}-${index}`}>
+                        {index > 0 && <span aria-hidden="true" className="mx-1.5 text-ink-faint">→</span>}
+                        {plainDecisionText(node)}
+                      </span>
+                    ))}
+                  </p>
+                )}
+                <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{plainDecisionText(discovery.consequence)}</p>
+                <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11.5px] leading-relaxed">
+                  <a href={discovery.evidenceHref} className="font-medium text-signal-lift hover:underline">
+                    {discovery.path
+                      ? "Open relationship graph"
+                      : discovery.id.startsWith("claim-conflict:")
+                        ? "Open both records"
+                        : "Open the proof"}
+                  </a>
+                  {discovery.receipts?.map((receipt) => (
+                    <a
+                      key={`${receipt.label}-${receipt.href}`}
+                      href={receipt.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-signal-lift hover:underline"
+                    >
+                      {receipt.label}
+                    </a>
+                  ))}
+                  <span className="text-ink-faint"><strong className="font-medium text-ink-dim">What would change it:</strong> {plainDecisionText(discovery.reversalCondition)}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
         {argument && (
           <div className="border-b border-line/70 px-5 py-4">
             {decisionLensId && onDecisionLensChange && (

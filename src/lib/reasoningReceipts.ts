@@ -46,6 +46,31 @@ export interface TypedContradictionReceipt {
   explanation: string;
 }
 
+export interface PublicControlPathDiscovery {
+  id: string;
+  headline: string;
+  consequence: string;
+  reversalCondition: string;
+  evidenceHref: string;
+  path: string[];
+  receipts: Array<{
+    label: string;
+    href: string;
+  }>;
+}
+
+export interface PublicClaimConflictDiscovery {
+  id: string;
+  headline: string;
+  consequence: string;
+  reversalCondition: string;
+  evidenceHref: string;
+  receipts: Array<{
+    label: string;
+    href: string;
+  }>;
+}
+
 interface ArtifactReceipt {
   sourceUrl: string;
   provider: string;
@@ -101,6 +126,153 @@ function safeHttpUrl(value: unknown): string {
   }
 }
 
+function publicRelationshipLabel(value: string): string {
+  const labels: Record<string, string> = {
+    AFFILIATED_WITH: "Affiliation receipt",
+    ADVISED: "Advisory receipt",
+    ASSOCIATES_WITH: "Association receipt",
+    ATTRIBUTED_CREATOR: "Creator receipt",
+    BUILT_BY: "Builder receipt",
+    CONTROLS_WALLET: "Wallet-control receipt",
+    DEPLOYED_BY: "Deployment receipt",
+    FOUNDED: "Founder receipt",
+    FUNDED: "Funding receipt",
+    FUNDED_BY: "Funding receipt",
+    INVESTED_IN: "Investment receipt",
+    RUNS_X: "Account receipt",
+    TEAM: "Team receipt",
+    WORKED_ON: "Role receipt",
+  };
+  return labels[value.toUpperCase()] ?? "Relationship receipt";
+}
+
+const DECISION_RELEVANT_PUBLIC_RELATIONSHIP = /CONTROLS_WALLET|DEPLOYED_BY|ATTRIBUTED_CREATOR|FOUNDED|BUILT_BY|RUNS_X|TEAM|WORKED_ON|FUNDED|FUNDED_BY|AFFILIATED_WITH|INVESTED_IN|ADVISED/;
+
+/**
+ * Find the strongest short path whose every edge has a frozen HTTP receipt.
+ * The first graph owns the primary subject; later graphs may extend the path
+ * through a shared canonical node. Candidate, inferred, reported-only, and
+ * source-less topology is deliberately invisible here.
+ */
+export function buildPublicControlPathDiscovery(
+  graphValues: readonly unknown[],
+  evidenceHref: `#${string}`,
+): PublicControlPathDiscovery | null {
+  const nodes = new Map<string, { key: string; label: string; type: string }>();
+  const primarySubjects = new Set<string>();
+  const edges: Array<{
+    from: string;
+    to: string;
+    relationship: string;
+    sourceUrl: string;
+  }> = [];
+
+  graphValues.forEach((graphValue, graphIndex) => {
+    const graph = record(graphValue);
+    rows(graph.nodes).forEach((nodeValue) => {
+      const node = record(nodeValue);
+      const key = text(node.key, 180);
+      if (!key) return;
+      const existing = nodes.get(key);
+      nodes.set(key, {
+        key,
+        label: text(node.label, 240) || existing?.label || key,
+        type: text(node.subtype, 80) || text(node.type, 80) || existing?.type || "Entity",
+      });
+      if (graphIndex === 0 && node.subject === true) primarySubjects.add(key);
+    });
+    rows(graph.edges).forEach((edgeValue) => {
+      const edge = record(edgeValue);
+      const from = text(edge.src ?? edge.from, 180);
+      const to = text(edge.dst ?? edge.to, 180);
+      const relationship = text(edge.type ?? edge.relationship, 120).toUpperCase();
+      const sourceUrl = safeHttpUrl(edge.source_url) || safeHttpUrl(edge.sourceUrl) || safeHttpUrl(edge.source);
+      const eligibility = [edge.evidence_origin, edge.eligibility, edge.match, edge.tier, edge.verdict, edge.evidence_state]
+        .map((value) => text(value, 100)).filter(Boolean).join(" ");
+      if (!from || !to || !relationship || !sourceUrl) return;
+      if (edge.artifact_verified === false || /candidate|model_lead|name[_ -]?only|reported|unverified|inferred|lead/i.test(eligibility)) return;
+      edges.push({ from, to, relationship, sourceUrl });
+    });
+  });
+
+  if (!primarySubjects.size || !edges.length) return null;
+  const adjacency = new Map<string, Array<{ next: string; edge: typeof edges[number] }>>();
+  edges.forEach((edge) => {
+    if (!nodes.has(edge.from) || !nodes.has(edge.to)) return;
+    adjacency.set(edge.from, [...(adjacency.get(edge.from) ?? []), { next: edge.to, edge }]);
+    adjacency.set(edge.to, [...(adjacency.get(edge.to) ?? []), { next: edge.from, edge }]);
+  });
+
+  const relationshipWeight = (relationship: string): number => {
+    if (/CONTROLS_WALLET|DEPLOYED_BY|ATTRIBUTED_CREATOR/.test(relationship)) return 90;
+    if (/FOUNDED|BUILT_BY|RUNS_X|TEAM/.test(relationship)) return 70;
+    if (/FUNDED|FUNDED_BY/.test(relationship)) return 60;
+    if (/AFFILIATED_WITH|INVESTED_IN|ADVISED|WORKED_ON/.test(relationship)) return 50;
+    return 10;
+  };
+  const candidates: Array<{
+    nodeKeys: string[];
+    pathEdges: typeof edges;
+    score: number;
+  }> = [];
+  for (const subject of [...primarySubjects].sort()) {
+    const queue = [{ key: subject, nodeKeys: [subject], pathEdges: [] as typeof edges }];
+    while (queue.length) {
+      const current = queue.shift();
+      if (!current) break;
+      if (current.pathEdges.length >= 2) {
+        const target = nodes.get(current.key);
+        const typeBonus = /wallet/i.test(target?.type ?? "") ? 30 : /person/i.test(target?.type ?? "") ? 20 : 10;
+        if (current.pathEdges.some((edge) => DECISION_RELEVANT_PUBLIC_RELATIONSHIP.test(edge.relationship))) {
+          candidates.push({
+            nodeKeys: current.nodeKeys,
+            pathEdges: current.pathEdges,
+            score: current.pathEdges.reduce((sum, edge) => sum + relationshipWeight(edge.relationship), 0) + typeBonus - current.pathEdges.length,
+          });
+        }
+      }
+      if (current.pathEdges.length >= 3) continue;
+      for (const candidate of adjacency.get(current.key) ?? []) {
+        if (current.nodeKeys.includes(candidate.next)) continue;
+        queue.push({
+          key: candidate.next,
+          nodeKeys: [...current.nodeKeys, candidate.next],
+          pathEdges: [...current.pathEdges, candidate.edge],
+        });
+      }
+    }
+  }
+  const selected = candidates.sort((left, right) =>
+    right.score - left.score
+    || left.pathEdges.length - right.pathEdges.length
+    || left.nodeKeys.join("|").localeCompare(right.nodeKeys.join("|")))[0];
+  if (!selected) return null;
+
+  const path = selected.nodeKeys.map((key) => nodes.get(key)?.label || key);
+  const relationships = selected.pathEdges.map((edge) => edge.relationship);
+  const target = path[path.length - 1];
+  const middle = path.slice(1, -1).join(" → ");
+  const consequence = relationships.some((relationship) => /CONTROLS_WALLET|DEPLOYED_BY|ATTRIBUTED_CREATOR/.test(relationship))
+    ? "This source-backed path identifies the wallet or operator closest to practical control, so the control risk can be assessed against a real entity."
+    : relationships.some((relationship) => /FOUNDED|BUILT_BY|RUNS_X|TEAM|WORKED_ON/.test(relationship))
+      ? "This source-backed path binds a named operator to the official project identity, so accountability and track record can be assessed against a person."
+      : relationships.some((relationship) => /AFFILIATED_WITH|INVESTED_IN|FUNDED|FUNDED_BY/.test(relationship))
+        ? "This source-backed path shows the vehicle through which the relationship reaches the project instead of collapsing it into a direct personal claim."
+        : "Every link in this relationship path has a frozen source receipt; source-less graph topology was excluded.";
+  return {
+    id: `control-path:${selected.nodeKeys.join(">")}`,
+    headline: `${path[0]} connects to ${target}${middle ? ` via ${middle}` : ""}`,
+    consequence,
+    reversalCondition: "A newer primary source that breaks or reattributes any link in this path would change this read.",
+    evidenceHref,
+    path,
+    receipts: selected.pathEdges.map((edge, index) => ({
+      label: `${publicRelationshipLabel(edge.relationship)} ${index + 1}`,
+      href: edge.sourceUrl,
+    })),
+  };
+}
+
 function aliasAppears(question: string, alias: string): boolean {
   const needle = normalized(alias);
   if (needle.length < 2) return false;
@@ -119,7 +291,7 @@ function graphRows(packet: Record<string, unknown>) {
 
 function edgeReason(edge: RawGraphEdge, nodeKeys: ReadonlySet<string>): GraphPathReceipt["rejectedAlternatives"][number]["reason"] | null {
   if (!nodeKeys.has(edge.from) || !nodeKeys.has(edge.to)) return "dangling_endpoint";
-  if (/candidate|model_lead|name[_ -]?only|namesake/i.test(edge.eligibility)) return "candidate_edge";
+  if (/candidate|model_lead|name[_ -]?only|namesake|inferred/i.test(edge.eligibility)) return "candidate_edge";
   if (/reported|unverified|lead/i.test(edge.evidenceState)) return "reported_only";
   if (!edge.sourceUrl) return "missing_source_receipt";
   return null;
@@ -393,4 +565,135 @@ export function buildTypedContradictionReceipts(packetValue: unknown): TypedCont
     });
   }
   return receipts.slice(0, 12);
+}
+
+function publicFactTopic(predicate: string): string {
+  const topics: Record<string, string> = {
+    audit: "security audit claim",
+    control: "control claim",
+    education: "education claim",
+    executive: "leadership claim",
+    exit: "exit claim",
+    founded: "founding date",
+    founder: "founder claim",
+    funding: "funding claim",
+    governance: "governance claim",
+    launched: "launch date",
+    legal_entity: "legal entity claim",
+    legal_regulatory_event: "legal or regulatory claim",
+    official_identity: "identity claim",
+    official_token: "official token claim",
+    partnership: "partnership claim",
+    product: "product claim",
+    public_security: "public security claim",
+    repository: "repository claim",
+    security_incident: "security incident claim",
+    tokenomics: "token supply claim",
+    track_record: "track record claim",
+    traction: "usage claim",
+    treasury: "treasury claim",
+    vesting: "vesting claim",
+  };
+  return topics[predicate.toLowerCase()] ?? "public claim";
+}
+
+function shortStatement(value: string, max = 170): string {
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  const clipped = clean.slice(0, max - 1).replace(/\s+\S*$/, "").trim();
+  return `${clipped || clean.slice(0, max - 1)}…`;
+}
+
+function quotedStatement(value: string): string {
+  return shortStatement(value).replace(/[.!?]+$/, "");
+}
+
+/**
+ * Promote only a genuine official-claim-versus-independent-record conflict.
+ * Both sides must be frozen verified artifacts about the audited subject and
+ * the same stated period. Ambiguous scope, undated comparisons, same-source
+ * restatements, leads, and generic public pages stay in the evidence chapter.
+ */
+export function buildPublicClaimConflictDiscovery(
+  factValues: readonly unknown[],
+  evidenceHref: `#${string}`,
+): PublicClaimConflictDiscovery | null {
+  const candidates: Array<{
+    factId: string;
+    predicate: string;
+    proposition: string;
+    support: ArtifactReceipt;
+    contradiction: ArtifactReceipt;
+    score: number;
+  }> = [];
+  const independentClasses = new Set(["official_counterparty", "regulatory_or_onchain", "independent_press"]);
+  const importance = new Map([
+    ["control", 100], ["legal_regulatory_event", 95], ["security_incident", 95], ["audit", 90],
+    ["official_identity", 90], ["official_token", 85], ["founder", 80], ["executive", 75],
+    ["funding", 75], ["governance", 70], ["tokenomics", 70], ["vesting", 70],
+    ["launched", 60], ["founded", 60], ["partnership", 55], ["traction", 50],
+  ]);
+
+  for (const value of factValues) {
+    const fact = record(value);
+    const factId = text(fact.factId, 180);
+    const predicate = text(fact.predicate, 100).toLowerCase();
+    const proposition = text(fact.value, 800);
+    if (!factId || !predicate || !proposition || text(fact.status, 80) !== "conflicted") continue;
+    if (text(fact.attributionScope, 80) !== "direct_subject") continue;
+    const sourceRows = rows(fact.sources).map(record);
+    const supports = sourceRows.flatMap((source) => {
+      const receipt = source.relation === "supports" && source.sourceClass === "official_subject" ? artifact(source) : null;
+      return receipt ? [receipt] : [];
+    });
+    const contradictions = sourceRows.flatMap((source) => {
+      const receipt = source.relation === "contradicts" && independentClasses.has(text(source.sourceClass, 80)) ? artifact(source) : null;
+      return receipt ? [receipt] : [];
+    });
+    for (const support of supports) {
+      for (const contradiction of contradictions) {
+        if (independence(support, contradiction) !== "independent") continue;
+        if (timeAlignment(support, contradiction) !== "aligned") continue;
+        const propositionYears = statedYears(proposition);
+        if (propositionYears.length > 0) {
+          const supportYears = new Set(statedYears(support.excerpt));
+          const contradictionYears = new Set(statedYears(contradiction.excerpt));
+          if (!propositionYears.some((year) => supportYears.has(year) && contradictionYears.has(year))) continue;
+        }
+        candidates.push({
+          factId,
+          predicate,
+          proposition,
+          support,
+          contradiction,
+          score: importance.get(predicate) ?? 40,
+        });
+      }
+    }
+  }
+
+  const selected = candidates.sort((left, right) =>
+    right.score - left.score
+    || left.factId.localeCompare(right.factId)
+    || left.contradiction.sourceUrl.localeCompare(right.contradiction.sourceUrl))[0];
+  if (!selected) return null;
+
+  const topic = publicFactTopic(selected.predicate);
+  const independentHost = host(selected.contradiction.sourceUrl);
+  const independentLabel = selected.contradiction.sourceClass === "regulatory_or_onchain"
+    ? "a registry or on-chain record"
+    : selected.contradiction.sourceClass === "official_counterparty"
+      ? "the named counterparty"
+      : "an independent source";
+  return {
+    id: `claim-conflict:${selected.factId}`,
+    headline: `The official ${topic} conflicts with ${independentLabel}`,
+    consequence: `The project says “${quotedStatement(selected.proposition)}”; the independent record says “${quotedStatement(selected.contradiction.excerpt)}.” ARGUS leaves the conflict unresolved instead of choosing a side.`,
+    reversalCondition: "A current primary record that resolves both statements for the same entity and period would change this read.",
+    evidenceHref,
+    receipts: [
+      { label: "Official claim", href: selected.support.sourceUrl },
+      { label: independentHost ? `Independent record · ${independentHost}` : "Independent record", href: selected.contradiction.sourceUrl },
+    ],
+  };
 }

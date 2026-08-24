@@ -1309,8 +1309,19 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
   }];
   const edges: PanoptesEdge[] = [];
   if (projectX) {
+    const projectXSourceUrl = socials.find((social) => {
+      const handle = social.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1];
+      return Boolean(handle && `@${handle}`.toLowerCase() === projectX.toLowerCase());
+    })?.url;
     nodes.push({ type: "Person", key: projectX });
-    edges.push({ src: center, dst: projectX, type: "TEAM" });
+    edges.push({
+      src: center,
+      dst: projectX,
+      type: "TEAM",
+      ...(projectXSourceUrl
+        ? { source_url: projectXSourceUrl, evidence_origin: "deterministic", artifact_verified: true }
+        : {}),
+    });
   }
   if (attribution) {
     const k = walletEntityKey(chain, attribution.address);
@@ -1318,7 +1329,15 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
     // The edge states what the evidence supports. An address a provider merely
     // names as creator or authority has not been shown to deploy anything, and
     // this graph is reconciled across reports, so the weaker claim travels.
-    edges.push({ src: center, dst: k, type: attribution.kind === "deployer" ? "DEPLOYED_BY" : "ATTRIBUTED_CREATOR", source: attribution.source });
+    edges.push({
+      src: center,
+      dst: k,
+      type: attribution.kind === "deployer" ? "DEPLOYED_BY" : "ATTRIBUTED_CREATOR",
+      source: attribution.source,
+      ...(/^https?:\/\//i.test(attribution.source)
+        ? { source_url: attribution.source, evidence_origin: "deterministic", artifact_verified: true }
+        : {}),
+    });
   }
   holders.slice(0, 4).forEach((h) => {
     // Roles and short labels are display metadata; the identity is always the
@@ -1341,7 +1360,14 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
     const key = xh ? "@" + xh : x.url.match(/^https?:\/\/(?:www\.)?([^/]+)/i)?.[1];
     if (!key || (projectX && key.toLowerCase() === projectX.toLowerCase())) return;
     nodes.push({ type: "Company", key });
-    edges.push({ src: center, dst: key, type: "LINKS" });
+    edges.push({
+      src: center,
+      dst: key,
+      type: "LINKS",
+      source_url: x.url,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
   });
   return { nodes, edges };
 }
