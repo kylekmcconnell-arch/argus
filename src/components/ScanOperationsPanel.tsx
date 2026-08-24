@@ -7,6 +7,7 @@ type Scan = {
   id: string;
   label: string;
   kind: string;
+  private?: boolean;
   status: string;
   actor: string;
   creditsCharged: number;
@@ -123,6 +124,7 @@ export function ScanOperationsPanel() {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[13px] font-medium text-ink">{scan.label}</span>
+                    {scan.private && <span className="chip" title="This investigation was run privately. Its subject is shown here because the workspace was charged for it.">private</span>}
                     <span className={`chip ${tone(scan.status)}`}>{scan.status}</span>
                   </div>
                   <div className="mt-1 text-[11px] text-ink-faint">{scan.actor} · {time(scan.startedAt)} · {elapsed(scan.durationMs)}</div>
