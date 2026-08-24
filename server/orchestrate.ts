@@ -1038,7 +1038,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // founder the follow scan misses (no follow edge, or beyond its page
     // budget) — e.g. a project account amplifying its founder's posts while
     // the founder's bio says "Founder @project".
-    discoverOperatorsFromAmplified(ctx.handle, ctx.evidence.profile.display_name),
+    discoverOperatorsFromAmplified(ctx.handle),
     // Reverse role-phrase search: who does the PUBLIC RECORD say founded or
     // leads this project? Runs quoted queries ("founder of @y", "cofounder of
     // @y", "CEO at @y", "@y team", name/domain variants) across X and the web,

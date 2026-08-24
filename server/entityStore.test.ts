@@ -22,10 +22,13 @@ describe("entityStore read/write", () => {
   it("readEntityFacts returns fresh facts, keyed and scoped correctly", async () => {
     stubSupabase();
     const now = new Date().toISOString();
-    const fetchMock = vi.fn(async (_url: unknown) => new Response(JSON.stringify([{
-      facts: { basicFacts: [{ predicate: "founder", value: "Ethereum" }] },
-      entity_type: "FOUNDER", audit_count: 3, updated_at: now,
-    }]), { status: 200 }));
+    const fetchMock = vi.fn(async (url: unknown) => {
+      void url;
+      return new Response(JSON.stringify([{
+        facts: { basicFacts: [{ predicate: "founder", value: "Ethereum" }] },
+        entity_type: "FOUNDER", audit_count: 3, updated_at: now,
+      }]), { status: 200 });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const rec = await readEntityFacts("org1", "@vitalikbuterin", MONTH);

@@ -4303,7 +4303,7 @@ describe("analyst verdict integrity", () => {
     );
     const verdictRequest = requests.find((request) => toolNameOf(request) === "record_verdict")!;
     const verdictTool = analystSchemaOf(verdictRequest);
-    const axesSchema = (verdictTool.schema as { properties: { axes: any } }).properties.axes;
+    const axesSchema = (verdictTool.schema as unknown as typeof RECORD_VERDICT_INPUT_SCHEMA).properties.axes;
     expect(verdictRequest.max_tokens).toBe(6000);
     expect(verdictTool.strict).toBe(true);
     expect(verdictTool.schema).toEqual(RECORD_VERDICT_INPUT_SCHEMA);
@@ -4489,7 +4489,6 @@ describe("analyst verdict integrity", () => {
     let requestBody = "";
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       requestBody = String(init?.body);
-      const request = JSON.parse(requestBody) as { tool_choice: { name: string } };
       const axes = productionCatalog.map(({ axis, weight, role }) => ({
         axis,
         score: role === SubjectClass.INVESTOR
@@ -4537,7 +4536,7 @@ describe("analyst verdict integrity", () => {
       }>;
     };
     const tool = analystSchemaOf(request);
-    const axesSchema = (tool.schema as { properties: { axes: any } }).properties.axes;
+    const axesSchema = (tool.schema as unknown as typeof RECORD_VERDICT_INPUT_SCHEMA).properties.axes;
     expect(productionCatalog).toHaveLength(14);
     expect(evidenceJson.length).toBeGreaterThan(20_000);
     expect(scorerCatalog.length).toBeGreaterThanOrEqual(20);
@@ -5132,12 +5131,8 @@ describe("analyst verdict integrity", () => {
       gaps: [],
     });
     let attempt = 0;
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+    const fetchMock = vi.fn(async () => {
       attempt += 1;
-      const request = JSON.parse(String(init?.body)) as {
-        messages: Array<{ content: string }>;
-        tool_choice: { name: string };
-      };
       const f1 = attempt === 1
         ? {
             ...axisRow("F1_identity_verifiability", 10, f1Coverage),

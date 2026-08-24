@@ -122,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (BURN_ADDRS.includes(address)) { res.status(200).json({ available: true, count: 0, cadence: "none" }); return; }
 
   let events: BurnTx[] = [];
-  let supply: number | null = null;
+  let supply: number | null;
   const bs = BLOCKSCOUT[chain];
   const esId = ETHERSCAN_CHAINID[chain];
   const esKey = process.env.ETHERSCAN_API_KEY;

@@ -12,7 +12,18 @@ const BASE = "https://api.dexscreener.com";
 // can carry dozens of CA-bearing promos; the cap bounds this pass (the
 // lifecycle pass in orchestrate.ts caps the same input at 3).
 const MAX_PROMO_LOOKUPS = 8;
-const isRecord = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+interface DexPairRecord extends Record<string, unknown> {
+  chainId?: string;
+  baseToken?: { symbol?: string; address?: string };
+  liquidity?: { usd?: number };
+  volume?: { h24?: number };
+  priceChange?: { h24?: number };
+  priceUsd?: string | number;
+  fdv?: number;
+  pairCreatedAt?: number;
+}
+const isPair = (value: unknown): value is DexPairRecord => isRecord(value);
 const recordDex = (op: string, status: "succeeded" | "partial" | "failed", detail?: string) => {
   recordCall("dexscreener", op, 0, ["keyless", detail].filter(Boolean).join(" · "), status);
 };
@@ -58,7 +69,7 @@ export async function lookupToken(address: string): Promise<DexTokenSnapshot | n
     recordDex("token-pairs", "succeeded", "no_pairs");
     return { address };
   }
-  const pairs = data.pairs.filter(isRecord);
+  const pairs = data.pairs.filter(isPair);
   if (!pairs.length) {
     recordDex("token-pairs", "partial", "invalid_pair_rows");
     return null;
@@ -133,14 +144,14 @@ export async function detectTokenLifecycle(ticker: string, knownAddress?: string
   }
 
   try {
-    const validRows = data.pairs.filter(isRecord);
+    const validRows = data.pairs.filter(isPair);
     const pairs = validRows.filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
     if (!pairs.length) {
       recordDex("token-search", validRows.length === data.pairs.length ? "succeeded" : "partial", validRows.length === data.pairs.length ? "no_match" : "invalid_pair_rows");
       return null;
     }
 
-    const byAddr = new Map<string, any[]>();
+    const byAddr = new Map<string, DexPairRecord[]>();
     let missingAddress = 0;
     for (const p of pairs) {
       const a = p.baseToken?.address;

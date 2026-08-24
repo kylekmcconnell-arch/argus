@@ -43,7 +43,6 @@ describe("drainerHit - visible-text, ask-gated", () => {
   });
 
   it("DOES flag a named drainer kit fingerprint", () => {
-    const body = `<script>/* inferno drainer v3 */</script><h1>Claim</h1>`;
     // named-kit tell lives in visible text after strip? keep it visible too:
     const visible = `<h1>inferno drainer</h1>`;
     expect(drainerHit(visible)).toBe(true);

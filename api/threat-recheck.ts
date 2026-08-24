@@ -9,7 +9,6 @@
 //     per token (no nightly re-spam) and optionally pushed to a webhook.
 // Bounded per run so it never runs long or hammers DexScreener.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
 import { ledgerAvailable, ledgerFlagged, ledgerRatedOk, ledgerUpsert, ledgerRecordAlert, ledgerGetAlert, type LedgerReceipt, type ThreatAlert } from "./_ledger.js";
 
 export const config = { maxDuration: 60 };

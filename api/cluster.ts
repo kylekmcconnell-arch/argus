@@ -62,7 +62,7 @@ interface OldestSignatureRead {
 // wallet's first transactions, and can never establish its seed funder.
 async function oldestSigs(url: string, wallet: string, usage: ProviderUsage): Promise<OldestSignatureRead> {
   let before: string | undefined;
-  let last: any[] = [];
+  let last: any[];
   for (let page = 0; page < 4; page++) {
     let batch: any[];
     try {

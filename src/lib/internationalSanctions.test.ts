@@ -87,7 +87,7 @@ describe("collectInternationalSanctions", () => {
 
   it("refuses to screen a name that is not a resolved full name", async () => {
     let called = 0;
-    const spy = ((_input: string | URL | Request) => {
+    const spy = (() => {
       called += 1;
       return Promise.resolve(new Response("", { status: 200 }));
     }) as unknown as typeof fetch;

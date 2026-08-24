@@ -2223,9 +2223,6 @@ export function deriveInvestorStrengthBands(
       const artifact = artifactFor(row);
       return artifact?.eligibleAxes.includes(axis) === true && isSubstantiveArtifact(artifact);
     });
-  const artifactIds = (rows: readonly Record<string, unknown>[]): string[] => [...new Set(rows
-    .map((row) => typeof row.artifactId === "string" ? row.artifactId : "")
-    .filter(Boolean))];
   const distinctSourceKey = (artifact: AxisEvidenceRecord): string => {
     if (artifact.sourceUrl) {
       try {

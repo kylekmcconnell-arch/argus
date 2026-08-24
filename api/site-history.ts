@@ -20,7 +20,16 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // archive.org rate-limits or times out (it throttles hard and intermittently).
 // The data is real — produced by this endpoint against live archive.org — just
 // cached so a known finding never disappears behind a flaky upstream.
-const SEED: Record<string, any> = {
+interface SeedHistory {
+  firstArchived: string;
+  removedSections: string[];
+  removedProfileLinks: string[];
+  removedNames: string[];
+  titleChange: string | null;
+  note: string;
+}
+
+const SEED: Record<string, SeedHistory> = {
   "celsius.network": {
     firstArchived: "2017",
     removedSections: ["team", "advisor", "advisors", "leadership", "partners", "about"],

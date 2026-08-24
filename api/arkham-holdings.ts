@@ -59,7 +59,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     providerCalls += 1;
     const r = await fetch(`${BAL}${encodeURIComponent(addr)}`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(12000) });
     if (!r.ok) { res.status(200).json({ available: false, note: `Arkham ${r.status}` }); return; }
-    const d = (await r.json()) as { totalBalance?: Record<string, number>; totalBalance24hAgo?: Record<string, number>; balances?: Record<string, any[]> };
+    const d = (await r.json()) as {
+      totalBalance?: Record<string, number>;
+      totalBalance24hAgo?: Record<string, number>;
+      balances?: Record<string, Array<{
+        usd?: unknown;
+        symbol?: unknown;
+        id?: unknown;
+        balance?: unknown;
+        name?: unknown;
+        priceChange24hPercent?: unknown;
+      }>>;
+    };
     providerSucceeded += 1;
 
     const totalUsd = Object.values(d.totalBalance ?? {}).reduce((s, v) => s + num(v), 0);

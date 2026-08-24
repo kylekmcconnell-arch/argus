@@ -27,12 +27,13 @@ const jsonResponse = (body: unknown, status = 200) =>
 // the `endpoint` field of the JSON body so one fetcher can serve both calls.
 function runFetcher(map: { search?: unknown; enrichment?: unknown }): typeof fetch {
   return ((_input: string | URL | Request, init?: RequestInit) => {
-    let endpoint = "";
-    try {
-      endpoint = (JSON.parse(String(init?.body ?? "{}")) as { endpoint?: string }).endpoint ?? "";
-    } catch {
-      endpoint = "";
-    }
+    const endpoint = (() => {
+      try {
+        return (JSON.parse(String(init?.body ?? "{}")) as { endpoint?: string }).endpoint ?? "";
+      } catch {
+        return "";
+      }
+    })();
     if (endpoint === "/v1/company/search") return Promise.resolve(jsonResponse(map.search ?? {}));
     if (endpoint === "/v1/company/enrichment") return Promise.resolve(jsonResponse(map.enrichment ?? {}));
     return Promise.resolve(jsonResponse({}, 404));

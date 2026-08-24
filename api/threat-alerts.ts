@@ -4,7 +4,6 @@
 // the shared ledger (populated by the re-check cron). Returns empty/av=false
 // when no store is configured, so the client degrades cleanly.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
 import { ledgerAvailable, ledgerRecentAlerts } from "./_ledger.js";
 
 export const config = { maxDuration: 15 };

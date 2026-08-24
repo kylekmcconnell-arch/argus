@@ -59,7 +59,7 @@ async function rpc(urls: string[], method: string, params: unknown[]): Promise<s
         signal: AbortSignal.timeout(9000),
       });
       if (!r.ok) continue;
-      const d = (await r.json()) as any;
+      const d = (await r.json()) as { result?: unknown };
       // A live RPC returning "0x" is a real answer (no code / empty slot), not a
       // provider failure — accept it and stop trying fallbacks.
       if (typeof d.result === "string") return d.result;

@@ -100,7 +100,6 @@ async function solHoldings(address: string): Promise<Position[]> {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const address = s(req.query.address);
-  const chain = s(req.query.chain).toLowerCase();
   const isEvm = EVM.test(address);
   const isSol = !isEvm && SOL.test(address) && address.length >= 32;
   if (!isEvm && !isSol) { res.status(400).json({ error: "valid EVM or Solana address required" }); return; }

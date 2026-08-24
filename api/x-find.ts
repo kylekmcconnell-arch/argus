@@ -7,7 +7,6 @@
 // project's domain? does the name align?) so we return a match with a confidence,
 // not a guess. Grok (search) + twitterapi.io (profile). 24h-cached.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
 import { attachPanelCost, cacheGetJson, cacheSetJson, grokUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 

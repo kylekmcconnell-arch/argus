@@ -66,7 +66,8 @@ describe("X follower audience shape", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(page(rows(120, (index) => {
       if (index < 40) return { createdAt: "Sat Mar 07 07:16:36 +0000 2026" };
       if (index < 60) return { createdAt: "Wed Jan 01 07:16:36 +0000 2025" };
-      const { createdAt: _dropped, ...missing } = row(index);
+      const { createdAt, ...missing } = row(index);
+      void createdAt;
       return { ...missing, createdAt: undefined };
     }))));
 

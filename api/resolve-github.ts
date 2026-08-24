@@ -62,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!key) { res.status(200).json({ available: false, note: "GitHub not configured (no GITHUB_TOKEN)." }); return; }
 
   const ck = `ghresolve:${handle.toLowerCase()}:${name.toLowerCase()}:v2`;
-  const cached = await cacheGetJson<any>(ck);
+  const cached = await cacheGetJson<Record<string, unknown>>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
   const usage: CallCounter = { calls: 0, succeeded: 0 };

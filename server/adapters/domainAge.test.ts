@@ -70,8 +70,11 @@ describe("resolveDomainScope", () => {
 
 describe("collectDomainRegistration", () => {
   it("follows redirects and reports the registration date and age", async () => {
-    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
-      rdap([{ eventAction: "registration", eventDate: "2019-04-15T00:11:31Z" }]));
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      void url;
+      void init;
+      return rdap([{ eventAction: "registration", eventDate: "2019-04-15T00:11:31Z" }]);
+    });
     const outcome = await collectDomainRegistration("https://www.venice.ai/about", fetchMock as unknown as typeof fetch, new Date("2026-07-27T00:00:00Z"));
 
     expect(outcome).toMatchObject({
@@ -83,8 +86,11 @@ describe("collectDomainRegistration", () => {
   });
 
   it("asks the registry about the registrable domain and still names the subdomain", async () => {
-    const fetchMock = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
-      rdap([{ eventAction: "registration", eventDate: "2018-11-26T05:33:07.549Z" }]));
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      void url;
+      void init;
+      return rdap([{ eventAction: "registration", eventDate: "2018-11-26T05:33:07.549Z" }]);
+    });
     const outcome = await collectDomainRegistration(
       "https://app.uniswap.org/#/swap",
       fetchMock as unknown as typeof fetch,

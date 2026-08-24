@@ -9,9 +9,7 @@
 // our answer is never stale. Auth-gated (spends provider budget); Solana via
 // Helius getTokenAccountsByOwner, EVM via keyless Blockscout token-balances.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore - bundled JS sibling
 import { requireArgusAuth } from "./_auth.js";
-// @ts-ignore - bundled JS sibling
 import { ledgerRecordHolderEdges, ledgerWalletReputation } from "./_ledger.js";
 
 export const config = { maxDuration: 45 };
@@ -169,7 +167,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
   const threshold = Math.max(4, Math.ceil(holders.length * 0.25));
-  let common = [...count.entries()].filter(([, c]) => c >= threshold).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  const common = [...count.entries()].filter(([, c]) => c >= threshold).sort((a, b) => b[1] - a[1]).slice(0, 15);
 
   const meta = await enrich(chain, common.map(([m]) => m));
   const commonCoins = common.map(([mint, held]) => {

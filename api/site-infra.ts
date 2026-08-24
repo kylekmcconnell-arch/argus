@@ -14,7 +14,6 @@
 //      the site isn't behind a shared CDN, which we detect and down-rank.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createHash } from "node:crypto";
-// @ts-ignore — bundled JS sibling
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 
 export const config = { maxDuration: 25 };
@@ -132,7 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // v3 distinguishes a completed empty screen from upstream failure. Older
   // cache entries could contain false-clean empties produced by failed calls.
   const ck = `siteinfra:${host}:v3`;
-  const cached = await cacheGetJson<any>(ck);
+  const cached = await cacheGetJson<Record<string, unknown>>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
   try {

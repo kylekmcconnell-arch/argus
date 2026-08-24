@@ -59,7 +59,7 @@ function candidateUrlTiers(domain: string): string[][] {
   ];
 }
 
-const TEAM_DOCUMENT_HINT = /(?:^|[\/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[\/_\-.]|$)/i;
+const TEAM_DOCUMENT_HINT = /(?:^|[/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[/_\-.]|$)/i;
 
 /**
  * Parse an official docs index without trusting it to name the team itself.

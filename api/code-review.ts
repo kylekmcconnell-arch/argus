@@ -15,10 +15,9 @@
 // verified proxy we resolve the implementation address and read ITS source, and
 // cache keyed on that address so an upgrade invalidates the read.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore - bundled JS sibling
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
-import { claudeMessages, grokChat, parseJsonObject, providerFallbacksEnabled } from "./_llm";
+import { claudeMessages, grokChat, providerFallbacksEnabled } from "./_llm";
 
 export const config = { maxDuration: 60 };
 

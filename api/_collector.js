@@ -9043,7 +9043,6 @@ function deriveInvestorStrengthBands(evidenceJson, axisCatalog2) {
     const artifact = artifactFor(row);
     return artifact?.eligibleAxes.includes(axis) === true && isSubstantiveArtifact(artifact);
   });
-  const artifactIds = (rows) => [...new Set(rows.map((row) => typeof row.artifactId === "string" ? row.artifactId : "").filter(Boolean))];
   const distinctSourceKey = (artifact) => {
     if (artifact.sourceUrl) {
       try {
@@ -12155,7 +12154,7 @@ function isSerperProviderOutage(detail) {
   return true;
 }
 function safeSerperFailure(status, raw) {
-  let message = "";
+  let message;
   try {
     const parsed = asRec(JSON.parse(raw.slice(0, 2e3)));
     message = [parsed.message, parsed.error].find((value) => typeof value === "string") ?? "";
@@ -13575,7 +13574,7 @@ function amplifiedAuthorsFromTimeline(payload, subjectHandle) {
   return out.slice(0, 12);
 }
 var MAX_AMPLIFIED_PROFILE_FETCHES = 8;
-async function discoverOperatorsFromAmplified(subjectHandle, subjectName3) {
+async function discoverOperatorsFromAmplified(subjectHandle) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
   const handle = subjectHandle.replace(/^@/, "");
@@ -14006,7 +14005,7 @@ async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectN
     }
   }
   let orgFetches = 0;
-  for (const [keyHandle, raw] of extraMentions) {
+  for (const raw of extraMentions.values()) {
     if (orgs.length >= 8 || orgFetches >= 6) break;
     orgFetches += 1;
     try {
@@ -14432,7 +14431,7 @@ function candidateUrlTiers(domain) {
     ]
   ];
 }
-var TEAM_DOCUMENT_HINT = /(?:^|[\/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[\/_\-.]|$)/i;
+var TEAM_DOCUMENT_HINT = /(?:^|[/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[/_\-.]|$)/i;
 function teamDocumentUrlsFromIndex(domain, raw) {
   const apex = normalizedApex(domain);
   if (!apex || !raw) return [];
@@ -17302,6 +17301,7 @@ async function enrichFirstPartyTeamAvatars(ctx) {
 var BASE2 = "https://api.dexscreener.com";
 var MAX_PROMO_LOOKUPS = 8;
 var isRecord = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var isPair = (value) => isRecord(value);
 var recordDex = (op, status, detail) => {
   recordCall("dexscreener", op, 0, ["keyless", detail].filter(Boolean).join(" \xB7 "), status);
 };
@@ -17334,7 +17334,7 @@ async function lookupToken(address) {
     recordDex("token-pairs", "succeeded", "no_pairs");
     return { address };
   }
-  const pairs = data.pairs.filter(isRecord);
+  const pairs = data.pairs.filter(isPair);
   if (!pairs.length) {
     recordDex("token-pairs", "partial", "invalid_pair_rows");
     return null;
@@ -17381,7 +17381,7 @@ async function detectTokenLifecycle(ticker, knownAddress) {
     return null;
   }
   try {
-    const validRows = data.pairs.filter(isRecord);
+    const validRows = data.pairs.filter(isPair);
     const pairs = validRows.filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
     if (!pairs.length) {
       recordDex("token-search", validRows.length === data.pairs.length ? "succeeded" : "partial", validRows.length === data.pairs.length ? "no_match" : "invalid_pair_rows");
@@ -18636,24 +18636,29 @@ async function tokenByContract(chain, address) {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 http_${res.status}`, "failed");
     return null;
   }
-  let d;
+  let value;
   try {
-    d = await res.json();
+    value = await res.json();
   } catch {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 response_json_error`, "failed");
     return null;
   }
-  if (!d || typeof d !== "object" || Array.isArray(d)) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 result_shape_error`, "partial");
     return null;
   }
+  const d = value;
   const hasSymbol = typeof d.symbol === "string" && !!d.symbol.trim();
   const hasName = typeof d.name === "string" && !!d.name.trim();
   if (!hasSymbol && !hasName) {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 missing_identity`, "partial");
     return null;
   }
-  const complete = hasSymbol && hasName && (d.market_data == null || typeof d.market_data === "object" && !Array.isArray(d.market_data));
+  const marketData = d.market_data && typeof d.market_data === "object" && !Array.isArray(d.market_data) ? d.market_data : null;
+  const currentPrice = marketData?.current_price && typeof marketData.current_price === "object" && !Array.isArray(marketData.current_price) ? marketData.current_price : null;
+  const marketCap = marketData?.market_cap && typeof marketData.market_cap === "object" && !Array.isArray(marketData.market_cap) ? marketData.market_cap : null;
+  const athChange = marketData?.ath_change_percentage && typeof marketData.ath_change_percentage === "object" && !Array.isArray(marketData.ath_change_percentage) ? marketData.ath_change_percentage : null;
+  const complete = hasSymbol && hasName && (d.market_data == null || marketData !== null);
   recordCall(
     "coingecko",
     "contract-lookup",
@@ -18664,9 +18669,9 @@ async function tokenByContract(chain, address) {
   return {
     symbol: d.symbol,
     name: d.name,
-    priceUsd: d.market_data?.current_price?.usd,
-    mcapUsd: d.market_data?.market_cap?.usd,
-    ath_change_pct: d.market_data?.ath_change_percentage?.usd
+    priceUsd: typeof currentPrice?.usd === "number" ? currentPrice.usd : void 0,
+    mcapUsd: typeof marketCap?.usd === "number" ? marketCap.usd : void 0,
+    ath_change_pct: typeof athChange?.usd === "number" ? athChange.usd : void 0
   };
 }
 var coingeckoAdapter = {
@@ -27225,7 +27230,7 @@ async function collectProjectTokenIdentity(ctx) {
   const registryHomepages = [];
   let selected = null;
   let search = null;
-  let candidates = [];
+  const candidates = [];
   let inspected = [];
   let detailAttempts = 0;
   let contractLookupFailed = false;
@@ -29078,7 +29083,7 @@ async function collectHolderProfile(chain, address) {
   const explorerShares = explorerWallets.map((holder) => holder.percent).filter((share) => Number.isFinite(share) && share >= 0 && share <= 100).sort((a, b) => b - a);
   const excludedNote = (count, register) => count ? ` ${count} ${register} row${count === 1 ? " was" : "s were"} excluded as a pool, contract, or locked address, so this is wallet concentration and not every address holding supply.` : "";
   let distributionSource = null;
-  let distributionNote = null;
+  let distributionNote;
   let shares = [];
   if (unordered && explorerShares.length) {
     shares = explorerShares;
@@ -30594,7 +30599,7 @@ async function operatorLaunchAnnouncements(handle) {
   const key = env("TWITTERAPI_KEY");
   const clean4 = handle.replace(/^@/, "");
   if (!key || !clean4) return [];
-  let posts = [];
+  let posts;
   try {
     posts = await searchFrom(clean4, LAUNCH_SEARCH_TERMS, key);
   } catch {
@@ -31862,7 +31867,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     // founder the follow scan misses (no follow edge, or beyond its page
     // budget) — e.g. a project account amplifying its founder's posts while
     // the founder's bio says "Founder @project".
-    discoverOperatorsFromAmplified(ctx.handle, ctx.evidence.profile.display_name),
+    discoverOperatorsFromAmplified(ctx.handle),
     // Reverse role-phrase search: who does the PUBLIC RECORD say founded or
     // leads this project? Runs quoted queries ("founder of @y", "cofounder of
     // @y", "CEO at @y", "@y team", name/domain variants) across X and the web,

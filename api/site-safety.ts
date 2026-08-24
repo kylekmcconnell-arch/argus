@@ -11,7 +11,6 @@
 //      off-domain redirect (cloaking), a stub/redirector page, and drainer-kit
 //      / seed-phrase phishing signatures in the returned HTML. Catches fresh
 //      drainers no blocklist has indexed yet.
-// @ts-ignore - bundled JS sibling
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
@@ -39,7 +38,7 @@ async function googleSafeBrowsing(url: string): Promise<string | null> {
       signal: AbortSignal.timeout(8000),
     });
     if (!r.ok) return null;
-    const d = (await r.json()) as any;
+    const d = (await r.json()) as { matches?: Array<{ threatType?: unknown }> };
     return Array.isArray(d.matches) && d.matches.length ? String(d.matches[0].threatType ?? "flagged") : "";
   } catch { return null; }
 }
@@ -48,8 +47,8 @@ async function goplusPhishing(url: string): Promise<boolean | null> {
   try {
     const r = await fetch(`https://api.gopluslabs.io/api/v1/phishing_site?url=${encodeURIComponent(url)}`, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
-    const d = (await r.json()) as any;
-    return d?.result?.phishing_site === 1;
+    const d = (await r.json()) as { result?: { phishing_site?: unknown } };
+    return d.result?.phishing_site === 1;
   } catch { return null; }
 }
 

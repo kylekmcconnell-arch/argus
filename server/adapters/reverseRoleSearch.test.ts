@@ -100,7 +100,9 @@ describe("discoverOperatorsFromAmplified", () => {
 
   it("returns the founder with both crossing signals in its evidence", async () => {
     vi.stubEnv("TWITTERAPI_KEY", "tw-key");
-    const fetchMock = vi.fn(async (_input?: unknown) => timelineResponse([
+    const fetchMock = vi.fn(async (input?: unknown) => {
+      void input;
+      return timelineResponse([
       {
         text: "RT @OxSimpleFarmer: Clock In 2.0",
         retweeted_tweet: {
@@ -111,10 +113,11 @@ describe("discoverOperatorsFromAmplified", () => {
         text: "cool thread",
         quoted_tweet: { author: { userName: "randomfan", name: "Fan", description: "bullish on @clutchmarkets" } },
       },
-    ]));
+      ]);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
-    const team = await discoverOperatorsFromAmplified("@clutchmarkets", "CLUTCH");
+    const team = await discoverOperatorsFromAmplified("@clutchmarkets");
 
     expect(team).toHaveLength(1);
     expect(team[0]).toMatchObject({

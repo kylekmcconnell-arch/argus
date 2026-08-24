@@ -6,6 +6,7 @@
 // GET  /api/threat-scan?address=&chain=   -> { hit, ageMs, scan } (fresh only)
 // POST /api/threat-scan  { scan }         -> stores it (fire-and-forget client)
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import type { ThreatScan } from "../src/threat/types";
 
 const FRESH_MS = 60 * 60 * 1000; // shared links serve the cached report for 1h
 const KIND = "threat-scan";
@@ -28,7 +29,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!c) { res.status(200).json({ available: false }); return; }
 
   if (req.method === "POST") {
-    const scan = (req.body as any)?.scan;
+    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body)
+      ? req.body as { scan?: Partial<ThreatScan> }
+      : {};
+    const scan = body.scan;
     const address = norm(scan?.address);
     if (!address || typeof scan?.scannedAt !== "number" || !scan?.call?.verdict) {
       res.status(400).json({ error: "scan payload required" }); return;
@@ -60,13 +64,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       { headers: headers(c.key), signal: AbortSignal.timeout(8000) },
     );
     if (!r.ok) { res.status(200).json({ available: true, hit: false }); return; }
-    const rows = (await r.json()) as { payload?: any; ts?: string }[];
+    const rows = (await r.json()) as { payload?: Partial<ThreatScan> & { __build?: string }; ts?: string }[];
     const row = rows?.[0];
     const scannedAt = typeof row?.payload?.scannedAt === "number" ? row.payload.scannedAt : row?.ts ? Date.parse(row.ts) : 0;
     const ageMs = Date.now() - scannedAt;
     const staleBuild = (row?.payload?.__build ?? "") !== BUILD;
     if (!row?.payload || staleBuild || !(ageMs >= 0 && ageMs < FRESH_MS)) { res.status(200).json({ available: true, hit: false }); return; }
-    const { __build, ...scan } = row.payload;
+    const scan = { ...row.payload };
+    delete scan.__build;
     res.status(200).json({ available: true, hit: true, ageMs, scan });
   } catch {
     res.status(200).json({ available: true, hit: false });

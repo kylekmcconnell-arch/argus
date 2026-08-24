@@ -56,9 +56,12 @@ async function programProjectAccounts(): Promise<{ pubkey: string; data: Buffer 
         signal: AbortSignal.timeout(18000),
       });
       if (!r.ok) continue;
-      const d = (await r.json()) as any;
+      const d = (await r.json()) as { result?: Array<{ pubkey?: unknown; account?: { data?: unknown[] } }> };
       if (!Array.isArray(d.result)) continue;
-      return d.result.map((a: any) => ({ pubkey: a.pubkey as string, data: Buffer.from(a.account.data[0], "base64") }));
+      return d.result
+        .filter((a): a is { pubkey: string; account: { data: [string, ...unknown[]] } } =>
+          typeof a.pubkey === "string" && Array.isArray(a.account?.data) && typeof a.account.data[0] === "string")
+        .map((a) => ({ pubkey: a.pubkey, data: Buffer.from(a.account.data[0], "base64") }));
     } catch { /* next url */ }
   }
   return [];

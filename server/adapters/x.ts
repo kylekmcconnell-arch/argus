@@ -1438,7 +1438,7 @@ export async function findTeam(
     "For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that web search reveals. This exposes serial founders and cross-project ties. " +
     "Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"founder|cofounder|ceo|cto|engineer|advisor|backer\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If none, return {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await generalWebSearch(system, `Project X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, builders, team members, and advisors of this exact project? Search the exact handle and inspect official-site \"built by\" attribution, founder interviews, podcasts, and ecosystem press. Give each person's precise role here AND their other projects.${postContext}`, { cacheKey: `team-x-v2:${h}` });
+  const text = await generalWebSearch(system, `Project X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, builders, team members, and advisors of this exact project? Search the exact handle and inspect official-site "built by" attribution, founder interviews, podcasts, and ecosystem press. Give each person's precise role here AND their other projects.${postContext}`, { cacheKey: `team-x-v2:${h}` });
   return parseTeamJSON(text, h, "X content");
 }
 
@@ -1464,7 +1464,7 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
     ...(clean && project ? [`site:linkedin.com "${project}" founder`] : []),
     ...(project ? [`"${project}" founder LinkedIn`, `"${project}" cofounder`] : []),
   ];
-  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for \"built by\", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, {
+  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, builder, executive, core team member, and advisor behind it. Inspect the official homepage/footer for "built by", then read founder interviews, podcasts, its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, {
     cacheKey: `team-site-v2:${clean || projectName}`,
     queries: officialSiteQueries.length ? officialSiteQueries : undefined,
   });
@@ -1752,7 +1752,6 @@ export function amplifiedAuthorsFromTimeline(payload: unknown, subjectHandle: st
 const MAX_AMPLIFIED_PROFILE_FETCHES = 8;
 export async function discoverOperatorsFromAmplified(
   subjectHandle: string,
-  subjectName?: string,
 ): Promise<TeamMember[]> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
@@ -2342,7 +2341,7 @@ async function discoverReverseBioFromTwitterapiUncached(
     }
   }
   let orgFetches = 0;
-  for (const [keyHandle, raw] of extraMentions) {
+  for (const raw of extraMentions.values()) {
     if (orgs.length >= 8 || orgFetches >= 6) break;
     orgFetches += 1;
     try {

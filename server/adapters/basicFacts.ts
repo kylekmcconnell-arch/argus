@@ -1169,7 +1169,7 @@ function discoveryPrompt(
     && questions.some((question) => question.predicate === "founder" || question.predicate === "executive")
     ? [
         "For founder and executive questions, bind every result to the exact project, not merely its display name.",
-        `Search the exact account ${ctx.handle}, the official domain, and any verified contract or token context together with founder, co-founder, CEO, team, builder, creator, and \"built by\".`,
+        `Search the exact account ${ctx.handle}, the official domain, and any verified contract or token context together with founder, co-founder, CEO, team, builder, creator, and "built by".`,
         "Check first-party homepages and footers plus attributable founder interviews, podcasts, and reputable ecosystem publications; many crypto projects disclose an operator there instead of on a formal team page.",
         "A same-named company or person in another industry is not evidence for this subject, even when its page literally repeats the project display name.",
       ].join(" ")
@@ -4327,90 +4327,6 @@ function verifiedIdentityExtendsProfile(ctx: CollectContext, candidate: string):
   if (currentTokens.length !== 1 || !candidateTokens.includes(currentTokens[0])) return false;
   const handle = looseTokens(ctx.handle.replace(/^@/, "")).join("");
   return handle === candidateTokens.join("");
-}
-
-/**
- * A pseudonymous display name ("vitalik.eth") appears in none of the sources
- * that document the person, so every fetched passage fails the subject gate and
- * NOTHING about that subject can ever verify. The handle itself usually carries
- * the real name; derive it conservatively (letters only, two or three tokens,
- * no promotional or generic suffix).
- */
-function handleDerivedNameCandidate(handle: string): string | null {
-  const raw = handle.replace(/^@/, "").trim();
-  if (!/^[A-Za-z][A-Za-z_]{2,30}$/.test(raw)) return null;
-  const parts = raw.includes("_") ? raw.split(/_+/) : raw.split(/(?=[A-Z])/);
-  const tokens = parts.map((part) => part.trim()).filter(Boolean);
-  if (tokens.length < 2 || tokens.length > 3) return null;
-  if (tokens.some((token) => token.length < 2 || !/^[A-Za-z]+$/.test(token))) return null;
-  const generic = new Set([
-    "the", "official", "real", "crypto", "eth", "ethereum", "defi", "dao", "nft",
-    "labs", "web3", "sol", "solana", "fund", "capital", "team", "hq", "app", "xyz",
-  ]);
-  if (tokens.some((token) => generic.has(token.toLocaleLowerCase()))) return null;
-  const candidate = tokens
-    .map((token) => `${token.slice(0, 1).toLocaleUpperCase()}${token.slice(1).toLocaleLowerCase()}`)
-    .join(" ");
-  return plausiblePersonIdentity(candidate) ? candidate : null;
-}
-
-/** An account that tells you it is not the person it names. */
-const SELF_DECLARED_NOT_THE_SUBJECT = /\b(?:parody|fan\s*account|fan\s*page|not\s+(?:the\s+)?real|unofficial|impersonat\w*|satire|tribute|bot)\b/i;
-
-/** Authority a lookalike account cannot manufacture. Notable followers are
- * provider-observed top funds, founders and operators; a squatter registering a
- * name-shaped handle has neither them nor a large organic following. */
-const MIN_NOTABLE_FOLLOWERS_FOR_NAME_ALIAS = 10;
-const MIN_FOLLOWERS_FOR_NAME_ALIAS = 250_000;
-// A follower count so large that a squatter holding the exact name-spelling
-// handle is implausible. This is an ALTERNATE authority proof to the notable
-// -follower reverse-check, which structurally under-observes for individuals:
-// the curated reference set is mostly funds and org accounts, and those rarely
-// follow a person even a maximally famous one (observed live: @ethereum and
-// @BitcoinMagazine do not follow @VitalikButerin), so a mega-account would
-// otherwise never clear the notable bar and its pseudonymous display name would
-// block every fact from verifying.
-const NOTABILITY_SELF_EVIDENT_FOLLOWERS = 1_000_000;
-
-function approximateFollowerCount(value: string): number {
-  const match = /([\d.,]+)\s*([KMB])?/i.exec(value.trim());
-  if (!match) return 0;
-  const base = Number(match[1].replace(/,/g, ""));
-  if (!Number.isFinite(base)) return 0;
-  const scale = match[2]?.toUpperCase();
-  return scale === "B" ? base * 1_000_000_000 : scale === "M" ? base * 1_000_000 : scale === "K" ? base * 1_000 : base;
-}
-
-/**
- * Widen the MATCHING ALIAS SET for a widely-recognized account whose handle
- * plainly spells a person's name. This is how sources refer to the subject, and
- * nothing more: it never sets resolved_name and never touches
- * identity_confidence, because those drive name-based OFAC, sanctions and court
- * screening, and a name good enough to read a page with is not a name good
- * enough to run someone's legal history against.
- *
- * Gated on account authority rather than page proximity. A page that merely
- * mentions an account near a name proves nothing (a scam warning does exactly
- * that), whereas a decade-old account followed by ten top-tier funds and
- * founders is the account those sources are written about.
- */
-function notabilityBoundNameAlias(ctx: CollectContext): string | null {
-  if (researchAudience(ctx) === "project" || isOrganizationAccount(ctx.evidence)) return null;
-  const profile = ctx.evidence.profile;
-  if (profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi") return null;
-  const candidate = handleDerivedNameCandidate(ctx.handle);
-  if (!candidate) return null;
-  if (subjectAliases(ctx).some((alias) => personKey(alias) === personKey(candidate))) return null;
-  if (SELF_DECLARED_NOT_THE_SUBJECT.test(`${profile.display_name} ${profile.bio}`)) return null;
-  const followers = approximateFollowerCount(profile.followers);
-  if (followers < MIN_FOLLOWERS_FOR_NAME_ALIAS) return null;
-  // Either authority proof is sufficient: an observed set of notable followers,
-  // OR a follower count so large that impersonation on the exact handle is
-  // implausible. This never sets resolved_name or identity_confidence, so it
-  // stays a reading-only alias and cannot feed name-based OFAC or court screening.
-  const notable = ctx.evidence.notableFollowers?.length ?? 0;
-  if (notable < MIN_NOTABLE_FOLLOWERS_FOR_NAME_ALIAS && followers < NOTABILITY_SELF_EVIDENT_FOLLOWERS) return null;
-  return candidate;
 }
 
 function applyVerifiedPersonIdentity(ctx: CollectContext, facts: readonly BasicFact[]): boolean {

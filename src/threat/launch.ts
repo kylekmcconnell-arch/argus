@@ -216,11 +216,20 @@ const VENUES: Venue[] = [
   },
 ];
 
-async function fromApi(chain: string, address: string): Promise<any | null> {
+interface LaunchApiResponse {
+  creatorVenue?: string;
+  snipe?: LaunchProvenance["snipe"];
+  pumpfun?: { complete?: boolean; curvePct?: number | null };
+}
+
+async function fromApi(chain: string, address: string): Promise<LaunchApiResponse | null> {
   try {
     const r = await apiFetch(`/api/launch?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(20000) });
     if (!r.ok) return null;
-    return (await r.json()) as any;
+    const value: unknown = await r.json();
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as LaunchApiResponse
+      : null;
   } catch {
     return null;
   }

@@ -12,7 +12,13 @@ export async function migrationCheck(chain: string, address: string): Promise<Mi
   try {
     const res = await apiFetch(`/api/migration?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(20000) });
     if (!res.ok) return null;
-    const d = (await res.json()) as any;
+    const d = (await res.json()) as {
+      available?: boolean;
+      migrated?: boolean;
+      isPostMigrationToken?: boolean;
+      projects?: MigrationInfo["projects"];
+      note?: string;
+    };
     if (!d.available || !d.migrated) return null;
     return {
       migrated: true,

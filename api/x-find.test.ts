@@ -15,10 +15,11 @@ vi.mock("./_auth.js", () => ({ requireArgusAuth }));
 import handler from "./x-find";
 
 function response() {
-  const captured: { status?: number; body?: any } = {};
+  type Body = Record<string, unknown> & { confidence?: string; matchReason?: string };
+  const captured: { status?: number; body: Body } = { body: {} };
   const res = {
     status(code: number) { captured.status = code; return this; },
-    json(body: unknown) { captured.body = body; return this; },
+    json(body: unknown) { captured.body = body as Body; return this; },
   };
   return { res, captured };
 }
