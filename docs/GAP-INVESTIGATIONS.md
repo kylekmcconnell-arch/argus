@@ -31,4 +31,4 @@ A newly saved standalone token report freezes one coarse integrated token-refres
 
 Older standalone token reports without this frozen plan continue to fail closed. Rescanning and saving the token creates a current report with the bounded plan when a compatible retryable gap exists.
 
-The migration in `supabase/migrations/20260822160000_gap_investigation_proposals.sql` must be reviewed and explicitly approved before it is applied to production. Application deployment alone does not create or alter these production tables or functions.
+The migration in `supabase/migrations/20260823204751_gap_investigation_proposals.sql` must be reviewed and explicitly approved before it is applied to production. Application deployment alone does not create or alter these production tables or functions.

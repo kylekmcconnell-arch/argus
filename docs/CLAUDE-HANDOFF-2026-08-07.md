@@ -1,5 +1,10 @@
 # ARGUS handoff to Claude
 
+> **Historical document, superseded.** Kept for the product thesis and failure
+> history, which still hold. Do not use it to judge what is built: several items
+> it lists as open or unfinished have since shipped. For current state read
+> `ARGUS-SOURCE-OF-TRUTH.md`, `DESIGN.md`, the tests, and GitHub history.
+
 Date: 2026-08-07
 
 Purpose: continue the current master revision without losing the product thesis, epistemic rules, confirmed implementation, failure history, or open work.
