@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatRoleLabel,
   plainLanguageSummary,
+  publicConcernTitle,
   publicCheckLabel,
   publicCheckNote,
   publicEntityLabel,
@@ -40,6 +41,20 @@ describe("plainLanguageSummary", () => {
 });
 
 describe("public report labels", () => {
+  it("keeps promotional source copy out of public concern titles", () => {
+    expect(publicConcernTitle({
+      axis: "P2_product_substance",
+      axisLabel: "Product and execution",
+      gap: "One of our biggest releases. SuperDeepseek-V4-Flash is now live 💪",
+    })).toBe("A live product could not be independently verified.");
+
+    expect(publicConcernTitle({
+      axis: "P2_product_substance",
+      axisLabel: "Product and execution",
+      gap: "The official site still presents an early-access page",
+    })).toBe("The official site still presents an early-access page.");
+  });
+
   it("turns check IDs into stable reader labels", () => {
     expect(publicCheckLabel("deployer-trail-evm")).toBe("Who created the token");
     expect(publicCheckLabel("trust-graph-reconciliation")).toBe("Known connections");

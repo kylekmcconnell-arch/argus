@@ -100,7 +100,7 @@ import {
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
-import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
+import { plainLanguageSummary, plainReportStatusLabel, publicConcernTitle } from "../lib/plainLanguage";
 import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
@@ -2361,12 +2361,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
     .map((axis) => {
       const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
-      const firstGap = plainLanguageSummary(axis.gaps[0] ?? "");
       const title = bandTierFor(axis.axis) === "assessed_null"
         ? (ASSESSED_NULL_RISK_TITLES[axis.axis] ?? `${diligenceAreaLabel(axis.axis)} was assessed with no positive record.`)
-        : firstGap && firstGap.length <= 140
-          ? sentence(firstGap)
-          : `Verified evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is thin.`;
+        : publicConcernTitle({
+          axis: axis.axis,
+          axisLabel: diligenceAreaLabel(axis.axis),
+          gap: axis.gaps[0],
+        });
       return {
         id: `low-axis-${axis.axis}`,
         title,
