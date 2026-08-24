@@ -15,6 +15,7 @@
 //
 // Solana only (Helius RPC + RugCheck). Gated on HELIUS_API_KEY. Bounded + graceful.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { arr, isRecord, rec, type JsonRecord } from "../src/lib/json.js";
 import { canSeedFunderCluster, SOLANA_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
 import { describeWalletClusterTrace, type WalletClusterCoverage } from "../src/lib/walletClusterTruth.js";
 import { requireArgusAuth } from "./_auth.js";
@@ -38,15 +39,15 @@ const SYSTEM = new Set<string>([
 // liquidity or custody, not a person — exclude it from the operator analysis.
 const MARKET = /amm|dex|pool|cex|exchange|program|vault|locker|market|raydium|meteora|orca|pump/i;
 
-async function rpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<any> {
+async function rpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<unknown> {
   usage.helius += 1;
   const res = await fetch(url, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(12000),
   });
   if (!res.ok) throw new Error(`rpc ${method} ${res.status}`);
-  const d = (await res.json()) as any;
-  if (d.error) throw new Error(`rpc ${method}: ${d.error.message}`);
+  const d = rec(await res.json());
+  if (d.error) throw new Error(`rpc ${method}: ${String(rec(d.error).message)}`);
   usage.heliusSucceeded += 1;
   return d.result;
 }
@@ -62,24 +63,24 @@ interface OldestSignatureRead {
 // wallet's first transactions, and can never establish its seed funder.
 async function oldestSigs(url: string, wallet: string, usage: ProviderUsage): Promise<OldestSignatureRead> {
   let before: string | undefined;
-  let last: any[];
+  let last: unknown[];
   for (let page = 0; page < 4; page++) {
-    let batch: any[];
+    let batch: unknown[];
     try {
-      batch = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage);
+      batch = arr(await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage));
     } catch {
       return { sigs: [], reachedBeginning: false, failed: true };
     }
-    if (!batch?.length) return { sigs: [], reachedBeginning: true, failed: false };
+    if (!batch.length) return { sigs: [], reachedBeginning: true, failed: false };
     last = batch;
     if (batch.length < 1000) {
       return {
-        sigs: last.slice(-6).reverse().map((s) => s.signature),
+        sigs: last.slice(-6).reverse().map((s) => String(rec(s).signature)),
         reachedBeginning: true,
         failed: false,
       };
     }
-    before = batch[batch.length - 1].signature;
+    before = String(rec(batch[batch.length - 1]).signature);
   }
   return { sigs: [], reachedBeginning: false, failed: false };
 }
@@ -93,17 +94,18 @@ async function fundingSource(
   sigs: string[],
   usage: ProviderUsage,
 ): Promise<{ funder: string | null; completed: boolean }> {
-  const scan = (instrs: any[]): string | null => {
-    for (const ix of instrs ?? []) {
-      const p = ix.parsed;
-      if (!p?.info) continue;
-      if (p.type === "transfer" && p.info.destination === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
-      if ((p.type === "createAccount" || p.type === "createAccountWithSeed") && p.info.newAccount === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
+  const scan = (instrs: unknown): string | null => {
+    for (const ix of arr(instrs)) {
+      const p = rec(rec(ix).parsed);
+      if (!p.info) continue;
+      const info = rec(p.info);
+      if (p.type === "transfer" && info.destination === wallet && info.source && info.source !== wallet) return String(info.source);
+      if ((p.type === "createAccount" || p.type === "createAccountWithSeed") && info.newAccount === wallet && info.source && info.source !== wallet) return String(info.source);
     }
     return null;
   };
   for (const sig of sigs) {
-    let tx: any;
+    let tx: unknown;
     try {
       tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
     } catch {
@@ -112,14 +114,16 @@ async function fundingSource(
       return { funder: null, completed: false };
     }
     if (!tx) return { funder: null, completed: false };
-    const direct = scan(tx.transaction?.message?.instructions);
+    const message = rec(rec(rec(tx).transaction).message);
+    const meta = rec(rec(tx).meta);
+    const direct = scan(message.instructions);
     if (direct) return { funder: direct, completed: true };
-    for (const inner of tx.meta?.innerInstructions ?? []) {
-      const found = scan(inner.instructions);
+    for (const inner of arr(meta.innerInstructions)) {
+      const found = scan(rec(inner).instructions);
       if (found) return { funder: found, completed: true };
     }
-    const keys: string[] = (tx.transaction?.message?.accountKeys ?? []).map((k: any) => (typeof k === "string" ? k : k.pubkey));
-    const pre: number[] = tx.meta?.preBalances ?? [], post: number[] = tx.meta?.postBalances ?? [];
+    const keys: string[] = arr(message.accountKeys).map((k) => (typeof k === "string" ? k : String(rec(k).pubkey)));
+    const pre: number[] = arr(meta.preBalances).map((v) => Number(v)), post: number[] = arr(meta.postBalances).map((v) => Number(v));
     const wi = keys.indexOf(wallet);
     if (wi >= 0 && (post[wi] ?? 0) > (pre[wi] ?? 0)) {
       let best = -1, drop = 0;
@@ -194,18 +198,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     usage.rugcheck += 1;
     const rr = await fetch(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, { signal: AbortSignal.timeout(15000), headers: { accept: "application/json" } });
     if (!rr.ok) { res.status(200).json({ mint, available: false, error: `rugcheck ${rr.status}` }); return; }
-    const rc = (await rr.json()) as any;
+    const rc = rec(await rr.json());
     usage.rugcheckSucceeded += 1;
-    const ka: Record<string, { name?: string; type?: string }> = rc.knownAccounts ?? {};
+    const ka: Record<string, { name?: string; type?: string }> = isRecord(rc.knownAccounts)
+      ? (rc.knownAccounts as Record<string, { name?: string; type?: string }>)
+      : {};
     // The pair records name the pools directly, so a pool that RugCheck did
     // not also label in knownAccounts still cannot seed a cluster.
-    const poolAddresses: string[] = (Array.isArray(rc.markets) ? rc.markets : [])
-      .map((m: any) => (typeof m?.pubkey === "string" ? m.pubkey : null))
-      .filter(Boolean);
-    const isMarket = (h: any) => { const lab = ka[h.address] || ka[h.owner]; return !!(lab?.type && MARKET.test(lab.type)); };
-    const holders = (rc.topHolders ?? [])
-      .map((h: any) => ({ address: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0), insider: !!h.insider, market: isMarket(h) }))
-      .filter((h: any) => SOLADDR.test(h.address) && !h.market && !CEX[h.address] && !SYSTEM.has(h.address));
+    const poolAddresses: string[] = arr(rc.markets)
+      .map((m) => { const pubkey = rec(m).pubkey; return typeof pubkey === "string" ? pubkey : null; })
+      .filter((pubkey): pubkey is string => Boolean(pubkey));
+    // Property access already coerces a missing key to the string "undefined",
+    // so String() here keeps the lookup exactly where it was.
+    const isMarket = (h: JsonRecord) => { const lab = ka[String(h.address)] || ka[String(h.owner)]; return !!(lab?.type && MARKET.test(lab.type)); };
+    const holders = arr(rc.topHolders)
+      .map((entry) => rec(entry))
+      .map((h) => ({ address: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0), insider: !!h.insider, market: isMarket(h) }))
+      .filter((h) => SOLADDR.test(h.address) && !h.market && !CEX[h.address] && !SYSTEM.has(h.address));
     const creator = typeof rc.creator === "string" && SOLADDR.test(rc.creator) ? rc.creator : null;
 
     const set: string[] = [];
