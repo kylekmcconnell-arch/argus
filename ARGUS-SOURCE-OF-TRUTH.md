@@ -170,6 +170,13 @@ under collapsed technical details. They do not appear as public headlines,
 metric labels, or badge stacks. Each public finding carries one primary status;
 priority, domain, and selected-view emphasis are supporting text.
 
+The saved research plan follows the same boundary. Its default report layer says
+how many applicable research areas were covered, which material answers still
+need evidence, and the best next step. Raw task states, provider and delegate
+routing, cost classes, dispatch reasons, and execution outcomes remain available
+only inside collapsed technical coverage details. A finished scan with unresolved
+evidence says that plainly; it does not look like an interrupted process.
+
 Project and token reports may also freeze a Social activity snapshot from X.
 The collector prefers the official X API when its bearer exists and otherwise
 uses the already configured twitterapi.io advanced-search provider. The first

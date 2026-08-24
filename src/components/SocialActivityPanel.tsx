@@ -52,6 +52,20 @@ function unavailableCopy(snapshot: SocialActivitySnapshot): string {
   return "X did not return usable activity data. ARGUS left the numbers unknown instead of showing zero.";
 }
 
+function incompleteCopy(snapshot: SocialActivitySnapshot): string {
+  const reason = snapshot.collection.incompleteReason
+    ?? (snapshot.collection.maxPosts > 0 && snapshot.collection.postReads >= snapshot.collection.maxPosts
+      ? "post_limit"
+      : "pagination_incomplete");
+  if (reason === "post_limit") {
+    return `ARGUS collected the maximum ${integer.format(snapshot.collection.maxPosts)} posts allowed for this saved scan. Account figures are minimums, so the activity score stays withheld.`;
+  }
+  if (reason === "provider_error") {
+    return "X stopped responding before ARGUS finished this saved search. Account figures are minimums, so the activity score stays withheld.";
+  }
+  return "X returned more result pages than this saved scan collected. Account figures are minimums, so the activity score stays withheld.";
+}
+
 export function SocialActivityPanel({ snapshot, className = "" }: { snapshot: SocialActivitySnapshot; className?: string }) {
   const [choice, setChoice] = useState<WindowChoice>("24h");
   const window = choice === "24h" ? snapshot.windows.last24Hours : snapshot.windows.last7Days;
@@ -68,6 +82,9 @@ export function SocialActivityPanel({ snapshot, className = "" }: { snapshot: So
   const peoplePrefix = window.authorCoverageComplete ? "" : "at least ";
   const period = choice === "24h" ? "in the last 24 hours" : "over the last 7 days";
   const subject = snapshot.queryBasis.projectName || "this project";
+  const savedSearchNote = snapshot.state === "partial"
+    ? "This saved search matched public X posts to the project's bound identifiers. Reposts are excluded."
+    : snapshot.note;
 
   return (
     <section id="social-activity" className={`panel scroll-mt-28 px-5 py-5 ${className}`} aria-labelledby="social-activity-title">
@@ -125,7 +142,7 @@ export function SocialActivityPanel({ snapshot, className = "" }: { snapshot: So
             </div>
             <div className="flex items-center gap-3 py-3 sm:px-4">
               <ChatsCircle aria-hidden="true" size={20} weight="duotone" className="text-signal-lift" />
-              <div><span className="mono text-[15px] font-semibold text-ink">{snapshot.windows.last7Days.postCount === null ? "Unknown" : integer.format(snapshot.windows.last7Days.postCount)}</span><span className="ml-1 text-[12.5px] text-ink-dim">posts in 7 days</span></div>
+              <div><span className="mono text-[15px] font-semibold text-ink">{snapshot.windows.last7Days.postCount === null ? "Unknown" : `${snapshot.collection.countsRequestCompleted ? "" : "At least "}${integer.format(snapshot.windows.last7Days.postCount)}`}</span><span className="ml-1 text-[12.5px] text-ink-dim">posts in 7 days</span></div>
             </div>
             <div className="py-3 sm:pl-4">
               <span className="mono text-[15px] font-semibold text-ink">{snapshot.top10AccountSharePct === null ? "Unknown" : `${snapshot.top10AccountSharePct}%`}</span>
@@ -135,13 +152,13 @@ export function SocialActivityPanel({ snapshot, className = "" }: { snapshot: So
 
           <Chart buckets={chartBuckets} label={`Public X posts matched to this project ${period}`} />
           {snapshot.state === "partial" && (
-            <p className="mt-3 text-[11px] font-medium text-caution">ARGUS reached its post limit. Unique-account figures are minimums, and the activity score stays withheld.</p>
+            <p className="mt-3 text-[11px] font-medium text-caution">{incompleteCopy(snapshot)}</p>
           )}
         </>
       )}
 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-2 border-t border-line/70 pt-3 text-[11px] leading-relaxed text-ink-faint">
-        <p className="max-w-3xl">{snapshot.note} Matches use the bound project identifiers saved with this report.</p>
+        <p className="max-w-3xl">{savedSearchNote} Matches use the bound project identifiers saved with this report.</p>
         <a href={snapshot.sourceUrl} target="_blank" rel="noreferrer" className="link-ext shrink-0">View matching X posts</a>
         <p className="w-full mono">Updated {new Date(snapshot.capturedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" })} UTC</p>
         <details className="w-full">

@@ -4941,7 +4941,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   };
   const finalChecks = checkTracker.snapshot(evidence.roles, checkScope);
   const providerSnapshotAtDecision = checkTracker.providers();
-  researchPlan = finalizeResearchPlan(researchPlan, finalChecks, providerSnapshotAtDecision.runs);
+  researchPlan = finalizeResearchPlan(researchPlan, finalChecks, providerSnapshotAtDecision.runs, {
+    roleResolved: evidence.roles.length > 0,
+    analystConclusionRecorded: evidence.axes.length > 0,
+  });
   evidence.researchPlan = researchPlan;
   emit({
     phase: "Director",

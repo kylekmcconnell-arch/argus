@@ -62,6 +62,11 @@ export interface ResearchPlan {
   nextActions: ResearchNextAction[];
 }
 
+export interface ResearchPlanCompletionContext {
+  roleResolved?: boolean;
+  analystConclusionRecorded?: boolean;
+}
+
 interface TaskTemplate extends Omit<ResearchTask, "id" | "priority" | "triggeredBy" | "rank" | "dispatchReason" | "blockedBy" | "state"> {
   roles?: SubjectClass[];
   intents?: ResearchIntent[];
@@ -340,10 +345,17 @@ export function finalizeResearchPlan(
   plan: ResearchPlan,
   checks: readonly ScanCheck[],
   providerRuns: readonly { id: string; state: string; detail?: string }[] = [],
+  context: ResearchPlanCompletionContext = {},
 ): ResearchPlan {
   const tasks = plan.tasks.map((task): ResearchTask => {
       if (task.blockedBy.length) {
         return { ...task, state: "skipped" as const, outcome: `blocked by ${task.blockedBy.length} unresolved identity gate${task.blockedBy.length === 1 ? "" : "s"}` };
+      }
+      if (task.capability === "role_resolution" && context.roleResolved) {
+        return { ...task, state: "completed", outcome: "subject type and report methodology were resolved" };
+      }
+      if (task.capability === "analyst_synthesis" && context.analystConclusionRecorded) {
+        return { ...task, state: "completed", outcome: "a frozen analyst conclusion was recorded" };
       }
       const taskChecks = checks.filter((check) => check.checkId && task.checkIds.includes(check.checkId));
       const successful = taskChecks.filter((check) => SUCCESS.has(check.status));

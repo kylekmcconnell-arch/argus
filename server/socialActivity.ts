@@ -5,6 +5,7 @@ import {
   socialActivityScore,
   type SocialActivityBucket,
   type SocialActivitySnapshot,
+  type SocialActivityIncompleteReason,
   type SocialActivityWindow,
 } from "../src/data/socialActivity";
 
@@ -16,6 +17,7 @@ const POST_READ_USD = 0.005;
 const COUNTS_REQUEST_USD = 0.005;
 const TWITTERAPI_IO_POST_USD = 0.00015;
 const TWITTERAPI_IO_SLICE_MS = 6 * HOUR_MS;
+const TWITTERAPI_IO_MAX_REQUESTS = 100;
 
 type JsonRecord = Record<string, unknown>;
 const asRecord = (value: unknown): JsonRecord =>
@@ -53,6 +55,7 @@ interface SearchResult {
   oldestAt: number | null;
   requests: number;
   postReads: number;
+  incompleteReason?: SocialActivityIncompleteReason;
 }
 
 function normalizedHandle(value: string): string | null {
@@ -220,7 +223,15 @@ async function collectSearch(
     if (nextToken) url.searchParams.set("next_token", nextToken);
     const payload = await fetchJson(fetchImpl, url, bearer, "search");
     requests += 1;
-    if (!payload) return { ok: false, posts: [...posts.values()], complete: false, oldestAt, requests, postReads };
+    if (!payload) return {
+      ok: false,
+      posts: [...posts.values()],
+      complete: false,
+      oldestAt,
+      requests,
+      postReads,
+      incompleteReason: "provider_error",
+    };
     const rows = Array.isArray(payload.data) ? payload.data : [];
     postReads += rows.length;
     recordCall("x-api", "post-read", rows.length * POST_READ_USD, `${rows.length} public posts`, "succeeded");
@@ -237,7 +248,15 @@ async function collectSearch(
     complete = nextToken === null;
   } while (nextToken && posts.size < maxPosts);
 
-  return { ok: true, posts: [...posts.values()], complete, oldestAt, requests, postReads };
+  return {
+    ok: true,
+    posts: [...posts.values()],
+    complete,
+    oldestAt,
+    requests,
+    postReads,
+    ...(!complete ? { incompleteReason: "post_limit" as const } : {}),
+  };
 }
 
 function countPosts(buckets: SocialActivityBucket[], start: Date, end: Date, countsComplete: boolean): number | null {
@@ -318,45 +337,88 @@ async function collectTwitterApiIo(
   let successfulRequests = 0;
   let billedRows = 0;
   let complete = true;
+  let incompleteReason: SocialActivityIncompleteReason | undefined;
 
   for (let sliceEnd = end.getTime(); sliceEnd > start.getTime() && posts.size < maxPosts; sliceEnd -= TWITTERAPI_IO_SLICE_MS) {
     const sliceStart = Math.max(start.getTime(), sliceEnd - TWITTERAPI_IO_SLICE_MS);
-    const url = new URL(TWITTERAPI_IO);
-    url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(sliceStart / 1000)} until_time:${Math.ceil(sliceEnd / 1000)}`);
-    url.searchParams.set("queryType", "Latest");
-    requests += 1;
-    let payload: JsonRecord | null = null;
-    try {
-      const response = await fetchImpl(url, {
-        headers: { "x-api-key": key },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (response.ok) payload = asRecord(await response.json());
-      else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
-    } catch (error) {
-      const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
-      recordCall("twitterapi", "social-search", 0, reason, "failed");
-    }
-    if (!payload) {
-      complete = false;
-      continue;
-    }
-    successfulRequests += 1;
-    const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
-    billedRows += rows.length;
-    recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
-    for (const row of rows) {
-      const post = twitterApiIoPost(row);
-      if (post && posts.size < maxPosts) posts.set(post.id, post);
-    }
-    if (payload.has_next_page === true || posts.size >= maxPosts) complete = false;
+    let cursor = "";
+    const seenCursors = new Set<string>();
+
+    do {
+      if (requests >= TWITTERAPI_IO_MAX_REQUESTS) {
+        complete = false;
+        incompleteReason = "pagination_incomplete";
+        break;
+      }
+      const url = new URL(TWITTERAPI_IO);
+      url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(sliceStart / 1000)} until_time:${Math.ceil(sliceEnd / 1000)}`);
+      url.searchParams.set("queryType", "Latest");
+      if (cursor) url.searchParams.set("cursor", cursor);
+      requests += 1;
+      let payload: JsonRecord | null = null;
+      try {
+        const response = await fetchImpl(url, {
+          headers: { "x-api-key": key },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (response.ok) payload = asRecord(await response.json());
+        else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
+      } catch (error) {
+        const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
+        recordCall("twitterapi", "social-search", 0, reason, "failed");
+      }
+      if (!payload) {
+        complete = false;
+        incompleteReason = "provider_error";
+        break;
+      }
+      successfulRequests += 1;
+      const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
+      billedRows += rows.length;
+      recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
+      for (const row of rows) {
+        const post = twitterApiIoPost(row);
+        if (post && posts.size < maxPosts) posts.set(post.id, post);
+      }
+
+      const hasNext = payload.has_next_page === true;
+      const nextCursor = typeof payload.next_cursor === "string" ? payload.next_cursor : "";
+      if (posts.size >= maxPosts) {
+        if (hasNext || sliceStart > start.getTime()) {
+          complete = false;
+          incompleteReason = "post_limit";
+        }
+        break;
+      }
+      if (!hasNext) break;
+      if (!nextCursor || seenCursors.has(nextCursor)) {
+        complete = false;
+        incompleteReason = "pagination_incomplete";
+        break;
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    } while (cursor);
+
+    if (incompleteReason === "pagination_incomplete" && requests >= TWITTERAPI_IO_MAX_REQUESTS) break;
   }
 
   const values = [...posts.values()];
-  if (posts.size >= maxPosts) complete = false;
+  if (posts.size >= maxPosts && !incompleteReason) {
+    complete = false;
+    incompleteReason = "post_limit";
+  }
   const oldestAt = complete && values.length ? Math.min(...values.map((post) => Date.parse(post.createdAt))) : null;
   return {
-    search: { ok: successfulRequests > 0, posts: values, complete, oldestAt, requests, postReads: billedRows },
+    search: {
+      ok: successfulRequests > 0,
+      posts: values,
+      complete,
+      oldestAt,
+      requests,
+      postReads: billedRows,
+      ...(incompleteReason ? { incompleteReason } : {}),
+    },
     buckets: hourlyBuckets(values, start, end),
     estimatedUsd: Math.round(billedRows * TWITTERAPI_IO_POST_USD * 10000) / 10000,
   };
@@ -382,7 +444,7 @@ export async function collectSocialActivity(
   if (!bearer && !twitterApiKey) return unavailableSnapshot(identity, now, "not_configured", "Social activity was not collected because X search access is not configured.");
   const provider: SocialActivitySnapshot["provider"] = bearer ? "x-api-v2" : "twitterapi-io";
 
-  const configuredMax = Number(env("ARGUS_SOCIAL_ACTIVITY_MAX_POSTS") || "200");
+  const configuredMax = Number(env("ARGUS_SOCIAL_ACTIVITY_MAX_POSTS") || "500");
   const maxPosts = Math.min(500, Math.max(10, Math.round(options.maxPosts ?? configuredMax)));
   const fetchImpl = options.fetchImpl ?? fetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1000));
@@ -464,10 +526,15 @@ export async function collectSocialActivity(
       maxPosts,
       estimatedUsd: twitterApiIo?.estimatedUsd
         ?? Math.round(((counts.ok ? COUNTS_REQUEST_USD : 0) + search.postReads * POST_READ_USD) * 10000) / 10000,
+      ...(search.incompleteReason ? { incompleteReason: search.incompleteReason } : {}),
     },
     note: state === "complete"
       ? `Public X posts matched to the bound project identifiers through ${provider === "x-api-v2" ? "the official X API" : "twitterapi.io"}. Reposts are excluded.`
-      : `ARGUS inspected ${search.posts.length.toLocaleString()} posts before the configured limit. Unique-account counts are minimums.`,
+      : search.incompleteReason === "post_limit"
+        ? `ARGUS collected the maximum ${maxPosts.toLocaleString()} posts allowed for this saved scan. Unique-account counts are minimums.`
+        : search.incompleteReason === "provider_error"
+          ? `X stopped responding before ARGUS finished the search. Unique-account counts are minimums.`
+          : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`,
   };
   if (!options.fetchImpl) void cacheSet(cacheKey, JSON.stringify(snapshot));
   return snapshot;
