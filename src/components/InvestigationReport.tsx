@@ -83,6 +83,7 @@ import {
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
 import { materialDeltaDiscovery } from "../lib/reportDelta";
+import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
 import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { NoticedRail } from "./InvestigatorBrief";
@@ -1537,6 +1538,8 @@ export function InvestigationReport({
             verdictTone={decisionCanvasTone}
             argument={verdictArgument}
             discovery={materialChangeDiscovery ?? controlPathDiscovery ?? claimConflictDiscovery ?? decisionDiscovery}
+            decisionBoundary={token.decisionBoundary}
+            decisionBoundaryEvidenceHref={token.decisionBoundary ? decisionBoundaryHref(token.decisionBoundary, "investigation") : undefined}
             decisionLensId={projectAccount?.intelligence ? decisionLensId : undefined}
             onDecisionLensChange={projectAccount?.intelligence ? setDecisionLensId : undefined}
             supports={supportItems}

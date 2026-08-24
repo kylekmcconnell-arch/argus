@@ -23,6 +23,8 @@ const ReferralsPreview = lazy(() => import('./dev/ReferralsPreview.tsx').then((m
 // eslint-disable-next-line react-refresh/only-export-components
 const IntelligenceReportPreview = lazy(() => import('./dev/IntelligenceReportPreview.tsx').then((module) => ({ default: module.IntelligenceReportPreview })))
 // eslint-disable-next-line react-refresh/only-export-components
+const DecisionLockPreview = lazy(() => import('./dev/DecisionLockPreview.tsx').then((module) => ({ default: module.DecisionLockPreview })))
+// eslint-disable-next-line react-refresh/only-export-components
 const ProvidersPreview = lazy(() => import('./dev/ProvidersPreview.tsx').then((module) => ({ default: module.ProvidersPreview })))
 // eslint-disable-next-line react-refresh/only-export-components
 const LandingPreview = lazy(() => import('./dev/LandingPreview.tsx').then((module) => ({ default: module.LandingPreview })))
@@ -77,6 +79,8 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><ReferralsPreview /></Suspense>
       ) : designPreview === 'intelligence-report' ? (
         <Suspense fallback={null}><IntelligenceReportPreview /></Suspense>
+      ) : designPreview === 'decision-lock' ? (
+        <Suspense fallback={null}><DecisionLockPreview /></Suspense>
       ) : designPreview === 'providers' ? (
         <Suspense fallback={null}><ProvidersPreview /></Suspense>
       ) : designPreview === 'landing' ? (

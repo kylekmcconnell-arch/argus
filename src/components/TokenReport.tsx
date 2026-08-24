@@ -58,6 +58,7 @@ import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
 import { deriveDecisionDiscovery, deriveNoticedSignals, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
 import { materialDeltaDiscovery } from "../lib/reportDelta";
+import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
@@ -458,6 +459,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
           discovery={materialChangeDiscovery ?? controlPathDiscovery ?? decisionDiscovery}
+          decisionBoundary={d.decisionBoundary}
+          decisionBoundaryEvidenceHref={d.decisionBoundary ? decisionBoundaryHref(d.decisionBoundary, "token") : undefined}
           supports={supportItems}
           concerns={concernItems}
           nextSteps={nextStepItems}

@@ -81,6 +81,7 @@ describe("market infrastructure is not a holder", () => {
     expect(concentration).toBeUndefined();
     expect(dossier!.insiderPct).toBeLessThan(10);
     expect(dossier!.bundleRisk).toBe("low");
+    expect(dossier!.decisionBoundary).toMatchObject({ schemaVersion: 1 });
 
     const exclusion = dossier!.findings.find((f) => /Excluded from concentration/.test(f.claim));
     expect(exclusion?.claim).toContain("liquidity pool");
@@ -119,6 +120,11 @@ describe("market infrastructure is not a holder", () => {
     expect(dossier!.score).toBeLessThanOrEqual(69);
     expect(dossier!.verdict).not.toBe("PASS");
     expect(dossier!.capApplied).toBe("single_wallet_concentration");
+    expect(dossier!.decisionBoundary).toMatchObject({
+      kind: "cap",
+      evidenceArea: "holders",
+      boundary: expect.stringContaining("caps the score at 69/100"),
+    });
     expect(concentration?.claim).toContain("holder snapshot does not establish whether the wallets coordinated");
     expect(concentration?.claim).not.toMatch(/bundled launch|coordinated snipe/i);
     expect(dossier!.axes.find((axis) => axis.key === "T4")?.rationale).not.toContain("fresh wallets");

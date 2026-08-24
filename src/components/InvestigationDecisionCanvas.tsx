@@ -1,4 +1,4 @@
-import { ArrowRight, ClockCounterClockwise, Database, Sparkle } from "@phosphor-icons/react";
+import { ArrowRight, ClockCounterClockwise, Database, LockKey, Sparkle } from "@phosphor-icons/react";
 import {
   ReportCanvasNarrativeSection,
   type ReportCanvasTone,
@@ -10,10 +10,49 @@ import type { DecisionDiscovery, VerdictArgument } from "../lib/reportInsights";
 import type { DecisionLensId } from "../intelligence/types";
 import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief";
 import { ScoreRing } from "./ScoreRing";
+import type { TokenDecisionBoundary } from "../lib/decisionBoundary";
 
 export interface DecisionCanvasItem {
   label: string;
   detail?: string | undefined;
+}
+
+function DecisionBoundaryBlock({ boundary, evidenceHref }: {
+  boundary: TokenDecisionBoundary;
+  evidenceHref: `#${string}`;
+}) {
+  return (
+    <section
+      className="border-b border-line/70 px-5 py-4"
+      aria-labelledby="decision-boundary-title"
+      data-testid="decision-boundary"
+    >
+      <div className="flex items-start gap-3">
+        <LockKey aria-hidden="true" size={18} weight="duotone" className="mt-0.5 shrink-0 text-ink-dim" />
+        <div className="min-w-0 flex-1">
+          <p className="eyebrow text-ink-dim">Decision lock</p>
+          <h3 id="decision-boundary-title" className="mt-1 text-[16px] font-semibold leading-snug text-ink">
+            What controls this result
+          </h3>
+          <p className="mt-1 max-w-4xl text-[13px] leading-relaxed text-ink-dim">{boundary.controllingFact}</p>
+          <p className="mt-1 max-w-4xl text-[12px] leading-relaxed text-ink-faint">{boundary.boundary}</p>
+          <dl className="mt-3 grid gap-x-8 gap-y-3 border-t border-line/60 pt-3 md:grid-cols-2">
+            <div className="min-w-0">
+              <dt className="mono text-[10px] font-medium uppercase tracking-[0.12em] text-ink-faint">What will not change it</dt>
+              <dd className="mt-1 break-words text-[12px] leading-relaxed text-ink-dim">{boundary.willNotChange}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="mono text-[10px] font-medium uppercase tracking-[0.12em] text-ink-faint">What would unlock it</dt>
+              <dd className="mt-1 break-words text-[12px] leading-relaxed text-ink-dim">{boundary.unlockCondition}</dd>
+            </div>
+          </dl>
+          <a href={evidenceHref} className="mono mt-3 inline-flex text-[10.5px] font-medium uppercase tracking-[0.08em] text-signal-lift hover:underline">
+            Open governing evidence
+          </a>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function plainDecisionText(value: string): string {
@@ -196,6 +235,8 @@ export function InvestigationDecisionCanvas({
   capturedAt,
   argument,
   discovery,
+  decisionBoundary,
+  decisionBoundaryEvidenceHref,
   decisionLensId,
   onDecisionLensChange,
   evidenceHref = "#token-evidence",
@@ -212,6 +253,8 @@ export function InvestigationDecisionCanvas({
   verdictTone: ReportCanvasTone;
   argument?: VerdictArgument | undefined;
   discovery?: DecisionDiscovery | null | undefined;
+  decisionBoundary?: TokenDecisionBoundary | null | undefined;
+  decisionBoundaryEvidenceHref?: `#${string}` | undefined;
   decisionLensId?: DecisionLensId | undefined;
   onDecisionLensChange?: ((lensId: DecisionLensId) => void) | undefined;
   supports: DecisionCanvasItem[];
@@ -335,6 +378,9 @@ export function InvestigationDecisionCanvas({
               </div>
             </div>
           </section>
+        )}
+        {decisionBoundary && decisionBoundaryEvidenceHref && (
+          <DecisionBoundaryBlock boundary={decisionBoundary} evidenceHref={decisionBoundaryEvidenceHref} />
         )}
         {argument && (
           <div className="border-b border-line/70 px-5 py-4">

@@ -146,4 +146,39 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain('target="_blank"');
     expect(html).toContain("Team receipt 2");
   });
+
+  it("shows a compact decision lock with the governing evidence link", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        verdictLabel="Caution"
+        score={35}
+        favorable={false}
+        verdictTone="caution"
+        decisionBoundary={{
+          schemaVersion: 1,
+          kind: "cap",
+          controllingFact: "More tokens can still be created by an active mint authority.",
+          boundary: "This finding caps the score at 35/100, even if every other scored area improves.",
+          willNotChange: "Higher price, volume, liquidity, followers, or social activity cannot override this safety limit.",
+          unlockCondition: "A current chain receipt must show that the mint authority was permanently revoked.",
+          evidenceArea: "contract",
+        }}
+        decisionBoundaryEvidenceHref="#token-methodology"
+        supports={[]}
+        concerns={[]}
+        nextSteps={[]}
+        verified={[]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain('data-testid="decision-boundary"');
+    expect(html).toContain("Decision lock");
+    expect(html).toContain("What controls this result");
+    expect(html).toContain("What will not change it");
+    expect(html).toContain("What would unlock it");
+    expect(html).toContain('href="#token-methodology"');
+  });
 });
