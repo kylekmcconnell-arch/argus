@@ -7,6 +7,7 @@
 //     holder sell analysis, supported summary flags, and honeypot reason.
 import { apiFetch } from "./net";
 import { retryFetch, retryFetchWithFreshTimeout } from "../lib/retry";
+import { arr, bool, num, rec, str } from "../lib/json";
 
 // ---- RugCheck (Solana) ----
 export interface RugcheckRisk {
@@ -30,28 +31,28 @@ export async function rugcheckReport(mint: string): Promise<RugcheckReport | nul
   try {
     const res = await retryFetchWithFreshTimeout(`https://api.rugcheck.xyz/v1/tokens/${mint}/report`, 15_000);
     if (!res.ok) return null;
-    const d = (await res.json()) as any;
-    const networks: any[] = d.insiderNetworks ?? [];
-    const insidersDetected = networks.reduce((a, n) => a + (n.size ?? n.wallets?.length ?? 0), 0);
-    const supply = Number(d.token?.supply ?? 0);
-    const insiderTokens = networks.reduce((a, n) => a + Number(n.tokenAmount ?? 0), 0);
-    const lockers = Object.values((d.lockers ?? {}) as Record<string, any>);
-    const lpLockedUsd = lockers.reduce((a: number, l: any) => a + Number(l.usdcLocked ?? 0), 0);
-    const marketLpUsd = Number(d.totalMarketLiquidity ?? 0);
+    const d = rec(await res.json());
+    const networks = arr(d.insiderNetworks).map(rec);
+    const insidersDetected = networks.reduce((total, network) => total + num(network.size ?? arr(network.wallets).length), 0);
+    const supply = num(rec(d.token).supply);
+    const insiderTokens = networks.reduce((total, network) => total + num(network.tokenAmount), 0);
+    const lockers = Object.values(rec(d.lockers)).map(rec);
+    const lpLockedUsd = lockers.reduce((total, locker) => total + num(locker.usdcLocked), 0);
+    const marketLpUsd = num(d.totalMarketLiquidity);
     return {
-      score: Number(d.score_normalised ?? d.score ?? 0),
-      risks: (d.risks ?? []).map((r: any) => ({
-        name: String(r.name ?? ""),
-        level: String(r.level ?? "warn"),
-        description: String(r.description ?? ""),
-        score: Number(r.score ?? 0),
-        value: r.value ? String(r.value) : undefined,
+      score: num(d.score_normalised ?? d.score),
+      risks: arr(d.risks).map(rec).map((risk) => ({
+        name: str(risk.name),
+        level: str(risk.level) || "warn",
+        description: str(risk.description),
+        score: num(risk.score),
+        value: risk.value ? str(risk.value) : undefined,
       })),
-      rugged: !!d.rugged,
+      rugged: bool(d.rugged),
       insidersDetected,
       insiderPct: supply > 0 ? Math.round((insiderTokens / supply) * 100) : 0,
       lockerPct: marketLpUsd > 0 ? Math.min(100, Math.round((lpLockedUsd / marketLpUsd) * 100)) : 0,
-      lockerNames: [...new Set(lockers.map((l: any) => String(l.type ?? "locker")))],
+      lockerNames: [...new Set(lockers.map((locker) => str(locker.type) || "locker"))],
     };
   } catch {
     return null;
@@ -110,26 +111,32 @@ export async function goplusMeta(chain: string, address: string): Promise<GoPlus
       signal: AbortSignal.timeout(12000),
     });
     if (!res.ok) return null;
-    const d = (await res.json()) as { result?: Record<string, any> };
-    const row = d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : undefined);
-    if (!row) return null;
-    const ft = row.fake_token;
-    const mapH = (h: any): LabeledHolder => ({
-      address: String(h.address ?? h.account ?? ""),
-      percent: Number(h.percent) * 100,
-      tag: String(h.tag ?? ""),
-      isLocked: h.is_locked === 1 || h.is_locked === "1",
-      isContract: h.is_contract === 1 || h.is_contract === "1",
-    });
+    const d = rec(await res.json());
+    const result = rec(d.result);
+    const row = rec(result[address.toLowerCase()] ?? Object.values(result)[0]);
+    if (!Object.keys(row).length) return null;
+    const ft = rec(row.fake_token);
+    const mapH = (value: unknown): LabeledHolder => {
+      const holder = rec(value);
+      return {
+        address: str(holder.address ?? holder.account),
+        percent: num(holder.percent) * 100,
+        tag: str(holder.tag),
+        isLocked: holder.is_locked === 1 || holder.is_locked === "1",
+        isContract: holder.is_contract === 1 || holder.is_contract === "1",
+      };
+    };
+    const fakeTokenOf = typeof ft.true_token_address === "string" ? ft.true_token_address : null;
+    const inCex = rec(row.is_in_cex);
     return {
-      fakeToken: ft?.value === 1 || ft?.value === "1" || row.is_fake_token === 1,
-      fakeTokenOf: ft?.true_token_address ?? null,
+      fakeToken: ft.value === 1 || ft.value === "1" || row.is_fake_token === 1,
+      fakeTokenOf,
       airdropScam: row.is_airdrop_scam === "1" || row.is_airdrop_scam === 1,
       trustListed: row.trust_list === "1" || row.trust_list === 1,
-      inCex: row.is_in_cex?.listed === "1" || row.is_in_cex?.listed === true,
-      holders: Array.isArray(row.holders) ? row.holders.map(mapH).filter((h: LabeledHolder) => h.address) : [],
-      lpHolders: Array.isArray(row.lp_holders) ? row.lp_holders.map(mapH).filter((h: LabeledHolder) => h.address) : [],
-      totalSupply: row.total_supply != null ? Number(row.total_supply) : null,
+      inCex: inCex.listed === "1" || inCex.listed === true,
+      holders: arr(row.holders).map(mapH).filter((holder) => holder.address),
+      lpHolders: arr(row.lp_holders).map(mapH).filter((holder) => holder.address),
+      totalSupply: row.total_supply != null ? num(row.total_supply) : null,
     };
   } catch {
     return null;
@@ -152,13 +159,13 @@ export async function codeFingerprint(chain: string, address: string): Promise<F
       signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) return null;
-    const d = (await res.json()) as any;
+    const d = rec(await res.json());
     if (!d.available || !d.fingerprint) return null;
     return {
-      fingerprint: String(d.fingerprint).toLowerCase(),
-      isToken: !!d.isToken,
-      proxy: !!d.proxy,
-      capabilities: Array.isArray(d.capabilities) ? d.capabilities.map((c: any) => ({ name: String(c.name), risk: String(c.risk) })) : [],
+      fingerprint: str(d.fingerprint).toLowerCase(),
+      isToken: bool(d.isToken),
+      proxy: bool(d.proxy),
+      capabilities: arr(d.capabilities).map(rec).map((capability) => ({ name: str(capability.name), risk: str(capability.risk) })),
     };
   } catch {
     return null;
@@ -182,12 +189,15 @@ export async function burnHistory(chain: string, address: string): Promise<BurnH
       signal: AbortSignal.timeout(22000),
     });
     if (!res.ok) return null;
-    const d = (await res.json()) as any;
+    const d = rec(await res.json());
     if (!d.available || !d.count) return null;
+    const cadence = ["none", "one-off", "regular", "irregular", "stalled"].includes(str(d.cadence))
+      ? str(d.cadence) as BurnHistory["cadence"]
+      : "none";
     return {
-      count: d.count, burnedSupplyPct: d.burnedSupplyPct ?? null, cadence: d.cadence ?? "none",
-      ongoing: !!d.ongoing, burnsLast30d: d.burnsLast30d ?? 0, medianIntervalDays: d.medianIntervalDays ?? null,
-      lastBurnAt: d.lastBurnAt ?? null,
+      count: num(d.count), burnedSupplyPct: d.burnedSupplyPct != null ? num(d.burnedSupplyPct) : null, cadence,
+      ongoing: bool(d.ongoing), burnsLast30d: num(d.burnsLast30d), medianIntervalDays: d.medianIntervalDays != null ? num(d.medianIntervalDays) : null,
+      lastBurnAt: d.lastBurnAt != null ? num(d.lastBurnAt) : null,
     };
   } catch {
     return null;
@@ -219,23 +229,27 @@ export async function honeypotDeep(chain: string, address: string): Promise<Hone
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) return null;
-    const d = (await res.json()) as any;
-    const h = d.holderAnalysis ?? {};
-    const summaryFlags = Array.isArray(d.summary?.flags) ? d.summary.flags : [];
-    const legacyFlags = Array.isArray(d.flags) ? d.flags : [];
+    const d = rec(await res.json());
+    const h = rec(d.holderAnalysis);
+    const summaryFlags = arr(rec(d.summary).flags);
+    const legacyFlags = arr(d.flags);
+    const honeypotResult = rec(d.honeypotResult);
     return {
-      isHoneypot: !!d.honeypotResult?.isHoneypot,
-      reason: d.honeypotResult?.honeypotReason ?? null,
-      holdersAnalyzed: Number(h.holders ?? 0),
-      holdersFailed: Number(h.failed ?? 0),
-      siphoned: Number(h.siphoned ?? 0),
-      highTaxWallets: Number(h.highTaxWallets ?? 0),
-      averageTax: Number(h.averageTax ?? 0),
-      flags: [...summaryFlags, ...legacyFlags].map((f: any) => ({
-        code: String(f.flag ?? f),
-        text: String(f.description ?? f.flag ?? f),
-        severity: String(f.severity ?? "medium"),
-      })),
+      isHoneypot: bool(honeypotResult.isHoneypot),
+      reason: typeof honeypotResult.honeypotReason === "string" ? honeypotResult.honeypotReason : null,
+      holdersAnalyzed: num(h.holders),
+      holdersFailed: num(h.failed),
+      siphoned: num(h.siphoned),
+      highTaxWallets: num(h.highTaxWallets),
+      averageTax: num(h.averageTax),
+      flags: [...summaryFlags, ...legacyFlags].map((value) => {
+        const flag = rec(value);
+        return {
+          code: str(flag.flag ?? value),
+          text: str(flag.description ?? flag.flag ?? value),
+          severity: str(flag.severity) || "medium",
+        };
+      }),
     };
   } catch {
     return null;
