@@ -12,6 +12,7 @@
 //      GitBook / IPFS whitepaper, the audit reports, off-site press coverage.
 // Every link is categorized; nothing is invented. 24h-cached.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { arr, isRecord, rec, type JsonRecord } from "../src/lib/json.js";
 import { attachPanelCost, cacheGetJson, cacheSetJson, grokUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 
@@ -125,7 +126,7 @@ async function crawlNav(domain: string): Promise<CrawlResult> {
 
 // Grok: whitepaper, audits, and any resource not linked from the homepage.
 type GrokResult = {
-  parsed: any | null;
+  parsed: unknown | null;
   calls: number;
   usd: number;
   status: "succeeded" | "partial" | "failed";
@@ -152,28 +153,34 @@ async function findViaGrok(name: string, domain: string, symbol: string, key: st
   } catch { return { parsed: null, calls: 1, usd: 0, status: "failed", meta: "transport_error" }; }
   if (!r.ok) return { parsed: null, calls: 1, usd: 0, status: "failed", meta: `http_${r.status}` };
 
-  let d: any;
+  let d: unknown;
   try { d = await r.json(); }
   catch { return { parsed: null, calls: 1, usd: 0, status: "failed", meta: "response_json_error" }; }
-  const text = d?.output_text ?? (Array.isArray(d?.output) ? d.output.flatMap((o: any) => o?.content ?? []).map((c: any) => c?.text ?? "").join(" ") : "") ?? "";
+  const response = rec(d);
+  const output = arr(response.output);
+  const text = response.output_text ?? output
+    .flatMap((item) => arr(rec(item).content))
+    .map((content) => rec(content).text ?? "")
+    .join(" ");
   const m = typeof text === "string" ? text.match(/\{[\s\S]*\}/) : null;
-  let parsed: any | null = null;
+  let parsed: unknown | null = null;
   if (m) {
     try { parsed = JSON.parse(m[0]); } catch { /* malformed model output */ }
   }
-  const toolCalls = Array.isArray(d?.output)
-    ? d.output.filter((item: any) => /search|tool/.test(String(item?.type ?? ""))).length
-    : 0;
-  const validContract = parsed
-    && typeof parsed === "object"
-    && !Array.isArray(parsed)
+  const toolCalls = output.filter((item) => /search|tool/.test(String(rec(item).type ?? ""))).length;
+  const validContract = isRecord(parsed)
     && Object.hasOwn(parsed, "whitepaper")
     && Array.isArray(parsed.resources)
     && Array.isArray(parsed.audits);
+  const usageRecord = rec(response.usage);
+  const usage = {
+    input_tokens: typeof usageRecord.input_tokens === "number" ? usageRecord.input_tokens : undefined,
+    output_tokens: typeof usageRecord.output_tokens === "number" ? usageRecord.output_tokens : undefined,
+  };
   return {
     parsed,
     calls: 1,
-    usd: grokUsd(d?.usage, toolCalls),
+    usd: grokUsd(usage, toolCalls),
     status: validContract ? "succeeded" : "partial",
     ...(validContract ? {} : { meta: "output_contract_error" }),
   };
@@ -181,6 +188,7 @@ async function findViaGrok(name: string, domain: string, symbol: string, key: st
 
 function assembleResult(nav: CrawlResult, grok: GrokResult | null) {
   const raw = grok?.parsed ?? null;
+  const rawRecord = rec(raw);
   const searchState: DiscoveryRead = grok
     ? {
         attempted: true,
@@ -191,15 +199,17 @@ function assembleResult(nav: CrawlResult, grok: GrokResult | null) {
         ...(grok.meta ? { meta: grok.meta } : {}),
       }
     : notAttempted();
-  const wp = raw?.whitepaper && isUrl(raw.whitepaper.url)
-    ? { url: raw.whitepaper.url, kind: ["whitepaper", "litepaper", "docs", "gitbook"].includes(raw.whitepaper.kind) ? raw.whitepaper.kind : "whitepaper" }
+  const whitepaper = rec(rawRecord.whitepaper);
+  const wp = rawRecord.whitepaper && isUrl(whitepaper.url)
+    ? { url: whitepaper.url, kind: ["whitepaper", "litepaper", "docs", "gitbook"].includes(String(whitepaper.kind)) ? String(whitepaper.kind) : "whitepaper" }
     : null;
 
   const seen = new Set<string>();
-  const audits = (Array.isArray(raw?.audits) ? raw.audits : [])
-    .filter((a: any) => a && typeof a.auditor === "string" && isUrl(a.url))
-    .map((a: any) => ({ auditor: a.auditor.trim().slice(0, 40), url: a.url, date: typeof a.date === "string" ? a.date.slice(0, 7) : null }))
-    .filter((a: any) => { const k = (a.auditor + a.url).toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
+  const audits = arr(rawRecord.audits)
+    .map(rec)
+    .filter((audit) => typeof audit.auditor === "string" && isUrl(audit.url))
+    .map((audit) => ({ auditor: String(audit.auditor).trim().slice(0, 40), url: String(audit.url), date: typeof audit.date === "string" ? audit.date.slice(0, 7) : null }))
+    .filter((audit) => { const k = (audit.auditor + audit.url).toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
     .slice(0, 6);
 
   // Merge on-site crawl (authoritative first) with Grok, dedupe by URL, validate
@@ -207,9 +217,13 @@ function assembleResult(nav: CrawlResult, grok: GrokResult | null) {
   const norm = (u: string) => u.toLowerCase().replace(/\/$/, "");
   // A bare homepage (no path) is not a resource — Grok sometimes labels it "about".
   const bareRoot = (u: string) => { try { const p = new URL(u).pathname; return p === "" || p === "/"; } catch { return false; } };
-  const grokRes: Resource[] = (Array.isArray(raw?.resources) ? raw.resources : [])
-    .filter((x: any) => x && isUrl(x.url) && !bareRoot(x.url) && typeof x.category === "string" && CATS[x.category])
-    .map((x: any) => ({ category: x.category, title: (typeof x.title === "string" && x.title.trim() ? x.title.trim() : CATS[x.category]).slice(0, 40), url: x.url }));
+  const grokRes: Resource[] = arr(rawRecord.resources)
+    .map(rec)
+    .filter((resource) => isUrl(resource.url) && !bareRoot(resource.url) && typeof resource.category === "string" && CATS[resource.category])
+    .map((resource) => {
+      const category = String(resource.category);
+      return { category, title: (typeof resource.title === "string" && resource.title.trim() ? resource.title.trim() : CATS[category]).slice(0, 40), url: String(resource.url) };
+    });
   const urlSeen = new Set<string>([wp ? norm(wp.url) : ""]);
   const perCat: Record<string, number> = {};
   const resources: Resource[] = [];
@@ -287,12 +301,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Cached enrichment is safe to read without spending. Only a valid persisted-
   // report capability may initiate a new Grok request.
-  const enhanced = await cacheGetJson<any>(enhancedCacheKey);
+  const enhanced = await cacheGetJson<JsonRecord>(enhancedCacheKey);
   if (enhanced) { res.status(200).json({ ...enhanced, _cached: true }); return; }
 
   const key = process.env.XAI_API_KEY;
   if (!panelCostVersionId || !key) {
-    const crawlCached = await cacheGetJson<any>(crawlCacheKey);
+    const crawlCached = await cacheGetJson<JsonRecord>(crawlCacheKey);
     if (crawlCached) { res.status(200).json({ ...crawlCached, _cached: true }); return; }
     const nav = domain ? await crawlNav(domain) : { resources: [], state: notAttempted() };
     const out = assembleResult(nav, null);
