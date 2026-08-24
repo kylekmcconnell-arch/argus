@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "./reportInsights";
+import { claimedTicker, deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "./reportInsights";
 
 describe("deriveNoticedSignals", () => {
   it("lifts unlocked liquidity and holder concentration out of the stat grid", () => {
@@ -151,6 +151,41 @@ describe("deriveNoticedSignals", () => {
       headline: "Project-attributed founder behind a $32.6M token",
       detail: "The project identifies @0xSimpleFarmer as Founder. That establishes its published role attribution, not independent proof of the person's identity, ownership, or control.",
     });
+  });
+});
+
+describe("deriveDecisionDiscovery", () => {
+  it("surfaces a cross-fact finding with proof and a reversal condition", () => {
+    const discovery = deriveDecisionDiscovery(deriveNoticedSignals({
+      nextUnlock: { amountUsd: 48_000_000, date: "2026-08-14", pctSupply: 6 },
+      volume24hUsd: 4_000_000,
+      anchors: { market: "#token-market" },
+    }));
+
+    expect(discovery).toMatchObject({
+      id: "unlock-pressure",
+      headline: "The next unlock equals 12 days of trading",
+      evidenceHref: "#token-market",
+    });
+    expect(discovery?.reversalCondition).toContain("unlock schedule");
+  });
+
+  it("does not promote a single scanner metric into a discovery", () => {
+    const discovery = deriveDecisionDiscovery(deriveNoticedSignals({
+      lpLockedPct: 0,
+      anchors: { market: "#token-market" },
+    }));
+
+    expect(discovery).toBeNull();
+  });
+
+  it("withholds a discovery when there is no receipt target", () => {
+    const discovery = deriveDecisionDiscovery(deriveNoticedSignals({
+      tvlChange30dPct: 18,
+      feesChange30dPct: -24,
+    }));
+
+    expect(discovery).toBeNull();
   });
 });
 

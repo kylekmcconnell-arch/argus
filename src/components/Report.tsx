@@ -23,7 +23,7 @@ import {
   UserFocus,
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
-import { claimedTicker, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
+import { claimedTicker, deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
 import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
 import type { DecisionLensId } from "../intelligence/types";
 import { ArgusMark } from "./ArgusMark";
@@ -2564,6 +2564,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     namedTeamCount: webTeam.length + webTeamLeads.length,
     anchors: { market: "#project-token", team: "#identity-evidence", account: "#report-overview" },
   });
+  const decisionDiscovery = deriveDecisionDiscovery(noticedSignals);
   // One paste, whole verdict: composed for group chats and IC memos alike.
   // The link is appended at copy time (share link when mintable, app URL else).
   const tldrBase = [
@@ -3364,6 +3365,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           favorable={favorableVerdict}
           verdictTone={decisionNarrativeTone}
           argument={caseArgument}
+          discovery={decisionDiscovery}
           decisionLensId={f.intelligence ? decisionLensId : undefined}
           onDecisionLensChange={f.intelligence ? setDecisionLensId : undefined}
           supports={decisionCanvasSupports}

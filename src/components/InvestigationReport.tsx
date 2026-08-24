@@ -81,7 +81,7 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
-import { deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
+import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
 import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
@@ -1115,6 +1115,7 @@ export function InvestigationReport({
     })),
     anchors: { market: "#investigation-visuals", team: "#investigation-team", account: "#investigation-people" },
   });
+  const decisionDiscovery = deriveDecisionDiscovery(noticedSignals);
   const advisors = (projectAccount?.evidence.testimonials ?? []).filter((t) => t.claimed_relationship === "advisor");
   const founderTeam = teamPeople.filter((person) => /\b(?:co[- ]?founder|founder|creator)\b/i.test(person.role ?? ""));
   const otherNamedTeam = teamPeople.filter((person) => !founderTeam.includes(person));
@@ -1520,6 +1521,7 @@ export function InvestigationReport({
             favorable={favorableVerdict}
             verdictTone={decisionCanvasTone}
             argument={verdictArgument}
+            discovery={decisionDiscovery}
             decisionLensId={projectAccount?.intelligence ? decisionLensId : undefined}
             onDecisionLensChange={projectAccount?.intelligence ? setDecisionLensId : undefined}
             supports={supportItems}
