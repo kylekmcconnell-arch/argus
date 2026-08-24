@@ -1707,23 +1707,7 @@ h1.display-sm {
 .landing-command-submit { min-height: 62px; border-radius: 0; background: var(--color-brand-fill); color: var(--color-on-brand); }
 .landing-command-submit:hover:not(:disabled) { background: var(--color-brand-dim); }
 .landing-command-submit:disabled { opacity: .46; }
-.landing-command-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem 1.5rem; }
-.landing-focus-control { display: flex; min-width: 0; align-items: center; gap: .75rem; }
-.landing-focus-select-wrap { position: relative; display: inline-flex; align-items: center; color: var(--color-brand); }
-.landing-focus-select-wrap > svg { pointer-events: none; position: absolute; right: .65rem; }
-.landing-focus-select {
-  min-height: 34px;
-  appearance: none;
-  border: 1px solid var(--color-control-line);
-  border-radius: 999px;
-  background: var(--color-panel);
-  padding: .35rem 2rem .35rem .8rem;
-  font-size: 12px;
-  font-weight: 580;
-  color: var(--color-ink);
-  outline: 0;
-}
-.landing-focus-select:focus-visible { border-color: var(--color-brand); box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-brand) 14%, transparent); }
+.landing-command-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .75rem 1.5rem; }
 .landing-method-rail { border-left: 1px solid var(--color-line); padding-left: clamp(1.5rem, 3vw, 2.5rem); }
 .landing-method-eye { display: flex; min-height: 190px; align-items: center; justify-content: center; }
 .landing-lens-heading { display: grid; grid-template-columns: auto 20px minmax(0, 1fr); align-items: center; gap: .65rem; }
@@ -1872,8 +1856,6 @@ h1.display-sm {
 }
 @media (max-width: 480px) {
   .landing-command-meta { align-items: flex-start; }
-  .landing-focus-control { width: 100%; flex-direction: column; align-items: flex-start; gap: .45rem; }
-  .landing-focus-select-wrap, .landing-focus-select { width: 100%; }
   .landing-lens-detail { padding-left: 0; }
   .public-access-codebar { grid-template-columns: minmax(0, 1fr); overflow: visible; border: 0; background: transparent; box-shadow: none; }
   .public-access-codebar input { min-height: 54px; border: 1px solid var(--color-control-line); border-radius: var(--radius-md); background: var(--color-panel); }

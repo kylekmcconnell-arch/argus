@@ -1,7 +1,6 @@
 import { useRef, useState } from "react";
 import {
   ArrowRightIcon,
-  CaretDownIcon,
   CheckCircleIcon,
   CurrencyDollarIcon,
   MagnifyingGlassIcon,
@@ -26,16 +25,7 @@ const INVESTIGATION_LENSES = [
   { icon: QuestionIcon, title: "What remains unknown", detail: "Missing facts and the most important questions to answer next." },
 ] as const;
 
-const INVESTIGATION_INTENTS: ReadonlyArray<{
-  value: ResearchIntent;
-  title: string;
-  detail: string;
-}> = [
-  { value: "investment_due_diligence", title: "Investment due diligence", detail: "Prioritizes team, contract, liquidity, holders, and market evidence." },
-  { value: "alpha_discovery", title: "Differentiated upside", detail: "Prioritizes traction, portfolio outcomes, market signals, and overlooked strengths." },
-  { value: "counterparty_risk", title: "Counterparty risk", detail: "Prioritizes operating history, adverse evidence, conflicts, and project fundamentals." },
-  { value: "identity_and_control", title: "Identity and control", detail: "Prioritizes the people, entities, wallets, and authority behind the subject." },
-];
+const DEFAULT_RESEARCH_INTENT: ResearchIntent = "investment_due_diligence";
 
 export function Landing({
   onAudit,
@@ -46,17 +36,15 @@ export function Landing({
 }) {
   const [value, setValue] = useState("");
   const [priv, setPriv] = useState(false);
-  const [intent, setIntent] = useState<ResearchIntent>("investment_due_diligence");
   const [launching, setLaunching] = useState(false);
   const launchingRef = useRef(false);
-  const selectedIntent = INVESTIGATION_INTENTS.find((option) => option.value === intent) ?? INVESTIGATION_INTENTS[0];
 
   const launchFreshAudit = async (subject: string) => {
     if (!subject || launchingRef.current) return;
     launchingRef.current = true;
     setLaunching(true);
     try {
-      await onAudit(subject, priv, intent);
+      await onAudit(subject, priv, DEFAULT_RESEARCH_INTENT);
     } catch {
       // The app owns the explicit failure state; Home only releases its lock.
     } finally {
@@ -122,28 +110,8 @@ export function Landing({
               <p id="subject-help" className="sr-only">We’ll work out whether it is a person, token, website, or project.</p>
 
               <div className="landing-command-meta mt-4">
-                <div className="landing-focus-control">
-                  <label htmlFor="research-focus" className="eyebrow shrink-0">Research focus</label>
-                  <div className="landing-focus-select-wrap">
-                    <select
-                      id="research-focus"
-                      value={intent}
-                      onChange={(event) => setIntent(event.target.value as ResearchIntent)}
-                      aria-describedby="research-focus-help"
-                      className="landing-focus-select"
-                    >
-                      {INVESTIGATION_INTENTS.map((option) => (
-                        <option key={option.value} value={option.value}>{option.title}</option>
-                      ))}
-                    </select>
-                    <CaretDownIcon size={13} weight="bold" aria-hidden />
-                  </div>
-                </div>
                 <PrivateToggle on={priv} onToggle={setPriv} />
               </div>
-              <p id="research-focus-help" className="mt-2 text-[11px] leading-relaxed text-ink-faint">
-                {selectedIntent.detail} Core safety and identity checks always run.
-              </p>
             </form>
 
             <p id="fresh-audit-note" className="mt-3 text-[11px] leading-relaxed text-ink-faint">
