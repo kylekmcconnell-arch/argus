@@ -22,6 +22,8 @@ describe("InvestigationDecisionCanvas public states", () => {
 
     expect(html).toContain("No checks saved");
     expect(html).toContain("Score withheld");
+    expect(html).toContain('data-report-score="prominent"');
+    expect(html).toContain("ARGUS risk score withheld");
     expect(html).toContain("No check results were saved");
     expect(html).not.toContain("0/0 checks");
     expect(html).not.toContain('role="progressbar"');
@@ -45,6 +47,9 @@ describe("InvestigationDecisionCanvas public states", () => {
     );
 
     expect(html).toContain("ARGUS risk score 45 out of 100");
+    expect(html).toContain('data-report-score="prominent"');
+    expect(html).toContain("ARGUS risk score");
+    expect(html).toContain("<svg");
     expect(html).toContain("7/7 checks complete");
     expect(html).not.toContain(">100%</p>");
   });
@@ -68,6 +73,7 @@ describe("InvestigationDecisionCanvas public states", () => {
     );
 
     expect(html).toContain("ARGUS risk score 20 out of 100");
-    expect(html).toContain("Early score · 5/7 checks complete");
+    expect(html).toContain("Early risk score");
+    expect(html).toContain("5/7 checks complete · provisional");
   });
 });
