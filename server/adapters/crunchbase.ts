@@ -34,13 +34,18 @@ export async function lookupOrganization(name: string) {
     return null;
   }
 
-  let d: any;
-  try { d = await res.json(); }
+  let value: unknown;
+  try { value = await res.json(); }
   catch {
     recordCall("crunchbase", "org-search", 0, `${meta} · response_json_error`, "failed");
     return null;
   }
-  if (!d || typeof d !== "object" || !Array.isArray(d.entities)) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    recordCall("crunchbase", "org-search", 0, `${meta} · result_shape_error`, "partial");
+    return null;
+  }
+  const d = value as { entities?: Array<{ properties?: Record<string, unknown> }> };
+  if (!Array.isArray(d.entities)) {
     recordCall("crunchbase", "org-search", 0, `${meta} · result_shape_error`, "partial");
     return null;
   }
@@ -49,7 +54,10 @@ export async function lookupOrganization(name: string) {
     return null;
   }
   const e = d.entities[0]?.properties;
-  const resolvedName = e?.identifier?.value;
+  const identifier = e?.identifier && typeof e.identifier === "object" && !Array.isArray(e.identifier)
+    ? e.identifier as Record<string, unknown>
+    : null;
+  const resolvedName = identifier?.value;
   if (!e || typeof e !== "object" || typeof resolvedName !== "string" || !resolvedName.trim()) {
     recordCall("crunchbase", "org-search", 0, `${meta} · result_shape_error`, "partial");
     return null;
@@ -57,7 +65,9 @@ export async function lookupOrganization(name: string) {
   const rawInvestors = e.investor_identifiers;
   const investorShapeOkay = rawInvestors == null || Array.isArray(rawInvestors);
   const investors = (Array.isArray(rawInvestors) ? rawInvestors : [])
-    .map((investor: any) => investor?.value)
+    .map((investor: unknown) => investor && typeof investor === "object" && !Array.isArray(investor)
+      ? (investor as Record<string, unknown>).value
+      : undefined)
     .filter((value: unknown): value is string => typeof value === "string" && !!value.trim());
   recordCall(
     "crunchbase",
@@ -68,10 +78,15 @@ export async function lookupOrganization(name: string) {
   );
   return {
     name: resolvedName,
-    fundingTotal: e.funding_total?.value_usd,
-    rounds: e.num_funding_rounds,
+    fundingTotal: e.funding_total && typeof e.funding_total === "object" && !Array.isArray(e.funding_total)
+      ? (e.funding_total as Record<string, unknown>).value_usd
+      : undefined,
+    rounds: typeof e.num_funding_rounds === "number" ? e.num_funding_rounds : undefined,
     investors,
-    acquirer: e.acquirer_identifier?.value,
+    acquirer: e.acquirer_identifier && typeof e.acquirer_identifier === "object" && !Array.isArray(e.acquirer_identifier)
+      && typeof (e.acquirer_identifier as Record<string, unknown>).value === "string"
+      ? (e.acquirer_identifier as Record<string, unknown>).value as string
+      : undefined,
   };
 }
 

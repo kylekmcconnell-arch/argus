@@ -28,6 +28,17 @@ export type Counterparty = {
   isContract: boolean;
 };
 
+interface CounterpartyRow {
+  address?: {
+    arkhamEntity?: { id?: unknown; name?: unknown; type?: unknown; twitter?: unknown };
+    address?: unknown;
+    contract?: unknown;
+  };
+  flow?: unknown;
+  usd?: unknown;
+  transactionCount?: unknown;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireArgusAuth(req, res, "analyst");
   if (!auth) return;
@@ -45,7 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!addr || addr.length < 8) { res.status(400).json({ error: "address required" }); return; }
 
   const ck = `arkham-cp:${providerAddressKey(addr)}:v1`;
-  const cached = await cacheGetJson<any>(ck);
+  const cached = await cacheGetJson<Record<string, unknown>>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
   let providerCalls = 0;
@@ -57,8 +68,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const d = (await r.json()) as Record<string, unknown>;
     providerSucceeded += 1;
     // Response is keyed by chain → array of counterparties. Flatten every chain.
-    const rows: any[] = [];
-    for (const v of Object.values(d)) if (Array.isArray(v)) rows.push(...v);
+    const rows: CounterpartyRow[] = [];
+    for (const v of Object.values(d)) if (Array.isArray(v)) rows.push(...v as CounterpartyRow[]);
 
     // Dedupe by entity (an entity spreads across many wallets); sum volume + tx,
     // and collapse direction to "both" when it flows in and out.
@@ -66,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const row of rows) {
       const a = row?.address;
       const e = a?.arkhamEntity;
-      const name = e?.name;
+      const name = typeof e?.name === "string" ? e.name : "";
       if (!name) continue; // only NAMED counterparties are useful here
       const idKey = String(e?.id || name).toLowerCase();
       const flow: "in" | "out" = row?.flow === "out" ? "out" : "in";
@@ -79,8 +90,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         byEntity.set(idKey, {
           name,
           entityId: typeof e?.id === "string" && e.id.trim() ? e.id.trim() : undefined,
-          type: e?.type,
-          address: a?.address ?? addr,
+          type: typeof e?.type === "string" ? e.type : undefined,
+          address: typeof a?.address === "string" ? a.address : addr,
           twitter: typeof e?.twitter === "string" && e.twitter ? e.twitter : undefined,
           usd: Number(row?.usd ?? 0),
           txCount: Number(row?.transactionCount ?? 0),

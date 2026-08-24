@@ -4303,7 +4303,7 @@ describe("analyst verdict integrity", () => {
     );
     const verdictRequest = requests.find((request) => toolNameOf(request) === "record_verdict")!;
     const verdictTool = analystSchemaOf(verdictRequest);
-    const axesSchema = (verdictTool.schema as { properties: { axes: any } }).properties.axes;
+    const axesSchema = (verdictTool.schema as unknown as typeof RECORD_VERDICT_INPUT_SCHEMA).properties.axes;
     expect(verdictRequest.max_tokens).toBe(6000);
     expect(verdictTool.strict).toBe(true);
     expect(verdictTool.schema).toEqual(RECORD_VERDICT_INPUT_SCHEMA);
@@ -4536,7 +4536,7 @@ describe("analyst verdict integrity", () => {
       }>;
     };
     const tool = analystSchemaOf(request);
-    const axesSchema = (tool.schema as { properties: { axes: any } }).properties.axes;
+    const axesSchema = (tool.schema as unknown as typeof RECORD_VERDICT_INPUT_SCHEMA).properties.axes;
     expect(productionCatalog).toHaveLength(14);
     expect(evidenceJson.length).toBeGreaterThan(20_000);
     expect(scorerCatalog.length).toBeGreaterThanOrEqual(20);

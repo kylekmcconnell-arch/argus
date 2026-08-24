@@ -18,10 +18,10 @@ const SOL_WALLET = "A".repeat(32);
 const EVM_WALLET = "0x1111111111111111111111111111111111111111";
 
 function response() {
-  const captured: { status?: number; body?: Record<string, any> } = {};
+  const captured: { status?: number; body?: Record<string, unknown> } = {};
   const res = {
     status(code: number) { captured.status = code; return this; },
-    json(body: unknown) { captured.body = body as Record<string, any>; return this; },
+    json(body: unknown) { captured.body = body as Record<string, unknown>; return this; },
   };
   return { res, captured };
 }

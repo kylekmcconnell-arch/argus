@@ -40,7 +40,7 @@ function chainFetch() {
     if (url.startsWith("https://api.helius.xyz/")) {
       return new Response(JSON.stringify([{ type: "TOKEN_MINT", tokenTransfers: [{ mint: MINT }] }]), { status: 200, headers: { "content-type": "application/json" } });
     }
-    const body = JSON.parse(init?.body ?? "{}") as { method: string; params: any[] };
+    const body = JSON.parse(init?.body ?? "{}") as { method: string; params: unknown[] };
     if (body.method === "getSignaturesForAddress") {
       if (body.params[0] !== DEPLOYER) return jsonRpc([]);
       return jsonRpc([
@@ -67,10 +67,10 @@ function chainFetch() {
 
 // The live scan sends no panel token: it has no persisted report version yet.
 async function run(query: Record<string, string>) {
-  const captured: { status?: number; body?: any } = {};
+  const captured: { status?: number; body: Record<string, unknown> } = { body: {} };
   const res = {
     status(code: number) { captured.status = code; return this; },
-    json(body: unknown) { captured.body = body; return this; },
+    json(body: unknown) { captured.body = body as Record<string, unknown>; return this; },
   };
   await handler({ method: "GET", query, headers: {} } as never, res as never);
   return captured;
