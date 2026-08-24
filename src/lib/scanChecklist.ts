@@ -292,24 +292,36 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
         },
   );
 
+  const tradeabilityAssessed = safety.tradeabilityAssessed === true || safety.simChecked;
+  const tradeabilityFinding = safety.honeypot
+    || safety.cannotSellAll
+    || safety.blacklist
+    || safety.pausable
+    || safety.tradingCooldown
+    || safety.ownerChangeBalance;
+  const tradeabilityNote = safety.tradeabilityMethod === "observed-market"
+    ? `${(safety.observedBuys24h ?? 0).toLocaleString()} buys and ${(safety.observedSells24h ?? 0).toLocaleString()} sells were recorded in the selected pool over 24 hours. Trading occurred, but this does not rule out wallet-specific restrictions.${tradeabilityFinding ? " Contract controls can still restrict particular holders or future trading." : ""}`
+    : safety.tradeabilityMethod === "goplus-screen"
+      ? `GoPlus tradeability screen completed · buy ${safety.buyTax}% · sell ${safety.sellTax}%`
+      : `Buy and sell simulation completed · buy ${safety.buyTax}% · sell ${safety.sellTax}%`;
   checks.push(
-    safety.simChecked
+    tradeabilityAssessed
       ? {
           checkId: "buy-sell-simulation",
           decisionCritical: true,
-          label: "Buy/sell simulation",
-          status: safety.honeypot || safety.cannotSellAll ? "finding" : "confirmed",
-          note: `buy ${safety.buyTax}% · sell ${safety.sellTax}%`,
+          label: "Tradeability check",
+          status: tradeabilityFinding ? "finding" : "confirmed",
+          note: tradeabilityNote,
         }
       : evm
         ? (safety.available
-          ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded }
+          ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Tradeability check", status: "unknown", note: outcomeNotRecorded }
           // Same signal as the contract-safety row above: no safety provider
           // covers this chain, so the simulation can never run here. Recording
           // "unavailable" with the reason keeps the gap honest instead of
           // presenting an eternally unfinished check.
-          : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unavailable", note: `no simulation provider covers ${chainDisplayName(dossier.chain)}; sell-block behavior cannot be simulated here` })
-        : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "not-applicable", note: "Solana: static flags only" },
+          : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Tradeability check", status: "unavailable", note: `no tradeability provider or two-sided market receipt covers ${chainDisplayName(dossier.chain)}` })
+        : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Tradeability check", status: "not-applicable", note: "Solana: static flags only" },
   );
 
   const holderCount = safety.holderCount || dossier.topHolders.length;
@@ -330,6 +342,8 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
 
   const hasHolderRows = dossier.topHolders.length > 0;
   const hasClusteringOutcome = hasHolderRows && (
+    dossier.holdersAssessed === true
+    ||
     dossier.bundleRisk === "elevated"
     || dossier.bundleRisk === "high"
     || dossier.bundleCount > 0
@@ -344,7 +358,7 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
           status: dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" ? "finding" : "confirmed",
           note: dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high"
             ? `${dossier.bundleCount} concentrated wallets · ~${Math.round(dossier.insiderPct)}% (${dossier.bundleRisk} risk)`
-            : "holder rows analyzed; no elevated concentration surfaced",
+            : `${dossier.topHolders.length} assessed non-market holder rows; no elevated concentration surfaced`,
         }
       : hasHolderRows
         ? { checkId: "wallet-clustering", decisionCritical: true, label: "Wallet clustering", status: "unknown", note: "holder rows exist, but clustering completion/reliability is not recorded" }

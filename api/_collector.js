@@ -28949,6 +28949,10 @@ function pickPair(pairs, wantAddress) {
   }
   return byLiq[0];
 }
+function hasCompleteGoplusTradeability(result) {
+  const reported = (value) => typeof value === "string" && value.trim().length > 0;
+  return result?.is_in_dex === "1" && reported(result.buy_tax) && reported(result.sell_tax) && reported(result.cannot_sell_all);
+}
 async function honeypotIs(chainId, address) {
   try {
     const res = await retryFetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
@@ -35075,6 +35079,8 @@ var isBurnAddr2 = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/
 var isBurnTag2 = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 function evmSafety(gp, sim) {
   const s = sim;
+  const goplusTradeabilityAssessed = hasCompleteGoplusTradeability(gp);
+  const simulationCompleted = s?.simSuccess === true;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
   let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
   let lpRowsSeen = 0;
@@ -35092,7 +35098,9 @@ function evmSafety(gp, sim) {
   return {
     available: !!gp || !!s,
     contractPropertiesAssessed: !!gp,
-    simChecked: !!s,
+    simChecked: simulationCompleted,
+    tradeabilityAssessed: simulationCompleted || goplusTradeabilityAssessed,
+    tradeabilityMethod: simulationCompleted ? "simulation" : goplusTradeabilityAssessed ? "goplus-screen" : void 0,
     honeypot: t12(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t12(gp?.is_honeypot) || t12(gp?.cannot_sell_all),
     serialScammerCreator: t12(gp?.honeypot_with_same_creator),
@@ -35127,6 +35135,18 @@ function evmSafety(gp, sim) {
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
     lpAssessed: lpRowsSeen > 0
+  };
+}
+function recordObservedTradeability(safety, market) {
+  if (safety.tradeabilityAssessed || market.buys24h <= 0 || market.sells24h <= 0 || market.liquidityUsd <= 0) {
+    return safety;
+  }
+  return {
+    ...safety,
+    tradeabilityAssessed: true,
+    tradeabilityMethod: "observed-market",
+    observedBuys24h: market.buys24h,
+    observedSells24h: market.sells24h
   };
 }
 function solanaSafety(sol) {
@@ -35338,6 +35358,7 @@ async function runTokenAudit(input, emit, opts) {
     explorerHolders = explorer;
     contractSource = source2;
     safety = evmSafety(gp, sim);
+    safety = recordObservedTradeability(safety, { buys24h: buys, sells24h: sells, liquidityUsd });
     const evmCreator = gp?.creator_address?.trim();
     const evmOwner = gp?.owner_address?.trim();
     deployerAttribution = evmCreator ? { address: evmCreator, source: "goplus", method: "contract creator", kind: "deployer" } : evmOwner && !/^0x0+$/.test(evmOwner) ? { address: evmOwner, source: "goplus", method: "current owner", kind: "attributed" } : null;

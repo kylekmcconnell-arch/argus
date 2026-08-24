@@ -365,6 +365,8 @@ export function pickPair(pairs: DexPair[], wantAddress?: string): DexPair | null
 }
 
 export interface GoPlusSecurity {
+  is_in_dex?: string;
+  cannot_buy?: string;
   is_honeypot?: string;
   honeypot_with_same_creator?: string; // "1" = the deployer has shipped honeypots before
   is_mintable?: string;
@@ -394,6 +396,15 @@ export interface GoPlusSecurity {
   lp_holders?: { address: string; percent: string; is_locked?: number; is_contract?: number; tag?: string }[];
   creator_address?: string;
   creator_percent?: string;
+}
+
+/** GoPlus documents empty or omitted trading fields as unknown. */
+export function hasCompleteGoplusTradeability(result: GoPlusSecurity | null): boolean {
+  const reported = (value: string | undefined): boolean => typeof value === "string" && value.trim().length > 0;
+  return result?.is_in_dex === "1"
+    && reported(result.buy_tax)
+    && reported(result.sell_tax)
+    && reported(result.cannot_sell_all);
 }
 
 // honeypot.is — a real buy/sell SIMULATION (EVM). Stronger than a static flag.

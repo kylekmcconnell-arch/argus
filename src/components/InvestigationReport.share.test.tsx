@@ -235,7 +235,7 @@ describe("investigation exact sharing", () => {
   it("names the exact two unfinished token safety checks behind a 5/7 report", () => {
     const checks = [
       ["contract-safety", "Contract controls", "confirmed"],
-      ["buy-sell-simulation", "Buy and sell test", "unknown"],
+      ["buy-sell-simulation", "Tradeability check", "unknown"],
       ["holder-distribution", "Large holders", "confirmed"],
       ["wallet-clustering", "Connected holder wallets", "unknown"],
       ["market-intelligence", "Market data", "confirmed"],
@@ -263,7 +263,7 @@ describe("investigation exact sharing", () => {
 
     const decisionBrief = container.querySelector('[data-canonical-decision-brief="true"]')?.textContent ?? "";
     expect(decisionBrief).toContain("5/7 token safety checks complete · provisional");
-    expect(decisionBrief).toContain("Required: Buy and sell test");
+    expect(decisionBrief).toContain("Required: Tradeability check");
     expect(decisionBrief).toContain("Required: Connected holder wallets");
   });
 

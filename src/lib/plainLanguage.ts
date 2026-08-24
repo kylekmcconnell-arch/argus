@@ -102,7 +102,7 @@ export function publicEntityLabel(value: string, type?: string, explicitLabel?: 
 
 const PUBLIC_CHECK_LABELS: Record<string, string> = {
   "contract-safety": "Contract controls",
-  "buy-sell-simulation": "Buy and sell test",
+  "buy-sell-simulation": "Tradeability check",
   "holder-distribution": "Large holders",
   "wallet-clustering": "Connected holder wallets",
   "operator-funding-trace": "Where the token creator's funds came from",

@@ -190,6 +190,38 @@ describe("tokenChecks", () => {
     expect(byLabel(checks, "Wallet clustering")).toMatchObject({ status: "unknown" });
   });
 
+  it("completes a clean clustering receipt when the holder register was assessed", () => {
+    const checks = tokenChecks(dossier({
+      holdersAssessed: true,
+      insiderPct: 0,
+      bundleCount: 0,
+      bundleRisk: "low",
+    }));
+
+    expect(byLabel(checks, "Wallet clustering")).toMatchObject({ status: "confirmed" });
+    expect(byLabel(checks, "Wallet clustering").note).toContain("assessed non-market holder rows");
+  });
+
+  it("completes bounded market-observed tradeability as a finding when controls remain", () => {
+    const checks = tokenChecks(dossier({
+      chain: "robinhood",
+      safety: safety({
+        simChecked: false,
+        tradeabilityAssessed: true,
+        tradeabilityMethod: "observed-market",
+        observedBuys24h: 2_322,
+        observedSells24h: 1_577,
+        blacklist: true,
+        pausable: true,
+        ownerChangeBalance: true,
+      }),
+    }));
+
+    expect(byLabel(checks, "Tradeability check")).toMatchObject({ status: "finding" });
+    expect(byLabel(checks, "Tradeability check").note).toContain("2,322 buys and 1,577 sells");
+    expect(byLabel(checks, "Tradeability check").note).toContain("wallet-specific restrictions");
+  });
+
   it("surfaces retained contract controls as findings instead of confirmed success", () => {
     const checks = tokenChecks(dossier({
       safety: safety({ ownerRenounced: false, pausable: true, proxy: true }),
@@ -425,9 +457,9 @@ describe("token OFAC address screen recording", () => {
       safety: safety({ simChecked: false }),
     }));
 
-    expect(byLabel(uncovered, "Buy/sell simulation")).toMatchObject({ status: "unavailable" });
-    expect(byLabel(uncovered, "Buy/sell simulation").note).toContain("Robinhood Chain");
-    expect(byLabel(supportedButUnrecorded, "Buy/sell simulation")).toMatchObject({ status: "unknown" });
+    expect(byLabel(uncovered, "Tradeability check")).toMatchObject({ status: "unavailable" });
+    expect(byLabel(uncovered, "Tradeability check").note).toContain("Robinhood Chain");
+    expect(byLabel(supportedButUnrecorded, "Tradeability check")).toMatchObject({ status: "unknown" });
   });
 
   it("records an unreachable list as unavailable instead of silently clean, and legacy dossiers stay unknown", () => {
