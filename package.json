@@ -15,6 +15,7 @@
     "calibrate:json": "tsx src/calibration/calibrate.ts --json",
     "canary:offline": "tsx scripts/release-canary.ts",
     "canary:offline:json": "tsx scripts/release-canary.ts --json",
+    "beta:measure": "tsx scripts/beta-quality-cycle.ts",
     "canary:identity:live": "tsx scripts/canary-stani-identity.ts",
     "canary:founder-verdict:live": "tsx scripts/canary-stani-verdict.ts",
     "eval:record": "tsx scripts/eval-harness.ts record",
