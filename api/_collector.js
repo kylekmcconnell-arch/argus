@@ -12,6 +12,7 @@ var PROVIDERS = [
   { id: "github", label: "GitHub forensics", env: ["GITHUB_TOKEN"], free: false, feeds: "twitter-linked identity, org/repo affiliations (F1/F2)" },
   { id: "reddit", label: "Reddit", env: ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"], free: false, feeds: "community FUD / reputation (F5/I5/AG4)" },
   { id: "helius", label: "Helius (Solana)", env: ["HELIUS_API_KEY"], free: false, feeds: "attributed-wallet activity (K4 context)" },
+  { id: "arkham", label: "Arkham", env: ["ARKHAM_API_KEY"], free: false, feeds: "score-neutral identity and exposure context for evidence-bound wallets" },
   { id: "bitquery", label: "Bitquery (not yet in core collector)", env: ["BITQUERY_API_KEY"], free: false, feeds: "reserved credential only; does not run or attest core audits" },
   { id: "analyst", label: "Grok analyst agent", env: ["XAI_API_KEY"], free: false, feeds: "messy-to-structured axis scoring + rationale + headline" },
   { id: "openrouter", label: "OpenRouter (optional extract fallback)", env: ["OPENROUTER_API_KEY"], free: false, feeds: "cheap extraction fallback when ARGUS_PROVIDER_FALLBACKS is on" }
@@ -804,7 +805,7 @@ var Audit = class {
       if (recentCriticalLoss) keys.push("recent_critical_protocol_loss_without_recorded_recovery");
     } else if (role === "KOL" /* KOL */) {
       if (this.wallets.some(
-        (w) => w.sold_into_own_promo && (w.link_tier === "SelfDoxxed" || w.link_tier === "InvestigatorAttributed") && w.evidence_origin !== "model_lead" && w.artifact_verified !== false
+        (w) => w.screen?.status !== "not_attributable" && w.sold_into_own_promo && (w.link_tier === "SelfDoxxed" || w.link_tier === "InvestigatorAttributed") && w.evidence_origin !== "model_lead" && w.artifact_verified !== false
       ))
         keys.push("wallet_sold_into_promo");
       if (this.promotions.some(
@@ -1006,6 +1007,7 @@ var Audit = class {
       edges.push({ src: this.handle, dst: c.client_name, type: "SERVICED", manipulation: !!c.manipulation_service_flag });
     }
     for (const w of this.wallets) {
+      if (w.screen?.status === "not_attributable") continue;
       const key = `${w.chain}:${w.address}`;
       nodes.push({ type: "Identity", subtype: "Wallet", key, link_tier: w.link_tier });
       edges.push({ src: this.handle, dst: key, type: "CONTROLS_WALLET", tier: w.link_tier });
@@ -2350,9 +2352,9 @@ function validTrustTie(tie) {
   return tie.strength !== "weak" && Boolean(tie.key.trim() && tie.label.trim() && tie.type.trim()) && tie.subjectEdgeTypes.length > 0 && tie.otherEdgeTypes.length > 0 && tie.subjectEdgeTypes.every((edge) => edge.trim().length > 0) && tie.otherEdgeTypes.every((edge) => edge.trim().length > 0);
 }
 function qualifiedAdverseTrustConnections(evidence) {
-  const screen = evidence.trustGraphScreen;
-  if (!screen || !SHA256_HEX3.test(screen.sourceContentHash)) return [];
-  return screen.connections.flatMap((connection) => {
+  const screen2 = evidence.trustGraphScreen;
+  if (!screen2 || !SHA256_HEX3.test(screen2.sourceContentHash)) return [];
+  return screen2.connections.flatMap((connection) => {
     const adverseVerdict = connection.otherVerdict?.trim().toUpperCase();
     const ties = connection.ties.filter(validTrustTie);
     return connection.qualified === true && connection.otherAttestation === "server_collected" && connection.otherCompleteness === "complete" && (adverseVerdict === "FAIL" || adverseVerdict === "AVOID") && UUID.test(connection.otherReportVersionId ?? "") && ties.length > 0 ? [{ connection, ties }] : [];
@@ -10150,9 +10152,9 @@ function extractScoringEvidenceCatalog(json, axisCatalog2) {
   })) : [];
 }
 var pruneTrustGraphPacket = (packet) => {
-  const screen = packet.trustGraphScreen;
-  if (!screen || typeof screen !== "object" || Array.isArray(screen)) return false;
-  const graph = screen;
+  const screen2 = packet.trustGraphScreen;
+  if (!screen2 || typeof screen2 !== "object" || Array.isArray(screen2)) return false;
+  const graph = screen2;
   const connections = Array.isArray(graph.connections) ? graph.connections : [];
   for (let index = connections.length - 1; index >= 0; index--) {
     const connection = connections[index];
@@ -13932,11 +13934,11 @@ async function discoverReverseBioFromTwitterapi(subjectHandle, subjectName3, pro
   return pending;
 }
 async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectName, projectBio) {
-  const empty = { team: [], orgs: [] };
+  const empty2 = { team: [], orgs: [] };
   const key = env("TWITTERAPI_KEY");
-  if (!key) return empty;
+  if (!key) return empty2;
   const handle = subjectHandle.replace(/^@/, "");
-  if (!handle) return empty;
+  if (!handle) return empty2;
   const subject = handle.toLowerCase();
   const candidates = /* @__PURE__ */ new Map();
   const add = (candidate) => {
@@ -18839,8 +18841,1006 @@ var onchainAdapter = {
   }
 };
 
-// server/adapters/basicFacts.ts
+// api/_arkham-core.ts
+var RISK = "https://api.arkm.com/risk/address/";
+var INTEL = "https://api.arkm.com/intelligence/address/";
+var ARKHAM_RISK_BATCH = "https://api.arkm.com/risk/address/batch";
+var ARKHAM_INTEL_BATCH = "https://api.arkm.com/intelligence/address_enriched/batch/all";
+var RISK_BATCH_LIMIT = 200;
+var INTEL_BATCH_LIMIT = 1e3;
+var cleanText = (value) => {
+  const text2 = typeof value === "string" ? value.trim() : "";
+  return text2 || void 0;
+};
+var CATEGORY_SCORES = [
+  ["darkweb_score", "dark web"],
+  ["gambling_score", "gambling"],
+  ["hacker_score", "hacker"],
+  ["mixed_kyc_service_score", "mixed-KYC service"],
+  ["mixer_score", "mixer"],
+  ["non_kyc_service_score", "non-KYC service"],
+  ["ponzi_score", "Ponzi"],
+  ["privacy_score", "privacy service"],
+  ["ransomware_score", "ransomware"],
+  ["sanctions_score", "sanctions"],
+  ["scam_score", "scam"],
+  ["token_blacklist_score", "blacklisted token"]
+];
+function shapeBriefing(d) {
+  const categoryScores = CATEGORY_SCORES.map(([field, category]) => ({ category, score: Number(d[field] ?? 0) })).filter((entry) => Number.isFinite(entry.score) && entry.score > 0).sort((a, b) => b.score - a.score);
+  return {
+    level: String(d.risk_level ?? "NONE"),
+    score: Number(d.max_score ?? 0),
+    greatestCategory: cleanText(d.greatest_risk_category),
+    incomingUsd: Number(d.risk_weighted_incoming_usd ?? 0),
+    outgoingUsd: Number(d.risk_weighted_outgoing_usd ?? 0),
+    hopDistance: Number.isFinite(Number(d.hop_distance)) ? Number(d.hop_distance) : void 0,
+    updatedAt: cleanText(d.updated_at),
+    categoryScores
+  };
+}
+async function seedName(addr, key, usage) {
+  usage.calls += 1;
+  try {
+    const r = await fetch(`${INTEL}${encodeURIComponent(addr)}`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(7e3) });
+    if (!r.ok) return {};
+    const d = await r.json();
+    usage.succeeded += 1;
+    return { name: d.arkhamEntity?.name || d.arkhamLabel?.name, type: d.arkhamEntity?.type };
+  } catch {
+    return {};
+  }
+}
+async function fetchAddressRiskPaths(address, key, labelSeeds) {
+  const usage = { calls: 0, succeeded: 0 };
+  try {
+    usage.calls += 1;
+    const r = await fetch(`${RISK}${encodeURIComponent(address)}`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(12e3) });
+    if (!r.ok) return { available: false, paths: [], calls: usage.calls, succeeded: usage.succeeded };
+    const d = await r.json();
+    usage.succeeded += 1;
+    const raw = Array.isArray(d?.top_sources) ? d.top_sources : [];
+    const bySeed = /* @__PURE__ */ new Map();
+    for (const p of raw) {
+      const s = String(p?.seed_address ?? "");
+      if (!s) continue;
+      const ex = bySeed.get(s);
+      if (!ex || Number(p?.contribution_usd ?? 0) > Number(ex?.contribution_usd ?? 0)) bySeed.set(s, p);
+    }
+    const top = [...bySeed.values()].sort((a, b) => Number(b?.contribution_usd ?? 0) - Number(a?.contribution_usd ?? 0)).slice(0, 6);
+    const seeds = top.map((p) => String(p.seed_address));
+    let labels;
+    if (labelSeeds) {
+      const batched = await labelSeeds(seeds);
+      usage.calls += batched.calls;
+      usage.succeeded += batched.succeeded;
+      labels = seeds.map((seed) => batched.names.get(seed.toLowerCase()) ?? {});
+    } else {
+      labels = await Promise.all(seeds.map((seed) => seedName(seed, key, usage)));
+    }
+    const paths = top.map((p, i) => ({
+      seed: String(p.seed_address),
+      seedName: labels[i].name,
+      seedType: labels[i].type,
+      category: typeof p?.risk_category === "string" ? p.risk_category : void 0,
+      direction: p?.direction === "backward" ? "backward" : "forward",
+      score: Number(p?.contribution_pct ?? 0),
+      usd: Number(p?.contribution_usd ?? 0),
+      hops: Number(p?.hop_distance ?? 0),
+      firstAt: cleanText(p?.first_ts),
+      lastAt: cleanText(p?.last_ts)
+    }));
+    return { available: true, paths, briefing: shapeBriefing(d), calls: usage.calls, succeeded: usage.succeeded };
+  } catch {
+    return { available: false, paths: [], calls: usage.calls, succeeded: usage.succeeded };
+  }
+}
+var empty = (outcome, calls, status) => ({ outcome, rows: /* @__PURE__ */ new Map(), status, calls, succeeded: 0 });
+async function postBatch(url, addresses, key, timeoutMs) {
+  let response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "API-Key": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ addresses }),
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+  } catch {
+    return { outcome: "unavailable", rows: /* @__PURE__ */ new Map() };
+  }
+  if (response.status === 402 || response.status === 403) {
+    return { outcome: "unentitled", rows: /* @__PURE__ */ new Map(), status: response.status };
+  }
+  if (!response.ok) return { outcome: "unavailable", rows: /* @__PURE__ */ new Map(), status: response.status };
+  let body;
+  try {
+    body = await response.json();
+  } catch {
+    return { outcome: "unavailable", rows: /* @__PURE__ */ new Map(), status: response.status };
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { outcome: "unavailable", rows: /* @__PURE__ */ new Map(), status: response.status };
+  }
+  const envelope = body.addresses;
+  const container = envelope && typeof envelope === "object" && !Array.isArray(envelope) ? envelope : body;
+  const rows = /* @__PURE__ */ new Map();
+  for (const [address, row] of Object.entries(container)) {
+    if (row && typeof row === "object" && !Array.isArray(row)) {
+      rows.set(address.toLowerCase(), row);
+    }
+  }
+  return { outcome: "answered", rows, status: response.status };
+}
+async function fetchAddressLabelsBatch(addresses, key, timeoutMs = 12e3) {
+  const targets = [...new Set(addresses.filter(Boolean))].slice(0, INTEL_BATCH_LIMIT);
+  if (!targets.length) return empty("answered", 0);
+  const { outcome, rows, status } = await postBatch(ARKHAM_INTEL_BATCH, targets, key, timeoutMs);
+  if (outcome !== "answered") return empty(outcome, 1, status);
+  const labels = /* @__PURE__ */ new Map();
+  for (const [address, row] of rows) {
+    const entity = row.arkhamEntity && typeof row.arkhamEntity === "object" ? row.arkhamEntity : {};
+    const label = row.arkhamLabel && typeof row.arkhamLabel === "object" ? row.arkhamLabel : {};
+    const type = cleanText(entity.type)?.toLowerCase();
+    labels.set(address, {
+      name: cleanText(entity.name) ?? cleanText(label.name),
+      type,
+      twitter: cleanText(entity.twitter),
+      website: cleanText(entity.website),
+      isCex: type === "cex",
+      isService: Boolean(entity.service) || type === "cex",
+      isContract: row.contract === true || row.isUserAddress === false
+    });
+  }
+  return { outcome: "answered", rows: labels, status, calls: 1, succeeded: 1 };
+}
+async function fetchAddressRiskBatch(addresses, key, timeoutMs = 15e3) {
+  const targets = [...new Set(addresses.filter(Boolean))].slice(0, RISK_BATCH_LIMIT);
+  if (!targets.length) return empty("answered", 0);
+  const { outcome, rows, status } = await postBatch(ARKHAM_RISK_BATCH, targets, key, timeoutMs);
+  if (outcome !== "answered") return empty(outcome, 1, status);
+  const risks = /* @__PURE__ */ new Map();
+  for (const [address, row] of rows) {
+    risks.set(address, { ...shapeBriefing(row), isSeed: row.is_seed === true });
+  }
+  return { outcome: "answered", rows: risks, status, calls: 1, succeeded: 1 };
+}
+
+// server/adapters/evmControlReality.ts
 import { createHash as createHash5 } from "node:crypto";
+var EVM_ADDRESS2 = /^0x[a-fA-F0-9]{40}$/;
+var HEX = /^0x[0-9a-fA-F]*$/;
+var ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+var ERC1967_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+var ERC1967_BEACON_SLOT = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50";
+var ERC1967_ADMIN_SLOT = "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
+var IMPLEMENTATION_SELECTOR = "0x5c60da1b";
+var OWNER_SELECTOR = "0x8da5cb5b";
+var SAFE_GET_OWNERS_SELECTOR = "0xa0e67e2b";
+var SAFE_GET_THRESHOLD_SELECTOR = "0xe75235b8";
+var PUBLIC_EVM_RPC = {
+  ethereum: ["https://ethereum-rpc.publicnode.com", "https://cloudflare-eth.com"],
+  base: ["https://base-rpc.publicnode.com", "https://mainnet.base.org"],
+  bsc: ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.binance.org"],
+  polygon: ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com"],
+  arbitrum: ["https://arbitrum-one-rpc.publicnode.com", "https://arb1.arbitrum.io/rpc"],
+  optimism: ["https://optimism-rpc.publicnode.com", "https://mainnet.optimism.io"],
+  avalanche: ["https://avalanche-c-chain-rpc.publicnode.com", "https://api.avax.network/ext/bc/C/rpc"]
+};
+var EXPECTED_EVM_CHAIN_IDS = {
+  ethereum: "0x1",
+  base: "0x2105",
+  bsc: "0x38",
+  polygon: "0x89",
+  arbitrum: "0xa4b1",
+  optimism: "0xa",
+  avalanche: "0xa86a"
+};
+var normalizeAddress2 = (value) => value.toLowerCase();
+var wordAddress = (value) => {
+  if (!value || !/^0x0{24}[0-9a-fA-F]{40}$/.test(value)) return null;
+  const address = `0x${value.slice(-40)}`.toLowerCase();
+  return address === ZERO_ADDRESS ? null : address;
+};
+var hexBytes = (value) => Math.max(0, (value.length - 2) / 2);
+var sha2562 = (value) => createHash5("sha256").update(value.toLowerCase()).digest("hex");
+var safeError = (value) => {
+  const text2 = value instanceof Error ? value.message : String(value ?? "rpc error");
+  if (/\bhttp\s+\d{3}\b/i.test(text2)) return text2.match(/\bhttp\s+\d{3}\b/i)?.[0].toLowerCase() ?? "http error";
+  if (/abort|timed?\s*out|timeout/i.test(text2)) return "request timed out";
+  if (/malformed|invalid json|parse/i.test(text2)) return "malformed RPC response";
+  if (/different block|block consistency/i.test(text2)) return "block consistency check failed";
+  if (/missing (?:result|block)|no usable result/i.test(text2)) return "RPC returned no usable result";
+  if (/fetch|network|socket|connect|dns|enotfound|econn/i.test(text2)) return "transport failure";
+  return "RPC request failed";
+};
+var normalizeChainIdQuantity = (value) => {
+  if (typeof value !== "string" || value.length > 66 || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)) {
+    return null;
+  }
+  try {
+    return `0x${BigInt(value).toString(16)}`;
+  } catch {
+    return null;
+  }
+};
+var captureChainIdentity = async (chain, transport) => {
+  const expectedChainId = EXPECTED_EVM_CHAIN_IDS[chain];
+  if (!expectedChainId) throw new Error(`No expected chain id is configured for chain '${chain}'.`);
+  const base = {
+    id: "evm-chain-identity",
+    method: "eth_chainId",
+    providerHost: transport.providerHost,
+    expectedChain: chain,
+    expectedChainId
+  };
+  const reply = await transport.request("eth_chainId", []);
+  if (!reply.ok) {
+    return {
+      receipt: { ...base, state: "rpc_error" },
+      note: `RPC chain identity unavailable: eth_chainId ${safeError(reply.error)}. No block or contract reads were attempted.`
+    };
+  }
+  const rawResult = typeof reply.result === "string" && reply.result.length <= 128 ? reply.result : void 0;
+  const observedChainId = normalizeChainIdQuantity(reply.result);
+  if (!observedChainId) {
+    return {
+      receipt: { ...base, state: "malformed", ...rawResult !== void 0 ? { rawResult } : {} },
+      note: "RPC chain identity response was malformed. No block or contract reads were attempted."
+    };
+  }
+  if (observedChainId !== expectedChainId) {
+    return {
+      receipt: { ...base, state: "mismatch", observedChainId, rawResult },
+      note: `RPC chain identity mismatch: expected ${chain} (${expectedChainId}), received ${observedChainId} from ${transport.providerHost}. No block or contract reads were attempted.`
+    };
+  }
+  return {
+    receipt: { ...base, state: "verified", observedChainId, rawResult }
+  };
+};
+function createHttpEvmRpcTransport(rpcUrl, fetchImpl = fetch, timeoutMs = 9e3) {
+  let calls = 0;
+  const providerHost = (() => {
+    try {
+      return new URL(rpcUrl).host;
+    } catch {
+      return "invalid-rpc-url";
+    }
+  })();
+  return {
+    providerHost,
+    get calls() {
+      return calls;
+    },
+    async request(method, params) {
+      calls += 1;
+      try {
+        const response = await fetchImpl(rpcUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: calls, method, params }),
+          signal: AbortSignal.timeout(timeoutMs)
+        });
+        if (!response.ok) return { ok: false, error: `http ${response.status}` };
+        const body = await response.json();
+        if (body.result !== void 0 && body.result !== null) return { ok: true, result: body.result };
+        return { ok: false, error: typeof body.error?.message === "string" ? body.error.message : "missing result" };
+      } catch (error) {
+        return { ok: false, error: safeError(error) };
+      }
+    }
+  };
+}
+var requiredString = async (transport, method, params) => {
+  const reply = await transport.request(method, params);
+  if (!reply.ok || typeof reply.result !== "string") throw new Error(`${method}: ${reply.error ?? "missing result"}`);
+  return reply.result;
+};
+var captureBlock = async (transport) => {
+  const tag2 = await requiredString(transport, "eth_blockNumber", []);
+  if (!/^0x[0-9a-fA-F]+$/.test(tag2)) throw new Error("eth_blockNumber: malformed block number");
+  const reply = await transport.request("eth_getBlockByNumber", [tag2, false]);
+  if (!reply.ok || reply.result == null) throw new Error(`eth_getBlockByNumber: ${reply.error ?? "missing block"}`);
+  let block;
+  try {
+    block = typeof reply.result === "string" ? JSON.parse(reply.result) : reply.result;
+  } catch {
+    throw new Error("eth_getBlockByNumber: malformed block");
+  }
+  if (typeof block.hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(block.hash)) throw new Error("eth_getBlockByNumber: malformed block hash");
+  if (typeof block.timestamp !== "string" || !/^0x[0-9a-fA-F]+$/.test(block.timestamp)) throw new Error("eth_getBlockByNumber: malformed timestamp");
+  const number = Number.parseInt(tag2.slice(2), 16);
+  const timestampSeconds = Number.parseInt(block.timestamp.slice(2), 16);
+  if (!Number.isSafeInteger(number) || !Number.isSafeInteger(timestampSeconds)) throw new Error("eth_getBlockByNumber: unsafe numeric field");
+  if (typeof block.number === "string" && Number.parseInt(block.number.slice(2), 16) !== number) {
+    throw new Error("eth_getBlockByNumber: returned a different block number");
+  }
+  return {
+    number,
+    tag: `0x${number.toString(16)}`,
+    hash: block.hash.toLowerCase(),
+    timestamp: new Date(timestampSeconds * 1e3).toISOString()
+  };
+};
+var verifyBlock = async (transport, block) => {
+  const reply = await transport.request("eth_getBlockByNumber", [block.tag, false]);
+  if (!reply.ok || reply.result == null) throw new Error("capture block could not be verified");
+  let current;
+  try {
+    current = typeof reply.result === "string" ? JSON.parse(reply.result) : reply.result;
+  } catch {
+    throw new Error("capture block verification was malformed");
+  }
+  if (typeof current.hash !== "string" || current.hash.toLowerCase() !== block.hash) {
+    throw new Error("capture block changed during collection");
+  }
+};
+var addReceipt = (state, input) => {
+  const receipt = {
+    id: `evm-read-${String(state.receipts.length + 1).padStart(3, "0")}`,
+    blockNumber: state.block.number,
+    blockHash: state.block.hash,
+    ...input
+  };
+  state.receipts.push(receipt);
+  return receipt;
+};
+var read = async (state, method, target, params, locator, keepRaw = true) => {
+  const reply = await state.transport.request(method, params);
+  if (!reply.ok || typeof reply.result !== "string" || !HEX.test(reply.result)) {
+    return {
+      result: null,
+      receipt: addReceipt(state, { method, target, locator, state: "rpc_error" })
+    };
+  }
+  const result = reply.result.toLowerCase();
+  const bytes = hexBytes(result);
+  return {
+    result,
+    receipt: addReceipt(state, {
+      method,
+      target,
+      locator,
+      state: "returned",
+      ...keepRaw && bytes <= 8192 ? { rawResult: result } : {},
+      resultSha256: sha2562(result),
+      byteLength: bytes
+    })
+  };
+};
+var readCode = async (state, address) => {
+  const normalized4 = normalizeAddress2(address);
+  const { result, receipt } = await read(
+    state,
+    "eth_getCode",
+    normalized4,
+    [normalized4, state.block.tag],
+    void 0,
+    false
+  );
+  if (result == null) return null;
+  const bytes = hexBytes(result);
+  return {
+    address: normalized4,
+    accountType: result === "0x" || bytes === 0 ? "no_code" : "contract",
+    byteLength: bytes,
+    ...bytes > 0 ? { sha256Fingerprint: sha2562(result) } : {},
+    receiptId: receipt.id
+  };
+};
+var readStorageAddress = async (state, target, slot) => {
+  const normalized4 = normalizeAddress2(target);
+  const { result, receipt } = await read(
+    state,
+    "eth_getStorageAt",
+    normalized4,
+    [normalized4, slot, state.block.tag],
+    slot
+  );
+  if (result == null) return { address: null, decodeState: "unavailable", receipt };
+  const address = wordAddress(result);
+  if (address) return { address, decodeState: "observed", receipt };
+  return {
+    address: null,
+    decodeState: /^0x0{64}$/.test(result) ? "zero_address" : "malformed",
+    receipt
+  };
+};
+var ethCall = async (state, target, selector) => {
+  const normalized4 = normalizeAddress2(target);
+  return read(
+    state,
+    "eth_call",
+    normalized4,
+    [{ to: normalized4, data: selector }, state.block.tag],
+    selector
+  );
+};
+var minimalProxyImplementation = (code) => {
+  if (!code) return null;
+  const match = code.toLowerCase().match(
+    /^0x363d3d373d3d3d363d73([0-9a-f]{40})5af43d82803e903d91602b57fd5bf3$/
+  );
+  return match ? { address: `0x${match[1]}`, proof: match[0] } : null;
+};
+var decodeAddressCall = (result) => {
+  if (result == null) return "malformed";
+  const address = wordAddress(result);
+  if (address) return address;
+  return /^0x0{64}$/.test(result) ? "zero" : "malformed";
+};
+var decodeUintWord = (result) => {
+  if (!result || !/^0x[0-9a-f]{64}$/.test(result)) return null;
+  const value = Number.parseInt(result.slice(2), 16);
+  return Number.isSafeInteger(value) ? value : null;
+};
+var decodeAddressArray = (result) => {
+  if (!result || !/^0x[0-9a-f]+$/.test(result) || (result.length - 2) % 64 !== 0) return null;
+  const words = result.slice(2).match(/.{64}/g) ?? [];
+  if (words.length < 2) return null;
+  const offset = Number.parseInt(words[0], 16) / 32;
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= words.length) return null;
+  const length = Number.parseInt(words[offset], 16);
+  if (!Number.isSafeInteger(length) || length < 1 || length > 50 || offset + 1 + length > words.length) return null;
+  const addresses = words.slice(offset + 1, offset + 1 + length).map((word) => wordAddress(`0x${word}`));
+  if (addresses.some((address) => address == null)) return null;
+  const values = addresses;
+  return new Set(values).size === values.length ? values : null;
+};
+var ownerProbe = async (state, subject, purpose) => {
+  const { result, receipt } = await ethCall(state, subject, OWNER_SELECTOR);
+  if (receipt.state === "rpc_error") return { subject, purpose, state: "unavailable", receiptId: receipt.id };
+  const decoded = decodeAddressCall(result);
+  if (decoded === "zero") return { subject, purpose, state: "zero_address", receiptId: receipt.id };
+  if (decoded === "malformed") return { subject, purpose, state: "malformed", receiptId: receipt.id };
+  return { subject, purpose, state: "observed", owner: decoded, receiptId: receipt.id };
+};
+var safeCompatibleProbe = async (state, address) => {
+  const ownersRead = await ethCall(state, address, SAFE_GET_OWNERS_SELECTOR);
+  const thresholdRead = await ethCall(state, address, SAFE_GET_THRESHOLD_SELECTOR);
+  const receiptIds = [ownersRead.receipt.id, thresholdRead.receipt.id];
+  const qualification2 = "safe_compatible_interface_only";
+  if (ownersRead.receipt.state === "rpc_error" || thresholdRead.receipt.state === "rpc_error") {
+    return { address, state: "unavailable", receiptIds, qualification: qualification2 };
+  }
+  const owners = decodeAddressArray(ownersRead.result);
+  const threshold = decodeUintWord(thresholdRead.result);
+  if (!owners || threshold == null || threshold < 1 || threshold > owners.length) {
+    return { address, state: "malformed", receiptIds, qualification: qualification2 };
+  }
+  return { address, state: "observed", owners, threshold, receiptIds, qualification: qualification2 };
+};
+var mergeAuthorities = (rows, codeByAddress) => {
+  const merged = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const address = normalizeAddress2(row.address);
+    const existing = merged.get(address);
+    if (existing) {
+      if (!existing.relations.includes(row.relation)) existing.relations.push(row.relation);
+      if (!existing.receiptIds.includes(row.receiptId)) existing.receiptIds.push(row.receiptId);
+      continue;
+    }
+    const code = codeByAddress.get(address);
+    merged.set(address, {
+      address,
+      relations: [row.relation],
+      accountType: code?.accountType ?? "unknown",
+      receiptIds: [row.receiptId, ...code ? [code.receiptId] : []],
+      qualification: "standard_role_observation_not_complete_permission_map"
+    });
+  }
+  return [...merged.values()].sort((left, right) => left.address.localeCompare(right.address));
+};
+var unavailableSnapshot = (chain, target, rpcCalls, note, chainIdentity) => ({
+  schemaVersion: 1,
+  state: "unavailable",
+  chain,
+  target,
+  mode: "point_in_time",
+  scoringImpact: "none",
+  ...chainIdentity ? { chainIdentity } : {},
+  collection: { sourceClass: "direct_chain_rpc", rpcCalls, modelCalls: 0, marginalUsd: 0 },
+  ownerProbes: [],
+  authorities: [],
+  safeCompatibleMultisigs: [],
+  receipts: [],
+  limitations: [
+    "No direct-chain control claim was made because a block-consistent RPC capture was unavailable."
+  ],
+  note
+});
+async function collectEvmControlRealityFromTransport(chainInput, targetInput, transport) {
+  const chain = chainInput.trim().toLowerCase();
+  const target = normalizeAddress2(targetInput.trim());
+  if (!EVM_ADDRESS2.test(target)) throw new Error("valid EVM target address required");
+  if (!EXPECTED_EVM_CHAIN_IDS[chain]) {
+    return unavailableSnapshot(
+      chain,
+      target,
+      transport.calls,
+      `No expected chain id is configured for chain '${chain}'. No RPC reads were attempted.`
+    );
+  }
+  const chainIdentity = await captureChainIdentity(chain, transport);
+  if (chainIdentity.receipt.state !== "verified") {
+    return unavailableSnapshot(
+      chain,
+      target,
+      transport.calls,
+      chainIdentity.note ?? "RPC chain identity could not be verified. No block or contract reads were attempted.",
+      chainIdentity.receipt
+    );
+  }
+  const block = await captureBlock(transport);
+  const state = { transport, block, receipts: [] };
+  const targetCodeRead = await read(
+    state,
+    "eth_getCode",
+    target,
+    [target, block.tag],
+    void 0,
+    false
+  );
+  if (targetCodeRead.result == null) throw new Error("target bytecode read failed");
+  const targetBytes = hexBytes(targetCodeRead.result);
+  const targetCode = {
+    address: target,
+    accountType: targetBytes === 0 ? "no_code" : "contract",
+    byteLength: targetBytes,
+    ...targetBytes > 0 ? { sha256Fingerprint: sha2562(targetCodeRead.result) } : {},
+    receiptId: targetCodeRead.receipt.id
+  };
+  if (targetCode.accountType === "no_code") {
+    await verifyBlock(transport, block);
+    return {
+      schemaVersion: 1,
+      state: "not_contract",
+      chain,
+      target,
+      mode: "point_in_time",
+      scoringImpact: "none",
+      chainIdentity: chainIdentity.receipt,
+      capture: { blockNumber: block.number, blockHash: block.hash, blockTimestamp: block.timestamp, providerHost: transport.providerHost },
+      collection: { sourceClass: "direct_chain_rpc", rpcCalls: transport.calls, modelCalls: 0, marginalUsd: 0 },
+      targetCode,
+      ownerProbes: [],
+      authorities: [],
+      safeCompatibleMultisigs: [],
+      receipts: state.receipts,
+      limitations: ["The verified token address had no contract bytecode at the captured block."]
+    };
+  }
+  const runtimeImplementation = minimalProxyImplementation(targetCodeRead.result);
+  const implementationSlot = await readStorageAddress(state, target, ERC1967_IMPLEMENTATION_SLOT);
+  const beaconSlot = await readStorageAddress(state, target, ERC1967_BEACON_SLOT);
+  const adminSlot = await readStorageAddress(state, target, ERC1967_ADMIN_SLOT);
+  const indicators = [];
+  const implementationCandidates = [];
+  if (runtimeImplementation) {
+    indicators.push("eip_1167_minimal_proxy");
+    implementationCandidates.push({
+      address: runtimeImplementation.address,
+      evidence: "eip_1167_runtime",
+      receiptIds: [targetCodeRead.receipt.id],
+      extractionProof: runtimeImplementation.proof
+    });
+  }
+  if (implementationSlot.address) {
+    indicators.push("erc_1967_implementation_slot");
+    implementationCandidates.push({
+      address: implementationSlot.address,
+      evidence: "erc_1967_implementation_slot",
+      receiptIds: [implementationSlot.receipt.id]
+    });
+  }
+  let beaconImplementation = null;
+  let beaconImplementationReceiptId = null;
+  if (beaconSlot.address) {
+    indicators.push("erc_1967_beacon_slot");
+    const implementationRead = await ethCall(state, beaconSlot.address, IMPLEMENTATION_SELECTOR);
+    beaconImplementationReceiptId = implementationRead.receipt.id;
+    beaconImplementation = wordAddress(implementationRead.result ?? void 0);
+    if (beaconImplementation) {
+      implementationCandidates.push({
+        address: beaconImplementation,
+        evidence: "erc_1967_beacon_call",
+        receiptIds: [beaconSlot.receipt.id, implementationRead.receipt.id]
+      });
+    }
+  }
+  if (adminSlot.address) indicators.push("erc_1967_admin_slot");
+  const uniqueImplementations = [...new Set(implementationCandidates.map((row) => row.address))];
+  const implementationCode = /* @__PURE__ */ new Map();
+  for (const address of uniqueImplementations.slice(0, 3)) {
+    implementationCode.set(address, await readCode(state, address));
+  }
+  for (const row of implementationCandidates) {
+    row.code = implementationCode.get(row.address) ?? void 0;
+    if (row.code && !row.receiptIds.includes(row.code.receiptId)) row.receiptIds.push(row.code.receiptId);
+  }
+  const ownerProbes = [await ownerProbe(state, target, "target_owner")];
+  const authorityRows = [];
+  if (adminSlot.address) authorityRows.push({ address: adminSlot.address, relation: "proxy_admin", receiptId: adminSlot.receipt.id });
+  const targetOwner = ownerProbes[0];
+  if (targetOwner.state === "observed" && targetOwner.owner) {
+    authorityRows.push({ address: targetOwner.owner, relation: "target_owner", receiptId: targetOwner.receiptId });
+  }
+  const codeByAddress = /* @__PURE__ */ new Map();
+  for (const row of authorityRows) {
+    if (!codeByAddress.has(row.address)) codeByAddress.set(row.address, await readCode(state, row.address));
+  }
+  if (adminSlot.address && codeByAddress.get(adminSlot.address)?.accountType === "contract") {
+    const probe = await ownerProbe(state, adminSlot.address, "proxy_admin_owner");
+    ownerProbes.push(probe);
+    if (probe.state === "observed" && probe.owner) {
+      authorityRows.push({ address: probe.owner, relation: "proxy_admin_owner", receiptId: probe.receiptId });
+      if (!codeByAddress.has(probe.owner)) codeByAddress.set(probe.owner, await readCode(state, probe.owner));
+    }
+  }
+  if (beaconSlot.address) {
+    if (!codeByAddress.has(beaconSlot.address)) codeByAddress.set(beaconSlot.address, await readCode(state, beaconSlot.address));
+    if (codeByAddress.get(beaconSlot.address)?.accountType === "contract") {
+      const probe = await ownerProbe(state, beaconSlot.address, "beacon_owner");
+      ownerProbes.push(probe);
+      if (probe.state === "observed" && probe.owner) {
+        authorityRows.push({ address: probe.owner, relation: "beacon_owner", receiptId: probe.receiptId });
+        if (!codeByAddress.has(probe.owner)) codeByAddress.set(probe.owner, await readCode(state, probe.owner));
+      }
+    }
+  }
+  const authorities = mergeAuthorities(authorityRows, codeByAddress);
+  const safeCompatibleMultisigs = [];
+  for (const authority of authorities.filter((row) => row.accountType === "contract").slice(0, 4)) {
+    safeCompatibleMultisigs.push(await safeCompatibleProbe(state, authority.address));
+  }
+  await verifyBlock(transport, block);
+  const conflicting = uniqueImplementations.length > 1;
+  const standardSlotReadsComplete = [implementationSlot, beaconSlot, adminSlot].every((row) => row.decodeState === "observed" || row.decodeState === "zero_address");
+  const proxy = {
+    state: conflicting ? "conflicting_implementation_candidates" : indicators.length ? "standard_proxy_observed" : !standardSlotReadsComplete ? "standard_proxy_assessment_incomplete" : "no_standard_proxy_indicator",
+    indicators,
+    implementationCandidates,
+    ...beaconSlot.address ? { beacon: { address: beaconSlot.address, receiptId: beaconSlot.receipt.id } } : {},
+    ...adminSlot.address ? { admin: { address: adminSlot.address, receiptId: adminSlot.receipt.id } } : {}
+  };
+  const limitations = [
+    "No standard proxy indicator does not prove that the contract is immutable; custom proxy and diamond patterns were not assessed.",
+    "owner() probes do not enumerate role-based permissions, guardians, pausers, or off-chain signer arrangements.",
+    "Safe-compatible owner and threshold responses are interface evidence only, not proof of an official Safe deployment.",
+    "This frozen control snapshot does not claim that any observed authority has exercised its power."
+  ];
+  if (!standardSlotReadsComplete) {
+    limitations.push("At least one standard proxy storage read failed, so absence of a proxy indicator was withheld.");
+  }
+  if (beaconSlot.address && !beaconImplementation) {
+    limitations.push(`The ERC-1967 beacon slot was observed, but implementation() was unavailable at receipt ${beaconImplementationReceiptId ?? "unknown"}.`);
+  }
+  return {
+    schemaVersion: 1,
+    state: "observed",
+    chain,
+    target,
+    mode: "point_in_time",
+    scoringImpact: "none",
+    chainIdentity: chainIdentity.receipt,
+    capture: { blockNumber: block.number, blockHash: block.hash, blockTimestamp: block.timestamp, providerHost: transport.providerHost },
+    collection: { sourceClass: "direct_chain_rpc", rpcCalls: transport.calls, modelCalls: 0, marginalUsd: 0 },
+    targetCode,
+    proxy,
+    ownerProbes,
+    authorities,
+    safeCompatibleMultisigs,
+    receipts: state.receipts,
+    limitations
+  };
+}
+async function collectEvmControlReality(chainInput, targetInput, options = {}) {
+  const chain = chainInput.trim().toLowerCase();
+  const target = normalizeAddress2(targetInput.trim());
+  if (!EVM_ADDRESS2.test(target)) throw new Error("valid EVM target address required");
+  const urls = options.rpcUrls ?? PUBLIC_EVM_RPC[chain];
+  if (!urls?.length) return unavailableSnapshot(chain, target, 0, `No direct RPC is configured for chain '${chain}'.`);
+  let totalCalls = 0;
+  let lastError = "RPC capture failed";
+  let lastIdentityFailure = null;
+  for (const rpcUrl of urls) {
+    const transport = createHttpEvmRpcTransport(rpcUrl, options.fetchImpl, options.timeoutMs);
+    try {
+      const snapshot = await collectEvmControlRealityFromTransport(chain, target, transport);
+      if (snapshot.state === "unavailable" && (snapshot.chainIdentity?.state === "rpc_error" || snapshot.chainIdentity?.state === "malformed")) {
+        totalCalls += transport.calls;
+        lastError = snapshot.note ?? "RPC chain identity unavailable";
+        lastIdentityFailure = snapshot;
+        continue;
+      }
+      if (totalCalls > 0) snapshot.collection.rpcCalls += totalCalls;
+      return snapshot;
+    } catch (error) {
+      totalCalls += transport.calls;
+      lastError = safeError(error);
+    }
+  }
+  if (lastIdentityFailure) {
+    lastIdentityFailure.collection.rpcCalls = totalCalls;
+    lastIdentityFailure.note = `Direct RPC capture unavailable: ${lastError}`;
+    return lastIdentityFailure;
+  }
+  return unavailableSnapshot(chain, target, totalCalls, `Direct RPC capture unavailable: ${lastError}`);
+}
+
+// server/adapters/arkham.ts
+var MAX_SCREENED_WALLETS = 4;
+var DETAIL_BUDGET_MS = 25e3;
+var RISK_DETAIL = "GET /risk/address/{address}";
+var ATTRIBUTABLE = ["farcaster_verified", "self_disclosed"];
+var BINDING_STRENGTH = {
+  farcaster_verified: 2,
+  self_disclosed: 1,
+  handle_name_guess: 0
+};
+var CONTROL_TEST_CHAINS = ["ethereum", "base"];
+function screenableWallets(evidence) {
+  return evidence.wallets.filter((wallet) => Boolean(wallet.binding) && ATTRIBUTABLE.includes(wallet.binding)).sort((a, b) => BINDING_STRENGTH[b.binding] - BINDING_STRENGTH[a.binding]).slice(0, MAX_SCREENED_WALLETS);
+}
+async function probeEvmControl(address, fetchImpl = fetch) {
+  let answered = false;
+  for (const chain of CONTROL_TEST_CHAINS) {
+    for (const url of PUBLIC_EVM_RPC[chain] ?? []) {
+      const transport = createHttpEvmRpcTransport(url, fetchImpl, 6e3);
+      const reply = await transport.request("eth_getCode", [address, "latest"]);
+      recordCall(
+        "public-evm-rpc",
+        "arkham-control-test",
+        0,
+        `eth_getCode/${chain}`,
+        reply.ok ? "succeeded" : "failed"
+      );
+      if (!reply.ok || typeof reply.result !== "string") continue;
+      answered = true;
+      if (reply.result.replace(/^0x/i, "").length > 0) return "contract";
+      break;
+    }
+  }
+  return answered ? "eoa" : "inconclusive";
+}
+var needsControlTest = (wallet) => wallet.binding === "self_disclosed" && wallet.chain !== "solana";
+var screen = (wallet, status, detail, endpoints, extra = {}) => ({
+  status,
+  detail,
+  provider: "arkham",
+  endpoints,
+  capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+  binding: wallet.binding,
+  bindingNote: wallet.notes,
+  ...extra
+});
+var entityOf = (label) => label ? {
+  name: label.name,
+  type: label.type,
+  twitter: label.twitter,
+  isCex: label.isCex,
+  isService: label.isService,
+  isContract: label.isContract
+} : void 0;
+var exposed = (risk) => risk.isSeed || risk.level !== "" && risk.level.toUpperCase() !== "NONE" || risk.score > 0;
+var short = (address) => `${address.slice(0, 6)}\u2026${address.slice(-4)}`;
+var arkhamAdapter = {
+  id: "arkham",
+  label: "Wallet identity and risk exposure (Arkham)",
+  available: () => !!env("ARKHAM_API_KEY"),
+  applicable: (evidence) => screenableWallets(evidence).length > 0,
+  async run(ctx) {
+    const key = env("ARKHAM_API_KEY");
+    if (!key) return { state: "skipped", attempts: 0, detail: "Arkham is not configured" };
+    const wallets = screenableWallets(ctx.evidence);
+    if (!wallets.length) {
+      return { state: "skipped", attempts: 0, detail: "no evidence-bound subject wallet was available" };
+    }
+    ctx.emit({
+      phase: "On-chain",
+      label: "Wallet screening",
+      detail: `Screening ${wallets.length} address${wallets.length === 1 ? "" : "es"} the subject bound to itself.`,
+      source: "arkham",
+      tone: "neutral"
+    });
+    const control = /* @__PURE__ */ new Map();
+    await Promise.all(wallets.map(async (wallet) => {
+      if (!needsControlTest(wallet)) {
+        control.set(wallet.address.toLowerCase(), "established");
+        return;
+      }
+      try {
+        control.set(wallet.address.toLowerCase(), await probeEvmControl(wallet.address));
+      } catch {
+        control.set(wallet.address.toLowerCase(), "inconclusive");
+      }
+    }));
+    const addresses = wallets.map((wallet) => wallet.address);
+    const labels = await fetchAddressLabelsBatch(addresses, key);
+    recordCall(
+      "arkham",
+      "scan:address-labels-batch",
+      0,
+      `subscription/keyed \xB7 ${labels.rows.size}/${addresses.length} rows \xB7 provider credits not converted to USD`,
+      labels.outcome === "answered" ? "succeeded" : "failed"
+    );
+    const attributable = wallets.filter((wallet) => {
+      const key2 = wallet.address.toLowerCase();
+      return (control.get(key2) === "eoa" || control.get(key2) === "established") && labels.rows.get(key2)?.isContract !== true;
+    });
+    const risk = attributable.length ? await fetchAddressRiskBatch(attributable.map((wallet) => wallet.address), key) : null;
+    if (risk) {
+      recordCall(
+        "arkham",
+        "scan:risk-batch",
+        0,
+        risk.outcome === "unentitled" ? "risk-addon/not-entitled \xB7 provider credits not converted to USD" : `subscription/keyed \xB7 ${risk.rows.size}/${attributable.length} rows \xB7 provider credits not converted to USD`,
+        risk.outcome === "answered" ? "succeeded" : "failed"
+      );
+    }
+    if (risk?.outcome === "unentitled") {
+      ctx.emit({
+        phase: "On-chain",
+        label: "Wallet exposure not screened",
+        detail: "The Arkham subscription does not include its separate Risk Scoring add-on. This is a coverage gap, not a clean result.",
+        source: "arkham",
+        tone: "warn"
+      });
+    }
+    const labelSeeds = async (seeds) => {
+      const batch = await fetchAddressLabelsBatch(seeds, key);
+      recordCall(
+        "arkham",
+        "scan:seed-labels-batch",
+        0,
+        `subscription/keyed \xB7 ${batch.rows.size}/${seeds.length} rows \xB7 provider credits not converted to USD`,
+        batch.outcome === "answered" ? "succeeded" : "failed"
+      );
+      const names = /* @__PURE__ */ new Map();
+      for (const [address, label] of batch.rows) names.set(address, { name: label.name, type: label.type });
+      return { names, calls: 0, succeeded: 0 };
+    };
+    const deadline = Date.now() + DETAIL_BUDGET_MS;
+    const details = /* @__PURE__ */ new Map();
+    const detailMissed = /* @__PURE__ */ new Set();
+    if (risk?.outcome === "answered") {
+      const flagged = attributable.filter((wallet) => {
+        const row = risk.rows.get(wallet.address.toLowerCase());
+        return row ? exposed(row) : false;
+      });
+      await Promise.all(flagged.map(async (wallet) => {
+        const address = wallet.address.toLowerCase();
+        if (Date.now() >= deadline) {
+          detailMissed.add(address);
+          return;
+        }
+        try {
+          const result = await fetchAddressRiskPaths(wallet.address, key, labelSeeds);
+          for (let index = 0; index < result.calls; index += 1) {
+            recordCall(
+              "arkham",
+              "scan:risk-paths",
+              0,
+              "subscription/keyed \xB7 provider credits not converted to USD",
+              index < result.succeeded ? "succeeded" : "failed"
+            );
+          }
+          if (!result.available) {
+            detailMissed.add(address);
+            return;
+          }
+          details.set(address, result.paths.map((path) => ({
+            seed: path.seed,
+            seedName: path.seedName,
+            category: path.category,
+            direction: path.direction,
+            usd: path.usd,
+            hops: path.hops,
+            firstAt: path.firstAt,
+            lastAt: path.lastAt
+          })));
+        } catch {
+          detailMissed.add(address);
+        }
+      }));
+    }
+    let exposedCount = 0;
+    let clear = 0;
+    let unavailable = 0;
+    let contracts = 0;
+    for (const wallet of wallets) {
+      const address = wallet.address.toLowerCase();
+      const label = labels.rows.get(address);
+      const entity = entityOf(label);
+      const probe = control.get(address);
+      const endpoints = labels.outcome === "answered" ? [ARKHAM_INTEL_BATCH] : [];
+      if (label?.isContract === true || probe === "contract") {
+        contracts += 1;
+        wallet.screen = screen(
+          wallet,
+          "not_attributable",
+          "This address has contract code, so ARGUS did not treat it as a wallet the subject controls or attribute exposure to the subject.",
+          endpoints,
+          { entity }
+        );
+        continue;
+      }
+      if (probe === "inconclusive") {
+        unavailable += 1;
+        wallet.screen = screen(
+          wallet,
+          "unavailable",
+          "The public chain check could not confirm this was a wallet rather than a contract. Nothing was attributed; this is not a clean result.",
+          endpoints,
+          { entity }
+        );
+        continue;
+      }
+      const row = risk?.outcome === "answered" ? risk.rows.get(address) : void 0;
+      if (!row) {
+        unavailable += 1;
+        wallet.screen = screen(
+          wallet,
+          "unavailable",
+          risk?.outcome === "unentitled" ? "This Arkham subscription does not include exposure screening. This is a coverage gap, not a clean wallet." : risk?.outcome === "unavailable" ? "Arkham did not answer the exposure check. This is a coverage gap, not a clean wallet." : "Arkham returned no exposure result for this address. This is a coverage gap, not a clean wallet.",
+          [...endpoints, ARKHAM_RISK_BATCH],
+          { entity }
+        );
+        continue;
+      }
+      const riskEndpoints = [...endpoints, ARKHAM_RISK_BATCH];
+      if (!exposed(row)) {
+        clear += 1;
+        wallet.screen = screen(
+          wallet,
+          "no_exposure_found",
+          "Arkham screened this address and found no exposure to a flagged entity.",
+          riskEndpoints,
+          { entity }
+        );
+        continue;
+      }
+      exposedCount += 1;
+      wallet.screen = screen(
+        wallet,
+        "screened",
+        detailMissed.has(address) ? `Arkham scored this address ${row.level} (${row.score}/100), but the detailed path was unavailable.` : `Arkham scored this address ${row.level} (${row.score}/100).`,
+        detailMissed.has(address) ? riskEndpoints : [...riskEndpoints, RISK_DETAIL],
+        {
+          entity,
+          risk: {
+            level: row.level,
+            score: row.score,
+            greatestCategory: row.greatestCategory,
+            incomingUsd: row.incomingUsd,
+            outgoingUsd: row.outgoingUsd,
+            hopDistance: row.hopDistance,
+            isSeed: row.isSeed,
+            updatedAt: row.updatedAt,
+            topSources: details.get(address) ?? []
+          }
+        }
+      );
+      ctx.emit({
+        phase: "On-chain",
+        label: `${short(wallet.address)} exposure`,
+        detail: `${row.level} (${row.score}/100)${row.greatestCategory ? ` \xB7 ${row.greatestCategory}` : ""}. Bound by ${wallet.binding.replace(/_/g, " ")}.`,
+        source: "arkham",
+        tone: "bad"
+      });
+    }
+    const laneFailed = labels.outcome !== "answered" && (!risk || risk.outcome !== "answered");
+    return {
+      state: laneFailed ? "failed" : unavailable > 0 || contracts > 0 ? "partial" : "executed",
+      attempts: wallets.length,
+      detail: `${wallets.length} bound address${wallets.length === 1 ? "" : "es"} \xB7 ${exposedCount} exposed \xB7 ${clear} no exposure found \xB7 ${contracts} contract${contracts === 1 ? "" : "s"} \xB7 ${unavailable} unavailable`
+    };
+  }
+};
+
+// server/adapters/basicFacts.ts
+import { createHash as createHash6 } from "node:crypto";
 import { isIP as isIP2 } from "node:net";
 
 // src/lib/projectLeadRelevance.ts
@@ -20169,7 +21169,7 @@ async function discoverBasicFactLeadsDetailed(ctx, dependencies = {}, questions 
       questionIds: batchQuestions.map((question) => question.id),
       questionSpecific
     };
-    const questionFingerprint = createHash5("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
+    const questionFingerprint = createHash6("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
     const cacheKey = `basic-facts:${RESEARCH_CACHE_VERSION}:claude:${audience}:${phase}:${key}:${questionFingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
     const cached = await cacheRead(cacheKey);
     if (cached) {
@@ -20267,7 +21267,7 @@ async function discoverGrokBasicFactLeadsDetailed(ctx, questions, phase, options
       questionIds: batchQuestions.map((question) => question.id),
       questionSpecific
     };
-    const fingerprint = createHash5("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
+    const fingerprint = createHash6("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
     let attempts = 0;
     const text2 = await grokSearch(
       "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
@@ -20325,7 +21325,7 @@ async function discoverGroundedBasicFactLeadsDetailed(ctx, questions, phase) {
       questionIds: batchQuestions.map((question) => question.id),
       questionSpecific
     };
-    const fingerprint = createHash5("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
+    const fingerprint = createHash6("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
     const officialQueries = deterministicFundingSearchQueries(ctx, batchQuestions);
     const subject = canonicalSubject.replace(/"/g, "").trim();
     const text2 = await groundedSearch(
@@ -21339,7 +22339,7 @@ function directPersonLegalIdentityIsBound(passage, aliases, officialCounterparty
 function factId(subjectKey, predicate, value, legalIdentity = "") {
   const normalizedValue = canonicalBasicFactComparisonValue(predicate, searchable(value));
   const identity = `${subjectKey.toLowerCase()}::${predicate}::${normalizedValue}${legalIdentity ? `::${legalIdentity}` : ""}`;
-  return `basic_v1_${createHash5("sha256").update(identity).digest("hex")}`;
+  return `basic_v1_${createHash6("sha256").update(identity).digest("hex")}`;
 }
 var TOKEN_ENTITY_LEGAL_SUFFIX = "(?:global|group|holding|holdings|co|company|corp|corporation|inc|incorporated|limited|llc|ltd|plc)";
 var CAPTURED_TOKEN_ENTITY = "([^,.!?;]{1,100}?)(?=\\s+(?:and|but|that|which|while|who)\\b|[,.;:!?)]|$)";
@@ -21969,7 +22969,7 @@ async function fetchSecExchangeRegistry() {
     host: "www.sec.gov",
     contentType: response.headers.get("content-type") ?? "application/json",
     text: text2,
-    contentHash: createHash5("sha256").update(text2).digest("hex"),
+    contentHash: createHash6("sha256").update(text2).digest("hex"),
     capturedAt: captureTimestamp()
   };
 }
@@ -22859,7 +23859,7 @@ var basicFactsAdapter = {
 };
 
 // server/adapters/offchain.ts
-import { createHash as createHash6 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 
 // src/lib/offchainEvidence.ts
 var asRecord4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -22869,7 +23869,7 @@ var aggregateStatus2 = (attempts) => {
   if (attempts.every((attempt) => attempt.status === "failed")) return "failed";
   return "partial";
 };
-var sha2562 = async (value) => {
+var sha2563 = async (value) => {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
@@ -23180,7 +24180,7 @@ async function loadOfacNames(fetcher, cache) {
         return {
           names: names2,
           attempts: [],
-          indexHash: await sha2562([...names2].sort().join("\n"))
+          indexHash: await sha2563([...names2].sort().join("\n"))
         };
       }
     }
@@ -23227,7 +24227,7 @@ async function loadOfacNames(fetcher, cache) {
   return {
     names: validIndex ? names : /* @__PURE__ */ new Set(),
     attempts: [attempt],
-    ...validIndex ? { indexHash: await sha2562([...names].sort().join("\n")) } : {}
+    ...validIndex ? { indexHash: await sha2563([...names].sort().join("\n")) } : {}
   };
 }
 async function loadOfacEntityNames(fetcher, cache) {
@@ -23239,7 +24239,7 @@ async function loadOfacEntityNames(fetcher, cache) {
         return {
           names,
           attempts: [],
-          indexHash: await sha2562([...names].sort().join("\n"))
+          indexHash: await sha2563([...names].sort().join("\n"))
         };
       }
     }
@@ -23287,7 +24287,7 @@ async function loadOfacEntityNames(fetcher, cache) {
   return {
     names: validIndex ? entityNames : /* @__PURE__ */ new Set(),
     attempts: [attempt],
-    ...validIndex ? { indexHash: await sha2562([...entityNames].sort().join("\n")) } : {}
+    ...validIndex ? { indexHash: await sha2563([...entityNames].sort().join("\n")) } : {}
   };
 }
 async function collectOfacName(rawName, options = {}) {
@@ -23455,7 +24455,7 @@ var asIso = (value) => {
   }
   return void 0;
 };
-var hashArtifact = (artifact) => createHash6("sha256").update(JSON.stringify({
+var hashArtifact = (artifact) => createHash7("sha256").update(JSON.stringify({
   kind: artifact.kind,
   provider: artifact.provider,
   title: artifact.title,
@@ -24066,11 +25066,16 @@ async function getJson(url) {
 async function web3bio(name) {
   const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);
   const arr = Array.isArray(d) ? d : d ? [d] : [];
-  return arr.find((x) => x && typeof x.address === "string" && x.address)?.address ?? null;
+  for (const row of arr) {
+    const address = row?.address;
+    if (typeof address === "string" && address) return address;
+  }
+  return null;
 }
 async function ensideas(name) {
   const d = await getJson(`https://api.ensideas.com/ens/resolve/${encodeURIComponent(name)}`);
-  return d && typeof d.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(d.address) ? d.address : null;
+  const address = d?.address;
+  return typeof address === "string" && /^0x[a-fA-F0-9]{40}$/.test(address) ? address : null;
 }
 async function snsResolve(name) {
   const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);
@@ -24099,8 +25104,9 @@ async function farcasterWallets(handle) {
   const fid = ud?.result?.user?.fid;
   if (!fid) return [];
   const vd = await getJson(`https://api.warpcast.com/v2/verifications?fid=${fid}`);
-  const verifs = vd?.result?.verifications ?? [];
-  return verifs.filter((v) => typeof v.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(v.address)).map((v) => ({ address: v.address, chain: "evm", source: `Farcaster verified wallet (@${u})`, tier: "InvestigatorAttributed" }));
+  const verifs = vd?.result?.verifications;
+  if (!Array.isArray(verifs)) return [];
+  return verifs.map((row) => row?.address).filter((address) => typeof address === "string" && /^0x[a-fA-F0-9]{40}$/.test(address)).map((address) => ({ address, chain: "evm", source: `Farcaster verified wallet (@${u})`, tier: "InvestigatorAttributed", binding: "farcaster_verified" }));
 }
 async function resolveWalletsFromText(text2) {
   if (!text2) return [];
@@ -24111,7 +25117,7 @@ async function resolveWalletsFromText(text2) {
     const k = address.toLowerCase();
     if (seen.has(k)) return;
     seen.add(k);
-    out.push({ address, chain, source: source2, tier: "SelfDoxxed" });
+    out.push({ address, chain, source: source2, tier: "SelfDoxxed", binding: "self_disclosed" });
   };
   for (const m of text2.matchAll(ADDR_IN_TEXT)) add(m[0], "evm", "0x address self-disclosed in X bio/posts");
   const names = /* @__PURE__ */ new Set();
@@ -24139,14 +25145,14 @@ async function resolveForHandle(handle, text2, opts = {}) {
   if (opts.includePossible) {
     for (const nm of [`${u}.eth`, `${u}.base.eth`]) {
       const r = await resolveName(nm);
-      if (r) add({ address: r.address, chain: r.chain, source: `${nm} (handle-name match, unconfirmed)`, tier: "InvestigatorAttributed" });
+      if (r) add({ address: r.address, chain: r.chain, source: `${nm} (handle-name match, unconfirmed)`, tier: "InvestigatorAttributed", binding: "handle_name_guess" });
     }
   }
   return out.slice(0, 8);
 }
 
 // server/adapters/trustgraph.ts
-import { createHash as createHash7 } from "node:crypto";
+import { createHash as createHash8 } from "node:crypto";
 
 // src/lib/reportPresentation.ts
 var VERDICT_COLORS = Object.freeze({
@@ -24491,7 +25497,7 @@ function stableValue(value) {
   );
 }
 function semanticHash(value) {
-  return createHash7("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
+  return createHash8("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
 }
 function semanticContribution(contribution) {
   const stableJson2 = (value) => JSON.stringify(stableValue(value));
@@ -24734,7 +25740,7 @@ async function collectTrustGraph(ctx, current) {
     });
     const status = connectedUnqualified.length ? "incomplete" : adverse.length ? "risk" : "clear";
     const line = connectedUnqualified.length ? `${connectedUnqualified.length} graph connection${connectedUnqualified.length === 1 ? "" : "s"} could not be qualified because the linked immutable report is not the active case projection, or is stale, partial, or incompletely attested.` : adverse.length ? `${adverse.length} exact, coverage-qualified connection${adverse.length === 1 ? "" : "s"} lead to prior FAIL/AVOID reports. Review the frozen ties before relying on the score.` : connections.length ? `${connections.length} exact graph connection${connections.length === 1 ? "" : "s"} were reconciled; none lead to a coverage-qualified FAIL/AVOID report.` : "No connection to a prior authoritative ARGUS report was found in the organization graph.";
-    const screen = {
+    const screen2 = {
       provider: "argus-graph",
       capturedAt,
       status,
@@ -24745,7 +25751,7 @@ async function collectTrustGraph(ctx, current) {
       line,
       connections
     };
-    ctx.evidence.trustGraphScreen = screen;
+    ctx.evidence.trustGraphScreen = screen2;
     ctx.evidence.sourceArtifacts.push({
       kind: "trust_graph",
       provider: "argus-graph",
@@ -24819,7 +25825,7 @@ async function collectTrustGraph(ctx, current) {
 }
 
 // server/adapters/portfolio.ts
-import { createHash as createHash8 } from "node:crypto";
+import { createHash as createHash9 } from "node:crypto";
 import { isIP as isIP3 } from "node:net";
 
 // server/adapters/investorDiscovery.ts
@@ -25045,7 +26051,7 @@ var canonicalSubjectHandle = (value) => {
   const bare = value.trim().replace(/^@/, "");
   return /^[A-Za-z0-9_]{1,30}$/.test(bare) ? `@${bare.toLowerCase()}` : null;
 };
-var attributionProofHash = (value) => createHash8("sha256").update(JSON.stringify(value)).digest("hex");
+var attributionProofHash = (value) => createHash9("sha256").update(JSON.stringify(value)).digest("hex");
 function sourcePathBindsSubjectHandle(sourceUrl2, subjectHandle) {
   try {
     const tokens = decodeURIComponent(new URL(sourceUrl2).pathname).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
@@ -25360,7 +26366,7 @@ function registrableApprox2(host) {
   return twoLevelSuffix.has(tail) ? parts.slice(-3).join(".") : tail;
 }
 function artifactHash(artifact) {
-  return createHash8("sha256").update(JSON.stringify(artifact)).digest("hex");
+  return createHash9("sha256").update(JSON.stringify(artifact)).digest("hex");
 }
 async function collectPortfolioRelationships(ctx, dependencies = {}) {
   const discover = dependencies.discover ?? discoverPortfolioCandidates;
@@ -25486,7 +26492,7 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
     const projectBoundRows = rows.filter((row) => Boolean(row.officialProjectDomain));
     const authoritative = projectBoundRows.some((row) => row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" || row.sourceClass === "public_primary");
     const pressDomains = new Set(projectBoundRows.filter((row) => row.sourceClass === "independent_press").map((row) => registrableApprox2(row.document.host)));
-    const pressFingerprints = new Set(projectBoundRows.filter((row) => row.sourceClass === "independent_press").map((row) => createHash8("sha256").update(normalized(row.match.excerpt ?? "")).digest("hex")));
+    const pressFingerprints = new Set(projectBoundRows.filter((row) => row.sourceClass === "independent_press").map((row) => createHash9("sha256").update(normalized(row.match.excerpt ?? "")).digest("hex")));
     const pressConfirmed = pressDomains.size >= 2 && pressFingerprints.size >= 2;
     const confirmed = authoritative || pressConfirmed;
     confirmationByProject.set(project, { confirmed, pressConfirmed });
@@ -25581,7 +26587,7 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
 }
 
 // server/adapters/fundScale.ts
-import { createHash as createHash9 } from "node:crypto";
+import { createHash as createHash10 } from "node:crypto";
 import { isIP as isIP4 } from "node:net";
 var MAX_CANDIDATES2 = 6;
 var MAX_SOURCES_PER_CANDIDATE2 = 3;
@@ -26023,7 +27029,7 @@ function claimGroupMetric(metric) {
   return metric;
 }
 function artifactHash2(artifact) {
-  return createHash9("sha256").update(JSON.stringify(artifact)).digest("hex");
+  return createHash10("sha256").update(JSON.stringify(artifact)).digest("hex");
 }
 function amountLabel(amountUsd) {
   if (amountUsd >= 1e12) return `$${(amountUsd / 1e12).toFixed(amountUsd % 1e12 ? 1 : 0)}T`;
@@ -26044,7 +27050,7 @@ function deterministicClaimId(base, rows) {
   const representativeAmount = amounts[Math.floor((amounts.length - 1) / 2)];
   const dates = rows.map((row) => row.match.asOf).filter((value) => Boolean(value)).map((value) => new Date(value).getTime()).sort((left, right) => left - right);
   const representativeDate = dates.length ? new Date(dates[Math.floor((dates.length - 1) / 2)]).toISOString().slice(0, 10) : "fixed";
-  const digest = createHash9("sha256").update(JSON.stringify({ base, representativeAmount, representativeDate })).digest("hex");
+  const digest = createHash10("sha256").update(JSON.stringify({ base, representativeAmount, representativeDate })).digest("hex");
   return `fund_scale_claim_v1_${digest}`;
 }
 function clusterSupportedRows(rows) {
@@ -26180,8 +27186,8 @@ async function collectFundScale(ctx, dependencies = {}) {
     const otherDomain = documentRegistrableDomain(other.document);
     const distinctDomains = Boolean(rowDomain && otherDomain && rowDomain !== otherDomain);
     const distinctContent = /^[a-f0-9]{64}$/i.test(row.document.contentHash) && /^[a-f0-9]{64}$/i.test(other.document.contentHash) && row.document.contentHash.toLowerCase() !== other.document.contentHash.toLowerCase();
-    const rowExcerptHash = createHash9("sha256").update(normalized2(row.match.excerpt)).digest("hex");
-    const otherExcerptHash = createHash9("sha256").update(normalized2(other.match.excerpt)).digest("hex");
+    const rowExcerptHash = createHash10("sha256").update(normalized2(row.match.excerpt)).digest("hex");
+    const otherExcerptHash = createHash10("sha256").update(normalized2(other.match.excerpt)).digest("hex");
     return distinctDomains && distinctContent && rowExcerptHash !== otherExcerptHash;
   };
   const pressRowCorroborated = (row, rows) => pressRowEligible(row) && rows.some((other) => other !== row && pressRowEligible(other) && independentPressPair(row, other));
@@ -26470,7 +27476,7 @@ var MAX_CANDIDATES3 = 3;
 var MAX_HISTORY_POINTS = 90;
 var PRICE_TOLERANCE = 0.25;
 var MIN_POOL_LIQUIDITY_USD = 25e3;
-var EVM_ADDRESS2 = /^0x[a-fA-F0-9]{40}$/;
+var EVM_ADDRESS3 = /^0x[a-fA-F0-9]{40}$/;
 var SOLANA_ADDRESS3 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 var PLATFORM_CHAIN = {
   solana: "solana",
@@ -26506,7 +27512,7 @@ var finiteNumber2 = (value) => {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(parsed) ? parsed : void 0;
 };
-var cleanText = (value) => typeof value === "string" ? value.trim() : "";
+var cleanText2 = (value) => typeof value === "string" ? value.trim() : "";
 var normalized3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 var projectName = (value) => value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*/)[0]?.trim() || value.trim();
 var GENERIC_NAME_SUFFIX = /^(?:finance|protocol|labs?|network|official|app|exchange|capital|fund|foundation|dao|token|coin|money|cash|club|world|games?|inu)$/i;
@@ -26591,9 +27597,9 @@ async function coinSearch(query) {
   }
   const valid = rows.flatMap((candidate) => {
     if (!isRecord3(candidate)) return [];
-    const id = cleanText(candidate.id);
-    const name = cleanText(candidate.name);
-    const symbol = cleanText(candidate.symbol);
+    const id = cleanText2(candidate.id);
+    const name = cleanText2(candidate.name);
+    const symbol = cleanText2(candidate.symbol);
     if (!id || !name) return [];
     return [{
       id,
@@ -26681,31 +27687,31 @@ async function coinByContract(platform, address) {
     recordCall("coingecko", "project-contract", 0, `${tier} \xB7 response_json_error`, "failed");
     return { state: "failed" };
   }
-  if (!isRecord3(payload) || !cleanText(payload.id)) {
+  if (!isRecord3(payload) || !cleanText2(payload.id)) {
     recordCall("coingecko", "project-contract", 0, `${tier} \xB7 result_shape_error`, "partial");
     return { state: "failed" };
   }
-  recordCall("coingecko", "project-contract", 0, `${tier} \xB7 ${cleanText(payload.id)}`, "succeeded");
+  recordCall("coingecko", "project-contract", 0, `${tier} \xB7 ${cleanText2(payload.id)}`, "succeeded");
   return { state: "ok", details: payload };
 }
 function parseSeededContract(ctx) {
-  const address = cleanText(ctx.tokenAddress);
-  const chain = cleanText(ctx.tokenChain).toLowerCase();
+  const address = cleanText2(ctx.tokenAddress);
+  const chain = cleanText2(ctx.tokenChain).toLowerCase();
   if (!address || !chain) return null;
   const platform = CHAIN_PLATFORM[chain];
   if (!platform) return null;
-  const addressValid = chain === "solana" ? SOLANA_ADDRESS3.test(address) : EVM_ADDRESS2.test(address);
+  const addressValid = chain === "solana" ? SOLANA_ADDRESS3.test(address) : EVM_ADDRESS3.test(address);
   return addressValid ? { address, chain, platform } : null;
 }
 var validContract = (platform, value) => {
-  const address = cleanText(value);
+  const address = cleanText2(value);
   if (!address) return null;
   if (platform === "solana") return SOLANA_ADDRESS3.test(address) ? address : null;
-  return PLATFORM_CHAIN[platform] && EVM_ADDRESS2.test(address) ? address : null;
+  return PLATFORM_CHAIN[platform] && EVM_ADDRESS3.test(address) ? address : null;
 };
 function canonicalContract(details) {
   const platforms = isRecord3(details.platforms) ? details.platforms : {};
-  const native = cleanText(details.asset_platform_id);
+  const native = cleanText2(details.asset_platform_id);
   const order = [...new Set([
     native,
     "solana",
@@ -26735,7 +27741,7 @@ var officialHomepages = (details) => {
 var domainsMatch = (left, right) => left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
 function verifyIdentity(ctx, details) {
   const links = isRecord3(details.links) ? details.links : {};
-  const officialHandle = cleanText(links.twitter_screen_name);
+  const officialHandle = cleanText2(links.twitter_screen_name);
   const exactX = officialHandle && normalizeHandle3(officialHandle) === normalizeHandle3(ctx.handle);
   const homepages = officialHomepages(details);
   if (exactX) {
@@ -26760,7 +27766,7 @@ function verifyIdentity(ctx, details) {
   };
 }
 var xHandleFromUrl = (value) => {
-  const raw = cleanText(value);
+  const raw = cleanText2(value);
   if (!raw) return null;
   try {
     const url = new URL(raw);
@@ -26776,7 +27782,7 @@ function dexIdentity(ctx, row) {
   const info = isRecord3(row.info) ? row.info : {};
   const websites = Array.isArray(info.websites) ? info.websites.flatMap((candidate) => {
     if (!isRecord3(candidate)) return [];
-    const url = cleanText(candidate.url);
+    const url = cleanText2(candidate.url);
     return canonicalOfficialWebsite(url) ? [url] : [];
   }) : [];
   const handles = Array.isArray(info.socials) ? info.socials.flatMap((candidate) => {
@@ -26854,12 +27860,12 @@ function dexProjectCandidates(ctx, query, rows) {
   const queryWords = cleanQuery.toLowerCase().split(/\s+/).filter((word) => word.length >= 3);
   const candidates = rows.flatMap((row) => {
     const base = isRecord3(row.baseToken) ? row.baseToken : {};
-    const name = cleanText(base.name);
-    const symbol = cleanText(base.symbol).toUpperCase();
-    const address = cleanText(base.address);
-    const chain = cleanText(row.chainId).toLowerCase();
-    const pairAddress = cleanText(row.pairAddress);
-    const sourceUrl2 = cleanText(row.url);
+    const name = cleanText2(base.name);
+    const symbol = cleanText2(base.symbol).toUpperCase();
+    const address = cleanText2(base.address);
+    const chain = cleanText2(row.chainId).toLowerCase();
+    const pairAddress = cleanText2(row.pairAddress);
+    const sourceUrl2 = cleanText2(row.url);
     const nameKey = normalized3(name);
     const symbolKey = normalized3(symbol);
     let relevance = 0;
@@ -26867,7 +27873,7 @@ function dexProjectCandidates(ctx, query, rows) {
     else if (nameKey && queryKey && (nameKey.includes(queryKey) || queryKey.includes(nameKey))) relevance += 600;
     relevance += queryWords.filter((word) => name.toLowerCase().includes(word)).length * 80;
     if (symbolKey && symbolKey === queryKey) relevance += 500;
-    const addressValid = chain === "solana" ? SOLANA_ADDRESS3.test(address) : EVM_ADDRESS2.test(address);
+    const addressValid = chain === "solana" ? SOLANA_ADDRESS3.test(address) : EVM_ADDRESS3.test(address);
     if (!name || !symbol || !addressValid || !chain || !pairAddress || !sourceUrl2 || relevance < 500) return [];
     const identity = dexIdentity(ctx, row);
     if (!identity) return [];
@@ -26957,7 +27963,7 @@ async function collectDexProjectToken(ctx, query) {
 }
 function cgHandleBoundHomepages(ctx, details) {
   const links = isRecord3(details.links) ? details.links : {};
-  const officialHandle = cleanText(links.twitter_screen_name);
+  const officialHandle = cleanText2(links.twitter_screen_name);
   if (!officialHandle || normalizeHandle3(officialHandle) !== normalizeHandle3(ctx.handle)) return [];
   return officialHomepages(details);
 }
@@ -26971,7 +27977,7 @@ function dexHandleBoundHomepages(ctx, row) {
   if (!handles.some((handle) => handle === normalizeHandle3(ctx.handle))) return [];
   const websites = Array.isArray(info.websites) ? info.websites.flatMap((candidate) => {
     if (!isRecord3(candidate)) return [];
-    const url = cleanText(candidate.url);
+    const url = cleanText2(candidate.url);
     return canonicalOfficialWebsite(url) ? [url] : [];
   }) : [];
   return websites;
@@ -27038,10 +28044,10 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl) {
     return r - l;
   })[0];
   const base = isRecord3(best.baseToken) ? best.baseToken : {};
-  const name = cleanText(base.name) || cleanText(ctx.evidence.profile.display_name);
-  const symbol = cleanText(base.symbol);
-  const chain = cleanText(best.chainId);
-  const pairAddress = cleanText(best.pairAddress);
+  const name = cleanText2(base.name) || cleanText2(ctx.evidence.profile.display_name);
+  const symbol = cleanText2(base.symbol);
+  const chain = cleanText2(best.chainId);
+  const pairAddress = cleanText2(best.pairAddress);
   if (!symbol || !chain) return null;
   const info = isRecord3(best.info) ? best.info : {};
   const priceUsd = finiteNumber2(best.priceUsd);
@@ -27049,7 +28055,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl) {
   const marketCapUsd = finiteNumber2(best.marketCap);
   const fdvUsd = finiteNumber2(best.fdv);
   const volume24hUsd = isRecord3(best.volume) ? finiteNumber2(best.volume.h24) : void 0;
-  const dexSourceUrl = cleanText(best.url) || `${DEXSCREENER}/${encodeURIComponent(only.address)}`;
+  const dexSourceUrl = cleanText2(best.url) || `${DEXSCREENER}/${encodeURIComponent(only.address)}`;
   const hasMarketRead = priceUsd !== void 0 || marketCapUsd !== void 0 || fdvUsd !== void 0 || volume24hUsd !== void 0;
   const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: void 0, attempts: 0 };
   return {
@@ -27084,7 +28090,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl) {
       ...fdvUsd !== void 0 ? { fdvUsd } : {},
       ...volume24hUsd !== void 0 ? { volume24hUsd } : {},
       ...historyResult.history ? { history: historyResult.history } : {},
-      ...cleanText(info.imageUrl) ? { imageUrl: cleanText(info.imageUrl) } : {},
+      ...cleanText2(info.imageUrl) ? { imageUrl: cleanText2(info.imageUrl) } : {},
       ...pairAddress ? { pairAddress } : {}
     }
   };
@@ -27158,10 +28164,10 @@ function selectPriceCorroboratedPair(rows, token, coingeckoPrice) {
   const candidates = rows.flatMap((row) => {
     const baseToken = isRecord3(row.baseToken) ? row.baseToken : {};
     const quoteToken = isRecord3(row.quoteToken) ? row.quoteToken : {};
-    const baseAddress = cleanText(baseToken.address);
-    const chain = cleanText(row.chainId).toLowerCase();
+    const baseAddress = cleanText2(baseToken.address);
+    const chain = cleanText2(row.chainId).toLowerCase();
     const priceUsd = finiteNumber2(row.priceUsd);
-    const pairAddress = cleanText(row.pairAddress);
+    const pairAddress = cleanText2(row.pairAddress);
     if (!baseAddress || !sameAddress(baseAddress, token.address) || chain !== token.chain || !priceUsd || priceUsd <= 0 || !pairAddress) return [];
     const difference = Math.abs(priceUsd - coingeckoPrice) / coingeckoPrice;
     if (difference > PRICE_TOLERANCE) return [];
@@ -27170,10 +28176,10 @@ function selectPriceCorroboratedPair(rows, token, coingeckoPrice) {
     return [{
       pairAddress,
       chain,
-      quoteSymbol: cleanText(quoteToken.symbol),
+      quoteSymbol: cleanText2(quoteToken.symbol),
       priceUsd,
       liquidityUsd: liquidity,
-      sourceUrl: cleanText(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`
+      sourceUrl: cleanText2(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`
     }];
   });
   return candidates.sort(
@@ -27442,21 +28448,21 @@ async function collectProjectTokenIdentity(ctx) {
   const totalSupply = finiteNumber2(market.total_supply);
   const maxSupply = finiteNumber2(market.max_supply);
   const athPrice = isRecord3(market.ath) ? finiteNumber2(market.ath.usd) : void 0;
-  const athDateRaw = isRecord3(market.ath_date) ? cleanText(market.ath_date.usd) : "";
+  const athDateRaw = isRecord3(market.ath_date) ? cleanText2(market.ath_date.usd) : "";
   const athDrawdown = isRecord3(market.ath_change_percentage) ? finiteNumber2(market.ath_change_percentage.usd) : void 0;
   const ath = athPrice !== void 0 || athDateRaw || athDrawdown !== void 0 ? {
     ...athPrice !== void 0 ? { priceUsd: athPrice } : {},
     ...athDateRaw ? { date: athDateRaw } : {},
     ...athDrawdown !== void 0 ? { drawdownPct: athDrawdown } : {}
   } : void 0;
-  const id = cleanText(details.id);
-  const name = cleanText(details.name);
-  const symbol = cleanText(details.symbol).toUpperCase();
+  const id = cleanText2(details.id);
+  const name = cleanText2(details.name);
+  const symbol = cleanText2(details.symbol).toUpperCase();
   if (!id || !name || !symbol) {
     return { state: "partial", detail: "verified CoinGecko identity had incomplete token metadata", attempts: 1 + detailAttempts };
   }
   const collectedAt = captureTimestamp();
-  const providerUpdatedAt = cleanText(details.last_updated);
+  const providerUpdatedAt = cleanText2(details.last_updated);
   const providerUpdatedMs = Date.parse(providerUpdatedAt);
   const normalizedProviderUpdatedAt = Number.isFinite(providerUpdatedMs) ? new Date(providerUpdatedMs).toISOString() : void 0;
   const pairs = await dexPairs(contract.address);
@@ -27549,7 +28555,7 @@ async function collectVentureTokenIdentity(venture) {
     const details = await coinDetails(candidate.id);
     if (!details) continue;
     const links = isRecord3(details.links) ? details.links : {};
-    const officialHandle = cleanText(links.twitter_screen_name);
+    const officialHandle = cleanText2(links.twitter_screen_name);
     const exactX = Boolean(ventureHandle && officialHandle && normalizeHandle3(officialHandle) === ventureHandle);
     const homepages = officialHomepages(details);
     const domainHomepage = ventureScope ? homepages.find((candidateHome) => {
@@ -27559,15 +28565,15 @@ async function collectVentureTokenIdentity(venture) {
     if (!exactX && !domainHomepage) continue;
     const contract = canonicalContract(details);
     if (!contract) continue;
-    const id = cleanText(details.id);
-    const name = cleanText(details.name);
-    const symbol = cleanText(details.symbol).toUpperCase();
+    const id = cleanText2(details.id);
+    const name = cleanText2(details.name);
+    const symbol = cleanText2(details.symbol).toUpperCase();
     if (!id || !name || !symbol) continue;
     const market = isRecord3(details.market_data) ? details.market_data : {};
     const currentPrice = isRecord3(market.current_price) ? finiteNumber2(market.current_price.usd) : void 0;
     const marketCap = isRecord3(market.market_cap) ? finiteNumber2(market.market_cap.usd) : void 0;
     const capturedAt = captureTimestamp();
-    const providerUpdatedAt = cleanText(details.last_updated);
+    const providerUpdatedAt = cleanText2(details.last_updated);
     const providerUpdatedMs = Date.parse(providerUpdatedAt);
     const normalizedProviderUpdatedAt = Number.isFinite(providerUpdatedMs) ? new Date(providerUpdatedMs).toISOString() : void 0;
     const sourceUrl2 = `https://www.coingecko.com/en/coins/${encodeURIComponent(id)}`;
@@ -27605,7 +28611,7 @@ async function collectVentureTokenIdentity(venture) {
 }
 
 // server/basicFactsProjection.ts
-import { createHash as createHash10 } from "node:crypto";
+import { createHash as createHash11 } from "node:crypto";
 var CRITICAL = /* @__PURE__ */ new Set([
   "official_identity",
   "current_role",
@@ -27620,7 +28626,7 @@ var FOUNDER_ROLE = /\b(?:co[- ]?)?founder\b|\bcreator\b/i;
 var CURRENT_AUTHORITY_ROLE = /\b(?:co[- ]?)?founder\b|\b(?:chief\s+executive\s+officer|ceo|chair(?:man|woman)?|president|owner|managing\s+partner|general\s+partner|director|head|lead)\b/i;
 var normalizeValue = (value) => value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
 var normalizeFactValue = (predicate, value) => canonicalBasicFactComparisonValue(predicate, normalizeValue(value));
-var hash2 = (value) => createHash10("sha256").update(JSON.stringify(value)).digest("hex");
+var hash2 = (value) => createHash11("sha256").update(JSON.stringify(value)).digest("hex");
 function factId2(subjectKey, predicate, value) {
   return `basic_v1_${hash2(`${subjectKey.toLowerCase()}::${predicate}::${normalizeFactValue(predicate, value)}`)}`;
 }
@@ -29399,7 +30405,7 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
   const capturedAt = captureTimestamp();
   const name = subjectName3.trim();
   const officialHost2 = officialSite ? registrableHost(officialSite) : null;
-  const empty = (note) => ({
+  const empty2 = (note) => ({
     available: false,
     note,
     securityPageUrl: null,
@@ -29408,7 +30414,7 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
     corroborated: [],
     capturedAt
   });
-  if (name.length < 2) return empty("No subject name to corroborate against.");
+  if (name.length < 2) return empty2("No subject name to corroborate against.");
   const conventionCandidates = [];
   if (officialSite) {
     try {
@@ -29418,7 +30424,7 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
     }
   }
   const candidates = [.../* @__PURE__ */ new Set([...candidateUrls, ...conventionCandidates])].slice(0, 4);
-  if (!candidates.length) return empty("No candidate security pages.");
+  if (!candidates.length) return empty2("No candidate security pages.");
   const urlLeads = /* @__PURE__ */ new Map();
   for (const link of candidateUrls) {
     let parsed;
@@ -29450,7 +30456,7 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, 
     const named2 = AUDITOR_REGISTRY.filter((auditor) => auditor.pattern.test(html));
     if (named2.length) matchedPages.push({ url: candidate, html, named: named2 });
   }
-  if (!matchedPages.length && !urlLeads.size) return empty("No fetchable security page or audit link named a known auditor.");
+  if (!matchedPages.length && !urlLeads.size) return empty2("No fetchable security page or audit link named a known auditor.");
   const primary = matchedPages.length ? matchedPages.reduce((best, page) => page.named.length > best.named.length ? page : best) : null;
   const securityPageUrl = primary?.url ?? [...urlLeads.values()].flatMap((entry) => entry.auditorDomainLinks)[0] ?? candidateUrls.find((link) => /^https?:\/\//i.test(link)) ?? candidates[0];
   const named = AUDITOR_REGISTRY.filter((auditor) => matchedPages.some((page) => page.named.includes(auditor)) || urlLeads.has(auditor.name));
@@ -29527,569 +30533,6 @@ ${sourceUrl2}`;
     corroborated,
     capturedAt
   };
-}
-
-// server/adapters/evmControlReality.ts
-import { createHash as createHash11 } from "node:crypto";
-var EVM_ADDRESS3 = /^0x[a-fA-F0-9]{40}$/;
-var HEX = /^0x[0-9a-fA-F]*$/;
-var ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-var ERC1967_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
-var ERC1967_BEACON_SLOT = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50";
-var ERC1967_ADMIN_SLOT = "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
-var IMPLEMENTATION_SELECTOR = "0x5c60da1b";
-var OWNER_SELECTOR = "0x8da5cb5b";
-var SAFE_GET_OWNERS_SELECTOR = "0xa0e67e2b";
-var SAFE_GET_THRESHOLD_SELECTOR = "0xe75235b8";
-var PUBLIC_EVM_RPC = {
-  ethereum: ["https://ethereum-rpc.publicnode.com", "https://cloudflare-eth.com"],
-  base: ["https://base-rpc.publicnode.com", "https://mainnet.base.org"],
-  bsc: ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.binance.org"],
-  polygon: ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com"],
-  arbitrum: ["https://arbitrum-one-rpc.publicnode.com", "https://arb1.arbitrum.io/rpc"],
-  optimism: ["https://optimism-rpc.publicnode.com", "https://mainnet.optimism.io"],
-  avalanche: ["https://avalanche-c-chain-rpc.publicnode.com", "https://api.avax.network/ext/bc/C/rpc"]
-};
-var EXPECTED_EVM_CHAIN_IDS = {
-  ethereum: "0x1",
-  base: "0x2105",
-  bsc: "0x38",
-  polygon: "0x89",
-  arbitrum: "0xa4b1",
-  optimism: "0xa",
-  avalanche: "0xa86a"
-};
-var normalizeAddress2 = (value) => value.toLowerCase();
-var wordAddress = (value) => {
-  if (!value || !/^0x0{24}[0-9a-fA-F]{40}$/.test(value)) return null;
-  const address = `0x${value.slice(-40)}`.toLowerCase();
-  return address === ZERO_ADDRESS ? null : address;
-};
-var hexBytes = (value) => Math.max(0, (value.length - 2) / 2);
-var sha2563 = (value) => createHash11("sha256").update(value.toLowerCase()).digest("hex");
-var safeError = (value) => {
-  const text2 = value instanceof Error ? value.message : String(value ?? "rpc error");
-  if (/\bhttp\s+\d{3}\b/i.test(text2)) return text2.match(/\bhttp\s+\d{3}\b/i)?.[0].toLowerCase() ?? "http error";
-  if (/abort|timed?\s*out|timeout/i.test(text2)) return "request timed out";
-  if (/malformed|invalid json|parse/i.test(text2)) return "malformed RPC response";
-  if (/different block|block consistency/i.test(text2)) return "block consistency check failed";
-  if (/missing (?:result|block)|no usable result/i.test(text2)) return "RPC returned no usable result";
-  if (/fetch|network|socket|connect|dns|enotfound|econn/i.test(text2)) return "transport failure";
-  return "RPC request failed";
-};
-var normalizeChainIdQuantity = (value) => {
-  if (typeof value !== "string" || value.length > 66 || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/.test(value)) {
-    return null;
-  }
-  try {
-    return `0x${BigInt(value).toString(16)}`;
-  } catch {
-    return null;
-  }
-};
-var captureChainIdentity = async (chain, transport) => {
-  const expectedChainId = EXPECTED_EVM_CHAIN_IDS[chain];
-  if (!expectedChainId) throw new Error(`No expected chain id is configured for chain '${chain}'.`);
-  const base = {
-    id: "evm-chain-identity",
-    method: "eth_chainId",
-    providerHost: transport.providerHost,
-    expectedChain: chain,
-    expectedChainId
-  };
-  const reply = await transport.request("eth_chainId", []);
-  if (!reply.ok) {
-    return {
-      receipt: { ...base, state: "rpc_error" },
-      note: `RPC chain identity unavailable: eth_chainId ${safeError(reply.error)}. No block or contract reads were attempted.`
-    };
-  }
-  const rawResult = typeof reply.result === "string" && reply.result.length <= 128 ? reply.result : void 0;
-  const observedChainId = normalizeChainIdQuantity(reply.result);
-  if (!observedChainId) {
-    return {
-      receipt: { ...base, state: "malformed", ...rawResult !== void 0 ? { rawResult } : {} },
-      note: "RPC chain identity response was malformed. No block or contract reads were attempted."
-    };
-  }
-  if (observedChainId !== expectedChainId) {
-    return {
-      receipt: { ...base, state: "mismatch", observedChainId, rawResult },
-      note: `RPC chain identity mismatch: expected ${chain} (${expectedChainId}), received ${observedChainId} from ${transport.providerHost}. No block or contract reads were attempted.`
-    };
-  }
-  return {
-    receipt: { ...base, state: "verified", observedChainId, rawResult }
-  };
-};
-function createHttpEvmRpcTransport(rpcUrl, fetchImpl = fetch, timeoutMs = 9e3) {
-  let calls = 0;
-  const providerHost = (() => {
-    try {
-      return new URL(rpcUrl).host;
-    } catch {
-      return "invalid-rpc-url";
-    }
-  })();
-  return {
-    providerHost,
-    get calls() {
-      return calls;
-    },
-    async request(method, params) {
-      calls += 1;
-      try {
-        const response = await fetchImpl(rpcUrl, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: calls, method, params }),
-          signal: AbortSignal.timeout(timeoutMs)
-        });
-        if (!response.ok) return { ok: false, error: `http ${response.status}` };
-        const body = await response.json();
-        if (body.result !== void 0 && body.result !== null) return { ok: true, result: body.result };
-        return { ok: false, error: typeof body.error?.message === "string" ? body.error.message : "missing result" };
-      } catch (error) {
-        return { ok: false, error: safeError(error) };
-      }
-    }
-  };
-}
-var requiredString = async (transport, method, params) => {
-  const reply = await transport.request(method, params);
-  if (!reply.ok || typeof reply.result !== "string") throw new Error(`${method}: ${reply.error ?? "missing result"}`);
-  return reply.result;
-};
-var captureBlock = async (transport) => {
-  const tag2 = await requiredString(transport, "eth_blockNumber", []);
-  if (!/^0x[0-9a-fA-F]+$/.test(tag2)) throw new Error("eth_blockNumber: malformed block number");
-  const reply = await transport.request("eth_getBlockByNumber", [tag2, false]);
-  if (!reply.ok || reply.result == null) throw new Error(`eth_getBlockByNumber: ${reply.error ?? "missing block"}`);
-  let block;
-  try {
-    block = typeof reply.result === "string" ? JSON.parse(reply.result) : reply.result;
-  } catch {
-    throw new Error("eth_getBlockByNumber: malformed block");
-  }
-  if (typeof block.hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(block.hash)) throw new Error("eth_getBlockByNumber: malformed block hash");
-  if (typeof block.timestamp !== "string" || !/^0x[0-9a-fA-F]+$/.test(block.timestamp)) throw new Error("eth_getBlockByNumber: malformed timestamp");
-  const number = Number.parseInt(tag2.slice(2), 16);
-  const timestampSeconds = Number.parseInt(block.timestamp.slice(2), 16);
-  if (!Number.isSafeInteger(number) || !Number.isSafeInteger(timestampSeconds)) throw new Error("eth_getBlockByNumber: unsafe numeric field");
-  if (typeof block.number === "string" && Number.parseInt(block.number.slice(2), 16) !== number) {
-    throw new Error("eth_getBlockByNumber: returned a different block number");
-  }
-  return {
-    number,
-    tag: `0x${number.toString(16)}`,
-    hash: block.hash.toLowerCase(),
-    timestamp: new Date(timestampSeconds * 1e3).toISOString()
-  };
-};
-var verifyBlock = async (transport, block) => {
-  const reply = await transport.request("eth_getBlockByNumber", [block.tag, false]);
-  if (!reply.ok || reply.result == null) throw new Error("capture block could not be verified");
-  let current;
-  try {
-    current = typeof reply.result === "string" ? JSON.parse(reply.result) : reply.result;
-  } catch {
-    throw new Error("capture block verification was malformed");
-  }
-  if (typeof current.hash !== "string" || current.hash.toLowerCase() !== block.hash) {
-    throw new Error("capture block changed during collection");
-  }
-};
-var addReceipt = (state, input) => {
-  const receipt = {
-    id: `evm-read-${String(state.receipts.length + 1).padStart(3, "0")}`,
-    blockNumber: state.block.number,
-    blockHash: state.block.hash,
-    ...input
-  };
-  state.receipts.push(receipt);
-  return receipt;
-};
-var read = async (state, method, target, params, locator, keepRaw = true) => {
-  const reply = await state.transport.request(method, params);
-  if (!reply.ok || typeof reply.result !== "string" || !HEX.test(reply.result)) {
-    return {
-      result: null,
-      receipt: addReceipt(state, { method, target, locator, state: "rpc_error" })
-    };
-  }
-  const result = reply.result.toLowerCase();
-  const bytes = hexBytes(result);
-  return {
-    result,
-    receipt: addReceipt(state, {
-      method,
-      target,
-      locator,
-      state: "returned",
-      ...keepRaw && bytes <= 8192 ? { rawResult: result } : {},
-      resultSha256: sha2563(result),
-      byteLength: bytes
-    })
-  };
-};
-var readCode = async (state, address) => {
-  const normalized4 = normalizeAddress2(address);
-  const { result, receipt } = await read(
-    state,
-    "eth_getCode",
-    normalized4,
-    [normalized4, state.block.tag],
-    void 0,
-    false
-  );
-  if (result == null) return null;
-  const bytes = hexBytes(result);
-  return {
-    address: normalized4,
-    accountType: result === "0x" || bytes === 0 ? "no_code" : "contract",
-    byteLength: bytes,
-    ...bytes > 0 ? { sha256Fingerprint: sha2563(result) } : {},
-    receiptId: receipt.id
-  };
-};
-var readStorageAddress = async (state, target, slot) => {
-  const normalized4 = normalizeAddress2(target);
-  const { result, receipt } = await read(
-    state,
-    "eth_getStorageAt",
-    normalized4,
-    [normalized4, slot, state.block.tag],
-    slot
-  );
-  if (result == null) return { address: null, decodeState: "unavailable", receipt };
-  const address = wordAddress(result);
-  if (address) return { address, decodeState: "observed", receipt };
-  return {
-    address: null,
-    decodeState: /^0x0{64}$/.test(result) ? "zero_address" : "malformed",
-    receipt
-  };
-};
-var ethCall = async (state, target, selector) => {
-  const normalized4 = normalizeAddress2(target);
-  return read(
-    state,
-    "eth_call",
-    normalized4,
-    [{ to: normalized4, data: selector }, state.block.tag],
-    selector
-  );
-};
-var minimalProxyImplementation = (code) => {
-  if (!code) return null;
-  const match = code.toLowerCase().match(
-    /^0x363d3d373d3d3d363d73([0-9a-f]{40})5af43d82803e903d91602b57fd5bf3$/
-  );
-  return match ? { address: `0x${match[1]}`, proof: match[0] } : null;
-};
-var decodeAddressCall = (result) => {
-  if (result == null) return "malformed";
-  const address = wordAddress(result);
-  if (address) return address;
-  return /^0x0{64}$/.test(result) ? "zero" : "malformed";
-};
-var decodeUintWord = (result) => {
-  if (!result || !/^0x[0-9a-f]{64}$/.test(result)) return null;
-  const value = Number.parseInt(result.slice(2), 16);
-  return Number.isSafeInteger(value) ? value : null;
-};
-var decodeAddressArray = (result) => {
-  if (!result || !/^0x[0-9a-f]+$/.test(result) || (result.length - 2) % 64 !== 0) return null;
-  const words = result.slice(2).match(/.{64}/g) ?? [];
-  if (words.length < 2) return null;
-  const offset = Number.parseInt(words[0], 16) / 32;
-  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= words.length) return null;
-  const length = Number.parseInt(words[offset], 16);
-  if (!Number.isSafeInteger(length) || length < 1 || length > 50 || offset + 1 + length > words.length) return null;
-  const addresses = words.slice(offset + 1, offset + 1 + length).map((word) => wordAddress(`0x${word}`));
-  if (addresses.some((address) => address == null)) return null;
-  const values = addresses;
-  return new Set(values).size === values.length ? values : null;
-};
-var ownerProbe = async (state, subject, purpose) => {
-  const { result, receipt } = await ethCall(state, subject, OWNER_SELECTOR);
-  if (receipt.state === "rpc_error") return { subject, purpose, state: "unavailable", receiptId: receipt.id };
-  const decoded = decodeAddressCall(result);
-  if (decoded === "zero") return { subject, purpose, state: "zero_address", receiptId: receipt.id };
-  if (decoded === "malformed") return { subject, purpose, state: "malformed", receiptId: receipt.id };
-  return { subject, purpose, state: "observed", owner: decoded, receiptId: receipt.id };
-};
-var safeCompatibleProbe = async (state, address) => {
-  const ownersRead = await ethCall(state, address, SAFE_GET_OWNERS_SELECTOR);
-  const thresholdRead = await ethCall(state, address, SAFE_GET_THRESHOLD_SELECTOR);
-  const receiptIds = [ownersRead.receipt.id, thresholdRead.receipt.id];
-  const qualification2 = "safe_compatible_interface_only";
-  if (ownersRead.receipt.state === "rpc_error" || thresholdRead.receipt.state === "rpc_error") {
-    return { address, state: "unavailable", receiptIds, qualification: qualification2 };
-  }
-  const owners = decodeAddressArray(ownersRead.result);
-  const threshold = decodeUintWord(thresholdRead.result);
-  if (!owners || threshold == null || threshold < 1 || threshold > owners.length) {
-    return { address, state: "malformed", receiptIds, qualification: qualification2 };
-  }
-  return { address, state: "observed", owners, threshold, receiptIds, qualification: qualification2 };
-};
-var mergeAuthorities = (rows, codeByAddress) => {
-  const merged = /* @__PURE__ */ new Map();
-  for (const row of rows) {
-    const address = normalizeAddress2(row.address);
-    const existing = merged.get(address);
-    if (existing) {
-      if (!existing.relations.includes(row.relation)) existing.relations.push(row.relation);
-      if (!existing.receiptIds.includes(row.receiptId)) existing.receiptIds.push(row.receiptId);
-      continue;
-    }
-    const code = codeByAddress.get(address);
-    merged.set(address, {
-      address,
-      relations: [row.relation],
-      accountType: code?.accountType ?? "unknown",
-      receiptIds: [row.receiptId, ...code ? [code.receiptId] : []],
-      qualification: "standard_role_observation_not_complete_permission_map"
-    });
-  }
-  return [...merged.values()].sort((left, right) => left.address.localeCompare(right.address));
-};
-var unavailableSnapshot = (chain, target, rpcCalls, note, chainIdentity) => ({
-  schemaVersion: 1,
-  state: "unavailable",
-  chain,
-  target,
-  mode: "point_in_time",
-  scoringImpact: "none",
-  ...chainIdentity ? { chainIdentity } : {},
-  collection: { sourceClass: "direct_chain_rpc", rpcCalls, modelCalls: 0, marginalUsd: 0 },
-  ownerProbes: [],
-  authorities: [],
-  safeCompatibleMultisigs: [],
-  receipts: [],
-  limitations: [
-    "No direct-chain control claim was made because a block-consistent RPC capture was unavailable."
-  ],
-  note
-});
-async function collectEvmControlRealityFromTransport(chainInput, targetInput, transport) {
-  const chain = chainInput.trim().toLowerCase();
-  const target = normalizeAddress2(targetInput.trim());
-  if (!EVM_ADDRESS3.test(target)) throw new Error("valid EVM target address required");
-  if (!EXPECTED_EVM_CHAIN_IDS[chain]) {
-    return unavailableSnapshot(
-      chain,
-      target,
-      transport.calls,
-      `No expected chain id is configured for chain '${chain}'. No RPC reads were attempted.`
-    );
-  }
-  const chainIdentity = await captureChainIdentity(chain, transport);
-  if (chainIdentity.receipt.state !== "verified") {
-    return unavailableSnapshot(
-      chain,
-      target,
-      transport.calls,
-      chainIdentity.note ?? "RPC chain identity could not be verified. No block or contract reads were attempted.",
-      chainIdentity.receipt
-    );
-  }
-  const block = await captureBlock(transport);
-  const state = { transport, block, receipts: [] };
-  const targetCodeRead = await read(
-    state,
-    "eth_getCode",
-    target,
-    [target, block.tag],
-    void 0,
-    false
-  );
-  if (targetCodeRead.result == null) throw new Error("target bytecode read failed");
-  const targetBytes = hexBytes(targetCodeRead.result);
-  const targetCode = {
-    address: target,
-    accountType: targetBytes === 0 ? "no_code" : "contract",
-    byteLength: targetBytes,
-    ...targetBytes > 0 ? { sha256Fingerprint: sha2563(targetCodeRead.result) } : {},
-    receiptId: targetCodeRead.receipt.id
-  };
-  if (targetCode.accountType === "no_code") {
-    await verifyBlock(transport, block);
-    return {
-      schemaVersion: 1,
-      state: "not_contract",
-      chain,
-      target,
-      mode: "point_in_time",
-      scoringImpact: "none",
-      chainIdentity: chainIdentity.receipt,
-      capture: { blockNumber: block.number, blockHash: block.hash, blockTimestamp: block.timestamp, providerHost: transport.providerHost },
-      collection: { sourceClass: "direct_chain_rpc", rpcCalls: transport.calls, modelCalls: 0, marginalUsd: 0 },
-      targetCode,
-      ownerProbes: [],
-      authorities: [],
-      safeCompatibleMultisigs: [],
-      receipts: state.receipts,
-      limitations: ["The verified token address had no contract bytecode at the captured block."]
-    };
-  }
-  const runtimeImplementation = minimalProxyImplementation(targetCodeRead.result);
-  const implementationSlot = await readStorageAddress(state, target, ERC1967_IMPLEMENTATION_SLOT);
-  const beaconSlot = await readStorageAddress(state, target, ERC1967_BEACON_SLOT);
-  const adminSlot = await readStorageAddress(state, target, ERC1967_ADMIN_SLOT);
-  const indicators = [];
-  const implementationCandidates = [];
-  if (runtimeImplementation) {
-    indicators.push("eip_1167_minimal_proxy");
-    implementationCandidates.push({
-      address: runtimeImplementation.address,
-      evidence: "eip_1167_runtime",
-      receiptIds: [targetCodeRead.receipt.id],
-      extractionProof: runtimeImplementation.proof
-    });
-  }
-  if (implementationSlot.address) {
-    indicators.push("erc_1967_implementation_slot");
-    implementationCandidates.push({
-      address: implementationSlot.address,
-      evidence: "erc_1967_implementation_slot",
-      receiptIds: [implementationSlot.receipt.id]
-    });
-  }
-  let beaconImplementation = null;
-  let beaconImplementationReceiptId = null;
-  if (beaconSlot.address) {
-    indicators.push("erc_1967_beacon_slot");
-    const implementationRead = await ethCall(state, beaconSlot.address, IMPLEMENTATION_SELECTOR);
-    beaconImplementationReceiptId = implementationRead.receipt.id;
-    beaconImplementation = wordAddress(implementationRead.result ?? void 0);
-    if (beaconImplementation) {
-      implementationCandidates.push({
-        address: beaconImplementation,
-        evidence: "erc_1967_beacon_call",
-        receiptIds: [beaconSlot.receipt.id, implementationRead.receipt.id]
-      });
-    }
-  }
-  if (adminSlot.address) indicators.push("erc_1967_admin_slot");
-  const uniqueImplementations = [...new Set(implementationCandidates.map((row) => row.address))];
-  const implementationCode = /* @__PURE__ */ new Map();
-  for (const address of uniqueImplementations.slice(0, 3)) {
-    implementationCode.set(address, await readCode(state, address));
-  }
-  for (const row of implementationCandidates) {
-    row.code = implementationCode.get(row.address) ?? void 0;
-    if (row.code && !row.receiptIds.includes(row.code.receiptId)) row.receiptIds.push(row.code.receiptId);
-  }
-  const ownerProbes = [await ownerProbe(state, target, "target_owner")];
-  const authorityRows = [];
-  if (adminSlot.address) authorityRows.push({ address: adminSlot.address, relation: "proxy_admin", receiptId: adminSlot.receipt.id });
-  const targetOwner = ownerProbes[0];
-  if (targetOwner.state === "observed" && targetOwner.owner) {
-    authorityRows.push({ address: targetOwner.owner, relation: "target_owner", receiptId: targetOwner.receiptId });
-  }
-  const codeByAddress = /* @__PURE__ */ new Map();
-  for (const row of authorityRows) {
-    if (!codeByAddress.has(row.address)) codeByAddress.set(row.address, await readCode(state, row.address));
-  }
-  if (adminSlot.address && codeByAddress.get(adminSlot.address)?.accountType === "contract") {
-    const probe = await ownerProbe(state, adminSlot.address, "proxy_admin_owner");
-    ownerProbes.push(probe);
-    if (probe.state === "observed" && probe.owner) {
-      authorityRows.push({ address: probe.owner, relation: "proxy_admin_owner", receiptId: probe.receiptId });
-      if (!codeByAddress.has(probe.owner)) codeByAddress.set(probe.owner, await readCode(state, probe.owner));
-    }
-  }
-  if (beaconSlot.address) {
-    if (!codeByAddress.has(beaconSlot.address)) codeByAddress.set(beaconSlot.address, await readCode(state, beaconSlot.address));
-    if (codeByAddress.get(beaconSlot.address)?.accountType === "contract") {
-      const probe = await ownerProbe(state, beaconSlot.address, "beacon_owner");
-      ownerProbes.push(probe);
-      if (probe.state === "observed" && probe.owner) {
-        authorityRows.push({ address: probe.owner, relation: "beacon_owner", receiptId: probe.receiptId });
-        if (!codeByAddress.has(probe.owner)) codeByAddress.set(probe.owner, await readCode(state, probe.owner));
-      }
-    }
-  }
-  const authorities = mergeAuthorities(authorityRows, codeByAddress);
-  const safeCompatibleMultisigs = [];
-  for (const authority of authorities.filter((row) => row.accountType === "contract").slice(0, 4)) {
-    safeCompatibleMultisigs.push(await safeCompatibleProbe(state, authority.address));
-  }
-  await verifyBlock(transport, block);
-  const conflicting = uniqueImplementations.length > 1;
-  const standardSlotReadsComplete = [implementationSlot, beaconSlot, adminSlot].every((row) => row.decodeState === "observed" || row.decodeState === "zero_address");
-  const proxy = {
-    state: conflicting ? "conflicting_implementation_candidates" : indicators.length ? "standard_proxy_observed" : !standardSlotReadsComplete ? "standard_proxy_assessment_incomplete" : "no_standard_proxy_indicator",
-    indicators,
-    implementationCandidates,
-    ...beaconSlot.address ? { beacon: { address: beaconSlot.address, receiptId: beaconSlot.receipt.id } } : {},
-    ...adminSlot.address ? { admin: { address: adminSlot.address, receiptId: adminSlot.receipt.id } } : {}
-  };
-  const limitations = [
-    "No standard proxy indicator does not prove that the contract is immutable; custom proxy and diamond patterns were not assessed.",
-    "owner() probes do not enumerate role-based permissions, guardians, pausers, or off-chain signer arrangements.",
-    "Safe-compatible owner and threshold responses are interface evidence only, not proof of an official Safe deployment.",
-    "This frozen control snapshot does not claim that any observed authority has exercised its power."
-  ];
-  if (!standardSlotReadsComplete) {
-    limitations.push("At least one standard proxy storage read failed, so absence of a proxy indicator was withheld.");
-  }
-  if (beaconSlot.address && !beaconImplementation) {
-    limitations.push(`The ERC-1967 beacon slot was observed, but implementation() was unavailable at receipt ${beaconImplementationReceiptId ?? "unknown"}.`);
-  }
-  return {
-    schemaVersion: 1,
-    state: "observed",
-    chain,
-    target,
-    mode: "point_in_time",
-    scoringImpact: "none",
-    chainIdentity: chainIdentity.receipt,
-    capture: { blockNumber: block.number, blockHash: block.hash, blockTimestamp: block.timestamp, providerHost: transport.providerHost },
-    collection: { sourceClass: "direct_chain_rpc", rpcCalls: transport.calls, modelCalls: 0, marginalUsd: 0 },
-    targetCode,
-    proxy,
-    ownerProbes,
-    authorities,
-    safeCompatibleMultisigs,
-    receipts: state.receipts,
-    limitations
-  };
-}
-async function collectEvmControlReality(chainInput, targetInput, options = {}) {
-  const chain = chainInput.trim().toLowerCase();
-  const target = normalizeAddress2(targetInput.trim());
-  if (!EVM_ADDRESS3.test(target)) throw new Error("valid EVM target address required");
-  const urls = options.rpcUrls ?? PUBLIC_EVM_RPC[chain];
-  if (!urls?.length) return unavailableSnapshot(chain, target, 0, `No direct RPC is configured for chain '${chain}'.`);
-  let totalCalls = 0;
-  let lastError = "RPC capture failed";
-  let lastIdentityFailure = null;
-  for (const rpcUrl of urls) {
-    const transport = createHttpEvmRpcTransport(rpcUrl, options.fetchImpl, options.timeoutMs);
-    try {
-      const snapshot = await collectEvmControlRealityFromTransport(chain, target, transport);
-      if (snapshot.state === "unavailable" && (snapshot.chainIdentity?.state === "rpc_error" || snapshot.chainIdentity?.state === "malformed")) {
-        totalCalls += transport.calls;
-        lastError = snapshot.note ?? "RPC chain identity unavailable";
-        lastIdentityFailure = snapshot;
-        continue;
-      }
-      if (totalCalls > 0) snapshot.collection.rpcCalls += totalCalls;
-      return snapshot;
-    } catch (error) {
-      totalCalls += transport.calls;
-      lastError = safeError(error);
-    }
-  }
-  if (lastIdentityFailure) {
-    lastIdentityFailure.collection.rpcCalls = totalCalls;
-    lastIdentityFailure.note = `Direct RPC capture unavailable: ${lastError}`;
-    return lastIdentityFailure;
-  }
-  return unavailableSnapshot(chain, target, totalCalls, `Direct RPC capture unavailable: ${lastError}`);
 }
 
 // server/adapters/operatorLaunches.ts
@@ -31160,6 +31603,11 @@ function excludeScoreNeutralControlReality(input) {
   void _scoreNeutralContext;
   return modelEvidence;
 }
+function stripArkhamScreenForScoring(wallet) {
+  const { screen: _scoreNeutralArkhamScreen, ...scoringWallet } = wallet;
+  void _scoreNeutralArkhamScreen;
+  return scoringWallet;
+}
 function protocolRecordMatchesCanonicalToken(recordGeckoId, canonicalGeckoId) {
   return Boolean(recordGeckoId) && recordGeckoId === canonicalGeckoId;
 }
@@ -31173,11 +31621,12 @@ var ADAPTERS = [
   coingeckoAdapter,
   // redditAdapter retired: Reddit API access was not approved.
   onchainAdapter,
+  arkhamAdapter,
   basicFactsAdapter
 ];
 var IDENTITY_LANE = [xAdapter, githubAdapter, peopledatalabsAdapter, offchainAdapter];
 var TOKEN_LANE = [dexscreenerAdapter, coingeckoAdapter];
-var WALLET_LANE = [onchainAdapter];
+var WALLET_LANE = [onchainAdapter, arkhamAdapter];
 var ADAPTER_PROVIDERS = {
   "x": ["twitterapi", "grok", "cache"],
   "github": ["github"],
@@ -31185,7 +31634,8 @@ var ADAPTER_PROVIDERS = {
   "offchain-diligence": ["google-news", "courtlistener", "opensanctions", "x-avatar", "claude", "cache"],
   "dexscreener": ["dexscreener"],
   "coingecko": ["coingecko"],
-  "onchain": ["helius"]
+  "onchain": ["helius"],
+  "arkham": ["arkham", "public-evm-rpc"]
 };
 var teamEvidenceRank = (member) => member.artifact_verified === true && member.evidence_origin !== "model_lead" ? 2 : member.evidence_origin !== "model_lead" ? 1 : 0;
 function coalesceTeamMembersByHandle(members) {
@@ -31224,7 +31674,7 @@ function coalesceTeamMembersByHandle(members) {
   }
   return output;
 }
-var KEYED = /* @__PURE__ */ new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain", "basic-facts"]);
+var KEYED = /* @__PURE__ */ new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain", "arkham", "basic-facts"]);
 var attemptTotals = (providers, operations) => {
   const allow = providers ? new Set(providers) : null;
   const allowOperations = operations ? new Set(operations) : null;
@@ -31633,7 +32083,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   await maybeOrientSubject(ctx, siteSubstance?.detail);
   if (foundWallets.length) {
     for (const w of foundWallets) {
-      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: w.tier, notes: w.source });
+      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: w.tier, notes: w.source, binding: w.binding });
     }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Wallet resolved", detail: `${foundWallets.length} wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}\u2026 (${w.chain}, ${w.source.includes("Farcaster") ? "Farcaster" : "self-disclosed"})`).join(", ")}. Running on-chain forensics.`, source: "find-wallet", tone: "good" });
   }
@@ -32971,18 +33421,18 @@ async function adverseSignalsAndTooling(ctx, record3) {
   };
   const screens = [subjectScreen, ...projectScreens, ...assocScreens];
   let totalSigs = 0;
-  for (const screen of screens) {
-    pushSigs(screen.signals);
-    totalSigs += screen.signals.length;
+  for (const screen2 of screens) {
+    pushSigs(screen2.signals);
+    totalSigs += screen2.signals.length;
   }
   if (totalSigs) {
-    const top = screens.flatMap((screen) => screen.signals).slice(0, 3).map((s) => `${s.relationship_to_subject} ${s.target_entity_key} \xB7 ${s.category.replace(/_/g, " ")}: ${s.claim}`).join(" \xB7 ");
+    const top = screens.flatMap((screen2) => screen2.signals).slice(0, 3).map((s) => `${s.relationship_to_subject} ${s.target_entity_key} \xB7 ${s.category.replace(/_/g, " ")}: ${s.claim}`).join(" \xB7 ");
     ctx.emit({ phase: "Adverse", label: `${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}`, detail: `Unverified candidate sources for follow-up. ${top}`, source: "grok", tone: "warn" });
   } else {
     ctx.emit({ phase: "Adverse", label: "No adverse leads surfaced", detail: "The model search returned no candidate rug/scam/drain/FUD source URLs for follow-up; this is not proof that none exist.", source: "grok", tone: "neutral" });
   }
   const toolingLeads = tooling?.tools.length ?? 0;
-  const answered = screens.filter((screen) => screen.completed).length;
+  const answered = screens.filter((screen2) => screen2.completed).length;
   const unanswered = screens.length - answered;
   const swept = `the subject, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}`;
   const gap = unanswered ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.` : "";
@@ -34008,12 +34458,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
             const verifiedSecurity = (evidence.basicFacts ?? []).some((fact) => fact.predicate === "public_security" && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated"));
             const securityEntry = (evidence.basicFactQuestionLedger ?? []).find((entry) => entry.predicate === "public_security");
             if (!verifiedSecurity && securityEntry && securityEntry.status === "unanswered") {
-              const screen = await screenSecRegistryForNames([
+              const screen2 = await screenSecRegistryForNames([
                 ventureToken.ventureName,
                 ventureToken.name,
                 primaryVenture.project_name
               ]);
-              if (screen === "empty") {
+              if (screen2 === "empty") {
                 securityEntry.providerRuns.push({ phase: "repair", provider: "sec-registry", state: "completed_empty" });
                 emit({
                   phase: "Founder",
@@ -34022,7 +34472,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
                   source: "sec-registry",
                   tone: "neutral"
                 });
-              } else if (screen === "matched") {
+              } else if (screen2 === "matched") {
                 emit({
                   phase: "Founder",
                   label: "Public-security registry match",
@@ -34313,7 +34763,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     testimonials: evidence.testimonials,
     advised: evidence.advised,
     promotions: evidence.promotions.map((promotion) => ({ ...promotion, provider: "twitterapi" })),
-    wallets: evidence.wallets.map((wallet) => ({ ...wallet, provider: "find-wallet/onchain" })),
+    // Arkham is score-neutral in this increment. Keep its screen out of every
+    // model packet as well as the deterministic score path.
+    wallets: evidence.wallets.filter((wallet) => wallet.screen?.status !== "not_attributable").map((wallet) => ({
+      ...stripArkhamScreenForScoring(wallet),
+      provider: "find-wallet/onchain"
+    })),
     clientEngagements: evidence.clientEngagements,
     associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
