@@ -1839,6 +1839,15 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // Unique-id: a PROJECT-bound handle is the brand/protocol account. Display
   // name never binds a person. Founder facts describe some OTHER handle.
   const projectBound = projectOrientationBound(evidence);
+  // A canonical token can bind the audited handle to the project even when
+  // the orientation model mistakes a project bio that names a developer for
+  // that developer's personal account. The exact official-X match is a
+  // unique-id bind; the absence of a resolved person name keeps this rule from
+  // collapsing a real founder's personal account into the project brand.
+  const canonicalTokenProjectBound = evidence.projectToken?.verified === true
+    && Boolean(evidence.projectToken.officialX)
+    && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle)
+    && !evidence.profile.resolved_name?.trim();
   // The bio is the first-party self-description, but an empty bio is not an
   // absent subject: the account's own posts are the same kind of evidence from
   // the same provider, so they classify when the bio says nothing.
@@ -1973,7 +1982,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // PROJECT-bound unique-id is final for this handle: it is the brand account,
   // never also the founder person. Personal orientation FOUNDER stays FOUNDER.
   // Other bio-classified methodologies (KOL / INVESTOR) still govern.
-  if (projectBound) {
+  if (projectBound || canonicalTokenProjectBound) {
     roles.delete(SubjectClass.FOUNDER);
     const other = [...roles].filter((role) => role !== SubjectClass.PROJECT);
     if (other.length === 0) roles.add(SubjectClass.PROJECT);

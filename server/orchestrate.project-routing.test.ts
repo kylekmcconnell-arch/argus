@@ -494,6 +494,39 @@ describe("provider-backed project routing", () => {
     expect(roles).not.toContain(SubjectClass.FOUNDER);
   });
 
+  it("keeps a canonical-token project account out of founder methodology when its bio names the developer", () => {
+    const evidence = resolvedProjectProfile(
+      "official account for $SUPERGEMMA | Building open-source ecosystem. | dev @jun_song",
+      "https://supergemma.ai/",
+    );
+    evidence.profile.handle = "@0xsupergemma";
+    evidence.profile.display_name = "SuperGemma";
+    evidence.subjectOrientation = {
+      kind: "FOUNDER",
+      what: "A developer building SuperGemma.",
+      audience: "developers",
+      boundHandle: "@0xsupergemma",
+      boundDomain: null,
+      sourceUrls: ["https://x.com/0xsupergemma"],
+      mentionedHandles: [{ handle: "@jun_song", roleHint: "developer", quote: "dev @jun_song" }],
+    };
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "SuperGemma",
+      symbol: "SUPERGEMMA",
+      coingeckoId: "supergemma",
+      rank: null,
+      address: "0x572c4fa77623652411574c51b5ddb7e1b750aba3",
+      chain: "ethereum",
+      officialX: "@0xsupergemma",
+      sourceUrl: "https://www.coingecko.com/en/coins/supergemma",
+      capturedAt: "2026-08-24T03:34:00.000Z",
+    };
+
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+  });
+
   it("keeps FOUNDER routing on a personal account with FOUNDER orientation", () => {
     const evidence = emptyEvidence("@alicefounder");
     evidence.profile.display_name = "Alice";

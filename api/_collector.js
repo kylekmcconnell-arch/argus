@@ -32573,6 +32573,7 @@ function providerBackedRoles(evidence) {
   let bioPrimaryProjectVerified = false;
   let investorBeyondBio = false;
   const projectBound = projectOrientationBound(evidence);
+  const canonicalTokenProjectBound = evidence.projectToken?.verified === true && Boolean(evidence.projectToken.officialX) && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle) && !evidence.profile.resolved_name?.trim();
   const selfDescription = evidence.profile.bio.trim() || (evidence.profile.self_post_sample ?? "").trim();
   if (evidence.profile.profile_collection_state === "resolved" && selfDescription) {
     const classification = classifySubject(selfDescription);
@@ -32643,7 +32644,7 @@ function providerBackedRoles(evidence) {
       roles.add("INVESTOR" /* INVESTOR */);
     }
   }
-  if (projectBound) {
+  if (projectBound || canonicalTokenProjectBound) {
     roles.delete("FOUNDER" /* FOUNDER */);
     const other = [...roles].filter((role) => role !== "PROJECT" /* PROJECT */);
     if (other.length === 0) roles.add("PROJECT" /* PROJECT */);

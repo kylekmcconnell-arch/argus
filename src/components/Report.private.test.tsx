@@ -153,7 +153,7 @@ describe("private person report evidence boundary", () => {
     expect(dossier.report.governing_score).toBe(base.report.governing_score);
   });
 
-  it("puts the mobile verdict ahead of profile detail and collapses secondary actions", () => {
+  it("uses the unified decision canvas and collapses secondary mobile actions", () => {
     const dossier = buildReport(SUBJECTS[1]);
 
     act(() => {
@@ -175,9 +175,11 @@ describe("private person report evidence boundary", () => {
     expect(profileDisclosure?.hasAttribute("open")).toBe(false);
 
     const result = overview?.querySelector<HTMLElement>('[aria-label="Report result and check status"]');
-    expect(result?.className).toContain("order-2");
-    expect(result?.children[0]?.className).toContain("max-sm:order-2");
-    expect(result?.children[1]?.className).toContain("max-sm:order-1");
+    expect(result?.className).toBe("hidden");
+    expect(result?.getAttribute("aria-hidden")).toBe("true");
+    const decisionCanvas = container.querySelector("#report-summary");
+    expect(decisionCanvas?.textContent).toContain("What this report means");
+    expect(decisionCanvas?.textContent).toContain("Report checks");
 
     const toolbar = container.querySelector("header.sticky");
     const caseBrief = [...(toolbar?.querySelectorAll("button") ?? [])]
@@ -1550,10 +1552,15 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Points before safety limits 95 + 5 bonus");
     expect(container.textContent).toContain("Current score 100");
     const decisionResult = container.querySelector<HTMLElement>('[aria-label="Report result and check status"]');
-    expect(decisionResult?.classList.contains("max-sm:grid")).toBe(true);
+    expect(decisionResult?.classList.contains("hidden")).toBe(true);
+    expect(decisionResult?.getAttribute("aria-hidden")).toBe("true");
+    const decisionCanvas = container.querySelector("#report-summary");
+    expect(decisionCanvas?.textContent).toContain("INCOMPLETE");
+    expect(decisionCanvas?.textContent).toContain("What this report means");
+    expect(decisionCanvas?.textContent).not.toContain("EARLY SCORE");
     const preliminarySignal = [...container.querySelectorAll<HTMLElement>(".chip")]
       .find((chip) => chip.textContent?.includes("EARLY SCORE"));
-    expect(preliminarySignal?.classList.contains("chip-wrap")).toBe(true);
+    expect(preliminarySignal?.closest('[aria-hidden="true"]')).not.toBeNull();
   });
 
   it("keeps a supported 71 PASS signal provisional while a sanctions screen remains open (never-waive)", () => {

@@ -113,9 +113,12 @@ export function ScoreContextStrip({
  * contract change) earns the alarm treatment. Raw provider diagnostics remain
  * available behind a technical-details fold.
  */
-type ProviderFailureKind = "no_record" | "unavailable" | "rejected";
+type ProviderFailureKind = "no_record" | "unavailable" | "rejected" | "optional_enrichment";
 
-function classifyProviderFailure(meta?: string): ProviderFailureKind {
+const OPTIONAL_ENRICHMENT_PROVIDERS = new Set(["cryptorank"]);
+
+function classifyProviderFailure(provider: string, meta?: string): ProviderFailureKind {
+  if (OPTIONAL_ENRICHMENT_PROVIDERS.has(provider.trim().toLowerCase())) return "optional_enrichment";
   const detail = meta ?? "";
   if (/no_record|http_404/i.test(detail)) return "no_record";
   if (/http_5\d\d|timeout|transport_error|unavailable/i.test(detail)) return "unavailable";
@@ -126,8 +129,8 @@ export function ProviderFailureNotice({ failures }: {
   failures?: Array<{ provider: string; op: string; failed: number; meta?: string }>;
 }) {
   if (!failures?.length) return null;
-  const buckets: Record<ProviderFailureKind, string[]> = { no_record: [], unavailable: [], rejected: [] };
-  for (const line of failures) buckets[classifyProviderFailure(line.meta)].push(line.provider);
+  const buckets: Record<ProviderFailureKind, string[]> = { no_record: [], unavailable: [], rejected: [], optional_enrichment: [] };
+  for (const line of failures) buckets[classifyProviderFailure(line.provider, line.meta)].push(line.provider);
   const names = (providers: string[]) => [...new Set(providers)].join(", ");
   const sentences = [
     buckets.unavailable.length
@@ -139,6 +142,9 @@ export function ProviderFailureNotice({ failures }: {
     buckets.rejected.length
       ? `${buckets.rejected.length} source check${buckets.rejected.length === 1 ? " was" : "s were"} rejected and need${buckets.rejected.length === 1 ? "s" : ""} attention (${names(buckets.rejected)}).`
       : "",
+    buckets.optional_enrichment.length
+      ? `Optional market-data enrichment did not contribute (${names(buckets.optional_enrichment)}).`
+      : "",
   ].filter(Boolean);
   const alarm = buckets.rejected.length > 0;
   const explanation = buckets.rejected.length
@@ -147,7 +153,9 @@ export function ProviderFailureNotice({ failures }: {
       : "This may leave part of the report unanswered. This source needs configuration attention; retrying the same scan unchanged is unlikely to fix it."
     : buckets.unavailable.length
       ? "This may leave part of the report unanswered. Run a new scan later to try the temporarily unavailable sources again."
-      : "A source with no record is an answered check, not a gap.";
+      : buckets.optional_enrichment.length
+        ? "This does not count as an unfinished safety check. Required report checks are assessed separately."
+        : "A source with no record is an answered check, not a gap.";
   return (
     <div className={`finding ${alarm ? "tint-avoid" : "tint-caution"} mt-3 px-4 py-3`} role={alarm ? "alert" : "note"}>
       <p className="text-[12.5px] font-medium text-ink">{sentences.join(" ")}</p>
