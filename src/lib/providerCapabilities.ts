@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 const ENABLED_VALUE = /^(?:1|true|on|enabled)$/i;
 const DISABLED_VALUE = /^(?:0|false|off|disabled)$/i;
 
@@ -7,8 +9,7 @@ const DISABLED_VALUE = /^(?:0|false|off|disabled)$/i;
  */
 export function arkhamProviderEnabled(): boolean {
   // Vite provides import.meta.env in the browser bundle and Vitest mirrors it.
-  const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  const raw = String(viteEnv?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim();
+  const raw = String(import.meta.env?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim();
   if (!raw) return true;
   if (DISABLED_VALUE.test(raw)) return false;
   return ENABLED_VALUE.test(raw);
