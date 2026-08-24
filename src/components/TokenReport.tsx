@@ -481,7 +481,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         )}
 
-        <div className="mt-4">
+        <div id="token-market" className="mt-4 scroll-mt-28">
           <MarketPerformancePanel
             token={d}
             showCurrentIntelligence={showCurrentIntelligence}
