@@ -18,7 +18,7 @@ import { checkForClones, type CloneCheckResult } from "./cloneCheck";
 import {
   dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
   GOPLUS_UNSORTED_HOLDER_CHAINS, blockscoutHolders, blockscoutContractSource, rugcheckReport,
-  largestInsiderClusterPercent,
+  largestInsiderClusterPercent, hasCompleteGoplusTradeability,
   type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo, type ExplorerHolder,
   type ExplorerContractSource, type RugcheckReport,
 } from "./sources";
@@ -32,6 +32,13 @@ export interface NormalizedSafety {
    * simulation alone cannot establish mint, ownership, or source-code state. */
   contractPropertiesAssessed?: boolean;
   simChecked: boolean;
+  /** Whether tradeability received a definitive recorded outcome. A supported
+   * simulation is strongest; observed two-sided market activity is a bounded
+   * fallback on chains the simulator does not cover. */
+  tradeabilityAssessed?: boolean;
+  tradeabilityMethod?: "simulation" | "goplus-screen" | "observed-market";
+  observedBuys24h?: number;
+  observedSells24h?: number;
   honeypot: boolean;
   honeypotOnchain: boolean; // GoPlus / on-chain flag, independent of the honeypot.is simulation
   serialScammerCreator: boolean; // GoPlus honeypot_with_same_creator: the deployer has shipped honeypots before
@@ -394,6 +401,11 @@ const isBurnTag = (t?: string) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 // --- normalize EVM safety from GoPlus + honeypot.is ---
 function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): NormalizedSafety {
   const s = sim;
+  // GoPlus documents missing/empty trading fields as unknown. Only a DEX-listed
+  // response with all three key outcomes recorded is a completed provider
+  // screen; a partial response must remain open unless market receipts fill it.
+  const goplusTradeabilityAssessed = hasCompleteGoplusTradeability(gp);
+  const simulationCompleted = s?.simSuccess === true;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
   // Classify where the liquidity sits: burned (permanent) vs locked vs sitting in
   // an unlocked wallet. Concentration in an unlocked CONTRACT (e.g. a pair/staking
@@ -415,7 +427,13 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
   return {
     available: !!gp || !!s,
     contractPropertiesAssessed: !!gp,
-    simChecked: !!s,
+    simChecked: simulationCompleted,
+    tradeabilityAssessed: simulationCompleted || goplusTradeabilityAssessed,
+    tradeabilityMethod: simulationCompleted
+      ? "simulation"
+      : goplusTradeabilityAssessed
+        ? "goplus-screen"
+        : undefined,
     honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
     serialScammerCreator: t1(gp?.honeypot_with_same_creator),
@@ -446,6 +464,22 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
     lpAssessed: lpRowsSeen > 0,
+  };
+}
+
+export function recordObservedTradeability(
+  safety: NormalizedSafety,
+  market: { buys24h: number; sells24h: number; liquidityUsd: number },
+): NormalizedSafety {
+  if (safety.tradeabilityAssessed || market.buys24h <= 0 || market.sells24h <= 0 || market.liquidityUsd <= 0) {
+    return safety;
+  }
+  return {
+    ...safety,
+    tradeabilityAssessed: true,
+    tradeabilityMethod: "observed-market",
+    observedBuys24h: market.buys24h,
+    observedSells24h: market.sells24h,
   };
 }
 
@@ -671,6 +705,12 @@ async function runTokenAudit(
     explorerHolders = explorer;
     contractSource = source;
     safety = evmSafety(gp, sim);
+    // Honeypot.is officially supports only Ethereum, BSC, and Base. On another
+    // chain, two-sided activity in the selected liquid pool is a bounded but
+    // definitive receipt that buying and selling occurred. It does not waive
+    // blacklist, pause, tax-change, or balance-change controls; those make the
+    // completed check a finding below.
+    safety = recordObservedTradeability(safety, { buys24h: buys, sells24h: sells, liquidityUsd });
     const evmCreator = gp?.creator_address?.trim();
     const evmOwner = gp?.owner_address?.trim();
     deployerAttribution = evmCreator

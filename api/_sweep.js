@@ -951,6 +951,10 @@ function pickPair(pairs, wantAddress) {
   }
   return byLiq[0];
 }
+function hasCompleteGoplusTradeability(result) {
+  const reported = (value) => typeof value === "string" && value.trim().length > 0;
+  return result?.is_in_dex === "1" && reported(result.buy_tax) && reported(result.sell_tax) && reported(result.cannot_sell_all);
+}
 async function honeypotIs(chainId, address) {
   try {
     const res = await retryFetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
@@ -1172,6 +1176,8 @@ var isBurnAddr = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^
 var isBurnTag = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 function evmSafety(gp, sim) {
   const s = sim;
+  const goplusTradeabilityAssessed = hasCompleteGoplusTradeability(gp);
+  const simulationCompleted = s?.simSuccess === true;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
   let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
   let lpRowsSeen = 0;
@@ -1189,7 +1195,9 @@ function evmSafety(gp, sim) {
   return {
     available: !!gp || !!s,
     contractPropertiesAssessed: !!gp,
-    simChecked: !!s,
+    simChecked: simulationCompleted,
+    tradeabilityAssessed: simulationCompleted || goplusTradeabilityAssessed,
+    tradeabilityMethod: simulationCompleted ? "simulation" : goplusTradeabilityAssessed ? "goplus-screen" : void 0,
     honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
     serialScammerCreator: t1(gp?.honeypot_with_same_creator),
@@ -1224,6 +1232,18 @@ function evmSafety(gp, sim) {
     creatorPercent: (creatorShare ?? 0) * 100,
     creatorPercentAssessed: creatorShare != null && Number.isFinite(creatorShare),
     lpAssessed: lpRowsSeen > 0
+  };
+}
+function recordObservedTradeability(safety, market) {
+  if (safety.tradeabilityAssessed || market.buys24h <= 0 || market.sells24h <= 0 || market.liquidityUsd <= 0) {
+    return safety;
+  }
+  return {
+    ...safety,
+    tradeabilityAssessed: true,
+    tradeabilityMethod: "observed-market",
+    observedBuys24h: market.buys24h,
+    observedSells24h: market.sells24h
   };
 }
 function solanaSafety(sol) {
@@ -1435,6 +1455,7 @@ async function runTokenAudit(input, emit, opts) {
     explorerHolders = explorer;
     contractSource = source;
     safety = evmSafety(gp, sim);
+    safety = recordObservedTradeability(safety, { buys24h: buys, sells24h: sells, liquidityUsd });
     const evmCreator = gp?.creator_address?.trim();
     const evmOwner = gp?.owner_address?.trim();
     deployerAttribution = evmCreator ? { address: evmCreator, source: "goplus", method: "contract creator", kind: "deployer" } : evmOwner && !/^0x0+$/.test(evmOwner) ? { address: evmOwner, source: "goplus", method: "current owner", kind: "attributed" } : null;
@@ -2043,14 +2064,17 @@ function tokenChecks(dossier) {
       note: `no contract-safety provider response recorded for ${dossier.chain}`
     }
   );
+  const tradeabilityAssessed = safety.tradeabilityAssessed === true || safety.simChecked;
+  const tradeabilityFinding = safety.honeypot || safety.cannotSellAll || safety.blacklist || safety.pausable || safety.tradingCooldown || safety.ownerChangeBalance;
+  const tradeabilityNote = safety.tradeabilityMethod === "observed-market" ? `${(safety.observedBuys24h ?? 0).toLocaleString()} buys and ${(safety.observedSells24h ?? 0).toLocaleString()} sells were recorded in the selected pool over 24 hours. Trading occurred, but this does not rule out wallet-specific restrictions.${tradeabilityFinding ? " Contract controls can still restrict particular holders or future trading." : ""}` : safety.tradeabilityMethod === "goplus-screen" ? `GoPlus tradeability screen completed \xB7 buy ${safety.buyTax}% \xB7 sell ${safety.sellTax}%` : `Buy and sell simulation completed \xB7 buy ${safety.buyTax}% \xB7 sell ${safety.sellTax}%`;
   checks.push(
-    safety.simChecked ? {
+    tradeabilityAssessed ? {
       checkId: "buy-sell-simulation",
       decisionCritical: true,
-      label: "Buy/sell simulation",
-      status: safety.honeypot || safety.cannotSellAll ? "finding" : "confirmed",
-      note: `buy ${safety.buyTax}% \xB7 sell ${safety.sellTax}%`
-    } : evm ? safety.available ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unavailable", note: `no simulation provider covers ${chainDisplayName(dossier.chain)}; sell-block behavior cannot be simulated here` } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "not-applicable", note: "Solana: static flags only" }
+      label: "Tradeability check",
+      status: tradeabilityFinding ? "finding" : "confirmed",
+      note: tradeabilityNote
+    } : evm ? safety.available ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Tradeability check", status: "unknown", note: outcomeNotRecorded } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Tradeability check", status: "unavailable", note: `no tradeability provider or two-sided market receipt covers ${chainDisplayName(dossier.chain)}` } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Tradeability check", status: "not-applicable", note: "Solana: static flags only" }
   );
   const holderCount = safety.holderCount || dossier.topHolders.length;
   const topHolderPct = safety.topHolderPct ?? dossier.topHolders[0]?.percent ?? null;
@@ -2064,14 +2088,14 @@ function tokenChecks(dossier) {
     } : safety.available ? { checkId: "holder-distribution", decisionCritical: true, label: "Holder distribution", status: "unknown", note: "safety data returned, but no holder-query outcome was recorded" } : { checkId: "holder-distribution", decisionCritical: true, label: "Holder distribution", status: "unavailable", note: "holder provider response unavailable" }
   );
   const hasHolderRows = dossier.topHolders.length > 0;
-  const hasClusteringOutcome = hasHolderRows && (dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" || dossier.bundleCount > 0 || dossier.insiderPct > 0);
+  const hasClusteringOutcome = hasHolderRows && (dossier.holdersAssessed === true || dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" || dossier.bundleCount > 0 || dossier.insiderPct > 0);
   checks.push(
     hasClusteringOutcome ? {
       checkId: "wallet-clustering",
       decisionCritical: true,
       label: "Wallet clustering",
       status: dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" ? "finding" : "confirmed",
-      note: dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" ? `${dossier.bundleCount} concentrated wallets \xB7 ~${Math.round(dossier.insiderPct)}% (${dossier.bundleRisk} risk)` : "holder rows analyzed; no elevated concentration surfaced"
+      note: dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" ? `${dossier.bundleCount} concentrated wallets \xB7 ~${Math.round(dossier.insiderPct)}% (${dossier.bundleRisk} risk)` : `${dossier.topHolders.length} assessed non-market holder rows; no elevated concentration surfaced`
     } : hasHolderRows ? { checkId: "wallet-clustering", decisionCritical: true, label: "Wallet clustering", status: "unknown", note: "holder rows exist, but clustering completion/reliability is not recorded" } : safety.available ? { checkId: "wallet-clustering", decisionCritical: true, label: "Wallet clustering", status: "unknown", note: "no holder rows available to establish a clustering result" } : { checkId: "wallet-clustering", decisionCritical: true, label: "Wallet clustering", status: "unavailable", note: "requires holder-provider data" }
   );
   const deployerRisk = dossier.deployerRisk;
@@ -2263,7 +2287,7 @@ var TOKEN_REQUIRED_CHECK_IDS = /* @__PURE__ */ new Set([
 ]);
 var TOKEN_REQUIRED_CHECK_LABELS = Object.freeze({
   "contract-safety": "Contract safety",
-  "buy-sell-simulation": "Buy/sell simulation",
+  "buy-sell-simulation": "Tradeability check",
   "holder-distribution": "Holder distribution",
   "wallet-clustering": "Wallet clustering",
   "market-intelligence": "Market intelligence",

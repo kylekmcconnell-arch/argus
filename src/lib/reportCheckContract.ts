@@ -22,7 +22,7 @@ export const TOKEN_REQUIRED_CHECK_IDS: ReadonlySet<string> = new Set([
 
 const TOKEN_REQUIRED_CHECK_LABELS: Readonly<Record<string, string>> = Object.freeze({
   "contract-safety": "Contract safety",
-  "buy-sell-simulation": "Buy/sell simulation",
+  "buy-sell-simulation": "Tradeability check",
   "holder-distribution": "Holder distribution",
   "wallet-clustering": "Wallet clustering",
   "market-intelligence": "Market intelligence",
