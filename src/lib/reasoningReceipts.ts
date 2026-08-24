@@ -59,6 +59,18 @@ export interface PublicControlPathDiscovery {
   }>;
 }
 
+export interface PublicClaimConflictDiscovery {
+  id: string;
+  headline: string;
+  consequence: string;
+  reversalCondition: string;
+  evidenceHref: string;
+  receipts: Array<{
+    label: string;
+    href: string;
+  }>;
+}
+
 interface ArtifactReceipt {
   sourceUrl: string;
   provider: string;
@@ -553,4 +565,135 @@ export function buildTypedContradictionReceipts(packetValue: unknown): TypedCont
     });
   }
   return receipts.slice(0, 12);
+}
+
+function publicFactTopic(predicate: string): string {
+  const topics: Record<string, string> = {
+    audit: "security audit claim",
+    control: "control claim",
+    education: "education claim",
+    executive: "leadership claim",
+    exit: "exit claim",
+    founded: "founding date",
+    founder: "founder claim",
+    funding: "funding claim",
+    governance: "governance claim",
+    launched: "launch date",
+    legal_entity: "legal entity claim",
+    legal_regulatory_event: "legal or regulatory claim",
+    official_identity: "identity claim",
+    official_token: "official token claim",
+    partnership: "partnership claim",
+    product: "product claim",
+    public_security: "public security claim",
+    repository: "repository claim",
+    security_incident: "security incident claim",
+    tokenomics: "token supply claim",
+    track_record: "track record claim",
+    traction: "usage claim",
+    treasury: "treasury claim",
+    vesting: "vesting claim",
+  };
+  return topics[predicate.toLowerCase()] ?? "public claim";
+}
+
+function shortStatement(value: string, max = 170): string {
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (clean.length <= max) return clean;
+  const clipped = clean.slice(0, max - 1).replace(/\s+\S*$/, "").trim();
+  return `${clipped || clean.slice(0, max - 1)}…`;
+}
+
+function quotedStatement(value: string): string {
+  return shortStatement(value).replace(/[.!?]+$/, "");
+}
+
+/**
+ * Promote only a genuine official-claim-versus-independent-record conflict.
+ * Both sides must be frozen verified artifacts about the audited subject and
+ * the same stated period. Ambiguous scope, undated comparisons, same-source
+ * restatements, leads, and generic public pages stay in the evidence chapter.
+ */
+export function buildPublicClaimConflictDiscovery(
+  factValues: readonly unknown[],
+  evidenceHref: `#${string}`,
+): PublicClaimConflictDiscovery | null {
+  const candidates: Array<{
+    factId: string;
+    predicate: string;
+    proposition: string;
+    support: ArtifactReceipt;
+    contradiction: ArtifactReceipt;
+    score: number;
+  }> = [];
+  const independentClasses = new Set(["official_counterparty", "regulatory_or_onchain", "independent_press"]);
+  const importance = new Map([
+    ["control", 100], ["legal_regulatory_event", 95], ["security_incident", 95], ["audit", 90],
+    ["official_identity", 90], ["official_token", 85], ["founder", 80], ["executive", 75],
+    ["funding", 75], ["governance", 70], ["tokenomics", 70], ["vesting", 70],
+    ["launched", 60], ["founded", 60], ["partnership", 55], ["traction", 50],
+  ]);
+
+  for (const value of factValues) {
+    const fact = record(value);
+    const factId = text(fact.factId, 180);
+    const predicate = text(fact.predicate, 100).toLowerCase();
+    const proposition = text(fact.value, 800);
+    if (!factId || !predicate || !proposition || text(fact.status, 80) !== "conflicted") continue;
+    if (text(fact.attributionScope, 80) !== "direct_subject") continue;
+    const sourceRows = rows(fact.sources).map(record);
+    const supports = sourceRows.flatMap((source) => {
+      const receipt = source.relation === "supports" && source.sourceClass === "official_subject" ? artifact(source) : null;
+      return receipt ? [receipt] : [];
+    });
+    const contradictions = sourceRows.flatMap((source) => {
+      const receipt = source.relation === "contradicts" && independentClasses.has(text(source.sourceClass, 80)) ? artifact(source) : null;
+      return receipt ? [receipt] : [];
+    });
+    for (const support of supports) {
+      for (const contradiction of contradictions) {
+        if (independence(support, contradiction) !== "independent") continue;
+        if (timeAlignment(support, contradiction) !== "aligned") continue;
+        const propositionYears = statedYears(proposition);
+        if (propositionYears.length > 0) {
+          const supportYears = new Set(statedYears(support.excerpt));
+          const contradictionYears = new Set(statedYears(contradiction.excerpt));
+          if (!propositionYears.some((year) => supportYears.has(year) && contradictionYears.has(year))) continue;
+        }
+        candidates.push({
+          factId,
+          predicate,
+          proposition,
+          support,
+          contradiction,
+          score: importance.get(predicate) ?? 40,
+        });
+      }
+    }
+  }
+
+  const selected = candidates.sort((left, right) =>
+    right.score - left.score
+    || left.factId.localeCompare(right.factId)
+    || left.contradiction.sourceUrl.localeCompare(right.contradiction.sourceUrl))[0];
+  if (!selected) return null;
+
+  const topic = publicFactTopic(selected.predicate);
+  const independentHost = host(selected.contradiction.sourceUrl);
+  const independentLabel = selected.contradiction.sourceClass === "regulatory_or_onchain"
+    ? "a registry or on-chain record"
+    : selected.contradiction.sourceClass === "official_counterparty"
+      ? "the named counterparty"
+      : "an independent source";
+  return {
+    id: `claim-conflict:${selected.factId}`,
+    headline: `The official ${topic} conflicts with ${independentLabel}`,
+    consequence: `The project says “${quotedStatement(selected.proposition)}”; the independent record says “${quotedStatement(selected.contradiction.excerpt)}.” ARGUS leaves the conflict unresolved instead of choosing a side.`,
+    reversalCondition: "A current primary record that resolves both statements for the same entity and period would change this read.",
+    evidenceHref,
+    receipts: [
+      { label: "Official claim", href: selected.support.sourceUrl },
+      { label: independentHost ? `Independent record · ${independentHost}` : "Independent record", href: selected.contradiction.sourceUrl },
+    ],
+  };
 }

@@ -313,7 +313,11 @@ export function InvestigationDecisionCanvas({
                 <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{plainDecisionText(discovery.consequence)}</p>
                 <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11.5px] leading-relaxed">
                   <a href={discovery.evidenceHref} className="font-medium text-signal-lift hover:underline">
-                    {discovery.path ? "Open relationship graph" : "Open the proof"}
+                    {discovery.path
+                      ? "Open relationship graph"
+                      : discovery.id.startsWith("claim-conflict:")
+                        ? "Open both records"
+                        : "Open the proof"}
                   </a>
                   {discovery.receipts?.map((receipt) => (
                     <a

@@ -340,6 +340,63 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).not.toContain("Large market");
   });
 
+  it("promotes a fully sourced project claim conflict into the investigation decision brief", () => {
+    render(investigation({
+      projectAccount: {
+        handle: "@argus",
+        display_name: "Argus",
+        avatar: "",
+        bio: "Argus project",
+        followers: "0",
+        joined: "",
+        identity_note: "",
+        headline: "Project account",
+        live: true,
+        notableFollowers: [],
+        contradictions: [],
+        basicFacts: [{
+          factId: "argus-launch-date",
+          predicate: "launched",
+          value: "The project launched in March 2024.",
+          status: "conflicted",
+          attributionScope: "direct_subject",
+          sources: [
+            {
+              url: "https://argus.example/history",
+              provider: "official-site",
+              sourceClass: "official_subject",
+              relation: "supports",
+              excerpt: "We launched in March 2024.",
+              contentHash: "official-launch-hash",
+              capturedAt: "2026-08-22T10:00:00Z",
+              artifactVerified: true,
+            },
+            {
+              url: "https://registry.example/argus",
+              provider: "public-registry",
+              sourceClass: "regulatory_or_onchain",
+              relation: "contradicts",
+              excerpt: "The registered launch occurred in September 2024.",
+              contentHash: "registry-launch-hash",
+              capturedAt: "2026-08-22T10:01:00Z",
+              artifactVerified: true,
+            },
+          ],
+        }],
+        webTeam: [],
+        report: { composite_verdict: "PASS", governing_score: 80, identity_confidence: "Confirmed", roles: [] },
+        evidence: { ventures: [], testimonials: [], advised: [], associates: [], wallets: [], promotions: [] },
+        graph: { nodes: [], edges: [] },
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+    }));
+
+    const brief = container.querySelector('[data-canonical-decision-brief="true"]')!;
+    expect(brief.textContent).toContain("The official launch date conflicts with a registry or blockchain record");
+    expect(brief.textContent).toContain("Open both records");
+    expect(brief.querySelector('a[href="#investigation-basic-facts"]')).not.toBeNull();
+    expect(brief.querySelector('a[href="https://registry.example/argus"]')).not.toBeNull();
+  });
+
   it("drops legacy Monid team rows that cannot be tied to the official project domain", () => {
     render(investigation({
       siteUrl: "https://venice.ai",

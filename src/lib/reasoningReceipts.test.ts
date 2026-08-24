@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGraphPathReceipt, buildPublicControlPathDiscovery, buildTypedContradictionReceipts } from "./reasoningReceipts";
+import { buildGraphPathReceipt, buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery, buildTypedContradictionReceipts } from "./reasoningReceipts";
 
 function graphPacket() {
   return {
@@ -89,6 +89,113 @@ function conflictPacket(overrides: Record<string, unknown> = {}) {
 }
 
 describe("reasoning receipts", () => {
+  it("surfaces an official claim that conflicts with an independent record for the same period", () => {
+    const discovery = buildPublicClaimConflictDiscovery([{
+      factId: "fact:launch-date",
+      predicate: "launched",
+      value: "The project launched in 2024.",
+      status: "conflicted",
+      attributionScope: "direct_subject",
+      sources: [
+        {
+          url: "https://project.example/history",
+          provider: "official-site",
+          sourceClass: "official_subject",
+          relation: "supports",
+          excerpt: "We launched the project in March 2024.",
+          contentHash: "official-hash",
+          capturedAt: "2026-08-22T10:00:00Z",
+          artifactVerified: true,
+        },
+        {
+          url: "https://registry.example/filing",
+          provider: "public-registry",
+          sourceClass: "regulatory_or_onchain",
+          relation: "contradicts",
+          excerpt: "The registered launch occurred in September 2024.",
+          contentHash: "registry-hash",
+          capturedAt: "2026-08-22T10:01:00Z",
+          artifactVerified: true,
+        },
+      ],
+    }], "#basic-facts");
+
+    expect(discovery).toMatchObject({
+      id: "claim-conflict:fact:launch-date",
+      headline: "The official launch date conflicts with a registry or on-chain record",
+      evidenceHref: "#basic-facts",
+      receipts: [
+        { label: "Official claim", href: "https://project.example/history" },
+        { href: "https://registry.example/filing" },
+      ],
+    });
+    expect(discovery?.consequence).toContain("ARGUS leaves the conflict unresolved");
+  });
+
+  it("withholds claim conflicts that are dependent, unverified, out of period, or about a related entity", () => {
+    const source = {
+      url: "https://project.example/history",
+      provider: "official-site",
+      sourceClass: "official_subject",
+      relation: "supports",
+      excerpt: "The project launched in 2024.",
+      contentHash: "support-hash",
+      capturedAt: "2026-08-22T10:00:00Z",
+      artifactVerified: true,
+    };
+    const fact = {
+      factId: "fact:launch-date",
+      predicate: "launched",
+      value: "The project launched in 2024.",
+      status: "conflicted",
+      attributionScope: "direct_subject",
+      sources: [source, {
+        ...source,
+        relation: "contradicts",
+        sourceClass: "independent_press",
+        excerpt: "The project launched in 2024 on another date.",
+        contentHash: "conflict-hash",
+      }],
+    };
+    expect(buildPublicClaimConflictDiscovery([fact], "#basic-facts")).toBeNull();
+    expect(buildPublicClaimConflictDiscovery([{
+      ...fact,
+      sources: [source, {
+        ...fact.sources[1],
+        url: "https://press.example/report",
+        provider: "press",
+        excerpt: "The project launched in 2023.",
+      }],
+    }], "#basic-facts")).toBeNull();
+    expect(buildPublicClaimConflictDiscovery([{
+      ...fact,
+      attributionScope: "related_entity",
+      sources: [source, {
+        ...fact.sources[1],
+        url: "https://press.example/report",
+        provider: "press",
+      }],
+    }], "#basic-facts")).toBeNull();
+    expect(buildPublicClaimConflictDiscovery([{
+      ...fact,
+      attributionScope: undefined,
+      sources: [source, {
+        ...fact.sources[1],
+        url: "https://press.example/report",
+        provider: "press",
+      }],
+    }], "#basic-facts")).toBeNull();
+    expect(buildPublicClaimConflictDiscovery([{
+      ...fact,
+      sources: [source, {
+        ...fact.sources[1],
+        url: "https://press.example/report",
+        provider: "press",
+        artifactVerified: false,
+      }],
+    }], "#basic-facts")).toBeNull();
+  });
+
   it("surfaces a two-hop public control path only when every edge has a source receipt", () => {
     const discovery = buildPublicControlPathDiscovery([
       {
