@@ -26,4 +26,26 @@ describe("ScanOperationsPanel", () => {
     act(() => root.unmount());
     container.remove();
   });
+
+  it("presents a truncated provider read as a floor, not a total", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      totals: {
+        scans: 1, running: 0, degraded: 0, failed: 0, credits: 1,
+        providerCostUsd: 18.5, unknownCostScans: 0,
+        providerCostIsFloor: true, truncated: { providerEvents: true, checks: false },
+      },
+      alerts: [],
+      scans: [{ id: "s", label: "$ARGUS", kind: "token", status: "complete", actor: "Kyle", creditsCharged: 1, providerCostUsd: 18.5, costBasis: "estimated", startedAt: "2026-08-23T20:00:00Z", durationMs: 2000, failureDetail: null, alerts: [], checks: [], providers: [] }],
+    }), { status: 200 })));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<ScanOperationsPanel />); });
+    await act(async () => {});
+    expect(container.textContent).toContain("at least $18.50");
+    expect(container.textContent).toContain("provider rows truncated");
+    expect(container.textContent).toContain("these figures are a floor");
+    act(() => root.unmount());
+    container.remove();
+  });
 });

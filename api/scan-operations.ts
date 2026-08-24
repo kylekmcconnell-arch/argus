@@ -24,6 +24,11 @@ async function rows(url: string, key: string): Promise<JsonRecord[]> {
 
 const inFilter = (ids: readonly string[]) => encodeURIComponent(`in.(${ids.join(",")})`);
 
+// Provider and check reads are bounded. A capped read is a floor, never a
+// total, so the response has to say when the cap was reached rather than
+// publish a confident cost built on a truncated sample.
+const EVENT_PAGE_LIMIT = 5000;
+
 export type ProviderFailureClass = "quota" | "rate_limit" | "authentication" | "timeout" | "transport" | "provider_error" | null;
 
 export function classifyProviderFailure(status: string, meta?: string): ProviderFailureClass {
@@ -76,10 +81,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? rows(`${credentials.url}/rest/v1/report_versions?select=id,case_id,version,completeness_state,verdict,score,created_at&organization_id=eq.${encodeURIComponent(auth.organizationId)}&id=${inFilter(versionIds)}`, credentials.key)
         : Promise.resolve([]),
       versionIds.length
-        ? rows(`${credentials.url}/rest/v1/provider_usage_events?select=id,report_version_id,provider,operation,calls,usd,status,meta,created_at&organization_id=eq.${encodeURIComponent(auth.organizationId)}&report_version_id=${inFilter(versionIds)}&order=created_at.asc,id.asc&limit=5000`, credentials.key)
+        ? rows(`${credentials.url}/rest/v1/provider_usage_events?select=id,report_version_id,provider,operation,calls,usd,status,meta,created_at&organization_id=eq.${encodeURIComponent(auth.organizationId)}&report_version_id=${inFilter(versionIds)}&order=created_at.asc,id.asc&limit=${EVENT_PAGE_LIMIT}`, credentials.key)
         : Promise.resolve([]),
       versionIds.length
-        ? rows(`${credentials.url}/rest/v1/check_runs?select=id,report_version_id,check_id,provider,state,error_code,error_detail,metadata&organization_id=eq.${encodeURIComponent(auth.organizationId)}&report_version_id=${inFilter(versionIds)}&order=finished_at.asc,id.asc&limit=5000`, credentials.key)
+        ? rows(`${credentials.url}/rest/v1/check_runs?select=id,report_version_id,check_id,provider,state,error_code,error_detail,metadata&organization_id=eq.${encodeURIComponent(auth.organizationId)}&report_version_id=${inFilter(versionIds)}&order=finished_at.asc,id.asc&limit=${EVENT_PAGE_LIMIT}`, credentials.key)
         : Promise.resolve([]),
       actorIds.length
         ? rows(`${credentials.url}/rest/v1/argus_members?select=user_id,display_name&organization_id=eq.${encodeURIComponent(auth.organizationId)}&user_id=${inFilter(actorIds)}`, credentials.key)
@@ -102,6 +107,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const id = text(row.report_version_id, 36);
       checksByVersion.set(id, [...(checksByVersion.get(id) ?? []), row]);
     }
+    // Hitting the cap means rows were left unread, so any cost summed from
+    // this sample is a minimum. Say so rather than presenting it as the total.
+    const usageTruncated = usage.length >= EVENT_PAGE_LIMIT;
+    const checksTruncated = checks.length >= EVENT_PAGE_LIMIT;
 
     const now = Date.now();
     const scans = receipts.map((receipt) => {
@@ -213,6 +222,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         credits: scans.reduce((sum, scan) => sum + scan.creditsCharged, 0),
         providerCostUsd: scans.reduce((sum, scan) => sum + (scan.providerCostUsd ?? 0), 0),
         unknownCostScans: scans.filter((scan) => scan.costBasis === "unknown").length,
+        providerCostIsFloor: usageTruncated,
+        truncated: { providerEvents: usageTruncated, checks: checksTruncated },
       },
     });
   } catch (error) {

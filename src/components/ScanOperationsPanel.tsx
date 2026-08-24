@@ -22,10 +22,22 @@ type Scan = {
 type Operations = {
   scans: Scan[];
   alerts: Array<Alert & { scanId: string; scanLabel: string }>;
-  totals: { scans: number; running: number; degraded: number; failed: number; credits: number; providerCostUsd: number; unknownCostScans: number };
+  totals: {
+    scans: number; running: number; degraded: number; failed: number; credits: number;
+    providerCostUsd: number; unknownCostScans: number;
+    providerCostIsFloor?: boolean;
+    truncated?: { providerEvents: boolean; checks: boolean };
+  };
 };
 
 const money = (value: number) => `$${value.toFixed(value < 1 ? 3 : 2)}`;
+
+function costNote(totals: Operations["totals"]): string {
+  const notes: string[] = [];
+  if (totals.unknownCostScans) notes.push(`${totals.unknownCostScans} unknown`);
+  if (totals.providerCostIsFloor) notes.push("provider rows truncated");
+  return notes.length ? notes.join(" · ") : "all recorded";
+}
 const elapsed = (ms: number | null) => ms == null ? "duration unavailable" : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} sec`;
 const time = (value: string) => {
   const date = new Date(value);
@@ -71,8 +83,18 @@ export function ScanOperationsPanel() {
           <Metric label="Scans" value={String(data.totals.scans)} />
           <Metric label="Failed or degraded" value={String(data.totals.failed + data.totals.degraded)} />
           <Metric label="Credits charged" value={data.totals.credits.toLocaleString()} />
-          <Metric label="Recorded provider cost" value={money(data.totals.providerCostUsd)} note={data.totals.unknownCostScans ? `${data.totals.unknownCostScans} unknown` : "all recorded"} />
+          <Metric
+            label="Recorded provider cost"
+            value={`${data.totals.providerCostIsFloor ? "at least " : ""}${money(data.totals.providerCostUsd)}`}
+            note={costNote(data.totals)}
+          />
         </div>
+        {(data.totals.truncated?.providerEvents || data.totals.truncated?.checks) && (
+          <p className="mt-2 text-[11.5px] leading-relaxed text-ink-dim">
+            This workspace has more {data.totals.truncated?.providerEvents ? "provider activity" : "check activity"} than
+            one read returns, so these figures are a floor. Narrow the range to see a complete picture.
+          </p>
+        )}
       </div>
 
       {data.alerts.length > 0 && (
