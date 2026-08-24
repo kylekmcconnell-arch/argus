@@ -9,6 +9,7 @@
 //
 // EVM only, via Etherscan v2 multichain. Gated on ETHERSCAN_API_KEY. Bounded.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { rec, str } from "../src/lib/json.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
@@ -37,7 +38,7 @@ const CEX = new Set<string>([
 
 const ES = "https://api.etherscan.io/v2/api";
 interface CallCounter { calls: number; succeeded: number }
-interface ExplorerRead { rows: any[]; completed: boolean; truncated: boolean; providerFailed: boolean }
+interface ExplorerRead { rows: unknown[]; completed: boolean; truncated: boolean; providerFailed: boolean }
 interface DeploymentScan {
   contracts: string[];
   completed: boolean;
@@ -47,10 +48,11 @@ interface DeploymentScan {
 const isAddr = (s: string) => /^0x[a-fA-F0-9]{40}$/.test(s);
 const lc = (s: string) => s.toLowerCase();
 
-function noTransactions(body: any): boolean {
-  return body?.status === "0"
-    && typeof body?.result === "string"
-    && /no transactions found/i.test(body.result);
+function noTransactions(body: unknown): boolean {
+  const data = rec(body);
+  return data.status === "0"
+    && typeof data.result === "string"
+    && /no transactions found/i.test(data.result);
 }
 
 async function txlist(chainid: number, address: string, key: string, offset: number, usage: CallCounter): Promise<ExplorerRead> {
@@ -58,8 +60,8 @@ async function txlist(chainid: number, address: string, key: string, offset: num
   const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "txlist", address, startblock: "0", endblock: "99999999", page: "1", offset: String(offset), sort: "asc", apikey: key });
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
   if (!r || !r.ok) return { rows: [], completed: false, truncated: false, providerFailed: true };
-  const d = (await r.json().catch(() => null)) as any;
-  if (Array.isArray(d?.result)) {
+  const d = rec(await r.json().catch(() => null));
+  if (Array.isArray(d.result)) {
     usage.succeeded += 1;
     return { rows: d.result, completed: true, truncated: d.result.length >= offset, providerFailed: false };
   }
@@ -75,8 +77,11 @@ async function txlist(chainid: number, address: string, key: string, offset: num
 async function deployments(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<DeploymentScan> {
   const read = await txlist(chainid, wallet, key, 10000, usage);
   const created = new Set<string>();
-  for (const t of read.rows) {
-    if ((!t.to || t.to === "") && t.contractAddress && isAddr(t.contractAddress) && lc(t.from) === lc(wallet)) created.add(lc(t.contractAddress));
+  for (const value of read.rows) {
+    const tx = rec(value);
+    const to = str(tx.to);
+    const contractAddress = str(tx.contractAddress);
+    if (!to && contractAddress && isAddr(contractAddress) && lc(str(tx.from)) === lc(wallet)) created.add(lc(contractAddress));
   }
   return {
     contracts: [...created],
@@ -97,11 +102,12 @@ async function seedRecipients(
   const read = await txlist(chainid, funder, key, 4000, usage);
   const recipients = new Set<string>();
   let candidateCapHit = false;
-  for (const t of read.rows) {
-    if (lc(t.from) !== lc(funder)) continue;
-    const to = t.to ? lc(t.to) : "";
+  for (const value of read.rows) {
+    const tx = rec(value);
+    if (lc(str(tx.from)) !== lc(funder)) continue;
+    const to = str(tx.to) ? lc(str(tx.to)) : "";
     if (!to || !isAddr(to) || to === lc(funder) || CEX.has(to)) continue;
-    const v = Number(t.value);
+    const v = Number(tx.value);
     if (v < MIN_SEED || v > MAX_SEED) continue;
     if (recipients.has(to)) continue;
     if (recipients.size >= MAX_CANDIDATES) { candidateCapHit = true; continue; }
