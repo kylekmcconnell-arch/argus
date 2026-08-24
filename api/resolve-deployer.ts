@@ -9,6 +9,7 @@
 //      the mint (bounded pagination; the ground truth when reachable).
 // Solana only (Helius). Gated on HELIUS_API_KEY.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { arr, rec, str, type JsonRecord } from "../src/lib/json.js";
 
 export const config = { maxDuration: 30 };
 
@@ -28,7 +29,7 @@ const NOT_A_DEV = new Set<string>([
 ]);
 const ok = (a: unknown): a is string => typeof a === "string" && SOLADDR.test(a) && !NOT_A_DEV.has(a);
 
-async function rpc(url: string, method: string, params: unknown): Promise<any> {
+async function rpc(url: string, method: string, params: unknown): Promise<unknown> {
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -36,17 +37,18 @@ async function rpc(url: string, method: string, params: unknown): Promise<any> {
     signal: AbortSignal.timeout(12000),
   });
   if (!res.ok) throw new Error(`rpc ${method} ${res.status}`);
-  const d = (await res.json()) as any;
-  if (d.error) throw new Error(`rpc ${method}: ${d.error.message}`);
+  const d = rec(await res.json());
+  const error = rec(d.error);
+  if (d.error) throw new Error(`rpc ${method}: ${str(error.message)}`);
   return d.result;
 }
 
 // Method 1: DAS getAsset — indexed creators + update authority.
 async function fromAsset(url: string, mint: string): Promise<{ creators: string[]; authority: string | null }> {
   try {
-    const a = await rpc(url, "getAsset", { id: mint });
-    const creators = (a?.creators ?? []).map((c: any) => c?.address).filter(ok);
-    const authority = (a?.authorities ?? []).map((x: any) => x?.address).find(ok) ?? null;
+    const asset = rec(await rpc(url, "getAsset", { id: mint }));
+    const creators = arr(asset.creators).map((creator) => str(rec(creator).address)).filter(ok);
+    const authority = arr(asset.authorities).map((entry) => str(rec(entry).address)).find(ok) ?? null;
     return { creators, authority };
   } catch {
     return { creators: [], authority: null };
@@ -59,18 +61,18 @@ async function firstTxSigner(url: string, mint: string): Promise<string | null> 
     let before: string | undefined;
     let oldest: string | null = null;
     for (let p = 0; p < MAX_SIG_PAGES; p++) {
-      const batch: any[] = await rpc(url, "getSignaturesForAddress", [mint, { limit: 1000, ...(before ? { before } : {}) }]);
-      if (!batch?.length) break;
-      if (batch.length < 1000) { oldest = batch[batch.length - 1].signature; break; }
-      before = batch[batch.length - 1].signature;
+      const batch = arr(await rpc(url, "getSignaturesForAddress", [mint, { limit: 1000, ...(before ? { before } : {}) }]));
+      if (!batch.length) break;
+      if (batch.length < 1000) { oldest = str(rec(batch[batch.length - 1]).signature); break; }
+      before = str(rec(batch[batch.length - 1]).signature);
       if (p === MAX_SIG_PAGES - 1) return null; // too active to reach creation
     }
     if (!oldest) return null;
-    const tx = await rpc(url, "getTransaction", [oldest, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }]);
-    const keys: any[] = tx?.transaction?.message?.accountKeys ?? [];
+    const tx = rec(await rpc(url, "getTransaction", [oldest, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }]));
+    const keys = arr(rec(rec(tx.transaction).message).accountKeys);
     // fee payer = first signer/writable account key
-    const payer = keys.find((k) => (typeof k === "object" ? k.signer : false)) ?? keys[0];
-    const addr = typeof payer === "string" ? payer : payer?.pubkey;
+    const payer = keys.find((key) => rec(key).signer === true) ?? keys[0];
+    const addr = typeof payer === "string" ? payer : str(rec(payer).pubkey);
     return ok(addr) ? addr : null;
   } catch {
     return null;
@@ -99,8 +101,8 @@ export async function fromEnhancedCreate(key: string, mint: string): Promise<str
       // shape allowed to make that claim. Otherwise fall through to the bounded
       // oldest-signature walk, which returns null rather than guess.
       if (txs.length >= ENHANCED_TX_LIMIT) continue;
-      const create = txs[txs.length - 1];
-      const payer = create?.feePayer;
+      const create = rec(txs[txs.length - 1]);
+      const payer = create.feePayer;
       if (ok(payer)) return payer;
     } catch { /* try next type */ }
   }
@@ -126,7 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // primary. Then an indexed creator, then the update authority.
     const deployer = createPayer ?? firstTx ?? asset.creators[0] ?? asset.authority ?? null;
     const via = createPayer ? "mint feePayer" : firstTx ? "creation-tx fee payer" : asset.creators[0] ? "DAS creator" : asset.authority ? "update authority" : null;
-    const body: any = { mint, available: true, deployer, via };
+    const body: JsonRecord = { mint, available: true, deployer, via };
     if (req.query.debug) body.candidates = { firstTx, createPayer, creators: asset.creators, authority: asset.authority };
     res.status(200).json(body);
   } catch (e) {

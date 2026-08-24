@@ -33,6 +33,7 @@
 // "still holds" figures are live balances, and a day-old copy would misstate
 // the one thing that moves.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { arr, rec, str } from "../src/lib/json.js";
 import { classifyMarketAddress } from "../src/lib/marketAddresses.js";
 import {
   currentTokenBalance,
@@ -312,24 +313,24 @@ async function launchWindowSigs(
   pageDeadline: number,
 ): Promise<{ sigs: string[]; reachedLaunch: boolean }> {
   let before: string | undefined;
-  const pages: any[][] = []; // fetch order: each entry OLDER than the one before
+  const pages: unknown[][] = []; // fetch order: each entry OLDER than the one before
   for (let page = 0; page < MAX_LAUNCH_PAGES; page++) {
     if (Date.now() > pageDeadline) break;
-    const batch: any[] = await heliusRpc(url, "getSignaturesForAddress", [mint, { limit: 1000, ...(before ? { before } : {}) }], usage);
-    if (!batch?.length) break;
+    const batch = arr(await heliusRpc(url, "getSignaturesForAddress", [mint, { limit: 1000, ...(before ? { before } : {}) }], usage));
+    if (!batch.length) break;
     pages.push(batch);
     if (pages.length > 3) pages.shift();
     if (batch.length < 1000) {
       const sigs: string[] = [];
       for (let i = pages.length - 1; i >= 0 && sigs.length < EARLY_TX_WINDOW; i--) {
         for (let j = pages[i].length - 1; j >= 0 && sigs.length < EARLY_TX_WINDOW; j--) {
-          const row = pages[i][j];
-          if (!row.err) sigs.push(row.signature);
+          const row = rec(pages[i][j]);
+          if (!row.err) sigs.push(str(row.signature));
         }
       }
       return { sigs, reachedLaunch: true };
     }
-    before = batch[batch.length - 1].signature;
+    before = str(rec(batch[batch.length - 1]).signature);
   }
   return { sigs: [], reachedLaunch: false };
 }
@@ -357,12 +358,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const rugcheck = await fetch(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, {
       signal: AbortSignal.timeout(12000),
       headers: { accept: "application/json" },
-    }).then((r) => (r.ok ? r.json() : null)).catch(() => null) as any;
-    const knownAccounts: Record<string, { name?: string; type?: string }> = rugcheck?.knownAccounts ?? {};
-    const creator = typeof rugcheck?.creator === "string" && SOLADDR.test(rugcheck.creator) ? rugcheck.creator : null;
-    const poolAddresses: string[] = (Array.isArray(rugcheck?.markets) ? rugcheck.markets : [])
-      .map((m: any) => (typeof m?.pubkey === "string" ? m.pubkey : null))
-      .filter(Boolean);
+    }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const rugcheckRecord = rec(rugcheck);
+    const knownAccounts = Object.fromEntries(Object.entries(rec(rugcheckRecord.knownAccounts)).map(([address, value]) => {
+      const account = rec(value);
+      return [address, { name: typeof account.name === "string" ? account.name : undefined, type: typeof account.type === "string" ? account.type : undefined }];
+    }));
+    const creator = typeof rugcheckRecord.creator === "string" && SOLADDR.test(rugcheckRecord.creator) ? rugcheckRecord.creator : null;
+    const poolAddresses = arr(rugcheckRecord.markets).map((market) => str(rec(market).pubkey)).filter(Boolean);
 
     // 1. Reach the token's first transactions. A token with more history than
     //    the page budget gets the honest refusal, not a window that silently

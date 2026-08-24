@@ -11,12 +11,14 @@
 // Nothing follows a lamport forward, so nothing here can support a claim about
 // where money went.
 
+import { arr, num, rec, str } from "../src/lib/json.js";
+
 export interface ProviderUsage {
   calls: number;
   succeeded: number;
 }
 
-export async function heliusRpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<any> {
+export async function heliusRpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<unknown> {
   usage.calls += 1;
   const res = await fetch(url, {
     method: "POST",
@@ -25,8 +27,9 @@ export async function heliusRpc(url: string, method: string, params: unknown, us
     signal: AbortSignal.timeout(12000),
   });
   if (!res.ok) throw new Error(`rpc ${method} ${res.status}`);
-  const d = (await res.json()) as any;
-  if (d.error) throw new Error(`rpc ${method}: ${d.error.message}`);
+  const d = rec(await res.json());
+  const error = rec(d.error);
+  if (d.error) throw new Error(`rpc ${method}: ${str(error.message)}`);
   usage.succeeded += 1;
   return d.result;
 }
@@ -45,17 +48,17 @@ export async function oldestWalletSigs(
   maxPages = 3,
 ): Promise<{ sigs: string[]; truncated: boolean }> {
   let before: string | undefined;
-  let last: any[] = [];
+  let last: unknown[] = [];
   for (let page = 0; page < maxPages; page++) {
-    const batch: any[] = await heliusRpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage).catch(() => []);
-    if (!batch?.length) break;
+    const batch = arr(await heliusRpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage).catch(() => []));
+    if (!batch.length) break;
     last = batch;
     if (batch.length < 1000) {
-      return { sigs: batch.slice(-6).reverse().map((s) => s.signature), truncated: false };
+      return { sigs: batch.slice(-6).reverse().map((s) => str(rec(s).signature)), truncated: false };
     }
-    before = batch[batch.length - 1].signature;
+    before = str(rec(batch[batch.length - 1]).signature);
   }
-  return { sigs: last.slice(-6).reverse().map((s) => s.signature), truncated: last.length >= 1000 };
+  return { sigs: last.slice(-6).reverse().map((s) => str(rec(s).signature)), truncated: last.length >= 1000 };
 }
 
 /**
@@ -67,17 +70,19 @@ export async function oldestWalletSigs(
  * leaving and is skipped rather than read backwards.
  */
 export async function seedFundingSource(url: string, wallet: string, sigs: string[], usage: ProviderUsage): Promise<string | null> {
-  const scan = (instrs: any[]): string | null => {
-    for (const ix of instrs ?? []) {
-      const p = ix.parsed;
-      if (!p?.info) continue;
-      if (p.type === "transfer" && p.info.destination === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
-      if ((p.type === "createAccount" || p.type === "createAccountWithSeed") && p.info.newAccount === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
+  const scan = (instrs: unknown): string | null => {
+    for (const ix of arr(instrs)) {
+      const parsed = rec(rec(ix).parsed);
+      const info = rec(parsed.info);
+      const source = str(info.source);
+      if (!parsed.info) continue;
+      if (parsed.type === "transfer" && info.destination === wallet && source && source !== wallet) return source;
+      if ((parsed.type === "createAccount" || parsed.type === "createAccountWithSeed") && info.newAccount === wallet && source && source !== wallet) return source;
     }
     return null;
   };
   for (const sig of sigs) {
-    let tx: any;
+    let tx: unknown;
     try {
       tx = await heliusRpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
     } catch {
@@ -87,15 +92,19 @@ export async function seedFundingSource(url: string, wallet: string, sigs: strin
       return null;
     }
     if (!tx) return null;
-    const direct = scan(tx.transaction?.message?.instructions);
+    const txRecord = rec(tx);
+    const transaction = rec(txRecord.transaction);
+    const message = rec(transaction.message);
+    const meta = rec(txRecord.meta);
+    const direct = scan(message.instructions);
     if (direct) return direct;
-    for (const inner of tx.meta?.innerInstructions ?? []) {
-      const s = scan(inner.instructions);
+    for (const inner of arr(meta.innerInstructions)) {
+      const s = scan(rec(inner).instructions);
       if (s) return s;
     }
-    const keys: string[] = (tx.transaction?.message?.accountKeys ?? []).map((k: any) => (typeof k === "string" ? k : k.pubkey));
-    const pre: number[] = tx.meta?.preBalances ?? [];
-    const post: number[] = tx.meta?.postBalances ?? [];
+    const keys = arr(message.accountKeys).map((key) => typeof key === "string" ? key : str(rec(key).pubkey));
+    const pre = arr(meta.preBalances).map(num);
+    const post = arr(meta.postBalances).map(num);
     const wi = keys.indexOf(wallet);
     if (wi >= 0 && (post[wi] ?? 0) > (pre[wi] ?? 0)) {
       let best = -1, drop = 0;
@@ -116,18 +125,20 @@ export async function seedFundingSource(url: string, wallet: string, sigs: strin
  */
 export async function currentTokenBalance(url: string, owner: string, mint: string, usage: ProviderUsage): Promise<number | null> {
   try {
-    const result = await heliusRpc(url, "getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }], usage);
-    if (!Array.isArray(result?.value)) return null;
-    const accounts: any[] = result.value;
+    const result = rec(await heliusRpc(url, "getTokenAccountsByOwner", [owner, { mint }, { encoding: "jsonParsed" }], usage));
+    if (!Array.isArray(result.value)) return null;
+    const accounts = result.value;
     let sum = 0;
     for (const account of accounts) {
-      const amount = account?.account?.data?.parsed?.info?.tokenAmount;
-      const ui = amount?.uiAmount;
+      const accountRecord = rec(account);
+      const amount = rec(rec(rec(rec(accountRecord.account).data).parsed).info).tokenAmount;
+      const amountRecord = rec(amount);
+      const ui = amountRecord.uiAmount;
       if (typeof ui === "number" && Number.isFinite(ui) && ui >= 0) {
         sum += ui;
         continue;
       }
-      const uiString = typeof amount?.uiAmountString === "string" ? amount.uiAmountString.trim() : "";
+      const uiString = typeof amountRecord.uiAmountString === "string" ? amountRecord.uiAmountString.trim() : "";
       const parsed = uiString ? Number(uiString) : Number.NaN;
       if (!Number.isFinite(parsed) || parsed < 0) return null;
       sum += parsed;

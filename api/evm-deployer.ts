@@ -9,6 +9,7 @@
 //
 // EVM only. Gated on ETHERSCAN_API_KEY. Bounded + graceful when unset.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { arr, rec, str } from "../src/lib/json.js";
 import { EVM_CEX_WALLETS as CEX } from "../src/lib/marketAddresses.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
@@ -27,7 +28,7 @@ const CHAINID: Record<string, number> = {
 
 const ES = "https://api.etherscan.io/v2/api";
 interface CallCounter { calls: number; succeeded: number }
-async function es(chainid: number, params: Record<string, string>, key: string, usage: CallCounter): Promise<any> {
+async function es(chainid: number, params: Record<string, string>, key: string, usage: CallCounter): Promise<unknown> {
   usage.calls += 1;
   const q = new URLSearchParams({ chainid: String(chainid), apikey: key, ...params });
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) });
@@ -50,13 +51,17 @@ async function fundingSource(chainid: number, wallet: string, key: string, usage
     es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage).catch(() => null),
     es(chainid, { module: "account", action: "txlistinternal", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage).catch(() => null),
   ]);
-  const txs: any[] = Array.isArray(d?.result) ? d.result : [];
-  const itxs: any[] = Array.isArray(di?.result) ? di.result : [];
-  const firstTs = txs.length ? Number(txs[0].timeStamp) || null : null;
+  const txs = arr(rec(d).result);
+  const itxs = arr(rec(di).result);
+  const firstTs = txs.length ? Number(rec(txs[0]).timeStamp) || null : null;
   const cands: { from: string; ts: number }[] = [];
-  const inflow = (t: any) => lc(t.to) === lc(wallet) && t.from && lc(t.from) !== lc(wallet) && Number(t.value) > 0 && t.isError !== "1";
-  for (const t of txs) if (inflow(t)) cands.push({ from: t.from, ts: Number(t.timeStamp) });
-  for (const t of itxs) if (inflow(t)) cands.push({ from: t.from, ts: Number(t.timeStamp) });
+  const inflow = (value: unknown) => {
+    const tx = rec(value);
+    const from = str(tx.from);
+    return lc(str(tx.to)) === lc(wallet) && from && lc(from) !== lc(wallet) && Number(tx.value) > 0 && tx.isError !== "1";
+  };
+  for (const value of txs) if (inflow(value)) { const tx = rec(value); cands.push({ from: str(tx.from), ts: Number(tx.timeStamp) }); }
+  for (const value of itxs) if (inflow(value)) { const tx = rec(value); cands.push({ from: str(tx.from), ts: Number(tx.timeStamp) }); }
   cands.sort((a, b) => a.ts - b.ts);
   return { funder: cands[0]?.from ?? null, firstTs };
 }
@@ -66,10 +71,13 @@ async function fundingSource(chainid: number, wallet: string, key: string, usage
 // many contracts is a serial launcher on its own.
 async function deploymentsBy(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<number> {
   const d = await es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "10000", sort: "asc" }, key, usage).catch(() => null);
-  const txs: any[] = Array.isArray(d?.result) ? d.result : [];
+  const txs = arr(rec(d).result);
   const created = new Set<string>();
-  for (const t of txs) {
-    if ((!t.to || t.to === "") && t.contractAddress && isAddr(t.contractAddress) && lc(t.from) === lc(wallet)) created.add(lc(t.contractAddress));
+  for (const value of txs) {
+    const tx = rec(value);
+    const to = str(tx.to);
+    const contractAddress = str(tx.contractAddress);
+    if (!to && contractAddress && isAddr(contractAddress) && lc(str(tx.from)) === lc(wallet)) created.add(lc(contractAddress));
   }
   return created.size;
 }
@@ -105,8 +113,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let deployer: string | null = walletQ && isAddr(walletQ) ? walletQ : null;
     if (!deployer) {
       const cc = await es(chainid, { module: "contract", action: "getcontractcreation", contractaddresses: address }, key, usage);
-      const rec = Array.isArray(cc?.result) ? cc.result[0] : null;
-      deployer = rec?.contractCreator && isAddr(rec.contractCreator) ? rec.contractCreator : null;
+      const creation = rec(arr(rec(cc).result)[0]);
+      const contractCreator = str(creation.contractCreator);
+      deployer = contractCreator && isAddr(contractCreator) ? contractCreator : null;
     }
     if (!deployer) { res.status(200).json({ address: subject, chain, available: true, deployer: null, note: "Deployer not resolvable from contract-creation records." }); return; }
 

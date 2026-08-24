@@ -14,6 +14,7 @@
 //
 // Solana only (Helius). Gated on HELIUS_API_KEY. Bounded + graceful when unset.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { arr, rec, str } from "../src/lib/json.js";
 import { SOLANA_CEX_WALLETS } from "../src/lib/marketAddresses.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
@@ -28,7 +29,7 @@ const MAX_CANDIDATES = 40; // distinct recipients we bother to check
 const CHECK_CHUNK = 6; // concurrency for the per-recipient mint scans
 const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 interface ProviderUsage { calls: number; succeeded: number }
-interface EnhancedTxRead { rows: any[]; completed: boolean; providerFailed: boolean }
+interface EnhancedTxRead { rows: unknown[]; completed: boolean; providerFailed: boolean }
 interface MintScan {
   total: number;
   sample: { mint: string; name?: string }[];
@@ -89,17 +90,19 @@ async function seedRecipients(
     const txs = read.rows;
     if (!txs.length) { reachedEnd = true; break; }
     scanned += txs.length;
-    for (const tx of txs) {
-      for (const nt of tx.nativeTransfers ?? []) {
-        if (nt.fromUserAccount !== funder) continue;
-        const to = nt.toUserAccount;
-        const amt = Number(nt.amount ?? 0);
+    for (const value of txs) {
+      const tx = rec(value);
+      for (const transfer of arr(tx.nativeTransfers)) {
+        const nativeTransfer = rec(transfer);
+        if (nativeTransfer.fromUserAccount !== funder) continue;
+        const to = str(nativeTransfer.toUserAccount);
+        const amt = Number(nativeTransfer.amount ?? 0);
         if (!to || to === funder || SKIP.has(to) || !SOLADDR.test(to)) continue;
         if (amt < MIN_SEED || amt > MAX_SEED) continue;
         recipients.add(to);
       }
     }
-    const nextBefore = txs[txs.length - 1]?.signature ?? "";
+    const nextBefore = str(rec(txs[txs.length - 1]).signature);
     if (txs.length < 100) { reachedEnd = true; break; }
     if (!nextBefore || nextBefore === before) { truncated = true; break; }
     before = nextBefore;
@@ -125,11 +128,12 @@ async function mintedTokens(key: string, wallet: string, usage: ProviderUsage): 
   const txs = read.rows;
   const mints = new Set<string>();
   const nameByMint = new Map<string, string>();
-  for (const t of txs) {
-    if (t.type !== "TOKEN_MINT" && t.type !== "CREATE") continue;
-    const real = [...new Set((t.tokenTransfers ?? []).map((x: any) => x.mint).filter((m: any) => typeof m === "string" && m && !DENY_MINT.has(m)))] as string[];
+  for (const value of txs) {
+    const tx = rec(value);
+    if (tx.type !== "TOKEN_MINT" && tx.type !== "CREATE") continue;
+    const real = [...new Set(arr(tx.tokenTransfers).map((transfer) => str(rec(transfer).mint)).filter((mint) => mint && !DENY_MINT.has(mint)))];
     for (const m of real) mints.add(m);
-    const nm = typeof t.description === "string" ? t.description.match(/minted\s+[\d.,]+\s+(.+)$/i) : null;
+    const nm = typeof tx.description === "string" ? tx.description.match(/minted\s+[\d.,]+\s+(.+)$/i) : null;
     if (nm && real.length === 1) nameByMint.set(real[0], nm[1].trim().slice(0, 40));
   }
   const sample = [...mints].slice(0, 8).map((m) => ({ mint: m, name: nameByMint.get(m) }));
