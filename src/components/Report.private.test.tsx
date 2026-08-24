@@ -60,6 +60,7 @@ describe("private person report evidence boundary", () => {
       ...buildReport(SUBJECTS[1]),
       display_name: "SuperGemma",
       handle: "@0xsupergemma",
+      website: "https://supergemma.example",
     };
 
     act(() => {
@@ -68,8 +69,11 @@ describe("private person report evidence boundary", () => {
 
     expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain("SuperGemma");
     expect(container.textContent).toContain("What this report means");
+    expect(container.querySelector('a[href="https://supergemma.example"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://x.com/0xsupergemma"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Report result and check status"]')?.classList.contains("hidden")).toBe(true);
   });
 

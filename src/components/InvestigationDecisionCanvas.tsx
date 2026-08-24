@@ -180,6 +180,8 @@ function DecisionLedgerList({
 
 export function InvestigationDecisionCanvas({
   verdictLabel,
+  score,
+  scoreIsProvisional = false,
   favorable,
   verdictTone,
   supports,
@@ -199,6 +201,10 @@ export function InvestigationDecisionCanvas({
   challengeAnchorId = null,
 }: {
   verdictLabel: string;
+  /** Saved ARGUS risk score. Null means the scoring contract withheld it. */
+  score: number | null;
+  /** Marks a saved score that readers may inspect while required checks remain open. */
+  scoreIsProvisional?: boolean;
   favorable: boolean;
   verdictTone: ReportCanvasTone;
   argument?: VerdictArgument | undefined;
@@ -240,8 +246,21 @@ export function InvestigationDecisionCanvas({
         </div>
         <div className="shrink-0 text-left sm:text-right">
           <p className={`mono text-[11px] font-semibold uppercase tracking-[0.1em] ${verdictClass}`}>{verdictLabel}</p>
-          <p className="mono text-[22px] font-semibold tabular-nums text-ink">{applicable === 0 ? "Not available" : `${coveragePercent}%`}</p>
-          <p className="mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{applicable === 0 ? "No checks saved" : `${successful}/${applicable} checks`}</p>
+          {score == null ? (
+            <p className="mono mt-1 text-[13px] font-semibold uppercase tracking-[0.08em] text-ink">Score withheld</p>
+          ) : (
+            <p className="mono mt-0.5 font-semibold tabular-nums text-ink" aria-label={`ARGUS risk score ${score} out of 100`}>
+              <span className="text-[28px] leading-none">{score}</span>
+              <span className="ml-1 text-[11px] font-medium text-ink-faint">/ 100</span>
+            </p>
+          )}
+          <p className="mono mt-1 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
+            {score != null && scoreIsProvisional
+              ? `Early score · ${successful}/${applicable} checks complete`
+              : applicable === 0
+                ? "No checks saved"
+                : `${successful}/${applicable} checks complete`}
+          </p>
         </div>
       </header>
 

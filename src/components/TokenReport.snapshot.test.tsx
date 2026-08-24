@@ -188,8 +188,13 @@ describe("token report supplemental evidence boundary", () => {
 
     expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain(`$${symbol}`);
     expect(container.textContent).toContain("What this report means");
+    const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
+    expect(decisionCanvas?.textContent).toContain("88");
+    expect(decisionCanvas?.textContent).toContain("/ 100");
+    expect(decisionCanvas?.textContent).toContain("7/7 checks complete");
     expect(container.querySelector('[aria-label="Safety check status"]')).toBeNull();
   });
 

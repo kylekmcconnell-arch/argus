@@ -7,6 +7,7 @@ describe("InvestigationDecisionCanvas public states", () => {
     const html = renderToStaticMarkup(
       <InvestigationDecisionCanvas
         verdictLabel="Not ready"
+        score={null}
         favorable={false}
         verdictTone="caution"
         supports={[]}
@@ -20,8 +21,53 @@ describe("InvestigationDecisionCanvas public states", () => {
     );
 
     expect(html).toContain("No checks saved");
+    expect(html).toContain("Score withheld");
     expect(html).toContain("No check results were saved");
     expect(html).not.toContain("0/0 checks");
     expect(html).not.toContain('role="progressbar"');
+  });
+
+  it("keeps the saved risk score separate from completed-check coverage", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        verdictLabel="Caution"
+        score={45}
+        favorable={false}
+        verdictTone="caution"
+        supports={[]}
+        concerns={[{ label: "Liquidity remains concentrated" }]}
+        nextSteps={[]}
+        verified={[{ label: "Official identity confirmed" }]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain("ARGUS risk score 45 out of 100");
+    expect(html).toContain("7/7 checks complete");
+    expect(html).not.toContain(">100%</p>");
+  });
+
+  it("labels an early score when required checks remain open", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        verdictLabel="Review with gaps"
+        score={20}
+        scoreIsProvisional
+        favorable={false}
+        verdictTone="caution"
+        supports={[]}
+        concerns={[]}
+        nextSteps={[{ label: "Confirm the audit" }]}
+        verified={[]}
+        coveragePercent={71}
+        successful={5}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain("ARGUS risk score 20 out of 100");
+    expect(html).toContain("Early score · 5/7 checks complete");
   });
 });
