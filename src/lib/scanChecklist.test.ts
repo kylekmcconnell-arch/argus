@@ -272,7 +272,7 @@ describe("clearanceCoverage (full-clearance coverage policy)", () => {
     checkId,
   });
 
-  it("grants clearance at the floor when every safety screen is recorded", () => {
+  it("does not call a report complete while any explicitly required check is open", () => {
     const checks = [
       row("identity-resolution", "confirmed"),
       row("ofac-sanctions-name", "checked-empty"),
@@ -288,7 +288,7 @@ describe("clearanceCoverage (full-clearance coverage policy)", () => {
     expect(coverage.applicable).toBe(8);
     expect(coverage.recordedPercent).toBe(75);
     expect(coverage.openNeverWaive).toEqual([]);
-    expect(coverage.sufficient).toBe(true);
+    expect(coverage.sufficient).toBe(false);
   });
 
   it("never waives an open sanctions screen regardless of coverage", () => {
@@ -339,7 +339,7 @@ describe("clearanceCoverage (full-clearance coverage policy)", () => {
       row("gap-2", "unknown"),
       row("gap-3", "unavailable"),
     ];
-    // 3/6 = 50% < 75% floor: too many gaps.
+    // 3/6 = 50%: explicitly required rows remain open.
     expect(clearanceCoverage(checks).sufficient).toBe(false);
   });
 

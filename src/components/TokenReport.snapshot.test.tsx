@@ -98,7 +98,15 @@ const versionContext: ReportVersionContext = {
   attestationState: "server_collected",
   methodologyVersion: "test-v1",
   createdAt: "2026-07-10T12:00:00.000Z",
-  checks: [{ label: "Contract safety", status: "confirmed" }],
+  checks: [
+    { checkId: "contract-safety", label: "Contract safety", status: "confirmed", decisionCritical: true },
+    { checkId: "buy-sell-simulation", label: "Buy/sell simulation", status: "confirmed", decisionCritical: true },
+    { checkId: "holder-distribution", label: "Holder distribution", status: "confirmed", decisionCritical: true },
+    { checkId: "wallet-clustering", label: "Wallet clustering", status: "confirmed", decisionCritical: true },
+    { checkId: "market-intelligence", label: "Market intelligence", status: "checked-empty", decisionCritical: true },
+    { checkId: "ofac-sanctions-address", label: "OFAC sanctions screen", status: "checked-empty", decisionCritical: true },
+    { checkId: "trust-graph-connections", label: "Trust-graph reconciliation", status: "checked-empty", decisionCritical: true },
+  ],
 };
 
 function dossier(overrides: Partial<TokenDossier> = {}): TokenDossier {
@@ -170,6 +178,21 @@ afterEach(() => {
 });
 
 describe("token report supplemental evidence boundary", () => {
+  it.each([
+    ["QUTRON", "Qutron"],
+    ["PROLOGUE", "Prologue"],
+    ["FOLD", "Fold"],
+    ["STONKBROKER", "StonkBroker"],
+  ])("renders the %s regression fixture through one canonical report experience", (symbol, name) => {
+    render(dossier({ symbol, name, versionContext }));
+
+    expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
+    expect(container.textContent).toContain(`$${symbol}`);
+    expect(container.textContent).toContain("What this report means");
+    expect(container.querySelector('[aria-label="Safety check status"]')).toBeNull();
+  });
+
   it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
     render(dossier({ versionContext }));
 
@@ -361,10 +384,10 @@ describe("token report supplemental evidence boundary", () => {
       },
     }));
 
-    expect(container.textContent).toContain("RISK WARNING");
+    expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
+    expect(container.textContent).toContain("Main concerns");
     expect(container.textContent).toContain("FAIL");
-    expect(container.textContent).toContain("risk score");
-    expect(container.textContent).toContain("some checks are still open");
+    expect(container.textContent).toContain("Do not rely on the score or result yet");
 
     const copy = [...container.querySelectorAll("button")]
       .find((button) => button.textContent?.trim() === "Copy report");

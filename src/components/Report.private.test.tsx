@@ -55,6 +55,24 @@ function decisionBasisText(): string {
 }
 
 describe("private person report evidence boundary", () => {
+  it("renders the SuperGemma regression fixture through one canonical report experience", () => {
+    const dossier: Dossier = {
+      ...buildReport(SUBJECTS[1]),
+      display_name: "SuperGemma",
+      handle: "@0xsupergemma",
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
+    expect(container.textContent).toContain("SuperGemma");
+    expect(container.textContent).toContain("What this report means");
+    expect(container.querySelector('[aria-label="Report result and check status"]')?.classList.contains("hidden")).toBe(true);
+  });
+
   it("promotes entity intelligence pressure into the report summary without changing the score", () => {
     const base = buildReport(SUBJECTS[1]);
     expect(base.intelligence).toBeDefined();
@@ -1070,7 +1088,7 @@ describe("private person report evidence boundary", () => {
     const mountedPanels = harness.livePanel.mock.calls.map(([panel]) => panel);
     expect(mountedPanels).not.toContain("pfp");
     expect(mountedPanels).not.toContain("ring-alert");
-    expect(container.textContent).toContain("2 still open");
+    expect(container.textContent).toContain("1 still open");
   });
 
   it("keeps legacy snapshot graph intelligence behind an explicitly labeled current overlay", () => {

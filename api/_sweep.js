@@ -1939,8 +1939,48 @@ function normalizeSubjectRef(value) {
 }
 
 // src/lib/scanChecklist.ts
+var POST_SCAN_ENRICHMENT_CHECK_IDS = /* @__PURE__ */ new Set([
+  "deployer-trail-evm",
+  "bytecode-fingerprint-evm"
+]);
+function decisionCriticalChecks(checks) {
+  const hasExplicitCriticality = checks.some((check) => check.decisionCritical !== void 0);
+  return hasExplicitCriticality ? checks.filter((check) => check.decisionCritical === true && (check.checkId !== "operator-funding-trace" || arkhamProviderEnabled()) && (!check.checkId || !POST_SCAN_ENRICHMENT_CHECK_IDS.has(check.checkId))) : checks;
+}
 var SUCCESSFUL = /* @__PURE__ */ new Set(["confirmed", "reported", "finding", "checked-empty"]);
+var NEVER_WAIVE_RECORDED = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty", "complete"]);
 var UNKNOWN_OR_FAILED = /* @__PURE__ */ new Set(["unknown", "unavailable", "stale"]);
+function neverWaiveCheckRecorded(checkId, status) {
+  return checkId === "organization-registration" ? status === "confirmed" : NEVER_WAIVE_RECORDED.has(status);
+}
+var NEVER_WAIVE_CHECK_IDS = /* @__PURE__ */ new Set([
+  "identity-resolution",
+  "ofac-sanctions-name",
+  // Person-name checks are not substitutes for the audited company's own
+  // legal-entity and sanctions questions.
+  "organization-registration",
+  "organization-sanctions",
+  // A sanctioned deployer or holder wallet is a legal-exposure flag no market
+  // signal can offset; the address screen is never waivable on token subjects.
+  "ofac-sanctions-address",
+  "trust-graph-connections",
+  // An unresolved token/security candidacy is a capital-risk unknown (the core
+  // scam vector), never an enrichment gap.
+  "founder-asset-distinction"
+]);
+var CLEARANCE_COVERAGE_FLOOR_PERCENT = 100;
+function clearanceCoverage(checks) {
+  const governing = decisionCriticalChecks(checks);
+  const applicableRows = governing.filter((check) => check.status !== "not-applicable");
+  const recordedRows = applicableRows.filter((check) => SUCCESSFUL.has(check.status));
+  const hasStableIds = applicableRows.some((check) => typeof check.checkId === "string" && check.checkId);
+  const openNeverWaive = hasStableIds ? applicableRows.filter((check) => check.checkId && NEVER_WAIVE_CHECK_IDS.has(check.checkId) && !neverWaiveCheckRecorded(check.checkId, check.status)).map((check) => check.checkId) : [];
+  const applicable = applicableRows.length;
+  const recorded = recordedRows.length;
+  const recordedPercent = applicable > 0 ? Math.floor(recorded / applicable * 100) : 0;
+  const sufficient = applicable > 0 && (hasStableIds ? openNeverWaive.length === 0 && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT : recorded === applicable);
+  return { applicable, recorded, openNeverWaive, recordedPercent, sufficient };
+}
 var shortAddr = (address) => address.length > 12 ? `${address.slice(0, 5)}\u2026${address.slice(-4)}` : address;
 function contractSafetyConcerns(dossier) {
   const safety = dossier.safety;
@@ -2211,6 +2251,82 @@ function personChecks(opts) {
   return checks;
 }
 
+// src/lib/reportCheckContract.ts
+var TOKEN_REQUIRED_CHECK_IDS = /* @__PURE__ */ new Set([
+  "contract-safety",
+  "buy-sell-simulation",
+  "holder-distribution",
+  "wallet-clustering",
+  "market-intelligence",
+  "ofac-sanctions-address",
+  "trust-graph-connections"
+]);
+var TOKEN_REQUIRED_CHECK_LABELS = Object.freeze({
+  "contract-safety": "Contract safety",
+  "buy-sell-simulation": "Buy/sell simulation",
+  "holder-distribution": "Holder distribution",
+  "wallet-clustering": "Wallet clustering",
+  "market-intelligence": "Market intelligence",
+  "ofac-sanctions-address": "OFAC sanctions screen",
+  "trust-graph-connections": "Trust-graph reconciliation"
+});
+var TOKEN_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
+  "operator-funding-trace",
+  "deployer-trail-evm",
+  "bytecode-fingerprint-evm",
+  "documents-audits",
+  "news-press",
+  "github-forensics"
+]);
+var PERSON_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "news-press",
+  "project-leadership-currency",
+  "founder-repeat-backing",
+  "investor-fund-scale"
+]);
+function applyReportCheckContract(kind, checks) {
+  const normalized = checks.map((check) => {
+    const checkId = check.checkId?.trim() ?? "";
+    if (kind === "token" || kind === "investigation") {
+      if (checkId && TOKEN_REQUIRED_CHECK_IDS.has(checkId)) {
+        return { ...check, decisionCritical: true };
+      }
+      if (checkId && TOKEN_SUPPLEMENTAL_CHECK_IDS.has(checkId)) {
+        return { ...check, decisionCritical: false };
+      }
+      return {
+        ...check,
+        ...check.decisionCritical === void 0 ? {} : { decisionCritical: check.decisionCritical }
+      };
+    }
+    if (check.decisionCritical !== void 0) return { ...check };
+    return {
+      ...check,
+      decisionCritical: !checkId || !PERSON_SUPPLEMENTAL_CHECK_IDS.has(checkId)
+    };
+  });
+  if (kind === "person") return normalized;
+  const present = new Set(normalized.map((check) => check.checkId).filter(Boolean));
+  const missingRequired = [...TOKEN_REQUIRED_CHECK_IDS].filter((checkId) => !present.has(checkId)).map((checkId) => ({
+    checkId,
+    label: TOKEN_REQUIRED_CHECK_LABELS[checkId] ?? checkId,
+    status: "unknown",
+    decisionCritical: true,
+    note: "required completion outcome was not saved"
+  }));
+  return [...normalized, ...missingRequired];
+}
+function hasExplicitReportCheckContract(kind, checks) {
+  if (kind === "token" || kind === "investigation") {
+    const ids = new Set(checks.map((check) => check.checkId).filter(Boolean));
+    return [...TOKEN_REQUIRED_CHECK_IDS].every((checkId) => ids.has(checkId));
+  }
+  return checks.length > 0 && checks.every((check) => typeof check.decisionCritical === "boolean") && checks.some((check) => check.decisionCritical === true);
+}
+
 // src/lib/reports.ts
 function reportChecks(kind, payload) {
   if (kind === "token") {
@@ -2247,9 +2363,10 @@ function reportChecks(kind, payload) {
 }
 function reportCompleteness(kind, payload, checks = reportChecks(kind, payload)) {
   const dossier = kind === "person" ? payload : null;
-  if (dossier?.checkRuns?.length && (dossier.completeness_state === "complete" || dossier.completeness_state === "partial" || dossier.completeness_state === "failed")) {
-    return dossier.completeness_state;
-  }
+  if (dossier?.checkRuns?.length && dossier.completeness_state === "failed") return "failed";
+  if (dossier?.checkRuns?.length && dossier.completeness_state === "partial" && !hasExplicitReportCheckContract("person", checks)) return "partial";
+  const contractedChecks = kind === "site" ? checks : applyReportCheckContract(kind, checks);
+  if (kind !== "site") return clearanceCoverage(contractedChecks).sufficient ? "complete" : "partial";
   const inScope = checks.filter((check) => check.status !== "not-applicable");
   return inScope.length > 0 && inScope.every(
     (check) => check.status === "confirmed" || check.status === "reported" || check.status === "finding" || check.status === "checked-empty"

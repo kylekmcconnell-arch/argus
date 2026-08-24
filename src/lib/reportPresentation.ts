@@ -138,11 +138,10 @@ export function coverageQualifiedCompleteness(input: {
   });
   if (!applicable.length) return "partial";
   // Full-clearance coverage policy (mirrors clearanceCoverage in scanChecklist):
-  // every never-waive safety screen recorded, plus recorded coverage at the
-  // clearance floor. An enrichment gap no longer withholds completeness
-  // indefinitely; an unrecorded sanctions / identity / trust-graph screen
-  // always does. Frozen rows without stable check ids keep the strict
-  // everything-recorded rule.
+  // optional enrichment is excluded before this boundary, every remaining
+  // required row records an outcome, and never-waive screens retain their
+  // stricter accepted-state rules. Frozen rows without stable check ids keep
+  // the strict everything-recorded rule.
   const nowMs = Date.now();
   const rows = applicable.map((value) => {
     const check = checkRecord(value);

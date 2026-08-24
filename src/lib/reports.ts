@@ -6,9 +6,10 @@ import type { Dossier } from "../data/dossier";
 import type { Recon } from "../collect/recon";
 import type { Investigation } from "./investigation";
 import type { TokenDossier } from "../token/audit";
-import { personChecks, reconcileInvestigationChecks, tokenChecks, type ScanCheck } from "./scanChecklist";
+import { clearanceCoverage, personChecks, reconcileInvestigationChecks, tokenChecks, type ScanCheck } from "./scanChecklist";
 import type { ResearchPlan } from "./researchDirector";
 import { normalizeSubjectRef } from "./subjectRef";
+import { applyReportCheckContract, hasExplicitReportCheckContract } from "./reportCheckContract";
 import type {
   ReportAttestationState,
   ReportCompletenessState,
@@ -103,13 +104,14 @@ export function reportCompleteness(
   checks = reportChecks(kind, payload),
 ): ReportCompletenessState {
   const dossier = kind === "person" ? payload as Dossier : null;
-  if (dossier?.checkRuns?.length && (
-    dossier.completeness_state === "complete"
-    || dossier.completeness_state === "partial"
-    || dossier.completeness_state === "failed"
-  )) {
-    return dossier.completeness_state;
-  }
+  if (dossier?.checkRuns?.length && dossier.completeness_state === "failed") return "failed";
+  if (dossier?.checkRuns?.length
+    && dossier.completeness_state === "partial"
+    && !hasExplicitReportCheckContract("person", checks)) return "partial";
+  const contractedChecks = kind === "site"
+    ? checks
+    : applyReportCheckContract(kind, checks);
+  if (kind !== "site") return clearanceCoverage(contractedChecks).sufficient ? "complete" : "partial";
   const inScope = checks.filter((check) => check.status !== "not-applicable");
   return inScope.length > 0 && inScope.every((check) =>
     check.status === "confirmed" || check.status === "reported" || check.status === "finding" || check.status === "checked-empty"

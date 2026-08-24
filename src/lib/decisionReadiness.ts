@@ -3,9 +3,8 @@ import { clearanceCoverage, decisionCriticalChecks, summarizeChecks, type ScanCh
 /**
  * Coverage below this floor is too thin to describe an assessment as
  * provisional. `ready` follows the full-clearance coverage policy in
- * scanChecklist (clearanceCoverage): every never-waive safety screen recorded
- * plus recorded coverage at the clearance floor; an enrichment gap does not
- * withhold clearance indefinitely, an unrecorded safety screen always does.
+ * scanChecklist (clearanceCoverage): every explicitly required check records
+ * an outcome. Optional enrichment is excluded before readiness is derived.
  */
 export const PROVISIONAL_COVERAGE_FLOOR_PERCENT = 70;
 

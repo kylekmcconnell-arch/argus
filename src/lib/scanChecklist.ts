@@ -157,9 +157,9 @@ export function summarizeChecks(checks: readonly ScanCheck[]): CoverageSummary {
  *
  * A recorded outcome for every applicable check is the ideal, but an
  * enrichment path a provider cannot serve must not withhold clearance
- * indefinitely. Clearance instead requires BOTH:
- *   (a) every never-waive safety screen has a recorded outcome, and
- *   (b) recorded coverage meets the clearance floor.
+ * indefinitely. Optional work is excluded before this function runs. Every
+ * remaining required row must record an outcome, and never-waive screens keep
+ * their stricter accepted-state rules.
  * Safety screens are never waivable: an unrecorded sanctions, identity, or
  * trust-graph screen always withholds clearance. Legacy snapshots without
  * stable check ids keep the strict everything-recorded rule, preserving
@@ -181,15 +181,15 @@ export const NEVER_WAIVE_CHECK_IDS: ReadonlySet<string> = new Set([
   "founder-asset-distinction",
 ]);
 
-/** Minimum recorded share of applicable governing checks for full clearance. */
-export const CLEARANCE_COVERAGE_FLOOR_PERCENT = 75;
+/** Every explicitly required check must record an outcome for full clearance. */
+export const CLEARANCE_COVERAGE_FLOOR_PERCENT = 100;
 
 export interface ClearanceCoverage {
   applicable: number;
   recorded: number;
   /** applicable never-waive screens without a recorded outcome */
   openNeverWaive: string[];
-  /** recorded/applicable as a floored percent (never rounds up to the floor) */
+  /** recorded/applicable as a floored percent */
   recordedPercent: number;
   /** true when the coverage policy grants full clearance */
   sufficient: boolean;
