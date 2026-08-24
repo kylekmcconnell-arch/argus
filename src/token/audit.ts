@@ -7,6 +7,7 @@
 import type { RunnableTokenInput } from "../lib/resolveInput";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
 import type { MaterialReportDelta } from "../lib/reportDelta";
+import { deriveTokenDecisionBoundary, type TokenDecisionBoundary } from "../lib/decisionBoundary";
 import type { TraceStep } from "../data/evidence";
 import type { SocialActivitySnapshot } from "../data/socialActivity";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
@@ -170,6 +171,8 @@ export interface TokenDossier {
   graph: { nodes: PanoptesNode[]; edges: PanoptesEdge[] };
   /** Highest-priority source-backed change from the exact prior report. */
   reportDelta?: MaterialReportDelta;
+  /** Frozen explanation of the governing score cap or nearest verdict boundary. */
+  decisionBoundary?: TokenDecisionBoundary;
   findings: { claim: string; tone: "good" | "warn" | "bad"; source: string }[];
   trace: TraceStep[];
   live: boolean;
@@ -1265,6 +1268,7 @@ async function runTokenAudit(
 
   const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployerAttribution, topHolders, socials);
 
+  const decisionBoundary = deriveTokenDecisionBoundary({ score, capApplied, axes });
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} · ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
 
@@ -1288,7 +1292,7 @@ async function runTokenAudit(
     // The pool exclusion has to reach the number a reader actually sees. Leaving
     // the raw provider top holder on the dossier put "top holder 37%" on the same
     // page as the finding explaining that the 37% line is the pool itself.
-    verdict, score, capApplied, headline, axes, safety: { ...s, topHolderPct: concentrationTopPct }, socials,
+    verdict, score, capApplied, headline, axes, ...(decisionBoundary ? { decisionBoundary } : {}), safety: { ...s, topHolderPct: concentrationTopPct }, socials,
     holdersAssessed: holdersReliable,
     projectX, ...(socialActivity ? { socialActivity } : {}), deployer, ...(deployerAttribution ? { deployerAttribution } : {}),
     topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,

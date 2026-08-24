@@ -232,6 +232,30 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.querySelector('[role="progressbar"][aria-label="Checks finished"]')).not.toBeNull();
   });
 
+  it("reopens the frozen decision boundary without recomputing it from current scoring rules", () => {
+    render(dossier({
+      verdict: "FAIL",
+      score: 20,
+      capApplied: "owner_can_modify_balance",
+      versionContext,
+      decisionBoundary: {
+        schemaVersion: 1,
+        kind: "cap",
+        controllingFact: "An active controller can directly change holder balances.",
+        boundary: "This saved report is capped at 20/100.",
+        willNotChange: "Market activity and community attention cannot override this contract control.",
+        unlockCondition: "Verify from the contract and chain that this authority is permanently disabled.",
+        evidenceArea: "contract",
+      },
+    }));
+
+    const decisionLock = container.querySelector('[data-testid="decision-boundary"]');
+    expect(decisionLock?.textContent).toContain("This saved report is capped at 20/100");
+    expect(decisionLock?.textContent).toContain("Market activity and community attention cannot override");
+    expect(decisionLock?.textContent).toContain("permanently disabled");
+    expect(decisionLock?.querySelector('a[href="#token-methodology"]')?.textContent).toContain("Open governing evidence");
+  });
+
   it("uses adverse evidence to explain an adverse verdict and keeps positive evidence as counterweight", () => {
     render(dossier({
       verdict: "FAIL",
