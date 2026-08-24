@@ -9,7 +9,7 @@
 // click rather than forcing a manual selection of a 42-character string.
 import { useState } from "react";
 import {
-  ArrowSquareOut, BookOpen, Check, Copy, Cube, DiscordLogo, GithubLogo,
+  ArrowSquareOut, BookOpen, ChartLineUp, Check, Copy, Cube, DiscordLogo, GithubLogo,
   GlobeSimple, LinkSimple, RedditLogo, TelegramLogo, XLogo, YoutubeLogo,
 } from "@phosphor-icons/react";
 
@@ -22,11 +22,12 @@ const RULES: [RegExp, string, number, IconType][] = [
   [/(?:docs\.|gitbook|readthedocs)/i, "Docs", 3, BookOpen],
   [/discord(?:\.gg|app\.com|\.com)/i, "Discord", 4, DiscordLogo],
   [/github\.com/i, "GitHub", 5, GithubLogo],
-  [/medium\.com|mirror\.xyz|substack\.com/i, "Blog", 6, BookOpen],
-  [/youtube\.com|youtu\.be/i, "YouTube", 7, YoutubeLogo],
-  [/reddit\.com/i, "Reddit", 8, RedditLogo],
-  [/linkedin\.com/i, "LinkedIn", 9, LinkSimple],
-  [/warpcast\.com|farcaster/i, "Farcaster", 10, LinkSimple],
+  [/dexscreener\.com/i, "Dexscreener", 6, ChartLineUp],
+  [/medium\.com|mirror\.xyz|substack\.com/i, "Blog", 7, BookOpen],
+  [/youtube\.com|youtu\.be/i, "YouTube", 8, YoutubeLogo],
+  [/reddit\.com/i, "Reddit", 9, RedditLogo],
+  [/linkedin\.com/i, "LinkedIn", 10, LinkSimple],
+  [/warpcast\.com|farcaster/i, "Farcaster", 11, LinkSimple],
 ];
 
 const LABEL_RULES: [RegExp, string, number, IconType][] = [
@@ -35,6 +36,7 @@ const LABEL_RULES: [RegExp, string, number, IconType][] = [
   [/docs?|documentation|gitbook|whitepaper/i, "Docs", 3, BookOpen],
   [/discord/i, "Discord", 4, DiscordLogo],
   [/github/i, "GitHub", 5, GithubLogo],
+  [/dexscreener/i, "Dexscreener", 6, ChartLineUp],
 ];
 
 function classify(url: string, explicitLabel?: string): { label: string; pri: number; Icon: IconType } {
@@ -114,6 +116,8 @@ export function ProjectLinks({
   for (const item of websites ?? []) push(item.url, item.label);
   if (xHandle) push(`https://x.com/${xHandle.replace(/^@/, "")}`);
   for (const l of links ?? []) push(l.url, l.label);
+  const address = contractAddress?.trim();
+  if (address) push(`https://dexscreener.com/search?q=${encodeURIComponent(address)}`, "Dexscreener");
 
   // Dedupe by label: one chip per platform (and one per distinct website host).
   const seen = new Set<string>();
@@ -140,7 +144,6 @@ export function ProjectLinks({
 
   const primary = items.find((item) => item.pri === 0);
   const resources = primary ? items.filter((item) => item !== primary) : items;
-  const address = contractAddress?.trim();
   if (!items.length && !address) return null;
   const groupCount = Number(Boolean(primary)) + Number(resources.length > 0) + Number(Boolean(address));
   const layout = groupCount === 3

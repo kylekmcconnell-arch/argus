@@ -72,7 +72,10 @@ describe("ProjectLinks", () => {
       "Docs",
       "Discord",
       "GitHub",
+      "Dexscreener",
     ]);
+    expect(container.querySelector<HTMLAnchorElement>('[href^="https://dexscreener.com/search"]')?.href)
+      .toBe("https://dexscreener.com/search?q=0xE172e9B6cfBeeB5593bDcE3f077356FDb33af904");
     expect(container.querySelector(".project-identity-chain")?.textContent).toBe("Base");
     expect(container.querySelector(".project-identity-contract-button")?.textContent).toBe("0xE172…f904");
   });
@@ -85,5 +88,14 @@ describe("ProjectLinks", () => {
     expect(container.querySelector(".project-identity-primary")).toBeNull();
     expect(container.querySelector(".project-identity-contract")).toBeNull();
     expect(container.querySelector(".project-identity-resource")?.textContent).toBe("Telegram");
+  });
+
+  it("does not show Dexscreener when no token contract is bound", () => {
+    act(() => {
+      root.render(<ProjectLinks website="https://argus.example" />);
+    });
+
+    expect(container.textContent).not.toContain("Dexscreener");
+    expect(container.querySelector('[href*="dexscreener.com"]')).toBeNull();
   });
 });

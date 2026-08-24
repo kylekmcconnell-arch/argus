@@ -3110,6 +3110,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             className="mt-3"
             website={f.website}
             xHandle={f.handle}
+            contractAddress={f.projectToken?.address}
+            chain={f.projectToken?.chain}
             links={f.githubAssessment?.login
               ? [{ label: "GitHub", url: `https://github.com/${f.githubAssessment.login}` }]
               : undefined}
