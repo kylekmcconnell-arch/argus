@@ -76,6 +76,7 @@ describe("social activity collector", () => {
     expect(snapshot.windows.last24Hours.authorCoverageComplete).toBe(false);
     expect(snapshot.activityScore).toBeNull();
     expect(snapshot.note).toContain("minimums");
+    expect(snapshot.collection.incompleteReason).toBe("post_limit");
   });
 
   it("does not turn a missing credential into zero activity", async () => {
@@ -107,5 +108,74 @@ describe("social activity collector", () => {
     expect(snapshot.windows.last24Hours).toMatchObject({ postCount: 0, uniqueAccounts: 0, authorCoverageComplete: true });
     expect(snapshot.activityScore).toBeNull();
     expect(fetchImpl).toHaveBeenCalledTimes(28);
+  });
+
+  it("follows twitterapi.io cursors before moving to the next time slice", async () => {
+    let firstSlice = true;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const cursor = url.searchParams.get("cursor");
+      if (firstSlice && !cursor) {
+        firstSlice = false;
+        return response({
+          tweets: [{
+            id: "page-1",
+            author: { id: "author-1" },
+            createdAt: "2026-08-22T21:00:00.000Z",
+            text: "SuperGemma",
+          }],
+          has_next_page: true,
+          next_cursor: "cursor-2",
+        });
+      }
+      if (cursor === "cursor-2") {
+        return response({
+          tweets: [{
+            id: "page-2",
+            author: { id: "author-2" },
+            createdAt: "2026-08-22T20:00:00.000Z",
+            text: "SuperGemma",
+          }],
+          has_next_page: false,
+          next_cursor: "",
+        });
+      }
+      return response({ tweets: [], has_next_page: false, next_cursor: "" });
+    });
+    const fetchImpl = fetchMock as typeof fetch;
+
+    const snapshot = await collectSocialActivity(
+      { handle: "@0xsupergemma", ticker: "SUPERGEMMA", projectName: "SuperGemma" },
+      { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl, maxPosts: 40 },
+    );
+
+    expect(snapshot.state).toBe("complete");
+    expect(snapshot.collection.incompleteReason).toBeUndefined();
+    expect(snapshot.collection.searchRequests).toBe(29);
+    expect(snapshot.windows.last24Hours).toMatchObject({
+      postCount: 2,
+      uniqueAccounts: 2,
+      authorCoverageComplete: true,
+    });
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("cursor=cursor-2"))).toBe(true);
+  });
+
+  it("records a provider pagination gap instead of calling it a post limit", async () => {
+    const fetchImpl = vi.fn(async () => response({
+      tweets: [],
+      has_next_page: true,
+      next_cursor: "",
+    })) as typeof fetch;
+
+    const snapshot = await collectSocialActivity(
+      { handle: "@0xsupergemma" },
+      { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl, maxPosts: 40 },
+    );
+
+    expect(snapshot.state).toBe("partial");
+    expect(snapshot.collection.postReads).toBe(0);
+    expect(snapshot.collection.incompleteReason).toBe("pagination_incomplete");
+    expect(snapshot.note).toContain("more result pages");
+    expect(snapshot.note).not.toContain("configured limit");
   });
 });

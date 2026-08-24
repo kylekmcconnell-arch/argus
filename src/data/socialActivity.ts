@@ -1,4 +1,5 @@
 export type SocialActivityState = "complete" | "partial" | "unavailable";
+export type SocialActivityIncompleteReason = "post_limit" | "provider_error" | "pagination_incomplete";
 
 export interface SocialActivityWindow {
   start: string;
@@ -49,6 +50,8 @@ export interface SocialActivitySnapshot {
     postReads: number;
     maxPosts: number;
     estimatedUsd: number;
+    /** Why author coverage is incomplete. Absent on complete and legacy snapshots. */
+    incompleteReason?: SocialActivityIncompleteReason;
   };
   note: string;
   unavailableReason?: "not_configured" | "invalid_identity" | "provider_failed";
