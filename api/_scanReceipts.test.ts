@@ -43,6 +43,25 @@ describe("scan receipt storage", () => {
     expect(init.method).toBe("PATCH");
   });
 
+  it("patches only the outcome so a renormalised subject cannot strand the receipt", async () => {
+    // The reserving caller writes a lowercased ref; the finishing caller has a
+    // checksummed address and a resolved symbol. Sending either again would
+    // trip the immutability guard and leave the run stuck in `running`.
+    await expect(recordScanReceipt(auth, {
+      runKey: "scan-key-123", route: "/app/scan", kind: "token",
+      canonicalRef: "0xAbC0000000000000000000000000000000000001",
+      displayQuery: "$ARGUS", status: "complete", creditsCharged: 1,
+      startedAt: "2026-08-23T20:00:00Z", finishedAt: "2026-08-23T20:00:02Z", durationMs: 2000,
+    })).resolves.toBe(true);
+    const [, init] = vi.mocked(fetch).mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(init.method).toBe("PATCH");
+    expect(body.status).toBe("complete");
+    for (const identity of ["organization_id", "run_key", "initiated_by", "route", "kind", "canonical_ref", "display_query", "private_run", "credits_charged_millis", "started_at"]) {
+      expect(body).not.toHaveProperty(identity);
+    }
+  });
+
   it("rejects a terminal receipt without a valid finish time and duration", async () => {
     await expect(recordScanReceipt(auth, {
       runKey: "scan-key-123", route: "/app/scan", kind: "token", canonicalRef: "0xabc",

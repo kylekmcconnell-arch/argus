@@ -73,28 +73,38 @@ export async function recordScanReceipt(auth: AuthContext, input: ScanReceiptWri
       : null;
   if (costBasis !== "unknown" && providerCostUsd == null) return false;
 
-  const row = {
-    organization_id: auth.organizationId,
-    run_key: input.runKey,
-    initiated_by: auth.userId,
-    route,
-    kind: input.kind,
-    canonical_ref: canonicalRef,
-    display_query: displayQuery,
-    private_run: input.privateRun === true,
+  const starting = input.status === "running";
+  const outcome = {
     status: input.status,
-    credits_charged_millis: Math.max(0, Math.round((input.creditsCharged ?? 0) * 1000)),
     report_version_id: input.reportVersionId ?? null,
     provider_cost_usd: providerCostUsd,
     cost_basis: costBasis,
-    started_at: startedAt,
     finished_at: finishedAt,
     duration_ms: durationMs,
     failure_code: input.failureCode ? cleanText(input.failureCode, 100) : null,
     failure_detail: input.failureDetail ? cleanText(input.failureDetail, 500) : null,
-    metadata: {},
   };
-  const starting = input.status === "running";
+  // Identity belongs to the reservation. A terminal write patches the outcome
+  // only: resending identity trips the immutability guard whenever the
+  // finishing caller normalises a value differently from the reserving one
+  // (a checksummed address against a lowercased ref, a resolved symbol against
+  // raw input), which would strand the receipt in `running` for good.
+  const row = starting
+    ? {
+      organization_id: auth.organizationId,
+      run_key: input.runKey,
+      initiated_by: auth.userId,
+      route,
+      kind: input.kind,
+      canonical_ref: canonicalRef,
+      display_query: displayQuery,
+      private_run: input.privateRun === true,
+      credits_charged_millis: Math.max(0, Math.round((input.creditsCharged ?? 0) * 1000)),
+      started_at: startedAt,
+      metadata: {},
+      ...outcome,
+    }
+    : outcome;
   const endpoint = starting
     ? `${credentials.url}/rest/v1/scan_run_receipts?on_conflict=organization_id,run_key`
     : `${credentials.url}/rest/v1/scan_run_receipts?organization_id=eq.${encodeURIComponent(auth.organizationId)}&run_key=eq.${encodeURIComponent(input.runKey)}`;

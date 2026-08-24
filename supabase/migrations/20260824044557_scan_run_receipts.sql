@@ -70,6 +70,7 @@ begin
     or old.route <> new.route
     or old.kind <> new.kind
     or old.canonical_ref <> new.canonical_ref
+    or old.display_query <> new.display_query
     or old.private_run <> new.private_run
     or old.credits_charged_millis <> new.credits_charged_millis
     or old.started_at <> new.started_at

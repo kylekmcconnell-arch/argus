@@ -6,7 +6,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, pg_catalog;
-select plan(12);
+select plan(13);
 select has_table('public', 'scan_run_receipts', 'scan receipt ledger exists');
 select ok(not has_table_privilege('anon', 'public.scan_run_receipts', 'select') and not has_table_privilege('authenticated', 'public.scan_run_receipts', 'select'), 'scan receipts are server mediated');
 select ok(has_table_privilege('service_role', 'public.scan_run_receipts', 'select') and has_table_privilege('service_role', 'public.scan_run_receipts', 'insert') and has_table_privilege('service_role', 'public.scan_run_receipts', 'update') and not has_table_privilege('service_role', 'public.scan_run_receipts', 'delete'), 'service role can append and finish receipts but cannot delete them');
@@ -63,6 +63,18 @@ select throws_ok(
   'P0001'::char(5),
   'scan receipt may only transition to a terminal state',
   'a running receipt cannot be updated without terminalising it'
+);
+
+-- The displayed label is identity too: an owner reading the ledger must see
+-- the subject as it was reserved, not one relabelled after the charge.
+select throws_ok(
+  $$update public.scan_run_receipts
+      set display_query = '$RELABELLED', status = 'complete',
+          finished_at = now(), duration_ms = 1000
+    where id = '00000000-0000-4000-8000-000000000203'$$,
+  'P0001'::char(5),
+  'scan receipt identity is immutable',
+  'a receipt cannot be relabelled while being finished'
 );
 
 select lives_ok(
