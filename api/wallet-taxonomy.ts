@@ -7,6 +7,7 @@
 // via a curated hot-wallet list; Solana age via Helius signatures. Bounded and
 // best-effort - any wallet that can't be read is "unknown", never fatal.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { arr, rec } from "../src/lib/json.js";
 
 export const config = { maxDuration: 30 };
 
@@ -51,9 +52,12 @@ async function evmClassify(chainid: number, wallet: string, key: string): Promis
     const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "tokentx", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "1", sort: "asc", apikey: key });
     const r = await fetch(`https://api.etherscan.io/v2/api?${q}`, { signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
-    const d = (await r.json()) as any;
+    const d = rec(await r.json());
     if (d.status === "0" && /rate limit/i.test(String(d.message ?? d.result ?? ""))) return null;
-    const first = Array.isArray(d.result) ? d.result[0] : null;
+    // rec() of a missing element would be a truthy {}, so the absent case is
+    // kept as an explicit null exactly as it was.
+    const rawFirst = Array.isArray(d.result) ? (d.result[0] as unknown) : null;
+    const first = rawFirst == null ? null : rec(rawFirst);
     const firstTs = first ? Number(first.timeStamp) * 1000 : null;
     const firstFrom = first ? String(first.from ?? "").toLowerCase() : "";
     const now = Date.now();
@@ -79,13 +83,13 @@ async function solClassify(key: string, wallet: string): Promise<{ ageDays: numb
   try {
     const rpc = async (params: unknown) => {
       const r = await fetch(`https://mainnet.helius-rpc.com/?api-key=${key}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSignaturesForAddress", params }), signal: AbortSignal.timeout(9000) });
-      return r.ok ? ((await r.json()) as any) : null;
+      return r.ok ? ((await r.json()) as unknown) : null;
     };
     const d = await rpc([wallet, { limit: 1000 }]);
-    const sigs = d?.result ?? [];
+    const sigs = arr(rec(d).result);
     if (!sigs.length) return { ageDays: null, lastDays: null, cexFunded: false };
-    const newest = Number(sigs[0]?.blockTime ?? 0) * 1000;
-    const oldest = Number(sigs[sigs.length - 1]?.blockTime ?? 0) * 1000;
+    const newest = Number(rec(sigs[0]).blockTime ?? 0) * 1000;
+    const oldest = Number(rec(sigs[sigs.length - 1]).blockTime ?? 0) * 1000;
     const now = Date.now();
     // <1000 sigs means we saw the wallet's whole life; oldest = first activity.
     const ageDays = oldest ? (now - oldest) / DAY : null;
@@ -97,24 +101,30 @@ async function solHolders(mint: string): Promise<{ addr: string; pct: number }[]
   try {
     const r = await fetch(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15000) });
     if (!r.ok) return [];
-    const rc = (await r.json()) as any;
-    const ka: Record<string, any> = rc.knownAccounts ?? {};
-    return (rc.topHolders ?? [])
-      .filter((h: any) => { const l = ka[h.address] || ka[h.owner]; return !(l?.type && /market|amm|pool|liquid|lp/i.test(l.type)) && !h.insider; })
-      .map((h: any) => ({ addr: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0) }))
-      .filter((h: any) => SOLADDR.test(h.addr)).slice(0, MAX);
+    const rc = rec(await r.json());
+    const ka = rec(rc.knownAccounts);
+    return arr(rc.topHolders)
+      .map((entry) => rec(entry))
+      // String() rather than a "" default: property access already coerces a
+      // missing key to the string "undefined", and that lookup must not move.
+      .filter((h) => { const l = rec(ka[String(h.address)] || ka[String(h.owner)]); return !(l.type && /market|amm|pool|liquid|lp/i.test(String(l.type))) && !h.insider; })
+      .map((h) => ({ addr: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0) }))
+      .filter((h) => SOLADDR.test(h.addr)).slice(0, MAX);
   } catch { return []; }
 }
 async function evmHolders(chainid: number, token: string): Promise<{ addr: string; pct: number }[]> {
   try {
     const r = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainid}?contract_addresses=${token}`, { signal: AbortSignal.timeout(12000) });
     if (!r.ok) return [];
-    const d = (await r.json()) as any;
-    const info = d?.result?.[token.toLowerCase()];
-    return (info?.holders ?? [])
-      .filter((h: any) => h.is_contract !== 1)
-      .map((h: any) => ({ addr: String(h.address ?? "").toLowerCase(), pct: Number(h.percent ?? 0) * (Number(h.percent) <= 1 ? 100 : 1) }))
-      .filter((h: any) => EVM.test(h.addr)).slice(0, MAX);
+    const d = rec(await r.json());
+    const info = rec(rec(d.result)[token.toLowerCase()]);
+    return arr(info.holders)
+      .map((entry) => rec(entry))
+      .filter((h) => h.is_contract !== 1)
+      // The second Number() keeps its missing default off deliberately: an
+      // absent percent yields NaN, NaN <= 1 is false, so the multiplier stays 1.
+      .map((h) => ({ addr: String(h.address ?? "").toLowerCase(), pct: Number(h.percent ?? 0) * (Number(h.percent) <= 1 ? 100 : 1) }))
+      .filter((h) => EVM.test(h.addr)).slice(0, MAX);
   } catch { return []; }
 }
 
