@@ -211,6 +211,48 @@ export interface ClientEngagement extends EvidenceProvenance {
   notes?: string;
 }
 
+export type WalletBinding = "farcaster_verified" | "self_disclosed" | "handle_name_guess";
+
+export interface WalletExposureSource {
+  seed: string;
+  seedName?: string;
+  category?: string;
+  direction: "backward" | "forward";
+  usd: number;
+  hops: number;
+  firstAt?: string;
+  lastAt?: string;
+}
+
+export interface WalletScreen {
+  status: "screened" | "no_exposure_found" | "unavailable" | "not_attributable";
+  detail: string;
+  provider: "arkham";
+  endpoints: string[];
+  capturedAt: string;
+  binding: WalletBinding;
+  bindingNote?: string;
+  entity?: {
+    name?: string;
+    type?: string;
+    twitter?: string;
+    isCex?: boolean;
+    isService?: boolean;
+    isContract?: boolean;
+  };
+  risk?: {
+    level: string;
+    score: number;
+    greatestCategory?: string;
+    incomingUsd: number;
+    outgoingUsd: number;
+    hopDistance?: number;
+    isSeed?: boolean;
+    updatedAt?: string;
+    topSources: WalletExposureSource[];
+  };
+}
+
 export interface Wallet extends EvidenceProvenance {
   address: string;
   chain: string;
@@ -221,6 +263,10 @@ export interface Wallet extends EvidenceProvenance {
   scam_adjacent_flow?: boolean;
   positive_signals?: string;
   notes?: string;
+  /** Set once when the address is resolved. Missing means no attribution. */
+  binding?: WalletBinding;
+  /** Score-neutral Arkham context; never supplied to the scorer. */
+  screen?: WalletScreen;
 }
 
 export interface Promotion extends EvidenceProvenance {
@@ -578,6 +624,7 @@ export class Audit {
       if (
         this.wallets.some(
           (w) =>
+            w.screen?.status !== "not_attributable" &&
             w.sold_into_own_promo &&
             (w.link_tier === "SelfDoxxed" || w.link_tier === "InvestigatorAttributed") &&
             w.evidence_origin !== "model_lead" &&
@@ -836,6 +883,9 @@ export class Audit {
       edges.push({ src: this.handle, dst: c.client_name, type: "SERVICED", manipulation: !!c.manipulation_service_flag });
     }
     for (const w of this.wallets) {
+      // Keep a screened contract visible in the report so the exclusion is
+      // auditable, but never represent it as a wallet controlled by the subject.
+      if (w.screen?.status === "not_attributable") continue;
       const key = `${w.chain}:${w.address}`;
       nodes.push({ type: "Identity", subtype: "Wallet", key, link_tier: w.link_tier });
       edges.push({ src: this.handle, dst: key, type: "CONTROLS_WALLET", tier: w.link_tier });

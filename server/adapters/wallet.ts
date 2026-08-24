@@ -7,6 +7,7 @@
 //   - handle-as-name: <handle>.eth / <handle>.base.eth (a possible match, opt-in)
 
 import { recordCall } from "../cost";
+import type { WalletBinding } from "../../src/engine";
 
 const ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
 // Lookarounds keep hostname/URL fragments out: "vitalik.eth.limo",
@@ -15,7 +16,7 @@ const ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
 const NAME_IN_TEXT = /(?<![./])\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b(?!\.[a-z0-9])/gi;
 const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-async function getJson(url: string): Promise<any> {
+async function getJson(url: string): Promise<unknown> {
   let operation: string;
   try { operation = new URL(url).host; }
   catch { return null; }
@@ -53,11 +54,16 @@ async function getJson(url: string): Promise<any> {
 async function web3bio(name: string): Promise<string | null> {
   const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);
   const arr = Array.isArray(d) ? d : d ? [d] : [];
-  return (arr.find((x: any) => x && typeof x.address === "string" && x.address) as any)?.address ?? null;
+  for (const row of arr) {
+    const address = (row as { address?: unknown } | null)?.address;
+    if (typeof address === "string" && address) return address;
+  }
+  return null;
 }
 async function ensideas(name: string): Promise<string | null> {
   const d = await getJson(`https://api.ensideas.com/ens/resolve/${encodeURIComponent(name)}`);
-  return d && typeof d.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(d.address) ? d.address : null;
+  const address = (d as { address?: unknown } | null)?.address;
+  return typeof address === "string" && /^0x[a-fA-F0-9]{40}$/.test(address) ? address : null;
 }
 async function snsResolve(name: string): Promise<string | null> {
   // Bonfida's worker proxy (sns-sdk-proxy.bonfida.workers.dev) is dead: every
@@ -82,7 +88,7 @@ export async function resolveName(name: string): Promise<{ address: string; chai
 }
 
 export type WalletTier = "SelfDoxxed" | "InvestigatorAttributed";
-export interface ResolvedWallet { address: string; chain: string; source: string; tier: WalletTier }
+export interface ResolvedWallet { address: string; chain: string; source: string; tier: WalletTier; binding: WalletBinding }
 
 // Farcaster: the handle's on-chain verified addresses (assumes the FC username
 // matches the X handle, common for crypto-natives; labeled so a human can judge).
@@ -94,13 +100,15 @@ async function farcasterWallets(handle: string): Promise<ResolvedWallet[]> {
   const u = handle.replace(/^@/, "").toLowerCase();
   if (!FARCASTER_NAME.test(u)) return [];
   const ud = await getJson(`https://api.warpcast.com/v2/user-by-username?username=${encodeURIComponent(u)}`);
-  const fid = ud?.result?.user?.fid;
+  const fid = (ud as { result?: { user?: { fid?: unknown } } } | null)?.result?.user?.fid;
   if (!fid) return [];
   const vd = await getJson(`https://api.warpcast.com/v2/verifications?fid=${fid}`);
-  const verifs: any[] = vd?.result?.verifications ?? [];
+  const verifs = (vd as { result?: { verifications?: unknown } } | null)?.result?.verifications;
+  if (!Array.isArray(verifs)) return [];
   return verifs
-    .filter((v) => typeof v.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(v.address))
-    .map((v) => ({ address: v.address, chain: "evm", source: `Farcaster verified wallet (@${u})`, tier: "InvestigatorAttributed" as WalletTier }));
+    .map((row) => (row as { address?: unknown } | null)?.address)
+    .filter((address): address is string => typeof address === "string" && /^0x[a-fA-F0-9]{40}$/.test(address))
+    .map((address) => ({ address, chain: "evm", source: `Farcaster verified wallet (@${u})`, tier: "InvestigatorAttributed" as WalletTier, binding: "farcaster_verified" as WalletBinding }));
 }
 
 export async function resolveWalletsFromText(text: string): Promise<ResolvedWallet[]> {
@@ -112,7 +120,7 @@ export async function resolveWalletsFromText(text: string): Promise<ResolvedWall
     const k = address.toLowerCase();
     if (seen.has(k)) return;
     seen.add(k);
-    out.push({ address, chain, source, tier: "SelfDoxxed" });
+    out.push({ address, chain, source, tier: "SelfDoxxed", binding: "self_disclosed" });
   };
   for (const m of text.matchAll(ADDR_IN_TEXT)) add(m[0], "evm", "0x address self-disclosed in X bio/posts");
   const names = new Set<string>();
@@ -138,7 +146,7 @@ export async function resolveForHandle(handle: string, text: string, opts: { inc
   if (opts.includePossible) {
     for (const nm of [`${u}.eth`, `${u}.base.eth`]) {
       const r = await resolveName(nm);
-      if (r) add({ address: r.address, chain: r.chain, source: `${nm} (handle-name match, unconfirmed)`, tier: "InvestigatorAttributed" });
+      if (r) add({ address: r.address, chain: r.chain, source: `${nm} (handle-name match, unconfirmed)`, tier: "InvestigatorAttributed", binding: "handle_name_guess" });
     }
   }
   return out.slice(0, 8);

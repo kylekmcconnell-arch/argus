@@ -67,6 +67,7 @@ import { githubAdapter } from "./adapters/github";
 import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
 import { onchainAdapter } from "./adapters/onchain";
+import { arkhamAdapter } from "./adapters/arkham";
 import { basicFactsAdapter, registrableDomain, screenSecRegistryForNames } from "./adapters/basicFacts";
 import { writeEntityFacts } from "./entityStore";
 import {
@@ -273,6 +274,13 @@ export function excludeScoreNeutralControlReality<
   return modelEvidence;
 }
 
+/** Arkham context is rendered and persisted, but cannot enter model scoring. */
+export function stripArkhamScreenForScoring<T extends { screen?: unknown }>(wallet: T): Omit<T, "screen"> {
+  const { screen: _scoreNeutralArkhamScreen, ...scoringWallet } = wallet;
+  void _scoreNeutralArkhamScreen;
+  return scoringWallet;
+}
+
 export function protocolRecordMatchesCanonicalToken(
   recordGeckoId: string | null | undefined,
   canonicalGeckoId: string,
@@ -290,6 +298,7 @@ const ADAPTERS: Adapter[] = [
   coingeckoAdapter,
   // redditAdapter retired: Reddit API access was not approved.
   onchainAdapter,
+  arkhamAdapter,
   basicFactsAdapter,
 ];
 
@@ -301,7 +310,7 @@ const ADAPTERS: Adapter[] = [
 export const ADAPTERS_FOR_TEST: readonly Adapter[] = ADAPTERS;
 export const IDENTITY_LANE = [xAdapter, githubAdapter, peopledatalabsAdapter, offchainAdapter] as const;
 export const TOKEN_LANE = [dexscreenerAdapter, coingeckoAdapter] as const;
-export const WALLET_LANE = [onchainAdapter] as const;
+export const WALLET_LANE = [onchainAdapter, arkhamAdapter] as const;
 
 /**
  * Every cost-ledger provider an adapter's run() can record. Concurrent
@@ -320,6 +329,7 @@ export const ADAPTER_PROVIDERS: Record<string, readonly string[]> = {
   "dexscreener": ["dexscreener"],
   "coingecko": ["coingecko"],
   "onchain": ["helius"],
+  "arkham": ["arkham", "public-evm-rpc"],
 };
 
 const teamEvidenceRank = (member: WebTeamMember): number =>
@@ -385,7 +395,7 @@ export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): 
 
 // Adapters that require a key to do anything meaningful (keyless DEX/CG no-op
 // without a promoted contract, so they don't count as "live collection").
-const KEYED = new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain", "basic-facts"]);
+const KEYED = new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain", "arkham", "basic-facts"]);
 
 interface AttemptTotals {
   total: number;
@@ -979,7 +989,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
   // in the bio/posts. The richer corpus surfaces more contract/URL mentions.
   if (foundWallets.length) {
     for (const w of foundWallets) {
-      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: w.tier, notes: w.source });
+      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: w.tier, notes: w.source, binding: w.binding });
     }
     ctx.emit({ phase: "P0 · Intake", label: "Wallet resolved", detail: `${foundWallets.length} wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}… (${w.chain}, ${w.source.includes("Farcaster") ? "Farcaster" : "self-disclosed"})`).join(", ")}. Running on-chain forensics.`, source: "find-wallet", tone: "good" });
   }
@@ -4675,7 +4685,14 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     testimonials: evidence.testimonials,
     advised: evidence.advised,
     promotions: evidence.promotions.map((promotion) => ({ ...promotion, provider: "twitterapi" })),
-    wallets: evidence.wallets.map((wallet) => ({ ...wallet, provider: "find-wallet/onchain" })),
+    // Arkham is score-neutral in this increment. Keep its screen out of every
+    // model packet as well as the deterministic score path.
+    wallets: evidence.wallets
+      .filter((wallet) => wallet.screen?.status !== "not_attributable")
+      .map((wallet) => ({
+        ...stripArkhamScreenForScoring(wallet),
+        provider: "find-wallet/onchain",
+      })),
     clientEngagements: evidence.clientEngagements,
     associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
