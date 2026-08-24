@@ -17,6 +17,7 @@ import { recordCall } from "../cost";
 import { env } from "../config";
 import { captureTimestamp } from "../captureTime";
 import { canonicalOfficialWebsite } from "../../src/lib/fundScaleEvidence";
+import { arr, rec, type JsonRecord } from "../../src/lib/json";
 import { formatUsd } from "./defiLlama";
 
 const API_BASE = "https://api.monid.ai/v1";
@@ -191,17 +192,16 @@ type RunOutcome = { ok: true; data: unknown } | { ok: false; note: string; noRec
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** The provider payload lives at run.output.data; fall back to run.output. */
-function extractData(run: any): unknown {
-  const output = run?.output;
-  if (output && typeof output === "object" && !Array.isArray(output) && "data" in output) {
-    return (output as { data: unknown }).data;
-  }
+function extractData(run: unknown): unknown {
+  const output = rec(run).output;
+  if (output && typeof output === "object" && !Array.isArray(output) && "data" in output) return rec(output).data;
   return output;
 }
 
-function runId(run: any): string | null {
-  if (isNonEmptyString(run?.runId)) return run.runId.trim();
-  if (isNonEmptyString(run?.id)) return run.id.trim();
+function runId(run: unknown): string | null {
+  const value = rec(run);
+  if (isNonEmptyString(value.runId)) return value.runId.trim();
+  if (isNonEmptyString(value.id)) return value.id.trim();
   return null;
 }
 
@@ -227,7 +227,7 @@ async function startRun(
   // outage; it must never render as a failed source check.
   if (res.status === 404) return { ok: false, noRecord: true, note: "no record found (no_record_404)" };
   if (!res.ok) return { ok: false, note: `Monid request failed (http_${res.status}).` };
-  let run: any;
+  let run: unknown;
   try {
     run = await res.json();
   } catch {
@@ -237,12 +237,13 @@ async function startRun(
 }
 
 /** Walk a run to a terminal state, polling the run-status endpoint if needed. */
-async function resolveRun(initial: any, key: string, fetcher: typeof fetch): Promise<RunOutcome> {
-  let current = initial;
+async function resolveRun(initial: unknown, key: string, fetcher: typeof fetch): Promise<RunOutcome> {
+  let current: unknown = initial;
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   // Bound the loop independently of the clock so a broken status can't spin.
   for (let guard = 0; guard < 32; guard += 1) {
-    const status = isNonEmptyString(current?.status) ? current.status : "";
+    const currentRecord = rec(current);
+    const status = isNonEmptyString(currentRecord.status) ? currentRecord.status : "";
     if (status === TERMINAL_OK) {
       const data = extractData(current);
       if (data === undefined || data === null) {
@@ -268,7 +269,7 @@ async function pollRun(
   id: string,
   key: string,
   fetcher: typeof fetch,
-): Promise<{ ok: true; run: any } | { ok: false; note: string }> {
+): Promise<{ ok: true; run: unknown } | { ok: false; note: string }> {
   let res: Response;
   try {
     res = await fetcher(`${API_BASE}/runs/${encodeURIComponent(id)}`, {
@@ -292,12 +293,9 @@ async function pollRun(
 // ---------------------------------------------------------------------------
 
 /** Akta search payload → the array of candidate companies (tolerates a nest). */
-function companyList(data: unknown): any[] {
+function companyList(data: unknown): unknown[] {
   if (Array.isArray(data)) return data;
-  if (data && typeof data === "object" && Array.isArray((data as { data?: unknown }).data)) {
-    return (data as { data: unknown[] }).data;
-  }
-  return [];
+  return arr(rec(data).data);
 }
 
 /** Enrichment payload → the object keyed by section name (tolerates a nest). */
@@ -335,7 +333,7 @@ function domainLabel(value: unknown): string {
 type CompanyMatchMethod = NonNullable<CompanyEnrichment["matchMethod"]>;
 type CompanyMatchDecision =
   | {
-      company: any;
+      company: JsonRecord;
       method: CompanyMatchMethod;
       requestedDomain: string | null;
       matchedDomain: string | null;
@@ -385,11 +383,11 @@ function logCompanyResolution(
  * closed before paid enrichment.
  */
 function pickBestMatch(
-  companies: any[],
+  companies: unknown[],
   query: string,
   options: Pick<EnrichmentOptions, "identityPolicy" | "officialName">,
 ): CompanyMatchDecision {
-  const valid = companies.filter((company) => isNonEmptyString(company?.uuid));
+  const valid = companies.map(rec).filter((company) => isNonEmptyString(company.uuid));
   const queryHost = hostOf(query);
   const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
   const queryName = normalizedCompanyName(query);
@@ -415,11 +413,11 @@ function pickBestMatch(
 
   if (queryLooksLikeHost) {
     const ranked = valid.flatMap((company) => {
-      const matchedDomain = hostOf(company?.website);
+      const matchedDomain = hostOf(company.website);
       const method = matchedDomain ? relatedOfficialHosts(queryHost!, matchedDomain) : null;
       if (!method) return [];
       const exactName = officialName
-        && normalizedCompanyName(company?.name) === officialName;
+        && normalizedCompanyName(company.name) === officialName;
       return [{
         company,
         method,
@@ -453,7 +451,7 @@ function pickBestMatch(
   }
 
   const exactNameMatches = valid.filter(
-    (company) => normalizedCompanyName(company?.name) === queryName,
+    (company) => normalizedCompanyName(company.name) === queryName,
   );
   if (exactNameMatches.length === 1) {
     const company = exactNameMatches[0];
@@ -461,7 +459,7 @@ function pickBestMatch(
       company,
       method: "exact_name",
       requestedDomain: null,
-      matchedDomain: hostOf(company?.website),
+      matchedDomain: hostOf(company.website),
       candidateCount: valid.length,
     };
   }
@@ -474,14 +472,14 @@ function pickBestMatch(
     };
   }
   if (queryName) {
-    const labelMatches = valid.filter((company) => domainLabel(company?.website) === queryName);
+    const labelMatches = valid.filter((company) => domainLabel(company.website) === queryName);
     if (labelMatches.length === 1) {
       const company = labelMatches[0];
       return {
         company,
         method: "domain_label",
         requestedDomain: null,
-        matchedDomain: hostOf(company?.website),
+        matchedDomain: hostOf(company.website),
         candidateCount: valid.length,
       };
     }
@@ -572,23 +570,25 @@ function parseFunding(section: unknown): FundingInfo | undefined {
       ? (raw.funding_overview as { total_funding_usd?: unknown })
       : {};
   const totalRaisedUsd = numOrNull(overview.total_funding_usd);
-  const rawRounds = Array.isArray(raw.funding_rounds) ? raw.funding_rounds : [];
-  const rounds: FundingRoundInfo[] = rawRounds.map((entry: any): FundingRoundInfo => {
-    const investors: any[] = Array.isArray(entry?.investors) ? entry.investors : [];
-    const namesWhere = (predicate: (investor: any) => boolean): string[] => [
+  const rawRounds = arr(raw.funding_rounds);
+  const rounds: FundingRoundInfo[] = rawRounds.map((value): FundingRoundInfo => {
+    const entry = rec(value);
+    const investors = arr(entry.investors);
+    const namesWhere = (predicate: (investor: JsonRecord) => boolean): string[] => [
       ...new Set(
         investors
+          .map(rec)
           .filter(predicate)
-          .map((investor: any): string => (isNonEmptyString(investor?.name) ? investor.name.trim() : ""))
+          .map((investor): string => (isNonEmptyString(investor.name) ? investor.name.trim() : ""))
           .filter((name: string) => name.length > 0),
       ),
     ];
     return {
-      date: formatAktaDate(entry?.date),
-      round: isNonEmptyString(entry?.round?.label) ? entry.round.label.trim() : "Undisclosed round",
-      amountUsd: numOrNull(entry?.amount_usd), // absolute USD — do NOT multiply
-      leadInvestors: namesWhere((investor) => investor?.lead_investor === true),
-      otherInvestors: namesWhere((investor) => investor?.lead_investor !== true),
+      date: formatAktaDate(entry.date),
+      round: isNonEmptyString(rec(entry.round).label) ? String(rec(entry.round).label).trim() : "Undisclosed round",
+      amountUsd: numOrNull(entry.amount_usd), // absolute USD — do NOT multiply
+      leadInvestors: namesWhere((investor) => investor.lead_investor === true),
+      otherInvestors: namesWhere((investor) => investor.lead_investor !== true),
     };
   });
   if (totalRaisedUsd === null && rounds.length === 0) return undefined;
@@ -602,15 +602,16 @@ function parseManagement(section: unknown): ManagementPerson[] | undefined {
     ? ((section as { profiles: unknown[] }).profiles)
     : [];
   const people: ManagementPerson[] = profiles
-    .map((profile: any): ManagementPerson | null => {
-      const name = isNonEmptyString(profile?.name) ? profile.name.trim() : "";
+    .map((value): ManagementPerson | null => {
+      const profile = rec(value);
+      const name = isNonEmptyString(profile.name) ? profile.name.trim() : "";
       if (!name) return null;
       return {
         name,
-        title: isNonEmptyString(profile?.designation) ? profile.designation.trim() : "",
-        priorCompanies: toStringList(profile?.previous_companies),
-        linkedin: isNonEmptyString(profile?.social?.linkedin) ? profile.social.linkedin.trim() : null,
-        startYear: startYearFrom(profile?.start_date),
+        title: isNonEmptyString(profile.designation) ? profile.designation.trim() : "",
+        priorCompanies: toStringList(profile.previous_companies),
+        linkedin: isNonEmptyString(rec(profile.social).linkedin) ? String(rec(profile.social).linkedin).trim() : null,
+        startYear: startYearFrom(profile.start_date),
       };
     })
     .filter((person): person is ManagementPerson => person !== null);
@@ -690,7 +691,7 @@ export async function collectCompanyEnrichment(
       ? [`https://${rootDomain}`]
       : []),
   ];
-  let companies: any[] = [];
+  let companies: unknown[] = [];
   let decision: CompanyMatchDecision | null = null;
   for (let index = 0; index < searchQueries.length; index += 1) {
     const providerQuery = searchQueries[index];
@@ -738,7 +739,7 @@ export async function collectCompanyEnrichment(
       candidateCount: decision.candidateCount,
       searchDomains: searchQueries.map((providerQuery) => hostOf(providerQuery) ?? providerQuery),
       candidateDomains: companies
-        .map((company) => hostOf(company?.website))
+        .map((company) => hostOf(rec(company).website))
         .filter((domain): domain is string => Boolean(domain))
         .slice(0, 10),
     });
@@ -914,7 +915,7 @@ async function startRunFor(
   // outage; it must never render as a failed source check.
   if (res.status === 404) return { ok: false, noRecord: true, note: "no record found (no_record_404)" };
   if (!res.ok) return { ok: false, note: `Monid request failed (http_${res.status}).` };
-  let run: any;
+  let run: unknown;
   try {
     run = await res.json();
   } catch {
@@ -1037,14 +1038,17 @@ function clampNewsLimit(value: unknown): number {
 
 /** News payload (array or { data:[...] }) → normalized articles. */
 function parseArticles(data: unknown): NewsArticle[] {
-  return companyList(data).map((entry: any): NewsArticle => ({
-    title: firstString(entry?.title),
-    summary: firstString(entry?.summary, entry?.ai_summary),
-    sentiment: firstString(entry?.sentiment),
-    publisher: firstString(entry?.publisher, entry?.publisher_domain),
-    url: firstString(entry?.url),
-    date: firstString(entry?.published_date, entry?.date),
-  }));
+  return companyList(data).map((value): NewsArticle => {
+    const entry = rec(value);
+    return {
+      title: firstString(entry.title),
+      summary: firstString(entry.summary, entry.ai_summary),
+      sentiment: firstString(entry.sentiment),
+      publisher: firstString(entry.publisher, entry.publisher_domain),
+      url: firstString(entry.url),
+      date: firstString(entry.published_date, entry.date),
+    };
+  });
 }
 
 /**
