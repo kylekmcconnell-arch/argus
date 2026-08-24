@@ -9043,7 +9043,6 @@ function deriveInvestorStrengthBands(evidenceJson, axisCatalog2) {
     const artifact = artifactFor(row);
     return artifact?.eligibleAxes.includes(axis) === true && isSubstantiveArtifact(artifact);
   });
-  const artifactIds = (rows) => [...new Set(rows.map((row) => typeof row.artifactId === "string" ? row.artifactId : "").filter(Boolean))];
   const distinctSourceKey = (artifact) => {
     if (artifact.sourceUrl) {
       try {
@@ -10719,7 +10718,8 @@ function tokenFromPromotions(promos) {
 var ENABLED_VALUE = /^(?:1|true|on|enabled)$/i;
 var DISABLED_VALUE = /^(?:0|false|off|disabled)$/i;
 function arkhamProviderEnabled() {
-  const raw = String(import.meta.env?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim();
+  const viteEnv = import.meta.env;
+  const raw = String(viteEnv?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim();
   if (!raw) return true;
   if (DISABLED_VALUE.test(raw)) return false;
   return ENABLED_VALUE.test(raw);
@@ -12155,7 +12155,7 @@ function isSerperProviderOutage(detail) {
   return true;
 }
 function safeSerperFailure(status, raw) {
-  let message = "";
+  let message;
   try {
     const parsed = asRec(JSON.parse(raw.slice(0, 2e3)));
     message = [parsed.message, parsed.error].find((value) => typeof value === "string") ?? "";
@@ -13575,7 +13575,7 @@ function amplifiedAuthorsFromTimeline(payload, subjectHandle) {
   return out.slice(0, 12);
 }
 var MAX_AMPLIFIED_PROFILE_FETCHES = 8;
-async function discoverOperatorsFromAmplified(subjectHandle, subjectName3) {
+async function discoverOperatorsFromAmplified(subjectHandle) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
   const handle = subjectHandle.replace(/^@/, "");
@@ -14006,7 +14006,7 @@ async function discoverReverseBioFromTwitterapiUncached(subjectHandle, _subjectN
     }
   }
   let orgFetches = 0;
-  for (const [keyHandle, raw] of extraMentions) {
+  for (const raw of extraMentions.values()) {
     if (orgs.length >= 8 || orgFetches >= 6) break;
     orgFetches += 1;
     try {
@@ -14432,7 +14432,7 @@ function candidateUrlTiers(domain) {
     ]
   ];
 }
-var TEAM_DOCUMENT_HINT = /(?:^|[\/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[\/_\-.]|$)/i;
+var TEAM_DOCUMENT_HINT = /(?:^|[/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[/_\-.]|$)/i;
 function teamDocumentUrlsFromIndex(domain, raw) {
   const apex = normalizedApex(domain);
   if (!apex || !raw) return [];
@@ -17302,6 +17302,7 @@ async function enrichFirstPartyTeamAvatars(ctx) {
 var BASE2 = "https://api.dexscreener.com";
 var MAX_PROMO_LOOKUPS = 8;
 var isRecord = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var isPair = (value) => isRecord(value);
 var recordDex = (op, status, detail) => {
   recordCall("dexscreener", op, 0, ["keyless", detail].filter(Boolean).join(" \xB7 "), status);
 };
@@ -17334,7 +17335,7 @@ async function lookupToken(address) {
     recordDex("token-pairs", "succeeded", "no_pairs");
     return { address };
   }
-  const pairs = data.pairs.filter(isRecord);
+  const pairs = data.pairs.filter(isPair);
   if (!pairs.length) {
     recordDex("token-pairs", "partial", "invalid_pair_rows");
     return null;
@@ -17381,7 +17382,7 @@ async function detectTokenLifecycle(ticker, knownAddress) {
     return null;
   }
   try {
-    const validRows = data.pairs.filter(isRecord);
+    const validRows = data.pairs.filter(isPair);
     const pairs = validRows.filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
     if (!pairs.length) {
       recordDex("token-search", validRows.length === data.pairs.length ? "succeeded" : "partial", validRows.length === data.pairs.length ? "no_match" : "invalid_pair_rows");
@@ -18261,6 +18262,19 @@ function finalizeResearchPlan(plan, checks, providerRuns = []) {
   return { ...plan, tasks, nextActions: nextActions(tasks) };
 }
 
+// src/lib/gapInvestigation.ts
+function restrictResearchPlan(plan, authorizedCapabilities) {
+  if (!authorizedCapabilities) return plan;
+  const allowed = new Set(authorizedCapabilities);
+  const tasks = plan.tasks.filter((task) => allowed.has(task.capability)).map((task, index) => ({ ...task, rank: index + 1 }));
+  const taskIds = new Set(tasks.map((task) => task.id));
+  return {
+    ...plan,
+    tasks,
+    nextActions: plan.nextActions.filter((action) => taskIds.has(action.taskId) && allowed.has(action.capability)).map((action, index) => ({ ...action, rank: index + 1 }))
+  };
+}
+
 // server/adapters/github.ts
 var GH = "https://api.github.com";
 var headers2 = (key) => ({
@@ -18623,24 +18637,29 @@ async function tokenByContract(chain, address) {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 http_${res.status}`, "failed");
     return null;
   }
-  let d;
+  let value;
   try {
-    d = await res.json();
+    value = await res.json();
   } catch {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 response_json_error`, "failed");
     return null;
   }
-  if (!d || typeof d !== "object" || Array.isArray(d)) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 result_shape_error`, "partial");
     return null;
   }
+  const d = value;
   const hasSymbol = typeof d.symbol === "string" && !!d.symbol.trim();
   const hasName = typeof d.name === "string" && !!d.name.trim();
   if (!hasSymbol && !hasName) {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 missing_identity`, "partial");
     return null;
   }
-  const complete = hasSymbol && hasName && (d.market_data == null || typeof d.market_data === "object" && !Array.isArray(d.market_data));
+  const marketData = d.market_data && typeof d.market_data === "object" && !Array.isArray(d.market_data) ? d.market_data : null;
+  const currentPrice = marketData?.current_price && typeof marketData.current_price === "object" && !Array.isArray(marketData.current_price) ? marketData.current_price : null;
+  const marketCap = marketData?.market_cap && typeof marketData.market_cap === "object" && !Array.isArray(marketData.market_cap) ? marketData.market_cap : null;
+  const athChange = marketData?.ath_change_percentage && typeof marketData.ath_change_percentage === "object" && !Array.isArray(marketData.ath_change_percentage) ? marketData.ath_change_percentage : null;
+  const complete = hasSymbol && hasName && (d.market_data == null || marketData !== null);
   recordCall(
     "coingecko",
     "contract-lookup",
@@ -18651,9 +18670,9 @@ async function tokenByContract(chain, address) {
   return {
     symbol: d.symbol,
     name: d.name,
-    priceUsd: d.market_data?.current_price?.usd,
-    mcapUsd: d.market_data?.market_cap?.usd,
-    ath_change_pct: d.market_data?.ath_change_percentage?.usd
+    priceUsd: typeof currentPrice?.usd === "number" ? currentPrice.usd : void 0,
+    mcapUsd: typeof marketCap?.usd === "number" ? marketCap.usd : void 0,
+    ath_change_pct: typeof athChange?.usd === "number" ? athChange.usd : void 0
   };
 }
 var coingeckoAdapter = {
@@ -27212,7 +27231,7 @@ async function collectProjectTokenIdentity(ctx) {
   const registryHomepages = [];
   let selected = null;
   let search = null;
-  let candidates = [];
+  const candidates = [];
   let inspected = [];
   let detailAttempts = 0;
   let contractLookupFailed = false;
@@ -29065,7 +29084,7 @@ async function collectHolderProfile(chain, address) {
   const explorerShares = explorerWallets.map((holder) => holder.percent).filter((share) => Number.isFinite(share) && share >= 0 && share <= 100).sort((a, b) => b - a);
   const excludedNote = (count, register) => count ? ` ${count} ${register} row${count === 1 ? " was" : "s were"} excluded as a pool, contract, or locked address, so this is wallet concentration and not every address holding supply.` : "";
   let distributionSource = null;
-  let distributionNote = null;
+  let distributionNote;
   let shares = [];
   if (unordered && explorerShares.length) {
     shares = explorerShares;
@@ -30581,7 +30600,7 @@ async function operatorLaunchAnnouncements(handle) {
   const key = env("TWITTERAPI_KEY");
   const clean4 = handle.replace(/^@/, "");
   if (!key || !clean4) return [];
-  let posts = [];
+  let posts;
   try {
     posts = await searchFrom(clean4, LAUNCH_SEARCH_TERMS, key);
   } catch {
@@ -31849,7 +31868,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     // founder the follow scan misses (no follow edge, or beyond its page
     // budget) — e.g. a project account amplifying its founder's posts while
     // the founder's bio says "Founder @project".
-    discoverOperatorsFromAmplified(ctx.handle, ctx.evidence.profile.display_name),
+    discoverOperatorsFromAmplified(ctx.handle),
     // Reverse role-phrase search: who does the PUBLIC RECORD say founded or
     // leads this project? Runs quoted queries ("founder of @y", "cofounder of
     // @y", "CEO at @y", "@y team", name/domain variants) across X and the web,
@@ -33543,6 +33562,21 @@ function mergeManagementIntoWebTeam(evidence, emit) {
 }
 async function runAuditWithLedger(rawHandle, emit, options) {
   const runtimeStartedAt = Date.now();
+  const authorizedCapabilities = options?.authorizedResearchScope?.capabilities;
+  const authorizedCapabilitySet = authorizedCapabilities ? new Set(authorizedCapabilities) : null;
+  const capabilityIsAuthorized = (...capabilities) => !authorizedCapabilitySet || capabilities.some((capability) => authorizedCapabilitySet.has(capability));
+  const authorizedDelegates = options?.authorizedResearchScope ? new Set(options.authorizedResearchScope.delegates) : null;
+  const adapterDelegates = {
+    x: ["x-profile", "twitterapi", "official-x"],
+    github: ["github"],
+    peopledatalabs: ["peopledatalabs"],
+    "offchain-diligence": ["official-domain", "public-web", "independent-web", "adverse-search", "courtlistener", "opensanctions"],
+    dexscreener: ["dexscreener"],
+    coingecko: ["coingecko"],
+    onchain: ["direct-chain-rpc", "wallet-graph"],
+    "basic-facts": ["basic-facts"]
+  };
+  const adapterIsAuthorized = (adapter) => !authorizedDelegates || (adapterDelegates[adapter.id] ?? []).some((delegate) => authorizedDelegates.has(delegate));
   resetDefiLlamaScanMemo();
   resetFollowScanMemo();
   const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
@@ -33571,7 +33605,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const seededEvidence = fixture ? toEvidence(fixture) : null;
   const liveSeedEvidence = seededEvidence ? downgradeFixtureEvidenceForLive(seededEvidence) : null;
   const liveProviders = ADAPTERS.filter(
-    (adapter) => KEYED.has(adapter.id) && adapter.available() && (!liveSeedEvidence || !adapter.applicable || adapter.applicable(liveSeedEvidence))
+    (adapter) => adapterIsAuthorized(adapter) && KEYED.has(adapter.id) && adapter.available() && (!liveSeedEvidence || !adapter.applicable || adapter.applicable(liveSeedEvidence))
   );
   const anyLive = liveProviders.length > 0 || analystAvailable();
   if (fixture && !anyLive) {
@@ -33793,8 +33827,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   if (!fixture) {
     const stageStartedAt = startRuntimeStage("cold-intake");
     await resolveProfile(ctx);
-    await projectTokenPass();
-    if (evidence.projectToken?.verified) {
+    if (capabilityIsAuthorized("token_and_market", "project_fundamentals")) {
+      await projectTokenPass();
+    }
+    if (evidence.projectToken?.verified && capabilityIsAuthorized("token_and_market", "project_fundamentals")) {
       const projectName2 = evidence.projectToken.name;
       const protocolLookupName = defiLlamaLookupName(projectName2);
       try {
@@ -33937,7 +33973,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     }
   } catch {
   }
-  let researchPlan = buildResearchPlan(evidence, options?.intent ?? "investment_due_diligence");
+  let researchPlan = restrictResearchPlan(
+    buildResearchPlan(evidence, options?.intent ?? "investment_due_diligence"),
+    authorizedCapabilities
+  );
   evidence.researchPlan = researchPlan;
   emit({
     phase: "Director",
@@ -33956,6 +33995,16 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     laneProviderRows.length = 0;
   };
   const runAdapter = async (a) => {
+    if (!adapterIsAuthorized(a)) {
+      laneProviderRows.push({
+        id: a.id,
+        label: a.label,
+        state: "skipped",
+        detail: "outside the frozen gap-investigation authorization",
+        observedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      return;
+    }
     if (collectionOverBudget()) {
       laneProviderRows.push({ id: a.id, label: a.label, state: "skipped", detail: "collection time budget reached; skipped to preserve scoring and persistence time", observedAt: (/* @__PURE__ */ new Date()).toISOString() });
       return;
@@ -34063,7 +34112,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     finishRuntimeStage("social-activity", socialStageStartedAt);
   }
   hydrateProjectTeamFromVerifiedFacts(evidence);
-  const revisedResearchPlan = buildResearchPlan(evidence, researchPlan.intent);
+  const revisedResearchPlan = restrictResearchPlan(
+    buildResearchPlan(evidence, researchPlan.intent),
+    authorizedCapabilities
+  );
   researchPlan = { ...revisedResearchPlan, createdAt: researchPlan.createdAt };
   evidence.researchPlan = researchPlan;
   emit({
@@ -34075,7 +34127,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   });
   const officialWebsiteAfterBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
   const recoveredProjectSite = !officialWebsiteBeforeBasicFacts && officialWebsiteAfterBasicFacts !== null && rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */);
-  if (recoveredProjectSite) {
+  if (recoveredProjectSite && capabilityIsAuthorized("official_facts", "project_fundamentals")) {
     const siteHost = new URL(officialWebsiteAfterBasicFacts).hostname.replace(/^www\./, "");
     evidence.roles = rolesAfterBasicFacts;
     await collectProjectSiteSubstance(ctx, siteHost);
@@ -34085,14 +34137,14 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     rolesAfterBasicFacts = providerBackedRoles(evidence);
     evidence.roles = rolesAfterBasicFacts;
   }
-  if (fixture || recoveredProjectSite && !evidence.projectToken?.verified) {
+  if (capabilityIsAuthorized("token_and_market", "project_fundamentals") && (fixture || recoveredProjectSite && !evidence.projectToken?.verified)) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
   } else {
     evidence.roles = rolesAfterBasicFacts;
   }
-  await organizationSafetyPass();
-  if (recoveredProjectSite && evidence.projectToken?.verified && !evidence.protocolTvl) {
+  if (capabilityIsAuthorized("legal_and_adverse")) await organizationSafetyPass();
+  if (recoveredProjectSite && evidence.projectToken?.verified && !evidence.protocolTvl && capabilityIsAuthorized("project_fundamentals", "legal_and_adverse")) {
     try {
       await recoverProjectProtocolIncidentEvidence(ctx);
     } catch (error) {
@@ -34105,9 +34157,9 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       });
     }
   }
-  await evmControlRealityPass();
+  if (capabilityIsAuthorized("people_and_control", "token_and_market")) await evmControlRealityPass();
   const recoveredCompanyLookup = evidence.projectToken?.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
-  if (!fixture && recoveredCompanyLookup && rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */) && evidence.companyEnrichment?.identityMatch !== "official_domain") {
+  if (capabilityIsAuthorized("people_and_control", "project_fundamentals") && !fixture && recoveredCompanyLookup && rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */) && evidence.companyEnrichment?.identityMatch !== "official_domain") {
     try {
       const enrichment = await withWallClockBox(
         collectProjectCompanyEnrichment(recoveredCompanyLookup, {
@@ -34124,7 +34176,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       emit({ phase: "Team", label: "Company leadership lookup failed", detail: String(error), source: "monid", tone: "warn" });
     }
   }
-  if (!fixture && !evidence.companyEnrichment && evidence.roles.includes("FOUNDER" /* FOUNDER */)) {
+  if (capabilityIsAuthorized("portfolio_and_outcomes", "project_fundamentals") && !fixture && !evidence.companyEnrichment && evidence.roles.includes("FOUNDER" /* FOUNDER */)) {
     const primaryVenture = deriveFounderVentureCandidate(evidence);
     emit({
       phase: "Founder",
@@ -34252,15 +34304,20 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     recordAdverseUnavailable("the collection time budget was reached before the adverse, scam, and rug sweep ran, so no adverse search was attempted");
     emit({ phase: "Collect", label: "Signal passes skipped", detail: "Collection time budget reached; skipping enrichment passes to leave time to score and persist a partial report.", tone: "warn" });
   } else {
-    const signalPasses = [
-      trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
+    const signalPasses = [];
+    if (capabilityIsAuthorized("token_and_market")) {
+      signalPasses.push(trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
         emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
-      })
-    ];
-    if (env("TWITTERAPI_KEY")) {
+      }));
+    } else {
+      checkTracker.provider("token-lifecycle", "Promoted-token lifecycle", "skipped", "outside the frozen gap-investigation authorization");
+    }
+    if (capabilityIsAuthorized("official_facts", "counter_evidence") && env("TWITTERAPI_KEY")) {
       signalPasses.push(trackedPass("post-cadence", "Posting cadence", ["twitterapi"], () => postCadence(ctx), (e) => {
         emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" });
       }));
+    } else if (!capabilityIsAuthorized("official_facts", "counter_evidence")) {
+      checkTracker.provider("post-cadence", "Posting cadence", "skipped", "outside the frozen gap-investigation authorization");
     } else {
       checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
     }
@@ -34310,7 +34367,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       checkTracker.record({ id: "project-transparency", status: "unavailable", note: detail, provider: "project-disclosure-collector" });
     }
   }
-  if (evidence.roles.includes("PROJECT" /* PROJECT */) && (evidence.webTeam?.length ?? 0) > 0) {
+  if (capabilityIsAuthorized("people_and_control") && evidence.roles.includes("PROJECT" /* PROJECT */) && (evidence.webTeam?.length ?? 0) > 0) {
     const leaderCompany = evidence.projectToken?.name?.trim() || evidence.profile.display_name.trim();
     try {
       const departures = await checkLeaderDepartures(evidence.webTeam ?? [], leaderCompany);
