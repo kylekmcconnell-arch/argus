@@ -18236,10 +18236,16 @@ function buildResearchPlan(evidence, intent = "investment_due_diligence") {
 function researchPlanAllows(plan, capability) {
   return plan.tasks.some((task) => task.capability === capability && task.state !== "skipped" && task.blockedBy.length === 0);
 }
-function finalizeResearchPlan(plan, checks, providerRuns = []) {
+function finalizeResearchPlan(plan, checks, providerRuns = [], context = {}) {
   const tasks = plan.tasks.map((task) => {
     if (task.blockedBy.length) {
       return { ...task, state: "skipped", outcome: `blocked by ${task.blockedBy.length} unresolved identity gate${task.blockedBy.length === 1 ? "" : "s"}` };
+    }
+    if (task.capability === "role_resolution" && context.roleResolved) {
+      return { ...task, state: "completed", outcome: "subject type and report methodology were resolved" };
+    }
+    if (task.capability === "analyst_synthesis" && context.analystConclusionRecorded) {
+      return { ...task, state: "completed", outcome: "a frozen analyst conclusion was recorded" };
     }
     const taskChecks = checks.filter((check) => check.checkId && task.checkIds.includes(check.checkId));
     const successful = taskChecks.filter((check) => SUCCESS2.has(check.status));
@@ -34715,7 +34721,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   };
   const finalChecks = checkTracker.snapshot(evidence.roles, checkScope);
   const providerSnapshotAtDecision = checkTracker.providers();
-  researchPlan = finalizeResearchPlan(researchPlan, finalChecks, providerSnapshotAtDecision.runs);
+  researchPlan = finalizeResearchPlan(researchPlan, finalChecks, providerSnapshotAtDecision.runs, {
+    roleResolved: evidence.roles.length > 0,
+    analystConclusionRecorded: evidence.axes.length > 0
+  });
   evidence.researchPlan = researchPlan;
   emit({
     phase: "Director",
