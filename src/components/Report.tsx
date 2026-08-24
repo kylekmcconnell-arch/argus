@@ -24,6 +24,7 @@ import {
 } from "@phosphor-icons/react";
 import { usdCompact } from "../lib/format";
 import { claimedTicker, deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
+import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
 import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
 import type { DecisionLensId } from "../intelligence/types";
@@ -2566,6 +2567,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     anchors: { market: "#project-token", team: "#identity-evidence", account: "#report-overview" },
   });
   const decisionDiscovery = deriveDecisionDiscovery(noticedSignals);
+  const materialChangeDiscovery = materialDeltaDiscovery(
+    f.reportDelta,
+    f.versionContext?.reportVersionId
+      ?? f.viewVersionContext?.reportVersionId
+      ?? (f.persistence?.state === "persisted" ? f.persistence.reportVersionId : null),
+  );
   const controlPathDiscovery = buildPublicControlPathDiscovery([f.graph], "#relationships");
   const claimConflictDiscovery = buildPublicClaimConflictDiscovery(f.basicFacts ?? [], "#basic-facts");
   // One paste, whole verdict: composed for group chats and IC memos alike.
@@ -3368,7 +3375,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           favorable={favorableVerdict}
           verdictTone={decisionNarrativeTone}
           argument={caseArgument}
-          discovery={controlPathDiscovery ?? claimConflictDiscovery ?? decisionDiscovery}
+          discovery={materialChangeDiscovery ?? controlPathDiscovery ?? claimConflictDiscovery ?? decisionDiscovery}
           decisionLensId={f.intelligence ? decisionLensId : undefined}
           onDecisionLensChange={f.intelligence ? setDecisionLensId : undefined}
           supports={decisionCanvasSupports}

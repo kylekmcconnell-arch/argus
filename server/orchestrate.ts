@@ -95,6 +95,7 @@ import {
 } from "./adapters/defiLlama";
 import { collectHolderProfile } from "./adapters/tokenHolders";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
+import { buildMaterialReportDelta } from "../src/lib/reportDelta";
 import { collectSecurityAudits } from "./adapters/securityAudits";
 import {
   collectEvmControlReality,
@@ -4973,13 +4974,29 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   if (options?.organizationId) {
     const prior = await readPriorOutcome(options.organizationId, evidence.profile.handle);
     if (prior) {
+      const reportDelta = prior.reportVersionId && prior.payload
+        ? buildMaterialReportDelta("person", {
+          reportVersionId: prior.reportVersionId,
+          version: prior.version,
+          capturedAt: prior.capturedAt,
+          payload: prior.payload,
+        }, dossier)
+        : null;
+      if (reportDelta) dossier.reportDelta = reportDelta;
       const delta = describeOutcomeDelta(prior, {
         score: typeof dossier.report.governing_score === "number" ? dossier.report.governing_score : null,
         verdict: dossier.report.composite_verdict ?? null,
         completeness: dossier.completeness_state ?? null,
       });
       if (delta) {
-        dossier.priorOutcome = { ...prior, delta };
+        dossier.priorOutcome = {
+          version: prior.version,
+          score: prior.score,
+          verdict: prior.verdict,
+          completeness: prior.completeness,
+          capturedAt: prior.capturedAt,
+          delta,
+        };
         checkTracker.provider("prior-outcome", "Since last scan", "executed", delta);
         emit({ phase: "Finalize", label: "Since last scan", detail: delta, source: "argus", tone: "neutral" });
       }

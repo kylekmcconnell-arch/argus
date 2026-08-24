@@ -17,11 +17,13 @@ const authHeaders = (key: string): Record<string, string> => ({
 });
 
 export interface PriorOutcome {
+  reportVersionId?: string;
   version: number;
   score: number | null;
   verdict: string | null;
   completeness: string | null;
   capturedAt: string | null;
+  payload?: unknown;
 }
 
 /** Latest persisted outcome for this org+handle, or null. Never throws. */
@@ -33,39 +35,46 @@ export async function readPriorOutcome(
   const ref = handle.trim().replace(/^@/, "").toLowerCase();
   if (!c || !organizationId || !ref) return null;
   try {
-    // Case rows key person subjects by canonical_ref; accept both bare and
-    // @-prefixed spellings so a historical ref format never hides the case.
-    const caseUrl = `${c.url}/rest/v1/cases`
+    // The mutable report projection is the activation pointer. Reading its
+    // exact immutable id avoids comparing against a newer version whose
+    // persistence succeeded but activation failed.
+    const projectionUrl = `${c.url}/rest/v1/reports`
       + `?organization_id=eq.${encodeURIComponent(organizationId)}`
       + `&kind=eq.person`
-      + `&canonical_ref=in.(${encodeURIComponent(`"${ref}","@${ref}"`)})`
-      + `&select=id&limit=1`;
-    const caseRes = await fetch(caseUrl, { headers: authHeaders(c.key), signal: AbortSignal.timeout(5_000) });
-    if (!caseRes.ok) return null;
-    const caseRows = (await caseRes.json()) as Array<{ id?: string }>;
-    const caseId = caseRows?.[0]?.id;
-    if (!caseId) return null;
+      + `&ref=in.(${encodeURIComponent(`"${ref}","@${ref}"`)})`
+      + "&select=report_version_id&order=ts.desc&limit=1";
+    const projectionRes = await fetch(projectionUrl, {
+      headers: authHeaders(c.key),
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!projectionRes.ok) return null;
+    const projectionRows = (await projectionRes.json()) as Array<{ report_version_id?: string }>;
+    const reportVersionId = projectionRows?.[0]?.report_version_id;
+    if (!reportVersionId) return null;
 
     const versionUrl = `${c.url}/rest/v1/report_versions`
-      + `?case_id=eq.${encodeURIComponent(caseId)}`
+      + `?id=eq.${encodeURIComponent(reportVersionId)}`
       + `&organization_id=eq.${encodeURIComponent(organizationId)}`
-      + "&select=version,score,verdict,completeness_state,created_at"
-      + "&order=version.desc&limit=1";
+      + "&select=id,version,score,verdict,completeness_state,created_at,payload"
+      + "&limit=1";
     const versionRes = await fetch(versionUrl, { headers: authHeaders(c.key), signal: AbortSignal.timeout(5_000) });
     if (!versionRes.ok) return null;
     const rows = (await versionRes.json()) as Array<{
-      version?: number; score?: number | string | null; verdict?: string | null;
+      id?: string; version?: number; score?: number | string | null; verdict?: string | null;
       completeness_state?: string | null; created_at?: string | null;
+      payload?: unknown;
     }>;
     const row = rows?.[0];
-    if (!row || typeof row.version !== "number") return null;
+    if (!row || typeof row.id !== "string" || typeof row.version !== "number") return null;
     const score = row.score === null || row.score === undefined ? null : Number(row.score);
     return {
+      reportVersionId: row.id,
       version: row.version,
       score: Number.isFinite(score as number) ? (score as number) : null,
       verdict: typeof row.verdict === "string" && row.verdict ? row.verdict : null,
       completeness: typeof row.completeness_state === "string" ? row.completeness_state : null,
       capturedAt: typeof row.created_at === "string" ? row.created_at : null,
+      payload: row.payload,
     };
   } catch {
     return null;

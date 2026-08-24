@@ -583,7 +583,11 @@ export default function App() {
           failureDetail: persisted.reason,
         } : {}),
       });
-      const settled: Investigation = { ...inv, persistence: { ...persisted, scanId } };
+      const settled: Investigation = {
+        ...inv,
+        ...(persisted.state === "persisted" && persisted.reportDelta ? { reportDelta: persisted.reportDelta } : {}),
+        persistence: { ...persisted, scanId },
+      };
       if (!settleCachedScan(
         resultCache.current,
         inv.token.address,
@@ -685,7 +689,11 @@ export default function App() {
           failureDetail: persisted.reason,
         } : {}),
       });
-      const settled: TokenDossier = { ...d, persistence: { ...persisted, scanId } };
+      const settled: TokenDossier = {
+        ...d,
+        ...(persisted.state === "persisted" && persisted.reportDelta ? { reportDelta: persisted.reportDelta } : {}),
+        persistence: { ...persisted, scanId },
+      };
       if (!settleCachedScan(
         resultCache.current,
         d.address,

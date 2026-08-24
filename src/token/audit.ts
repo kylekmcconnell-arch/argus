@@ -6,6 +6,7 @@
 
 import type { RunnableTokenInput } from "../lib/resolveInput";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
+import type { MaterialReportDelta } from "../lib/reportDelta";
 import type { TraceStep } from "../data/evidence";
 import type { SocialActivitySnapshot } from "../data/socialActivity";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
@@ -167,6 +168,8 @@ export interface TokenDossier {
   bundleRisk: "low" | "elevated" | "high";
   cg: CgInfo | null;
   graph: { nodes: PanoptesNode[]; edges: PanoptesEdge[] };
+  /** Highest-priority source-backed change from the exact prior report. */
+  reportDelta?: MaterialReportDelta;
   findings: { claim: string; tone: "good" | "warn" | "bad"; source: string }[];
   trace: TraceStep[];
   live: boolean;
