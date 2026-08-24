@@ -76,4 +76,49 @@ describe("SocialActivityPanel", () => {
     expect(container.textContent).toContain("cannot measure the conversation yet");
     expect(container.textContent).not.toContain("0 unique");
   });
+
+  it("does not call a legacy pagination gap a post limit", () => {
+    act(() => root.render(<SocialActivityPanel snapshot={{
+      ...snapshot,
+      state: "partial",
+      activityScore: null,
+      collection: {
+        ...snapshot.collection,
+        maxPosts: 200,
+        postReads: 47,
+        countsRequestCompleted: false,
+      },
+      windows: {
+        ...snapshot.windows,
+        last7Days: {
+          ...snapshot.windows.last7Days,
+          postCount: 47,
+          uniqueAccounts: 22,
+          inspectedPosts: 47,
+          authorCoverageComplete: false,
+        },
+      },
+      note: "ARGUS inspected 47 posts before the configured limit. Unique-account counts are minimums.",
+    }} />));
+    expect(container.textContent).toContain("more result pages than this saved scan collected");
+    expect(container.textContent).toContain("At least 47");
+    expect(container.textContent).not.toContain("reached its post limit");
+    expect(container.textContent).not.toContain("before the configured limit");
+  });
+
+  it("names the post ceiling only when the collector actually reaches it", () => {
+    act(() => root.render(<SocialActivityPanel snapshot={{
+      ...snapshot,
+      state: "partial",
+      activityScore: null,
+      collection: {
+        ...snapshot.collection,
+        maxPosts: 500,
+        postReads: 500,
+        incompleteReason: "post_limit",
+      },
+    }} />));
+    expect(container.textContent).toContain("maximum 500 posts allowed for this saved scan");
+    expect(container.textContent).toContain("activity score stays withheld");
+  });
 });
