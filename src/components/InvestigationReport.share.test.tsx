@@ -198,15 +198,13 @@ describe("investigation exact sharing", () => {
       },
     }), () => undefined, () => undefined);
 
-    expect(container.textContent).toContain("Score while checks are open");
-    expect(container.textContent).toContain("CHECKS OPEN 84");
-    expect(container.textContent).not.toContain("PASS 84");
-    expect(container.textContent).toContain("NOT READY");
-    expect(container.textContent).toContain("Score only · not financial advice");
+    expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
+    expect(container.textContent).not.toContain("Score while checks are open");
+    expect(container.textContent).toContain("REVIEW WITH GAPS");
     expect(container.textContent).toContain("Before you use this report");
-    expect(container.textContent).toContain("Market size");
-    expect(container.textContent).toContain("1 required safety check is not finished");
-    expect(container.querySelector<HTMLProgressElement>('progress[aria-label="Checks finished: 63%"]')?.value).toBe(63);
+    expect(container.textContent).toContain("Known connections must finish before this report is ready");
+    expect(container.querySelector<HTMLElement>('[role="progressbar"][aria-label="Checks finished"]')?.getAttribute("aria-valuenow")).toBe("85");
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).not.toContain("INCOMPLETE");
     expect(container.textContent).not.toContain("Investigation incomplete");
@@ -214,10 +212,9 @@ describe("investigation exact sharing", () => {
     const statusCard = container.querySelector<HTMLElement>('[aria-label="Report status"]');
     const scoreCard = container.querySelector<HTMLElement>('[aria-label="Score while checks are open"]');
     const marketCard = container.querySelector<HTMLElement>('[aria-label="Market size"]');
-    expect(statusCard?.className).toContain("order-1");
-    expect(scoreCard?.className).toContain("order-2");
-    expect(marketCard?.className).toContain("order-3");
-    expect(scoreCard?.querySelector(".verdict-pill-lg")).toBeNull();
+    expect(statusCard?.closest("aside")?.getAttribute("aria-label")).toBe("Report guide");
+    expect(scoreCard).toBeNull();
+    expect(marketCard).toBeNull();
 
     const toolbar = container.querySelector<HTMLElement>(".report-toolbar");
     const caseBrief = [...(toolbar?.querySelectorAll("button") ?? [])]
@@ -229,18 +226,10 @@ describe("investigation exact sharing", () => {
     expect(mobileActions?.textContent).toContain("Challenge report");
     expect(mobileActions?.textContent).toContain("Rescan current evidence");
 
-    // The "Checks finished" counter expands into the list of exactly the rows
-    // it counts as unfinished, each with its status and required marking.
-    const statusCardDropdown = statusCard?.querySelector<HTMLDetailsElement>("details");
-    expect(statusCardDropdown?.textContent).toContain("Checks finished");
-    const unfinishedList = statusCardDropdown?.querySelector('[aria-label="Checks not finished"]');
-    expect(unfinishedList?.textContent).toContain("Known connections");
-    expect(unfinishedList?.textContent).toContain("News and press");
-    expect(unfinishedList?.textContent).toContain("did not finish");
-    expect(unfinishedList?.textContent).toContain("required");
-    // Post-scan enrichment rows are not part of the counter and must not
-    // appear in the list that explains it.
-    expect(unfinishedList?.textContent).not.toContain("deployer-trail-evm");
+    const decisionBrief = container.querySelector('[data-canonical-decision-brief="true"]');
+    expect(decisionBrief?.textContent).toContain("Known connections");
+    expect(decisionBrief?.textContent).not.toContain("News and press");
+    expect(decisionBrief?.textContent).not.toContain("deployer-trail-evm");
   });
 
   it("separates a company's equity round from its token market value", () => {
@@ -909,7 +898,7 @@ describe("investigation exact sharing", () => {
     });
     const pasted = String(harness.clipboard.mock.calls[0]?.[0]);
     const lines = pasted.split("\n");
-    expect(lines[0]).toContain("ARGUS · $ARG investigation · risk score PASS 88/100 · safety checks READY TO REVIEW");
+    expect(lines[0]).toContain("ARGUS · $ARG investigation · risk score PASS 88/100 · safety checks NOT READY");
     expect(lines).toContain("Investigation share test");
     expect(lines[lines.length - 1]).toBe("http://localhost:3000/?share=opaque");
   });

@@ -13,7 +13,6 @@ describe("InvestigationDecisionCanvas public states", () => {
         concerns={[{ label: "Early funding origin remains unresolved" }]}
         nextSteps={[]}
         verified={[]}
-        openQuestions={[]}
         coveragePercent={0}
         successful={0}
         applicable={0}

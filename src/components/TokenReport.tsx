@@ -14,6 +14,7 @@ import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness, type DecisionReadiness } from "../lib/decisionReadiness";
+import { applyReportCheckContract, hasExplicitReportCheckContract } from "../lib/reportCheckContract";
 import {
   coverageQualifiedCompleteness,
   presentPublicReport,
@@ -53,7 +54,6 @@ import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
 import { ReportExperienceLayout, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
-import { ScoreRing } from "./ScoreRing";
 import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
@@ -167,13 +167,19 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     || (d.persistence?.state === "persisted" && d.persistence.reportVersionId),
   );
   const tokenSubjectGraphKey = String(d.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
-  const checks = versionContext
+  const checks = applyReportCheckContract("token", versionContext
     ? versionContext.checks
-    : tokenChecks(d);
+    : tokenChecks(d));
+  const canApplyCurrentCompletionContract = hasExplicitReportCheckContract("token", versionContext
+    ? versionContext.checks
+    : tokenChecks(d));
   const readiness = deriveDecisionReadiness(checks);
-  const readinessColor = readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)";
   const presentationCompleteness = coverageQualifiedCompleteness({
-    completeness: versionContext?.completenessState ?? (readiness.status === "ready" ? "complete" : "partial"),
+    completeness: versionContext?.completenessState === "failed"
+      ? "failed"
+      : readiness.status === "ready" && canApplyCurrentCompletionContract
+        ? "complete"
+        : versionContext?.completenessState ?? "partial",
     attestation: versionContext?.attestationState ?? (d.live ? "server_collected" : "analyst_submitted"),
     checks,
   });
@@ -186,7 +192,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     ? "UNVERIFIABLE_IDENTITY"
     : presentation.displayVerdict;
   const presentationMeta = verdictMeta(presentedVerdict);
-  const presentationColor = presentationMeta.color;
   const s = d.safety;
   const gp = d.safetyChecked;
   const isSol = d.chain === "solana";
@@ -285,7 +290,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     detail: check.note,
   }));
   const verifiedItems = recordedChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
-  const openQuestionItems = gapChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
   const capturedAt = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : undefined;
@@ -429,67 +433,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
         <ReportDisclaimer className="mt-2 max-w-3xl" />
 
-        {/* Decision layer: model output and evidence completeness are separate.
-            A thinly-supported PASS must never read like an investment-ready clearance. */}
-        <div className="panel tint-var tint-strong relative mt-4 overflow-hidden soft-shadow" style={{ "--tint": presentationColor } as React.CSSProperties}>
-          <div className="relative flex flex-wrap items-start gap-6 p-6 pb-5">
-            <div className="shrink-0 text-center">
-              <ScoreRing score={presentation.primaryScore ? d.score : null} verdict={presentedVerdict} color={presentationColor} size={96} bands={Boolean(presentation.primaryScore)} />
-              <div className="mono mt-1.5 text-[11px] uppercase tracking-wider text-ink-dim">
-                {presentation.scoreLabel?.toLowerCase() ?? "score withheld"}
-              </div>
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="eyebrow mb-1.5">{plainReportStatusLabel(presentation.resultLabel)}</div>
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="display text-[32px] uppercase leading-none" style={{ color: presentationColor }}>{presentationMeta.label}</span>
-                {presentation.secondarySignal && (
-                  <span className="chip tint-caution">{presentation.secondarySignal}</span>
-                )}
-              </div>
-              <p className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-                {plainLanguageSummary(presentation.final ? d.headline : presentation.note)}
-              </p>
-              <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-                {presentation.final ? readiness.guidance : <>This score uses the checks that finished. It is not an approval to buy or invest. {plainLanguageSummary(d.headline)}</>}
-              </p>
-              {d.capApplied && (
-                <div className="chip tint-avoid mt-3 font-medium">
-                  Score limit · {d.capApplied.replace(/_/g, " ")}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div
-            className="finding tint-var relative px-6 py-4"
-            style={{ "--tint": readinessColor } as React.CSSProperties}
-            aria-label="Safety check status"
-          >
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">
-                {readiness.status === "ready" ? "Safety checks finished" : `${readiness.coveragePercent}% of checks finished`}
-              </span>
-              <span className="text-[11px] text-ink-faint">required checks are shown below</span>
-              <a href="#token-methodology" className="ml-auto text-[11px] text-signal-lift underline-offset-2 hover:underline">Review checks</a>
-            </div>
-            <dl className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="Safety check summary">
-              <div className="stat-tile">
-                <dt className="stat-label">Checks complete</dt>
-                <dd className="stat-value mt-0.5 font-semibold">{readiness.coveragePercent}%</dd>
-              </div>
-              <div className="stat-tile">
-                <dt className="stat-label">Finished</dt>
-                <dd className="stat-value mt-0.5 font-semibold">{readiness.successful}<span className="text-[11px] text-ink-faint">/{readiness.applicable}</span></dd>
-              </div>
-              <div className="stat-tile">
-                <dt className="stat-label">Still open</dt>
-                <dd className="stat-value mt-0.5 font-semibold" style={{ color: readiness.unresolved ? readinessColor : "var(--color-ink)" }}>{readiness.unresolved}</dd>
-              </div>
-            </dl>
-          </div>
-        </div>
-
         <InvestigationDecisionCanvas
           verdictLabel={presentationMeta.label}
           favorable={favorableVerdict}
@@ -498,7 +441,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           concerns={concernItems}
           nextSteps={nextStepItems}
           verified={verifiedItems}
-          openQuestions={openQuestionItems}
           challengeAnchorId={shareView ? null : "token-challenge"}
           coveragePercent={readiness.coveragePercent}
           successful={readiness.successful}

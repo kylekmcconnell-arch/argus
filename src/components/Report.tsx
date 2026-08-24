@@ -50,6 +50,7 @@ import { ExportMenu } from "./ExportMenu";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { decisionCriticalChecks, isAdverseFinding, personChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
+import { applyReportCheckContract, hasExplicitReportCheckContract } from "../lib/reportCheckContract";
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
 import { ScoreComposition } from "./ScoreComposition";
@@ -1923,11 +1924,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     roles,
     hasAssociates: (evidence.associates?.length ?? 0) > 0,
   });
-  const diligenceChecks = versionContext
+  const diligenceChecks = applyReportCheckContract("person", versionContext
     ? versionContext.checks
     : f.checkRuns?.length
       ? f.checkRuns
-      : derivedDiligenceChecks;
+      : derivedDiligenceChecks);
   const legacyCoverageNotCaptured = versionContext?.attestationState === "legacy_unattested"
     && versionContext.checks.length === 0;
   // Screens that completed and explicitly found nothing: the honest content
@@ -1945,8 +1946,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         },
   );
   const recordedCompleteness = versionContext?.completenessState ?? f.completeness_state;
+  const canApplyCurrentCompletionContract = hasExplicitReportCheckContract("person", versionContext
+    ? versionContext.checks
+    : f.checkRuns?.length
+      ? f.checkRuns
+      : derivedDiligenceChecks);
   const presentationCompleteness = coverageQualifiedCompleteness({
-    completeness: recordedCompleteness ?? (readiness.status === "ready" ? "complete" : "partial"),
+    completeness: recordedCompleteness === "failed"
+      ? "failed"
+      : readiness.status === "ready" && canApplyCurrentCompletionContract
+        ? "complete"
+        : recordedCompleteness ?? "partial",
     attestation: versionContext?.attestationState ?? (f.live ? "server_collected" : undefined),
     checks: diligenceChecks,
   });
@@ -2615,7 +2625,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   );
   const decisionCanvasContext = toDecisionCanvasItems(intelligenceContextNarrative);
   const decisionCanvasNextSteps = toDecisionCanvasItems(verificationNext);
-  const decisionCanvasOpenQuestions = toDecisionCanvasItems(allVerificationQuestions);
   const decisionCanvasVerified = decisionCriticalChecks(diligenceChecks)
     .filter((check) => check.status === "confirmed"
       || check.status === "reported"
@@ -3340,7 +3349,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           context={decisionCanvasContext}
           nextSteps={decisionCanvasNextSteps}
           verified={decisionCanvasVerified}
-          openQuestions={decisionCanvasOpenQuestions}
           coveragePercent={readiness.coveragePercent}
           successful={readiness.successful}
           applicable={readiness.applicable}

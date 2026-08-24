@@ -22,6 +22,7 @@ import {
   tokenChecks,
 } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
+import { applyReportCheckContract } from "../lib/reportCheckContract";
 import { ArkhamName } from "./ArkhamName";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { AddInfo } from "./AddInfo";
@@ -93,6 +94,11 @@ import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
 import { projectWebSurfaces } from "../lib/projectWebSurfaces";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import type { DecisionLensId } from "../intelligence/types";
+
+// Kept only as a rollback seam while the canonical decision brief settles.
+// This is not a runtime/user flag and must remain false until the legacy hero
+// code is deleted after the stabilization release.
+const LEGACY_REPORT_HERO_ENABLED = false;
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -810,13 +816,13 @@ export function InvestigationReport({
   const tokenSubjectGraphKey = String(token.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
   // Credit org-side outcomes the bound project scan recorded in this same
   // payload; without a confirmed canonical binding this is a no-op.
-  const diligenceChecks = reconcileInvestigationChecks(
+  const diligenceChecks = applyReportCheckContract("investigation", reconcileInvestigationChecks(
     inv.versionContext ? inv.versionContext.checks : tokenChecks(token),
     token.address,
     projectAccount,
     inv.projectAccountAudit,
     inv.projectAccountBinding,
-  );
+  ));
   const readiness = deriveDecisionReadiness(diligenceChecks);
   const clearance = clearanceCoverage(diligenceChecks);
   const observedTokenMeta = verdictMeta(token.verdict);
@@ -1297,14 +1303,6 @@ export function InvestigationReport({
     nextStepItems[0] ? `Top open item: ${nextStepItems[0].label}.` : "",
   ].filter(Boolean).join("\n");
   const verifiedItems = recordedChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
-  const openQuestionItems = [
-    ...gapChecks.map((check) => ({ label: check.label, detail: check.note })),
-    ...intelligenceBrief.questions.map((item) => ({ label: item.title, detail: `${item.detail} ${item.provenance}`.trim() })),
-  ].filter((item, index, items) => {
-    const key = item.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    return items.findIndex((candidate) =>
-      candidate.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() === key) === index;
-  }).slice(0, 6);
   const capturedAt = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : undefined;
@@ -1491,17 +1489,16 @@ export function InvestigationReport({
             onExportPdf={() => printReportPdf(inv.token.name || inv.token.symbol)}
           />
 
-          {/* the editorial opening, earned: only a decision-ready report gets
-              the Auric File hero. A not-ready report keeps leading with the
-              readiness gate in the card grid below. */}
-          {readiness.status === "ready" && (
+          {/* Legacy editorial/score heroes are quarantined. The shared decision
+              brief below is the only public report opening for every state. */}
+          {LEGACY_REPORT_HERO_ENABLED && readiness.status === "ready" && (
             <div className="af-doc">
               <VerdictHero token={token} savedLabel={capturedAt ? `Saved ${capturedAt}` : null} />
             </div>
           )}
 
           <InvestigationDecisionCanvas
-            verdictLabel={observedTokenMeta.label}
+            verdictLabel={readiness.status === "ready" ? observedTokenMeta.label : readinessLabel}
             favorable={favorableVerdict}
             verdictTone={decisionCanvasTone}
             argument={verdictArgument}
@@ -1515,7 +1512,6 @@ export function InvestigationReport({
             }))}
             nextSteps={nextStepItems}
             verified={verifiedItems}
-            openQuestions={openQuestionItems}
             coveragePercent={readiness.coveragePercent}
             successful={readiness.successful}
             applicable={readiness.applicable}
@@ -1525,7 +1521,7 @@ export function InvestigationReport({
             challengeAnchorId={shareView ? null : "investigation-challenge"}
           />
 
-          <div className={`investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 ${readiness.status === "ready" ? "" : "xl:grid-cols-3"}`}>
+          {LEGACY_REPORT_HERO_ENABLED && <div className={`investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 ${readiness.status === "ready" ? "" : "xl:grid-cols-3"}`}>
             {readiness.status !== "ready" && (
             <section
               className="panel investigation-hero-card order-2 flex flex-col p-4 lg:p-5"
@@ -1657,7 +1653,7 @@ export function InvestigationReport({
               <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 xl:grid-cols-2" aria-label="Market size details">
                 <div>
                   <dt className="stat-label">Market rank</dt>
-                  <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg.rank}` : "Not available"}</dd>
+                  <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg?.rank}` : "Not available"}</dd>
                 </div>
                 <div>
                   <dt className="stat-label" title="Estimated value if every token were available to trade.">Value if all circulate</dt>
@@ -1676,7 +1672,7 @@ export function InvestigationReport({
                 Size helps with context · it does not make an asset safe
               </p>
             </section>
-          </div>
+          </div>}
 
           {noticedSignals.length > 0 && (
             <section className="panel mt-3 p-4" aria-label="What Argus noticed">
@@ -1839,7 +1835,7 @@ export function InvestigationReport({
           label="Report guide"
           mobileOffsetClass="top-[101px] sm:top-[65px]"
           status={{
-            label: observedTokenMeta.label,
+            label: readiness.status === "ready" ? observedTokenMeta.label : readinessLabel,
             detail: readiness.status === "ready" ? "Required safety checks are finished." : readinessLabel,
             meta: `${readiness.successful}/${readiness.applicable} checks finished`,
             tone: decisionCanvasTone,

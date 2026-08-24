@@ -10778,7 +10778,7 @@ var NEVER_WAIVE_CHECK_IDS = /* @__PURE__ */ new Set([
   // scam vector), never an enrichment gap.
   "founder-asset-distinction"
 ]);
-var CLEARANCE_COVERAGE_FLOOR_PERCENT = 75;
+var CLEARANCE_COVERAGE_FLOOR_PERCENT = 100;
 function clearanceCoverage(checks) {
   const governing = decisionCriticalChecks(checks);
   const applicableRows = governing.filter((check) => check.status !== "not-applicable");

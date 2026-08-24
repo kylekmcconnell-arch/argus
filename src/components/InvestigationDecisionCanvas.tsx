@@ -187,7 +187,6 @@ export function InvestigationDecisionCanvas({
   context = [],
   nextSteps,
   verified,
-  openQuestions,
   coveragePercent,
   successful,
   applicable,
@@ -210,7 +209,6 @@ export function InvestigationDecisionCanvas({
   context?: DecisionCanvasItem[];
   nextSteps: DecisionCanvasItem[];
   verified: DecisionCanvasItem[];
-  openQuestions: DecisionCanvasItem[];
   coveragePercent: number;
   successful: number;
   applicable: number;
@@ -231,7 +229,7 @@ export function InvestigationDecisionCanvas({
         : "text-ink";
 
   return (
-    <section id="report-summary" className="story-chapter report-section mt-6 scroll-mt-28">
+    <section id="report-summary" data-canonical-decision-brief="true" className="story-chapter report-section mt-6 scroll-mt-28">
       <header className="report-section-heading">
         <div>
           <p className="eyebrow text-signal-lift">01 · Decision brief</p>
@@ -310,7 +308,7 @@ export function InvestigationDecisionCanvas({
               <p className="mt-2 text-[11px] leading-snug text-ink-faint">
                 {applicable === 0
                   ? "No check results were saved."
-                  : `${successful} finished, ${openQuestions.length} open.`}
+                  : `${successful} finished, ${Math.max(0, applicable - successful)} open.`}
               </p>
             </section>
 
