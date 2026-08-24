@@ -22,6 +22,17 @@ export interface IntelligenceBrief {
   questions: IntelligenceBriefItem[];
 }
 
+/**
+ * A frozen intelligence spine may retain an older unanswered question after a
+ * later deterministic binding proves the project's official token. Consumers
+ * may omit that stale question from concise next-step lists without mutating
+ * the saved question register or its lineage receipt.
+ */
+export function isOfficialTokenQuestion(item: Pick<IntelligenceBriefItem, "id" | "title">): boolean {
+  return /official[_ .-](?:crypto[_ .-])?token/i.test(item.id)
+    || /\bofficial (?:crypto )?token\b/i.test(item.title);
+}
+
 const SEVERITY_RANK: Record<DerivedIntelligenceSignal["severity"], number> = {
   high: 0,
   medium: 1,

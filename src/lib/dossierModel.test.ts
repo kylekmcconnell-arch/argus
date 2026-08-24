@@ -114,7 +114,19 @@ describe("dossier model", () => {
       providerFailures: [{}, {}],
     });
     const coverage = dossier.beats.find((b) => b.id === "coverage")!;
-    expect(coverage.heading).toBe("3 leads. 1 check still open.");
+    expect(coverage.heading).toBe("3 leads. 1 research question still needs evidence.");
+  });
+
+  it("does not call a completed no-result search an open question", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [],
+      checkRuns: [{ checkId: "supplemental-search", label: "Supplemental search", status: "checked-empty" }],
+      basicFactLeads: [], providerFailures: [],
+    });
+
+    expect(dossier.beats.find((b) => b.id === "coverage")!.heading)
+      .toBe("0 leads. No research questions still need evidence.");
   });
 
   it("does not print unbound aggregator funding as a raised figure or led-by", () => {

@@ -200,6 +200,7 @@ export function InvestigationDecisionCanvas({
   evidenceHref = "#token-evidence",
   methodologyHref = "#token-methodology",
   challengeAnchorId = null,
+  checkScopeLabel = "Required report checks",
 }: {
   verdictLabel: string;
   /** Saved ARGUS risk score. Null means the scoring contract withheld it. */
@@ -224,6 +225,8 @@ export function InvestigationDecisionCanvas({
   methodologyHref?: `#${string}`;
   /** Anchor id of the ask console; null hides the per-item challenge push. */
   challengeAnchorId?: string | null;
+  /** Public name for the exact check set behind successful/applicable. */
+  checkScopeLabel?: string;
 }) {
   const verdictItems = favorable ? supports : concerns;
   const countervailingItems = favorable ? concerns : supports;
@@ -274,10 +277,10 @@ export function InvestigationDecisionCanvas({
             )}
             <p className="mono mt-1 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
               {score != null && scoreIsProvisional
-                ? `${successful}/${applicable} checks complete · provisional`
+                ? `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete · provisional`
                 : applicable === 0
                   ? "No checks saved"
-                  : `${successful}/${applicable} checks complete`}
+                  : `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete`}
             </p>
           </div>
         </div>
@@ -331,11 +334,11 @@ export function InvestigationDecisionCanvas({
             )}
           </div>
 
-          <aside className="border-t border-line/60 bg-panel-2/20 px-4 py-5 lg:border-l lg:border-t-0" aria-label="Report checks">
+          <aside className="border-t border-line/60 bg-panel-2/20 px-4 py-5 lg:border-l lg:border-t-0" aria-label={checkScopeLabel}>
             <section aria-label="Checks finished">
               <div className="flex items-center gap-2">
                 <Database size={17} weight="duotone" aria-hidden="true" className="text-signal-lift" />
-                <h3 className="eyebrow text-ink-dim">Report checks</h3>
+                <h3 className="eyebrow text-ink-dim">{checkScopeLabel}</h3>
                 <span className="mono ml-auto text-[13.5px] font-semibold text-ink">{applicable === 0 ? "Not available" : `${coveragePercent}%`}</span>
               </div>
               {applicable > 0 && (
@@ -352,7 +355,7 @@ export function InvestigationDecisionCanvas({
 
             <div className="mt-4 border-t border-line/60 pt-4">
               <DecisionLedgerList
-                title="Check next"
+                title="Research and follow-up"
                 items={nextSteps}
                 href={methodologyHref}
                 emptyCopy={applicable === 0 ? "No required check results were saved." : "No checks remain open."}

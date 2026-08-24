@@ -455,7 +455,14 @@ function headingFor(
   }
 
   if (beatId === "coverage") {
-    return `${plural(ctx.leadCount, "lead", "leads")}. ${plural(ctx.openCheckCount, "check still open", "checks still open")}.`;
+    const researchCopy = ctx.openCheckCount === 0
+      ? "No research questions still need evidence."
+      : plural(
+        ctx.openCheckCount,
+        "research question still needs evidence",
+        "research questions still need evidence",
+      );
+    return `${plural(ctx.leadCount, "lead", "leads")}. ${researchCopy}`.replace(/\.?$/, ".");
   }
 
   if (beatId === "verdict") {
@@ -577,7 +584,10 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
   const team = collectTeam(payload);
   const claimed = new Set(BEAT_CHECKS.flatMap((b) => b.checks));
   const leftover = checks.filter((c) => !claimed.has(str(c.checkId)));
-  const openCount = leftover.filter((c) => ["unknown", "unavailable", "checked-empty"].includes(str(c.status))).length;
+  // checked-empty is a completed search with no result, not unfinished work.
+  // Calling it "open" contradicted the canonical required-check counter on
+  // otherwise complete reports such as SuperGemma.
+  const openCount = leftover.filter((c) => ["unknown", "unavailable", "stale"].includes(str(c.status))).length;
   const headingCtx = {
     subject,
     team,

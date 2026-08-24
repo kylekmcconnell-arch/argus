@@ -232,6 +232,41 @@ describe("investigation exact sharing", () => {
     expect(decisionBrief?.textContent).not.toContain("deployer-trail-evm");
   });
 
+  it("names the exact two unfinished token safety checks behind a 5/7 report", () => {
+    const checks = [
+      ["contract-safety", "Contract controls", "confirmed"],
+      ["buy-sell-simulation", "Buy and sell test", "unknown"],
+      ["holder-distribution", "Large holders", "confirmed"],
+      ["wallet-clustering", "Connected holder wallets", "unknown"],
+      ["market-intelligence", "Market data", "confirmed"],
+      ["ofac-sanctions-address", "Sanctions screening", "checked-empty"],
+      ["trust-graph-connections", "Known connections", "checked-empty"],
+    ].map(([checkId, label, status]) => ({
+      checkId,
+      label,
+      status: status as "confirmed" | "unknown" | "checked-empty",
+      decisionCritical: true,
+    }));
+
+    render(investigation({
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000144",
+        reportVersionId,
+        version: 6,
+        completenessState: "partial",
+        attestationState: "analyst_submitted",
+        methodologyVersion: null,
+        createdAt: "2026-08-24T01:23:00.000Z",
+        checks,
+      },
+    }));
+
+    const decisionBrief = container.querySelector('[data-canonical-decision-brief="true"]')?.textContent ?? "";
+    expect(decisionBrief).toContain("5/7 token safety checks complete · provisional");
+    expect(decisionBrief).toContain("Required: Buy and sell test");
+    expect(decisionBrief).toContain("Required: Connected holder wallets");
+  });
+
   it("separates a company's equity round from its token market value", () => {
     render(investigation({
       token: {
@@ -667,7 +702,7 @@ describe("investigation exact sharing", () => {
 
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).toContain("Finished checks");
-    expect(container.textContent).toContain("Check next");
+    expect(container.textContent).toContain("Research and follow-up");
     expect(container.querySelector('[role="progressbar"][aria-label="Checks finished"]')).not.toBeNull();
   });
 

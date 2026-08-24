@@ -441,6 +441,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           coveragePercent={readiness.coveragePercent}
           successful={readiness.successful}
           applicable={readiness.applicable}
+          checkScopeLabel="Token safety checks"
           capturedAt={capturedAt}
         />
 

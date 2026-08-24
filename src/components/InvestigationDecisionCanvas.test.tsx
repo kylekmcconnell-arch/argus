@@ -50,7 +50,7 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain('data-report-score="prominent"');
     expect(html).toContain("ARGUS risk score");
     expect(html).toContain("<svg");
-    expect(html).toContain("7/7 checks complete");
+    expect(html).toContain("7/7 required report checks complete");
     expect(html).not.toContain(">100%</p>");
   });
 
@@ -69,11 +69,14 @@ describe("InvestigationDecisionCanvas public states", () => {
         coveragePercent={71}
         successful={5}
         applicable={7}
+        checkScopeLabel="Token safety checks"
       />,
     );
 
     expect(html).toContain("ARGUS risk score 20 out of 100");
     expect(html).toContain("Early risk score");
-    expect(html).toContain("5/7 checks complete · provisional");
+    expect(html).toContain("5/7 token safety checks complete · provisional");
+    expect(html).toContain("Token safety checks");
+    expect(html).toContain("Research and follow-up");
   });
 });
