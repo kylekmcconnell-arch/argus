@@ -67,7 +67,7 @@ import { SecondOpinion } from "./SecondOpinion";
 import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
 import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
-import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
+import { ReportExperienceLayout, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
@@ -1323,6 +1323,17 @@ export function InvestigationReport({
   const scanDetailsChapterNumber = challengeChapterNumber + 1;
   const chapterLabel = (chapter: number, label: string) =>
     `${String(chapter).padStart(2, "0")} · ${label}`;
+  const reportNavItems: ReportCanvasNavItem[] = [
+    { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
+    { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
+    { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
+    { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
+    ...(hasConnectionsChapter ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
+    ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
+    ...(token.axes?.length ? [{ href: "#composition" as const, label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> }] : []),
+    { href: "#investigation-methodology", label: "Method", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
+    ...(!shareView ? [{ href: "#investigation-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
+  ];
 
   return (
     <div className="investigation-story relative min-h-full pb-24">
@@ -1488,24 +1499,6 @@ export function InvestigationReport({
               <VerdictHero token={token} savedLabel={capturedAt ? `Saved ${capturedAt}` : null} />
             </div>
           )}
-
-          <div className="investigation-story-nav sticky top-[101px] z-20 mt-5 sm:top-[65px]">
-            <ReportCanvasSectionNav
-              sticky={false}
-              label="Report story"
-              items={[
-                { href: "#report-summary", label: "Brief", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
-                { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
-                { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
-                { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
-                ...(hasConnectionsChapter ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
-                ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
-                ...(token.axes?.length ? [{ href: "#composition" as const, label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> }] : []),
-                { href: "#investigation-methodology", label: "Method", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
-                ...(!shareView ? [{ href: "#investigation-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              ]}
-            />
-          </div>
 
           <InvestigationDecisionCanvas
             verdictLabel={observedTokenMeta.label}
@@ -1840,6 +1833,20 @@ export function InvestigationReport({
           )}
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
+
+        <ReportExperienceLayout
+          items={reportNavItems}
+          label="Report guide"
+          mobileOffsetClass="top-[101px] sm:top-[65px]"
+          status={{
+            label: observedTokenMeta.label,
+            detail: readiness.status === "ready" ? "Required safety checks are finished." : readinessLabel,
+            meta: `${readiness.successful}/${readiness.applicable} checks finished`,
+            tone: decisionCanvasTone,
+          }}
+          nextStep={nextStepItems[0]?.label}
+          nextStepHref="#investigation-methodology"
+        >
 
         {projectAccount?.intelligence && (
           <PointInTimeIntelligencePanel
@@ -2472,6 +2479,7 @@ export function InvestigationReport({
         <div className="mt-4 panel p-4 text-[12.5px] leading-relaxed text-ink-faint">
           ARGUS checked the token, website, project account, and public team. Open a person to run a deeper review. Names without a verified profile stay unconfirmed.
         </div>
+        </ReportExperienceLayout>
       </div>
       {!shareView && <ArgusEyeAssistant inv={inv} reportVersionId={frozenReportVersionId} />}
     </div>

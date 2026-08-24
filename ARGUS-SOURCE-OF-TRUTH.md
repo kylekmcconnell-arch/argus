@@ -139,6 +139,15 @@ can support that conclusion.
 
 ## Decision experience
 
+Every report type uses the same responsive reading shell and section vocabulary:
+Summary, Risks, Market when applicable, Social when captured, People when
+applicable, Connections, Control surface when captured, Evidence, Method, and
+Challenge for private reports. On wide screens the shell
+adds a sticky report guide with the current decision state and one next check. On
+smaller screens the same destinations become a horizontal section guide. The rail
+is orientation, not a second evidence surface: facts, receipts, and methodology
+remain in the report body and are never duplicated into the rail.
+
 The report opens with the interactive dossier as the reading document:
 named beats derived by `buildDossier()` from the live payload (identity,
 team, product, perimeter, coverage, verdict). Headings are counts and

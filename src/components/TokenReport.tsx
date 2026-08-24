@@ -51,7 +51,7 @@ import {
 } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
-import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
+import { ReportExperienceLayout, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { ReportActionsRow } from "./ReportActionsRow";
@@ -295,6 +295,16 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     : presentedVerdict === "CAUTION" || presentedVerdict === "INCOMPLETE" || presentedVerdict === "UNVERIFIABLE_IDENTITY"
       ? "caution"
       : "avoid";
+  const reportNavItems: ReportCanvasNavItem[] = [
+    { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
+    { href: "#report-risks", label: "Risks", icon: <ChartDonut size={16} weight="duotone" aria-hidden="true" /> },
+    { href: "#token-story", label: "Market", icon: <FileText size={16} weight="duotone" aria-hidden="true" /> },
+    ...(d.socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
+    { href: "#token-relationships", label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
+    { href: "#token-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+    { href: "#token-methodology", label: "Method", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+    ...(!shareView ? [{ href: "#token-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
+  ];
 
   return (
     <div className="relative min-h-full pb-24">
@@ -480,21 +490,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         </div>
 
-        <div className="sticky top-[65px] z-20 mt-5">
-          <ReportCanvasSectionNav
-            sticky={false}
-            items={[
-              { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#report-risks", label: "Risks", icon: <ChartDonut size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#token-story", label: "The file", icon: <FileText size={16} weight="duotone" aria-hidden="true" /> },
-              ...(d.socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              { href: "#token-evidence", label: "Sources", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#token-relationships", label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#token-methodology", label: "Checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
-            ]}
-          />
-        </div>
-
         <InvestigationDecisionCanvas
           verdictLabel={presentationMeta.label}
           favorable={favorableVerdict}
@@ -511,6 +506,17 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           capturedAt={capturedAt}
         />
 
+        <ReportExperienceLayout
+          items={reportNavItems}
+          status={{
+            label: presentationMeta.label,
+            detail: readiness.status === "ready" ? "Required safety checks are finished." : readiness.title,
+            meta: `${readiness.successful}/${readiness.applicable} checks finished`,
+            tone: decisionCanvasTone,
+          }}
+          nextStep={nextStepItems[0]?.label}
+          nextStepHref="#token-methodology"
+        >
         <TokenStory dossier={d} />
 
         {!shareView && (
@@ -797,6 +803,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             the score even when the market looks healthy. This report is research, not financial advice.
           </p>
         </div>
+        </ReportExperienceLayout>
       </div>
     </div>
   );

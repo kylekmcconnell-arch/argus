@@ -77,7 +77,8 @@ import { buildDecisionBasis } from "../lib/decisionBasis";
 import {
   ReportCanvasNarrativeSection,
   ReportCanvasRailCard,
-  ReportCanvasSectionNav,
+  ReportExperienceLayout,
+  type ReportCanvasNavItem,
   type ReportCanvasNarrativeItem,
   type ReportCanvasRailItem,
 } from "./ReportCanvasPrimitives";
@@ -2846,6 +2847,25 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       sub: "Matched through CoinGecko",
     }] : []),
   ];
+  const reportGuideTone = presentedVerdict === "PASS"
+    ? "pass"
+    : presentedVerdict === "CAUTION" || presentedVerdict === "PROVISIONAL" || presentedVerdict === "INCOMPLETE"
+      ? "caution"
+      : presentedVerdict === "FAIL" || presentedVerdict === "AVOID"
+        ? "avoid"
+        : "neutral";
+  const reportNavItems: ReportCanvasNavItem[] = [
+    { href: "#dossier", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
+    { href: "#decision-summary", label: "Risks", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: decisionQuestionCount },
+    ...(f.projectToken ? [{ href: "#project-token" as const, label: "Market", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
+    ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
+    { href: "#identity-evidence", label: "People", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
+    { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
+    ...(f.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> }] : []),
+    { href: "#evidence-ledger", label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount },
+    ...(diligenceChecks.length > 0 ? [{ href: "#scan-methodology" as const, label: "Method", icon: <UserFocus aria-hidden="true" size={15} weight="bold" />, count: diligenceChecks.length }] : []),
+    ...(!shareView ? [{ href: "#ask-report" as const, label: "Challenge", icon: <MagnifyingGlassPlus aria-hidden="true" size={15} weight="bold" /> }] : []),
+  ];
 
   return (
     <div className="relative min-h-full pb-24">
@@ -3311,6 +3331,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           />
         )}
 
+        <ReportExperienceLayout
+          items={reportNavItems}
+          status={{
+            label: m.label,
+            detail: readiness.status === "ready" ? "Required evidence checks are finished." : readinessTitle,
+            meta: `${readiness.successful}/${readiness.applicable} checks finished`,
+            tone: reportGuideTone,
+          }}
+          nextStep={verificationNext[0]?.title}
+        >
         <DossierReport payload={f as unknown as Record<string, unknown>} />
         {f.projectStrengthBands && (
           <DimensionChapters
@@ -3318,33 +3348,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             checksHref="#scan-methodology"
           />
         )}
-
-        <div className="sticky top-[69px] z-20 mt-5">
-          <ReportCanvasSectionNav
-            sticky={false}
-            items={[
-              { href: "#dossier", label: "The file", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
-              { href: "#decision-summary", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
-              ...(f.intelligence ? [{ href: "#decision-intelligence" as const, label: "Deep dive", icon: <MagnifyingGlassPlus aria-hidden="true" size={15} weight="bold" />, count: f.intelligence.signals.length }] : []),
-              ...(f.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> }] : []),
-              ...(showBasicFacts ? [{
-                href: "#basic-facts" as const,
-                label: "Key facts",
-                icon: <CheckCircle aria-hidden="true" size={15} weight="bold" />,
-                count: new Set(basicFacts
-                  .filter((fact) => fact.status === "verified" || fact.status === "corroborated")
-                  .map((fact) => fact.predicate)).size,
-              }] : []),
-              ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
-              ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
-              { href: "#decision-basis", label: "Why this score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
-              { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
-              ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Sources", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
-              { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
-              ...(diligenceChecks.length > 0 ? [{ href: "#scan-methodology" as const, label: "Checks", icon: <UserFocus aria-hidden="true" size={15} weight="bold" />, count: diligenceChecks.length }] : []),
-            ]}
-          />
-        </div>
 
         {prioritizeDecisionIntelligence && f.intelligence && (
           <PointInTimeIntelligencePanel
@@ -4508,6 +4511,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </p>
           <RunCostLine cost={dossier.cost} />
         </div>
+        </ReportExperienceLayout>
       </div>
     </div>
   );
