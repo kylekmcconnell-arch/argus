@@ -30,7 +30,7 @@ src/engine/        the scoring engine (TS port of argus_p v2.2). Pure, no deps.
 src/engine/*.test  mirrors the 31 Python checks; the port is provably identical.
 src/calibration/   golden set + runner. The model-evolution guardrail.
 src/data/          evidence shape, dossier assembly, the curated subjects.
-src/components/    the origami-style UI (AppShell, Landing, Report, TrustGraph…).
+src/components/    the report and product UI (AppShell, Landing, Report, TrustGraph…).
 server/            the autonomous collector: provider adapters + Claude analyst.
 engine_reference/  the original Python argus_p package (source of truth).
 ```
@@ -58,9 +58,12 @@ Grow the golden set in `src/calibration/golden.ts` as real ground truth accrues.
 
 ## Conventions
 
-- **Design system mimics origami.chat**: Sora typeface, light paper theme, a
-  single pink accent (`#d64a9e`), near-black buttons, small radii. The brand mark
-  is the peacock ocellus (Argus Panoptes, the hundred-eyed giant). Tokens live in
+- **Design system is a dark, data-first fintech surface**: system sans
+  (`-apple-system`/SF Pro/Inter), a dark ground (`color-scheme: dark`), and ARGUS
+  identity green (`#00c805`) held separate from the semantic evidence colours so
+  brand emphasis never changes what a report state means. Interaction colour is
+  deliberately neutral, which keeps financial hues semantic. The brand mark is
+  the peacock ocellus (Argus Panoptes, the hundred-eyed giant). Tokens live in
   `src/index.css`; components use the CSS variables, so reskins are a token edit.
 - **No em dashes** in any user-facing copy.
 - The engine owns caps, banding, and the composite verdict. Adapters only
@@ -70,6 +73,7 @@ Grow the golden set in `src/calibration/golden.ts` as real ground truth accrues.
 
 To run real audits instead of curated dossiers, copy `.env.example` to `.env`
 and add the provider keys you have (Grok + twitterapi.io for X, People Data
-Labs, CoinGecko, Reddit, Helius/Bitquery, and ANTHROPIC_API_KEY for the analyst).
-Crunchbase is optional company/funding enrichment and is not required for
-portfolio verification. With no keys it stays in curated mode. Never commit `.env`.
+Labs, CoinGecko, Helius/Bitquery, and ANTHROPIC_API_KEY for the Claude fallback
+analyst). Grok is the primary analyst route. The Reddit and Crunchbase adapters
+are retired, so their keys do nothing today even though the variables still exist
+in `.env.example`. With no keys it stays in curated mode. Never commit `.env`.
