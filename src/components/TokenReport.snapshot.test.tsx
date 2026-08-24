@@ -29,7 +29,7 @@ vi.mock("./LinkEntity", () => ({ LinkEntity: (props: Record<string, unknown>) =>
 vi.mock("./SecondOpinion", () => ({
   SecondOpinion: (props: Record<string, unknown>) => {
     harness.secondOpinion(props);
-    return <div data-panel="second-opinion">second-opinion</div>;
+    return <div id={String(props.id)} data-panel="second-opinion">second-opinion</div>;
   },
 }));
 vi.mock("./ServiceAlert", () => ({
@@ -178,7 +178,7 @@ describe("token report supplemental evidence boundary", () => {
       reportVersionId: versionContext.reportVersionId,
     }));
 
-    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report sections"]');
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report guide"]');
     expect(nav).not.toBeNull();
     const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
       .map((link) => link.getAttribute("href"));
@@ -186,9 +186,10 @@ describe("token report supplemental evidence boundary", () => {
       "#report-summary",
       "#report-risks",
       "#token-story",
-      "#token-evidence",
       "#token-relationships",
+      "#token-evidence",
       "#token-methodology",
+      "#token-challenge",
     ]);
     expect(container.textContent).toContain("What was not verified");
     expect(container.textContent).toContain("No CoinGecko record was captured");

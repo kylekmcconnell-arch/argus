@@ -1927,7 +1927,13 @@ h1.display-sm {
      overlay (ARGUS EYE assistant, skip link, mobile scrim) - anything fixed
      would otherwise print on top of report content on every page. */
   .app-sidebar, .app-mobile-header, nav, button, dialog,
-  [class~="fixed"], .print\:hidden { display: none !important; }
+  [class~="fixed"], .print\:hidden, .report-experience-rail { display: none !important; }
+
+  /* The orientation rail is screen chrome. Let the report body reclaim the
+     full printable width once that rail is removed. */
+  [data-report-experience-shell="true"] > .grid {
+    display: block !important;
+  }
 
   /* Sticky toolbars and section headers print in normal flow. On screen they
      float over scrolled content with a translucent blur; in a paged medium

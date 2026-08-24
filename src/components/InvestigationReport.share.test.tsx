@@ -656,7 +656,7 @@ describe("investigation exact sharing", () => {
       reportVersionId,
     }));
 
-    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report story"]');
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report guide"]');
     expect(nav).not.toBeNull();
     const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
       .map((link) => link.getAttribute("href"));

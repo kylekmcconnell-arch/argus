@@ -55,6 +55,13 @@ decision layer; when a required token chart or citation is missing; when a token
 report hides recorded collector gaps below a complete-looking score; or when a
 sourced token figure and an unestablished one look the same.
 
+The report experience also fails when person, token, and token-plus-project
+reports use conflicting section names or navigation order; when a guide link has
+no matching report section; when the desktop rail repeats evidence instead of
+orienting the reader; or when the mobile section guide obscures report content.
+The sticky guide may show only the section map, current report state, and one
+next check.
+
 The research-coverage layer fails when a completed scan looks interrupted because
 it exposes raw task states, delegate names, dispatch reasons, stop rules, or
 provider outcomes by default. It must distinguish “the scan finished but this
