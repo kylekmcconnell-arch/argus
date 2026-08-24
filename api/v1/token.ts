@@ -4,6 +4,7 @@ import type { ResolvedInput, RunnableTokenInput } from "../../src/lib/resolveInp
 import { auditToken, collectSocialActivity, resolveInput } from "../_collector.js";
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 import { screenSanctionedAddresses } from "../_sanctions-core.js";
+import { recordScanReceipt } from "../_scanReceipts.js";
 
 export const config = { maxDuration: 60 };
 
@@ -21,6 +22,7 @@ function cors(req: VercelRequest, res: VercelResponse): void {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const startedAt = Date.now();
   cors(req, res);
   if (req.method === "OPTIONS") { res.status(204).end(); return; }
   if (req.method !== "GET") { res.status(405).setHeader("Allow", "GET, OPTIONS").json({ error: "method_not_allowed" }); return; }
@@ -55,6 +57,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     return;
   }
+  await recordScanReceipt(auth, {
+    runKey: idempotencyKey, route: "/api/v1/token", kind: "token", canonicalRef: input.ref,
+    displayQuery: ref, status: "running", creditsCharged: quota.used,
+    startedAt: new Date(startedAt).toISOString(),
+  });
   try {
     // Inject the direct OFAC screener so this server path records a real
     // sanctions outcome (and applies the AVOID cap) rather than skipping the
@@ -64,9 +71,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       collectSocialActivity,
     });
     if (!d) {
+      await recordScanReceipt(auth, {
+        runKey: idempotencyKey, route: "/api/v1/token", kind: "token", canonicalRef: input.ref,
+        displayQuery: ref, status: "failed", creditsCharged: quota.used,
+        startedAt: new Date(startedAt).toISOString(), finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedAt, failureCode: "not_found",
+        failureDetail: "No DEX pair was found for this contract.",
+      });
       res.status(404).json({ error: "no DEX pair found for this contract" });
       return;
     }
+    await recordScanReceipt(auth, {
+      runKey: idempotencyKey, route: "/api/v1/token", kind: "token", canonicalRef: input.ref,
+      displayQuery: ref, status: "complete", creditsCharged: quota.used,
+      startedAt: new Date(startedAt).toISOString(), finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAt,
+    });
     res.status(200).json({
       api: "argus/v1",
       kind: "token",
@@ -92,6 +112,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       links: { app: `https://argus-one-flax.vercel.app/?t=${d.address}` },
     });
   } catch (e) {
+    await recordScanReceipt(auth, {
+      runKey: idempotencyKey, route: "/api/v1/token", kind: "token", canonicalRef: input.ref,
+      displayQuery: ref, status: "failed", creditsCharged: quota.used,
+      startedAt: new Date(startedAt).toISOString(), finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAt, failureCode: "scan_failed",
+      failureDetail: e instanceof Error ? e.message : "The token scan failed.",
+    });
     res.status(500).json({ error: String(e) });
   }
 }

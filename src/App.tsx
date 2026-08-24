@@ -42,6 +42,7 @@ import type { ResearchIntent } from "./lib/researchDirector";
 import { fetchReconWebTeam } from "./lib/reconSupplements";
 import { recentReportKind } from "./lib/recentReportRoute";
 import { consumeStaleChunkReloadNotice } from "./components/AppErrorBoundary";
+import { finishScanReceipt } from "./lib/scanReceipts";
 
 // Product areas load on demand. The home/search shell stays immediate while
 // heavyweight reports, graph views, recon, and admin tooling become cached
@@ -556,12 +557,32 @@ export default function App() {
 
   // DATA-side completion (runs for every finished scan, backgrounded or not, so it
   // lands in the library even if navigated away). Never touches the view.
-  const investigationData = useCallback((inv: Investigation, priv: boolean, scanId: string) => {
-    if (priv) return;
+  const investigationData = useCallback((inv: Investigation, priv: boolean, scanId: string, creditKey: string, startedAt: number) => {
+    if (priv) {
+      void finishScanReceipt({
+        runKey: creditKey, kind: "investigation", canonicalRef: inv.token.address,
+        displayQuery: `$${inv.token.symbol}`, privateRun: true, startedAt, status: "complete",
+      });
+      return;
+    }
     const pending: Investigation = { ...inv, persistence: { state: "pending", scanId } };
     cacheResult(resultCache.current, inv.token.address, { kind: "investigation", inv: pending });
     enqueueReportPersistence("investigation", inv.token.address, async () => {
       const persisted = await syncReport("investigation", inv.token.address, `$${inv.token.symbol}`, inv, inv.token.verdict, inv.token.score);
+      void finishScanReceipt({
+        runKey: creditKey,
+        kind: "investigation",
+        canonicalRef: inv.token.address,
+        displayQuery: `$${inv.token.symbol}`,
+        privateRun: false,
+        startedAt,
+        status: persisted.state === "persisted" ? "complete" : "degraded",
+        ...(persisted.state === "persisted" ? { reportVersionId: persisted.reportVersionId } : {}),
+        ...(persisted.state === "failed" ? {
+          failureCode: "persistence_failed",
+          failureDetail: persisted.reason,
+        } : {}),
+      });
       const settled: Investigation = { ...inv, persistence: { ...persisted, scanId } };
       if (!settleCachedScan(
         resultCache.current,
@@ -638,12 +659,32 @@ export default function App() {
     const c = investigationContribution(inv);
     if (c) recordContribution(c);
   }, [enqueueReportPersistence, setDossier, setInvestigation, setTokenDossier]);
-  const tokenData = useCallback((d: TokenDossier, priv: boolean, scanId: string) => {
-    if (priv) return;
+  const tokenData = useCallback((d: TokenDossier, priv: boolean, scanId: string, creditKey: string, startedAt: number) => {
+    if (priv) {
+      void finishScanReceipt({
+        runKey: creditKey, kind: "token", canonicalRef: d.address,
+        displayQuery: `$${d.symbol}`, privateRun: true, startedAt, status: "complete",
+      });
+      return;
+    }
     const pending: TokenDossier = { ...d, persistence: { state: "pending", scanId } };
     cacheResult(resultCache.current, d.address, { kind: "token", dossier: pending });
     enqueueReportPersistence("token", d.address, async () => {
       const persisted = await syncReport("token", d.address, `$${d.symbol}`, d, d.verdict, d.score);
+      void finishScanReceipt({
+        runKey: creditKey,
+        kind: "token",
+        canonicalRef: d.address,
+        displayQuery: `$${d.symbol}`,
+        privateRun: false,
+        startedAt,
+        status: persisted.state === "persisted" ? "complete" : "degraded",
+        ...(persisted.state === "persisted" ? { reportVersionId: persisted.reportVersionId } : {}),
+        ...(persisted.state === "failed" ? {
+          failureCode: "persistence_failed",
+          failureDetail: persisted.reason,
+        } : {}),
+      });
       const settled: TokenDossier = { ...d, persistence: { ...persisted, scanId } };
       if (!settleCachedScan(
         resultCache.current,
@@ -672,8 +713,8 @@ export default function App() {
   // The runner calls this for every finished token / investigation scan.
   useEffect(() => {
     setScanOnComplete((run: ScanRun) => {
-      if (run.kind === "token" && run.result) tokenData(run.result as TokenDossier, !!run.priv, run.id);
-      else if (run.kind === "investigation" && run.result) investigationData(run.result as Investigation, !!run.priv, run.id);
+      if (run.kind === "token" && run.result) tokenData(run.result as TokenDossier, !!run.priv, run.id, run.creditKey, run.startedAt);
+      else if (run.kind === "investigation" && run.result) investigationData(run.result as Investigation, !!run.priv, run.id, run.creditKey, run.startedAt);
     });
   }, [tokenData, investigationData]);
 

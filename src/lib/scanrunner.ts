@@ -12,6 +12,7 @@ import type { RunnableTokenInput } from "./resolveInput";
 import type { TraceStep } from "../data/evidence";
 import type { ResearchIntent } from "./researchDirector";
 import { reserveInvestigationCredit } from "./investigationCredits";
+import { finishScanReceipt } from "./scanReceipts";
 
 export type ScanKind = "token" | "investigation";
 export interface ScanRun {
@@ -78,7 +79,7 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
   aborts.set(key, () => { cancelled = true; });
   (async () => {
     try {
-      await reserveInvestigationCredit(run.creditKey, "token");
+      await reserveInvestigationCredit(run.creditKey, "token", run.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
       if (cancelled) return;
       let count = 0;
       const d = await auditToken(
@@ -87,10 +88,28 @@ export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: {
         { force: opts?.force, collectSocialActivity: collectTokenSocialActivity },
       );
       if (cancelled) return;
-      if (!d) { run.status = "error"; run.error = "not_found"; emit(); }
+      if (!d) {
+        run.status = "error";
+        run.error = "not_found";
+        emit();
+        void finishScanReceipt({
+          runKey: run.creditKey, kind: "token", canonicalRef: run.ref, displayQuery: run.input,
+          privateRun: run.priv, startedAt: run.startedAt, status: "failed",
+          failureCode: "not_found", failureDetail: "No DEX pair was found for this contract.",
+        });
+      }
       else { run.status = "done"; run.result = d; run.pct = 100; emit(); onComplete?.(run); }
     } catch (e) {
-      if (!cancelled) { run.status = "error"; run.error = String(e); emit(); }
+      if (!cancelled) {
+        run.status = "error";
+        run.error = String(e);
+        emit();
+        void finishScanReceipt({
+          runKey: run.creditKey, kind: "token", canonicalRef: run.ref, displayQuery: run.input,
+          privateRun: run.priv, startedAt: run.startedAt, status: "failed",
+          failureCode: "collection_failed", failureDetail: run.error,
+        });
+      }
     } finally { aborts.delete(key); }
   })();
   return run;
@@ -116,14 +135,24 @@ export function startInvestigationScan(
   aborts.set(key, () => { cancelled = true; });
   void (async () => {
     try {
-      await reserveInvestigationCredit(run.creditKey, "investigation");
+      await reserveInvestigationCredit(run.creditKey, "investigation", run.ref, run.input, run.priv, new Date(run.startedAt).toISOString());
       if (cancelled) return;
       let count = 0;
       const abort = streamInvestigation(input, {
         onStep: (s) => { count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(94, count * 7); emit(); },
         onHop: (sub) => { run.hop = sub; emit(); },
         onDone: (inv) => { run.status = "done"; run.result = inv; run.pct = 100; aborts.delete(key); emit(); onComplete?.(run); },
-        onError: (error) => { run.status = "error"; run.error = error; aborts.delete(key); emit(); },
+        onError: (error) => {
+          run.status = "error";
+          run.error = error;
+          aborts.delete(key);
+          emit();
+          void finishScanReceipt({
+            runKey: run.creditKey, kind: "investigation", canonicalRef: run.ref, displayQuery: run.input,
+            privateRun: run.priv, startedAt: run.startedAt, status: "failed",
+            failureCode: "collection_failed", failureDetail: error,
+          });
+        },
       }, { forceTokenAudit: opts?.force, intent: opts?.intent, creditKey: run.creditKey });
       aborts.set(key, abort);
     } catch (error) {
@@ -132,6 +161,11 @@ export function startInvestigationScan(
         run.error = error instanceof Error ? error.message : String(error);
         aborts.delete(key);
         emit();
+        void finishScanReceipt({
+          runKey: run.creditKey, kind: "investigation", canonicalRef: run.ref, displayQuery: run.input,
+          privateRun: run.priv, startedAt: run.startedAt, status: "failed",
+          failureCode: "collection_failed", failureDetail: run.error,
+        });
       }
     }
   })();

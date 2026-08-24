@@ -19,6 +19,7 @@ vi.mock("../_auth.js", () => ({
     displayName: "Analyst",
   })),
 }));
+vi.mock("../_scanReceipts.js", () => ({ recordScanReceipt: vi.fn() }));
 
 vi.mock("../audit.js", () => ({
   persistServerDossier: vi.fn(),

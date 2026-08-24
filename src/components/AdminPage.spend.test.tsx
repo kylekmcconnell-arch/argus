@@ -20,7 +20,8 @@ vi.mock("../lib/verdict", () => ({ verdictMeta: () => ({ color: "#888" }) }));
 vi.mock("./PendingEdits", () => ({ PendingEdits: () => null }));
 vi.mock("./TeamAccess", () => ({ TeamAccess: () => null }));
 
-import { AdminPage, buildSpendDays } from "./AdminPage";
+import { AdminPage } from "./AdminPage";
+import { buildSpendDays } from "../lib/adminSpend";
 
 let root: Root;
 let container: HTMLDivElement;
