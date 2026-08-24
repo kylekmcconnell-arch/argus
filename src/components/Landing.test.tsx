@@ -105,7 +105,7 @@ describe("Landing fresh audit launch", () => {
     expect(onAudit).toHaveBeenCalledTimes(2);
   });
 
-  it("passes the user's decision to the investigation director", async () => {
+  it("uses the default investigation path without exposing internal routing", async () => {
     const onAudit = vi.fn();
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -115,35 +115,19 @@ describe("Landing fresh audit launch", () => {
     });
 
     const input = container.querySelector<HTMLInputElement>("#investigation-subject");
-    const focus = container.querySelector<HTMLSelectElement>("#research-focus");
     const form = container.querySelector<HTMLFormElement>("form");
     await act(async () => {
       const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
       inputSetter?.call(input, "@clutchmarkets");
       input?.dispatchEvent(new Event("input", { bubbles: true }));
-      const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
-      selectSetter?.call(focus, "identity_and_control");
-      focus?.dispatchEvent(new Event("change", { bubbles: true }));
     });
     await act(async () => {
       form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       await Promise.resolve();
     });
 
-    expect(onAudit).toHaveBeenCalledWith("@clutchmarkets", false, "identity_and_control");
-  });
-
-  it("keeps research intent available without blocking the primary subject action", async () => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-    await act(async () => root?.render(<Landing onAudit={() => undefined} onAbout={() => undefined} />));
-
-    const focus = container.querySelector<HTMLSelectElement>("#research-focus");
-    expect(focus).not.toBeNull();
-    expect(focus?.options).toHaveLength(4);
-    expect(focus?.value).toBe("investment_due_diligence");
-    expect(container.querySelector(".landing-intent-grid")).toBeNull();
-    expect(container.textContent).toContain("Core safety and identity checks always run");
+    expect(onAudit).toHaveBeenCalledWith("@clutchmarkets", false, "investment_due_diligence");
+    expect(container.querySelector("#research-focus")).toBeNull();
+    expect(container.textContent).not.toContain("Research focus");
   });
 });
