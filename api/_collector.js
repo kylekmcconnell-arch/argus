@@ -10718,8 +10718,7 @@ function tokenFromPromotions(promos) {
 var ENABLED_VALUE = /^(?:1|true|on|enabled)$/i;
 var DISABLED_VALUE = /^(?:0|false|off|disabled)$/i;
 function arkhamProviderEnabled() {
-  const viteEnv = import.meta.env;
-  const raw = String(viteEnv?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim();
+  const raw = String(import.meta.env?.VITE_ARKHAM_PROVIDER_ENABLED ?? "").trim();
   if (!raw) return true;
   if (DISABLED_VALUE.test(raw)) return false;
   return ENABLED_VALUE.test(raw);
