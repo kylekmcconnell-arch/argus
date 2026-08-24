@@ -49,7 +49,12 @@ export interface DecisionDiscovery {
   headline: string;
   consequence: string;
   reversalCondition: string;
-  evidenceHref: `#${string}`;
+  evidenceHref: string;
+  path?: string[];
+  receipts?: Array<{
+    label: string;
+    href: string;
+  }>;
 }
 
 /**

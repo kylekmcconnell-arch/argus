@@ -57,6 +57,7 @@ import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
 import { deriveDecisionDiscovery, deriveNoticedSignals, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
+import { buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -214,6 +215,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     athDrawdownPct: d.cg?.ath?.drawdownPct,
     anchors: { market: "#token-market" },
   }));
+  const controlPathDiscovery = buildPublicControlPathDiscovery([d.graph], "#token-relationships");
   const projectSite = d.socials.find((x) => x.label === "site" && /^https?:\/\//i.test(x.url))?.url;
   const projectDomain = projectSite ? projectSite.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase() : null;
   // The project's GitHub org (from its socials), for commit forensics — same
@@ -449,7 +451,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           scoreIsProvisional={readiness.status !== "ready"}
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
-          discovery={decisionDiscovery}
+          discovery={controlPathDiscovery ?? decisionDiscovery}
           supports={supportItems}
           concerns={concernItems}
           nextSteps={nextStepItems}

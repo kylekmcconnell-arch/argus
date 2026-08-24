@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGraphPathReceipt, buildTypedContradictionReceipts } from "./reasoningReceipts";
+import { buildGraphPathReceipt, buildPublicControlPathDiscovery, buildTypedContradictionReceipts } from "./reasoningReceipts";
 
 function graphPacket() {
   return {
@@ -89,6 +89,86 @@ function conflictPacket(overrides: Record<string, unknown> = {}) {
 }
 
 describe("reasoning receipts", () => {
+  it("surfaces a two-hop public control path only when every edge has a source receipt", () => {
+    const discovery = buildPublicControlPathDiscovery([
+      {
+        nodes: [
+          { key: "token:base:0xargus", label: "$ARGUS", type: "Token", subject: true },
+          { key: "@argus", label: "@argus", type: "Person" },
+        ],
+        edges: [{
+          src: "token:base:0xargus",
+          dst: "@argus",
+          type: "TEAM",
+          source_url: "https://x.com/argus",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+        }],
+      },
+      {
+        nodes: [
+          { key: "@argus", label: "Argus", type: "Company", subject: true },
+          { key: "@ada", label: "Ada Lovelace", type: "Person" },
+        ],
+        edges: [{
+          src: "@argus",
+          dst: "@ada",
+          type: "TEAM",
+          source_url: "https://argus.example/team",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+        }],
+      },
+    ], "#investigation-relationships");
+
+    expect(discovery).toMatchObject({
+      evidenceHref: "#investigation-relationships",
+      path: ["$ARGUS", "Argus", "Ada Lovelace"],
+      receipts: [
+        { href: "https://x.com/argus" },
+        { href: "https://argus.example/team" },
+      ],
+    });
+    expect(discovery?.headline).toContain("Ada Lovelace");
+    expect(discovery?.consequence).toContain("accountability and track record");
+  });
+
+  it("withholds public control paths when one hop is source-less or candidate-only", () => {
+    const base = {
+      nodes: [
+        { key: "subject", label: "Subject", type: "Company", subject: true },
+        { key: "middle", label: "Middle", type: "Company" },
+        { key: "target", label: "Target", type: "Person" },
+      ],
+      edges: [
+        { src: "subject", dst: "middle", type: "AFFILIATED_WITH", source_url: "https://example.com/one" },
+        { src: "middle", dst: "target", type: "TEAM" },
+      ],
+    };
+    expect(buildPublicControlPathDiscovery([base], "#relationships")).toBeNull();
+    expect(buildPublicControlPathDiscovery([{
+      ...base,
+      edges: [
+        base.edges[0],
+        { ...base.edges[1], source_url: "https://example.com/two", evidence_origin: "model_lead" },
+      ],
+    }], "#relationships")).toBeNull();
+  });
+
+  it("withholds generic link chains even when every link has a URL", () => {
+    expect(buildPublicControlPathDiscovery([{
+      nodes: [
+        { key: "subject", label: "Subject", type: "Company", subject: true },
+        { key: "site", label: "Official site", type: "Company" },
+        { key: "docs", label: "Docs", type: "Company" },
+      ],
+      edges: [
+        { src: "subject", dst: "site", type: "LINKS", source_url: "https://example.com" },
+        { src: "site", dst: "docs", type: "LINKS", source_url: "https://docs.example.com" },
+      ],
+    }], "#relationships")).toBeNull();
+  });
+
   it("returns the shortest source-receipted path and preserves bounded attribution", () => {
     const receipt = buildGraphPathReceipt("Trace Argus to wallet:0xverified", "trace_connection", graphPacket());
 

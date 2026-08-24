@@ -46,6 +46,19 @@ export interface TypedContradictionReceipt {
   explanation: string;
 }
 
+export interface PublicControlPathDiscovery {
+  id: string;
+  headline: string;
+  consequence: string;
+  reversalCondition: string;
+  evidenceHref: string;
+  path: string[];
+  receipts: Array<{
+    label: string;
+    href: string;
+  }>;
+}
+
 interface ArtifactReceipt {
   sourceUrl: string;
   provider: string;
@@ -101,6 +114,153 @@ function safeHttpUrl(value: unknown): string {
   }
 }
 
+function publicRelationshipLabel(value: string): string {
+  const labels: Record<string, string> = {
+    AFFILIATED_WITH: "Affiliation receipt",
+    ADVISED: "Advisory receipt",
+    ASSOCIATES_WITH: "Association receipt",
+    ATTRIBUTED_CREATOR: "Creator receipt",
+    BUILT_BY: "Builder receipt",
+    CONTROLS_WALLET: "Wallet-control receipt",
+    DEPLOYED_BY: "Deployment receipt",
+    FOUNDED: "Founder receipt",
+    FUNDED: "Funding receipt",
+    FUNDED_BY: "Funding receipt",
+    INVESTED_IN: "Investment receipt",
+    RUNS_X: "Account receipt",
+    TEAM: "Team receipt",
+    WORKED_ON: "Role receipt",
+  };
+  return labels[value.toUpperCase()] ?? "Relationship receipt";
+}
+
+const DECISION_RELEVANT_PUBLIC_RELATIONSHIP = /CONTROLS_WALLET|DEPLOYED_BY|ATTRIBUTED_CREATOR|FOUNDED|BUILT_BY|RUNS_X|TEAM|WORKED_ON|FUNDED|FUNDED_BY|AFFILIATED_WITH|INVESTED_IN|ADVISED/;
+
+/**
+ * Find the strongest short path whose every edge has a frozen HTTP receipt.
+ * The first graph owns the primary subject; later graphs may extend the path
+ * through a shared canonical node. Candidate, inferred, reported-only, and
+ * source-less topology is deliberately invisible here.
+ */
+export function buildPublicControlPathDiscovery(
+  graphValues: readonly unknown[],
+  evidenceHref: `#${string}`,
+): PublicControlPathDiscovery | null {
+  const nodes = new Map<string, { key: string; label: string; type: string }>();
+  const primarySubjects = new Set<string>();
+  const edges: Array<{
+    from: string;
+    to: string;
+    relationship: string;
+    sourceUrl: string;
+  }> = [];
+
+  graphValues.forEach((graphValue, graphIndex) => {
+    const graph = record(graphValue);
+    rows(graph.nodes).forEach((nodeValue) => {
+      const node = record(nodeValue);
+      const key = text(node.key, 180);
+      if (!key) return;
+      const existing = nodes.get(key);
+      nodes.set(key, {
+        key,
+        label: text(node.label, 240) || existing?.label || key,
+        type: text(node.subtype, 80) || text(node.type, 80) || existing?.type || "Entity",
+      });
+      if (graphIndex === 0 && node.subject === true) primarySubjects.add(key);
+    });
+    rows(graph.edges).forEach((edgeValue) => {
+      const edge = record(edgeValue);
+      const from = text(edge.src ?? edge.from, 180);
+      const to = text(edge.dst ?? edge.to, 180);
+      const relationship = text(edge.type ?? edge.relationship, 120).toUpperCase();
+      const sourceUrl = safeHttpUrl(edge.source_url) || safeHttpUrl(edge.sourceUrl) || safeHttpUrl(edge.source);
+      const eligibility = [edge.evidence_origin, edge.eligibility, edge.match, edge.tier, edge.verdict, edge.evidence_state]
+        .map((value) => text(value, 100)).filter(Boolean).join(" ");
+      if (!from || !to || !relationship || !sourceUrl) return;
+      if (edge.artifact_verified === false || /candidate|model_lead|name[_ -]?only|reported|unverified|inferred|lead/i.test(eligibility)) return;
+      edges.push({ from, to, relationship, sourceUrl });
+    });
+  });
+
+  if (!primarySubjects.size || !edges.length) return null;
+  const adjacency = new Map<string, Array<{ next: string; edge: typeof edges[number] }>>();
+  edges.forEach((edge) => {
+    if (!nodes.has(edge.from) || !nodes.has(edge.to)) return;
+    adjacency.set(edge.from, [...(adjacency.get(edge.from) ?? []), { next: edge.to, edge }]);
+    adjacency.set(edge.to, [...(adjacency.get(edge.to) ?? []), { next: edge.from, edge }]);
+  });
+
+  const relationshipWeight = (relationship: string): number => {
+    if (/CONTROLS_WALLET|DEPLOYED_BY|ATTRIBUTED_CREATOR/.test(relationship)) return 90;
+    if (/FOUNDED|BUILT_BY|RUNS_X|TEAM/.test(relationship)) return 70;
+    if (/FUNDED|FUNDED_BY/.test(relationship)) return 60;
+    if (/AFFILIATED_WITH|INVESTED_IN|ADVISED|WORKED_ON/.test(relationship)) return 50;
+    return 10;
+  };
+  const candidates: Array<{
+    nodeKeys: string[];
+    pathEdges: typeof edges;
+    score: number;
+  }> = [];
+  for (const subject of [...primarySubjects].sort()) {
+    const queue = [{ key: subject, nodeKeys: [subject], pathEdges: [] as typeof edges }];
+    while (queue.length) {
+      const current = queue.shift();
+      if (!current) break;
+      if (current.pathEdges.length >= 2) {
+        const target = nodes.get(current.key);
+        const typeBonus = /wallet/i.test(target?.type ?? "") ? 30 : /person/i.test(target?.type ?? "") ? 20 : 10;
+        if (current.pathEdges.some((edge) => DECISION_RELEVANT_PUBLIC_RELATIONSHIP.test(edge.relationship))) {
+          candidates.push({
+            nodeKeys: current.nodeKeys,
+            pathEdges: current.pathEdges,
+            score: current.pathEdges.reduce((sum, edge) => sum + relationshipWeight(edge.relationship), 0) + typeBonus - current.pathEdges.length,
+          });
+        }
+      }
+      if (current.pathEdges.length >= 3) continue;
+      for (const candidate of adjacency.get(current.key) ?? []) {
+        if (current.nodeKeys.includes(candidate.next)) continue;
+        queue.push({
+          key: candidate.next,
+          nodeKeys: [...current.nodeKeys, candidate.next],
+          pathEdges: [...current.pathEdges, candidate.edge],
+        });
+      }
+    }
+  }
+  const selected = candidates.sort((left, right) =>
+    right.score - left.score
+    || left.pathEdges.length - right.pathEdges.length
+    || left.nodeKeys.join("|").localeCompare(right.nodeKeys.join("|")))[0];
+  if (!selected) return null;
+
+  const path = selected.nodeKeys.map((key) => nodes.get(key)?.label || key);
+  const relationships = selected.pathEdges.map((edge) => edge.relationship);
+  const target = path[path.length - 1];
+  const middle = path.slice(1, -1).join(" → ");
+  const consequence = relationships.some((relationship) => /CONTROLS_WALLET|DEPLOYED_BY|ATTRIBUTED_CREATOR/.test(relationship))
+    ? "This source-backed path identifies the wallet or operator closest to practical control, so the control risk can be assessed against a real entity."
+    : relationships.some((relationship) => /FOUNDED|BUILT_BY|RUNS_X|TEAM|WORKED_ON/.test(relationship))
+      ? "This source-backed path binds a named operator to the official project identity, so accountability and track record can be assessed against a person."
+      : relationships.some((relationship) => /AFFILIATED_WITH|INVESTED_IN|FUNDED|FUNDED_BY/.test(relationship))
+        ? "This source-backed path shows the vehicle through which the relationship reaches the project instead of collapsing it into a direct personal claim."
+        : "Every link in this relationship path has a frozen source receipt; source-less graph topology was excluded.";
+  return {
+    id: `control-path:${selected.nodeKeys.join(">")}`,
+    headline: `${path[0]} connects to ${target}${middle ? ` via ${middle}` : ""}`,
+    consequence,
+    reversalCondition: "A newer primary source that breaks or reattributes any link in this path would change this read.",
+    evidenceHref,
+    path,
+    receipts: selected.pathEdges.map((edge, index) => ({
+      label: `${publicRelationshipLabel(edge.relationship)} ${index + 1}`,
+      href: edge.sourceUrl,
+    })),
+  };
+}
+
 function aliasAppears(question: string, alias: string): boolean {
   const needle = normalized(alias);
   if (needle.length < 2) return false;
@@ -119,7 +279,7 @@ function graphRows(packet: Record<string, unknown>) {
 
 function edgeReason(edge: RawGraphEdge, nodeKeys: ReadonlySet<string>): GraphPathReceipt["rejectedAlternatives"][number]["reason"] | null {
   if (!nodeKeys.has(edge.from) || !nodeKeys.has(edge.to)) return "dangling_endpoint";
-  if (/candidate|model_lead|name[_ -]?only|namesake/i.test(edge.eligibility)) return "candidate_edge";
+  if (/candidate|model_lead|name[_ -]?only|namesake|inferred/i.test(edge.eligibility)) return "candidate_edge";
   if (/reported|unverified|lead/i.test(edge.evidenceState)) return "reported_only";
   if (!edge.sourceUrl) return "missing_source_receipt";
   return null;

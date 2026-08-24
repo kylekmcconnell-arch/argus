@@ -110,4 +110,40 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain("What would change it:");
     expect(html).toContain('href="#token-market"');
   });
+
+  it("renders a source-receipted relationship path without hiding the graph", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        verdictLabel="Caution"
+        score={62}
+        favorable={false}
+        verdictTone="caution"
+        discovery={{
+          id: "control-path:token>project>person",
+          headline: "$ARGUS connects to Ada through @argus",
+          consequence: "This source-backed path binds a named operator to the official project identity.",
+          reversalCondition: "A newer primary source that breaks a link would change this read.",
+          evidenceHref: "#relationships",
+          path: ["$ARGUS", "@argus", "Ada"],
+          receipts: [
+            { label: "Account receipt 1", href: "https://x.com/argus" },
+            { label: "Team receipt 2", href: "https://argus.example/team" },
+          ],
+        }}
+        supports={[]}
+        concerns={[]}
+        nextSteps={[]}
+        verified={[]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain("Source-backed path: $ARGUS to @argus to Ada");
+    expect(html).toContain("Open relationship graph");
+    expect(html).toContain('href="https://x.com/argus"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain("Team receipt 2");
+  });
 });

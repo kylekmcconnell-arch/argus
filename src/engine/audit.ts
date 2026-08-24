@@ -837,9 +837,15 @@ export class Audit {
       subject: true,
     }];
     const edges: PanoptesEdge[] = [];
+    const receipt = (row: EvidenceProvenance, sourceUrl?: string | null) => ({
+      ...(sourceUrl ? { source_url: sourceUrl } : {}),
+      ...(row.provider ? { provider: row.provider } : {}),
+      ...(row.evidence_origin ? { evidence_origin: row.evidence_origin } : {}),
+      ...(row.artifact_verified !== undefined ? { artifact_verified: row.artifact_verified } : {}),
+    });
     for (const a of this.associates) {
       nodes.push({ type: "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
-      edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation });
+      edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation, ...receipt(a, a.evidence_url) });
     }
     for (const v of this.ventures) {
       const key = canonicalEntityKey({ handle: v.x_handle, domain: v.domain, name: v.project_name });
@@ -852,7 +858,7 @@ export class Audit {
           : /advisor|adviser|board/.test(role)
             ? "ADVISED"
             : "WORKED_ON";
-      edges.push({ src: this.handle, dst: key, type: edgeType, role: v.role, outcome: v.outcome });
+      edges.push({ src: this.handle, dst: key, type: edgeType, role: v.role, outcome: v.outcome, ...receipt(v, v.evidence_url) });
     }
     for (const p of this.promotions) {
       // Strip an existing $ before re-prefixing — a ticker stored as "$SUSHI"
@@ -876,11 +882,11 @@ export class Audit {
     for (const p of this.advisedProjects) {
       const key = canonicalEntityKey({ handle: p.project_handle, name: p.project_name });
       nodes.push({ type: "Company", key, label: p.project_name, outcome: p.project_outcome });
-      edges.push({ src: this.handle, dst: key, type: "ADVISED", verdict: p.corroboration_verdict, outcome: p.project_outcome });
+      edges.push({ src: this.handle, dst: key, type: "ADVISED", verdict: p.corroboration_verdict, outcome: p.project_outcome, ...receipt(p, p.evidence_url) });
     }
     for (const c of this.clientEngagements) {
       nodes.push({ type: "Company", key: c.client_name });
-      edges.push({ src: this.handle, dst: c.client_name, type: "SERVICED", manipulation: !!c.manipulation_service_flag });
+      edges.push({ src: this.handle, dst: c.client_name, type: "SERVICED", manipulation: !!c.manipulation_service_flag, ...receipt(c, c.evidence_url) });
     }
     for (const w of this.wallets) {
       // Keep a screened contract visible in the report so the exclusion is
@@ -888,7 +894,7 @@ export class Audit {
       if (w.screen?.status === "not_attributable") continue;
       const key = `${w.chain}:${w.address}`;
       nodes.push({ type: "Identity", subtype: "Wallet", key, link_tier: w.link_tier });
-      edges.push({ src: this.handle, dst: key, type: "CONTROLS_WALLET", tier: w.link_tier });
+      edges.push({ src: this.handle, dst: key, type: "CONTROLS_WALLET", tier: w.link_tier, ...receipt(w, w.link_evidence_url) });
     }
     for (const f of this.findings.filter((x) => this.findingTargetsSubject(x) && x.finding_type === "DeceptionFinding")) {
       const key = "DF-" + f.claim.slice(0, 10);

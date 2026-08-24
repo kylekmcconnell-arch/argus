@@ -300,9 +300,32 @@ export function InvestigationDecisionCanvas({
               <div className="min-w-0">
                 <p className="eyebrow text-signal-lift">ARGUS found</p>
                 <h3 className="mt-1 text-[16px] font-semibold leading-snug text-ink">{plainDecisionText(discovery.headline)}</h3>
+                {discovery.path && discovery.path.length >= 2 && (
+                  <p className="mono mt-2 text-[10.5px] uppercase tracking-[0.08em] text-ink-dim" aria-label={`Source-backed path: ${discovery.path.join(" to ")}`}>
+                    {discovery.path.map((node, index) => (
+                      <span key={`${node}-${index}`}>
+                        {index > 0 && <span aria-hidden="true" className="mx-1.5 text-ink-faint">→</span>}
+                        {plainDecisionText(node)}
+                      </span>
+                    ))}
+                  </p>
+                )}
                 <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{plainDecisionText(discovery.consequence)}</p>
                 <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[11.5px] leading-relaxed">
-                  <a href={discovery.evidenceHref} className="font-medium text-signal-lift hover:underline">Open the proof</a>
+                  <a href={discovery.evidenceHref} className="font-medium text-signal-lift hover:underline">
+                    {discovery.path ? "Open relationship graph" : "Open the proof"}
+                  </a>
+                  {discovery.receipts?.map((receipt) => (
+                    <a
+                      key={`${receipt.label}-${receipt.href}`}
+                      href={receipt.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-signal-lift hover:underline"
+                    >
+                      {receipt.label}
+                    </a>
+                  ))}
                   <span className="text-ink-faint"><strong className="font-medium text-ink-dim">What would change it:</strong> {plainDecisionText(discovery.reversalCondition)}</span>
                 </div>
               </div>

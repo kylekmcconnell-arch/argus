@@ -141,7 +141,7 @@ function graphSnapshot(value: unknown, inputPath: string, addCitation: CitationC
     edges: (Array.isArray(graph.edges) ? graph.edges : []).slice(0, 120).map((value, index) => {
       const edge = record(value);
       const sourceUrl = safeSourceUrl(edge.source_url) || safeSourceUrl(edge.source);
-      const eligibility = [edge.evidence_origin, edge.match, edge.tier, edge.verdict]
+      const eligibility = [edge.evidence_origin, edge.match, edge.tier, edge.verdict, edge.artifact_verified === false ? "artifact_unverified" : ""]
         .map((candidate) => text(candidate, 80)).filter(Boolean).join(" ");
       if (sourceUrl && !/candidate|model_lead|name[_ -]?only|reported|unverified|lead/i.test(eligibility)) {
         addCitation({
@@ -161,6 +161,7 @@ function graphSnapshot(value: unknown, inputPath: string, addCitation: CitationC
         provider: text(edge.provider, 120) || text(edge.source, 120),
         sourceClass: text(edge.source_class, 120),
         evidenceState: text(edge.evidence_state, 80) || text(edge.verdict, 80),
+        artifactVerified: edge.artifact_verified === true,
         eligibility,
       };
     }),
