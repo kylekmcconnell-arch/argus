@@ -47,6 +47,34 @@ describe("Case Brief middleware policy", () => {
     }
   });
 
+  it("admits only the exact provider-billing feed token before Supabase auth", async () => {
+    vi.stubEnv("ARGUS_BILLING_FEED_TOKEN", "provider-feed-secret");
+
+    const allowed = await middleware(new Request("https://argus.example/api/provider-billing", {
+      headers: { authorization: "Bearer provider-feed-secret" },
+    }));
+    expect(allowed.status).toBe(204);
+    expect(next).toHaveBeenCalledOnce();
+
+    vi.mocked(next).mockClear();
+    for (const authorization of ["", "Bearer wrong", "Bearer provider-feed-secret-extra"]) {
+      const rejected = await middleware(new Request("https://argus.example/api/provider-billing", {
+        headers: authorization ? { authorization } : {},
+      }));
+      expect(rejected.status).toBe(401);
+    }
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("fails the provider-billing route closed when its feed token is unset", async () => {
+    vi.stubEnv("ARGUS_BILLING_FEED_TOKEN", "");
+    const response = await middleware(new Request("https://argus.example/api/provider-billing", {
+      headers: { authorization: "Bearer any-value" },
+    }));
+    expect(response.status).toBe(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it("lets an authenticated waitlist user reach account growth without membership", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
