@@ -55,6 +55,12 @@ decision layer; when a required token chart or citation is missing; when a token
 report hides recorded collector gaps below a complete-looking score; or when a
 sourced token figure and an unestablished one look the same.
 
+The research-coverage layer fails when a completed scan looks interrupted because
+it exposes raw task states, delegate names, dispatch reasons, stop rules, or
+provider outcomes by default. It must distinguish “the scan finished but this
+answer remains unverified” from a required execution failure, while keeping the
+immutable technical receipts available on demand.
+
 ## Live founder canaries
 
 These are release gates, not hand-authored demo dossiers. Each case must run

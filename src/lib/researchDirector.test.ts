@@ -43,6 +43,25 @@ describe("research director", () => {
     expect(final.tasks.find((task) => task.capability === "network_connections")?.state).toBe("completed");
   });
 
+  it("does not leave role routing or analyst synthesis open after both were frozen", () => {
+    const evidence = emptyEvidence("@project");
+    evidence.roles = [SubjectClass.PROJECT];
+    const plan = buildResearchPlan(evidence);
+    const final = finalizeResearchPlan(plan, [], [], {
+      roleResolved: true,
+      analystConclusionRecorded: true,
+    });
+
+    expect(final.tasks.find((task) => task.capability === "role_resolution")).toMatchObject({
+      state: "completed",
+      outcome: "subject type and report methodology were resolved",
+    });
+    expect(final.tasks.find((task) => task.capability === "analyst_synthesis")).toMatchObject({
+      state: "completed",
+      outcome: "a frozen analyst conclusion was recorded",
+    });
+  });
+
   it("blocks namesake-prone relationship searches until identity gates are resolved", () => {
     const evidence = emptyEvidence("@clutchmarkets");
     evidence.roles = [SubjectClass.INVESTOR];
