@@ -135,9 +135,9 @@
     <li><strong>Decision lenses share one truth set.</strong> Investment, alpha, counterparty, and general diligence may reorder emphasis, but they never hide a saved risk, revise the score, or buy new data.</li>
     <li><strong>The parent verdict governs.</strong> Direct findings, completeness, score, and verdict stay outside the derived layer. An incomplete parent or an AVOID or FAIL verdict withholds a competing Decision Intelligence thesis.</li>
     <li><strong>Lineage follows each artifact.</strong> Contradicting sources stay beside supporting sources. Token identity, market, liquidity, history, holder-security, and holder-distribution values keep the exact producer that supplied each one.</li>
-    <li><strong>Cross-provider facts rebind before use.</strong> TVL and funding need the canonical CoinGecko id; fees need a complete same-slug protocol receipt; holder, unlock, and control rows need the canonical address and chain. An unbound row stays visible but cannot produce a measurement.</li>
+    <li><strong>Cross-provider facts rebind before use.</strong> TVL and funding need the canonical CoinGecko id; fees need a complete same-slug protocol receipt; holder and control rows need the canonical address and chain. An unbound row stays visible but cannot produce a measurement.</li>
     <li><strong>Company and chronology labels do not bind themselves.</strong> Company enrichment requires an independently resolved non-shared official host, coherent requested and matched hosts, the declared method, matched company website, and valid capture time. It cannot authenticate itself from its own request. RDAP age and launch chronology are recomputed from the exact official hostname, registrable domain, endpoint, and account-creation receipt.</li>
-    <li><strong>Impossible numbers stay receipts.</strong> Percentages outside zero to one hundred, a ninety-day unlock total above one hundred, and circulating supply above total supply are withheld and surfaced as reconciliation gaps.</li>
+    <li><strong>Impossible numbers stay receipts.</strong> Percentages outside zero to one hundred and circulating supply above total supply are withheld and surfaced as reconciliation gaps.</li>
     <li><strong>Existing evidence keeps its ceiling.</strong> Legal and sanctions name matches are identity-resolution gaps, image classifications are provider opinions, and checked-empty evidence never becomes support. Graph risk needs an exact qualified tie to a complete server-collected adverse report.</li>
     <li><strong>Missing is never zero.</strong> Decision Intelligence keeps absent measurements and failed checks unresolved. It never turns them into clean, safe, unfunded, unaudited, or exonerated claims.</li>
     <li><strong>One missing axis does not erase the others.</strong> The analyst scores every decision area with substantive evidence, preserves unsupported areas as unmeasured, and withholds the overall score until the full role profile is assessed.</li>
@@ -255,8 +255,6 @@ const N = [
    "Keeps subject-page and curated-link audit leads separate. An engagement is corroborated only when an auditor-owned page contains explicit audit context plus the project's official domain or canonical contract in the same saved proof window."],
   ["ad-llama","adapters","DeFi metrics","defiLlama",null,null,
    "Pulls usage numbers that cannot be faked cheaply: value locked, fees users actually paid, funding rounds."],
-  ["ad-unlocks","adapters","Unlock schedule","tokenUnlocks","key",null,
-   "Answers 'when does locked supply hit the market next, and how much' from vesting calendars."],
   ["ad-holders","adapters","Whale + LP check","tokenHolders",null,null,
    "How concentrated is the token: the top-10 holders' share, and whether the trading liquidity is locked or could be pulled."],
   ["ad-tgraph","adapters","Known-bad connections","trustgraph",null,null,
@@ -300,8 +298,6 @@ const N = [
    "Public conversation counts and bounded post reads. At the Aug 22, 2026 public rate, recent counts cost $0.005 per request and post reads cost $0.005 per returned post. ARGUS defaults to a 200-post ceiling and caches identical 15-minute query windows."],
   ["pv-llama","providers","DeFiLlama","api.llama.fi","free",
    "TVL + 30-day trend, protocol fees + trend, funding rounds, audit links."],
-  ["pv-cr","providers","CryptoRank","v3 api","key",
-   "Upcoming token-unlock dates, sizes, and 90-day supply load. 2 credits per audit."],
   ["pv-goplus","providers","GoPlus","goplus.io","free",
    "Top-10 holder concentration, LP lock/burn status, honeypot flags."],
   ["pv-mkts","providers","CoinGecko + DexScreener","market apis","free",
@@ -348,7 +344,7 @@ const E = [
   ["en-analyst","en-score"],["en-score","en-clear"],["en-clear","en-intelligence"],["en-intelligence","en-present"],
   ["en-orch","db-versions"],["en-orch","db-usage"],["en-orch","ad-prior"],["en-orch","ad-investor"],["en-orch","ad-evmcontrol"],
   ["en-token","pv-mkts"],["en-token","pv-goplus"],["en-token","pv-osint"],["en-token","db-versions"],
-  ["en-intake","ad-ptoken"],["en-intake","ad-x"],["en-intake","ad-llama"],["en-intake","ad-unlocks"],["en-intake","ad-holders"],["en-intake","ad-audits"],["en-intake","ad-monid"],
+  ["en-intake","ad-ptoken"],["en-intake","ad-x"],["en-intake","ad-llama"],["en-intake","ad-holders"],["en-intake","ad-audits"],["en-intake","ad-monid"],
   ["en-lanes","ad-x"],["en-lanes","ad-github"],["en-lanes","ad-pdl"],["en-lanes","ad-offchain"],["en-lanes","ad-pfp"],
   ["en-basics","ad-basics"],["en-basics","ad-kb"],["en-signals","ad-x"],["en-tg","ad-tgraph"],
   ["en-analyst","pv-claude"],["en-analyst","pv-grok"],
@@ -356,7 +352,7 @@ const E = [
   ["ad-x","pv-tw"],["ad-x","pv-grok"],["ad-x","pv-claude"],["ad-x","ad-grounded"],
   ["ad-grounded","pv-serper"],["ad-grounded","pv-or"],["ad-grounded","ad-web"],
   ["ad-audits","ad-llama"],["ad-audits","ad-web"],
-  ["ad-llama","pv-llama"],["ad-unlocks","pv-cr"],["ad-holders","pv-goplus"],["ad-ptoken","pv-mkts"],["ad-evmcontrol","pv-publicrpc"],["ad-evmcontrol","en-intelligence"],
+  ["ad-llama","pv-llama"],["ad-holders","pv-goplus"],["ad-ptoken","pv-mkts"],["ad-evmcontrol","pv-publicrpc"],["ad-evmcontrol","en-intelligence"],
   ["ad-offchain","pv-osint"],["ad-pfp","pv-claude"],["ad-pdl","pv-pdl"],["ad-github","pv-gh"],["ad-monid","pv-monid"],["ad-investor","pv-claude"],
   ["ad-kb","db-kb"],["ad-cache","db-cache"],["ad-tgraph","db-graph"],["ad-prior","db-versions"],["ad-web","ad-cache"],
 ];

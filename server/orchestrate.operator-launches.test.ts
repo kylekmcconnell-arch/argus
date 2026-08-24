@@ -25,7 +25,6 @@ import { prepareProvenanceRows } from "../api/_provenance";
 const PROVIDER_ENV = [
   "ANTHROPIC_API_KEY",
   "COINGECKO_API_KEY",
-  "CRYPTORANK_API_KEY",
   "GITHUB_TOKEN",
   "HELIUS_API_KEY",
   "MONID_API_KEY",

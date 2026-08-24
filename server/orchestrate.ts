@@ -93,7 +93,6 @@ import {
   resetDefiLlamaScanMemo,
 } from "./adapters/defiLlama";
 import { collectHolderProfile } from "./adapters/tokenHolders";
-import { collectUpcomingUnlocks } from "./adapters/tokenUnlocks";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { collectSecurityAudits } from "./adapters/securityAudits";
 import {
@@ -3741,7 +3740,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       const projectName = evidence.projectToken.name;
       const protocolLookupName = defiLlamaLookupName(projectName);
       try {
-        const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome, unlocksOutcome] = await Promise.all([
+        const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome] = await Promise.all([
           collectProtocolTvl(protocolLookupName),
           collectProtocolFunding(protocolLookupName),
           collectProtocolFees(protocolLookupName),
@@ -3750,23 +3749,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           evidence.projectToken.address
             ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address)
             : Promise.resolve({ available: false as const, note: "no canonical token address" }),
-          // Upcoming unlocks (CryptoRank, dormant until keyed): the next-dump
-          // schedule a buyer cannot easily assemble elsewhere.
-          collectUpcomingUnlocks(
-            projectName,
-            evidence.projectToken.symbol,
-            {
-              address: evidence.projectToken.address,
-              chain: evidence.projectToken.chain,
-            },
-          ),
         ]);
         if (holdersOutcome.available) {
           evidence.holderProfile = { ...holdersOutcome.value, capturedAt: holdersOutcome.value.sourceCapturedAt };
         }
-        // CryptoRank owns this timestamp and exact source lineage. Reusing the
-        // canonical token's capture time would falsely date a later vesting read.
-        if (unlocksOutcome.available) evidence.tokenUnlocks = { ...unlocksOutcome.value };
         const canonicalGeckoId = evidence.projectToken.coingeckoId;
         const tvlIdentityMatched = canonicalGeckoId !== undefined
           && tvlOutcome.available

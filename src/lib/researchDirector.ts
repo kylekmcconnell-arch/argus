@@ -134,7 +134,7 @@ const TEMPLATES: TaskTemplate[] = [
     stopWhen: "The exact official contract is bound and the material market and control questions have dated readings.",
     roles: [SubjectClass.PROJECT, SubjectClass.FOUNDER, SubjectClass.KOL, SubjectClass.INVESTOR],
     intents: ["investment_due_diligence", "alpha_discovery", "identity_and_control"],
-    delegates: ["coingecko", "dexscreener", "geckoterminal", "goplus", "cryptorank", "direct-chain-rpc"],
+    delegates: ["coingecko", "dexscreener", "geckoterminal", "goplus", "direct-chain-rpc"],
     checkIds: ["project-token-identity", "promoted-token-performance", "founder-asset-distinction"],
     predicates: ["official_token", "public_security", "tokenomics", "vesting"],
   },

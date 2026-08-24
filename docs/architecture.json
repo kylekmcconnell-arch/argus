@@ -23,7 +23,7 @@
    "api/social-activity.ts": "authenticated bounded X conversation capture for token scans. The server prefers a private X_API_BEARER and otherwise uses the existing private TWITTERAPI_KEY, caches identical 15-minute provider/query windows, and returns a typed snapshot with explicit partial/unavailable state, post-read ceiling and estimated provider cost",
    "api/sweep.ts": "manual watchlist sweep; deliberately NO cron",
    "api/polymarket-trader.ts": "scan-time Polymarket trader-record check, GET ?wallet=<0x addr>. Keyless, no panel-cost token (same scan-time split as deployer-origin), 5-min TTL in _cache, and a record carrying failures is never cached. Computes nothing itself: src/polymarket/trader.ts fetches, src/polymarket/record.ts derives.",
-   "forensicFamily": "arkham*, deployer*, evm-*, holders, bytecode, site-infra, sanctions*, legal-screen, news, pfp-check, recon-team, find-wallet, vc-portfolio, project-docs, namesake, cryptorank, gmgn-holders, gmgn-bundle, early-buyers",
+   "forensicFamily": "arkham*, deployer*, evm-*, holders, bytecode, site-infra, sanctions*, legal-screen, news, pfp-check, recon-team, find-wallet, vc-portfolio, project-docs, namesake, gmgn-holders, gmgn-bundle, early-buyers",
    "api/gmgn-holders.ts + api/gmgn-bundle.ts": "scan-time ungated GMGN readings (server/adapters/gmgn.ts): holder cost basis, and the /v1/token/info launch-pattern read (bundler/insider volume shares, wallet-tag counts, dev record). Every figure is GMGN's classification, published attributed, never adopted as an ARGUS finding, never a score floor; their AI rating is deliberately not read. wallet_tags_stat counts CAP at 1000 (GMGN_TAG_COUNT_CAP), so a count at the cap is a floor; 0-1 ratios are range-gated. Auth: X-APIKEY header + timestamp/client_id query nonces (in VOLATILE_PATTERNS for eval replay).",
    "api/governance.ts": "scan-time Snapshot governance concentration (server/adapters/snapshot.ts; keyless, free, ungated, 15-min client cache). Reports how few addresses carried the last 5 closed proposals, quorum misses, and on CONTESTED votes only whether the top voter exceeded the winning margin. BINDING IS NEVER BY NAME, A CALLER-SUPPLIED SPACE ID, OR TOKEN STRATEGY: candidate space ids come from bounded conventions because Snapshot search is unreliable, but a candidate is accepted only when Snapshot marks it verified AND its X handle exactly matches the audited official X account or its website relates to the audited official domain. A genuine token contract in a strategy still does not prove that a namesake space governs the audited project. Two caveats are unconditional in the copy: voting power is not a holding, and Snapshot is off-chain signalling. Soft evidence: sets no score floors.",
    "api/early-buyers.ts": "scan-time ARGUS-owned early-buyer funding trace (Solana, Helius, ungated like deployer-origin, deliberately uncached because the still-holds figures are live balances). Walks the mint's first successful transactions (window collected across the last pages walked because failed sniper spam dominates oldest pages; >30 pages of history = honest refusal, never a mid-life window), lists the wallets that took supply, traces each wallet's seed funder via api/_funding-core.ts, and reports SHAPE only: N of M share a funder, K in one block, what a cluster still holds. Rules: a shared CEX custody funder (marketAddresses) never clusters; a history-truncated wallet is unresolved and never independent; capped/partial reads publish floors. _funding-core.ts is the first shared home of the funding walk; folding deployer/deployer-origin/cluster onto it is the open follow-up.",
@@ -35,7 +35,7 @@
   "file": "server/orchestrate.ts (runAudit ~:3168 wraps runAuditWithLedger ~:2193 in withCostLedger)",
   "stagesOrdered": [
    "budget-setup: analystDeadlineAt, collectionDeadlineAt = analystDeadline - COLLECTION_ANALYST_RESERVE_MS, graphScreenDeadlineAt = collectionDeadline + TRUST_GRAPH_SCREEN_RESERVE_MS",
-   "cold-intake: resolveProfile (twitterapi) -> projectTokenPass (coingecko/dexscreener/geckoterminal) -> parallel token enrichment (DeFiLlama tvl/fees/funding, holder profile, CryptoRank unlocks, security audits, Monid) -> coldIntake posts/claims/team",
+   "cold-intake: resolveProfile (twitterapi) -> projectTokenPass (coingecko/dexscreener/geckoterminal) -> parallel token enrichment (DeFiLlama tvl/fees/funding, holder profile, security audits, Monid) -> coldIntake posts/claims/team",
    "adapter-lanes: 3 concurrent lanes (IDENTITY: x/github/pdl/offchain, TOKEN: dexscreener/coingecko, WALLET: onchain); serial within lane; ARGUS_SERIAL_ADAPTERS collapses",
    "basic-facts: runs ALONE post-barrier (Claude web_search discovery; the dominant cost line); fact-level, predicate-specific KB cooldowns when ARGUS_ENTITY_REUSE=on; funding/investors/partnerships/security/legal/live metrics always refresh",
    "social-activity: PROJECT-only frozen official-X counts plus bounded author pagination after the project role and canonical token identity are known; partial pagination publishes minimums and withholds concentration/activity score",
@@ -101,11 +101,6 @@
     "collects": "TVL(+trend) / fees(+30d-over-30d trend) / funding rounds / audit links",
     "via": "api.llama.fi, free",
     "note": "funding rounds also project one `investor` basic fact per distinct named backer (server/basicFactsProjection.ts), answering the project ledger's investor question. Leads and other investors keep their aggregator role and are never promoted. providerProjection:true / floorEligible:false, so they are never written back to the KB and cannot lift the P4 floor. Capped at 12 backers, and the cap declares itself in the excerpt when it bites. TVL, funding and audit-links all read the SAME /protocol/{slug} document; reads are coalesced on the full URL with a short scan-scoped memo (fetchJsonOnce, 30s, cleared at the top of runAudit), collapsing three 1.86 MB pulls into one. Only a SUCCESS is ever retained: a transport failure, an HTTP failure, an unreadable body and a completed 400 no-match are all dropped immediately, so a provider blip can never freeze into a clean-looking absence. A document served from the memo books as ledger status \"cached\", never as a second provider attempt."
-   },
-   "tokenUnlocks.ts": {
-    "collects": "upcoming unlock date/allocation/%supply/$ + 90d load",
-    "via": "CryptoRank v3, <=2 credits/audit",
-    "dormantUntil": "CRYPTORANK_API_KEY"
    },
    "tokenHolders.ts": {
     "collects": "float control: top-10 WALLET %, LP lock/burn, plus GoPlus contract-control and deployer-history flags (serial-scammer creator, mint, take-back, hidden owner, selfdestruct, pausable, owner-change-balance, creator share)",
@@ -247,7 +242,6 @@
    "SERPER_API_KEY",
    "OPENROUTER_API_KEY",
    "COINGECKO_API_KEY",
-   "CRYPTORANK_API_KEY",
    "PDL_API_KEY",
    "GITHUB_TOKEN",
    "HELIUS_API_KEY",

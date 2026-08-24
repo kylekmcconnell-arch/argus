@@ -67,7 +67,7 @@ for (const p of PROVIDERS) {
     console.log(`\n  ${C.yellow}! ${p.label} is half-configured — still missing: ${missing.join(", ")}${C.reset}`);
   }
 }
-const OFFICE_DNS_HOSTS = ["api.web3.bio", "api.cryptorank.io"] as const;
+const OFFICE_DNS_HOSTS = ["api.web3.bio"] as const;
 
 async function officeDnsStatus(host: string): Promise<"reachable" | "blocked"> {
   try {

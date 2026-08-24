@@ -436,7 +436,7 @@ export interface HolderProfileSnapshot {
   capturedAt: string;
 }
 
-/** Frozen upcoming-unlock schedule (CryptoRank vesting events). The "next dump" disclosure; never a verdict. */
+/** Legacy frozen CryptoRank vesting receipt retained only for historical report compatibility. */
 export interface TokenUnlocksSnapshot {
   nextUnlockDate: string;
   allocationName: string | null;
@@ -445,11 +445,11 @@ export interface TokenUnlocksSnapshot {
   percentOfMcap: number | null;
   cumulativeUnlockedPercent: number | null;
   next90dPercentOfSupply: number | null;
-  /** New reports bind the schedule through CryptoRank's exact contract map. */
+  /** Historical reports bound the schedule through CryptoRank's exact contract map. */
   canonicalAddress?: string;
   /** Normalized chain proven on both sides of the contract-map join. */
   chain?: string;
-  /** CryptoRank currency id selected only after the exact contract join. */
+  /** Historical CryptoRank currency id selected only after the exact contract join. */
   currencyId?: number;
   /** Exact API endpoint used to establish the canonical contract mapping. */
   contractSourceUrl?: string;
@@ -1005,7 +1005,7 @@ export interface CollectedEvidence {
   protocolFees?: ProtocolFeesSnapshot;
   /** Frozen float-control profile for the verified canonical token (GoPlus holder register). */
   holderProfile?: HolderProfileSnapshot;
-  /** Frozen upcoming-unlock schedule for the verified canonical token (CryptoRank; dormant until keyed). */
+  /** Legacy frozen unlock schedule retained so previously saved reports remain readable. */
   tokenUnlocks?: TokenUnlocksSnapshot;
   /** Frozen independent-audit evidence (auditor-domain corroborated vs self-attested). */
   securityAudits?: SecurityAuditsSnapshot;

@@ -320,7 +320,7 @@ export async function launchProvenance(d: TokenDossier): Promise<LaunchProvenanc
     // vesting and supply-unlock schedules that no on-chain pool read will show.
     const cex = d.cg?.cexCount ?? 0;
     if (cex >= 3 && out.kind !== "launchpad") {
-      out.notes.push(`Trades on ${cex} centralized exchanges - if the market debut was an exchange listing or a sale round (CoinList / Binance Launchpad style), early-investor vesting and supply unlocks apply; cross-check the sale rounds and unlock schedule on cryptorank.io (also CoinGecko/CoinMarketCap token pages).`);
+      out.notes.push(`Trades on ${cex} centralized exchanges - if the market debut was an exchange listing or a sale round (CoinList / Binance Launchpad style), early-investor vesting and supply unlocks may apply; verify the sale rounds and unlock schedule in the project's official disclosures and reputable market records.`);
     }
 
     return out;

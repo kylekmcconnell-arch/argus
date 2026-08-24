@@ -113,18 +113,6 @@ describe("ProviderFailureNotice", () => {
     expect(container.textContent).not.toContain("Run a new scan later");
   });
 
-  it("keeps CryptoRank failure separate from required report completion", () => {
-    act(() => {
-      root.render(<ProviderFailureNotice failures={[
-        { provider: "cryptorank", op: "currency-contracts", failed: 1, meta: "http_401 rejected" },
-      ]} />);
-    });
-    expect(container.textContent).toContain("Optional market-data enrichment did not contribute (cryptorank).");
-    expect(container.textContent).toContain("does not count as an unfinished safety check");
-    expect(container.textContent).not.toContain("needs attention");
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-  });
-
   it("renders nothing on a clean run", () => {
     act(() => {
       root.render(<ProviderFailureNotice failures={[]} />);
