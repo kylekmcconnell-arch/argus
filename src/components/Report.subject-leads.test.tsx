@@ -192,8 +192,10 @@ describe("favorable person report with adverse leads about the subject", () => {
   it("never publishes absence as an all-clear when a provisional PASS has open critical coverage", () => {
     render(provisionalPassWithOpenCriticalCheck());
 
-    expect(container.querySelector("span.display")?.textContent).toBe("PROVISIONAL");
-    expect(container.querySelector('[aria-label="Safety check status"]')?.textContent).toContain("Review with gaps");
+    const decisionCanvas = container.querySelector("#report-summary")?.textContent ?? "";
+    expect(decisionCanvas).toContain("PROVISIONAL");
+    expect(decisionCanvas).toContain("Report checks");
+    expect(decisionCanvas).toContain("OFAC sanctions screen");
     expect(concernsText()).not.toContain("No adverse findings");
     expect(concernsText()).toContain("1 decision-critical check remains open or unrecorded");
     expect(concernsText()).toContain("OFAC sanctions screen");

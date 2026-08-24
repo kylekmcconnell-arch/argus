@@ -179,6 +179,7 @@ function DecisionLedgerList({
 }
 
 export function InvestigationDecisionCanvas({
+  verdictLabel,
   favorable,
   verdictTone,
   supports,
@@ -221,6 +222,13 @@ export function InvestigationDecisionCanvas({
 }) {
   const verdictItems = favorable ? supports : concerns;
   const countervailingItems = favorable ? concerns : supports;
+  const verdictClass = verdictTone === "pass"
+    ? "text-pass"
+    : verdictTone === "avoid"
+      ? "text-avoid"
+      : verdictTone === "caution"
+        ? "text-caution"
+        : "text-ink";
 
   return (
     <section id="report-summary" className="story-chapter report-section mt-6 scroll-mt-28">
@@ -233,6 +241,7 @@ export function InvestigationDecisionCanvas({
           </p>
         </div>
         <div className="shrink-0 text-left sm:text-right">
+          <p className={`mono text-[11px] font-semibold uppercase tracking-[0.1em] ${verdictClass}`}>{verdictLabel}</p>
           <p className="mono text-[22px] font-semibold tabular-nums text-ink">{applicable === 0 ? "Not available" : `${coveragePercent}%`}</p>
           <p className="mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{applicable === 0 ? "No checks saved" : `${successful}/${applicable} checks`}</p>
         </div>

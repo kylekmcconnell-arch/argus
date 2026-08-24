@@ -83,6 +83,7 @@ import {
   type ReportCanvasRailItem,
 } from "./ReportCanvasPrimitives";
 import { ReportDisclaimer } from "./ReportDisclaimer";
+import { InvestigationDecisionCanvas, type DecisionCanvasItem } from "./InvestigationDecisionCanvas";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -2604,6 +2605,23 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       : null,
     nextChecks: verificationNext.map((item) => item.title),
   });
+  const toDecisionCanvasItems = (items: readonly ReportCanvasNarrativeItem[]): DecisionCanvasItem[] =>
+    items.map((item) => ({ label: item.title, ...(item.detail ? { detail: item.detail } : {}) }));
+  const decisionCanvasSupports = toDecisionCanvasItems(supportNarrative);
+  const decisionCanvasConcerns = toDecisionCanvasItems(
+    [...confidenceLimits, ...lowAxisDrivers, ...subjectLeadNarrative]
+      .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
+      .slice(0, 8),
+  );
+  const decisionCanvasContext = toDecisionCanvasItems(intelligenceContextNarrative);
+  const decisionCanvasNextSteps = toDecisionCanvasItems(verificationNext);
+  const decisionCanvasOpenQuestions = toDecisionCanvasItems(allVerificationQuestions);
+  const decisionCanvasVerified = decisionCriticalChecks(diligenceChecks)
+    .filter((check) => check.status === "confirmed"
+      || check.status === "reported"
+      || check.status === "finding"
+      || check.status === "checked-empty")
+    .map((check) => ({ label: check.label, ...(check.note ? { detail: check.note } : {}) }));
 
   const unscoredIntelNarrative: ReportCanvasNarrativeItem[] = [
     ...(f.projectToken ? [{
@@ -3104,7 +3122,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <CriticalSubjectAlerts dossier={f} />
 
           <div
-            className="order-2 flex flex-wrap items-center gap-5 border-t border-line/60 px-5 py-5 max-sm:grid max-sm:items-start max-sm:gap-4 lg:order-none"
+            className="hidden"
+            aria-hidden="true"
             aria-label="Report result and check status"
           >
             <div className="shrink-0 text-center max-sm:order-2 max-sm:flex max-sm:items-center max-sm:gap-3 max-sm:text-left">
@@ -3233,7 +3252,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               ever an empty grey box. */}
           {fundamentalTiles.length >= 2 && (
             <dl
-              className="order-4 grid grid-cols-2 gap-px border-t border-line/60 bg-line max-sm:[&>div:last-child:nth-child(odd)]:col-span-2 sm:[grid-template-columns:repeat(var(--tile-count),minmax(0,1fr))]"
+              className="hidden"
+              aria-hidden="true"
               style={{ "--tile-count": Math.min(fundamentalTiles.length, 5) } as React.CSSProperties}
               aria-label="Verified fundamentals"
             >
@@ -3247,7 +3267,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </dl>
           )}
 
-          <div className={`finding relative order-5 px-5 py-4 ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`} aria-label="Safety check status">
+          <div className="hidden" aria-hidden="true">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">{readinessTitle}</span>
               <span className="text-[11px] text-ink-faint">
@@ -3292,7 +3312,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
             )}
             <ProofChipStrip chips={heroProofChips} />
-            <ProviderFailureNotice failures={f.providerFailures} />
             {f.priorOutcome && (
               <OutcomeDeltaStrip
                 prior={f.priorOutcome}
@@ -3308,6 +3327,30 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             )}
           </div>
         </section>
+
+        <InvestigationDecisionCanvas
+          verdictLabel={m.label}
+          favorable={favorableVerdict}
+          verdictTone={decisionNarrativeTone}
+          argument={caseArgument}
+          decisionLensId={f.intelligence ? decisionLensId : undefined}
+          onDecisionLensChange={f.intelligence ? setDecisionLensId : undefined}
+          supports={decisionCanvasSupports}
+          concerns={decisionCanvasConcerns}
+          context={decisionCanvasContext}
+          nextSteps={decisionCanvasNextSteps}
+          verified={decisionCanvasVerified}
+          openQuestions={decisionCanvasOpenQuestions}
+          coveragePercent={readiness.coveragePercent}
+          successful={readiness.successful}
+          applicable={readiness.applicable}
+          capturedAt={capturedLabel ?? finalizedLabel ?? undefined}
+          evidenceHref="#evidence-ledger"
+          methodologyHref="#scan-methodology"
+          challengeAnchorId={shareView ? null : "ask-report"}
+        />
+
+        <ProviderFailureNotice failures={f.providerFailures} />
 
         {/* the composition strip: the governing role's weighted dimensions as
             readable rows — expand for the why, jump to the evidence, or
