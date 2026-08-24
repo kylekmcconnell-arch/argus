@@ -853,21 +853,28 @@ export function EmbeddedThreatScan({ address, chain }: { address: string; chain:
   useEffect(() => {
     if (started.current) return;
     started.current = true;
+    // The scan outlives a fast unmount, so every state write is gated. Without
+    // this the trailing update lands after React has torn the tree down.
+    let cancelled = false;
     const input: ResolvedInput = { kind: "token", ref: address, via: chain === "solana" ? "solana" : "evm" };
     (async () => {
       try {
         const r = await fetch(`/api/threat-scan?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(6000) });
         const d = r.ok ? ((await r.json()) as { hit?: boolean; scan?: ThreatScan }) : null;
+        if (cancelled) return;
         if (d?.hit && d.scan?.address) { setScan(d.scan); return; }
       } catch { /* live scan below */ }
-      threatScan(input, (s) => setSteps((prev) => [...prev, s]))
+      if (cancelled) return;
+      threatScan(input, (s) => { if (!cancelled) setSteps((prev) => [...prev, s]); })
         .then((r) => {
+          if (cancelled) return;
           if (!r) { setFailed(true); return; }
           setScan(r);
           void fetch("/api/threat-scan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scan: r }) }).catch(() => {});
         })
-        .catch(() => setFailed(true));
+        .catch(() => { if (!cancelled) setFailed(true); });
     })();
+    return () => { cancelled = true; };
   }, [address, chain]);
   if (failed) return <div className="mono px-1 py-3 text-[11.5px] text-ink-faint">Threat scan unavailable for this token.</div>;
   if (!scan) {
