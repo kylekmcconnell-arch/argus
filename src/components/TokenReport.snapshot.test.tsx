@@ -191,6 +191,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain(`$${symbol}`);
     expect(container.textContent).toContain("What this report means");
+    expect(container.querySelector('a[href^="https://dexscreener.com/search?q="]')?.textContent).toBe("Dexscreener");
     const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
     expect(decisionCanvas?.textContent).toContain("88");
     expect(decisionCanvas?.textContent).toContain("/ 100");

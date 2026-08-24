@@ -338,6 +338,9 @@ describe("private person report evidence boundary", () => {
     });
 
     const ledgers = container.querySelector('[aria-label="Provider evidence ledgers"]');
+    expect(container.querySelector('a[href="https://dexscreener.com/search?q=0x5555555555555555555555555555555555555555"]')?.textContent)
+      .toBe("Dexscreener");
+    expect(container.querySelector('.project-identity-contract-button')?.textContent).toBe("0x5555…5555");
     expect(ledgers?.textContent).toContain("Fixture Labs");
     expect(ledgers?.textContent).toContain("Lead Capital");
     expect(ledgers?.textContent).toContain("Protocol incident ledger");
