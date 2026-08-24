@@ -13,6 +13,7 @@
 // Angles 3-4 read it off the data instead of guessing, so they catch people the
 // LLM search misses. Results dedupe by handle/name.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { arr, isRecord, num, rec, str, type JsonRecord } from "../src/lib/json.js";
 import { requireArgusAuth } from "./_auth.js";
 import { attachPanelCost, grokUsd, resolvePanelCostVersion } from "./_cache.js";
 
@@ -38,7 +39,7 @@ function personLinkedInUrl(value: unknown): string | undefined {
 }
 
 interface TeamAngle {
-  people: any[];
+  people: JsonRecord[];
   provider: "grok" | "twitterapi" | "github";
   calls: number;
   usd: number;
@@ -63,6 +64,19 @@ const personProvenance = (provider: TeamAngle["provider"]) => provider === "grok
     ? { evidence_origin: "deterministic" as const, artifact_verified: true, evidenceKind: "project_association" as const }
     : { evidence_origin: "deterministic" as const, artifact_verified: true, evidenceKind: "code_contribution" as const };
 
+interface ReconPerson {
+  name: string;
+  handle?: string;
+  linkedin?: string;
+  role: string;
+  evidence?: string;
+  provider: TeamAngle["provider"];
+  evidence_origin: "model_lead" | "deterministic";
+  artifact_verified: boolean;
+  evidenceKind: "model_candidate" | "project_association" | "code_contribution";
+  developerProfiles?: ReturnType<typeof profileDeveloperLinks>;
+}
+
 // ── Grok angles ──────────────────────────────────────────────────────────
 async function grokPeople(key: string, system: string, user: string): Promise<TeamAngle> {
   let r: Response;
@@ -81,25 +95,32 @@ async function grokPeople(key: string, system: string, user: string): Promise<Te
   } catch { return { people: [], provider: "grok", calls: 1, usd: 0, status: "failed" }; }
   if (!r.ok) return { people: [], provider: "grok", calls: 1, usd: 0, status: "failed" };
 
-  let d: any;
+  let d: unknown;
   try { d = await r.json(); }
   catch { return { people: [], provider: "grok", calls: 1, usd: 0, status: "failed" }; }
-  const toolCalls = Array.isArray(d?.output) ? d.output.filter((item: any) => /search|tool/.test(String(item?.type ?? ""))).length : 0;
-  const text = d?.output_text ?? (Array.isArray(d?.output) ? d.output.flatMap((o: any) => o?.content ?? []).map((c: any) => c?.text ?? "").join(" ") : "") ?? "";
+  const response = rec(d);
+  const output = arr(response.output);
+  const toolCalls = output.filter((item) => /search|tool/.test(str(rec(item).type))).length;
+  const text = response.output_text ?? output.flatMap((item) => arr(rec(item).content)).map((content) => str(rec(content).text)).join(" ");
   const m = typeof text === "string" ? text.match(/\{[\s\S]*\}/) : null;
-  let people: any[] = [];
+  let people: JsonRecord[] = [];
   let validContract = false;
   if (m) {
     try {
-      const parsed = JSON.parse(m[0]).people;
-      if (Array.isArray(parsed)) { people = parsed; validContract = true; }
+      const parsed = rec(JSON.parse(m[0]));
+      if (Array.isArray(parsed.people)) { people = parsed.people.filter(isRecord); validContract = true; }
     } catch { /* invalid provider payload */ }
   }
-  return { people, provider: "grok", calls: 1, usd: grokUsd(d?.usage, toolCalls), status: validContract ? "succeeded" : "partial" };
+  const usageRecord = rec(response.usage);
+  const usage = {
+    input_tokens: typeof usageRecord.input_tokens === "number" ? usageRecord.input_tokens : undefined,
+    output_tokens: typeof usageRecord.output_tokens === "number" ? usageRecord.output_tokens : undefined,
+  };
+  return { people, provider: "grok", calls: 1, usd: grokUsd(usage, toolCalls), status: validContract ? "succeeded" : "partial" };
 }
 
 // ── X following ∩ mentions (deterministic) ─────────────────────────────────
-async function twJson(url: string, key: string, counter?: CallCounter): Promise<any> {
+async function twJson(url: string, key: string, counter?: CallCounter): Promise<unknown> {
   if (counter) counter.calls += 1;
   try {
     const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) });
@@ -111,32 +132,33 @@ async function twJson(url: string, key: string, counter?: CallCounter): Promise<
 }
 // Chains/infra/tools every project follows + tags — not team, so filter them out.
 const TW_DENY = new Set(["solana", "ethereum", "bitcoin", "base", "arbitrum", "optimism", "polygon", "bnbchain", "avax", "avalancheavax", "pumpdotfun", "dexscreener", "dextools", "coingecko", "coinmarketcap", "jupiterexchange", "raydiumprotocol", "binance", "coinbase", "uniswap", "tether_to", "circle"]);
-async function followsAndTags(handle: string, key: string, counter?: CallCounter): Promise<any[]> {
+async function followsAndTags(handle: string, key: string, counter?: CallCounter): Promise<JsonRecord[]> {
   const u = handle.replace(/^@/, "");
-  const postsD = await twJson(`${TW}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key, counter);
-  const rawTweets = postsD?.data?.tweets ?? postsD?.tweets;
-  const tweets: any[] = Array.isArray(rawTweets) ? rawTweets : [];
+  const postsD = rec(await twJson(`${TW}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key, counter));
+  const rawTweets = rec(postsD.data).tweets ?? postsD.tweets;
+  const tweets = arr(rawTweets).map(rec);
   const mentions = new Set<string>();
-  for (const t of tweets) for (const mm of String(t.text ?? "").matchAll(/@([A-Za-z0-9_]{2,30})/g)) mentions.add(mm[1].toLowerCase());
+  for (const t of tweets) for (const mm of str(t.text).matchAll(/@([A-Za-z0-9_]{2,30})/g)) mentions.add(mm[1].toLowerCase());
   mentions.delete(u.toLowerCase());
   TW_DENY.forEach((d) => mentions.delete(d));
   if (!mentions.size) return [];
-  const follows = new Map<string, any>();
+  const follows = new Map<string, JsonRecord>();
   let cursor = "";
   for (let p = 0; p < 4; p++) {
-    const d = await twJson(`${TW}/twitter/user/followings?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, key, counter);
-    const list: any[] = d?.followings ?? d?.data?.followings ?? (Array.isArray(d?.data) ? d.data : []);
-    if (!list?.length) break;
-    for (const f of list) { const un = String(f.userName ?? f.screen_name ?? ""); if (un) follows.set(un.toLowerCase(), f); }
-    if (!d?.has_next_page || !d?.next_cursor) break;
-    cursor = d.next_cursor;
+    const d = rec(await twJson(`${TW}/twitter/user/followings?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, key, counter));
+    const data = rec(d.data);
+    const list = arr(d.followings ?? data.followings ?? (Array.isArray(d.data) ? d.data : [])).map(rec);
+    if (!list.length) break;
+    for (const f of list) { const un = str(f.userName ?? f.screen_name); if (un) follows.set(un.toLowerCase(), f); }
+    if (!d.has_next_page || !d.next_cursor) break;
+    cursor = str(d.next_cursor);
   }
-  const out: any[] = [];
+  const out: JsonRecord[] = [];
   for (const lk of mentions) {
     if (TW_DENY.has(lk)) continue;
     const f = follows.get(lk);
     // a chain/infra account usually has a huge following; people-team don't.
-    if (f && Number(f.followers_count ?? f.followers ?? 0) < 2_000_000) {
+    if (f && num(f.followers_count ?? f.followers) < 2_000_000) {
       out.push({ name: f.name || "@" + (f.userName ?? lk), handle: "@" + (f.userName ?? lk), role: "follows + tags", evidence: "the project both follows and tags this account" });
     }
   }
@@ -145,20 +167,22 @@ async function followsAndTags(handle: string, key: string, counter?: CallCounter
 
 const DEVELOPER_ROLE = /\b(?:founder|co-?founder|cto|chief technology officer|lead (?:dev|developer|engineer)|engineering lead)\b/i;
 
-export function profileDeveloperLinks(profile: any, handle: string): Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }> {
+export function profileDeveloperLinks(profile: unknown, handle: string): Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }> {
+  const profileRecord = rec(profile);
+  const profileBio = rec(profileRecord.profile_bio);
+  const profileBioEntities = rec(profileBio.entities);
+  const profileBioDescription = rec(profileBioEntities.description);
+  const entities = rec(profileRecord.entities);
+  const entityDescription = rec(entities.description);
   const candidates = [
-    profile?.url,
-    profile?.website,
-    profile?.link,
-    profile?.profile_url,
-    profile?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url,
-    ...(Array.isArray(profile?.profile_bio?.entities?.description?.urls)
-      ? profile.profile_bio.entities.description.urls.map((entry: any) => entry?.expanded_url)
-      : []),
-    ...(Array.isArray(profile?.entities?.description?.urls)
-      ? profile.entities.description.urls.map((entry: any) => entry?.expanded_url)
-      : []),
-    ...String(profile?.description ?? "").matchAll(/https?:\/\/(?:www\.)?(?:github\.com|huggingface\.co)\/[A-Za-z0-9_.-]+/gi),
+    profileRecord.url,
+    profileRecord.website,
+    profileRecord.link,
+    profileRecord.profile_url,
+    rec(arr(rec(profileBioEntities.url).urls)[0]).expanded_url,
+    ...arr(profileBioDescription.urls).map((entry) => rec(entry).expanded_url),
+    ...arr(entityDescription.urls).map((entry) => rec(entry).expanded_url),
+    ...str(profileRecord.description).matchAll(/https?:\/\/(?:www\.)?(?:github\.com|huggingface\.co)\/[A-Za-z0-9_.-]+/gi),
   ].flatMap((value) => typeof value === "string" ? [value] : Array.isArray(value) ? [value[0]] : []);
   const sourceUrl = `https://x.com/${handle.replace(/^@/, "")}`;
   const out = new Map<string, { provider: "github" | "huggingface"; url: string; sourceUrl: string }>();
@@ -175,12 +199,12 @@ export function profileDeveloperLinks(profile: any, handle: string): Array<{ pro
 async function developerLinksFromX(handle: string, key: string, counter: CallCounter) {
   const user = handle.replace(/^@/, "");
   const payload = await twJson(`${TW}/twitter/user/info?userName=${encodeURIComponent(user)}`, key, counter);
-  const profile = payload?.data ?? payload;
+  const profile = rec(payload).data ?? payload;
   return profileDeveloperLinks(profile, user);
 }
 
 // ── GitHub org (deterministic) ─────────────────────────────────────────────
-async function ghJson(path: string, key: string, counter?: CallCounter): Promise<any> {
+async function ghJson(path: string, key: string, counter?: CallCounter): Promise<unknown> {
   if (counter) counter.calls += 1;
   try {
     const r = await fetch(GH + path, { headers: { authorization: `Bearer ${key}`, accept: "application/vnd.github+json", "user-agent": "argus" }, signal: AbortSignal.timeout(10000) });
@@ -190,22 +214,23 @@ async function ghJson(path: string, key: string, counter?: CallCounter): Promise
     return data;
   } catch { return null; }
 }
-async function githubOrgTeam(org: string, key: string, counter?: CallCounter): Promise<any[]> {
+async function githubOrgTeam(org: string, key: string, counter?: CallCounter): Promise<JsonRecord[]> {
   const o = org.replace(/^https?:\/\/(www\.)?github\.com\//i, "").replace(/\/.*$/, "");
   if (!o) return [];
   const logins = new Set<string>();
   const members = await ghJson(`/orgs/${encodeURIComponent(o)}/public_members?per_page=20`, key, counter);
-  for (const m of Array.isArray(members) ? members : []) if (m.login) logins.add(m.login);
+  for (const member of arr(members).map(rec)) if (member.login) logins.add(str(member.login));
   const repos = await ghJson(`/orgs/${encodeURIComponent(o)}/repos?sort=pushed&per_page=4`, key, counter);
-  for (const repo of (Array.isArray(repos) ? repos : []).slice(0, 3)) {
-    const contributors = await ghJson(`/repos/${o}/${repo.name}/contributors?per_page=10`, key, counter);
-    for (const c of Array.isArray(contributors) ? contributors : []) if (c.login && c.type === "User") logins.add(c.login);
+  for (const repo of arr(repos).slice(0, 3).map(rec)) {
+    const contributors = await ghJson(`/repos/${o}/${str(repo.name)}/contributors?per_page=10`, key, counter);
+    for (const contributor of arr(contributors).map(rec)) if (contributor.login && contributor.type === "User") logins.add(str(contributor.login));
   }
-  const out: any[] = [];
+  const out: JsonRecord[] = [];
   for (const login of [...logins].slice(0, 12)) {
-    const usr = await ghJson(`/users/${encodeURIComponent(login)}`, key, counter);
-    if (!usr) continue;
-    out.push({ name: usr.name || login, handle: usr.twitter_username && HANDLE.test(usr.twitter_username) ? "@" + usr.twitter_username : undefined, role: "github contributor", evidence: `GitHub: github.com/${o} (${login})` });
+    const usr = rec(await ghJson(`/users/${encodeURIComponent(login)}`, key, counter));
+    if (!Object.keys(usr).length) continue;
+    const twitterUsername = typeof usr.twitter_username === "string" ? usr.twitter_username : "";
+    out.push({ name: str(usr.name) || login, handle: twitterUsername && HANDLE.test(twitterUsername) ? "@" + twitterUsername : undefined, role: "github contributor", evidence: `GitHub: github.com/${o} (${login})` });
   }
   return out;
 }
@@ -313,17 +338,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const partial = !completed && results.some((result) => result.status === "succeeded" || result.status === "partial");
 
     const self = new Set([domain.toLowerCase(), x.toLowerCase()].filter(Boolean));
-    const byKey = new Map<string, any>();
-    for (const { people: arr, provider } of results) {
-      for (const p of arr) {
-        if (!p || typeof p.name !== "string" || !p.name.trim()) continue;
-        const handle = p.handle && HANDLE.test(p.handle) ? "@" + p.handle.replace(/^@/, "") : undefined;
+    const byKey = new Map<string, ReconPerson>();
+    for (const { people, provider } of results) {
+      for (const p of people) {
+        if (typeof p.name !== "string" || !p.name.trim()) continue;
+        const handle = typeof p.handle === "string" && HANDLE.test(p.handle) ? "@" + p.handle.replace(/^@/, "") : undefined;
         const linkedin = personLinkedInUrl(p.linkedin);
         const cleaned = {
           name: p.name.trim(),
           handle,
           linkedin,
-          role: (p.role || "team").toString(),
+          role: str(p.role || "team"),
           evidence: typeof p.evidence === "string" ? p.evidence : undefined,
           provider,
           ...personProvenance(provider),
@@ -352,7 +377,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!gh && twKey) {
       const developerProfileCounter: CallCounter = { calls: 0, succeeded: 0 };
       const eligible = [...byKey.values()]
-        .filter((person) => person.handle && DEVELOPER_ROLE.test(String(person.role ?? "")))
+        .filter((person): person is ReconPerson & { handle: string } => typeof person.handle === "string" && DEVELOPER_ROLE.test(person.role))
         .slice(0, 5);
       await Promise.all(eligible.map(async (person) => {
         const profiles = await developerLinksFromX(person.handle, twKey, developerProfileCounter);
