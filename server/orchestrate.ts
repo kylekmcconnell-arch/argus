@@ -30,6 +30,7 @@ import {
 } from "./agent";
 import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cost";
 import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
+import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
@@ -329,13 +330,6 @@ const teamEvidenceRank = (member: WebTeamMember): number =>
       ? 1
       : 0;
 
-const canonicalTeamName = (value?: string): string => {
-  const raw = (value ?? "").trim().toLowerCase();
-  if (!raw || raw.startsWith("@")) return "";
-  const tokens = raw.split(/[^a-z0-9]+/).filter(Boolean);
-  return tokens.length >= 2 ? tokens.join(" ") : "";
-};
-
 /**
  * Collapse roster rows that resolve to the same X identity after enrichment.
  * Exact multi-part names are also safe merge keys for the common case where a
@@ -345,17 +339,15 @@ const canonicalTeamName = (value?: string): string => {
  */
 export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): WebTeamMember[] {
   const output: WebTeamMember[] = [];
-  const indexByHandle = new Map<string, number>();
-  const indexByName = new Map<string, number>();
+  const indexByIdentity = new Map<string, number>();
   for (const member of members) {
-    const handle = member.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
-    const name = canonicalTeamName(member.name);
-    const existingIndex = (handle ? indexByHandle.get(handle) : undefined)
-      ?? (name ? indexByName.get(name) : undefined);
+    const identityKeys = teamIdentityKeys(member);
+    const existingIndex = identityKeys
+      .map((key) => indexByIdentity.get(key))
+      .find((index): index is number => index !== undefined);
     if (existingIndex === undefined) {
       output.push({ ...member });
-      if (handle) indexByHandle.set(handle, output.length - 1);
-      if (name) indexByName.set(name, output.length - 1);
+      for (const key of identityKeys) indexByIdentity.set(key, output.length - 1);
       continue;
     }
 
@@ -385,10 +377,9 @@ export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): 
       if (secondary.linkedin) merged.linkedin = secondary.linkedin;
     }
     output[existingIndex] = merged;
-    const mergedHandle = merged.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
-    const mergedName = canonicalTeamName(merged.name);
-    if (mergedHandle) indexByHandle.set(mergedHandle, existingIndex);
-    if (mergedName) indexByName.set(mergedName, existingIndex);
+    for (const key of [...identityKeys, ...teamIdentityKeys(merged)]) {
+      indexByIdentity.set(key, existingIndex);
+    }
   }
   return output;
 }

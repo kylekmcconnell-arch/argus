@@ -341,6 +341,43 @@ describe("count-true headings", () => {
     expect(JSON.stringify(mixed)).not.toContain("Nine of them proven");
   });
 
+  it("renders one person when search and first-party labels resolve to Jun Song", () => {
+    const dossier = buildDossier({
+      handle: "@0xsupergemma",
+      display_name: "SuperGemma",
+      website: "https://supergemma.example/",
+      report: { verdict: "INCOMPLETE", score_total: null },
+      basicFacts: [],
+      checkRuns: [{ checkId: "project-team-identity", label: "Team", status: "confirmed" }],
+      basicFactLeads: [],
+      providerFailures: [],
+      webTeamLeads: [{
+        name: "Jun Song Independent",
+        role: "builder",
+        artifact_verified: true,
+      }],
+      webTeam: [{
+        name: "Jun Song",
+        handle: "@jun_song",
+        role: "builder",
+        handleProvenance: "subject_first_party",
+        avatarUrl: "https://pbs.twimg.com/jun.jpg",
+      }],
+    });
+
+    expect(dossier.team).toEqual([
+      expect.objectContaining({
+        name: "Jun Song",
+        role: "builder",
+        firstParty: true,
+        independentlyConfirmed: true,
+        avatarUrl: "https://pbs.twimg.com/jun.jpg",
+      }),
+    ]);
+    expect(dossier.beats.find((beat) => beat.id === "team")?.heading)
+      .toBe("The project named 1 person. 1 is independently confirmed.");
+  });
+
   it("keeps the recorded verdict call and does not invent a thesis", () => {
     const dossier = buildDossier({
       handle: "@alice",

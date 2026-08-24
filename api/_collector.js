@@ -10714,6 +10714,32 @@ function tokenFromPromotions(promos) {
   return null;
 }
 
+// src/lib/teamIdentity.ts
+var canonicalPart = (value) => (value ?? "").trim().toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join(" ");
+var canonicalName = (value) => {
+  const raw = (value ?? "").trim();
+  if (!raw || raw.startsWith("@")) return "";
+  const normalized4 = canonicalPart(raw);
+  return normalized4.split(" ").length >= 2 ? normalized4 : "";
+};
+var canonicalHandle2 = (value) => (value ?? "").trim().replace(/^@/, "").toLowerCase();
+function teamIdentityKeys(member) {
+  const keys = [];
+  const handle = canonicalHandle2(member.handle);
+  if (handle) keys.push(`handle:${handle}`);
+  const name = canonicalName(member.name);
+  if (!name) return keys;
+  keys.push(`name:${name}`);
+  const role = canonicalPart(member.role);
+  if (!role) return keys;
+  keys.push(`role-name:${role}:${name}`);
+  const withoutSearchDescriptor = name.replace(/\s+independent$/, "");
+  if (withoutSearchDescriptor !== name && withoutSearchDescriptor.split(" ").length >= 2) {
+    keys.push(`role-name:${role}:${withoutSearchDescriptor}`);
+  }
+  return [...new Set(keys)];
+}
+
 // src/lib/providerCapabilities.ts
 var ENABLED_VALUE = /^(?:1|true|on|enabled)$/i;
 var DISABLED_VALUE = /^(?:0|false|off|disabled)$/i;
@@ -31442,24 +31468,15 @@ var ADAPTER_PROVIDERS = {
   "onchain": ["helius"]
 };
 var teamEvidenceRank = (member) => member.artifact_verified === true && member.evidence_origin !== "model_lead" ? 2 : member.evidence_origin !== "model_lead" ? 1 : 0;
-var canonicalTeamName = (value) => {
-  const raw = (value ?? "").trim().toLowerCase();
-  if (!raw || raw.startsWith("@")) return "";
-  const tokens = raw.split(/[^a-z0-9]+/).filter(Boolean);
-  return tokens.length >= 2 ? tokens.join(" ") : "";
-};
 function coalesceTeamMembersByHandle(members) {
   const output = [];
-  const indexByHandle = /* @__PURE__ */ new Map();
-  const indexByName = /* @__PURE__ */ new Map();
+  const indexByIdentity = /* @__PURE__ */ new Map();
   for (const member of members) {
-    const handle = member.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
-    const name = canonicalTeamName(member.name);
-    const existingIndex = (handle ? indexByHandle.get(handle) : void 0) ?? (name ? indexByName.get(name) : void 0);
+    const identityKeys = teamIdentityKeys(member);
+    const existingIndex = identityKeys.map((key) => indexByIdentity.get(key)).find((index) => index !== void 0);
     if (existingIndex === void 0) {
       output.push({ ...member });
-      if (handle) indexByHandle.set(handle, output.length - 1);
-      if (name) indexByName.set(name, output.length - 1);
+      for (const key of identityKeys) indexByIdentity.set(key, output.length - 1);
       continue;
     }
     const existing = output[existingIndex];
@@ -31481,10 +31498,9 @@ function coalesceTeamMembersByHandle(members) {
       if (secondary.linkedin) merged.linkedin = secondary.linkedin;
     }
     output[existingIndex] = merged;
-    const mergedHandle = merged.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
-    const mergedName = canonicalTeamName(merged.name);
-    if (mergedHandle) indexByHandle.set(mergedHandle, existingIndex);
-    if (mergedName) indexByName.set(mergedName, existingIndex);
+    for (const key of [...identityKeys, ...teamIdentityKeys(merged)]) {
+      indexByIdentity.set(key, existingIndex);
+    }
   }
   return output;
 }

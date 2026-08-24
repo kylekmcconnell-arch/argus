@@ -151,9 +151,12 @@ remain in the report body and are never duplicated into the rail.
 The report opens with the interactive dossier as the reading document:
 named beats derived by `buildDossier()` from the live payload (identity,
 team, product, perimeter, coverage, verdict). Headings are counts and
-recorded states only. The display name is not a bind key. First-party
-named team is not independently corroborated. Provenance colour is
-source-of-truth, not pass/fail.
+recorded states only. The display name is not a bind key. Team referents
+reconcile by stable handle first and exact canonical name second. A provider
+presentation suffix may become a role-qualified alias, never a broad fuzzy
+match. First-party naming and independent confirmation remain separate evidence
+states on the one reconciled person. Provenance colour is source-of-truth, not
+pass/fail.
 
 Token reports use a separate chronological spine from `buildTokenStory()`:
 launch, liquidity, holders, contract, presence, and gaps. Headline market

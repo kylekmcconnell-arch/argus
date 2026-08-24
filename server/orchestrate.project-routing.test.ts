@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SubjectClass, VentureOutcome, type Venture } from "../src/engine";
-import { emptyEvidence, type BasicFact, type BasicFactPredicate } from "../src/data/evidence";
+import { emptyEvidence, type BasicFact, type BasicFactPredicate, type WebTeamMember } from "../src/data/evidence";
 import type { CheckObservation, CollectContext } from "./adapters/types";
 import { basicFactsResearchQuestions } from "./adapters/basicFacts";
 import {
@@ -189,6 +189,48 @@ describe("provider-backed project routing", () => {
         artifact_verified: true,
       }),
     ]);
+  });
+
+  it("reconciles a role-qualified search label with the first-party person", () => {
+    const merged = coalesceTeamMembersByHandle([
+      {
+        name: "Jun Song Independent",
+        role: "builder",
+        source: "Web identity search",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        provider: "grok",
+        identity_link_evidence_origin: "model_lead",
+      },
+      {
+        name: "Jun Song",
+        handle: "@jun_song",
+        role: "builder",
+        source: "Official project account",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "twitterapi",
+        identity_link_evidence_origin: "deterministic",
+        handleProvenance: "subject_first_party",
+      },
+    ]);
+
+    expect(merged).toEqual([
+      expect.objectContaining({
+        name: "Jun Song",
+        handle: "@jun_song",
+        role: "builder",
+        artifact_verified: true,
+        handleProvenance: "subject_first_party",
+      }),
+    ]);
+  });
+
+  it("does not merge a similar search label across different project roles", () => {
+    expect(coalesceTeamMembersByHandle([
+      { name: "Jun Song Independent", role: "researcher", evidence_origin: "model_lead" },
+      { name: "Jun Song", role: "builder", evidence_origin: "deterministic" },
+    ] as WebTeamMember[])).toHaveLength(2);
   });
 
   it("carries the first-party handle marker forward through a coalesce, never backward", () => {
