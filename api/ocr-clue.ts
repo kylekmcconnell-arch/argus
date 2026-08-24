@@ -61,4 +61,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-function safeParse(s: string): any { try { return JSON.parse(s); } catch { return {}; } }
+function safeParse(s: string): { image?: unknown } {
+  try {
+    const value: unknown = JSON.parse(s);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as { image?: unknown }
+      : {};
+  } catch {
+    return {};
+  }
+}

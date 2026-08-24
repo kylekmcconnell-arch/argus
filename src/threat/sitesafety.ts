@@ -26,7 +26,14 @@ export async function siteSafety(socials: { label: string; url: string }[], addr
     const xBio = handle && address && chain
       ? await apiFetch(`/api/x-authenticity?handle=${encodeURIComponent(handle)}&address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`, { signal: AbortSignal.timeout(12000) })
           .then((r) => (r.ok ? r.json() : null))
-          .then((d: any) => (d?.available ? { handle: d.handle, status: d.status, note: d.note } : null))
+          .then((value: unknown) => {
+            const d = value && typeof value === "object" && !Array.isArray(value)
+              ? value as { available?: boolean; handle?: unknown; status?: unknown; note?: unknown }
+              : null;
+            if (!d?.available || typeof d.handle !== "string" || typeof d.status !== "string" || typeof d.note !== "string") return null;
+            if (!["verified", "mismatch", "absent", "unreadable"].includes(d.status)) return null;
+            return { handle: d.handle, status: d.status as NonNullable<SiteSafety["xBio"]>["status"], note: d.note };
+          })
           .catch(() => null)
       : null;
 

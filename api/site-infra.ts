@@ -131,7 +131,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // v3 distinguishes a completed empty screen from upstream failure. Older
   // cache entries could contain false-clean empties produced by failed calls.
   const ck = `siteinfra:${host}:v3`;
-  const cached = await cacheGetJson<any>(ck);
+  const cached = await cacheGetJson<Record<string, unknown>>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
   try {

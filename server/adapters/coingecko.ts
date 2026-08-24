@@ -46,23 +46,36 @@ export async function tokenByContract(chain: string, address: string) {
     return null;
   }
 
-  let d: any;
-  try { d = await res.json(); }
+  let value: unknown;
+  try { value = await res.json(); }
   catch {
     recordCall("coingecko", "contract-lookup", 0, `${tier} · response_json_error`, "failed");
     return null;
   }
-  if (!d || typeof d !== "object" || Array.isArray(d)) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     recordCall("coingecko", "contract-lookup", 0, `${tier} · result_shape_error`, "partial");
     return null;
   }
+  const d = value as Record<string, unknown>;
   const hasSymbol = typeof d.symbol === "string" && !!d.symbol.trim();
   const hasName = typeof d.name === "string" && !!d.name.trim();
   if (!hasSymbol && !hasName) {
     recordCall("coingecko", "contract-lookup", 0, `${tier} · missing_identity`, "partial");
     return null;
   }
-  const complete = hasSymbol && hasName && (d.market_data == null || (typeof d.market_data === "object" && !Array.isArray(d.market_data)));
+  const marketData = d.market_data && typeof d.market_data === "object" && !Array.isArray(d.market_data)
+    ? d.market_data as Record<string, unknown>
+    : null;
+  const currentPrice = marketData?.current_price && typeof marketData.current_price === "object" && !Array.isArray(marketData.current_price)
+    ? marketData.current_price as Record<string, unknown>
+    : null;
+  const marketCap = marketData?.market_cap && typeof marketData.market_cap === "object" && !Array.isArray(marketData.market_cap)
+    ? marketData.market_cap as Record<string, unknown>
+    : null;
+  const athChange = marketData?.ath_change_percentage && typeof marketData.ath_change_percentage === "object" && !Array.isArray(marketData.ath_change_percentage)
+    ? marketData.ath_change_percentage as Record<string, unknown>
+    : null;
+  const complete = hasSymbol && hasName && (d.market_data == null || marketData !== null);
   recordCall(
     "coingecko",
     "contract-lookup",
@@ -71,11 +84,11 @@ export async function tokenByContract(chain: string, address: string) {
     complete ? "succeeded" : "partial",
   );
   return {
-    symbol: d.symbol,
-    name: d.name,
-    priceUsd: d.market_data?.current_price?.usd,
-    mcapUsd: d.market_data?.market_cap?.usd,
-    ath_change_pct: d.market_data?.ath_change_percentage?.usd,
+    symbol: d.symbol as string,
+    name: d.name as string,
+    priceUsd: typeof currentPrice?.usd === "number" ? currentPrice.usd : undefined,
+    mcapUsd: typeof marketCap?.usd === "number" ? marketCap.usd : undefined,
+    ath_change_pct: typeof athChange?.usd === "number" ? athChange.usd : undefined,
   };
 }
 

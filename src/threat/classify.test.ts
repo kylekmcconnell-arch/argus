@@ -16,7 +16,7 @@ function dossier(over: Partial<TokenDossier> = {}): TokenDossier {
   return {
     address: "0xabc", chain: "ethereum", dexId: "uniswap", symbol: "TKN", name: "Token",
     liquidityUsd: 50000, mcap: 100000, ageDays: 40, bundleRisk: "low", insiderPct: 0,
-    bundleCount: 0, safety: { available: true } as any, findings: [], cg: null,
+    bundleCount: 0, safety: { available: true } as TokenDossier["safety"], findings: [], cg: null,
     ...over,
   } as TokenDossier;
 }

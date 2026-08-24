@@ -68,7 +68,7 @@ async function ethCall(urls: string[], to: string, data: string): Promise<string
         signal: AbortSignal.timeout(9000),
       });
       if (!r.ok) continue;
-      const d = (await r.json()) as any;
+      const d = (await r.json()) as { result?: unknown };
       if (typeof d.result === "string") return d.result;
     } catch { /* next endpoint */ }
   }
