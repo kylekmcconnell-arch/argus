@@ -1448,14 +1448,18 @@ export function InvestigationReport({
         )}
         {showCurrentIntelligence && <RingAlert handle={"$" + token.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
         {/* headline */}
-        <div className="investigation-story-cover mt-6">
+        <div className="investigation-story-cover mt-6" data-canonical-report-header="true">
           <div className="flex flex-wrap items-end gap-3">
             {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-11 w-11 shrink-0 rounded-xl border border-line object-cover soft-shadow" />}
             <div>
               <p className="eyebrow">Token investigation</p>
               <h1 className="display-sm mt-0.5 text-[30px] leading-none text-ink sm:text-[34px]">{`$${token.symbol}`}</h1>
             </div>
-            {canShare && <CopyTldrButton base={tldrBase} mint={mintShareUrl} className="mb-0.5 ml-auto" />}
+            <CopyTldrButton
+              base={tldrBase}
+              {...(canShare ? { mint: mintShareUrl } : {})}
+              className="mb-0.5 ml-auto"
+            />
           </div>
 
           {/* Where the project actually lives, at the top where a reader looks
@@ -1499,6 +1503,8 @@ export function InvestigationReport({
 
           <InvestigationDecisionCanvas
             verdictLabel={readiness.status === "ready" ? observedTokenMeta.label : readinessLabel}
+            score={token.score}
+            scoreIsProvisional={readiness.status !== "ready"}
             favorable={favorableVerdict}
             verdictTone={decisionCanvasTone}
             argument={verdictArgument}

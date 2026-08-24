@@ -28,8 +28,7 @@ import { MoneyFlowStory } from "./MoneyFlowStory";
 import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 import { LinkEntity } from "./LinkEntity";
 import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
-import { TokenHeadlineStats, TokenStory } from "./TokenStory";
-import { buildTokenStory } from "../lib/tokenStory";
+import { TokenStory } from "./TokenStory";
 import { SecondOpinion } from "./SecondOpinion";
 import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
@@ -207,7 +206,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
     .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
   const otherLinks = d.socials.filter((x) => x.label !== "site" && !/x\.com|twitter\.com/i.test(x.url));
-  const story = buildTokenStory(d);
   const [watched, setWatched] = useState(() => isWatched(d.address));
   const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
   const [copiedTxt, setCopiedTxt] = useState(false);
@@ -394,35 +392,31 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         )}
         {showCurrentIntelligence && <RingAlert handle={"$" + d.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
-        {/* token identity */}
-        <div className="mt-6 flex flex-wrap items-center gap-4">
-          {d.imageUrl ? (
-            <img src={d.imageUrl} alt="" className="h-14 w-14 rounded-2xl border border-line-2 object-cover" />
-          ) : (
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line-2 bg-panel text-xl text-signal-lift">${d.symbol.slice(0, 3)}</div>
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="display-sm text-[24px] text-ink">{d.name}</h1>
-              <span className="mono text-[13.5px] text-ink-faint">${d.symbol}</span>
+        <section className="investigation-story-cover mt-6" data-canonical-report-header="true" aria-labelledby="token-report-title">
+          <div className="flex flex-wrap items-end gap-3">
+            {d.imageUrl ? (
+              <img src={d.imageUrl} alt="" className="h-11 w-11 rounded-xl border border-line object-cover soft-shadow" />
+            ) : (
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-line bg-panel text-sm font-semibold text-signal-lift">${d.symbol.slice(0, 3)}</div>
+            )}
+            <div>
+              <p className="eyebrow">Token investigation</p>
+              <h1 id="token-report-title" className="display-sm mt-0.5 text-[30px] leading-none text-ink sm:text-[34px]">${d.symbol}</h1>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-faint">
-              <span className="rounded border border-line px-1.5 py-0.5 text-ink-dim capitalize">{d.chain}</span>
-              <span>{d.dexId}</span>
-              <span className="mono">{d.address.slice(0, 6)}…{d.address.slice(-4)}</span>
-            </div>
+            <button type="button" onClick={copyReport} className="btn-chip mb-0.5 ml-auto min-h-8 px-2.5 text-[10px] uppercase tracking-[0.08em]">
+              {copiedTxt ? "Copied" : "Copy summary"}
+            </button>
           </div>
-          <TokenHeadlineStats figures={story.headline} />
-        </div>
 
-        <ProjectLinks
-          className="mt-3"
-          website={projectSite}
-          xHandle={d.projectX ?? d.cg?.twitter}
-          contractAddress={d.address}
-          chain={d.chain}
-          links={d.socials}
-        />
+          <ProjectLinks
+            className="mt-3"
+            website={projectSite}
+            xHandle={d.projectX ?? d.cg?.twitter}
+            contractAddress={d.address}
+            chain={d.chain}
+            links={d.socials}
+          />
+        </section>
 
         {/* what the project actually does — CoinGecko's own blurb */}
         {d.cg?.description && (
@@ -435,6 +429,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         <InvestigationDecisionCanvas
           verdictLabel={presentationMeta.label}
+          score={d.score}
+          scoreIsProvisional={readiness.status !== "ready"}
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
           supports={supportItems}

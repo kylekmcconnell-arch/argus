@@ -39,6 +39,7 @@ import { OperatorTrackRecord } from "./OperatorTrackRecord";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
+import { ProjectLinks } from "./ProjectLinks";
 import { xAvatar, personAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
@@ -3075,33 +3076,48 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {/* Subject identity and decision state are intentionally one hierarchy:
             who is being assessed, what ARGUS concluded, and whether the frozen
             evidence is complete enough to act on. */}
-        <section id="report-overview" className="panel mt-6 flex scroll-mt-28 flex-col overflow-hidden" aria-labelledby="report-subject-title">
-          <div className="contents lg:grid lg:grid-cols-[minmax(0,1fr)_17rem] lg:gap-5 lg:p-5">
-            <div className="order-1 flex min-w-0 items-start gap-4 p-4 sm:p-5 lg:order-none lg:p-0">
-              <Avatar src={f.avatar_url || xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                  <h1 id="report-subject-title" className="display text-[32px] leading-none text-ink max-sm:text-[24px]">{f.display_name}</h1>
-                  <span className="mono text-[13.5px] text-ink-faint">{f.handle}</span>
-                </div>
-                <div className="hidden sm:block">
-                  <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} />
-                </div>
-                <details className="mt-3 border-t border-line/60 pt-1 sm:hidden">
-                  <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 text-[11.5px] text-ink-dim [&::-webkit-details-marker]:hidden">
-                    <span>{roles.map((role) => ROLE_META[role].label).join(" · ") || "Subject"}</span>
-                    <span className="mono text-[10px] uppercase tracking-wide text-signal-lift">Profile context</span>
-                  </summary>
-                  <div className="pb-1">
-                    <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} />
-                  </div>
-                </details>
+        <section id="report-overview" className="investigation-story-cover mt-6 scroll-mt-28" data-canonical-report-header="true" aria-labelledby="report-subject-title">
+          <div className="flex flex-wrap items-end gap-3">
+            <Avatar src={f.avatar_url || xAvatar(f.handle)} letter={f.avatar} size={44} rounded="rounded-xl" letterClass="text-lg" />
+            <div className="min-w-0 flex-1">
+              <p className="eyebrow">{roles.includes(SubjectClass.PROJECT) ? "Project investigation" : "Person investigation"}</p>
+              <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                <h1 id="report-subject-title" className="display-sm text-[30px] leading-none text-ink sm:text-[34px]">{f.display_name}</h1>
+                <span className="mono text-[13px] text-ink-faint">{f.handle}</span>
               </div>
             </div>
+            <CopyTldrButton
+              base={tldrBase}
+              {...(!shareView ? { mint: mintShareUrl } : {})}
+              className="mb-0.5 ml-auto"
+            />
+          </div>
 
-            <details className="order-6 mx-5 mb-5 border-t border-line/60 pt-4 text-[11px] lg:order-none lg:m-0 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
-              <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-dim">Report details</summary>
-              <dl className="mt-3 grid content-start gap-3" aria-label="Saved report details">
+          <div className="mt-2 hidden sm:block">
+            <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} />
+          </div>
+          <details className="mt-3 border-t border-line/60 pt-1 sm:hidden">
+            <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 text-[11.5px] text-ink-dim [&::-webkit-details-marker]:hidden">
+              <span>{roles.map((role) => ROLE_META[role].label).join(" · ") || "Subject"}</span>
+              <span className="mono text-[10px] uppercase tracking-wide text-signal-lift">Profile context</span>
+            </summary>
+            <div className="pb-1">
+              <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} />
+            </div>
+          </details>
+
+          <ProjectLinks
+            className="mt-3"
+            website={f.website}
+            xHandle={f.handle}
+            links={f.githubAssessment?.login
+              ? [{ label: "GitHub", url: `https://github.com/${f.githubAssessment.login}` }]
+              : undefined}
+          />
+
+          <details className="mt-3 border-t border-line/60 pt-3 text-[11px]">
+            <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-dim">Report details</summary>
+            <dl className="mt-3 grid gap-3 sm:grid-cols-3" aria-label="Saved report details">
               <div>
                 <dt className="stat-label">Report ID</dt>
                 <dd className="mono mt-1 break-all text-ink-dim">{report.audit_id}</dd>
@@ -3124,9 +3140,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <dd className="mt-1 text-ink-dim">{capturedLabel ?? finalizedLabel}</dd>
                 </div>
               )}
-              </dl>
-            </details>
-          </div>
+            </dl>
+          </details>
 
           <CriticalSubjectAlerts dossier={f} />
 
@@ -3339,6 +3354,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
         <InvestigationDecisionCanvas
           verdictLabel={m.label}
+          score={presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null}
+          scoreIsProvisional={!presentation.final}
           favorable={favorableVerdict}
           verdictTone={decisionNarrativeTone}
           argument={caseArgument}
