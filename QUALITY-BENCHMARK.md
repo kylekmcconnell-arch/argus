@@ -144,6 +144,11 @@ and a honeypot token. Token-provider calls are intercepted by exact synthetic
 DexScreener, GoPlus, Honeypot, and CoinGecko responses. Unknown URLs are blocked
 and fail the canary, so the command cannot trigger live or paid scans.
 
+Saved-report model tests also pin team referent reconciliation. A first-party
+person and an independently sourced row with the same stable handle or an exact,
+role-qualified canonical alias must render as one person while retaining both
+evidence states. Similar names in different roles must remain separate.
+
 For machine-readable CI output:
 
 ```sh

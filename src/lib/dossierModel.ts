@@ -14,6 +14,7 @@ import {
   type ProvenanceState,
 } from "./provenance";
 import type { EntityLedgerRow, EntityScorecard } from "../intelligence/entityScorecards";
+import { teamIdentityKeys } from "./teamIdentity";
 
 export interface DossierReceiptSource {
   url: string;
@@ -475,16 +476,13 @@ function collectTeam(payload: Record<string, unknown>): TeamMember[] {
     ...arr<Record<string, unknown>>(payload.webTeamLeads),
     ...arr<Record<string, unknown>>(payload.webTeam),
   ];
-  const seen = new Set<string>();
+  const indexByIdentity = new Map<string, number>();
   const team: TeamMember[] = [];
   for (const m of rows) {
     const name = str(m.name);
     if (!name) continue;
-    const key = `${name}|${str(m.handle)}|${str(m.role)}`.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
     const firstParty = str(m.handleProvenance) === "subject_first_party";
-    team.push({
+    const candidate: TeamMember = {
       name,
       role: str(m.role),
       handle: str(m.handle) || null,
@@ -492,7 +490,33 @@ function collectTeam(payload: Record<string, unknown>): TeamMember[] {
       avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
       avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
       independentlyConfirmed: m.artifact_verified === true || m.artifactVerified === true,
-    });
+    };
+    const identityKeys = teamIdentityKeys(candidate);
+    const existingIndex = identityKeys
+      .map((key) => indexByIdentity.get(key))
+      .find((index): index is number => index !== undefined);
+    if (existingIndex === undefined) {
+      team.push(candidate);
+      for (const key of identityKeys) indexByIdentity.set(key, team.length - 1);
+      continue;
+    }
+
+    const existing = team[existingIndex];
+    const preferred = candidate.firstParty && !existing.firstParty ? candidate : existing;
+    const secondary = preferred === existing ? candidate : existing;
+    const merged: TeamMember = {
+      ...preferred,
+      handle: preferred.handle ?? secondary.handle,
+      role: preferred.role || secondary.role,
+      firstParty: preferred.firstParty || secondary.firstParty,
+      independentlyConfirmed: preferred.independentlyConfirmed || secondary.independentlyConfirmed,
+      avatarUrl: preferred.avatarUrl ?? secondary.avatarUrl,
+      avatarCapturedAt: preferred.avatarCapturedAt ?? secondary.avatarCapturedAt,
+    };
+    team[existingIndex] = merged;
+    for (const key of [...identityKeys, ...teamIdentityKeys(merged)]) {
+      indexByIdentity.set(key, existingIndex);
+    }
   }
   return team;
 }
