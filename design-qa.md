@@ -49,6 +49,57 @@ final result: passed
 
 ---
 
+# Design QA — restored report score prominence (2026-08-24)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-24 at 12.51.23 AM.png`
+- Focused source crop: `docs/design-qa/score-prominence-2026-08-24/source-current-score-region.png`
+- Intended score idiom: the original shared `ScoreRing` presentation recovered from commit `0a65353` in `TokenReport.tsx`
+- Desktop implementation: `docs/design-qa/score-prominence-2026-08-24/implementation-desktop.jpg`
+- Mobile implementation: `docs/design-qa/score-prominence-2026-08-24/implementation-mobile.jpg`
+- Desktop viewport: 1742 × 920 CSS pixels, light theme, complete SuperGemma-shaped report fixture, score 46/100, 7/7 checks complete
+- Mobile viewport: 390 × 844 CSS pixels, same report state
+- Source crop pixels: 1450 × 230
+- Desktop implementation crop pixels: 1382 × 230
+- Mobile implementation pixels: 390 × 844
+- Density normalization: device scale 1; the focused source and implementation were inspected together at their native density and equivalent decision-brief region
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- The reported production state made the score look absent: `46 / 100` was a small right-edge statistic with no visual anchor.
+- The restored state reuses the original ARGUS `ScoreRing` component at 120px, retains the saved score and verdict color, and gives it a labeled, bordered lockup above the fold.
+- Score and completion remain semantically separate: the ring is `46 / 100`; the supporting line is `7/7 checks complete`.
+- The same lockup renders `N/A / 100` plus `Score withheld` when the scoring contract withholds a result, and labels unfinished results as an early risk score with provisional completion copy.
+- The mobile layout has no document-level horizontal overflow (`document.body.scrollWidth` equals 390px). The ring and check status become a compact horizontal lockup below the decision-brief title.
+
+## Required fidelity surfaces
+
+- Fonts and typography: the existing ARGUS mono score treatment, report serif title, weights, tracking, and tabular numerals are preserved. The score is now large enough to read at a glance.
+- Spacing and layout rhythm: desktop uses the original right-hand score composition with a hairline boundary; mobile stacks the score beneath the heading without clipping or crowding.
+- Colors and visual tokens: only the existing pass, caution, avoid, ink, panel, and line tokens are used. The original three-band score track is restored.
+- Image quality and asset fidelity: no new raster, SVG, CSS-drawn, or placeholder asset was introduced. The existing shared score-ring component is reused exactly.
+- Copy and content: `ARGUS risk score`, verdict, `/ 100`, and completed-check count are explicit and independently labeled.
+
+## Interaction and runtime checks
+
+- Canonical report decision canvas rendered in the in-app browser at desktop and mobile widths.
+- Complete-score, provisional-score, and withheld-score component tests cover the public states.
+- Browser console: zero errors and zero warnings.
+- Responsive measurement: 390px viewport and 390px document width; no horizontal overflow.
+
+## Comparison history
+
+### Iteration 1
+
+- Earlier finding: P1, the score was technically present but visually buried, so users reasonably read it as missing.
+- Fix: restored the original shared `ScoreRing`, promoted it to a labeled 120px decision lockup, and kept check completion outside the score.
+- Post-fix evidence: desktop and mobile captures listed above. The source and desktop implementation were reviewed together in one comparison input.
+
+final result: passed
+
+---
+
 # Design QA — sidebar instrument-seal logo (2026-08-23)
 
 ## Comparison target

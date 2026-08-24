@@ -491,6 +491,22 @@
   flex: 1;
   min-width: 0;
 }
+.decision-brief-heading {
+  align-items: center;
+}
+.decision-score-lockup {
+  display: grid;
+  min-width: 156px;
+  justify-items: center;
+  gap: 5px;
+  border-left: 1px solid var(--color-line);
+  padding: 4px 8px 2px 24px;
+  text-align: center;
+}
+.decision-score-copy {
+  display: grid;
+  justify-items: center;
+}
 .readiness-progress {
   display: block;
   width: 100%;
@@ -539,6 +555,27 @@
   .story-chapter {
     margin-inline: -8px;
     padding-inline: 8px;
+  }
+  .decision-brief-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .decision-score-lockup {
+    width: 100%;
+    grid-template-columns: auto auto 1fr;
+    align-items: center;
+    justify-items: start;
+    border-top: 1px solid var(--color-line);
+    border-left: 0;
+    padding: 16px 0 0;
+    text-align: left;
+  }
+  .decision-score-lockup > :first-child {
+    grid-column: 1 / -1;
+  }
+  .decision-score-copy {
+    justify-items: start;
+    padding-left: 8px;
   }
   .investigation-story-cover::before {
     inset-inline: -8px;

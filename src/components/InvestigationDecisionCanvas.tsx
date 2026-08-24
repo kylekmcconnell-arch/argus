@@ -9,6 +9,7 @@ import { requestChallenge } from "../lib/challenge";
 import type { VerdictArgument } from "../lib/reportInsights";
 import type { DecisionLensId } from "../intelligence/types";
 import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief";
+import { ScoreRing } from "./ScoreRing";
 
 export interface DecisionCanvasItem {
   label: string;
@@ -230,13 +231,20 @@ export function InvestigationDecisionCanvas({
     ? "text-pass"
     : verdictTone === "avoid"
       ? "text-avoid"
+        : verdictTone === "caution"
+          ? "text-caution"
+          : "text-ink";
+  const verdictColor = verdictTone === "pass"
+    ? "var(--color-pass)"
+    : verdictTone === "avoid"
+      ? "var(--color-avoid)"
       : verdictTone === "caution"
-        ? "text-caution"
-        : "text-ink";
+        ? "var(--color-caution)"
+        : "var(--color-ink)";
 
   return (
     <section id="report-summary" data-canonical-decision-brief="true" className="story-chapter report-section mt-6 scroll-mt-28">
-      <header className="report-section-heading">
+      <header className="report-section-heading decision-brief-heading">
         <div>
           <p className="eyebrow text-signal-lift">01 · Decision brief</p>
           <h2 className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">What this report means</h2>
@@ -244,23 +252,34 @@ export function InvestigationDecisionCanvas({
             The strongest evidence, the main risks, and what to check next.
           </p>
         </div>
-        <div className="shrink-0 text-left sm:text-right">
-          <p className={`mono text-[11px] font-semibold uppercase tracking-[0.1em] ${verdictClass}`}>{verdictLabel}</p>
-          {score == null ? (
-            <p className="mono mt-1 text-[13px] font-semibold uppercase tracking-[0.08em] text-ink">Score withheld</p>
-          ) : (
-            <p className="mono mt-0.5 font-semibold tabular-nums text-ink" aria-label={`ARGUS risk score ${score} out of 100`}>
-              <span className="text-[28px] leading-none">{score}</span>
-              <span className="ml-1 text-[11px] font-medium text-ink-faint">/ 100</span>
-            </p>
-          )}
-          <p className="mono mt-1 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
-            {score != null && scoreIsProvisional
-              ? `Early score · ${successful}/${applicable} checks complete`
-              : applicable === 0
-                ? "No checks saved"
-                : `${successful}/${applicable} checks complete`}
+        <div
+          className="decision-score-lockup shrink-0"
+          data-report-score="prominent"
+          aria-label={score == null ? "ARGUS risk score withheld" : `ARGUS risk score ${score} out of 100`}
+        >
+          <p className="mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
+            {score != null && scoreIsProvisional ? "Early risk score" : "ARGUS risk score"}
           </p>
+          <ScoreRing
+            score={score}
+            verdict={verdictLabel}
+            color={verdictColor}
+            size={120}
+            bands={score != null}
+          />
+          <div className="decision-score-copy">
+            <p className={`mono text-[11px] font-semibold uppercase tracking-[0.1em] ${verdictClass}`}>{verdictLabel}</p>
+            {score == null && (
+              <p className="mono mt-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-ink">Score withheld</p>
+            )}
+            <p className="mono mt-1 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
+              {score != null && scoreIsProvisional
+                ? `${successful}/${applicable} checks complete · provisional`
+                : applicable === 0
+                  ? "No checks saved"
+                  : `${successful}/${applicable} checks complete`}
+            </p>
+          </div>
         </div>
       </header>
 
