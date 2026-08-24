@@ -201,7 +201,7 @@ describe("private person report evidence boundary", () => {
     expect(result?.getAttribute("aria-hidden")).toBe("true");
     const decisionCanvas = container.querySelector("#report-summary");
     expect(decisionCanvas?.textContent).toContain("What this report means");
-    expect(decisionCanvas?.textContent).toContain("Report checks");
+    expect(decisionCanvas?.textContent).toContain("Required report checks");
 
     const toolbar = container.querySelector("header.sticky");
     const caseBrief = [...(toolbar?.querySelectorAll("button") ?? [])]

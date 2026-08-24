@@ -195,7 +195,7 @@ describe("token report supplemental evidence boundary", () => {
     const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
     expect(decisionCanvas?.textContent).toContain("88");
     expect(decisionCanvas?.textContent).toContain("/ 100");
-    expect(decisionCanvas?.textContent).toContain("7/7 checks complete");
+    expect(decisionCanvas?.textContent).toContain("7/7 token safety checks complete");
     expect(container.querySelector('[aria-label="Safety check status"]')).toBeNull();
   });
 
@@ -228,7 +228,7 @@ describe("token report supplemental evidence boundary", () => {
 
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).toContain("Finished checks");
-    expect(container.textContent).toContain("Check next");
+    expect(container.textContent).toContain("Research and follow-up");
     expect(container.querySelector('[role="progressbar"][aria-label="Checks finished"]')).not.toBeNull();
   });
 

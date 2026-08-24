@@ -82,7 +82,7 @@ import {
 } from "./BasicFactsPanel";
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
-import { deriveIntelligenceBrief } from "../lib/intelligenceBrief";
+import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
 import { walletAgeFact } from "../lib/operatorTrace";
@@ -843,8 +843,11 @@ export function InvestigationReport({
   // ones — so the dropdown's list always sums with the counter it explains.
   const unfinishedCounterChecks = decisionCriticalChecks(diligenceChecks)
     .filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
-  const requiredGapChecks = gapChecks.filter((check) =>
-    check.checkId ? clearance.openNeverWaive.includes(check.checkId) : false);
+  // All unfinished rows in the canonical seven-check counter are required.
+  // openNeverWaive is a stricter subset used for clearance, not the definition
+  // of the counter. Conflating them made optional research appear to explain a
+  // 5/7 result while hiding the two actual unfinished safety checks.
+  const requiredGapChecks = unfinishedCounterChecks;
   const enrichmentGapChecks = gapChecks.filter((check) => !requiredGapChecks.includes(check));
   // A gap the providers cannot close on this chain stays open and still blocks
   // clearance, but offering a rescan for it would be a false remedy.
@@ -1271,11 +1274,20 @@ export function InvestigationReport({
       detail: check.note,
     }));
   const nextStepItems = [
-    ...requiredNextStepItems,
-    ...intelligenceBrief.questions.map((item) => ({
+    // Lead with the concrete scan blockers, but reserve room for the highest
+    // priority research question when many provider checks are simultaneously
+    // unavailable. The status card still lists every required blocker.
+    ...requiredNextStepItems.slice(0, 2),
+    ...intelligenceBrief.questions
+      .filter((item) => !(
+        isOfficialTokenQuestion(item)
+        && (projectAccount?.projectToken?.verified || inv.projectAccountBinding?.status === "verified")
+      ))
+      .map((item) => ({
       label: item.title,
       detail: `${item.detail} ${item.provenance}`.trim(),
-    })),
+      })),
+    ...requiredNextStepItems.slice(2),
     ...enrichmentNextStepItems,
   ].filter((item, index, items) => {
     const key = item.label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -1521,6 +1533,7 @@ export function InvestigationReport({
             coveragePercent={readiness.coveragePercent}
             successful={readiness.successful}
             applicable={readiness.applicable}
+            checkScopeLabel="Token safety checks"
             capturedAt={capturedAt}
             evidenceHref="#investigation-evidence"
             methodologyHref="#investigation-methodology"

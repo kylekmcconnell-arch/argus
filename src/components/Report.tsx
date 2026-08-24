@@ -106,7 +106,7 @@ import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
-import { deriveIntelligenceBrief } from "../lib/intelligenceBrief";
+import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { SocialActivityPanel } from "./SocialActivityPanel";
 
 /* ── small primitives ─────────────────────────────────────────────── */
@@ -2481,13 +2481,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       href: "#report-overview" as `#${string}`,
     }] : []),
     ...conflictedBasicFactQuestions,
-    ...intelligenceBrief.questions.map((item) => ({
+    ...intelligenceBrief.questions
+      .filter((item) => !(f.projectToken?.verified && isOfficialTokenQuestion(item)))
+      .map((item) => ({
       id: item.id,
       title: plainLanguageSummary(item.title),
       detail: plainLanguageSummary(item.detail),
       provenance: item.provenance,
       href: "#decision-intelligence" as `#${string}`,
-    })),
+      })),
     ...checkVerificationQuestions,
     ...openBasicFactQuestions,
     ...axisGapArtifactQuestions,
@@ -3371,6 +3373,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           coveragePercent={readiness.coveragePercent}
           successful={readiness.successful}
           applicable={readiness.applicable}
+          checkScopeLabel="Required report checks"
           capturedAt={capturedLabel ?? finalizedLabel ?? undefined}
           evidenceHref="#evidence-ledger"
           methodologyHref="#scan-methodology"
