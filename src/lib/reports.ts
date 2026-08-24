@@ -15,13 +15,14 @@ import type {
   ReportCompletenessState,
   ReportVersionContext,
 } from "./reportVersion";
+import type { MaterialReportDelta } from "./reportDelta";
 
 export type ReportKind = "person" | "token" | "investigation" | "site";
 export type ReportStatus = "open" | "archived";
 export type ReportLifecycleAction = "archive" | "restore";
 
 export type ReportSyncResult =
-  | { state: "persisted"; reportVersionId: string; panelCostToken: string }
+  | { state: "persisted"; reportVersionId: string; panelCostToken: string; reportDelta?: MaterialReportDelta }
   | { state: "failed"; reason: string };
 
 const RETRYABLE_SAVE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -270,6 +271,7 @@ export async function syncReport(
       const body = (await response.json().catch(() => ({}))) as {
         reportVersionId?: unknown;
         panelCostToken?: unknown;
+        reportDelta?: unknown;
       };
       if (typeof body.reportVersionId !== "string" || typeof body.panelCostToken !== "string") {
         return { state: "failed", reason: "Report storage returned an incomplete save receipt." };
@@ -278,6 +280,9 @@ export async function syncReport(
         state: "persisted",
         reportVersionId: body.reportVersionId,
         panelCostToken: body.panelCostToken,
+        ...(body.reportDelta && typeof body.reportDelta === "object"
+          ? { reportDelta: body.reportDelta as MaterialReportDelta }
+          : {}),
       };
     } catch {
       if (attempt < 2) {

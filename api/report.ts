@@ -22,6 +22,11 @@ import {
   type StoredCheckRun,
 } from "../src/lib/reportVersion.js";
 import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
+import {
+  buildMaterialReportDelta,
+  type MaterialReportDelta,
+  type PriorReportSnapshot,
+} from "../src/lib/reportDelta.js";
 
 export const config = { maxDuration: 20 };
 
@@ -62,6 +67,44 @@ const normRef = (value: string) => {
   if (EVM_ADDRESS.test(clean)) return clean.toLowerCase();
   return clean.toLowerCase();
 };
+
+async function previousActiveReport(
+  credentials: ServiceCredentials,
+  organizationId: string,
+  kind: "token" | "investigation",
+  ref: string,
+): Promise<PriorReportSnapshot | null> {
+  try {
+    const response = await fetch(
+      `${credentials.url}/rest/v1/${TABLE}?select=payload,report_version_id,ts&organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.${encodeURIComponent(kind)}&ref=eq.${encodeURIComponent(ref)}&order=ts.desc&limit=1`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
+    );
+    if (!response.ok) return null;
+    const rows = await response.json() as unknown;
+    const row = Array.isArray(rows) ? asRecord(rows[0]) : {};
+    const reportVersionId = typeof row.report_version_id === "string" ? row.report_version_id : "";
+    if (!reportVersionId || !row.payload) return null;
+    const versionResponse = await fetch(
+      `${credentials.url}/rest/v1/report_versions?select=version,created_at&id=eq.${encodeURIComponent(reportVersionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&limit=1`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
+    );
+    if (!versionResponse.ok) return null;
+    const versionRows = await versionResponse.json() as unknown;
+    const version = Array.isArray(versionRows) ? asRecord(versionRows[0]) : {};
+    if (typeof version.version !== "number") return null;
+    return {
+      reportVersionId,
+      version: version.version,
+      capturedAt: typeof version.created_at === "string"
+        ? version.created_at
+        : typeof row.ts === "string" ? row.ts : null,
+      payload: row.payload,
+    };
+  } catch (error) {
+    console.warn("[report] prior material-change lookup unavailable", error);
+    return null;
+  }
+}
 
 function safeParse(value: string): unknown {
   try { return JSON.parse(value); } catch { return {}; }
@@ -877,7 +920,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      const derived = projection(kind, body.payload);
+      let materialDelta: MaterialReportDelta | null = null;
+      let persistedPayload = body.payload;
+      if (kind === "token" || kind === "investigation") {
+        const prior = await previousActiveReport(credentials, auth.organizationId, kind, ref);
+        materialDelta = prior ? buildMaterialReportDelta(kind, prior, body.payload) : null;
+        if (materialDelta) persistedPayload = { ...asRecord(body.payload), reportDelta: materialDelta };
+      }
+
+      const derived = projection(kind, persistedPayload);
       const row: Record<string, unknown> = {
         organization_id: auth.organizationId,
         ref,
@@ -885,7 +936,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         query: typeof body.query === "string" ? body.query.slice(0, 200) : ref,
         contributor: auth.displayName.slice(0, 80),
         created_by: auth.userId,
-        payload: body.payload,
+        payload: persistedPayload,
         verdict: derived.verdict,
         score: derived.score,
         attestation_state: "analyst_submitted",
@@ -902,6 +953,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json({
           ok: true,
           reportVersionId,
+          ...(materialDelta ? { reportDelta: materialDelta } : {}),
           ...(panelCostToken ? { panelCostToken } : {}),
         });
         return;

@@ -168,6 +168,49 @@ describe("report save reliability", () => {
     expect(second.clientRunId).toBe(first.clientRunId);
   });
 
+  it("returns the frozen material-change receipt to the live report", async () => {
+    const reportDelta = {
+      schemaVersion: 1 as const,
+      id: "delta-contract-ownerRenounced",
+      category: "contract_control" as const,
+      headline: "Owner control changed since the last scan",
+      consequence: "Control changed.",
+      reversalCondition: "A fresh chain receipt would reverse this change.",
+      evidenceHref: "#token-methodology" as const,
+      previous: {
+        reportVersionId: "00000000-0000-4000-8000-000000000120",
+        version: 2,
+        capturedAt: "2026-08-23T00:00:00.000Z",
+        value: "present",
+      },
+      current: { value: "absent" },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      reportVersionId: "00000000-0000-4000-8000-000000000123",
+      panelCostToken: "signed-panel-token",
+      reportDelta,
+    }), { status: 200 })));
+
+    await expect(syncReport(
+      "token",
+      "0x1111111111111111111111111111111111111111",
+      "$TEST",
+      {
+        address: "0x1111111111111111111111111111111111111111",
+        versionContext: {
+          caseId: "00000000-0000-4000-8000-000000000119",
+          reportVersionId: "00000000-0000-4000-8000-000000000120",
+          version: 1,
+          completenessState: "partial",
+          attestationState: "analyst_submitted",
+          methodologyVersion: "test",
+          createdAt: "2026-08-23T00:00:00.000Z",
+          checks: [],
+        },
+      } as unknown as TokenDossier,
+    )).resolves.toMatchObject({ state: "persisted", reportDelta });
+  });
+
   it("does not retry an authorization failure and returns plain-language state", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: "insufficient_role" }), { status: 403 }));
     vi.stubGlobal("fetch", fetchMock);

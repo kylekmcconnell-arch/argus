@@ -17,20 +17,33 @@ describe("readPriorOutcome", () => {
     const urls: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       urls.push(String(url));
-      if (String(url).includes("/rest/v1/cases")) return jsonResponse([{ id: "case-1" }]);
-      return jsonResponse([{ version: 6, score: 75, verdict: "PASS", completeness_state: "complete", created_at: "2026-07-22T03:09:00.000Z" }]);
+      if (String(url).includes("/rest/v1/reports")) {
+        return jsonResponse([{ report_version_id: "11111111-1111-4111-8111-111111111111" }]);
+      }
+      return jsonResponse([{
+        id: "11111111-1111-4111-8111-111111111111",
+        version: 6,
+        score: 75,
+        verdict: "PASS",
+        completeness_state: "complete",
+        created_at: "2026-07-22T03:09:00.000Z",
+        payload: { handle: "uniswap" },
+      }]);
     }));
 
     const prior = await readPriorOutcome("11111111-1111-1111-1111-111111111111", "@Uniswap");
     expect(prior).toEqual({
+      reportVersionId: "11111111-1111-4111-8111-111111111111",
       version: 6,
       score: 75,
       verdict: "PASS",
       completeness: "complete",
       capturedAt: "2026-07-22T03:09:00.000Z",
+      payload: { handle: "uniswap" },
     });
+    expect(urls[0]).toContain("/rest/v1/reports?");
     expect(urls[0]).toContain("kind=eq.person");
-    expect(urls[1]).toContain("order=version.desc&limit=1");
+    expect(urls[1]).toContain("id=eq.11111111-1111-4111-8111-111111111111");
   });
 
   it("returns null without credentials, an org, or a stored case (never throws)", async () => {

@@ -82,6 +82,7 @@ import {
 } from "./BasicFactsPanel";
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
+import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
 import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { NoticedRail } from "./InvestigatorBrief";
@@ -1117,6 +1118,11 @@ export function InvestigationReport({
     anchors: { market: "#investigation-visuals", team: "#investigation-team", account: "#investigation-people" },
   });
   const decisionDiscovery = deriveDecisionDiscovery(noticedSignals);
+  const materialChangeDiscovery = materialDeltaDiscovery(
+    inv.reportDelta,
+    inv.versionContext?.reportVersionId
+      ?? (inv.persistence?.state === "persisted" ? inv.persistence.reportVersionId : null),
+  );
   const controlPathDiscovery = buildPublicControlPathDiscovery(
     [token.graph, projectAccount?.graph].filter(Boolean),
     "#investigation-relationships",
@@ -1530,7 +1536,7 @@ export function InvestigationReport({
             favorable={favorableVerdict}
             verdictTone={decisionCanvasTone}
             argument={verdictArgument}
-            discovery={controlPathDiscovery ?? claimConflictDiscovery ?? decisionDiscovery}
+            discovery={materialChangeDiscovery ?? controlPathDiscovery ?? claimConflictDiscovery ?? decisionDiscovery}
             decisionLensId={projectAccount?.intelligence ? decisionLensId : undefined}
             onDecisionLensChange={projectAccount?.intelligence ? setDecisionLensId : undefined}
             supports={supportItems}

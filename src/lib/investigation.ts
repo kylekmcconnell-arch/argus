@@ -25,6 +25,7 @@ import type { RetrievalStage } from "../collect/retrieve";
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
 import type { ReportPersistenceContext, ReportVersionContext } from "./reportVersion";
+import type { MaterialReportDelta } from "./reportDelta";
 
 export interface FounderCandidate {
   name: string;          // display name or @handle
@@ -162,6 +163,8 @@ export interface Investigation {
   versionContext?: ReportVersionContext;
   /** Transient persistence/cost capability for a scan completed in this tab. */
   persistence?: ReportPersistenceContext;
+  /** Highest-priority source-backed change from the exact prior report. */
+  reportDelta?: MaterialReportDelta;
 }
 
 // /api/deployer-origin, not /api/deployer. The panel route requires a signed

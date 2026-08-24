@@ -202,6 +202,62 @@ describe("report case lifecycle API", () => {
     });
   });
 
+  it("freezes the highest-priority material change from the exact previous active version", async () => {
+    const address = "0x00000000000000000000000000000000000000ab";
+    const previousVersionId = "00000000-0000-4000-8000-000000000401";
+    const currentVersionId = "00000000-0000-4000-8000-000000000402";
+    const safety = (ownerRenounced: boolean) => ({
+      contractPropertiesAssessed: true,
+      ownerRenounced,
+      mintable: false,
+      freezable: false,
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{
+        payload: { address, safety: safety(true) },
+        report_version_id: previousVersionId,
+        ts: "2026-08-23T01:00:00.000Z",
+      }]))
+      .mockResolvedValueOnce(jsonResponse([{
+        version: 4,
+        created_at: "2026-08-23T01:00:00.000Z",
+      }]));
+    vi.stubGlobal("fetch", fetchMock);
+    persistReportVersionBundle.mockResolvedValue(currentVersionId);
+    const { res, captured } = response();
+
+    await handler(request("POST", {
+      body: {
+        kind: "token",
+        ref: address,
+        query: "$TEST",
+        payload: { address, safety: safety(false) },
+        clientRunId: "00000000-0000-4000-8000-000000000403",
+        completenessState: "complete",
+        checkRuns: [],
+      },
+    }), res);
+
+    expect(fetchMock.mock.calls[0][0]).toContain("kind=eq.token");
+    expect(fetchMock.mock.calls[1][0]).toContain(previousVersionId);
+    expect(persistReportVersionBundle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          reportDelta: expect.objectContaining({
+            category: "contract_control",
+            previous: expect.objectContaining({ reportVersionId: previousVersionId, version: 4 }),
+          }),
+        }),
+      }),
+    );
+    expect(captured.body).toMatchObject({
+      ok: true,
+      reportVersionId: currentVersionId,
+      reportDelta: { category: "contract_control" },
+    });
+  });
+
   it("does not mint a fresh panel capability when a person POST only links an existing server version", async () => {
     const caseId = "00000000-0000-4000-8000-000000000201";
     const versionId = "00000000-0000-4000-8000-000000000301";

@@ -27,6 +27,7 @@ import type {
   GithubAssessment,
 } from "./evidence";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
+import type { MaterialReportDelta } from "../lib/reportDelta";
 import type { ScanCheck } from "../lib/scanChecklist";
 import type { ResearchPlan } from "../lib/researchDirector";
 import { portfolioRelationshipBinding } from "../lib/portfolioRelationshipBinding";
@@ -167,6 +168,8 @@ export interface Dossier {
     capturedAt: string | null;
     delta: string;
   };
+  /** Highest-priority source-backed change from the exact prior report. */
+  reportDelta?: MaterialReportDelta;
   /**
    * The operator's earlier launches and the earlier projects their own account
    * claims, carried as structure so a frozen report renders each launch, its
