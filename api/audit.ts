@@ -20,6 +20,7 @@ import {
 } from "../src/lib/investigationRuntime.js";
 import { activateReportVersionWithAuthoritativeGraph } from "./_graph.js";
 import type { ResearchIntent } from "../src/lib/researchDirector.js";
+import { recordScanReceipt } from "./_scanReceipts.js";
 
 export const config = { maxDuration: 600 };
 
@@ -254,9 +255,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
   const quotaMetadata = { private: req.query.private === "1" };
-  const quota = creditKey
-    ? await consumeInvestigationQuota(auth, "/api/audit", quotaMetadata, creditKey)
-    : await consumeInvestigationQuota(auth, "/api/audit", quotaMetadata);
+  const effectiveCreditKey = creditKey || crypto.randomUUID();
+  const quota = await consumeInvestigationQuota(auth, "/api/audit", quotaMetadata, effectiveCreditKey);
   if (quota.error) {
     res.status(503).json({ error: quota.error, message: "Usage controls are temporarily unavailable." });
     return;
@@ -270,6 +270,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     return;
   }
+
+  const privateRun = req.query.private === "1";
+  const embeddedProjectAccount = privateRun && typeof req.query.address === "string" && !!req.query.address.trim();
+  const receiptRunKey = embeddedProjectAccount ? `${effectiveCreditKey}:embedded` : effectiveCreditKey;
+  await recordScanReceipt(auth, {
+    runKey: receiptRunKey,
+    route: "/api/audit",
+    kind: "person",
+    canonicalRef: handle,
+    displayQuery: rawHandle || `@${handle}`,
+    privateRun,
+    status: "running",
+    creditsCharged: embeddedProjectAccount ? 0 : quota.used,
+    startedAt: new Date(requestStartedAt).toISOString(),
+  });
 
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
@@ -332,9 +347,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       stageMs: Date.now() - collectionStartedAt,
       elapsedMs: Date.now() - requestStartedAt,
     }));
-    if (!dossier) {
-      send("error", { error: "not_found" });
-    } else {
+      if (!dossier) {
+        await recordScanReceipt(auth, {
+          runKey: receiptRunKey, route: "/api/audit", kind: "person", canonicalRef: handle,
+          displayQuery: rawHandle || `@${handle}`, privateRun, status: "failed",
+          creditsCharged: embeddedProjectAccount ? 0 : quota.used,
+          startedAt: new Date(requestStartedAt).toISOString(), finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - requestStartedAt, failureCode: "not_found",
+          failureDetail: "ARGUS could not resolve this subject.",
+        });
+        send("error", { error: "not_found" });
+      } else {
       let reportVersionId: string | null = null;
       let persistenceFailureReason: string | undefined;
       let persistence: "private" | "persisted" | "failed" = req.query.private === "1" ? "private" : "persisted";
@@ -365,6 +388,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const panelCostToken = persistence === "persisted" && reportVersionId
         ? issuePanelCostToken(auth.organizationId, reportVersionId)
         : undefined;
+      const cost = dossier.cost && typeof dossier.cost === "object" && !Array.isArray(dossier.cost)
+        ? dossier.cost as { usd?: unknown; estimated?: unknown; calls?: Array<{ status?: unknown }> }
+        : null;
+      const providerCostUsd = typeof cost?.usd === "number" && Number.isFinite(cost.usd) ? Math.max(0, cost.usd) : null;
+      const providerIssue = cost?.calls?.some((line) => line?.status === "failed" || line?.status === "partial") === true;
+      const receiptStatus = persistence === "failed" || providerIssue ? "degraded" : "complete";
+      await recordScanReceipt(auth, {
+        runKey: receiptRunKey, route: "/api/audit", kind: "person", canonicalRef: handle,
+        displayQuery: rawHandle || `@${handle}`, privateRun, status: receiptStatus,
+        creditsCharged: embeddedProjectAccount ? 0 : quota.used, reportVersionId,
+        providerCostUsd, costBasis: providerCostUsd == null ? "unknown" : cost?.estimated === false ? "exact" : "estimated",
+        startedAt: new Date(requestStartedAt).toISOString(), finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - requestStartedAt,
+        failureCode: persistence === "failed" ? "persistence_failed" : providerIssue ? "provider_incomplete" : null,
+        failureDetail: persistenceFailureReason ?? null,
+      });
       send("done", {
         ...dossier,
         persistence: {
@@ -377,6 +416,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   } catch (error) {
     console.error("[api/audit] failed", error);
+    await recordScanReceipt(auth, {
+      runKey: receiptRunKey, route: "/api/audit", kind: "person", canonicalRef: handle,
+      displayQuery: rawHandle || `@${handle}`, privateRun, status: "failed",
+      creditsCharged: embeddedProjectAccount ? 0 : quota.used,
+      startedAt: new Date(requestStartedAt).toISOString(), finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - requestStartedAt, failureCode: "investigation_failed",
+      failureDetail: error instanceof Error ? error.message : "The investigation failed before a report was saved.",
+    });
     send("error", { error: "investigation_failed", message: String(error) });
   }
   console.info("[audit-route-runtime]", JSON.stringify({

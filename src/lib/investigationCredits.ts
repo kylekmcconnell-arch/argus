@@ -6,11 +6,15 @@ export interface CreditReservation {
 export async function reserveInvestigationCredit(
   idempotencyKey: string,
   kind: "token" | "investigation",
+  canonicalRef: string,
+  displayQuery = canonicalRef,
+  privateRun = false,
+  startedAt = new Date().toISOString(),
 ): Promise<CreditReservation> {
   const response = await fetch("/api/investigation-credit", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ idempotencyKey, kind }),
+    body: JSON.stringify({ idempotencyKey, kind, canonicalRef, displayQuery, privateRun, startedAt }),
   });
   const body = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) {

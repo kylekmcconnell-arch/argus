@@ -37,7 +37,9 @@ describe("background scan credit gate", () => {
     await vi.waitFor(() => expect(getScanRun("token", input.ref)?.status).toBe("error"));
 
     expect(mocks.reserveInvestigationCredit).toHaveBeenCalledOnce();
-    expect(mocks.reserveInvestigationCredit).toHaveBeenCalledWith(run.creditKey, "token");
+    expect(mocks.reserveInvestigationCredit).toHaveBeenCalledWith(
+      run.creditKey, "token", input.ref, input.ref, false, expect.any(String),
+    );
     expect(mocks.auditToken).toHaveBeenCalledOnce();
     expect(mocks.reserveInvestigationCredit.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.auditToken.mock.invocationCallOrder[0]);

@@ -20,6 +20,7 @@ vi.mock("../_auth.js", () => ({
     displayName: "Analyst",
   })),
 }));
+vi.mock("../_scanReceipts.js", () => ({ recordScanReceipt: vi.fn() }));
 
 vi.mock("../_sanctions-core.js", () => ({
   screenSanctionedAddresses: vi.fn(),

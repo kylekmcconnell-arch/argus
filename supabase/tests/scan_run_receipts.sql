@@ -1,0 +1,11 @@
+begin;
+create extension if not exists pgtap with schema extensions;
+select plan(6);
+select has_table('public', 'scan_run_receipts', 'scan receipt ledger exists');
+select ok(not has_table_privilege('anon', 'public.scan_run_receipts', 'select') and not has_table_privilege('authenticated', 'public.scan_run_receipts', 'select'), 'scan receipts are server mediated');
+select ok(has_table_privilege('service_role', 'public.scan_run_receipts', 'select') and has_table_privilege('service_role', 'public.scan_run_receipts', 'insert') and has_table_privilege('service_role', 'public.scan_run_receipts', 'update') and not has_table_privilege('service_role', 'public.scan_run_receipts', 'delete'), 'service role can append and finish receipts but cannot delete them');
+select has_trigger('public', 'scan_run_receipts', 'scan_run_receipts_transition_guard', 'terminal transition guard exists');
+select ok(not has_function_privilege('anon', 'public.enforce_scan_run_receipt_transition()', 'execute') and not has_function_privilege('authenticated', 'public.enforce_scan_run_receipt_transition()', 'execute'), 'transition guard is not callable by browser roles');
+select col_is_fk('public', 'scan_run_receipts', 'report_version_id', 'receipts bind to immutable reports');
+select * from finish();
+rollback;

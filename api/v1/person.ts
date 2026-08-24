@@ -13,6 +13,7 @@ import {
   coverageQualifiedCompleteness,
   presentPublicReport,
 } from "../../src/lib/reportPresentation.js";
+import { recordScanReceipt } from "../_scanReceipts.js";
 
 export const config = { maxDuration: 600 };
 
@@ -148,6 +149,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     return;
   }
+  await recordScanReceipt(auth, {
+    runKey: idempotencyKey, route: "/api/v1/person", kind: "person", canonicalRef: handle,
+    displayQuery: rawHandle, status: "running", creditsCharged: quota.used,
+    startedAt: new Date(requestStartedAt).toISOString(),
+  });
   try {
     const dossier = await runAudit(handle, () => {}, {
       organizationId: auth.organizationId,
@@ -156,12 +162,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         - ANALYST_FINALIZATION_RESERVE_MS,
     });
     if (!dossier) {
+      await recordScanReceipt(auth, {
+        runKey: idempotencyKey, route: "/api/v1/person", kind: "person", canonicalRef: handle,
+        displayQuery: rawHandle, status: "failed", creditsCharged: quota.used,
+        startedAt: new Date(requestStartedAt).toISOString(), finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - requestStartedAt, failureCode: "not_found",
+        failureDetail: "ARGUS could not resolve this subject.",
+      });
       res.status(404).json({ error: "could not resolve subject (no keys configured for live people audits)" });
       return;
     }
     const reportVersionId = await persistServerDossier(handle, dossier, auth);
+    const providerCostUsd = typeof dossier.cost?.usd === "number" && Number.isFinite(dossier.cost.usd) ? dossier.cost.usd : null;
+    const providerIssue = dossier.cost?.calls?.some((line) => ["failed", "partial"].includes(String((line as { status?: unknown }).status))) === true;
+    await recordScanReceipt(auth, {
+      runKey: idempotencyKey, route: "/api/v1/person", kind: "person", canonicalRef: handle,
+      displayQuery: rawHandle, status: providerIssue ? "degraded" : "complete", creditsCharged: quota.used,
+      reportVersionId, providerCostUsd, costBasis: providerCostUsd == null ? "unknown" : dossier.cost?.estimated === false ? "exact" : "estimated",
+      startedAt: new Date(requestStartedAt).toISOString(), finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - requestStartedAt,
+      failureCode: providerIssue ? "provider_incomplete" : null,
+    });
     res.status(200).json(personApiResult(dossier, reportVersionId));
   } catch (e) {
+    await recordScanReceipt(auth, {
+      runKey: idempotencyKey, route: "/api/v1/person", kind: "person", canonicalRef: handle,
+      displayQuery: rawHandle, status: "failed", creditsCharged: quota.used,
+      startedAt: new Date(requestStartedAt).toISOString(), finishedAt: new Date().toISOString(),
+      durationMs: Date.now() - requestStartedAt, failureCode: "scan_failed",
+      failureDetail: e instanceof Error ? e.message : "The person scan failed.",
+    });
     res.status(500).json({ error: String(e) });
   }
 }

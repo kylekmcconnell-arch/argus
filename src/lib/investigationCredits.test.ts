@@ -12,7 +12,7 @@ describe("investigation credit reservations", () => {
     }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(reserveInvestigationCredit("scan-key-123", "investigation")).resolves.toEqual({
+    await expect(reserveInvestigationCredit("scan-key-123", "investigation", "0xabc", "$ARGUS")).resolves.toEqual({
       chargedCredits: 1,
       remainingCredits: 49_999,
     });
@@ -20,6 +20,10 @@ describe("investigation credit reservations", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       idempotencyKey: "scan-key-123",
       kind: "investigation",
+      canonicalRef: "0xabc",
+      displayQuery: "$ARGUS",
+      privateRun: false,
+      startedAt: expect.any(String),
     });
   });
 
@@ -30,7 +34,7 @@ describe("investigation credit reservations", () => {
       message: "You have no investigation credits left. Ask a workspace owner to add credits before starting another scan.",
     }), { status: 429 })));
 
-    await expect(reserveInvestigationCredit("scan-key-123", "token"))
+    await expect(reserveInvestigationCredit("scan-key-123", "token", "0xabc", "$ARGUS"))
       .rejects.toThrow("You have no investigation credits left");
   });
 });
