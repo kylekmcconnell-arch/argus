@@ -252,6 +252,15 @@ response cannot create duplicate immutable versions. Loading shared audit
 history is read-only; reconciliation may adjust the browser's current projection
 but may not replay historical rows into the write endpoint.
 
+Newly saved token reports freeze a single integrated token-refresh task only
+when a retryable contract, trading, holder, wallet, market, or sanctions check
+remains open. An authorized follow-up may run only that exact task and its
+allowlisted provider set, produces an inactive immutable proposal, and never
+changes the saved source version. Standalone token refreshes do not claim they
+can answer project documents, news, GitHub, or trust-graph questions; those
+require a canonically bound token + project investigation. Legacy token reports
+without the frozen task fail closed until they are rescanned and saved.
+
 ## July 14, 2026 reconciliation
 
 Full-clearance coverage policy. A recorded outcome for every applicable check
