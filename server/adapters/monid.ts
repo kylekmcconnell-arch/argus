@@ -1072,7 +1072,7 @@ export async function collectCompanyNews(
 
   // Resolve to a company identifier: url/uuid pass through, a bare name is
   // resolved to a uuid through the free search (same path as enrichment).
-  let companyId = "";
+  let companyId: string;
   if (looksLikeUuid(query)) {
     companyId = query;
   } else if (looksLikeUrl(query)) {

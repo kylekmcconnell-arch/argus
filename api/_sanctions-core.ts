@@ -9,7 +9,6 @@
 // collector), so both the HTTP screen (GET /api/sanctions) and server-side
 // audit paths (the public /api/v1/token) can screen from one implementation
 // without a handler self-calling its own HTTP route.
-// @ts-ignore — bundled JS sibling
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 
 const RAW = "https://raw.githubusercontent.com/0xB10C/ofac-sanctioned-digital-currency-addresses/lists/sanctioned_addresses_";

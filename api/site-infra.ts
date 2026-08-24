@@ -14,7 +14,6 @@
 //      the site isn't behind a shared CDN, which we detect and down-rank.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createHash } from "node:crypto";
-// @ts-ignore — bundled JS sibling
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 
 export const config = { maxDuration: 25 };

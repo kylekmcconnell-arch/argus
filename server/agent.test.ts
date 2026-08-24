@@ -4489,7 +4489,6 @@ describe("analyst verdict integrity", () => {
     let requestBody = "";
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       requestBody = String(init?.body);
-      const request = JSON.parse(requestBody) as { tool_choice: { name: string } };
       const axes = productionCatalog.map(({ axis, weight, role }) => ({
         axis,
         score: role === SubjectClass.INVESTOR
@@ -5132,12 +5131,8 @@ describe("analyst verdict integrity", () => {
       gaps: [],
     });
     let attempt = 0;
-    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+    const fetchMock = vi.fn(async () => {
       attempt += 1;
-      const request = JSON.parse(String(init?.body)) as {
-        messages: Array<{ content: string }>;
-        tool_choice: { name: string };
-      };
       const f1 = attempt === 1
         ? {
             ...axisRow("F1_identity_verifiability", 10, f1Coverage),

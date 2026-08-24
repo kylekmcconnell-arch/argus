@@ -470,7 +470,7 @@ export async function operatorLaunchAnnouncements(handle: string): Promise<Launc
   const key = env("TWITTERAPI_KEY");
   const clean = handle.replace(/^@/, "");
   if (!key || !clean) return [];
-  let posts: unknown[] = [];
+  let posts: unknown[];
   try {
     posts = await searchFrom(clean, LAUNCH_SEARCH_TERMS, key);
   } catch {

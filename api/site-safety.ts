@@ -11,7 +11,6 @@
 //      off-domain redirect (cloaking), a stub/redirector page, and drainer-kit
 //      / seed-phrase phishing signatures in the returned HTML. Catches fresh
 //      drainers no blocklist has indexed yet.
-// @ts-ignore - bundled JS sibling
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 

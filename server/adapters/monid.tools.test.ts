@@ -27,12 +27,13 @@ function runFetcher(map: {
   pretrade?: unknown;
 }): typeof fetch {
   return ((_input: string | URL | Request, init?: RequestInit) => {
-    let endpoint = "";
-    try {
-      endpoint = (JSON.parse(String(init?.body ?? "{}")) as { endpoint?: string }).endpoint ?? "";
-    } catch {
-      endpoint = "";
-    }
+    const endpoint = (() => {
+      try {
+        return (JSON.parse(String(init?.body ?? "{}")) as { endpoint?: string }).endpoint ?? "";
+      } catch {
+        return "";
+      }
+    })();
     if (endpoint === "/v1/company/search") return Promise.resolve(jsonResponse(map.search ?? {}));
     if (endpoint === "/v1/news") return Promise.resolve(jsonResponse(map.news ?? {}));
     if (endpoint === "/x402/solutions/web3-pre-trade") return Promise.resolve(jsonResponse(map.pretrade ?? {}));

@@ -62,10 +62,13 @@ describe("discoverOperatorsFromFollowings", () => {
 
   it("returns the dev with both crossing signals in its evidence, plus their other projects", async () => {
     vi.stubEnv("TWITTERAPI_KEY", "tw-key");
-    const fetchMock = vi.fn(async (_input?: unknown) => followingsResponse([
+    const fetchMock = vi.fn(async (input?: unknown) => {
+      void input;
+      return followingsResponse([
       { userName: "S0Ldev", name: "S0Ldev", description: "Shipping web3 tools & ideas | Dev since 08 | AI nerd\nBuilding @linkrbot | @uapenfts" },
       { userName: "randomfan", name: "Fan", description: "bullish on @linkrbot" },
-    ]));
+      ]);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const team = await discoverOperatorsFromFollowings("@linkrbot", "Linkr");

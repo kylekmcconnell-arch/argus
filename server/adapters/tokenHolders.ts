@@ -173,7 +173,7 @@ export async function collectHolderProfile(chain: string, address: string): Prom
       : "";
 
   let distributionSource: HolderProfile["distributionSource"] = null;
-  let distributionNote: string | null = null;
+  let distributionNote: string | null;
   let shares: number[] = [];
   if (unordered && explorerShares.length) {
     shares = explorerShares;

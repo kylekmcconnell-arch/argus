@@ -1,7 +1,5 @@
 import {
   clearanceCoverage,
-  decisionCriticalChecks,
-  summarizeChecks,
   type CheckStatus,
   type ScanCheck,
 } from "../src/lib/scanChecklist";

@@ -66,7 +66,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ageMs = Date.now() - scannedAt;
     const staleBuild = (row?.payload?.__build ?? "") !== BUILD;
     if (!row?.payload || staleBuild || !(ageMs >= 0 && ageMs < FRESH_MS)) { res.status(200).json({ available: true, hit: false }); return; }
-    const { __build, ...scan } = row.payload;
+    const scan = { ...row.payload };
+    delete scan.__build;
     res.status(200).json({ available: true, hit: true, ageMs, scan });
   } catch {
     res.status(200).json({ available: true, hit: false });

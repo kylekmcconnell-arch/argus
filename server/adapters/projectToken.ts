@@ -1110,7 +1110,7 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
   };
   let selected: SelectedToken | null = null;
   let search: CoinSearchRow[] | null = null;
-  let candidates: CoinSearchRow[] = [];
+  const candidates: CoinSearchRow[] = [];
   let inspected: Array<{ details: JsonRecord | null; selected: SelectedToken | null }> = [];
   let detailAttempts = 0;
   let contractLookupFailed = false;

@@ -9,7 +9,6 @@
 // Backed by Supabase (kind='threat-receipt'); returns empty/av=false when no
 // store is configured, so the client falls back to its localStorage ledger.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
 import { ledgerAvailable, ledgerUpsert, ledgerRecent, ledgerByDeployer, ledgerByFingerprint, ledgerGet, type LedgerReceipt } from "./_ledger.js";
 
 export const config = { maxDuration: 15 };

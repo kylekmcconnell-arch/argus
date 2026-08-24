@@ -187,7 +187,7 @@ function isSerperProviderOutage(detail?: string): boolean {
 }
 
 function safeSerperFailure(status: number, raw: string): string {
-  let message = "";
+  let message: string;
   try {
     const parsed = asRec(JSON.parse(raw.slice(0, 2_000)));
     message = [parsed.message, parsed.error].find((value): value is string => typeof value === "string") ?? "";

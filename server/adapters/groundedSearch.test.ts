@@ -545,7 +545,7 @@ describe("groundedSearch Serper query quality", () => {
   it("skips /news when newsQuery is empty or sanitizes to null", async () => {
     provision();
     const urls: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       urls.push(String(url));
       if (String(url).includes("serper")) {
         return ok({ organic: [{ title: "T", link: "https://ex.com/a", snippet: "snip" }] });
