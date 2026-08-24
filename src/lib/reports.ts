@@ -7,6 +7,7 @@ import type { Recon } from "../collect/recon";
 import type { Investigation } from "./investigation";
 import type { TokenDossier } from "../token/audit";
 import { personChecks, reconcileInvestigationChecks, tokenChecks, type ScanCheck } from "./scanChecklist";
+import type { ResearchPlan } from "./researchDirector";
 import { normalizeSubjectRef } from "./subjectRef";
 import type {
   ReportAttestationState,
@@ -115,6 +116,105 @@ export function reportCompleteness(
   ) ? "complete" : "partial";
 }
 
+const TOKEN_RESCAN_CHECK_IDS = new Set([
+  "contract-safety",
+  "buy-sell-simulation",
+  "holder-distribution",
+  "wallet-clustering",
+  "operator-funding-trace",
+  "market-intelligence",
+  "ofac-sanctions-address",
+]);
+export const TOKEN_GAP_TASK_ID = "token-evidence-refresh";
+export const TOKEN_GAP_DELEGATES = [
+  "dexscreener",
+  "goplus",
+  "honeypot-is",
+  "rugcheck",
+  "blockscout",
+  "coingecko",
+  "geckoterminal",
+  "ofac-sdn",
+  "arkham",
+  "clone-check",
+  "social-activity",
+] as const;
+
+/**
+ * Freeze one coarse, honest token-rescan task alongside a saved token report.
+ *
+ * The token collector is an integrated safety audit rather than a collection
+ * of independently callable person-research specialists. The authorization
+ * therefore exposes one task whose delegate set exactly describes that audit,
+ * and only for retryable checks the audit can actually attempt. Project docs,
+ * news, GitHub, and trust-graph gaps are intentionally excluded because a
+ * standalone token rescan cannot answer them.
+ */
+export function withTokenGapInvestigationPlan(
+  payload: TokenDossier,
+  checks: readonly ScanCheck[],
+  createdAt = new Date().toISOString(),
+): TokenDossier {
+  const open = checks.filter((check) =>
+    Boolean(check.checkId)
+    && TOKEN_RESCAN_CHECK_IDS.has(check.checkId as string)
+    && check.retryable !== false
+    && (check.status === "unknown" || check.status === "unavailable" || check.status === "stale"));
+  if (!open.length) return payload;
+
+  const questions = open.map((check) => ({
+    id: `token-gap:${check.checkId}`,
+    prompt: `Can a fresh token scan complete the ${check.label.toLowerCase()} check?`,
+    state: check.status,
+    materiality: check.decisionCritical === false ? "important" : "critical",
+  }));
+  const taskId = TOKEN_GAP_TASK_ID;
+  const researchPlan: ResearchPlan = {
+    schemaVersion: 1,
+    intent: "investment_due_diligence",
+    subject: payload.address,
+    roles: ["TOKEN"],
+    createdAt,
+    tasks: [{
+      id: taskId,
+      capability: "token_and_market",
+      question: "Re-run the token's contract, trading, holder, sanctions, market, and wallet checks.",
+      why: "These checks share one integrated token audit and must be refreshed together to preserve a coherent score.",
+      priority: questions.some((question) => question.materiality === "critical") ? "critical" : "high",
+      delegates: [...TOKEN_GAP_DELEGATES],
+      checkIds: open.map((check) => check.checkId as string),
+      triggeredBy: questions.map((question) => question.id),
+      rank: 1,
+      decisionImpact: 5,
+      costClass: "medium",
+      dispatchReason: "A retryable token-safety question remains open in the saved report.",
+      stopWhen: "The integrated token audit finishes and its immutable proposal is ready for analyst review.",
+      blockedBy: [],
+      state: "planned",
+    }],
+    nextActions: [{
+      rank: 1,
+      taskId,
+      capability: "token_and_market",
+      action: "Run a fresh integrated token audit and compare it with the saved report.",
+      whyNow: "One or more retryable token checks do not have a completed outcome.",
+      delegates: [...TOKEN_GAP_DELEGATES],
+    }],
+  };
+  const current = payload as TokenDossier & {
+    intelligence?: Record<string, unknown>;
+    researchPlan?: ResearchPlan;
+  };
+  return {
+    ...current,
+    researchPlan,
+    intelligence: {
+      ...(current.intelligence ?? {}),
+      questions,
+    },
+  } as TokenDossier;
+}
+
 export async function syncReport(
   kind: ReportKind,
   ref: string,
@@ -124,7 +224,10 @@ export async function syncReport(
   score?: number | null,
 ): Promise<ReportSyncResult> {
   const checkRuns = reportChecks(kind, payload);
-  const completenessState = reportCompleteness(kind, payload, checkRuns);
+  const persistedPayload = kind === "token"
+    ? withTokenGapInvestigationPlan(payload as TokenDossier, checkRuns)
+    : payload;
+  const completenessState = reportCompleteness(kind, persistedPayload, checkRuns);
   // The server binds this id to the immutable version. Every retry below sends
   // the same value, so a response lost after a successful commit cannot create
   // duplicate report versions or charge downstream work twice.
@@ -133,7 +236,7 @@ export async function syncReport(
     kind,
     ref,
     query,
-    payload,
+    payload: persistedPayload,
     verdict,
     score,
     checkRuns,

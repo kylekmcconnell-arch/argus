@@ -23,6 +23,9 @@ The build does not ship when any of these are true:
 - a bounded follow-up mutates its frozen source report, automatically activates
   a proposal, expands beyond saved tasks, or drops the frozen token evidence from
   a token + project investigation.
+- a standalone token follow-up runs without its exact frozen integrated task,
+  advertises project-context work its collector cannot perform, or replaces the
+  active report before analyst review.
 
 Passing the obvious-facts gate is necessary but not sufficient. At least one
 live founder and one live project canary must also produce a decision-changing

@@ -2,7 +2,7 @@
 // from /api/ask: conversation remains frozen-report reasoning, while this route
 // may spend a bounded research budget and can create only an inactive proposal.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { runAudit } from "./_collector.js";
+import { auditToken, collectSocialActivity, resolveInput, runAudit } from "./_collector.js";
 import {
   consumeInvestigationQuota,
   requireArgusAuth,
@@ -14,8 +14,15 @@ import {
 import { loadExactVersionReport } from "./report.js";
 import { persistGapInvestigationProposalBundle } from "./_provenance.js";
 import { recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
+import { screenSanctionedAddresses } from "./_sanctions-core.js";
 import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
-import { reportChecks, reportCompleteness } from "../src/lib/reports.js";
+import {
+  reportChecks,
+  reportCompleteness,
+  TOKEN_GAP_DELEGATES,
+  TOKEN_GAP_TASK_ID,
+  withTokenGapInvestigationPlan,
+} from "../src/lib/reports.js";
 import {
   authorizeGapInvestigation,
   GapInvestigationAuthorizationError,
@@ -23,14 +30,17 @@ import {
 } from "../src/lib/gapInvestigation.js";
 import type { Dossier } from "../src/data/dossier.js";
 import type { TraceStep } from "../src/data/evidence.js";
+import type { RunnableTokenInput } from "../src/lib/resolveInput.js";
+import type { TokenDossier } from "../src/token/audit.js";
 
 export const config = { maxDuration: 600 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const METHODOLOGY_VERSION = "argus-person-v5-project-strength-bands";
+const TOKEN_METHODOLOGY_VERSION = "argus-token-v2-terminal-outcomes";
 const INVESTIGATION_METHODOLOGY_VERSION = "argus-investigation-v2-terminal-outcomes";
 type JsonRecord = Record<string, unknown>;
-type SupportedGapReportKind = "person" | "investigation";
+type SupportedGapReportKind = "person" | "token" | "investigation";
 
 const record = (value: unknown): JsonRecord =>
   value !== null && typeof value === "object" && !Array.isArray(value)
@@ -137,6 +147,7 @@ function projectAccountHandle(payload: unknown): string {
 }
 
 function collectorHandle(kind: SupportedGapReportKind, report: JsonRecord, payload: unknown): string {
+  if (kind === "token") throw new Error("token reports use the bounded token collector");
   const handle = kind === "person"
     ? text(report.ref, 80).replace(/^@/, "")
     : projectAccountHandle(payload);
@@ -148,15 +159,47 @@ function collectorHandle(kind: SupportedGapReportKind, report: JsonRecord, paylo
   return handle;
 }
 
+function tokenCollectorInput(report: JsonRecord): RunnableTokenInput {
+  const input = resolveInput(text(report.ref, 500));
+  if (
+    input.kind !== "token"
+    || (input.via !== "evm" && input.via !== "solana" && input.via !== "dexscreener")
+  ) {
+    throw new Error("source report is not bound to an exact token contract or DexScreener URL");
+  }
+  return input as RunnableTokenInput;
+}
+
+function assertTokenCollectorScope(scope: AuthorizedResearchScope): void {
+  const allowedDelegates = new Set<string>(TOKEN_GAP_DELEGATES);
+  if (
+    scope.taskIds.length !== 1
+    || scope.taskIds[0] !== TOKEN_GAP_TASK_ID
+    || scope.capabilities.length !== 1
+    || scope.capabilities[0] !== "token_and_market"
+    || scope.delegates.length !== allowedDelegates.size
+    || scope.delegates.some((delegate) => !allowedDelegates.has(delegate))
+  ) {
+    throw new GapInvestigationAuthorizationError(
+      "research_task_not_allowed",
+      "The saved token follow-up does not match the bounded integrated token collector.",
+    );
+  }
+}
+
 function proposedReportPayload(
   kind: SupportedGapReportKind,
   sourcePayload: unknown,
-  dossier: Dossier,
+  dossier: Dossier | TokenDossier,
 ): JsonRecord {
-  if (kind === "person") return dossier as unknown as JsonRecord;
+  if (kind === "person") return dossier as Dossier as unknown as JsonRecord;
+  if (kind === "token") {
+    const token = dossier as TokenDossier;
+    return withTokenGapInvestigationPlan(token, reportChecks("token", token)) as unknown as JsonRecord;
+  }
   return {
     ...record(sourcePayload),
-    projectAccount: dossier,
+    projectAccount: dossier as Dossier,
     projectAccountAudit: {
       state: "complete",
       note: "The authorized project-account follow-up completed and is preserved in this proposed report version.",
@@ -164,15 +207,28 @@ function proposedReportPayload(
   };
 }
 
-function reportProjection(kind: SupportedGapReportKind, report: JsonRecord, payload: JsonRecord, dossier: Dossier) {
+function reportProjection(
+  kind: SupportedGapReportKind,
+  report: JsonRecord,
+  payload: JsonRecord,
+  dossier: Dossier | TokenDossier,
+) {
   if (kind === "person") {
+    const person = dossier as Dossier;
     return {
-      verdict: typeof dossier.report?.composite_verdict === "string"
-        ? dossier.report.composite_verdict.slice(0, 40)
+      verdict: typeof person.report?.composite_verdict === "string"
+        ? person.report.composite_verdict.slice(0, 40)
         : null,
-      score: typeof dossier.report?.governing_score === "number"
-        ? dossier.report.governing_score
+      score: typeof person.report?.governing_score === "number"
+        ? person.report.governing_score
         : null,
+    };
+  }
+  if (kind === "token") {
+    const token = dossier as TokenDossier;
+    return {
+      verdict: text(token.verdict, 40) || null,
+      score: typeof token.score === "number" && Number.isFinite(token.score) ? token.score : null,
     };
   }
   const token = record(payload.token);
@@ -212,10 +268,10 @@ async function authorizeAndExecute(
   }
   const report = record(exact.report);
   const kind = text(report.kind, 40);
-  if (kind !== "person" && kind !== "investigation") {
+  if (kind !== "person" && kind !== "token" && kind !== "investigation") {
     res.status(409).json({
       error: "supported_report_required",
-      note: "Bounded follow-up is available for person reports and saved token + project investigations.",
+      note: "Bounded follow-up is available for person, token, and saved token + project reports.",
     });
     return;
   }
@@ -230,6 +286,7 @@ async function authorizeAndExecute(
       timeBudgetSeconds,
       acceptedCostCeilingUsd,
     });
+    if (supportedKind === "token") assertTokenCollectorScope(scope);
   } catch (error) {
     if (error instanceof GapInvestigationAuthorizationError) {
       res.status(409).json({ error: error.code, note: error.message });
@@ -287,23 +344,46 @@ async function authorizeAndExecute(
       gapId: scope.gap.id,
       taskIds: scope.taskIds,
     }];
-    const handle = collectorHandle(supportedKind, report, payload);
     const startedAt = Date.now();
-    const dossier = await runAudit(handle, (step) => {
-      if (receipts.length < 199) receipts.push(traceReceipt(step));
-    }, {
-      organizationId: auth.organizationId,
-      intent: savedIntent(payload),
-      analystDeadlineAt: startedAt + scope.timeBudgetSeconds * 1_000 - 30_000,
-      authorizedResearchScope: {
-        taskIds: scope.taskIds,
-        capabilities: scope.capabilities,
-        delegates: scope.delegates,
-      },
-    });
+    const handle = supportedKind === "token" ? null : collectorHandle(supportedKind, report, payload);
+    let dossier: Dossier | TokenDossier | null;
+    if (supportedKind === "token") {
+      const deadlineMs = Math.max(1_000, scope.timeBudgetSeconds * 1_000 - 15_000);
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        dossier = await Promise.race([
+          auditToken(tokenCollectorInput(report), (step) => {
+            if (receipts.length < 199) receipts.push(traceReceipt(step));
+          }, {
+            force: true,
+            screenSanctions: screenSanctionedAddresses,
+            collectSocialActivity,
+          }),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => reject(new Error("bounded token collector exceeded its authorized time budget")), deadlineMs);
+          }),
+        ]);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    } else {
+      dossier = await runAudit(handle as string, (step) => {
+        if (receipts.length < 199) receipts.push(traceReceipt(step));
+      }, {
+        organizationId: auth.organizationId,
+        intent: savedIntent(payload),
+        analystDeadlineAt: startedAt + scope.timeBudgetSeconds * 1_000 - 30_000,
+        authorizedResearchScope: {
+          taskIds: scope.taskIds,
+          capabilities: scope.capabilities,
+          delegates: scope.delegates,
+        },
+      });
+    }
     if (!dossier) throw new Error("bounded collector returned no dossier");
 
-    const costRecord = record(dossier.cost);
+    const personDossier = supportedKind === "token" ? null : dossier as Dossier;
+    const costRecord = record(personDossier?.cost);
     const observedCostUsd = typeof costRecord.usd === "number" && Number.isFinite(costRecord.usd)
       ? Math.max(0, costRecord.usd)
       : 0;
@@ -317,15 +397,15 @@ async function authorizeAndExecute(
       observedCostUsd,
     );
     const { verdict, score } = reportProjection(supportedKind, report, proposed, dossier);
-    const attestationState = supportedKind === "person" && dossier.live
+    const attestationState = (supportedKind === "person" || supportedKind === "token") && dossier.live
       ? "server_collected" as const
       : "analyst_submitted" as const;
     const checks = supportedKind === "person"
-      ? dossier.checkRuns ?? []
-      : reportChecks("investigation", proposed);
+      ? personDossier?.checkRuns ?? []
+      : reportChecks(supportedKind, proposed);
     const requestedCompleteness = supportedKind === "person"
-      ? dossier.completeness_state === "complete" ? "complete" : "partial"
-      : reportCompleteness("investigation", proposed, checks);
+      ? personDossier?.completeness_state === "complete" ? "complete" : "partial"
+      : reportCompleteness(supportedKind, proposed, checks);
     const completenessState = observedCostUsd > scope.estimatedCostCeilingUsd
       ? "partial" as const
       : coverageQualifiedCompleteness({
@@ -341,14 +421,16 @@ async function authorizeAndExecute(
       observedCostUsd,
       estimatedCostCeilingUsd: scope.estimatedCostCeilingUsd,
     });
-    const runId = typeof dossier.report?.audit_id === "string"
-      ? `gap:${authorizationId}:${dossier.report.audit_id}`.slice(0, 200)
-      : `gap:${authorizationId}`;
+    const runId = personDossier && typeof personDossier.report?.audit_id === "string"
+      ? `gap:${authorizationId}:${personDossier.report.audit_id}`.slice(0, 200)
+      : supportedKind === "token"
+        ? `gap:${authorizationId}:${(dossier as TokenDossier).address}`.slice(0, 200)
+        : `gap:${authorizationId}`;
     const proposedReportVersionId = await persistGapInvestigationProposalBundle(credentials, {
       authorizationId,
       organizationId: auth.organizationId,
       kind: supportedKind,
-      canonicalRef: supportedKind === "person" ? handle.toLowerCase() : text(report.ref, 500),
+      canonicalRef: supportedKind === "person" ? (handle as string).toLowerCase() : text(report.ref, 500),
       query: text(report.query, 200) || (supportedKind === "person" ? `@${handle}` : text(report.ref, 200)),
       createdBy: auth.userId,
       payload: proposed,
@@ -360,10 +442,12 @@ async function authorizeAndExecute(
       completenessState,
       methodologyVersion: process.env.ARGUS_METHODOLOGY_VERSION
         || (supportedKind === "person"
-          ? dossier.axisCitationVersion === 1 ? METHODOLOGY_VERSION : null
-          : INVESTIGATION_METHODOLOGY_VERSION),
-      providerSnapshot: dossier.providerSnapshot ?? {},
-      cost: dossier.cost ?? {},
+          ? personDossier?.axisCitationVersion === 1 ? METHODOLOGY_VERSION : null
+          : supportedKind === "token"
+            ? TOKEN_METHODOLOGY_VERSION
+            : INVESTIGATION_METHODOLOGY_VERSION),
+      providerSnapshot: personDossier?.providerSnapshot ?? {},
+      cost: personDossier?.cost ?? {},
       executionReceipts: receipts.slice(0, 200),
     });
     const costLines = Array.isArray(costRecord.calls) ? costRecord.calls as PanelCostLine[] : [];

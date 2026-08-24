@@ -4,7 +4,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions, pg_catalog;
-select plan(2);
+select plan(3);
 
 insert into public.organizations (id, slug, name)
 values ('00000000-0000-4000-8000-000000000105', 'gap-proposal-test', 'Gap Proposal Test');
@@ -284,5 +284,73 @@ end;
 $token_project_authorization$;
 
 select pass('token and project investigations authorize their nested saved project plan');
+
+do $standalone_token_authorization$
+declare
+  v_source uuid;
+  v_authorization uuid;
+begin
+  select persisted.report_version_id into v_source
+  from public.persist_report_version(
+    '00000000-0000-4000-8000-000000000105',
+    'token',
+    '0x0000000000000000000000000000000000000106',
+    '$SOLO',
+    '00000000-0000-4000-8000-000000000106',
+    '{
+      "address":"0x0000000000000000000000000000000000000106",
+      "researchPlan":{
+        "schemaVersion":1,
+        "tasks":[{
+          "id":"token-evidence-refresh",
+          "capability":"token_and_market",
+          "state":"planned",
+          "blockedBy":[],
+          "delegates":["dexscreener","goplus","honeypot-is","rugcheck","blockscout","coingecko","geckoterminal","ofac-sdn","arkham","clone-check","social-activity"]
+        }]
+      },
+      "intelligence":{
+        "questions":[{
+          "id":"token-gap:contract-safety",
+          "prompt":"Can a fresh token scan complete the contract safety check?",
+          "state":"unavailable"
+        }]
+      }
+    }'::jsonb,
+    'standalone-token-gap-source',
+    'analyst_submitted',
+    'INCOMPLETE',
+    44,
+    'partial',
+    'argus-token-v2-terminal-outcomes',
+    '{}'::jsonb,
+    '{}'::jsonb
+  ) persisted;
+
+  perform public.activate_report_version(
+    '00000000-0000-4000-8000-000000000105',
+    v_source
+  );
+  v_authorization := public.authorize_gap_investigation(
+    '00000000-0000-4000-8000-000000000105',
+    v_source,
+    'token-gap:contract-safety',
+    'Can a fresh token scan complete the contract safety check?',
+    array['token-evidence-refresh'],
+    array['token-evidence-refresh'],
+    array['token_and_market'],
+    array['dexscreener','goplus','honeypot-is','rugcheck','blockscout','coingecko','geckoterminal','ofac-sdn','arkham','clone-check','social-activity'],
+    '00000000-0000-4000-8000-000000000106',
+    now() + interval '10 minutes',
+    300,
+    1.50
+  );
+  if v_authorization is null then
+    raise exception 'standalone token authorization returned no id';
+  end if;
+end;
+$standalone_token_authorization$;
+
+select pass('standalone token reports authorize only their frozen integrated token task');
 select * from finish();
 rollback;
