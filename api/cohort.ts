@@ -9,6 +9,7 @@
 // our answer is never stale. Auth-gated (spends provider budget); Solana via
 // Helius getTokenAccountsByOwner, EVM via keyless Blockscout token-balances.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { arr, rec } from "../src/lib/json.js";
 import { requireArgusAuth } from "./_auth.js";
 import { ledgerRecordHolderEdges, ledgerWalletReputation } from "./_ledger.js";
 
@@ -43,11 +44,11 @@ async function heliusTokens(key: string, owner: string): Promise<string[]> {
       signal: AbortSignal.timeout(9000),
     });
     if (!r.ok) return [];
-    const d = (await r.json()) as any;
+    const d = rec(await r.json());
     const out: string[] = [];
-    for (const a of d?.result?.value ?? []) {
-      const info = a?.account?.data?.parsed?.info;
-      if (info?.mint && (info.tokenAmount?.uiAmount ?? 0) > 0) out.push(String(info.mint).toLowerCase());
+    for (const a of arr(rec(d.result).value)) {
+      const info = rec(rec(rec(rec(rec(a).account).data).parsed).info);
+      if (info.mint && Number(rec(info.tokenAmount).uiAmount ?? 0) > 0) out.push(String(info.mint).toLowerCase());
     }
     return out;
   } catch { return []; }
@@ -57,11 +58,13 @@ async function blockscoutTokens(base: string, addr: string): Promise<{ mint: str
   try {
     const r = await fetch(`${base}/api/v2/addresses/${addr}/token-balances`, { signal: AbortSignal.timeout(9000) });
     if (!r.ok) return [];
-    const d = (await r.json()) as any[];
+    const d = await r.json();
     const out: { mint: string; symbol: string }[] = [];
-    for (const t of Array.isArray(d) ? d : []) {
-      if ((t?.token?.type ?? "").includes("ERC-20") && Number(t?.value ?? 0) > 0) {
-        out.push({ mint: String(t.token.address).toLowerCase(), symbol: String(t.token.symbol ?? "") });
+    for (const entry of arr(d)) {
+      const t = rec(entry);
+      const token = rec(t.token);
+      if (String(token.type ?? "").includes("ERC-20") && Number(t.value ?? 0) > 0) {
+        out.push({ mint: String(token.address).toLowerCase(), symbol: String(token.symbol ?? "") });
       }
     }
     return out;
@@ -73,24 +76,26 @@ async function solHolders(mint: string): Promise<string[]> {
   try {
     const r = await fetch(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15000) });
     if (!r.ok) return [];
-    const rc = (await r.json()) as any;
-    const ka: Record<string, any> = rc.knownAccounts ?? {};
-    return (rc.topHolders ?? [])
-      .filter((h: any) => { const l = ka[h.address] || ka[h.owner]; return !(l?.type && /market|amm|pool|liquid|lp/i.test(l.type)) && !h.insider; })
-      .map((h: any) => String(h.owner || h.address || ""))
-      .filter((a: string) => SOLADDR.test(a)).slice(0, MAX_HOLDERS);
+    const rc = rec(await r.json());
+    const ka = rec(rc.knownAccounts);
+    return arr(rc.topHolders)
+      .map((entry) => rec(entry))
+      .filter((h) => { const l = rec(ka[String(h.address)] || ka[String(h.owner)]); return !(l.type && /market|amm|pool|liquid|lp/i.test(String(l.type))) && !h.insider; })
+      .map((h) => String(h.owner || h.address || ""))
+      .filter((a) => SOLADDR.test(a)).slice(0, MAX_HOLDERS);
   } catch { return []; }
 }
 async function evmHolders(chainid: number, token: string): Promise<string[]> {
   try {
     const r = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainid}?contract_addresses=${token}`, { signal: AbortSignal.timeout(12000) });
     if (!r.ok) return [];
-    const d = (await r.json()) as any;
-    const info = d?.result?.[token.toLowerCase()];
-    return (info?.holders ?? [])
-      .filter((h: any) => h.is_contract !== 1)
-      .map((h: any) => String(h.address ?? "").toLowerCase())
-      .filter((a: string) => EVM.test(a)).slice(0, MAX_HOLDERS);
+    const d = rec(await r.json());
+    const info = rec(rec(d.result)[token.toLowerCase()]);
+    return arr(info.holders)
+      .map((entry) => rec(entry))
+      .filter((h) => h.is_contract !== 1)
+      .map((h) => String(h.address ?? "").toLowerCase())
+      .filter((a) => EVM.test(a)).slice(0, MAX_HOLDERS);
   } catch { return []; }
 }
 
@@ -104,10 +109,12 @@ async function enrich(chain: string, mints: string[]): Promise<Map<string, { sym
   try {
     const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mints.slice(0, 30).join(",")}`, { signal: AbortSignal.timeout(10000) });
     if (!r.ok) return out;
-    const d = (await r.json()) as any;
-    for (const p of d?.pairs ?? []) {
-      const a = String(p?.baseToken?.address ?? "").toLowerCase();
-      if (a && !out.has(a)) out.set(a, { symbol: p.baseToken?.symbol ?? "", mcap: p.marketCap ?? p.fdv ?? null, liq: p.liquidity?.usd ?? null });
+    const d = rec(await r.json());
+    for (const entry of arr(d.pairs)) {
+      const p = rec(entry);
+      const baseToken = rec(p.baseToken);
+      const a = String(baseToken.address ?? "").toLowerCase();
+      if (a && !out.has(a)) out.set(a, { symbol: String(baseToken.symbol ?? ""), mcap: (p.marketCap ?? p.fdv ?? null) as number | null, liq: (rec(p.liquidity).usd ?? null) as number | null });
     }
   } catch { /* best-effort */ }
   return out;
