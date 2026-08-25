@@ -51,6 +51,7 @@ import {
   Briefcase,
   CaretDown,
   ChartLineUp,
+  ChatsCircle,
   ClipboardText,
   Database,
   DotsThree,
@@ -80,6 +81,9 @@ import {
   type BasicFactLeadView,
   type BasicFactView,
 } from "./BasicFactsPanel";
+import { SocialActivityPanel } from "./SocialActivityPanel";
+import { SubjectAccusationStage } from "./SubjectAccusationStage";
+import { visibleInvestigativeLeads } from "../lib/subjectLeads";
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { publicProviderExplanation } from "../lib/intelligencePresentation";
 import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
@@ -771,6 +775,14 @@ export function InvestigationReport({
   );
   const { token, projectX, siteUrl, recon, projectAccount, founders, deployerTrail } = inv;
   const accountReport = projectAccount?.report;
+  const accountLeadSubject = accountReport?.handle || projectAccount?.handle || projectX || "";
+  const accountLeads = accountReport
+    ? visibleInvestigativeLeads({
+      handle: accountLeadSubject,
+      investigative_leads: accountReport.investigative_leads,
+      publishable_findings: accountReport.publishable_findings,
+    })
+    : { subjectLeads: [], relatedEntityLeads: [], subjectAdverseLeads: [] };
   const accountGoverning = accountReport?.role_reports?.find((rr) => rr.role === accountReport.governing_role);
   const accountAxes = accountGoverning ? Object.entries(accountGoverning.axes ?? {}) : [];
   // The deployer wallet's age, said in the unit that carries it and stamped with
@@ -1358,6 +1370,8 @@ export function InvestigationReport({
     { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
     { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
     { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
+    ...(token.socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
+    ...(accountLeads.subjectLeads.length > 0 ? [{ href: "#subject-leads" as const, label: "Accusations", icon: <WarningCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
     { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
     ...(hasConnectionsChapter ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
     ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
@@ -1976,6 +1990,9 @@ export function InvestigationReport({
               protocolTvl={projectAccount?.protocolTvl}
               canonicalGeckoId={projectAccount?.projectToken?.coingeckoId}
             />
+            {token.socialActivity && (
+              <SocialActivityPanel snapshot={token.socialActivity} className="mt-3" panelCostToken={panelCostToken} />
+            )}
           </div>
         </div>
 
@@ -1985,6 +2002,19 @@ export function InvestigationReport({
             title="Who is behind this project"
             description="Team identity is a core diligence question. Start with the people and roles supported by sources, then review the project account and token creator."
           />
+          {accountLeads.subjectLeads.length > 0 && (
+            <div id="subject-leads" className="mb-4 scroll-mt-28">
+              <h3 className="text-[16px] font-semibold text-ink">What people accused</h3>
+              <p className="mt-1 text-[12.5px] text-ink-faint">these name the subject directly · never counted in this score</p>
+              <div className="mt-3">
+                <SubjectAccusationStage
+                  leads={accountLeads.subjectLeads}
+                  subject={accountLeadSubject}
+                  panelCostToken={panelCostToken}
+                />
+              </div>
+            </div>
+          )}
           <div id="investigation-evidence" className="scroll-mt-28 grid gap-3 lg:grid-cols-2">
           {/* on-chain */}
           <Card title="Token record" accent={readiness.status === "ready" ? tm.color : "var(--color-caution)"}>

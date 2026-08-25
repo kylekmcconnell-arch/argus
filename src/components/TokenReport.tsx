@@ -501,7 +501,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           />
         </div>
 
-        {d.socialActivity && <SocialActivityPanel snapshot={d.socialActivity} className="mt-4" />}
+        {d.socialActivity && <SocialActivityPanel snapshot={d.socialActivity} className="mt-4" panelCostToken={panelCostToken} />}
 
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         {showCurrentIntelligence && panelCostToken && (

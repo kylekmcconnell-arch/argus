@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PfpCheck } from "./PfpCheck";
+import { PfpAvatar, PfpCheck } from "./PfpCheck";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -100,5 +100,31 @@ describe("legacy profile-photo integrity overlay", () => {
     expect(fetcher).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Brand image expected");
     expect(container.textContent).toContain("does not judge this image as if it were a person's face");
+  });
+});
+
+describe("PfpAvatar", () => {
+  it("renders a trusted official preview and does not treat a later break as identity", async () => {
+    const fetcher = vi.fn();
+    vi.stubGlobal("fetch", fetcher);
+    await act(async () => {
+      root.render(<PfpAvatar handle="@alice" previewUrl="https://pbs.twimg.com/profile_images/1/alice.jpg" />);
+    });
+    const img = container.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("https://pbs.twimg.com/profile_images/1/alice.jpg");
+    expect(img?.getAttribute("alt")).toBe("");
+    expect(fetcher).not.toHaveBeenCalled();
+    act(() => img?.dispatchEvent(new Event("error")));
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.textContent).toContain("A");
+  });
+
+  it("ignores an untrusted preview URL and falls back to a letter without hotlinking it", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    await act(async () => {
+      root.render(<PfpAvatar handle="@alice" previewUrl="https://evil.example/alice.jpg" />);
+    });
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.textContent).toContain("A");
   });
 });

@@ -111,6 +111,16 @@ import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { SocialActivityPanel } from "./SocialActivityPanel";
+import { SubjectAccusationStage } from "./SubjectAccusationStage";
+import {
+  SUBJECT_LEAD_RELATIONSHIP,
+  actionableInvestigativeLead,
+  findingTarget,
+  isPublishableSubjectFinding,
+  leadArtifactConfirmed,
+  leadRelationshipLabel,
+  normalizedEntityHandle,
+} from "../lib/subjectLeads";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -689,56 +699,6 @@ function CorroborationTable({
 
 /* ── findings ledger ──────────────────────────────────────────────── */
 
-type ReportFinding = Dossier["report"]["publishable_findings"][number];
-
-const normalizedEntityHandle = (value?: string | null): string | null => {
-  if (!value) return null;
-  const match = value.trim().match(/^@?([A-Za-z0-9_]{1,30})$/);
-  return match ? match[1].toLowerCase() : null;
-};
-
-const findingTarget = (finding: ReportFinding): string | null =>
-  finding.finding_scope?.target_entity_key
-  ?? finding.claim.match(/@([A-Za-z0-9_]{1,30})/)?.[0]
-  ?? null;
-
-/**
- * Stored snapshots are immutable, including early versions produced before the
- * engine enforced entity scope. Apply the current publication boundary as a
- * read-time projection so a historical model lead can never keep appearing as
- * verified subject evidence merely because the underlying payload is frozen.
- */
-function isPublishableSubjectFinding(finding: ReportFinding, subject: string): boolean {
-  if (finding.evidence_origin === "model_lead" || finding.artifact_verified === false) return false;
-  if (finding.independent_source_count < 1) return false;
-  if (finding.verification_status !== "Verified" && finding.verification_status !== "Reported") return false;
-  const scope = finding.finding_scope;
-  if (!scope) {
-    // Pre-scope deterministic findings remain readable, but legacy discovery
-    // types fail closed because their actual target was not stored separately.
-    return !/Lead$/i.test(finding.finding_type);
-  }
-  return scope.scope === "direct_subject"
-    && scope.relationship_to_subject === "self"
-    && normalizedEntityHandle(scope.target_entity_key) === normalizedEntityHandle(subject);
-}
-
-function actionableInvestigativeLead(finding: ReportFinding): boolean {
-  if (finding.artifact_verified === true && finding.evidence_origin !== "model_lead") return true;
-  const source = safeSourceLink(finding.source_url);
-  if (!source) return false;
-  try {
-    const url = new URL(source.href);
-    const path = url.pathname.toLowerCase();
-    return path !== "/search"
-      && !path.startsWith("/search/")
-      && !url.searchParams.has("q")
-      && !url.searchParams.has("query");
-  } catch {
-    return false;
-  }
-}
-
 function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable_findings"] }) {
   if (!findings.length) return null;
   return (
@@ -829,36 +789,6 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
       })}
     </div>
   );
-}
-
-const SUBJECT_LEAD_RELATIONSHIP = "About this subject";
-
-/**
- * The caption a lead row carries. Derived once, so the split that decides which
- * card a lead lands in can never disagree with the label printed on the row: a
- * sweep row about the subject themselves must not be filed under related
- * entities, and a row about an associate must not be read as subject evidence.
- */
-function leadRelationshipLabel(lead: ReportFinding, subject: string): string {
-  const scope = lead.finding_scope;
-  if (scope?.relationship_to_subject === "associate") return "About an associate";
-  if (scope?.relationship_to_subject === "venture") return "About a venture";
-  if (scope?.relationship_to_subject === "self") return SUBJECT_LEAD_RELATIONSHIP;
-  const target = normalizedEntityHandle(findingTarget(lead));
-  return target !== null && target !== normalizedEntityHandle(subject)
-    ? "About a related company"
-    : SUBJECT_LEAD_RELATIONSHIP;
-}
-
-/**
- * A lead is confirmed about the entity it names only when a deterministic
- * collector actually fetched the artifact. Model output stays a rumor however
- * confident it sounds.
- */
-function leadArtifactConfirmed(lead: ReportFinding): boolean {
-  return lead.verification_status === "Verified"
-    && lead.artifact_verified === true
-    && lead.evidence_origin !== "model_lead";
 }
 
 function InvestigativeLeadsLedger({ leads, subject }: {
@@ -3498,7 +3428,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         )}
 
         {f.socialActivity && roles.includes(SubjectClass.PROJECT) && (
-          <SocialActivityPanel snapshot={f.socialActivity} className="mt-3" />
+          <SocialActivityPanel snapshot={f.socialActivity} className="mt-3" panelCostToken={panelCostToken} />
         )}
 
         <DiligenceEvidenceLedgers
@@ -4618,18 +4548,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {subjectLeads.length > 0 && (
           <div id="subject-leads" className="scroll-mt-28">
             <Section
-              title={`Unverified leads about ${report.handle}`}
+              title="What people accused"
               kicker="these name the subject directly · never counted in this score"
             >
-              <div className="finding tint-caution px-4 py-3">
-                <p className="text-[12.5px] leading-relaxed text-ink-dim">
-                  {subjectLeadSummary && `${subjectLeadSummary} `}
-                  Read each one before you rely on this result. Not corroborated is not the same as untrue.
-                </p>
-              </div>
-              <div className="mt-2">
-                <InvestigativeLeadsLedger leads={subjectLeads} subject={report.handle} />
-              </div>
+              <SubjectAccusationStage
+                leads={subjectLeads}
+                subject={report.handle}
+                summary={subjectLeadSummary}
+                panelCostToken={panelCostToken}
+              />
             </Section>
           </div>
         )}

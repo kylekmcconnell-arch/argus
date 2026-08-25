@@ -10,6 +10,29 @@ export function xAvatar(handle: string): string {
   return `https://unavatar.io/x/${handle.replace(/^@/, "")}`;
 }
 
+/**
+ * Official X CDN avatar only. Broken or off-host URLs are not identity proof
+ * and must not be rendered as a person's face.
+ */
+export function trustedOfficialXAvatarUrl(raw?: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    if (
+      url.protocol !== "https:"
+      || (host !== "pbs.twimg.com" && host !== "abs.twimg.com" && !host.endsWith(".twimg.com"))
+      || url.username
+      || url.password
+      || (url.port && url.port !== "443")
+    ) return null;
+    url.hash = "";
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 // A team member with a LinkedIn but no X handle still has a face: unavatar's
 // linkedin provider resolves the /in/<slug> profile photo. fallback=false makes
 // a miss return 404 so the Avatar cleanly drops to a letter (not a grey blob).

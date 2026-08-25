@@ -6769,7 +6769,7 @@ function assembleDossier(ev, live) {
   (row.handleProvenance === "subject_first_party" && Boolean(row.handle) || !teamNameIsOwnHandle(row));
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
     ...member,
-    ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0 } : {},
+    ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0, github: void 0, developerProfiles: void 0 } : {},
     ...member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}
   }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
@@ -14964,6 +14964,36 @@ function hostname(url) {
     return url;
   }
 }
+function officialSiteAccessDeniedFinding(domain) {
+  const host = hostname(domain.includes("://") ? domain : `https://${domain}`);
+  return `The official site (${host}) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.`;
+}
+function isConfirmedOfficialSiteAccessDenial(site) {
+  if (site.status !== "access_blocked") return false;
+  if (site.reason === "rate_limit") return false;
+  if (/\bHTTP 429\b/i.test(site.detail) || /\brate-limited\b/i.test(site.detail)) return false;
+  return site.reason === "anti_bot" || site.reason === "http_access" || site.reason === void 0;
+}
+function isConfirmedOfficialSiteHttp403(site) {
+  return site.status === "access_blocked" && site.reason === "http_access" && /\bHTTP 403\b/i.test(site.detail);
+}
+function sameOfficialHost(candidate, official) {
+  try {
+    const left = new URL(candidate).hostname.replace(/^www\./i, "").toLowerCase();
+    const right = new URL(official).hostname.replace(/^www\./i, "").toLowerCase();
+    return Boolean(left) && left === right;
+  } catch {
+    return false;
+  }
+}
+function pageTitle(html) {
+  const markup = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  if (markup) return markup.replace(/\s+/g, " ").trim();
+  return html.match(/^Title:\s*(.+)$/m)?.[1].replace(/\s+/g, " ").trim() ?? "";
+}
+function withOfficialReaderRecovery(detail, method) {
+  return method === "reader_recovery" ? `${detail}; recovered through the bounded reader of the same official site` : detail;
+}
 function isAntiBotResponse(response, body) {
   const mitigation = response.headers.get("cf-mitigated") ?? "";
   const challenge = response.headers.get("x-datadome") ?? response.headers.get("x-captcha") ?? "";
@@ -14998,7 +15028,7 @@ async function readBody(response, maxBytes) {
   }
   return { text: text2, truncated };
 }
-async function get(url, opts) {
+async function get(url, opts, retryAccessDenied = true) {
   let response;
   try {
     response = await fetch(url, {
@@ -15035,13 +15065,18 @@ async function get(url, opts) {
     };
   }
   const finalUrl = response.url || url;
+  if (response.status === 403 && retryAccessDenied) {
+    recordCall("site-fetch", "substance", 0, "http_403_access_blocked_retry", "partial");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    return get(url, opts, false);
+  }
   if (response.status === 401 || response.status === 403 || response.status === 429) {
     recordCall("site-fetch", "substance", 0, `http_${response.status}_access_blocked`, "partial");
     return {
       kind: "failure",
       url: finalUrl,
       status: "access_blocked",
-      reason: "http_access",
+      reason: response.status === 429 ? "rate_limit" : "http_access",
       detail: response.status === 429 ? "the site rate-limited the automated liveness request (HTTP 429)" : `the site denied the automated liveness request (HTTP ${response.status})`
     };
   }
@@ -15126,46 +15161,75 @@ function metaContent(html, name) {
   if (nameFirst) return nameFirst;
   return html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${escaped}["']`, "i"))?.[1] ?? "";
 }
-async function checkSiteSubstance(domain) {
-  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase().trim();
-  if (!d || !/\.[a-z]{2,}$/i.test(d)) return null;
-  const candidates = d.startsWith("www.") ? [`https://${d}`, `https://${d.slice(4)}`] : [`https://${d}`, `https://www.${d}`];
-  const failures = [];
-  let page;
-  for (const candidate of candidates) {
-    const result = await get(candidate);
-    if (result.kind === "page") {
-      page = result;
-      break;
-    }
-    failures.push(result);
+async function recoverOfficialSitePage(officialUrl, recoverOfficialText) {
+  const recovered = await recoverOfficialText(officialUrl);
+  if (recovered.status !== "ok") {
+    recordCall("site-fetch", "substance", 0, recovered.reason || "reader_recovery_failed", "partial");
+    return null;
   }
-  if (!page) return failedSiteResult(d, failures);
+  if (!sameOfficialHost(recovered.url, officialUrl)) {
+    recordCall("site-fetch", "substance", 0, "reader_recovery_offsite", "partial");
+    return null;
+  }
+  if (bodyLooksLikeAntiBotChallenge(recovered.text) || antiBotChallengeBody(recovered.contentType, recovered.text)) {
+    recordCall("site-fetch", "substance", 0, "reader_anti_bot_challenge", "partial");
+    return null;
+  }
+  if (!recovered.text.trim()) {
+    recordCall("site-fetch", "substance", 0, "reader_recovery_empty_body", "partial");
+    return null;
+  }
+  recordCall("site-fetch", "substance", 0, "reader_recovery_after_http_403", "succeeded");
+  return {
+    kind: "page",
+    // Citations stay on the official URL. Reader recovery is not a second source.
+    url: officialUrl,
+    html: recovered.text,
+    truncated: false,
+    retrievalMethod: "reader_recovery"
+  };
+}
+async function classifyServedPage(page) {
   const meta = metaContent(page.html, "description");
-  const title = page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1].replace(/\s+/g, " ").trim() ?? "";
+  const title = pageTitle(page.html);
   const body = stripText(page.html);
   const hasSubstantialProductSurface = body.length >= 400 && PRODUCT.test(body);
+  const retrievalMethod = page.retrievalMethod;
   if (PARKED.test(page.html)) {
     return {
       url: page.url,
       status: "coming_soon",
       reason: "parked",
-      detail: "the served homepage is a registrar parking or domain-for-sale page"
+      retrievalMethod,
+      detail: withOfficialReaderRecovery(
+        "the served homepage is a registrar parking or domain-for-sale page",
+        retrievalMethod
+      )
     };
   }
   const hardComingMarker = HARD_COMING.test(`${title} ${meta}`) && !hasSubstantialProductSurface;
   const comingOnlySurface = COMING.test(`${title} ${meta} ${body}`) && !hasSubstantialProductSurface;
   if (hardComingMarker || comingOnlySurface) {
-    const excerpt = [title, meta].find((value) => COMING.test(value)) || body.match(COMING)?.[0] || "coming-soon marker";
+    const excerpt2 = [title, meta].find((value) => COMING.test(value)) || body.match(COMING)?.[0] || "coming-soon marker";
     return {
       url: page.url,
       status: "coming_soon",
       reason: "coming_soon",
-      detail: `the served homepage explicitly presents a coming-soon or waitlist surface ("${excerpt.slice(0, 80)}")`
+      retrievalMethod,
+      detail: withOfficialReaderRecovery(
+        `the served homepage explicitly presents a coming-soon or waitlist surface ("${excerpt2.slice(0, 80)}")`,
+        retrievalMethod
+      )
     };
   }
   if (hasSubstantialProductSurface) {
-    return { url: page.url, status: "live", detail: `live site${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
+    const excerpt2 = meta || (retrievalMethod === "reader_recovery" ? title : "");
+    return {
+      url: page.url,
+      status: "live",
+      retrievalMethod,
+      detail: withOfficialReaderRecovery(`live site${excerpt2 ? `: "${excerpt2.slice(0, 80)}"` : ""}`, retrievalMethod)
+    };
   }
   const isShell = /id=["'](root|__next|app|__nuxt)["']/i.test(page.html) || /<script[^>]+type=["']module["']/i.test(page.html);
   if (isShell && body.length < 300) {
@@ -15185,10 +15249,44 @@ async function checkSiteSubstance(domain) {
     return {
       url: page.url,
       status: "client_rendered",
-      detail: bundleHint ? "client-rendered app; its bundle contains an unrendered coming-soon string, which is not treated as homepage liveness evidence" : bundleReadCapped ? `client-rendered app; static read could not confirm a product surface${quoteNote}; its script bundles were read only up to ${BUNDLE_READ_CAP_LABEL}, so no coming-soon marker was reached rather than shown to be absent` : `client-rendered app; static read could not confirm a product surface${quoteNote}`
+      retrievalMethod,
+      detail: withOfficialReaderRecovery(bundleHint ? "client-rendered app; its bundle contains an unrendered coming-soon string, which is not treated as homepage liveness evidence" : bundleReadCapped ? `client-rendered app; static read could not confirm a product surface${quoteNote}; its script bundles were read only up to ${BUNDLE_READ_CAP_LABEL}, so no coming-soon marker was reached rather than shown to be absent` : `client-rendered app; static read could not confirm a product surface${quoteNote}`, retrievalMethod)
     };
   }
-  return { url: page.url, status: "live", detail: `site is up${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
+  const excerpt = meta || (retrievalMethod === "reader_recovery" ? title : "");
+  return {
+    url: page.url,
+    status: "live",
+    retrievalMethod,
+    detail: withOfficialReaderRecovery(`site is up${excerpt ? `: "${excerpt.slice(0, 80)}"` : ""}`, retrievalMethod)
+  };
+}
+async function checkSiteSubstance(domain, dependencies = {}) {
+  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase().trim();
+  if (!d || !/\.[a-z]{2,}$/i.test(d)) return null;
+  const candidates = d.startsWith("www.") ? [`https://${d}`, `https://${d.slice(4)}`] : [`https://${d}`, `https://www.${d}`];
+  const failures = [];
+  let page;
+  for (const candidate of candidates) {
+    const result = await get(candidate);
+    if (result.kind === "page") {
+      page = result;
+      break;
+    }
+    failures.push(result);
+  }
+  if (!page) {
+    const pending = failedSiteResult(d, failures);
+    if (isConfirmedOfficialSiteHttp403(pending)) {
+      const recovered = await recoverOfficialSitePage(
+        pending.url,
+        dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery
+      );
+      if (recovered) page = recovered;
+    }
+    if (!page) return pending;
+  }
+  return classifyServedPage(page);
 }
 
 // server/adapters/linkHub.ts
@@ -31324,8 +31422,83 @@ function describeDecline(launch) {
   return `, down ${declinePct.toFixed(1)}% from its peak`;
 }
 
+// src/lib/avatars.ts
+function trustedOfficialXAvatarUrl(raw) {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== "https:" || host !== "pbs.twimg.com" && host !== "abs.twimg.com" && !host.endsWith(".twimg.com") || url.username || url.password || url.port && url.port !== "443") return null;
+    url.hash = "";
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 // src/data/socialActivity.ts
+var SOCIAL_MENTION_CARD_MAX = 8;
 var clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+var HANDLE2 = /^[A-Za-z0-9_]{1,15}$/;
+function normalizedSocialHandle(value) {
+  const handle = value?.trim().replace(/^@/, "") ?? "";
+  return HANDLE2.test(handle) ? handle.toLowerCase() : null;
+}
+function tweetPermalink(handle, postId, rawUrl) {
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      const host = parsed.hostname.toLowerCase();
+      if ((parsed.protocol === "https:" || parsed.protocol === "http:") && (host === "x.com" || host === "www.x.com" || host === "twitter.com" || host === "www.twitter.com") && /\/status\/\d+/i.test(parsed.pathname) && !parsed.username && !parsed.password) return parsed.href;
+    } catch {
+    }
+  }
+  return /^\d+$/.test(postId) || /^[A-Za-z0-9]+$/.test(postId) ? `https://x.com/${handle}/status/${postId}` : null;
+}
+function selectSocialMentioners(posts, subjectHandle, limit = SOCIAL_MENTION_CARD_MAX) {
+  const subject = normalizedSocialHandle(subjectHandle);
+  const byHandle = /* @__PURE__ */ new Map();
+  for (const post of posts) {
+    const handle = normalizedSocialHandle(post.handle);
+    if (!handle || handle === subject) continue;
+    const text2 = post.text?.replace(/\s+/g, " ").trim() ?? "";
+    if (!text2) continue;
+    const tweetUrl = tweetPermalink(handle, post.id, post.tweetUrl);
+    if (!tweetUrl) continue;
+    const createdAt = post.createdAt;
+    const candidate = {
+      postId: post.id,
+      handle: `@${handle}`,
+      ...post.displayName?.trim() ? { displayName: post.displayName.trim() } : {},
+      text: text2,
+      tweetUrl,
+      createdAt,
+      ...typeof post.followers === "number" && Number.isFinite(post.followers) && post.followers >= 0 ? { followers: Math.round(post.followers) } : {},
+      ...post.avatarUrl ? { avatarUrl: post.avatarUrl } : {}
+    };
+    const prior = byHandle.get(handle);
+    if (!prior) {
+      byHandle.set(handle, candidate);
+      continue;
+    }
+    const priorFollowers = prior.followers;
+    const nextFollowers = candidate.followers;
+    const richerFollowers = (nextFollowers ?? -1) > (priorFollowers ?? -1);
+    const sameFollowers = nextFollowers === priorFollowers || nextFollowers === void 0 && priorFollowers === void 0;
+    const newer = Date.parse(candidate.createdAt) > Date.parse(prior.createdAt);
+    if (richerFollowers || sameFollowers && newer) byHandle.set(handle, candidate);
+  }
+  return [...byHandle.values()].sort((left, right) => {
+    const leftFollowers = left.followers;
+    const rightFollowers = right.followers;
+    if (leftFollowers !== void 0 && rightFollowers !== void 0 && leftFollowers !== rightFollowers) {
+      return rightFollowers - leftFollowers;
+    }
+    if (leftFollowers !== void 0 && rightFollowers === void 0) return -1;
+    if (leftFollowers === void 0 && rightFollowers !== void 0) return 1;
+    return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+  }).slice(0, Math.max(0, Math.min(SOCIAL_MENTION_CARD_MAX, Math.round(limit))));
+}
 function socialActivityScore(input) {
   const breadth = clamp(Math.log10(input.uniqueAccounts7d + 1) / Math.log10(1001), 0, 1) * 50;
   const prior = Math.max(1, input.uniqueAccountsPrevious24h);
@@ -31473,7 +31646,9 @@ async function collectSearch(fetchImpl, bearer, query, start, end, maxPosts) {
     url.searchParams.set("start_time", start.toISOString());
     url.searchParams.set("end_time", end.toISOString());
     url.searchParams.set("max_results", String(Math.min(100, Math.max(10, remaining))));
-    url.searchParams.set("tweet.fields", "author_id,created_at");
+    url.searchParams.set("tweet.fields", "author_id,created_at,text");
+    url.searchParams.set("expansions", "author_id");
+    url.searchParams.set("user.fields", "username,name,public_metrics,profile_image_url");
     if (nextToken) url.searchParams.set("next_token", nextToken);
     const payload = await fetchJson(fetchImpl, url, bearer, "search");
     requests += 1;
@@ -31487,14 +31662,15 @@ async function collectSearch(fetchImpl, bearer, query, start, end, maxPosts) {
       incompleteReason: "provider_error"
     };
     const rows = Array.isArray(payload.data) ? payload.data : [];
+    const users = usersById(payload);
     postReads += rows.length;
     recordCall("x-api", "post-read", rows.length * POST_READ_USD, `${rows.length} public posts`, "succeeded");
     for (const row of rows) {
-      const record4 = asRecord6(row);
-      if (typeof record4.id !== "string" || typeof record4.author_id !== "string" || typeof record4.created_at !== "string") continue;
-      const at = Date.parse(record4.created_at);
+      const post = officialXPost(row, users);
+      if (!post) continue;
+      const at = Date.parse(post.createdAt);
       if (!Number.isFinite(at)) continue;
-      posts.set(record4.id, { id: record4.id, authorId: record4.author_id, createdAt: record4.created_at });
+      posts.set(post.id, post);
       oldestAt = oldestAt === null ? at : Math.min(oldestAt, at);
     }
     const token = asRecord6(payload.meta).next_token;
@@ -31533,16 +31709,104 @@ function windowFrom(posts, buckets, start, end, search, countsComplete) {
     authorCoverageComplete
   };
 }
+function usersById(payload) {
+  const includes = asRecord6(payload.includes);
+  const users = Array.isArray(includes.users) ? includes.users : [];
+  const map = /* @__PURE__ */ new Map();
+  for (const row of users) {
+    const record4 = asRecord6(row);
+    if (typeof record4.id === "string") map.set(record4.id, record4);
+  }
+  return map;
+}
+function providedFollowerCount(...values) {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.round(value);
+    if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  }
+  return void 0;
+}
+function providedHandle(...values) {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const handle = value.trim().replace(/^@/, "");
+    if (/^[A-Za-z0-9_]{1,15}$/.test(handle)) return handle;
+  }
+  return void 0;
+}
+function providedText(value) {
+  return typeof value === "string" && value.trim() ? value : void 0;
+}
+function providedTweetUrl(...values) {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    try {
+      const parsed = new URL(value);
+      const host = parsed.hostname.toLowerCase();
+      if ((parsed.protocol === "https:" || parsed.protocol === "http:") && (host === "x.com" || host === "www.x.com" || host === "twitter.com" || host === "www.twitter.com") && /\/status\/\d+/i.test(parsed.pathname) && !parsed.username && !parsed.password) return parsed.href;
+    } catch {
+    }
+  }
+  return void 0;
+}
+function authorFields(author) {
+  const handle = providedHandle(author.userName, author.username, author.screen_name);
+  const displayName = typeof author.name === "string" && author.name.trim() ? author.name.trim() : void 0;
+  const metrics = asRecord6(author.public_metrics);
+  const followers = providedFollowerCount(
+    author.followers,
+    author.followersCount,
+    author.followers_count,
+    metrics.followers_count
+  );
+  const avatarUrl = trustedOfficialXAvatarUrl(
+    typeof author.profilePicture === "string" ? author.profilePicture : typeof author.profile_image_url_https === "string" ? author.profile_image_url_https : typeof author.profile_image_url === "string" ? author.profile_image_url : typeof author.profile_image === "string" ? author.profile_image : null
+  ) ?? void 0;
+  return {
+    ...handle ? { handle } : {},
+    ...displayName ? { displayName } : {},
+    ...followers !== void 0 ? { followers } : {},
+    ...avatarUrl ? { avatarUrl } : {}
+  };
+}
+function officialXPost(row, users) {
+  const record4 = asRecord6(row);
+  if (typeof record4.id !== "string" || typeof record4.author_id !== "string" || typeof record4.created_at !== "string") {
+    return null;
+  }
+  const at = Date.parse(record4.created_at);
+  if (!Number.isFinite(at)) return null;
+  const author = users.get(record4.author_id) ?? {};
+  const text2 = providedText(record4.text);
+  const tweetUrl = providedTweetUrl(record4.url);
+  return {
+    id: record4.id,
+    authorId: record4.author_id,
+    createdAt: record4.created_at,
+    ...authorFields(author),
+    ...text2 ? { text: text2 } : {},
+    ...tweetUrl ? { tweetUrl } : {}
+  };
+}
 function twitterApiIoPost(row) {
   const record4 = asRecord6(row);
   const author = asRecord6(record4.author);
   const id = typeof record4.id === "string" ? record4.id : null;
-  const authorId = typeof author.id === "string" ? author.id : typeof author.userName === "string" ? author.userName.toLowerCase() : null;
+  const handle = providedHandle(author.userName, author.username, author.screen_name);
+  const authorId = typeof author.id === "string" ? author.id : handle ? handle.toLowerCase() : null;
   const createdAt = typeof record4.createdAt === "string" ? record4.createdAt : null;
   const text2 = typeof record4.text === "string" ? record4.text : "";
   const isRepost = record4.retweeted_tweet !== void 0 && record4.retweeted_tweet !== null || /^RT\s+@/i.test(text2);
   if (!id || !authorId || !createdAt || isRepost || !Number.isFinite(Date.parse(createdAt))) return null;
-  return { id, authorId, createdAt: new Date(createdAt).toISOString() };
+  const tweetUrl = providedTweetUrl(record4.url, record4.twitterUrl);
+  return {
+    id,
+    authorId,
+    createdAt: new Date(createdAt).toISOString(),
+    ...authorFields(author),
+    ...providedText(text2) ? { text: text2 } : {},
+    ...tweetUrl ? { tweetUrl } : {}
+  };
 }
 function hourlyBuckets(posts, start, end) {
   const counts = /* @__PURE__ */ new Map();
@@ -31663,10 +31927,13 @@ async function collectSocialActivity(rawIdentity, options = {}) {
   if (!bearer && !twitterApiKey) return unavailableSnapshot2(identity, now, "not_configured", "Social activity was not collected because X search access is not configured.");
   const provider = bearer ? "x-api-v2" : "twitterapi-io";
   const configuredMax = Number(env("ARGUS_SOCIAL_ACTIVITY_MAX_POSTS") || String(SOCIAL_ACTIVITY_MAX_POSTS));
-  const maxPosts = Math.min(SOCIAL_ACTIVITY_MAX_POSTS, Math.max(SOCIAL_ACTIVITY_MIN_POSTS, Math.round(options.maxPosts ?? configuredMax)));
+  const maxPosts = Math.min(
+    SOCIAL_ACTIVITY_MAX_POSTS,
+    Math.max(SOCIAL_ACTIVITY_MIN_POSTS, Math.round(options.maxPosts ?? configuredMax))
+  );
   const fetchImpl = options.fetchImpl ?? fetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1e3));
-  const cacheKey = `social-activity:v1:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
+  const cacheKey = `social-activity:v2:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
   if (!options.fetchImpl) {
     const cached = await cacheGet(cacheKey, { operation: "social-activity-hit", meta: "15 minute activity snapshot" });
     if (cached) {
@@ -31702,6 +31969,7 @@ async function collectSocialActivity(rawIdentity, options = {}) {
     activeDays
   }) : null;
   const state = counts.ok && last7Days.authorCoverageComplete ? "complete" : "partial";
+  const mentioners = selectSocialMentioners(search.posts, identity.handle);
   const snapshot = {
     schemaVersion: 1,
     provider,
@@ -31729,7 +31997,8 @@ async function collectSocialActivity(rawIdentity, options = {}) {
       estimatedUsd: twitterApiIo?.estimatedUsd ?? Math.round(((counts.ok ? COUNTS_REQUEST_USD : 0) + search.postReads * POST_READ_USD) * 1e4) / 1e4,
       ...search.incompleteReason ? { incompleteReason: search.incompleteReason } : {}
     },
-    note: state === "complete" ? `Public X posts matched to the bound project identifiers through ${provider === "x-api-v2" ? "the official X API" : "twitterapi.io"}. Reposts are excluded.` : search.incompleteReason === "post_limit" ? `ARGUS collected the maximum ${maxPosts.toLocaleString()} posts allowed for this saved scan. Unique-account counts are minimums.` : search.incompleteReason === "provider_error" ? `X stopped responding before ARGUS finished the search. Unique-account counts are minimums.` : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`
+    note: state === "complete" ? `Public X posts matched to the bound project identifiers through ${provider === "x-api-v2" ? "the official X API" : "twitterapi.io"}. Reposts are excluded.` : search.incompleteReason === "post_limit" ? `ARGUS collected the maximum ${maxPosts.toLocaleString()} posts allowed for this saved scan. Unique-account counts are minimums.` : search.incompleteReason === "provider_error" ? `X stopped responding before ARGUS finished the search. Unique-account counts are minimums.` : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`,
+    ...mentioners.length ? { mentioners } : {}
   };
   if (!options.fetchImpl) void cacheSet(cacheKey, JSON.stringify(snapshot));
   return snapshot;
@@ -32168,6 +32437,22 @@ function applySiteSubstanceOutcome(ctx, domain, site) {
       phase: "P2 \xB7 Substance",
       label: "Website check unavailable",
       detail: `${domain}: a coming-soon label was returned without direct served-page evidence. No liveness conclusion was drawn.`,
+      source: "site-fetch",
+      tone: "neutral"
+    });
+    return;
+  }
+  if (isConfirmedOfficialSiteAccessDenial(site)) {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "checked-empty",
+      note: officialSiteAccessDeniedFinding(domain),
+      provider: "site-fetch"
+    });
+    ctx.emit({
+      phase: "P2 \xB7 Substance",
+      label: "Official site blocked the request",
+      detail: `${officialSiteAccessDeniedFinding(domain)} This is a finished access-denied result, not evidence that the website or product is offline.`,
       source: "site-fetch",
       tone: "neutral"
     });

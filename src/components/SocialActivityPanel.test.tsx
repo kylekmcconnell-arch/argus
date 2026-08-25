@@ -2,8 +2,14 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SocialActivitySnapshot } from "../data/socialActivity";
+
+vi.mock("./PfpCheck", () => ({
+  PfpCheck: () => null,
+  PfpAvatar: ({ handle }: { handle?: string }) => <span>{handle ? `avatar:${handle}` : "avatar"}</span>,
+}));
+
 import { SocialActivityPanel } from "./SocialActivityPanel";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -120,5 +126,38 @@ describe("SocialActivityPanel", () => {
     }} />));
     expect(container.textContent).toContain("maximum 5,000 posts allowed for this saved scan");
     expect(container.textContent).toContain("activity score stays withheld");
+  });
+
+  it("renders mentioner people-cards with follower counts and tweet links, without an influence score", () => {
+    act(() => root.render(<SocialActivityPanel snapshot={{
+      ...snapshot,
+      mentioners: [
+        {
+          postId: "1",
+          handle: "@whale",
+          text: "Watching $CLUTCH",
+          tweetUrl: "https://x.com/whale/status/1",
+          createdAt: "2026-08-22T20:00:00.000Z",
+          followers: 880000,
+          avatarUrl: "https://pbs.twimg.com/profile_images/1/whale.jpg",
+        },
+        {
+          postId: "2",
+          handle: "@quiet",
+          text: "mentioned the project",
+          tweetUrl: "https://x.com/quiet/status/2",
+          createdAt: "2026-08-22T19:00:00.000Z",
+        },
+      ],
+    }} />));
+    expect(container.textContent).toContain("Who talked about it");
+    expect(container.textContent).toContain("@whale");
+    expect(container.textContent).toContain("Watching $CLUTCH");
+    expect(container.textContent).toContain("followers");
+    expect(container.querySelector('a[href="https://x.com/whale/status/1"]')).not.toBeNull();
+    expect(container.textContent).toContain("@quiet");
+    expect(container.textContent).toContain("not an influence score");
+    expect(container.textContent).not.toMatch(/influence score:\s*\d/i);
+    expect(container.textContent).not.toContain("#1");
   });
 });

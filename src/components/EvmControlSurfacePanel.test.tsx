@@ -42,7 +42,7 @@ vi.mock("./SnapshotEvidenceControl", () => ({
 }));
 vi.mock("./SanctionsNameScreen", () => ({ SanctionsNameScreen: () => null }));
 vi.mock("./LegalScreen", () => ({ LegalScreen: () => null }));
-vi.mock("./PfpCheck", () => ({ PfpCheck: () => null }));
+vi.mock("./PfpCheck", () => ({ PfpCheck: () => null, PfpAvatar: () => null }));
 vi.mock("./PersonGithub", () => ({ PersonGithub: () => null }));
 vi.mock("./VcReport", () => ({ VcReport: () => null }));
 vi.mock("./KolReport", () => ({ KolReport: () => null }));
