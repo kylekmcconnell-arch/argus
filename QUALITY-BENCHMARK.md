@@ -69,6 +69,10 @@ it exposes raw task states, delegate names, dispatch reasons, stop rules, or
 provider outcomes by default. It must distinguish “the scan finished but this
 answer remains unverified” from a required execution failure, while keeping the
 immutable technical receipts available on demand.
+It also fails when a recoverable official-site 403 is published without trying
+the bounded safe reader path, when recovered bytes are mislabeled as an
+independent source, or when an HTTP 429 is described as a rejected configuration
+instead of a rate limit.
 
 ## Live founder canaries
 

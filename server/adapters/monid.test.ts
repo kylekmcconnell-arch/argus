@@ -53,6 +53,43 @@ const enrichmentCompleted = (data: unknown) => ({
 });
 
 describe("collectCompanyEnrichment", () => {
+  it("retries one rate-limited run creation and then continues", async () => {
+    let searchCalls = 0;
+    const fetcher = ((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { endpoint?: string };
+      if (body.endpoint === "/v1/company/search") {
+        searchCalls += 1;
+        if (searchCalls === 1) return Promise.resolve(new Response("", { status: 429, headers: { "retry-after": "0" } }));
+        return Promise.resolve(jsonResponse(searchCompleted([
+          { uuid: "example-uuid", name: "Example", website: "example.com" },
+        ])));
+      }
+      return Promise.resolve(jsonResponse(enrichmentCompleted({
+        firmographic: { legal_name: "Example, Inc." },
+      })));
+    }) as unknown as typeof fetch;
+
+    const out = await collectCompanyEnrichment("https://example.com", { fetcher });
+
+    expect(out.available).toBe(true);
+    expect(searchCalls).toBe(2);
+  });
+
+  it("stops after one retry when Monid keeps returning 429", async () => {
+    let calls = 0;
+    const fetcher = (() => {
+      calls += 1;
+      return Promise.resolve(new Response("", { status: 429, headers: { "retry-after": "0" } }));
+    }) as unknown as typeof fetch;
+
+    const out = await collectCompanyEnrichment("https://example.com", { fetcher });
+
+    expect(out.available).toBe(false);
+    if (out.available) throw new Error("expected unavailable");
+    expect(out.note).toContain("http_429");
+    expect(calls).toBe(2);
+  });
+
   it("returns { available:false, reason:'no_key' } when MONID_API_KEY is unset", async () => {
     delete process.env[KEY];
     const out = await collectCompanyEnrichment("Acme Labs", { fetcher: runFetcher({}) });

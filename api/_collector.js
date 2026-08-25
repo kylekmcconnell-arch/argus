@@ -969,16 +969,22 @@ var Audit = class {
       subject: true
     }];
     const edges = [];
+    const receipt = (row, sourceUrl2) => ({
+      ...sourceUrl2 ? { source_url: sourceUrl2 } : {},
+      ...row.provider ? { provider: row.provider } : {},
+      ...row.evidence_origin ? { evidence_origin: row.evidence_origin } : {},
+      ...row.artifact_verified !== void 0 ? { artifact_verified: row.artifact_verified } : {}
+    });
     for (const a of this.associates) {
       nodes.push({ type: "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
-      edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation });
+      edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation, ...receipt(a, a.evidence_url) });
     }
     for (const v of this.ventures) {
       const key = canonicalEntityKey({ handle: v.x_handle, domain: v.domain, name: v.project_name });
       nodes.push({ type: "Company", key, label: v.project_name, outcome: v.outcome });
       const role = (v.role ?? "").toLowerCase();
       const edgeType = /\b(?:founder|co-?founder|founding team)\b/.test(role) ? "FOUNDED" : /\b(?:investor|backer|angel investor|limited partner)\b|\binvested in\b/.test(role) ? "INVESTED_IN" : /advisor|adviser|board/.test(role) ? "ADVISED" : "WORKED_ON";
-      edges.push({ src: this.handle, dst: key, type: edgeType, role: v.role, outcome: v.outcome });
+      edges.push({ src: this.handle, dst: key, type: edgeType, role: v.role, outcome: v.outcome, ...receipt(v, v.evidence_url) });
     }
     for (const p of this.promotions) {
       const key = p.contract_address || "$" + (p.ticker ?? "").replace(/^\$+/, "");
@@ -1000,17 +1006,17 @@ var Audit = class {
     for (const p of this.advisedProjects) {
       const key = canonicalEntityKey({ handle: p.project_handle, name: p.project_name });
       nodes.push({ type: "Company", key, label: p.project_name, outcome: p.project_outcome });
-      edges.push({ src: this.handle, dst: key, type: "ADVISED", verdict: p.corroboration_verdict, outcome: p.project_outcome });
+      edges.push({ src: this.handle, dst: key, type: "ADVISED", verdict: p.corroboration_verdict, outcome: p.project_outcome, ...receipt(p, p.evidence_url) });
     }
     for (const c of this.clientEngagements) {
       nodes.push({ type: "Company", key: c.client_name });
-      edges.push({ src: this.handle, dst: c.client_name, type: "SERVICED", manipulation: !!c.manipulation_service_flag });
+      edges.push({ src: this.handle, dst: c.client_name, type: "SERVICED", manipulation: !!c.manipulation_service_flag, ...receipt(c, c.evidence_url) });
     }
     for (const w of this.wallets) {
       if (w.screen?.status === "not_attributable") continue;
       const key = `${w.chain}:${w.address}`;
       nodes.push({ type: "Identity", subtype: "Wallet", key, link_tier: w.link_tier });
-      edges.push({ src: this.handle, dst: key, type: "CONTROLS_WALLET", tier: w.link_tier });
+      edges.push({ src: this.handle, dst: key, type: "CONTROLS_WALLET", tier: w.link_tier, ...receipt(w, w.link_evidence_url) });
     }
     for (const f of this.findings.filter((x) => this.findingTargetsSubject(x) && x.finding_type === "DeceptionFinding")) {
       const key = "DF-" + f.claim.slice(0, 10);
@@ -1445,11 +1451,11 @@ var compatiblePressClaim = (left, right) => {
 };
 function isStrictFundScaleArtifact(value, peers = [], context = {}) {
   const now = context.now ?? /* @__PURE__ */ new Date();
-  const record3 = asRecord(value);
-  if (!record3 || !Number.isFinite(now.getTime()) || !structurallyStrictFundScaleArtifact(record3, now, context)) return false;
-  if (record3.sourceClass !== "independent_press") return true;
-  if (typeof record3.fundScaleSourceCount !== "number" || record3.fundScaleSourceCount < 2) return false;
-  const compatible = [record3, ...peers.map(asRecord).filter((peer) => Boolean(peer))].filter((peer, index, rows) => rows.indexOf(peer) === index).filter((peer) => peer.sourceClass === "independent_press" && structurallyStrictFundScaleArtifact(peer, now, context) && compatiblePressClaim(record3, peer));
+  const record4 = asRecord(value);
+  if (!record4 || !Number.isFinite(now.getTime()) || !structurallyStrictFundScaleArtifact(record4, now, context)) return false;
+  if (record4.sourceClass !== "independent_press") return true;
+  if (typeof record4.fundScaleSourceCount !== "number" || record4.fundScaleSourceCount < 2) return false;
+  const compatible = [record4, ...peers.map(asRecord).filter((peer) => Boolean(peer))].filter((peer, index, rows) => rows.indexOf(peer) === index).filter((peer) => peer.sourceClass === "independent_press" && structurallyStrictFundScaleArtifact(peer, now, context) && compatiblePressClaim(record4, peer));
   const domains = /* @__PURE__ */ new Set();
   const hashes = /* @__PURE__ */ new Set();
   const prose = /* @__PURE__ */ new Set();
@@ -2360,8 +2366,8 @@ function qualifiedAdverseTrustConnections(evidence) {
     return connection.qualified === true && connection.otherAttestation === "server_collected" && connection.otherCompleteness === "complete" && (adverseVerdict === "FAIL" || adverseVerdict === "AVOID") && UUID.test(connection.otherReportVersionId ?? "") && ties.length > 0 ? [{ connection, ties }] : [];
   });
 }
-function axisEvidenceIsVerifiedCounter(record3, axis) {
-  return record3.scope === "direct_subject" && record3.verification === "verified" && SHA256_HEX3.test(record3.contentHash) && (record3.counterEligibleAxes ?? []).includes(axis);
+function axisEvidenceIsVerifiedCounter(record4, axis) {
+  return record4.scope === "direct_subject" && record4.verification === "verified" && SHA256_HEX3.test(record4.contentHash) && (record4.counterEligibleAxes ?? []).includes(axis);
 }
 function projectAxisDomain(axis) {
   if (axis.startsWith("P1_")) return "team";
@@ -3025,10 +3031,10 @@ function buildMeasurements(evidence) {
   if (evidence.securityAudits) {
     const checkRef = "snapshot:security-audits";
     const normalizedAuditor = (value) => value.trim().toLowerCase();
-    const auditRows = sortedCorroboratedAudits(evidence).map((record3, index) => ({
-      ...record3,
+    const auditRows = sortedCorroboratedAudits(evidence).map((record4, index) => ({
+      ...record4,
       sourceRef: corroboratedAuditSourceId(index),
-      anchorValidation: validatedAuditIdentityAnchor(record3.audit, evidence)
+      anchorValidation: validatedAuditIdentityAnchor(record4.audit, evidence)
     }));
     const identityAnchoredRows = auditRows.filter(({ anchorValidation }) => anchorValidation.state === "matched");
     const identityGapRows = auditRows.filter(({ anchorValidation }) => anchorValidation.state !== "matched");
@@ -4366,14 +4372,14 @@ function buildSignals(evidence, measurements, questions) {
     });
   });
   const counterRecordsByAxis = /* @__PURE__ */ new Map();
-  for (const record3 of evidence.axisEvidenceCatalog ?? []) {
-    for (const axis of record3.counterEligibleAxes ?? []) {
-      if (!axis.startsWith("P") || !axisEvidenceIsVerifiedCounter(record3, axis)) continue;
-      counterRecordsByAxis.set(axis, [...counterRecordsByAxis.get(axis) ?? [], record3]);
+  for (const record4 of evidence.axisEvidenceCatalog ?? []) {
+    for (const axis of record4.counterEligibleAxes ?? []) {
+      if (!axis.startsWith("P") || !axisEvidenceIsVerifiedCounter(record4, axis)) continue;
+      counterRecordsByAxis.set(axis, [...counterRecordsByAxis.get(axis) ?? [], record4]);
     }
   }
   for (const [axis, records] of [...counterRecordsByAxis.entries()].sort(([left], [right]) => left.localeCompare(right))) {
-    const excerpts = records.map((record3) => boundedText(record3.excerpt ?? record3.title, 180)).filter((excerpt) => Boolean(excerpt));
+    const excerpts = records.map((record4) => boundedText(record4.excerpt ?? record4.title, 180)).filter((excerpt) => Boolean(excerpt));
     addSignal({
       id: `verified_axis_counter_evidence:${encodeURIComponent(axis)}`,
       ruleId: "verified-direct-axis-counter-evidence",
@@ -4388,15 +4394,15 @@ function buildSignals(evidence, measurements, questions) {
       changeCondition: "Re-evaluate when the exact underlying record changes, is superseded, or no longer satisfies direct-subject verification and counter-eligibility gates.",
       evidenceState: "verified",
       measurementRefs: [],
-      sourceRefs: records.map((record3) => axisEvidenceSourceId(record3.artifactId)),
+      sourceRefs: records.map((record4) => axisEvidenceSourceId(record4.artifactId)),
       lenses: ["investment", "alpha_research", "counterparty", "general_diligence"]
     });
   }
   const catalogById = new Map((evidence.axisEvidenceCatalog ?? []).map((artifact) => [artifact.artifactId, artifact]));
   for (const axis of evidence.axes.filter((row) => row.axis.startsWith("P"))) {
     const invalidCounterRefs = uniqueSorted2((axis.counterEvidenceRefs ?? []).filter((reference) => {
-      const record3 = catalogById.get(reference);
-      return !record3 || !axisEvidenceIsVerifiedCounter(record3, axis.axis);
+      const record4 = catalogById.get(reference);
+      return !record4 || !axisEvidenceIsVerifiedCounter(record4, axis.axis);
     }));
     if (invalidCounterRefs.length > 0) {
       addSignal({
@@ -5311,7 +5317,7 @@ function buildLenses(signals, questions, definitions = LENS_DEFINITIONS, domains
   });
 }
 function buildCaptureWindow(sources) {
-  const dated = sources.flatMap((source2) => source2.capturedAt ? [{ value: source2.capturedAt, time: Date.parse(source2.capturedAt) }] : []).filter((record3) => Number.isFinite(record3.time)).sort((left, right) => left.time - right.time || left.value.localeCompare(right.value));
+  const dated = sources.flatMap((source2) => source2.capturedAt ? [{ value: source2.capturedAt, time: Date.parse(source2.capturedAt) }] : []).filter((record4) => Number.isFinite(record4.time)).sort((left, right) => left.time - right.time || left.value.localeCompare(right.value));
   return {
     earliest: dated[0]?.value ?? null,
     latest: dated.at(-1)?.value ?? null
@@ -6831,7 +6837,16 @@ function assembleDossier(ev, live) {
     const pkey = canonicalEntityKey({ handle: verifiedHandle, name: p.name });
     if (!pkey) continue;
     if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, label: p.name, role: p.role });
-    graph.edges.push({ src: subjectKey, dst: pkey, type: "TEAM", role: p.role });
+    graph.edges.push({
+      src: subjectKey,
+      dst: pkey,
+      type: "TEAM",
+      role: p.role,
+      ...p.sourceUrl ? { source_url: p.sourceUrl } : {},
+      ...p.provider ? { provider: p.provider } : {},
+      ...p.evidence_origin ? { evidence_origin: p.evidence_origin } : {},
+      artifact_verified: p.artifact_verified === true
+    });
     for (const pr of verifiedProjects) {
       if (!pr.name) continue;
       const prKey = canonicalEntityKey({ name: pr.name });
@@ -8787,9 +8802,9 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   }
   const records = (value) => Array.isArray(value) ? value.filter((row) => Boolean(row && typeof row === "object" && !Array.isArray(row))) : [];
   const artifactIds = (values) => [...new Set(values.map((row) => typeof row.artifactId === "string" ? row.artifactId : "").filter(Boolean))];
-  const basicFacts = records(packet.basicFacts);
-  const verifiedFacts = (...predicates) => basicFacts.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.floorEligible !== false && fact.providerProjection !== true);
-  const ceilingOnlyFacts = (...predicates) => basicFacts.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && (fact.floorEligible === false || fact.providerProjection === true));
+  const basicFacts2 = records(packet.basicFacts);
+  const verifiedFacts = (...predicates) => basicFacts2.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.floorEligible !== false && fact.providerProjection !== true);
+  const ceilingOnlyFacts = (...predicates) => basicFacts2.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && (fact.floorEligible === false || fact.providerProjection === true));
   const factText = (facts) => facts.map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`).join(" ");
   const team = records(packet.team).filter((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
   const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
@@ -9800,9 +9815,9 @@ var eligibleAxesFor = (section, value, axisCatalog2, sourceArtifactPeers = [], s
   const allowed = new Set(eligible);
   return [...new Set(axisCatalog2.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
 };
-var recordText = (record3, keys, max) => {
+var recordText = (record4, keys, max) => {
   for (const key of keys) {
-    const value = record3[key];
+    const value = record4[key];
     if (typeof value === "string" && value.trim()) return clip(value.trim(), max);
   }
   return void 0;
@@ -9860,26 +9875,26 @@ var sanitizeArtifactUrls = (value, depth = 0) => {
   }
   return sanitized;
 };
-var verificationFor = (section, record3, sourceArtifactPeers = [], subjectHandle, profile, subjectRoles = []) => {
+var verificationFor = (section, record4, sourceArtifactPeers = [], subjectHandle, profile, subjectRoles = []) => {
   if (section === "axisGaps") return "unavailable";
   if (section === "checkOutcomes") {
-    const status = recordText(record3, ["status"], 40)?.toLowerCase();
+    const status = recordText(record4, ["status"], 40)?.toLowerCase();
     if (status === "confirmed" || status === "finding") return "verified";
     if (status === "reported") return "reported";
     if (status === "checked-empty") return "checked_empty";
     if (status === "unavailable" || status === "unknown" || status === "stale" || status === "not-applicable") return "unavailable";
   }
   if (section === "findings") {
-    const status = recordText(record3, ["verification_status"], 40)?.toLowerCase();
-    if (status === "verified" && record3.artifact_verified === true) return "verified";
+    const status = recordText(record4, ["verification_status"], 40)?.toLowerCase();
+    if (status === "verified" && record4.artifact_verified === true) return "verified";
     if (status === "reported") return "reported";
   }
   if (section === "sourceArtifacts") {
-    const match = recordText(record3, ["match"], 40);
-    const kind = recordText(record3, ["kind"], 80);
+    const match = recordText(record4, ["match"], 40);
+    const kind = recordText(record4, ["kind"], 80);
     if (kind === "portfolio_relationship") {
       if (match === "relationship_confirmed" && subjectHandle && profile) {
-        const binding = portfolioRelationshipBinding(record3, {
+        const binding = portfolioRelationshipBinding(record4, {
           roles: subjectRoles,
           profile: {
             handle: subjectHandle,
@@ -9898,13 +9913,13 @@ var verificationFor = (section, record3, sourceArtifactPeers = [], subjectHandle
       return "unavailable";
     }
     if (kind === "fund_scale") {
-      return isStrictFundScaleArtifact(record3, sourceArtifactPeers, { subjectHandle, profile }) ? "verified" : "unavailable";
+      return isStrictFundScaleArtifact(record4, sourceArtifactPeers, { subjectHandle, profile }) ? "verified" : "unavailable";
     }
     if (kind === "trust_graph") {
-      if (record3.coverageState === "unavailable" || match === "observed") return "unavailable";
+      if (record4.coverageState === "unavailable" || match === "observed") return "unavailable";
       if (match === "screened_clear" || match === "no_match") return "checked_empty";
-      const contentHash = recordText(record3, ["contentHash"], 64);
-      const sourceContentHash = recordText(record3, ["sourceContentHash"], 64);
+      const contentHash = recordText(record4, ["contentHash"], 64);
+      const sourceContentHash = recordText(record4, ["sourceContentHash"], 64);
       if (match === "risk_signal" && /^[a-f0-9]{64}$/i.test(contentHash ?? "") && /^[a-f0-9]{64}$/i.test(sourceContentHash ?? "")) {
         return "verified";
       }
@@ -9914,32 +9929,32 @@ var verificationFor = (section, record3, sourceArtifactPeers = [], subjectHandle
     if (match === "candidate") return "reported";
   }
   if (section === "trustGraphScreen") {
-    if (record3.status === "incomplete") return "unavailable";
-    const connections = Array.isArray(record3.connections) ? record3.connections : [];
+    if (record4.status === "incomplete") return "unavailable";
+    const connections = Array.isArray(record4.connections) ? record4.connections : [];
     const qualifiedConnections = connections.filter((candidate) => {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
       const connection = candidate;
       return connection.qualified === true && Array.isArray(connection.ties) && connection.ties.length > 0;
     });
-    if (record3.status === "clear" && qualifiedConnections.length === 0) return "checked_empty";
+    if (record4.status === "clear" && qualifiedConnections.length === 0) return "checked_empty";
     if (qualifiedConnections.length > 0) return "verified";
     return "unavailable";
   }
   if (section === "projectToken" || section === "ventureToken") {
-    return record3.verified === true && (record3.verification === "official_x" || record3.verification === "official_domain") ? "verified" : "unavailable";
+    return record4.verified === true && (record4.verification === "official_x" || record4.verification === "official_domain") ? "verified" : "unavailable";
   }
   if (section === "basicFacts") {
-    const status = recordText(record3, ["status"], 40)?.toLowerCase();
-    return record3.artifact_verified === true && (status === "verified" || status === "corroborated") ? "verified" : status === "lead" ? "reported" : "unavailable";
+    const status = recordText(record4, ["status"], 40)?.toLowerCase();
+    return record4.artifact_verified === true && (status === "verified" || status === "corroborated") ? "verified" : status === "lead" ? "reported" : "unavailable";
   }
   return "observed";
 };
-var counterEligibleAxesFor = (section, record3, verification, eligibleAxes) => {
+var counterEligibleAxesFor = (section, record4, verification, eligibleAxes) => {
   if (verification !== "verified") return [];
-  if (section === "findings" && typeof record3.polarity === "number" && record3.polarity < 0) return [...eligibleAxes];
-  if (section === "basicFacts" && recordText(record3, ["predicate"], 80)?.toLowerCase() === "security_incident") return [...eligibleAxes];
-  if (section === "sourceArtifacts" && record3.match === "risk_signal") return [...eligibleAxes];
-  if (section === "trustGraphScreen" && (record3.severity === "caution" || record3.severity === "avoid")) return [...eligibleAxes];
+  if (section === "findings" && typeof record4.polarity === "number" && record4.polarity < 0) return [...eligibleAxes];
+  if (section === "basicFacts" && recordText(record4, ["predicate"], 80)?.toLowerCase() === "security_incident") return [...eligibleAxes];
+  if (section === "sourceArtifacts" && record4.match === "risk_signal") return [...eligibleAxes];
+  if (section === "trustGraphScreen" && (record4.severity === "caution" || record4.severity === "avoid")) return [...eligibleAxes];
   return [];
 };
 var DIRECT_SECTIONS = /* @__PURE__ */ new Set(["profile", "profileAuthenticity", "projectToken", "findings", "wallets", "promotions", "recentActivity"]);
@@ -10100,7 +10115,7 @@ function extractScoringEvidenceCatalog(json, axisCatalog2) {
   if (!Array.isArray(packet.evidenceCatalog) || !packet.evidenceCatalog.every(isAxisEvidenceRecord)) return [];
   if (axisCatalog2 && axisCatalog2.length > 0 && packet.schema_version !== 5) return [];
   const catalog = packet.evidenceCatalog;
-  const byId = new Map(catalog.map((record3) => [record3.artifactId, record3]));
+  const byId = new Map(catalog.map((record4) => [record4.artifactId, record4]));
   if (byId.size !== catalog.length) return [];
   const strictCatalog = packet.schema_version === 5;
   const requestedAxes = axisCatalog2 && axisCatalog2.length > 0 && new Set(axisCatalog2.map(({ axis }) => axis)).size === axisCatalog2.length ? [...axisCatalog2] : void 0;
@@ -10145,10 +10160,10 @@ function extractScoringEvidenceCatalog(json, axisCatalog2) {
   for (const section of [...SCORING_ARRAY_SECTIONS, "axisGaps"]) {
     if (Array.isArray(packet[section])) packet[section].forEach((value) => inspect(section, value));
   }
-  return represented.size === catalog.length ? catalog.map((record3) => ({
-    ...record3,
-    eligibleAxes: [...record3.eligibleAxes],
-    ...record3.counterEligibleAxes ? { counterEligibleAxes: [...record3.counterEligibleAxes] } : {}
+  return represented.size === catalog.length ? catalog.map((record4) => ({
+    ...record4,
+    eligibleAxes: [...record4.eligibleAxes],
+    ...record4.counterEligibleAxes ? { counterEligibleAxes: [...record4.counterEligibleAxes] } : {}
   })) : [];
 }
 var pruneTrustGraphPacket = (packet) => {
@@ -10274,8 +10289,8 @@ function serializeAnalystEvidencePacket(input, options) {
     }
     const source2 = options.includeInvestigativeLeads ? rawSource : rawSource.filter((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return true;
-      const record3 = item;
-      return record3.evidence_origin !== "model_lead" && record3.artifact_verified !== false;
+      const record4 = item;
+      return record4.evidence_origin !== "model_lead" && record4.artifact_verified !== false;
     });
     const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source2, options.axisCatalog ? source2.length : limit) : section === "checkOutcomes" ? retainCheckOutcomes(source2, limit) : source2.slice(0, limit);
     const included = selected.map((item) => section === "sourceArtifacts" ? compactSourceArtifact(item) : compactObject(item)).filter((item) => item !== void 0);
@@ -12395,8 +12410,8 @@ Output 3 to 5 precise Google search queries that will surface the exact pages ne
   const m = text2.match(/\[[\s\S]*\]/);
   if (!m) return [];
   try {
-    const arr = JSON.parse(m[0]);
-    return Array.isArray(arr) ? arr.filter((q) => typeof q === "string" && q.trim().length > 0).slice(0, 5) : [];
+    const arr2 = JSON.parse(m[0]);
+    return Array.isArray(arr2) ? arr2.filter((q) => typeof q === "string" && q.trim().length > 0).slice(0, 5) : [];
   } catch {
     return [];
   }
@@ -12987,7 +13002,7 @@ async function collectCorpus(handle) {
   const originalsRaw = [...p1.tweets, ...p2.tweets].map(parseTweet).filter((p) => p.text && !p.isReply && !p.isRt);
   const searchedRaw = [...sId, ...sLa, ...sEn, ...sSh, ...sCa].map(parseTweet).filter((p) => p.text && !p.isRt);
   const seen = /* @__PURE__ */ new Set();
-  const dedup = (arr) => arr.filter((p) => {
+  const dedup = (arr2) => arr2.filter((p) => {
     const k = p.text.slice(0, 80).toLowerCase();
     if (seen.has(k)) return false;
     seen.add(k);
@@ -13078,8 +13093,8 @@ async function checkFollowUncached(source2, target) {
     const nested = asRecord2(d.data);
     const records = Object.keys(nested).length ? [nested, d] : [d];
     const pick = (...keys) => {
-      for (const record3 of records) {
-        for (const k of keys) if (typeof record3[k] === "boolean") return record3[k];
+      for (const record4 of records) {
+        for (const k of keys) if (typeof record4[k] === "boolean") return record4[k];
       }
       return null;
     };
@@ -13133,25 +13148,25 @@ var audienceMonth = (row) => {
 };
 function tallyAudienceRow(tally, row) {
   if (!row || typeof row !== "object" || Array.isArray(row)) return;
-  const record3 = row;
+  const record4 = row;
   tally.profilesExamined += 1;
-  const month = audienceMonth(record3);
+  const month = audienceMonth(record4);
   if (month) {
     tally.creationMeasured += 1;
     tally.creationMonths.set(month, (tally.creationMonths.get(month) ?? 0) + 1);
   }
-  const posts = audienceNumber(record3, "statusesCount", "statuses_count", "tweetCount", "tweet_count");
+  const posts = audienceNumber(record4, "statusesCount", "statuses_count", "tweetCount", "tweet_count");
   if (posts !== null) {
     tally.postsMeasured += 1;
     if (posts === 0) tally.zeroPosts += 1;
   }
-  const avatarUrl = typeof record3.profilePicture === "string" ? record3.profilePicture : typeof record3.profile_image_url_https === "string" ? record3.profile_image_url_https : typeof record3.profile_image_url === "string" ? record3.profile_image_url : null;
+  const avatarUrl = typeof record4.profilePicture === "string" ? record4.profilePicture : typeof record4.profile_image_url_https === "string" ? record4.profile_image_url_https : typeof record4.profile_image_url === "string" ? record4.profile_image_url : null;
   const defaultAvatar = avatarUrl === null ? null : DEFAULT_AVATAR_URL.test(avatarUrl);
   if (defaultAvatar !== null) {
     tally.avatarMeasured += 1;
     if (defaultAvatar) tally.defaultAvatar += 1;
   }
-  const bio = typeof record3.description === "string" ? record3.description : null;
+  const bio = typeof record4.description === "string" ? record4.description : null;
   const emptyBio = bio === null ? null : bio.trim() === "";
   if (emptyBio !== null) {
     tally.bioMeasured += 1;
@@ -13161,8 +13176,8 @@ function tallyAudienceRow(tally, row) {
     tally.starterMeasured += 1;
     if (defaultAvatar && emptyBio) tally.starterAccounts += 1;
   }
-  const followers = audienceNumber(record3, "followers", "followersCount", "followers_count");
-  const following = audienceNumber(record3, "following", "followingCount", "following_count", "friends_count");
+  const followers = audienceNumber(record4, "followers", "followersCount", "followers_count");
+  const following = audienceNumber(record4, "following", "followingCount", "following_count", "friends_count");
   if (followers !== null && following !== null) {
     tally.ratioMeasured += 1;
     if (followers === 0 && following === 0) tally.balanced += 1;
@@ -13452,8 +13467,8 @@ async function enrichTeamIdentities(project, people) {
   const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
-    const arr = JSON.parse(m[0]).people ?? [];
-    return arr.filter((p) => p && typeof p.name === "string" && p.name.trim()).map((p) => ({
+    const arr2 = JSON.parse(m[0]).people ?? [];
+    return arr2.filter((p) => p && typeof p.name === "string" && p.name.trim()).map((p) => ({
       name: p.name.trim(),
       handle: typeof p.handle === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(p.handle.replace(/^@/, "")) ? "@" + p.handle.replace(/^@/, "") : void 0,
       linkedin: typeof p.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(p.linkedin) ? p.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0
@@ -14217,9 +14232,9 @@ function parseTeamJSON(text2, selfHandle, source2) {
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
-    const arr = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
+    const arr2 = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
     const self = (selfHandle ?? "").replace(/^@/, "").toLowerCase();
-    return arr.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => {
+    return arr2.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => {
       const role = (t.role || "team").toString();
       const kind = t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
       const linkedin = typeof t.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(t.linkedin) ? t.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
@@ -14669,16 +14684,42 @@ function scanPageTextForCredits(text2, sourceUrl2, projectName2, anchors) {
   }
   return out.slice(0, 6);
 }
-async function fetchPage(url, expectedApex, purpose = "roster") {
+function recoveredTeamPage(recovered, url, expectedApex, purpose, failureMeta2) {
+  const op = purpose === "credits" ? "site-credits" : "team-page";
+  if (recovered.status !== "ok") return null;
+  try {
+    const finalHost = new URL(recovered.url).hostname.toLowerCase();
+    if (finalHost !== expectedApex && !finalHost.endsWith(`.${expectedApex}`)) return null;
+  } catch {
+    return null;
+  }
+  const text2 = recovered.text.replace(/\s+/g, " ").trim();
+  if (purpose === "credits") {
+    if (text2.length < 40) return null;
+  } else if (text2.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text2)) {
+    return null;
+  }
+  recordCall("site-fetch", op, 0, `reader_recovery_after_${failureMeta2}`, "succeeded");
+  return { url: recovered.url || url, text: text2, html: recovered.text, anchors: profileAnchors(recovered.text) };
+}
+async function fetchPage(url, expectedApex, purpose = "roster", recoverOfficialText = fetchPublicTextWithRecovery, allowRecovery = false) {
   const op = purpose === "credits" ? "site-credits" : "team-page";
   let response;
   try {
     response = await fetchWithOneRetry(url, () => ({ headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,text/markdown,text/plain" }, redirect: "follow", signal: AbortSignal.timeout(8e3) }));
   } catch {
+    if (allowRecovery) {
+      const recovered = recoveredTeamPage(await recoverOfficialText(url), url, expectedApex, purpose, "transport_error");
+      if (recovered) return recovered;
+    }
     recordCall("site-fetch", op, 0, "transport_error", "failed");
     return null;
   }
   if (!response.ok) {
+    if (allowRecovery && (response.status === 403 || response.status === 429)) {
+      const recovered = recoveredTeamPage(await recoverOfficialText(url), url, expectedApex, purpose, `http_${response.status}`);
+      if (recovered) return recovered;
+    }
     recordCall(
       "site-fetch",
       op,
@@ -14856,20 +14897,23 @@ async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
   })));
   return [...new Set(results.flat())].slice(0, 8);
 }
-async function fetchTeamPage(domain, projectName2) {
+async function fetchTeamPage(domain, projectName2, dependencies = {}) {
   const apex = normalizedApex(domain);
   if (!apex) return [];
+  const recoverOfficialText = dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery;
   const [primaryCandidates = [], fallbackCandidates = []] = candidateUrlTiers(domain);
+  const discoveredUrls = await discoverTeamDocumentUrls(domain);
+  const discoveredSet = new Set(discoveredUrls);
   const primaryUrls = [.../* @__PURE__ */ new Set([
-    ...await discoverTeamDocumentUrls(domain),
+    ...discoveredUrls,
     ...primaryCandidates
   ])];
   if (!primaryUrls.length) return [];
-  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex)))).filter(Boolean);
+  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex, "roster", recoverOfficialText, discoveredSet.has(u))))).filter(Boolean);
   if (!pages.length && fallbackCandidates.length) {
-    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex)))).filter(Boolean);
+    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex, "roster", recoverOfficialText)))).filter(Boolean);
   }
-  const homePage = await fetchPage(`https://${apex}/`, apex, "credits") ?? await fetchPage(`https://www.${apex}/`, apex, "credits");
+  const homePage = await fetchPage(`https://${apex}/`, apex, "credits", recoverOfficialText, true) ?? await fetchPage(`https://www.${apex}/`, apex, "credits", recoverOfficialText, true);
   const apexLabel = apex.split(".")[0];
   const creditSeen = /* @__PURE__ */ new Set();
   const creditTeam = [...pages, ...homePage ? [homePage] : []].flatMap((page) => scanPageTextForCredits(page.text, page.url, projectName2, page.anchors)).filter((person) => {
@@ -14881,7 +14925,7 @@ async function fetchTeamPage(domain, projectName2) {
   if (!pages.length && !creditTeam.length) return [];
   const directTeam = pages.length ? await extractTeamFromPages(pages, projectName2) : [];
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
-  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex)))).filter(Boolean);
+  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex, "roster", recoverOfficialText, true)))).filter(Boolean);
   const forumTeam = forumPages.length ? await extractTeamFromPages(forumPages, projectName2, true) : [];
   const seen = /* @__PURE__ */ new Set();
   return [...directTeam, ...forumTeam, ...creditTeam].filter((person) => {
@@ -15615,6 +15659,17 @@ function deriveLaunchWindow(domainRegisteredAt, accountCreatedAt) {
   };
 }
 
+// src/lib/json.ts
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function rec(value) {
+  return isRecord(value) ? value : {};
+}
+function arr(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 // server/adapters/defiLlama.ts
 var API_BASE = "https://api.llama.fi";
 function defiLlamaSlug(name) {
@@ -15906,6 +15961,8 @@ var PER_SECTION_USD = 0.125;
 var POLL_INTERVAL_MS = 2e3;
 var POLL_TIMEOUT_MS = 3e4;
 var RUN_TIMEOUT_MS = 3e4;
+var RATE_LIMIT_RETRY_DEFAULT_MS = 750;
+var RATE_LIMIT_RETRY_MAX_MS = 2e3;
 var ALLOWED_SECTIONS = [
   "funding_detail",
   "mna_and_investment",
@@ -15952,29 +16009,37 @@ var TERMINAL_OK = "COMPLETED";
 var TERMINAL_FAIL = /* @__PURE__ */ new Set(["FAILED", "BLOCKED", "TIMED_OUT", "STOPPED"]);
 var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function extractData(run) {
-  const output = run?.output;
-  if (output && typeof output === "object" && !Array.isArray(output) && "data" in output) {
-    return output.data;
-  }
+  const output = rec(run).output;
+  if (output && typeof output === "object" && !Array.isArray(output) && "data" in output) return rec(output).data;
   return output;
 }
 function runId(run) {
-  if (isNonEmptyString(run?.runId)) return run.runId.trim();
-  if (isNonEmptyString(run?.id)) return run.id.trim();
+  const value = rec(run);
+  if (isNonEmptyString(value.runId)) return value.runId.trim();
+  if (isNonEmptyString(value.id)) return value.id.trim();
   return null;
 }
 async function startRun(key, endpoint, input, fetcher) {
-  let res;
-  try {
-    res = await fetcher(`${API_BASE2}/run`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({ provider: PROVIDER, endpoint, input }),
-      signal: AbortSignal.timeout(RUN_TIMEOUT_MS)
-    });
-  } catch {
-    return { ok: false, note: "Monid was unavailable." };
+  let res = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      res = await fetcher(`${API_BASE2}/run`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify({ provider: PROVIDER, endpoint, input }),
+        signal: AbortSignal.timeout(RUN_TIMEOUT_MS)
+      });
+    } catch {
+      return { ok: false, note: "Monid was unavailable." };
+    }
+    if (res.status !== 429 || attempt > 0) break;
+    const retryAfter = res.headers.get("retry-after");
+    const parsedSeconds = retryAfter == null ? Number.NaN : Number(retryAfter);
+    const parsedDate = retryAfter == null ? Number.NaN : Date.parse(retryAfter);
+    const requestedDelay = Number.isFinite(parsedSeconds) ? Math.max(0, parsedSeconds * 1e3) : Number.isFinite(parsedDate) ? Math.max(0, parsedDate - Date.now()) : RATE_LIMIT_RETRY_DEFAULT_MS;
+    await sleep(Math.min(RATE_LIMIT_RETRY_MAX_MS, requestedDelay));
   }
+  if (!res) return { ok: false, note: "Monid was unavailable." };
   if (res.status === 404) return { ok: false, noRecord: true, note: "no record found (no_record_404)" };
   if (!res.ok) return { ok: false, note: `Monid request failed (http_${res.status}).` };
   let run;
@@ -15989,7 +16054,8 @@ async function resolveRun(initial, key, fetcher) {
   let current = initial;
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   for (let guard = 0; guard < 32; guard += 1) {
-    const status = isNonEmptyString(current?.status) ? current.status : "";
+    const currentRecord = rec(current);
+    const status = isNonEmptyString(currentRecord.status) ? currentRecord.status : "";
     if (status === TERMINAL_OK) {
       const data = extractData(current);
       if (data === void 0 || data === null) {
@@ -16030,10 +16096,7 @@ async function pollRun(id, key, fetcher) {
 }
 function companyList(data) {
   if (Array.isArray(data)) return data;
-  if (data && typeof data === "object" && Array.isArray(data.data)) {
-    return data.data;
-  }
-  return [];
+  return arr(rec(data).data);
 }
 function sectionRoot(data) {
   if (!data || typeof data !== "object") return {};
@@ -16073,7 +16136,7 @@ function logCompanyResolution(event, details) {
   console.info("[monid.company_resolution]", JSON.stringify({ event, ...details }));
 }
 function pickBestMatch(companies, query, options) {
-  const valid = companies.filter((company) => isNonEmptyString(company?.uuid));
+  const valid = companies.map(rec).filter((company) => isNonEmptyString(company.uuid));
   const queryHost = hostOf2(query);
   const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
   const queryName = normalizedCompanyName(query);
@@ -16097,10 +16160,10 @@ function pickBestMatch(companies, query, options) {
   }
   if (queryLooksLikeHost) {
     const ranked = valid.flatMap((company) => {
-      const matchedDomain = hostOf2(company?.website);
+      const matchedDomain = hostOf2(company.website);
       const method = matchedDomain ? relatedOfficialHosts(queryHost, matchedDomain) : null;
       if (!method) return [];
-      const exactName = officialName && normalizedCompanyName(company?.name) === officialName;
+      const exactName = officialName && normalizedCompanyName(company.name) === officialName;
       return [{
         company,
         method,
@@ -16133,7 +16196,7 @@ function pickBestMatch(companies, query, options) {
     };
   }
   const exactNameMatches = valid.filter(
-    (company) => normalizedCompanyName(company?.name) === queryName
+    (company) => normalizedCompanyName(company.name) === queryName
   );
   if (exactNameMatches.length === 1) {
     const company = exactNameMatches[0];
@@ -16141,7 +16204,7 @@ function pickBestMatch(companies, query, options) {
       company,
       method: "exact_name",
       requestedDomain: null,
-      matchedDomain: hostOf2(company?.website),
+      matchedDomain: hostOf2(company.website),
       candidateCount: valid.length
     };
   }
@@ -16154,14 +16217,14 @@ function pickBestMatch(companies, query, options) {
     };
   }
   if (queryName) {
-    const labelMatches = valid.filter((company) => domainLabel(company?.website) === queryName);
+    const labelMatches = valid.filter((company) => domainLabel(company.website) === queryName);
     if (labelMatches.length === 1) {
       const company = labelMatches[0];
       return {
         company,
         method: "domain_label",
         requestedDomain: null,
-        matchedDomain: hostOf2(company?.website),
+        matchedDomain: hostOf2(company.website),
         candidateCount: valid.length
       };
     }
@@ -16221,21 +16284,22 @@ function parseFunding(section) {
   const raw = section;
   const overview = raw.funding_overview && typeof raw.funding_overview === "object" ? raw.funding_overview : {};
   const totalRaisedUsd = numOrNull(overview.total_funding_usd);
-  const rawRounds = Array.isArray(raw.funding_rounds) ? raw.funding_rounds : [];
-  const rounds = rawRounds.map((entry) => {
-    const investors = Array.isArray(entry?.investors) ? entry.investors : [];
+  const rawRounds = arr(raw.funding_rounds);
+  const rounds = rawRounds.map((value) => {
+    const entry = rec(value);
+    const investors = arr(entry.investors);
     const namesWhere = (predicate) => [
       ...new Set(
-        investors.filter(predicate).map((investor) => isNonEmptyString(investor?.name) ? investor.name.trim() : "").filter((name) => name.length > 0)
+        investors.map(rec).filter(predicate).map((investor) => isNonEmptyString(investor.name) ? investor.name.trim() : "").filter((name) => name.length > 0)
       )
     ];
     return {
-      date: formatAktaDate(entry?.date),
-      round: isNonEmptyString(entry?.round?.label) ? entry.round.label.trim() : "Undisclosed round",
-      amountUsd: numOrNull(entry?.amount_usd),
+      date: formatAktaDate(entry.date),
+      round: isNonEmptyString(rec(entry.round).label) ? String(rec(entry.round).label).trim() : "Undisclosed round",
+      amountUsd: numOrNull(entry.amount_usd),
       // absolute USD — do NOT multiply
-      leadInvestors: namesWhere((investor) => investor?.lead_investor === true),
-      otherInvestors: namesWhere((investor) => investor?.lead_investor !== true)
+      leadInvestors: namesWhere((investor) => investor.lead_investor === true),
+      otherInvestors: namesWhere((investor) => investor.lead_investor !== true)
     };
   });
   if (totalRaisedUsd === null && rounds.length === 0) return void 0;
@@ -16245,15 +16309,16 @@ function parseFunding(section) {
 function parseManagement(section) {
   if (!section || typeof section !== "object") return void 0;
   const profiles = Array.isArray(section.profiles) ? section.profiles : [];
-  const people = profiles.map((profile) => {
-    const name = isNonEmptyString(profile?.name) ? profile.name.trim() : "";
+  const people = profiles.map((value) => {
+    const profile = rec(value);
+    const name = isNonEmptyString(profile.name) ? profile.name.trim() : "";
     if (!name) return null;
     return {
       name,
-      title: isNonEmptyString(profile?.designation) ? profile.designation.trim() : "",
-      priorCompanies: toStringList(profile?.previous_companies),
-      linkedin: isNonEmptyString(profile?.social?.linkedin) ? profile.social.linkedin.trim() : null,
-      startYear: startYearFrom(profile?.start_date)
+      title: isNonEmptyString(profile.designation) ? profile.designation.trim() : "",
+      priorCompanies: toStringList(profile.previous_companies),
+      linkedin: isNonEmptyString(rec(profile.social).linkedin) ? String(rec(profile.social).linkedin).trim() : null,
+      startYear: startYearFrom(profile.start_date)
     };
   }).filter((person) => person !== null);
   return people.length ? people : void 0;
@@ -16347,7 +16412,7 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
       queryDomain: decision.requestedDomain,
       candidateCount: decision.candidateCount,
       searchDomains: searchQueries.map((providerQuery) => hostOf2(providerQuery) ?? providerQuery),
-      candidateDomains: companies.map((company) => hostOf2(company?.website)).filter((domain) => Boolean(domain)).slice(0, 10)
+      candidateDomains: companies.map((company) => hostOf2(rec(company).website)).filter((domain) => Boolean(domain)).slice(0, 10)
     });
     return {
       available: false,
@@ -16467,9 +16532,9 @@ async function enrichPersonViaMonid(params, fetcher = fetch) {
   }
   const data = outcome.data;
   if (!data || typeof data !== "object" || Array.isArray(data)) return { outcome: "no_match" };
-  const record3 = data;
-  if (!isNonEmptyString(record3.full_name) && !isNonEmptyString(record3.id)) return { outcome: "no_match" };
-  return { outcome: "match", record: record3 };
+  const record4 = data;
+  if (!isNonEmptyString(record4.full_name) && !isNonEmptyString(record4.id)) return { outcome: "no_match" };
+  return { outcome: "match", record: record4 };
 }
 
 // src/lib/employmentCurrency.ts
@@ -16494,14 +16559,14 @@ var monthYear2 = (value) => {
 };
 function employmentCurrency(records, company, person) {
   const who = person?.trim() ? person.trim() : "This person";
-  const matches = records.filter((record3) => typeof record3.company === "string" && sameCompany(record3.company, company));
+  const matches = records.filter((record4) => typeof record4.company === "string" && sameCompany(record4.company, company));
   if (!matches.length) {
     return {
       state: "absent",
       summary: `${who} has no ${company} role on their employment record. That record may simply be incomplete, so it is not evidence they were never involved.`
     };
   }
-  const open = matches.find((record3) => !record3.end?.trim());
+  const open = matches.find((record4) => !record4.end?.trim());
   if (open) {
     return {
       state: "current",
@@ -16813,7 +16878,7 @@ var peopledatalabsAdapter = {
         }
         confirmed.push(company);
       } else {
-        const rec = {
+        const rec2 = {
           project_name: company,
           role: title,
           period,
@@ -16824,8 +16889,8 @@ var peopledatalabsAdapter = {
           evidence_origin: "deterministic",
           artifact_verified: true
         };
-        ctx.evidence.ventures.push(rec);
-        byName.set(key, rec);
+        ctx.evidence.ventures.push(rec2);
+        byName.set(key, rec2);
         added.push(company);
       }
     }
@@ -17327,8 +17392,8 @@ async function enrichFirstPartyTeamAvatars(ctx) {
 // server/adapters/dexscreener.ts
 var BASE2 = "https://api.dexscreener.com";
 var MAX_PROMO_LOOKUPS = 8;
-var isRecord = (value) => !!value && typeof value === "object" && !Array.isArray(value);
-var isPair = (value) => isRecord(value);
+var isRecord2 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var isPair = (value) => isRecord2(value);
 var recordDex = (op, status, detail) => {
   recordCall("dexscreener", op, 0, ["keyless", detail].filter(Boolean).join(" \xB7 "), status);
 };
@@ -17353,7 +17418,7 @@ async function lookupToken(address) {
     recordDex("token-pairs", "failed", "response_json_error");
     return null;
   }
-  if (!isRecord(data) || !Array.isArray(data.pairs)) {
+  if (!isRecord2(data) || !Array.isArray(data.pairs)) {
     recordDex("token-pairs", "partial", "result_shape_error");
     return null;
   }
@@ -17403,7 +17468,7 @@ async function detectTokenLifecycle(ticker, knownAddress) {
     recordDex("token-search", "failed", "response_json_error");
     return null;
   }
-  if (!isRecord(data) || !Array.isArray(data.pairs)) {
+  if (!isRecord2(data) || !Array.isArray(data.pairs)) {
     recordDex("token-search", "partial", "result_shape_error");
     return null;
   }
@@ -17422,12 +17487,12 @@ async function detectTokenLifecycle(ticker, knownAddress) {
         missingAddress += 1;
         continue;
       }
-      let arr = byAddr.get(a);
-      if (!arr) {
-        arr = [];
-        byAddr.set(a, arr);
+      let arr2 = byAddr.get(a);
+      if (!arr2) {
+        arr2 = [];
+        byAddr.set(a, arr2);
       }
-      arr.push(p);
+      arr2.push(p);
     }
     const generations = [...byAddr.entries()].map(([address, ps]) => {
       const created = ps.map((p) => p.pairCreatedAt).filter((x) => typeof x === "number");
@@ -17676,15 +17741,15 @@ function parseMentionedHandles(raw, packet) {
   const out = [];
   for (const item of raw) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-    const rec = item;
-    const handleRaw = typeof rec.handle === "string" ? rec.handle.trim() : "";
+    const rec2 = item;
+    const handleRaw = typeof rec2.handle === "string" ? rec2.handle.trim() : "";
     if (!looksLikeHandle(handleRaw)) continue;
     const key = normalizeHandle2(handleRaw);
     if (!key || key === subject || seen.has(key)) continue;
-    const quote = typeof rec.quote === "string" ? rec.quote.replace(/\s+/g, " ").trim() : "";
+    const quote = typeof rec2.quote === "string" ? rec2.quote.replace(/\s+/g, " ").trim() : "";
     if (!quote) continue;
     if (!new RegExp(`@${key}\\b`, "i").test(quote)) continue;
-    const roleHint = typeof rec.roleHint === "string" ? rec.roleHint.replace(/\s+/g, " ").trim().slice(0, 40) : "";
+    const roleHint = typeof rec2.roleHint === "string" ? rec2.roleHint.replace(/\s+/g, " ").trim().slice(0, 40) : "";
     seen.add(key);
     out.push({
       handle: `@${key}`,
@@ -17724,13 +17789,13 @@ function parseLaunchedProducts(raw, packet) {
   const seen = /* @__PURE__ */ new Set();
   for (const item of raw) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-    const rec = item;
-    const name = typeof rec.name === "string" ? rec.name.replace(/\s+/g, " ").trim().slice(0, 80) : "";
-    const handleRaw = typeof rec.handle === "string" ? rec.handle.trim() : "";
+    const rec2 = item;
+    const name = typeof rec2.name === "string" ? rec2.name.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+    const handleRaw = typeof rec2.handle === "string" ? rec2.handle.trim() : "";
     const handle = looksLikeHandle(handleRaw) ? normalizeHandle2(handleRaw) : "";
     if (handle && handle === subject) continue;
-    const namedDomain = normalizeDomain(typeof rec.domain === "string" ? rec.domain : null);
-    const tokenTicker = parseTokenTicker(rec.tokenTicker);
+    const namedDomain = normalizeDomain(typeof rec2.domain === "string" ? rec2.domain : null);
+    const tokenTicker = parseTokenTicker(rec2.tokenTicker);
     const productHandle = handle ? `@${handle}` : void 0;
     const productDomain = namedDomain && namedDomain !== packet.websiteHost ? namedDomain : void 0;
     if (!name && !productHandle && !tokenTicker && !productDomain) continue;
@@ -18314,13 +18379,13 @@ var headers2 = (key) => ({
   accept: "application/vnd.github+json",
   "user-agent": "argus-due-diligence"
 });
-var isRecord2 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var isRecord3 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 function validGithubResult(path, value) {
   const clean4 = path.split("?")[0];
-  if (clean4 === "/search/users") return isRecord2(value) && Array.isArray(value.items);
+  if (clean4 === "/search/users") return isRecord3(value) && Array.isArray(value.items);
   if (/^\/users\/[^/]+\/(orgs|repos)$/.test(clean4)) return Array.isArray(value);
-  if (/^\/users\/[^/]+$/.test(clean4)) return isRecord2(value) && typeof value.login === "string" && !!value.login.trim();
-  return isRecord2(value) || Array.isArray(value);
+  if (/^\/users\/[^/]+$/.test(clean4)) return isRecord3(value) && typeof value.login === "string" && !!value.login.trim();
+  return isRecord3(value) || Array.isArray(value);
 }
 async function ghJson(path, key) {
   const op = path.split("?")[0].split("/").slice(1, 3).join("/") || "api";
@@ -23515,12 +23580,12 @@ function cachedFactClosesDiscovery(ctx, question, facts) {
 }
 async function loadReusableBasicFacts(ctx) {
   if (env("ARGUS_ENTITY_REUSE") !== "on") return [];
-  const rec = await readEntityFacts(
+  const rec2 = await readEntityFacts(
     ctx.organizationId,
     canonicalEntityKey({ handle: ctx.handle }),
     ENTITY_REUSE_READ_WINDOW_MS
   );
-  const cached = rec?.facts && typeof rec.facts === "object" ? rec.facts.basicFacts : void 0;
+  const cached = rec2?.facts && typeof rec2.facts === "object" ? rec2.facts.basicFacts : void 0;
   if (!Array.isArray(cached)) return [];
   const projectionLike = (fact) => fact.providerProjection === true || /^captured \d{4}-\d{2}-\d{2}$/.test(String(fact.qualifier ?? "")) || /operates a live on-chain protocol/.test(String(fact.value ?? ""));
   return cached.filter((fact) => Boolean(fact) && typeof fact === "object" && typeof fact.predicate === "string" && typeof fact.value === "string" && fact.artifact_verified === true && fact.predicate !== "legal_regulatory_event" && !projectionLike(fact) && reusableFactIsFresh(fact) && (researchAudience(ctx) === "project" || isOrganizationAccount(ctx.evidence) || Boolean(ctx.evidence.profile.identity_binding) || fact.predicate === "official_identity" && identityFactBindsExactAuditedHandle(ctx, fact)));
@@ -25065,8 +25130,8 @@ async function getJson(url) {
 }
 async function web3bio(name) {
   const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);
-  const arr = Array.isArray(d) ? d : d ? [d] : [];
-  for (const row of arr) {
+  const arr2 = Array.isArray(d) ? d : d ? [d] : [];
+  for (const row of arr2) {
     const address = row?.address;
     if (typeof address === "string" && address) return address;
   }
@@ -25079,8 +25144,8 @@ async function ensideas(name) {
 }
 async function snsResolve(name) {
   const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);
-  const arr = Array.isArray(d) ? d : d ? [d] : [];
-  for (const row of arr) {
+  const arr2 = Array.isArray(d) ? d : d ? [d] : [];
+  for (const row of arr2) {
     const address = row?.address;
     if (typeof address === "string" && SOLANA_ADDRESS2.test(address)) return address;
   }
@@ -27507,7 +27572,7 @@ var geckoTerminalOhlcvUrl = (chain, poolAddress, timeframe) => {
   const network = GECKOTERMINAL_NETWORK[chain];
   return network ? `${GECKOTERMINAL}/networks/${encodeURIComponent(network)}/pools/${encodeURIComponent(poolAddress)}/ohlcv/${timeframe}?aggregate=1&limit=${MAX_HISTORY_POINTS}&currency=usd` : null;
 };
-var isRecord3 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var isRecord4 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var finiteNumber2 = (value) => {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
   return Number.isFinite(parsed) ? parsed : void 0;
@@ -27590,13 +27655,13 @@ async function coinSearch(query) {
     recordCall("coingecko", "project-search", 0, `${tier} \xB7 response_json_error`, "failed");
     return null;
   }
-  const rows = isRecord3(payload) && Array.isArray(payload.coins) ? payload.coins : null;
+  const rows = isRecord4(payload) && Array.isArray(payload.coins) ? payload.coins : null;
   if (!rows) {
     recordCall("coingecko", "project-search", 0, `${tier} \xB7 result_shape_error`, "partial");
     return null;
   }
   const valid = rows.flatMap((candidate) => {
-    if (!isRecord3(candidate)) return [];
+    if (!isRecord4(candidate)) return [];
     const id = cleanText2(candidate.id);
     const name = cleanText2(candidate.name);
     const symbol = cleanText2(candidate.symbol);
@@ -27655,7 +27720,7 @@ async function coinDetails(id) {
     recordCall("coingecko", "project-details", 0, `${tier} \xB7 response_json_error`, "failed");
     return null;
   }
-  if (!isRecord3(payload)) {
+  if (!isRecord4(payload)) {
     recordCall("coingecko", "project-details", 0, `${tier} \xB7 result_shape_error`, "partial");
     return null;
   }
@@ -27687,7 +27752,7 @@ async function coinByContract(platform, address) {
     recordCall("coingecko", "project-contract", 0, `${tier} \xB7 response_json_error`, "failed");
     return { state: "failed" };
   }
-  if (!isRecord3(payload) || !cleanText2(payload.id)) {
+  if (!isRecord4(payload) || !cleanText2(payload.id)) {
     recordCall("coingecko", "project-contract", 0, `${tier} \xB7 result_shape_error`, "partial");
     return { state: "failed" };
   }
@@ -27710,7 +27775,7 @@ var validContract = (platform, value) => {
   return PLATFORM_CHAIN[platform] && EVM_ADDRESS3.test(address) ? address : null;
 };
 function canonicalContract(details) {
-  const platforms = isRecord3(details.platforms) ? details.platforms : {};
+  const platforms = isRecord4(details.platforms) ? details.platforms : {};
   const native = cleanText2(details.asset_platform_id);
   const order = [...new Set([
     native,
@@ -27732,7 +27797,7 @@ function canonicalContract(details) {
   return null;
 }
 var officialHomepages = (details) => {
-  const links = isRecord3(details.links) ? details.links : {};
+  const links = isRecord4(details.links) ? details.links : {};
   const homes = Array.isArray(links.homepage) ? links.homepage : [];
   return homes.filter(
     (value) => typeof value === "string" && canonicalOfficialWebsite(value) !== null
@@ -27740,7 +27805,7 @@ var officialHomepages = (details) => {
 };
 var domainsMatch = (left, right) => left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
 function verifyIdentity(ctx, details) {
-  const links = isRecord3(details.links) ? details.links : {};
+  const links = isRecord4(details.links) ? details.links : {};
   const officialHandle = cleanText2(links.twitter_screen_name);
   const exactX = officialHandle && normalizeHandle3(officialHandle) === normalizeHandle3(ctx.handle);
   const homepages = officialHomepages(details);
@@ -27779,14 +27844,14 @@ var xHandleFromUrl = (value) => {
   }
 };
 function dexIdentity(ctx, row) {
-  const info = isRecord3(row.info) ? row.info : {};
+  const info = isRecord4(row.info) ? row.info : {};
   const websites = Array.isArray(info.websites) ? info.websites.flatMap((candidate) => {
-    if (!isRecord3(candidate)) return [];
+    if (!isRecord4(candidate)) return [];
     const url = cleanText2(candidate.url);
     return canonicalOfficialWebsite(url) ? [url] : [];
   }) : [];
   const handles = Array.isArray(info.socials) ? info.socials.flatMap((candidate) => {
-    if (!isRecord3(candidate)) return [];
+    if (!isRecord4(candidate)) return [];
     const handle = xHandleFromUrl(candidate.url);
     return handle ? [handle] : [];
   }) : [];
@@ -27840,11 +27905,11 @@ async function dexSearch(query) {
     recordCall("dexscreener", "project-search", 0, "keyless \xB7 response_json_error", "failed");
     return null;
   }
-  if (!isRecord3(payload) || !Array.isArray(payload.pairs)) {
+  if (!isRecord4(payload) || !Array.isArray(payload.pairs)) {
     recordCall("dexscreener", "project-search", 0, "keyless \xB7 result_shape_error", "partial");
     return null;
   }
-  const pairs = payload.pairs.filter(isRecord3);
+  const pairs = payload.pairs.filter(isRecord4);
   recordCall(
     "dexscreener",
     "project-search",
@@ -27859,7 +27924,7 @@ function dexProjectCandidates(ctx, query, rows) {
   const queryKey = normalized3(cleanQuery);
   const queryWords = cleanQuery.toLowerCase().split(/\s+/).filter((word) => word.length >= 3);
   const candidates = rows.flatMap((row) => {
-    const base = isRecord3(row.baseToken) ? row.baseToken : {};
+    const base = isRecord4(row.baseToken) ? row.baseToken : {};
     const name = cleanText2(base.name);
     const symbol = cleanText2(base.symbol).toUpperCase();
     const address = cleanText2(base.address);
@@ -27877,8 +27942,8 @@ function dexProjectCandidates(ctx, query, rows) {
     if (!name || !symbol || !addressValid || !chain || !pairAddress || !sourceUrl2 || relevance < 500) return [];
     const identity = dexIdentity(ctx, row);
     if (!identity) return [];
-    const liquidity = isRecord3(row.liquidity) ? finiteNumber2(row.liquidity.usd) : void 0;
-    const volume = isRecord3(row.volume) ? finiteNumber2(row.volume.h24) : void 0;
+    const liquidity = isRecord4(row.liquidity) ? finiteNumber2(row.liquidity.usd) : void 0;
+    const volume = isRecord4(row.volume) ? finiteNumber2(row.volume.h24) : void 0;
     return [{
       name,
       symbol,
@@ -27962,21 +28027,21 @@ async function collectDexProjectToken(ctx, query) {
   };
 }
 function cgHandleBoundHomepages(ctx, details) {
-  const links = isRecord3(details.links) ? details.links : {};
+  const links = isRecord4(details.links) ? details.links : {};
   const officialHandle = cleanText2(links.twitter_screen_name);
   if (!officialHandle || normalizeHandle3(officialHandle) !== normalizeHandle3(ctx.handle)) return [];
   return officialHomepages(details);
 }
 function dexHandleBoundHomepages(ctx, row) {
-  const info = isRecord3(row.info) ? row.info : {};
+  const info = isRecord4(row.info) ? row.info : {};
   const handles = Array.isArray(info.socials) ? info.socials.flatMap((candidate) => {
-    if (!isRecord3(candidate)) return [];
+    if (!isRecord4(candidate)) return [];
     const handle = xHandleFromUrl(candidate.url);
     return handle ? [handle] : [];
   }) : [];
   if (!handles.some((handle) => handle === normalizeHandle3(ctx.handle))) return [];
   const websites = Array.isArray(info.websites) ? info.websites.flatMap((candidate) => {
-    if (!isRecord3(candidate)) return [];
+    if (!isRecord4(candidate)) return [];
     const url = cleanText2(candidate.url);
     return canonicalOfficialWebsite(url) ? [url] : [];
   }) : [];
@@ -28004,7 +28069,7 @@ function officialWebsiteScopes(ctx, extraUrls = []) {
   }
   return scopes;
 }
-async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl) {
+async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialText) {
   let html;
   let identityCapturedAt;
   try {
@@ -28014,14 +28079,33 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl) {
       signal: AbortSignal.timeout(9e3)
     });
     if (!response.ok) {
-      recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
+      if (response.status === 403 || response.status === 429) {
+        const recovered = await recoverOfficialText(scope.canonicalUrl);
+        if (recovered.status === "ok") {
+          html = recovered.text.slice(0, 4e5);
+          identityCapturedAt = captureTimestamp();
+          recordCall("site-fetch", "token-declaration", 0, `reader_recovery_after_http_${response.status}`, "succeeded");
+        } else {
+          recordCall("site-fetch", "token-declaration", 0, `http_${response.status} \xB7 ${recovered.reason}`, "failed");
+          return null;
+        }
+      } else {
+        recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
+        return null;
+      }
+    } else {
+      html = (await response.text()).slice(0, 4e5);
+      identityCapturedAt = captureTimestamp();
+    }
+  } catch {
+    const recovered = await recoverOfficialText(scope.canonicalUrl);
+    if (recovered.status !== "ok") {
+      recordCall("site-fetch", "token-declaration", 0, `transport_error \xB7 ${recovered.reason}`, "failed");
       return null;
     }
-    html = (await response.text()).slice(0, 4e5);
+    html = recovered.text.slice(0, 4e5);
     identityCapturedAt = captureTimestamp();
-  } catch {
-    recordCall("site-fetch", "token-declaration", 0, "transport_error", "failed");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, "reader_recovery_after_transport_error", "succeeded");
   }
   const candidates = siteContractCandidates(html);
   if (!candidates.length) {
@@ -28039,22 +28123,22 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl) {
   }
   const [only] = resolved;
   const best = [...only.pairs].sort((left, right) => {
-    const l = isRecord3(left.liquidity) ? finiteNumber2(left.liquidity.usd) ?? 0 : 0;
-    const r = isRecord3(right.liquidity) ? finiteNumber2(right.liquidity.usd) ?? 0 : 0;
+    const l = isRecord4(left.liquidity) ? finiteNumber2(left.liquidity.usd) ?? 0 : 0;
+    const r = isRecord4(right.liquidity) ? finiteNumber2(right.liquidity.usd) ?? 0 : 0;
     return r - l;
   })[0];
-  const base = isRecord3(best.baseToken) ? best.baseToken : {};
+  const base = isRecord4(best.baseToken) ? best.baseToken : {};
   const name = cleanText2(base.name) || cleanText2(ctx.evidence.profile.display_name);
   const symbol = cleanText2(base.symbol);
   const chain = cleanText2(best.chainId);
   const pairAddress = cleanText2(best.pairAddress);
   if (!symbol || !chain) return null;
-  const info = isRecord3(best.info) ? best.info : {};
+  const info = isRecord4(best.info) ? best.info : {};
   const priceUsd = finiteNumber2(best.priceUsd);
-  const liquidityUsd = isRecord3(best.liquidity) ? finiteNumber2(best.liquidity.usd) : void 0;
+  const liquidityUsd = isRecord4(best.liquidity) ? finiteNumber2(best.liquidity.usd) : void 0;
   const marketCapUsd = finiteNumber2(best.marketCap);
   const fdvUsd = finiteNumber2(best.fdv);
-  const volume24hUsd = isRecord3(best.volume) ? finiteNumber2(best.volume.h24) : void 0;
+  const volume24hUsd = isRecord4(best.volume) ? finiteNumber2(best.volume.h24) : void 0;
   const dexSourceUrl = cleanText2(best.url) || `${DEXSCREENER}/${encodeURIComponent(only.address)}`;
   const hasMarketRead = priceUsd !== void 0 || marketCapUsd !== void 0 || fdvUsd !== void 0 || volume24hUsd !== void 0;
   const historyResult = pairAddress ? await tokenHistory(chain, pairAddress) : { history: void 0, attempts: 0 };
@@ -28095,12 +28179,12 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl) {
     }
   };
 }
-async function collectSiteDeclaredToken(ctx, fetchImpl = fetch, extraOfficialUrls = []) {
+async function collectSiteDeclaredToken(ctx, fetchImpl = fetch, extraOfficialUrls = [], recoverOfficialText = fetchPublicTextWithRecovery) {
   const scopes = officialWebsiteScopes(ctx, extraOfficialUrls);
   if (!scopes.length) return null;
   const declared = [];
   for (const scope of scopes) {
-    const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl);
+    const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialText);
     if (found) declared.push(found);
   }
   if (!declared.length) return null;
@@ -28132,11 +28216,11 @@ async function dexPairs(address) {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless \xB7 response_json_error", "failed");
     return null;
   }
-  if (!isRecord3(payload) || !Array.isArray(payload.pairs)) {
+  if (!isRecord4(payload) || !Array.isArray(payload.pairs)) {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless \xB7 result_shape_error", "partial");
     return null;
   }
-  const pairs = payload.pairs.filter(isRecord3);
+  const pairs = payload.pairs.filter(isRecord4);
   recordCall(
     "dexscreener",
     "project-token-pairs",
@@ -28162,8 +28246,8 @@ var quotePriority = (symbol) => {
 function selectPriceCorroboratedPair(rows, token, coingeckoPrice) {
   if (!coingeckoPrice || coingeckoPrice <= 0) return null;
   const candidates = rows.flatMap((row) => {
-    const baseToken = isRecord3(row.baseToken) ? row.baseToken : {};
-    const quoteToken = isRecord3(row.quoteToken) ? row.quoteToken : {};
+    const baseToken = isRecord4(row.baseToken) ? row.baseToken : {};
+    const quoteToken = isRecord4(row.quoteToken) ? row.quoteToken : {};
     const baseAddress = cleanText2(baseToken.address);
     const chain = cleanText2(row.chainId).toLowerCase();
     const priceUsd = finiteNumber2(row.priceUsd);
@@ -28171,7 +28255,7 @@ function selectPriceCorroboratedPair(rows, token, coingeckoPrice) {
     if (!baseAddress || !sameAddress(baseAddress, token.address) || chain !== token.chain || !priceUsd || priceUsd <= 0 || !pairAddress) return [];
     const difference = Math.abs(priceUsd - coingeckoPrice) / coingeckoPrice;
     if (difference > PRICE_TOLERANCE) return [];
-    const liquidity = isRecord3(row.liquidity) ? finiteNumber2(row.liquidity.usd) : void 0;
+    const liquidity = isRecord4(row.liquidity) ? finiteNumber2(row.liquidity.usd) : void 0;
     if (liquidity == null || liquidity < MIN_POOL_LIQUIDITY_USD) return [];
     return [{
       pairAddress,
@@ -28207,8 +28291,8 @@ async function ohlcv(chain, poolAddress, timeframe) {
     recordCall("geckoterminal", `project-token-ohlcv-${timeframe}`, 0, "keyless \xB7 response_json_error", "failed");
     return null;
   }
-  const data = isRecord3(payload) && isRecord3(payload.data) ? payload.data : null;
-  const attributes = data && isRecord3(data.attributes) ? data.attributes : null;
+  const data = isRecord4(payload) && isRecord4(payload.data) ? payload.data : null;
+  const attributes = data && isRecord4(data.attributes) ? data.attributes : null;
   const rows = attributes && Array.isArray(attributes.ohlcv_list) ? attributes.ohlcv_list : null;
   if (!rows) {
     recordCall("geckoterminal", `project-token-ohlcv-${timeframe}`, 0, "keyless \xB7 result_shape_error", "partial");
@@ -28256,7 +28340,7 @@ function historyCoverageNote(history) {
   const volume = history.volume ? `, with reported volume ${history.volume.changePct >= 0 ? "up" : "down"} ${Math.abs(history.volume.changePct).toFixed(0)}% against the prior ${history.volume.prior.candles} ${unit}s${history.volume.isFloor ? " (a floor: not every candle reported volume)" : ""}` : "";
   return ` and ${history.points.length} frozen ${history.timeframe} price points${span}${volume}`;
 }
-async function collectProjectTokenIdentity(ctx) {
+async function collectProjectTokenIdentity(ctx, dependencies = {}) {
   const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
   const registryQueries = projectRegistrySearchQueries(
     ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""),
@@ -28382,7 +28466,12 @@ async function collectProjectTokenIdentity(ctx) {
       });
       return { state: "executed", detail: dexFallback.detail, attempts };
     }
-    const declared = await collectSiteDeclaredToken(ctx, fetch, registryHomepages);
+    const declared = await collectSiteDeclaredToken(
+      ctx,
+      fetch,
+      registryHomepages,
+      dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery
+    );
     if (declared) {
       ctx.evidence.projectToken = declared.snapshot;
       ctx.recordCheck?.({
@@ -28439,17 +28528,17 @@ async function collectProjectTokenIdentity(ctx) {
     };
   }
   const { details, identity, contract } = selected;
-  const market = isRecord3(details.market_data) ? details.market_data : {};
-  const currentPrice = isRecord3(market.current_price) ? finiteNumber2(market.current_price.usd) : void 0;
-  const marketCap = isRecord3(market.market_cap) ? finiteNumber2(market.market_cap.usd) : void 0;
-  const fdv = isRecord3(market.fully_diluted_valuation) ? finiteNumber2(market.fully_diluted_valuation.usd) : void 0;
-  const volume = isRecord3(market.total_volume) ? finiteNumber2(market.total_volume.usd) : void 0;
+  const market = isRecord4(details.market_data) ? details.market_data : {};
+  const currentPrice = isRecord4(market.current_price) ? finiteNumber2(market.current_price.usd) : void 0;
+  const marketCap = isRecord4(market.market_cap) ? finiteNumber2(market.market_cap.usd) : void 0;
+  const fdv = isRecord4(market.fully_diluted_valuation) ? finiteNumber2(market.fully_diluted_valuation.usd) : void 0;
+  const volume = isRecord4(market.total_volume) ? finiteNumber2(market.total_volume.usd) : void 0;
   const circulatingSupply = finiteNumber2(market.circulating_supply);
   const totalSupply = finiteNumber2(market.total_supply);
   const maxSupply = finiteNumber2(market.max_supply);
-  const athPrice = isRecord3(market.ath) ? finiteNumber2(market.ath.usd) : void 0;
-  const athDateRaw = isRecord3(market.ath_date) ? cleanText2(market.ath_date.usd) : "";
-  const athDrawdown = isRecord3(market.ath_change_percentage) ? finiteNumber2(market.ath_change_percentage.usd) : void 0;
+  const athPrice = isRecord4(market.ath) ? finiteNumber2(market.ath.usd) : void 0;
+  const athDateRaw = isRecord4(market.ath_date) ? cleanText2(market.ath_date.usd) : "";
+  const athDrawdown = isRecord4(market.ath_change_percentage) ? finiteNumber2(market.ath_change_percentage.usd) : void 0;
   const ath = athPrice !== void 0 || athDateRaw || athDrawdown !== void 0 ? {
     ...athPrice !== void 0 ? { priceUsd: athPrice } : {},
     ...athDateRaw ? { date: athDateRaw } : {},
@@ -28554,7 +28643,7 @@ async function collectVentureTokenIdentity(venture) {
   for (const candidate of candidates) {
     const details = await coinDetails(candidate.id);
     if (!details) continue;
-    const links = isRecord3(details.links) ? details.links : {};
+    const links = isRecord4(details.links) ? details.links : {};
     const officialHandle = cleanText2(links.twitter_screen_name);
     const exactX = Boolean(ventureHandle && officialHandle && normalizeHandle3(officialHandle) === ventureHandle);
     const homepages = officialHomepages(details);
@@ -28569,9 +28658,9 @@ async function collectVentureTokenIdentity(venture) {
     const name = cleanText2(details.name);
     const symbol = cleanText2(details.symbol).toUpperCase();
     if (!id || !name || !symbol) continue;
-    const market = isRecord3(details.market_data) ? details.market_data : {};
-    const currentPrice = isRecord3(market.current_price) ? finiteNumber2(market.current_price.usd) : void 0;
-    const marketCap = isRecord3(market.market_cap) ? finiteNumber2(market.market_cap.usd) : void 0;
+    const market = isRecord4(details.market_data) ? details.market_data : {};
+    const currentPrice = isRecord4(market.current_price) ? finiteNumber2(market.current_price.usd) : void 0;
+    const marketCap = isRecord4(market.market_cap) ? finiteNumber2(market.market_cap.usd) : void 0;
     const capturedAt = captureTimestamp();
     const providerUpdatedAt = cleanText2(details.last_updated);
     const providerUpdatedMs = Date.parse(providerUpdatedAt);
@@ -30019,10 +30108,10 @@ function parseKnownAccounts(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return accounts;
   for (const [address, entry] of Object.entries(value)) {
     if (!address.trim() || !entry || typeof entry !== "object") continue;
-    const record3 = entry;
+    const record4 = entry;
     accounts[address] = {
-      ...typeof record3.name === "string" ? { name: record3.name } : {},
-      ...typeof record3.type === "string" ? { type: record3.type } : {}
+      ...typeof record4.name === "string" ? { name: record4.name } : {},
+      ...typeof record4.type === "string" ? { type: record4.type } : {}
     };
   }
   return accounts;
@@ -30259,25 +30348,30 @@ async function readPriorOutcome(organizationId, handle) {
   const ref = handle.trim().replace(/^@/, "").toLowerCase();
   if (!c || !organizationId || !ref) return null;
   try {
-    const caseUrl = `${c.url}/rest/v1/cases?organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.person&canonical_ref=in.(${encodeURIComponent(`"${ref}","@${ref}"`)})&select=id&limit=1`;
-    const caseRes = await fetch(caseUrl, { headers: authHeaders2(c.key), signal: AbortSignal.timeout(5e3) });
-    if (!caseRes.ok) return null;
-    const caseRows = await caseRes.json();
-    const caseId = caseRows?.[0]?.id;
-    if (!caseId) return null;
-    const versionUrl = `${c.url}/rest/v1/report_versions?case_id=eq.${encodeURIComponent(caseId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=version,score,verdict,completeness_state,created_at&order=version.desc&limit=1`;
+    const projectionUrl = `${c.url}/rest/v1/reports?organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.person&ref=in.(${encodeURIComponent(`"${ref}","@${ref}"`)})&select=report_version_id&order=ts.desc&limit=1`;
+    const projectionRes = await fetch(projectionUrl, {
+      headers: authHeaders2(c.key),
+      signal: AbortSignal.timeout(5e3)
+    });
+    if (!projectionRes.ok) return null;
+    const projectionRows = await projectionRes.json();
+    const reportVersionId = projectionRows?.[0]?.report_version_id;
+    if (!reportVersionId) return null;
+    const versionUrl = `${c.url}/rest/v1/report_versions?id=eq.${encodeURIComponent(reportVersionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=id,version,score,verdict,completeness_state,created_at,payload&limit=1`;
     const versionRes = await fetch(versionUrl, { headers: authHeaders2(c.key), signal: AbortSignal.timeout(5e3) });
     if (!versionRes.ok) return null;
     const rows = await versionRes.json();
     const row = rows?.[0];
-    if (!row || typeof row.version !== "number") return null;
+    if (!row || typeof row.id !== "string" || typeof row.version !== "number") return null;
     const score = row.score === null || row.score === void 0 ? null : Number(row.score);
     return {
+      reportVersionId: row.id,
       version: row.version,
       score: Number.isFinite(score) ? score : null,
       verdict: typeof row.verdict === "string" && row.verdict ? row.verdict : null,
       completeness: typeof row.completeness_state === "string" ? row.completeness_state : null,
-      capturedAt: typeof row.created_at === "string" ? row.created_at : null
+      capturedAt: typeof row.created_at === "string" ? row.created_at : null,
+      payload: row.payload
     };
   } catch {
     return null;
@@ -30298,6 +30392,142 @@ function describeOutcomeDelta(prior, current) {
   if (!parts.length) return null;
   const when = prior.capturedAt ? ` (v${prior.version}, ${prior.capturedAt.slice(0, 10)})` : ` (v${prior.version})`;
   return `Since last scan${when}: ${parts.join(" \xB7 ")}`;
+}
+
+// src/lib/reportDelta.ts
+var record3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+var finite2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+function tokenPayload(kind, payload) {
+  const root = record3(payload);
+  const candidate = kind === "investigation" ? root.token : payload;
+  const token = record3(candidate);
+  return typeof token.address === "string" && token.address ? candidate : null;
+}
+function basicFacts(kind, payload) {
+  if (kind === "token") return [];
+  const root = record3(payload);
+  const subject = kind === "investigation" ? record3(root.projectAccount) : root;
+  return Array.isArray(subject.basicFacts) ? subject.basicFacts : [];
+}
+function eligibleFact(fact) {
+  return fact.status === "verified" && fact.artifact_verified === true && fact.attributionScope === "direct_subject" && !fact.providerProjection && fact.sources.some((source2) => source2.artifactVerified === true && /^https?:\/\//i.test(source2.url));
+}
+function makeDelta(prior, fields, previousValue, currentValue) {
+  return {
+    schemaVersion: 1,
+    ...fields,
+    previous: {
+      reportVersionId: prior.reportVersionId,
+      version: prior.version,
+      capturedAt: prior.capturedAt,
+      value: previousValue
+    },
+    current: { value: currentValue }
+  };
+}
+function contractDelta(kind, previousPayload, currentPayload, prior) {
+  const previous = tokenPayload(kind, previousPayload);
+  const current = tokenPayload(kind, currentPayload);
+  if (!previous || !current) return null;
+  if (previous.safety.contractPropertiesAssessed !== true || current.safety.contractPropertiesAssessed !== true) return null;
+  const anchor = kind === "investigation" ? "#investigation-evidence" : "#token-methodology";
+  const fields = [
+    {
+      key: "ownerRenounced",
+      label: "owner control",
+      safer: true,
+      consequence: "The contract's recorded authority changed, which can materially change who may alter the token after launch.",
+      reversal: "A fresh contract-authority receipt showing the prior control state would reverse this change."
+    },
+    {
+      key: "mintable",
+      label: "mint authority",
+      safer: false,
+      consequence: "The ability to create additional supply changed, altering dilution and control risk.",
+      reversal: "A fresh chain receipt showing the mint authority did not change would reverse this change."
+    },
+    {
+      key: "freezable",
+      label: "freeze authority",
+      safer: false,
+      consequence: "The recorded ability to freeze balances changed, altering holder-control risk.",
+      reversal: "A fresh chain receipt showing the freeze authority did not change would reverse this change."
+    }
+  ];
+  for (const field of fields) {
+    if (previous.safety[field.key] === current.safety[field.key]) continue;
+    const before = previous.safety[field.key] ? "present" : "absent";
+    const after = current.safety[field.key] ? "present" : "absent";
+    const improved = current.safety[field.key] === field.safer;
+    return makeDelta(prior, {
+      id: `delta-contract-${field.key}`,
+      category: "contract_control",
+      headline: `${field.label[0].toUpperCase()}${field.label.slice(1)} changed since the last scan`,
+      consequence: `${field.consequence} ARGUS recorded it as ${before} before and ${after} now${improved ? ", reducing this specific control risk" : ", increasing this specific control risk"}.`,
+      reversalCondition: field.reversal,
+      evidenceHref: anchor
+    }, before, after);
+  }
+  return null;
+}
+function liquidityDelta(kind, previousPayload, currentPayload, prior) {
+  const previous = tokenPayload(kind, previousPayload);
+  const current = tokenPayload(kind, currentPayload);
+  if (!previous || !current || previous.safety.lpAssessed !== true || current.safety.lpAssessed !== true) return null;
+  const before = (finite2(previous.safety.lpLockedPct) ?? 0) + (finite2(previous.safety.lpBurnedPct) ?? 0);
+  const after = (finite2(current.safety.lpLockedPct) ?? 0) + (finite2(current.safety.lpBurnedPct) ?? 0);
+  const crossedMaterialBoundary = before < 50 && after >= 50 || before >= 50 && after < 50;
+  if (!crossedMaterialBoundary && Math.abs(after - before) < 25) return null;
+  return makeDelta(prior, {
+    id: "delta-liquidity-protection",
+    category: "liquidity_protection",
+    headline: "Liquidity protection changed materially since the last scan",
+    consequence: `Locked or burned liquidity moved from ${before.toFixed(0)}% to ${after.toFixed(0)}%. That changes how much of the trading pool can be withdrawn by an unlocked holder.`,
+    reversalCondition: "Comparable LP-holder receipts showing the same protected share in both scans would reverse this change.",
+    evidenceHref: kind === "investigation" ? "#investigation-visuals" : "#token-market"
+  }, `${before.toFixed(1)}% protected`, `${after.toFixed(1)}% protected`);
+}
+function holderDelta(kind, previousPayload, currentPayload, prior) {
+  const previous = tokenPayload(kind, previousPayload);
+  const current = tokenPayload(kind, currentPayload);
+  if (!previous || !current || previous.holdersAssessed !== true || current.holdersAssessed !== true) return null;
+  const before = finite2(previous.safety.topHolderPct);
+  const after = finite2(current.safety.topHolderPct);
+  if (before === null || after === null || Math.abs(after - before) < 10) return null;
+  return makeDelta(prior, {
+    id: "delta-holder-concentration",
+    category: "holder_concentration",
+    headline: "Largest-holder concentration changed materially",
+    consequence: `The largest assessed wallet moved from ${before.toFixed(1)}% to ${after.toFixed(1)}% of supply. That changes the amount one wallet may be able to sell or influence.`,
+    reversalCondition: "Comparable holder receipts showing the same wallet share in both scans would reverse this change.",
+    evidenceHref: kind === "investigation" ? "#investigation-evidence" : "#composition"
+  }, `${before.toFixed(2)}%`, `${after.toFixed(2)}%`);
+}
+function verifiedFactDelta(kind, previousPayload, currentPayload, prior) {
+  const previous = basicFacts(kind, previousPayload).filter(eligibleFact);
+  const current = basicFacts(kind, currentPayload).filter(eligibleFact);
+  const priorByPredicate = new Map(previous.map((fact) => [fact.predicate, fact]));
+  for (const fact of current) {
+    const old = priorByPredicate.get(fact.predicate);
+    if (!old || old.normalizedValue === fact.normalizedValue) continue;
+    const label = String(fact.predicate).replaceAll("_", " ");
+    return makeDelta(prior, {
+      id: `delta-fact-${fact.predicate}`,
+      category: "verified_fact",
+      headline: `A verified ${label} record changed since the last scan`,
+      consequence: `The prior report recorded \u201C${old.value}\u201D; this scan records \u201C${fact.value}\u201D. ARGUS treats the two saved source-backed records as a material change, not as a score movement.`,
+      reversalCondition: "Opening both cited records and confirming they describe the same unchanged fact would reverse this change.",
+      evidenceHref: kind === "investigation" ? "#investigation-basic-facts" : "#basic-facts"
+    }, old.value, fact.value);
+  }
+  return null;
+}
+function buildMaterialReportDelta(kind, prior, currentPayload) {
+  if (!prior.reportVersionId || prior.version < 1 || !prior.payload || !currentPayload) return null;
+  if (kind === "token" || kind === "investigation") {
+    return contractDelta(kind, prior.payload, currentPayload, prior) ?? liquidityDelta(kind, prior.payload, currentPayload, prior) ?? holderDelta(kind, prior.payload, currentPayload, prior) ?? verifiedFactDelta(kind, prior.payload, currentPayload, prior);
+  }
+  return verifiedFactDelta(kind, prior.payload, currentPayload, prior);
 }
 
 // server/adapters/securityAudits.ts
@@ -31219,9 +31449,9 @@ async function collectCounts(fetchImpl, bearer, query, start, end) {
   const payload = await fetchJson(fetchImpl, url, bearer, "counts");
   if (!payload) return { ok: false, buckets: [] };
   const buckets = (Array.isArray(payload.data) ? payload.data : []).flatMap((row) => {
-    const record3 = asRecord6(row);
-    const count = typeof record3.tweet_count === "number" && Number.isFinite(record3.tweet_count) ? Math.max(0, Math.round(record3.tweet_count)) : null;
-    return typeof record3.start === "string" && typeof record3.end === "string" && count !== null ? [{ start: record3.start, end: record3.end, postCount: count }] : [];
+    const record4 = asRecord6(row);
+    const count = typeof record4.tweet_count === "number" && Number.isFinite(record4.tweet_count) ? Math.max(0, Math.round(record4.tweet_count)) : null;
+    return typeof record4.start === "string" && typeof record4.end === "string" && count !== null ? [{ start: record4.start, end: record4.end, postCount: count }] : [];
   });
   return { ok: true, buckets };
 }
@@ -31257,11 +31487,11 @@ async function collectSearch(fetchImpl, bearer, query, start, end, maxPosts) {
     postReads += rows.length;
     recordCall("x-api", "post-read", rows.length * POST_READ_USD, `${rows.length} public posts`, "succeeded");
     for (const row of rows) {
-      const record3 = asRecord6(row);
-      if (typeof record3.id !== "string" || typeof record3.author_id !== "string" || typeof record3.created_at !== "string") continue;
-      const at = Date.parse(record3.created_at);
+      const record4 = asRecord6(row);
+      if (typeof record4.id !== "string" || typeof record4.author_id !== "string" || typeof record4.created_at !== "string") continue;
+      const at = Date.parse(record4.created_at);
       if (!Number.isFinite(at)) continue;
-      posts.set(record3.id, { id: record3.id, authorId: record3.author_id, createdAt: record3.created_at });
+      posts.set(record4.id, { id: record4.id, authorId: record4.author_id, createdAt: record4.created_at });
       oldestAt = oldestAt === null ? at : Math.min(oldestAt, at);
     }
     const token = asRecord6(payload.meta).next_token;
@@ -31301,13 +31531,13 @@ function windowFrom(posts, buckets, start, end, search, countsComplete) {
   };
 }
 function twitterApiIoPost(row) {
-  const record3 = asRecord6(row);
-  const author = asRecord6(record3.author);
-  const id = typeof record3.id === "string" ? record3.id : null;
+  const record4 = asRecord6(row);
+  const author = asRecord6(record4.author);
+  const id = typeof record4.id === "string" ? record4.id : null;
   const authorId = typeof author.id === "string" ? author.id : typeof author.userName === "string" ? author.userName.toLowerCase() : null;
-  const createdAt = typeof record3.createdAt === "string" ? record3.createdAt : null;
-  const text2 = typeof record3.text === "string" ? record3.text : "";
-  const isRepost = record3.retweeted_tweet !== void 0 && record3.retweeted_tweet !== null || /^RT\s+@/i.test(text2);
+  const createdAt = typeof record4.createdAt === "string" ? record4.createdAt : null;
+  const text2 = typeof record4.text === "string" ? record4.text : "";
+  const isRepost = record4.retweeted_tweet !== void 0 && record4.retweeted_tweet !== null || /^RT\s+@/i.test(text2);
   if (!id || !authorId || !createdAt || isRepost || !Number.isFinite(Date.parse(createdAt))) return null;
   return { id, authorId, createdAt: new Date(createdAt).toISOString() };
 }
@@ -31994,7 +32224,7 @@ function mergeDiscoveredAffiliations(ventures, discovered) {
       }
       continue;
     }
-    const rec = {
+    const rec2 = {
       project_name: v.name,
       // Canonical bridge keys: the venture's own X account / domain. Without
       // these the graph keys the project on its fuzzy name and never connects
@@ -32011,9 +32241,9 @@ function mergeDiscoveredAffiliations(ventures, discovered) {
       evidence_origin: "model_lead",
       artifact_verified: false
     };
-    ventures.push(rec);
-    byName.set(v.name.toLowerCase(), rec);
-    pending.push({ v, rec });
+    ventures.push(rec2);
+    byName.set(v.name.toLowerCase(), rec2);
+    pending.push({ v, rec: rec2 });
   }
   return pending;
 }
@@ -32372,7 +32602,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       }
       continue;
     }
-    const rec = {
+    const rec2 = {
       name: t.name,
       handle: t.handle,
       role: t.role,
@@ -32389,9 +32619,9 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       projects_evidence_origin: t.projects_evidence_origin,
       handleProvenance: t.handleProvenance
     };
-    webTeam.push(rec);
-    if (h) byHandle.set(h, rec);
-    if (n) byName.set(n, rec);
+    webTeam.push(rec2);
+    if (h) byHandle.set(h, rec2);
+    if (n) byName.set(n, rec2);
   }
   let linkedinCorroborated = 0;
   for (const [handle, hit] of founderFollowup) {
@@ -32657,7 +32887,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Affiliations discovered", detail: `${discovered.length} public affiliation${discovered.length === 1 ? "" : "s"} tied to the subject: ${discovered.slice(0, 5).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
     let corroboratedAffiliations = 0;
     await Promise.all(
-      pending.slice(0, 5).map(async ({ v, rec }) => {
+      pending.slice(0, 5).map(async ({ v, rec: rec2 }) => {
         const corrob = [];
         const subjectU = ctx.handle.replace(/^@/, "").toLowerCase();
         const xHandle = v.x_handle ?? (v.evidence?.match(/@([A-Za-z0-9_]{2,30})/g) ?? []).map((s) => s.slice(1)).find((u) => u.toLowerCase() !== subjectU);
@@ -32668,7 +32898,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
             const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name);
             if (arch) {
               corrob.push(...archiveCorroborationLabels(arch));
-              rec.evidence_url = arch.url;
+              rec2.evidence_url = arch.url;
               archiveVerified = true;
               archiveProvider = arch.provider;
             }
@@ -32682,11 +32912,11 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         if (corrob.length) {
           corroboratedAffiliations += 1;
           const base = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" \xB7 ");
-          rec.notes = base;
+          rec2.notes = base;
           if (archiveVerified) {
-            rec.evidence_origin = "deterministic";
-            rec.artifact_verified = true;
-            rec.provider = archiveProvider ?? "wayback";
+            rec2.evidence_origin = "deterministic";
+            rec2.artifact_verified = true;
+            rec2.provider = archiveProvider ?? "wayback";
           }
           ctx.emit({ phase: "P0 \xB7 Intake", label: `Affiliation corroborated \xB7 ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""}: ${corrob.join("; ")}${archiveVerified ? " (verified, scoreable)" : ""}.`, source: "argus", tone: "good" });
         }
@@ -33351,7 +33581,7 @@ function adverseSignalToFinding(sig) {
     }
   };
 }
-async function adverseSignalsAndTooling(ctx, record3) {
+async function adverseSignalsAndTooling(ctx, record4) {
   const { evidence } = ctx;
   const self = ctx.handle.replace(/^@/, "").toLowerCase();
   const ticker = (evidence.projectToken?.verified === true ? evidence.projectToken.symbol : null) ?? evidence.promotions.find((p) => p.ticker)?.ticker;
@@ -33437,7 +33667,7 @@ async function adverseSignalsAndTooling(ctx, record3) {
   const swept = `the subject, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}`;
   const gap = unanswered ? ` The search did not answer for ${unanswered} of the ${screens.length} targets screened, so those are unscreened rather than clear.` : "";
   if (totalSigs || toolingLeads) {
-    record3({
+    record4({
       id: "adverse-screen",
       status: "finding",
       note: `Swept ${swept} for rug, slow-rug, liquidity-pull, drain, and scam reports: ${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}${toolingLeads ? ` and ${toolingLeads} manipulation-tooling lead${toolingLeads === 1 ? "" : "s"}` : ""} surfaced. Each is an unverified candidate source for follow-up, not a verified finding.${gap}`,
@@ -33445,14 +33675,14 @@ async function adverseSignalsAndTooling(ctx, record3) {
       sourceCount: totalSigs + toolingLeads
     });
   } else if (!answered) {
-    record3({
+    record4({
       id: "adverse-screen",
       status: "unavailable",
       note: `the model search returned no readable answer for any of the ${screens.length} adverse-screen target${screens.length === 1 ? "" : "s"}, so no rug, scam, or drain search was completed`,
       provider: "adverse-sweep"
     });
   } else {
-    record3({
+    record4({
       id: "adverse-screen",
       status: "checked-empty",
       // A completed empty search is an answer; it is not a clean record.
@@ -33479,9 +33709,9 @@ async function adverseSignalsAndTooling(ctx, record3) {
         if (!member.handle) continue;
         const key = member.handle.replace(/^@/, "").toLowerCase();
         if (key === self) continue;
-        const rec = appearances.get(key) ?? { name: member.name, projects: /* @__PURE__ */ new Set() };
-        rec.projects.add(projectTargets[i].name);
-        appearances.set(key, rec);
+        const rec2 = appearances.get(key) ?? { name: member.name, projects: /* @__PURE__ */ new Set() };
+        rec2.projects.add(projectTargets[i].name);
+        appearances.set(key, rec2);
       }
     });
     const overlaps = [...appearances.entries()].filter(([, r]) => r.projects.size >= 2);
@@ -34979,13 +35209,27 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   if (options?.organizationId) {
     const prior = await readPriorOutcome(options.organizationId, evidence.profile.handle);
     if (prior) {
+      const reportDelta = prior.reportVersionId && prior.payload ? buildMaterialReportDelta("person", {
+        reportVersionId: prior.reportVersionId,
+        version: prior.version,
+        capturedAt: prior.capturedAt,
+        payload: prior.payload
+      }, dossier) : null;
+      if (reportDelta) dossier.reportDelta = reportDelta;
       const delta2 = describeOutcomeDelta(prior, {
         score: typeof dossier.report.governing_score === "number" ? dossier.report.governing_score : null,
         verdict: dossier.report.composite_verdict ?? null,
         completeness: dossier.completeness_state ?? null
       });
       if (delta2) {
-        dossier.priorOutcome = { ...prior, delta: delta2 };
+        dossier.priorOutcome = {
+          version: prior.version,
+          score: prior.score,
+          verdict: prior.verdict,
+          completeness: prior.completeness,
+          capturedAt: prior.capturedAt,
+          delta: delta2
+        };
         checkTracker.provider("prior-outcome", "Since last scan", "executed", delta2);
         emit({ phase: "Finalize", label: "Since last scan", detail: delta2, source: "argus", tone: "neutral" });
       }
@@ -35029,6 +35273,160 @@ async function runAuditWithLedger(rawHandle, emit, options) {
 }
 function runAudit(rawHandle, emit, options) {
   return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
+}
+
+// src/lib/decisionBoundary.ts
+var CAP_BOUNDARIES = {
+  honeypot_confirmed: {
+    ceiling: 10,
+    controllingFact: "The saved tradeability evidence shows that holders may not be able to sell.",
+    unlockCondition: "A fresh successful buy-and-sell receipt, together with contract evidence showing the restriction is gone, must replace the failed result.",
+    evidenceArea: "contract"
+  },
+  cannot_sell_all: {
+    ceiling: 15,
+    controllingFact: "The contract does not allow a holder to sell their full balance.",
+    unlockCondition: "A fresh trade receipt must show a full-balance sell succeeds and the contract restriction no longer applies.",
+    evidenceArea: "contract"
+  },
+  owner_can_modify_balance: {
+    ceiling: 20,
+    controllingFact: "An active controller can directly change holder balances.",
+    unlockCondition: "A current chain receipt must show that the balance-changing authority was permanently removed or cannot be exercised.",
+    evidenceArea: "contract"
+  },
+  balance_mutable_authority: {
+    ceiling: 20,
+    controllingFact: "An active authority can rewrite token balances.",
+    unlockCondition: "A current chain receipt must show that the balance-mutating authority was permanently revoked.",
+    evidenceArea: "contract"
+  },
+  serial_scammer_creator: {
+    ceiling: 25,
+    controllingFact: "The attributed creator wallet has previously created tokens recorded as honeypots.",
+    unlockCondition: "Primary creation records must reattribute this token to a different wallet, or the source record behind the prior honeypot link must be corrected.",
+    evidenceArea: "contract"
+  },
+  mint_authority_active: {
+    ceiling: 35,
+    controllingFact: "More tokens can still be created by an active mint authority.",
+    unlockCondition: "A current chain receipt must show that the mint authority was permanently revoked.",
+    evidenceArea: "contract"
+  },
+  freeze_authority_active: {
+    ceiling: 35,
+    controllingFact: "An active freeze authority can stop token accounts from moving funds.",
+    unlockCondition: "A current chain receipt must show that the freeze authority was permanently revoked.",
+    evidenceArea: "contract"
+  },
+  reclaimable_ownership: {
+    ceiling: 35,
+    controllingFact: "The saved contract record shows hidden or reclaimable ownership control.",
+    unlockCondition: "A current contract-authority receipt must show that ownership cannot be hidden, reclaimed, or exercised.",
+    evidenceArea: "contract"
+  },
+  single_wallet_majority_supply: {
+    ceiling: 39,
+    controllingFact: "One assessed non-market wallet controls at least half of the token supply.",
+    unlockCondition: "A comparable current holder register must show that no non-market wallet holds a majority of supply.",
+    evidenceArea: "holders"
+  },
+  documented_scanner_concealment: {
+    ceiling: 55,
+    controllingFact: "The verified contract source documents behavior intended to conceal activity from scanners.",
+    unlockCondition: "New verified source code and matching deployed-bytecode receipts must show that the concealment behavior was removed.",
+    evidenceArea: "contract"
+  },
+  single_wallet_concentration: {
+    ceiling: 69,
+    controllingFact: "One assessed non-market wallet holds at least a quarter of the token supply.",
+    unlockCondition: "A comparable current holder register must show the largest non-market wallet below the concentration threshold.",
+    evidenceArea: "holders"
+  },
+  few_wallet_concentration: {
+    ceiling: 69,
+    controllingFact: "The three largest assessed material wallets hold at least 60% of supply between them.",
+    unlockCondition: "A comparable current holder register must show those wallets below the concentration threshold.",
+    evidenceArea: "holders"
+  },
+  ofac_sanctioned_address: {
+    ceiling: 5,
+    controllingFact: "A wallet bound to this report matched a current sanctions record.",
+    unlockCondition: "A current official sanctions record must show the address is no longer designated, or primary attribution evidence must correct the address binding.",
+    evidenceArea: "contract"
+  }
+};
+var MARKET_CANNOT_OVERRIDE = "Higher price, volume, liquidity, followers, or social activity cannot override this safety limit.";
+function largestHeadroom(axes) {
+  const ranked = axes.filter((axis) => Number.isFinite(axis.score) && Number.isFinite(axis.weight) && axis.weight > 0).map((axis) => ({ axis, points: Math.max(0, axis.weight - axis.score) })).sort((a, b) => b.points - a.points || a.axis.key.localeCompare(b.axis.key));
+  return ranked[0] && ranked[0].points > 0 ? ranked[0] : null;
+}
+function largestContribution(axes) {
+  const ranked = axes.filter((axis) => Number.isFinite(axis.score) && Number.isFinite(axis.weight) && axis.weight > 0).map((axis) => ({ axis, points: Math.max(0, axis.score) })).sort((a, b) => b.points - a.points || a.axis.key.localeCompare(b.axis.key));
+  return ranked[0] && ranked[0].points > 0 ? ranked[0] : null;
+}
+function areaForAxis(axis) {
+  if (!axis) return "method";
+  if (axis.key === "T1") return "liquidity";
+  if (axis.key === "T2" || axis.key === "T3") return "contract";
+  if (axis.key === "T4") return "holders";
+  if (axis.key === "T5" || axis.key === "T6") return "market";
+  return "method";
+}
+function deriveTokenDecisionBoundary(input) {
+  if (input.score === null || !Number.isFinite(input.score)) return null;
+  const score = Math.max(0, Math.min(100, Math.round(input.score)));
+  if (input.capApplied) {
+    const rule = CAP_BOUNDARIES[input.capApplied.toLowerCase()];
+    if (!rule) {
+      return {
+        schemaVersion: 1,
+        kind: "unknown_cap",
+        controllingFact: "A saved safety limit controls this result, but this report does not contain a public explanation for that limit.",
+        boundary: `The saved score is ${score}/100. ARGUS will not infer the missing ceiling.`,
+        willNotChange: MARKET_CANNOT_OVERRIDE,
+        unlockCondition: "Open the methodology receipt for the saved limit before treating this result as movable.",
+        evidenceArea: "method"
+      };
+    }
+    return {
+      schemaVersion: 1,
+      kind: "cap",
+      controllingFact: rule.controllingFact,
+      boundary: `This finding caps the score at ${rule.ceiling}/100, even if every other scored area improves.`,
+      willNotChange: MARKET_CANNOT_OVERRIDE,
+      unlockCondition: rule.unlockCondition,
+      evidenceArea: rule.evidenceArea
+    };
+  }
+  if (score < 70) {
+    const threshold = score < 40 ? 40 : 70;
+    const nextVerdict = score < 40 ? "CAUTION" : "PASS";
+    const gap = threshold - score;
+    const headroom = largestHeadroom(input.axes);
+    const headroomCopy = !headroom ? "The saved axes contain no unused scoring headroom." : headroom.points >= gap ? `${headroom.axis.label} has ${headroom.points} points of unused headroom on paper, enough to cross the boundary only if new evidence earns those points.` : `${headroom.axis.label} has the most unused headroom at ${headroom.points} points, so no single scored area can cross the boundary by itself.`;
+    return {
+      schemaVersion: 1,
+      kind: "threshold",
+      controllingFact: `${gap} evidence-backed point${gap === 1 ? "" : "s"} separate this score from ${nextVerdict}.`,
+      boundary: headroomCopy,
+      willNotChange: "Price movement, volume, or social attention alone does not add points to this saved report.",
+      unlockCondition: `A new scan must verify enough changed evidence to add ${gap} point${gap === 1 ? "" : "s"}; arithmetic headroom is not a prediction.`,
+      evidenceArea: areaForAxis(headroom?.axis)
+    };
+  }
+  const buffer = score - 69;
+  const contribution = largestContribution(input.axes);
+  const pressure = contribution && contribution.points >= buffer ? `${contribution.axis.label} contributes ${contribution.points} points and is large enough by itself to erase that buffer if its evidence materially deteriorates.` : "No single scored area is large enough by itself to erase the current buffer.";
+  return {
+    schemaVersion: 1,
+    kind: "buffer",
+    controllingFact: `${buffer} point${buffer === 1 ? "" : "s"} separate this score from falling below PASS.`,
+    boundary: pressure,
+    willNotChange: "Short-term price or social movement does not change the saved PASS result.",
+    unlockCondition: "Only a new scan with materially different verified evidence can move this boundary.",
+    evidenceArea: areaForAxis(contribution?.axis)
+  };
 }
 
 // src/token/scannerEvasion.ts
@@ -36192,6 +36590,7 @@ async function runTokenAudit(input, emit, opts) {
     });
   }
   const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployerAttribution, topHolders, socials);
+  const decisionBoundary = deriveTokenDecisionBoundary({ score, capApplied, axes });
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} \xB7 ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
   return {
@@ -36230,6 +36629,7 @@ async function runTokenAudit(input, emit, opts) {
     capApplied,
     headline,
     axes,
+    ...decisionBoundary ? { decisionBoundary } : {},
     safety: { ...s, topHolderPct: concentrationTopPct },
     socials,
     holdersAssessed: holdersReliable,
@@ -36266,13 +36666,28 @@ function buildGraph(chain, address, symbol, verdict, projectX, attribution, hold
   }];
   const edges = [];
   if (projectX) {
+    const projectXSourceUrl = socials.find((social) => {
+      const handle = social.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1];
+      return Boolean(handle && `@${handle}`.toLowerCase() === projectX.toLowerCase());
+    })?.url;
     nodes.push({ type: "Person", key: projectX });
-    edges.push({ src: center, dst: projectX, type: "TEAM" });
+    edges.push({
+      src: center,
+      dst: projectX,
+      type: "TEAM",
+      ...projectXSourceUrl ? { source_url: projectXSourceUrl, evidence_origin: "deterministic", artifact_verified: true } : {}
+    });
   }
   if (attribution) {
     const k = walletEntityKey(chain, attribution.address);
     nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + attribution.address.slice(0, 8), chain, address: attribution.address });
-    edges.push({ src: center, dst: k, type: attribution.kind === "deployer" ? "DEPLOYED_BY" : "ATTRIBUTED_CREATOR", source: attribution.source });
+    edges.push({
+      src: center,
+      dst: k,
+      type: attribution.kind === "deployer" ? "DEPLOYED_BY" : "ATTRIBUTED_CREATOR",
+      source: attribution.source,
+      .../^https?:\/\//i.test(attribution.source) ? { source_url: attribution.source, evidence_origin: "deterministic", artifact_verified: true } : {}
+    });
   }
   holders.slice(0, 4).forEach((h) => {
     const k = walletEntityKey(chain, h.address);
@@ -36289,7 +36704,14 @@ function buildGraph(chain, address, symbol, verdict, projectX, attribution, hold
     const key = xh ? "@" + xh : x.url.match(/^https?:\/\/(?:www\.)?([^/]+)/i)?.[1];
     if (!key || projectX && key.toLowerCase() === projectX.toLowerCase()) return;
     nodes.push({ type: "Company", key });
-    edges.push({ src: center, dst: key, type: "LINKS" });
+    edges.push({
+      src: center,
+      dst: key,
+      type: "LINKS",
+      source_url: x.url,
+      evidence_origin: "deterministic",
+      artifact_verified: true
+    });
   });
   return { nodes, edges };
 }

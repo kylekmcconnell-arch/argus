@@ -28,6 +28,8 @@ const PER_SECTION_USD = 0.125;
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 30_000;
 const RUN_TIMEOUT_MS = 30_000;
+const RATE_LIMIT_RETRY_DEFAULT_MS = 750;
+const RATE_LIMIT_RETRY_MAX_MS = 2_000;
 
 export type EnrichmentSection =
   | "funding_detail"
@@ -212,17 +214,30 @@ async function startRun(
   input: Record<string, unknown>,
   fetcher: typeof fetch,
 ): Promise<RunOutcome> {
-  let res: Response;
-  try {
-    res = await fetcher(`${API_BASE}/run`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({ provider: PROVIDER, endpoint, input }),
-      signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
-    });
-  } catch {
-    return { ok: false, note: "Monid was unavailable." };
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      res = await fetcher(`${API_BASE}/run`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify({ provider: PROVIDER, endpoint, input }),
+        signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
+      });
+    } catch {
+      return { ok: false, note: "Monid was unavailable." };
+    }
+    if (res.status !== 429 || attempt > 0) break;
+    const retryAfter = res.headers.get("retry-after");
+    const parsedSeconds = retryAfter == null ? Number.NaN : Number(retryAfter);
+    const parsedDate = retryAfter == null ? Number.NaN : Date.parse(retryAfter);
+    const requestedDelay = Number.isFinite(parsedSeconds)
+      ? Math.max(0, parsedSeconds * 1_000)
+      : Number.isFinite(parsedDate)
+        ? Math.max(0, parsedDate - Date.now())
+        : RATE_LIMIT_RETRY_DEFAULT_MS;
+    await sleep(Math.min(RATE_LIMIT_RETRY_MAX_MS, requestedDelay));
   }
+  if (!res) return { ok: false, note: "Monid was unavailable." };
   // A 404 is an answer (the provider has no record for this lookup), not an
   // outage; it must never render as a failed source check.
   if (res.status === 404) return { ok: false, noRecord: true, note: "no record found (no_record_404)" };

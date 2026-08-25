@@ -313,6 +313,12 @@ screen as a frozen artifact and finding; OFAC remains the only gating
 sanctions check. Crunchbase and Reddit were retired from the pipeline.
 Monid enrichment runs inside a hard 25-second wall-clock box so a slow
 provider degrades to a skipped enrichment, never a dead run.
+Official-site reads that are blocked at the origin may make one bounded pass
+through the existing SSRF-safe public-text reader recovery. Recovered content
+retains the official URL and first-party evidence class; the reader is only a
+transport and never becomes corroboration. Monid run creation retries one HTTP
+429 response with a capped Retry-After delay. A repeated 429 remains a visible
+rate-limit gap rather than a configuration error or an inferred answer.
 
 Live validation state. Both flagship subjects now publish full clearance.
 Stani Kulechov (founder) publishes a decision-ready PASS 82 with every never-

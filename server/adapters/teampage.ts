@@ -4,6 +4,7 @@
 // Claude pull the named roster. Keyless fetch + ANTHROPIC_API_KEY for extraction.
 import { structured } from "../agent";
 import { recordCall } from "../cost";
+import { fetchPublicTextWithRecovery, type PublicTextWithRecoveryResult } from "../publicWeb";
 import type { TeamMember } from "./x";
 
 const normalizedApex = (domain: string) =>
@@ -338,16 +339,59 @@ export function scanPageTextForCredits(
   return out.slice(0, 6);
 }
 
-async function fetchPage(url: string, expectedApex: string, purpose: "roster" | "credits" = "roster"): Promise<TeamPage | null> {
+type TeamPageDependencies = {
+  recoverOfficialText?: (url: string) => Promise<PublicTextWithRecoveryResult>;
+};
+
+function recoveredTeamPage(
+  recovered: PublicTextWithRecoveryResult,
+  url: string,
+  expectedApex: string,
+  purpose: "roster" | "credits",
+  failureMeta: string,
+): TeamPage | null {
+  const op = purpose === "credits" ? "site-credits" : "team-page";
+  if (recovered.status !== "ok") return null;
+  try {
+    const finalHost = new URL(recovered.url).hostname.toLowerCase();
+    if (finalHost !== expectedApex && !finalHost.endsWith(`.${expectedApex}`)) return null;
+  } catch {
+    return null;
+  }
+  const text = recovered.text.replace(/\s+/g, " ").trim();
+  if (purpose === "credits") {
+    if (text.length < 40) return null;
+  } else if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) {
+    return null;
+  }
+  recordCall("site-fetch", op, 0, `reader_recovery_after_${failureMeta}`, "succeeded");
+  return { url: recovered.url || url, text, html: recovered.text, anchors: profileAnchors(recovered.text) };
+}
+
+async function fetchPage(
+  url: string,
+  expectedApex: string,
+  purpose: "roster" | "credits" = "roster",
+  recoverOfficialText: (url: string) => Promise<PublicTextWithRecoveryResult> = fetchPublicTextWithRecovery,
+  allowRecovery = false,
+): Promise<TeamPage | null> {
   const op = purpose === "credits" ? "site-credits" : "team-page";
   let response: Response;
   try {
     response = await fetchWithOneRetry(url, () => ({ headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,text/markdown,text/plain" }, redirect: "follow", signal: AbortSignal.timeout(8000) }));
   } catch {
+    if (allowRecovery) {
+      const recovered = recoveredTeamPage(await recoverOfficialText(url), url, expectedApex, purpose, "transport_error");
+      if (recovered) return recovered;
+    }
     recordCall("site-fetch", op, 0, "transport_error", "failed");
     return null;
   }
   if (!response.ok) {
+    if (allowRecovery && (response.status === 403 || response.status === 429)) {
+      const recovered = recoveredTeamPage(await recoverOfficialText(url), url, expectedApex, purpose, `http_${response.status}`);
+      if (recovered) return recovered;
+    }
     recordCall(
       "site-fetch",
       op,
@@ -579,24 +623,31 @@ async function discoverFounderAuthoredForumUrls(domain: string, verifiedTeam: Te
   return [...new Set(results.flat())].slice(0, 8);
 }
 
-export async function fetchTeamPage(domain: string, projectName?: string): Promise<TeamMember[]> {
+export async function fetchTeamPage(
+  domain: string,
+  projectName?: string,
+  dependencies: TeamPageDependencies = {},
+): Promise<TeamMember[]> {
   const apex = normalizedApex(domain);
   if (!apex) return [];
+  const recoverOfficialText = dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery;
   const [primaryCandidates = [], fallbackCandidates = []] = candidateUrlTiers(domain);
+  const discoveredUrls = await discoverTeamDocumentUrls(domain);
+  const discoveredSet = new Set(discoveredUrls);
   const primaryUrls = [...new Set([
-    ...(await discoverTeamDocumentUrls(domain)),
+    ...discoveredUrls,
     ...primaryCandidates,
   ])];
   if (!primaryUrls.length) return [];
-  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
+  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex, "roster", recoverOfficialText, discoveredSet.has(u))))).filter(Boolean) as TeamPage[];
   if (!pages.length && fallbackCandidates.length) {
-    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
+    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex, "roster", recoverOfficialText)))).filter(Boolean) as TeamPage[];
   }
   // The homepage never qualifies as a roster page, but its footer is where a
   // one-person project credits its builder (the Clutch Markets case). Fetch it
   // for the deterministic credit scan only — it is never fed to the LLM lane.
-  const homePage = await fetchPage(`https://${apex}/`, apex, "credits")
-    ?? await fetchPage(`https://www.${apex}/`, apex, "credits");
+  const homePage = await fetchPage(`https://${apex}/`, apex, "credits", recoverOfficialText, true)
+    ?? await fetchPage(`https://www.${apex}/`, apex, "credits", recoverOfficialText, true);
   const apexLabel = apex.split(".")[0];
   const creditSeen = new Set<string>();
   const creditTeam = [...pages, ...(homePage ? [homePage] : [])]
@@ -612,7 +663,7 @@ export async function fetchTeamPage(domain: string, projectName?: string): Promi
   if (!pages.length && !creditTeam.length) return [];
   const directTeam = pages.length ? await extractTeamFromPages(pages, projectName) : [];
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
-  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
+  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex, "roster", recoverOfficialText, true)))).filter(Boolean) as TeamPage[];
   const forumTeam = forumPages.length ? await extractTeamFromPages(forumPages, projectName, true) : [];
   const seen = new Set<string>();
   // Credit hits come LAST so an LLM-extracted roster row for the same person

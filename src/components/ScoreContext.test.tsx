@@ -102,6 +102,20 @@ describe("ProviderFailureNotice", () => {
     expect(container.textContent).toContain("Run a new scan later");
   });
 
+  it("names a provider rate limit instead of calling it a rejected configuration", () => {
+    act(() => {
+      root.render(<ProviderFailureNotice failures={[
+        { provider: "monid", op: "company/search", failed: 1, meta: "search · Monid request failed (http_429)." },
+      ]} />);
+    });
+    expect(container.textContent).toContain("1 source was rate-limited (monid).");
+    expect(container.textContent).toContain("Run a new scan later");
+    expect(container.textContent).not.toContain("rejected");
+    expect(container.textContent).not.toContain("configuration attention");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('[role="note"]')).not.toBeNull();
+  });
+
   it("treats a no-record-only notice as an answer, not a gap", () => {
     act(() => {
       root.render(<ProviderFailureNotice failures={[

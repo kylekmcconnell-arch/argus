@@ -113,11 +113,12 @@ export function ScoreContextStrip({
  * contract change) earns the alarm treatment. Raw provider diagnostics remain
  * available behind a technical-details fold.
  */
-type ProviderFailureKind = "no_record" | "unavailable" | "rejected";
+type ProviderFailureKind = "no_record" | "unavailable" | "rate_limited" | "rejected";
 
 function classifyProviderFailure(_provider: string, meta?: string): ProviderFailureKind {
   const detail = meta ?? "";
   if (/no_record|http_404/i.test(detail)) return "no_record";
+  if (/http_429|rate[_\s-]?limit/i.test(detail)) return "rate_limited";
   if (/http_5\d\d|timeout|transport_error|unavailable/i.test(detail)) return "unavailable";
   return "rejected";
 }
@@ -126,7 +127,7 @@ export function ProviderFailureNotice({ failures }: {
   failures?: Array<{ provider: string; op: string; failed: number; meta?: string }>;
 }) {
   if (!failures?.length) return null;
-  const buckets: Record<ProviderFailureKind, string[]> = { no_record: [], unavailable: [], rejected: [] };
+  const buckets: Record<ProviderFailureKind, string[]> = { no_record: [], unavailable: [], rate_limited: [], rejected: [] };
   for (const line of failures) buckets[classifyProviderFailure(line.provider, line.meta)].push(line.provider);
   const names = (providers: string[]) => [...new Set(providers)].join(", ");
   const sentences = [
@@ -136,17 +137,20 @@ export function ProviderFailureNotice({ failures }: {
     buckets.no_record.length
       ? `${buckets.no_record.length} source${buckets.no_record.length === 1 ? " has" : "s have"} no record of this subject (${names(buckets.no_record)}).`
       : "",
+    buckets.rate_limited.length
+      ? `${buckets.rate_limited.length} source${buckets.rate_limited.length === 1 ? " was" : "s were"} rate-limited (${names(buckets.rate_limited)}).`
+      : "",
     buckets.rejected.length
       ? `${buckets.rejected.length} source check${buckets.rejected.length === 1 ? " was" : "s were"} rejected and need${buckets.rejected.length === 1 ? "s" : ""} attention (${names(buckets.rejected)}).`
       : "",
   ].filter(Boolean);
   const alarm = buckets.rejected.length > 0;
   const explanation = buckets.rejected.length
-    ? buckets.unavailable.length
-      ? "This may leave part of the report unanswered. Rejected checks need configuration attention; retrying unchanged will not fix them. Temporarily unavailable sources may recover on a later scan."
+    ? buckets.unavailable.length || buckets.rate_limited.length
+      ? "This may leave part of the report unanswered. Rejected checks need configuration attention; retrying unchanged will not fix them. Temporarily unavailable or rate-limited sources may recover on a later scan."
       : "This may leave part of the report unanswered. This source needs configuration attention; retrying the same scan unchanged is unlikely to fix it."
-    : buckets.unavailable.length
-      ? "This may leave part of the report unanswered. Run a new scan later to try the temporarily unavailable sources again."
+    : buckets.unavailable.length || buckets.rate_limited.length
+      ? "This may leave part of the report unanswered. Run a new scan later to try the temporarily unavailable or rate-limited sources again."
       : "A source with no record is an answered check, not a gap.";
   return (
     <div className={`finding ${alarm ? "tint-avoid" : "tint-caution"} mt-3 px-4 py-3`} role={alarm ? "alert" : "note"}>
