@@ -22,6 +22,30 @@ afterEach(() => {
 });
 
 describe("BasicFactsPanel", () => {
+  it("keeps context cards readable beside the sticky report rail", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[{
+            factId: "context-founder",
+            predicate: "founder",
+            value: "Tharmas · creator",
+            status: "verified",
+            floorEligible: false,
+            critical: true,
+            sources: [{ url: "https://x.com/0xTharmas", relation: "supports" }],
+          }]}
+        />,
+      );
+    });
+
+    const grid = container.querySelector('[aria-label="Context-only basic facts"] ul');
+    expect(grid?.className).toContain("sm:grid-cols-2");
+    expect(grid?.className).not.toContain("xl:grid-cols-3");
+    const card = grid?.querySelector("li");
+    expect(card?.firstElementChild?.firstElementChild?.textContent).toContain("Additional context");
+  });
+
   it("shows every required question, honest coverage, and clickable supporting or conflicting sources", () => {
     act(() => {
       root.render(

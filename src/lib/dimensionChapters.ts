@@ -5,6 +5,7 @@
 // score band, never invented, and the specific numbers live in the lead and
 // the ledger where they can be checked.
 import type { TokenDossier } from "../token/audit";
+import { publicStrengthLabel } from "./intelligencePresentation";
 
 export type ChapterTone = "pass" | "caution" | "fail";
 
@@ -269,7 +270,9 @@ export function personDimensionChapters(
       if (min != null && max != null && Number.isFinite(min) && Number.isFinite(max)) {
         facts.push({ label: "Recorded range", value: `${min}–${max}` });
       }
-      if (tier && tier !== "unknown") facts.push({ label: "Recorded band", value: tier, tone });
+      if (tier && tier !== "unknown") {
+        facts.push({ label: "Evidence strength", value: publicStrengthLabel(tier), tone });
+      }
       return {
         axis,
         eyebrow: label,
