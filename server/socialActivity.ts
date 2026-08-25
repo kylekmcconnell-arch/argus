@@ -17,7 +17,17 @@ const POST_READ_USD = 0.005;
 const COUNTS_REQUEST_USD = 0.005;
 const TWITTERAPI_IO_POST_USD = 0.00015;
 const TWITTERAPI_IO_SLICE_MS = 6 * HOUR_MS;
-const TWITTERAPI_IO_MAX_REQUESTS = 100;
+const TWITTERAPI_IO_PAGE_SIZE = 20;
+const SOCIAL_ACTIVITY_MIN_POSTS = 10;
+const SOCIAL_ACTIVITY_MAX_POSTS = 5_000;
+// twitterapi.io returns up to 20 tweets per request. The previous cap of 100
+// stopped a busy 7-day search around ~2,000 posts with pagination_incomplete.
+// Size the budget from the post ceiling so that cap is actually reachable:
+// half the billed rows may be client-filtered reposts, plus one probe per
+// 6-hour slice in the 7-day window.
+const TWITTERAPI_IO_MAX_REQUESTS =
+  Math.ceil(SOCIAL_ACTIVITY_MAX_POSTS / (TWITTERAPI_IO_PAGE_SIZE / 2))
+  + Math.ceil((7 * DAY_MS) / TWITTERAPI_IO_SLICE_MS);
 
 type JsonRecord = Record<string, unknown>;
 const asRecord = (value: unknown): JsonRecord =>
@@ -444,8 +454,11 @@ export async function collectSocialActivity(
   if (!bearer && !twitterApiKey) return unavailableSnapshot(identity, now, "not_configured", "Social activity was not collected because X search access is not configured.");
   const provider: SocialActivitySnapshot["provider"] = bearer ? "x-api-v2" : "twitterapi-io";
 
-  const configuredMax = Number(env("ARGUS_SOCIAL_ACTIVITY_MAX_POSTS") || "500");
-  const maxPosts = Math.min(500, Math.max(10, Math.round(options.maxPosts ?? configuredMax)));
+  const configuredMax = Number(env("ARGUS_SOCIAL_ACTIVITY_MAX_POSTS") || String(SOCIAL_ACTIVITY_MAX_POSTS));
+  const maxPosts = Math.min(
+    SOCIAL_ACTIVITY_MAX_POSTS,
+    Math.max(SOCIAL_ACTIVITY_MIN_POSTS, Math.round(options.maxPosts ?? configuredMax)),
+  );
   const fetchImpl = options.fetchImpl ?? fetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1000));
   const cacheKey = `social-activity:v1:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
