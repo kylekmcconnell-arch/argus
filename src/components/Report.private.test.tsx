@@ -96,7 +96,10 @@ describe("private person report evidence boundary", () => {
     expect(openRail.textContent).toContain("6 finished, 1 open");
     expect(openRail.textContent).toContain("What is still open");
     expect(openRail.textContent).toContain("Product and website substance");
-    expect(openRail.textContent).toContain("earnonhood.com denied the automated request (HTTP 403)");
+    expect(openRail.textContent).toContain("earnonhood.com blocked the automated check, so ARGUS could not finish reviewing the website.");
+    expect(openRail.textContent).not.toContain("HTTP 403");
+    expect(openRail.textContent).toContain("1 open");
+    expect(openRail.textContent).not.toContain("7 finished");
   });
 
   it("renders the SuperGemma regression fixture through one canonical report experience", () => {

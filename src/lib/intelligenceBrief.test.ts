@@ -150,6 +150,27 @@ describe("deriveIntelligenceBrief", () => {
     expect(JSON.stringify(brief.questions)).not.toContain("unrelated credential");
   });
 
+  it("rewrites ledger jargon in open-question details", () => {
+    const value = snapshot();
+    value.questions = [{
+      id: "question:facets",
+      domain: "product",
+      prompt: "What does the product do?",
+      materiality: "important",
+      state: "partial",
+      basis: "Strict direct-subject evidence answers part of this multi-facet question, but the frozen ledger does not record facet-level completeness.",
+      answerRefs: [],
+      sourceRefs: [],
+    }];
+    value.lenses[0]!.unresolvedQuestionIds = ["question:facets"];
+
+    const brief = deriveIntelligenceBrief(value);
+    const text = JSON.stringify(brief.questions);
+
+    expect(brief.questions[0]?.detail).toMatch(/evidence tied directly to this project|saved evidence/i);
+    expect(text).not.toMatch(/strict direct-subject|frozen ledger/i);
+  });
+
   it("does not convert a failed read into a negative ownership claim", () => {
     const brief = deriveIntelligenceBrief(snapshot());
     const text = JSON.stringify(brief);

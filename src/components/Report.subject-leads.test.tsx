@@ -195,10 +195,10 @@ describe("favorable person report with adverse leads about the subject", () => {
     const decisionCanvas = container.querySelector("#report-summary")?.textContent ?? "";
     expect(decisionCanvas).toContain("PROVISIONAL");
     expect(decisionCanvas).toContain("Required report checks");
-    expect(decisionCanvas).toContain("OFAC sanctions screen");
+    expect(decisionCanvas).toContain("Sanctions screening");
     expect(concernsText()).not.toContain("No adverse findings");
     expect(concernsText()).toContain("1 decision-critical check remains open or unrecorded");
-    expect(concernsText()).toContain("OFAC sanctions screen");
+    expect(concernsText()).toContain("Sanctions screening");
     expect(concernsText()).toContain("does not support an all-clear");
   });
 

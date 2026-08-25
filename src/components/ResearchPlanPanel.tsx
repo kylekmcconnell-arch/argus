@@ -35,7 +35,6 @@ function publicTaskNote(task: ResearchTask): string {
 
 export function ResearchPlanPanel({ plan, className = "" }: { plan: ResearchPlan; className?: string }) {
   const publicTasks = plan.tasks.filter((task) => !INTERNAL_CAPABILITIES.has(task.capability) && task.state !== "skipped");
-  const coveredTasks = publicTasks.filter((task) => task.state === "completed");
   const openTasks = publicTasks.filter(needsEvidence).sort((a, b) => a.rank - b.rank);
   const nextAction = (plan.nextActions ?? []).find((action) => openTasks.some((task) => task.id === action.taskId));
   const materialGaps = openTasks.slice(0, 3);
@@ -51,8 +50,8 @@ export function ResearchPlanPanel({ plan, className = "" }: { plan: ResearchPlan
           <h3 className="mt-0.5 text-[15px] font-semibold text-ink">What the scan established, and what is still missing</h3>
           <p className="mt-1 max-w-3xl text-[11.5px] leading-relaxed text-ink-dim">
             {openTasks.length > 0
-              ? `${coveredTasks.length} research area${coveredTasks.length === 1 ? " was" : "s were"} covered; ${openTasks.length} still ${openTasks.length === 1 ? "needs" : "need"} more evidence. The scan finished, but ARGUS could not verify every answer from the sources saved with this ${intentLabel[plan.intent]}.`
-              : `All ${coveredTasks.length} applicable research area${coveredTasks.length === 1 ? " was" : "s were"} covered for this ${intentLabel[plan.intent]}.`}
+              ? `The scan finished, but some answers still need more evidence from the sources saved with this ${intentLabel[plan.intent]}.`
+              : `The applicable research areas for this ${intentLabel[plan.intent]} were covered.`}
           </p>
         </div>
         <span className={`chip shrink-0 ${openTasks.length > 0 ? "tint-caution" : "tint-pass"}`}>

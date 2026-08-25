@@ -6,6 +6,7 @@ import {
   publicMeasurementTitle,
   publicQuestionStateLabel,
   publicIntelligenceText,
+  publicProviderExplanation,
   publicSignalCopy,
 } from "./intelligencePresentation";
 
@@ -72,7 +73,7 @@ describe("public Decision Intelligence presentation", () => {
     expect(`${copy.headline} ${copy.finding}`).not.toContain("integrity-gate");
   });
 
-  it("turns internal product and GoPlus rule headlines into attributed reader language", () => {
+  it("turns internal product and contract-warning headlines into reader language without vendor names", () => {
     const support = publicSignalCopy(signal({
       ruleId: "strict-product-description",
       polarity: "support",
@@ -85,9 +86,39 @@ describe("public Decision Intelligence presentation", () => {
     }));
 
     expect(support.headline).toBe("Direct sources describe what the product does");
-    expect(concern.headline).toBe("GoPlus reported a contract or deployer warning");
-    expect(`${support.headline} ${concern.headline}`).not.toMatch(/strict direct-subject|fired .* flag/i);
-    expect(concern.headline).toContain("GoPlus");
+    expect(concern.headline).toBe("A contract or deployer warning was recorded");
+    expect(`${support.headline} ${concern.headline}`).not.toMatch(/strict direct-subject|fired .* flag|GoPlus/i);
+  });
+
+  it("rewrites integrity-gate dumps, SiteNotLive titles, ledger jargon, and raw floats", () => {
+    const integrity = publicIntelligenceText(
+      "The final integrity gate recorded 3 fail-closed integrity events. Counts include 2 duplicate source IDs, 1 duplicate measurement IDs, invalid lineage, rejected archetype evidence.",
+    );
+    const site = publicSignalCopy(signal({
+      ruleId: "verified-direct-subject-adverse-finding",
+      headline: "Verified adverse record: SiteNotLive",
+      finding: "Frozen SiteNotLive finding: supergemma.ai is a coming-soon page.",
+    }));
+    const ledger = publicIntelligenceText(
+      "The frozen scoring analyst recorded 2 unresolved questions. Strict direct-subject evidence answers part of this multi-facet question, but the frozen ledger does not record facet-level completeness. 1 direct-subject scorer-packet record is marked score-limiting.",
+    );
+    const drawdown = publicIntelligenceText("Price sits -39.7410894525038% below the reported high.");
+
+    expect(integrity).toContain("3 report items failed the source-link check");
+    expect(integrity).not.toMatch(/fail-closed|integrity gate|duplicate source IDs|invalid lineage|rejected archetype/i);
+    expect(site.headline).toBe("The project website is not live yet");
+    expect(site.finding).toContain("coming-soon");
+    expect(`${site.headline} ${site.finding}`).not.toMatch(/SiteNotLive/i);
+    expect(ledger).not.toMatch(/frozen scoring analyst|frozen ledger|strict direct-subject|scorer-packet/i);
+    expect(ledger).toContain("saved review");
+    expect(drawdown).toContain("-39.7%");
+    expect(drawdown).not.toContain("39.7410894525038");
+  });
+
+  it("does not treat a provider name as the public explanation", () => {
+    expect(publicProviderExplanation("GoPlus")).toBeUndefined();
+    expect(publicProviderExplanation("twitterapi.io")).toBeUndefined();
+    expect(publicIntelligenceText("GoPlus assigns 12% of supply to a labeled wallet.")).not.toMatch(/GoPlus/);
   });
 
   it("translates legacy scorer bands without changing their ranges or treating checked-empty evidence as negative", () => {

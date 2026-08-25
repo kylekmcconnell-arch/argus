@@ -82,7 +82,9 @@ describe("ResearchPlanPanel", () => {
     const html = renderToStaticMarkup(<ResearchPlanPanel plan={plan} />);
 
     expect(html).toContain("What the scan established, and what is still missing");
-    expect(html).toContain("1 research area was covered; 1 still needs more evidence");
+    expect(html).toContain("The scan finished, but some answers still need more evidence");
+    expect(html).not.toContain("No research questions still need evidence");
+    expect(html).not.toMatch(/\d+ still needs? more evidence/);
     expect(html).toContain("The scan finished");
     expect(html).toContain("More evidence needed");
     expect(html).toContain("Who operates and controls the project?");

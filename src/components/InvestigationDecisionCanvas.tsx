@@ -4,7 +4,8 @@ import {
   type ReportCanvasTone,
   type ReportCanvasNarrativeItem,
 } from "./ReportCanvasPrimitives";
-import { publicCheckLabel } from "../lib/plainLanguage";
+import { publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
+import { publicFindingTitle, publicIntelligenceText } from "../lib/intelligencePresentation";
 import { requestChallenge } from "../lib/challenge";
 import type { DecisionDiscovery, VerdictArgument } from "../lib/reportInsights";
 import type { DecisionLensId } from "../intelligence/types";
@@ -56,7 +57,7 @@ function DecisionBoundaryBlock({ boundary, evidenceHref }: {
 }
 
 function plainDecisionText(value: string): string {
-  return publicCheckLabel(value)
+  return publicIntelligenceText(publicCheckNote(publicFindingTitle(publicCheckLabel(value))))
     .trim()
     .replace(/^Resolve deployer trail$/i, "Who created the token")
     .replace(/^Resolve bytecode fingerprint$/i, "Copied contract code")
@@ -65,7 +66,7 @@ function plainDecisionText(value: string): string {
     .replace(/^Resolve wallet clustering$/i, "Connected holder wallets")
     .replace(/^Resolve operator\s*\/\s*funding trace$/i, "Where the token creator’s funds came from")
     .replace(/^Resolve holder distribution$/i, "Large holder distribution")
-    .replace(/^Corroborated on CoinGecko/i, "Listed on CoinGecko")
+    .replace(/^Corroborated on CoinGecko/i, "Listed on a major market registry")
     .replace(/\bWallet clustering\b/gi, "Connected holder wallets")
     .replace(/\bSell simulation passed \(buy ([\d.]+)% \/ sell ([\d.]+)%\)\./gi, "Buying and selling worked in the test ($1% buy fee / $2% sell fee).")
     .replace(/\bBuy\s*\/\s*sell simulation\b/gi, "Buy and sell test")

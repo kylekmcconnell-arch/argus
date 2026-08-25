@@ -44,7 +44,7 @@ const LENS_FALLBACK: Record<DecisionLensId, Pick<DecisionLens, "label" | "questi
   },
   general_diligence: {
     label: "General diligence",
-    question: "What does this derived frozen-evidence subset establish?",
+    question: "What does this saved evidence establish?",
     domainPriority: ["identity", "product", "team", "market", "liquidity", "supply", "economics", "funding", "treasury", "governance", "control", "security", "legal", "chronology"],
   },
 };
@@ -666,7 +666,7 @@ export function PointInTimeIntelligencePanel({
                 </p>
               )}
               {questions.length > 3 && (
-                <p className="mt-2 text-[10.5px] text-ink-faint">{questions.length - 3} more remain in the frozen question ledger.</p>
+                <p className="mt-2 text-[10.5px] text-ink-faint">{questions.length - 3} more open questions remain.</p>
               )}
             </section>
           </div>

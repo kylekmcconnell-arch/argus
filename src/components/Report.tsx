@@ -102,7 +102,8 @@ import {
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
-import { formatRoleLabel, plainLanguageSummary, plainReportStatusLabel, publicConcernTitle } from "../lib/plainLanguage";
+import { formatRoleLabel, plainLanguageSummary, plainReportStatusLabel, publicCheckLabel, publicCheckNote, publicConcernTitle } from "../lib/plainLanguage";
+import { publicFindingTitle, publicIntelligenceText, publicStrengthLabel } from "../lib/intelligencePresentation";
 import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
@@ -2237,7 +2238,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const unresolvedChecks = decisionCriticalChecks(diligenceChecks).filter((check) =>
     check.status === "unknown" || check.status === "unavailable" || check.status === "stale",
   );
-  const unresolvedCheckNames = unresolvedChecks.slice(0, 3).map((check) => check.label);
+  const unresolvedCheckNames = unresolvedChecks.slice(0, 3).map((check) => publicCheckLabel(check.label));
   const unresolvedCheckRemainder = Math.max(0, unresolvedChecks.length - unresolvedCheckNames.length);
   const noCleanScreenCopy = unresolvedChecks.length > 0
     ? `${unresolvedChecks.length} decision-critical ${unresolvedChecks.length === 1 ? "check remains" : "checks remain"} open or unrecorded: ${unresolvedCheckNames.join(", ")}${unresolvedCheckRemainder > 0 ? `, and ${unresolvedCheckRemainder} more` : ""}. No completed clean screen is recorded, so this report does not support an all-clear.`
@@ -2393,8 +2394,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       .filter((artifact) => !notApplicableCheckIds.has(artifact.operation.replace(/^checkOutcomes:/, "")))
       .map((artifact, index) => ({
         id: `verify-axis-artifact-${axis.axis}-${index}`,
-        title: artifact.title,
-        detail: artifact.excerpt || `Source coverage is incomplete for ${diligenceAreaLabel(axis.axis).toLowerCase()}.`,
+        title: publicFindingTitle(artifact.title),
+        detail: publicIntelligenceText(artifact.excerpt || `Source coverage is incomplete for ${diligenceAreaLabel(axis.axis).toLowerCase()}.`),
         provenance: "Source unavailable",
         href: axisHref(axis.axis),
       })));
@@ -2447,8 +2448,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     : [];
   const checkVerificationQuestions: ReportCanvasNarrativeItem[] = investorOpenChecks.map((check, index) => ({
     id: `verify-${check.checkId ?? index}`,
-    title: check.label,
-    detail: check.note,
+    title: publicCheckLabel(check.label),
+    detail: publicCheckNote(check.note),
     provenance: "Not fully checked",
     href: "#scan-methodology" as `#${string}`,
   }));
@@ -2525,7 +2526,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .map((axis) => {
       const open = axis.weight - axis.score;
       const tier = bandTierFor(axis.axis);
-      const firstGap = plainLanguageSummary(axis.gaps[0] ?? "");
+      const firstGap = publicIntelligenceText(axis.gaps[0] ?? "");
       return {
         id: `points-${axis.axis}`,
         title: `${diligenceAreaLabel(axis.axis)}: ${open} of ${axis.weight} points open`,
@@ -2533,7 +2534,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           ? sentence(firstGap)
           : "The follow-up questions for this area are listed below.",
         provenance: tier
-          ? `${tier.replace(/_/g, " ")} source support · scored ${axis.score}/${axis.weight}`
+          ? `${publicStrengthLabel(tier)} · scored ${axis.score}/${axis.weight}`
           : `scored ${axis.score}/${axis.weight}`,
         href: axisHref(axis.axis),
       };
@@ -2636,8 +2637,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     items.map((item) => ({ label: item.title, ...(item.detail ? { detail: item.detail } : {}) }));
   const unresolvedRequiredNextSteps: ReportCanvasNarrativeItem[] = unresolvedChecks.map((check, index) => ({
     id: `required-check-${check.checkId || index}`,
-    title: check.label,
-    detail: plainLanguageSummary(check.note || (
+    title: publicCheckLabel(check.label),
+    detail: publicCheckNote(check.note || (
       check.status === "stale"
         ? "The saved result is out of date. Run this check again."
         : check.retryable === false
@@ -2663,14 +2664,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       || check.status === "reported"
       || check.status === "finding"
       || check.status === "checked-empty")
-    .map((check) => ({ label: check.label, ...(check.note ? { detail: check.note } : {}) }));
+    .map((check) => ({ label: publicCheckLabel(check.label), ...(check.note ? { detail: publicCheckNote(check.note) } : {}) }));
 
   const unscoredIntelNarrative: ReportCanvasNarrativeItem[] = [
     ...(f.projectToken ? [{
       id: "intel-project-token",
       title: `$${f.projectToken.symbol} is the verified project token.`,
       detail: [
-        f.projectToken.rank != null ? `CoinGecko rank #${f.projectToken.rank}` : null,
+        f.projectToken.rank != null ? `Market rank #${f.projectToken.rank}` : null,
         f.projectToken.marketCapUsd != null ? `market cap ${usdCompact(f.projectToken.marketCapUsd)}` : null,
         f.projectToken.chain,
       ].filter(Boolean).join(" · "),
@@ -2679,9 +2680,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     }] : []),
     ...(f.sourceArtifacts ?? []).map((artifact, index) => ({
       id: `intel-artifact-${artifact.contentHash || index}`,
-      title: artifact.title,
-      detail: artifact.excerpt,
-      provenance: `${artifact.provider} · ${artifact.match.replace(/_/g, " ")}`,
+      title: publicFindingTitle(artifact.title),
+      detail: publicIntelligenceText(artifact.excerpt),
+      provenance: artifact.match.replace(/_/g, " "),
       href: "#evidence-ledger" as `#${string}`,
     })),
     ...publishableSubjectFindings.map((finding, index) => ({

@@ -61,6 +61,11 @@ describe("public report labels", () => {
     expect(publicCheckLabel("OFAC sanctions screen")).toBe("Sanctions screening");
     expect(publicCheckNote("deployer unresolved; trace completion outcome not recorded"))
       .toBe("ARGUS could not identify the token creator, so the funding check did not finish.");
+    expect(publicCheckNote("earnonhood.com denied the automated request (HTTP 403); no adverse website conclusion was drawn"))
+      .toBe("earnonhood.com blocked the automated check, so ARGUS could not finish reviewing the website.");
+    expect(publicCheckNote("supergemma.ai serves a verified coming-soon page"))
+      .toBe("The project website is not live yet. It still shows a coming-soon or early-access page.");
+    expect(publicCheckNote("SiteNotLive")).toContain("not live yet");
   });
 
   it("keeps graph IDs typed while presenting readable nodes and relationships", () => {

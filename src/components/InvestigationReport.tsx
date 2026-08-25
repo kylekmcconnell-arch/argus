@@ -81,6 +81,7 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
+import { publicProviderExplanation } from "../lib/intelligencePresentation";
 import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
@@ -1249,7 +1250,7 @@ export function InvestigationReport({
   const supportItems = [
     ...token.findings
       .filter((finding) => finding.tone === "good")
-      .map((finding) => ({ label: finding.claim, detail: finding.source })),
+      .map((finding) => ({ label: finding.claim, ...(publicProviderExplanation(finding.source) ? { detail: publicProviderExplanation(finding.source) } : {}) })),
     ...(groundedTeamSupportPeople.length > 0 ? [{
       label: `${groundedTeamSupportPeople.length} source-grounded team ${groundedTeamSupportPeople.length === 1 ? "member" : "members"} identified`,
       detail: groundedTeamSupportPeople.slice(0, 4).map((person) => person.name).filter(Boolean).join(", "),
@@ -1263,15 +1264,15 @@ export function InvestigationReport({
     // They stay visible in the recorded-outcomes rail below.
     ...recordedChecks
       .filter((check) => check.status === "confirmed")
-      .map((check) => ({ label: check.label, detail: check.note })),
+      .map((check) => ({ label: publicCheckLabel(check.label), ...(check.note ? { detail: publicCheckNote(check.note) } : {}) })),
   ].slice(0, 6);
   const concernItems = [
     ...token.findings
       .filter((finding) => finding.tone !== "good")
-      .map((finding) => ({ label: finding.claim, detail: finding.source })),
+      .map((finding) => ({ label: finding.claim, ...(publicProviderExplanation(finding.source) ? { detail: publicProviderExplanation(finding.source) } : {}) })),
     ...recordedChecks
       .filter((check) => check.status === "finding")
-      .map((check) => ({ label: check.label, detail: check.note })),
+      .map((check) => ({ label: publicCheckLabel(check.label), ...(check.note ? { detail: publicCheckNote(check.note) } : {}) })),
     ...intelligenceBrief.pressures.map((item) => ({
       label: item.title,
       detail: `${item.detail} ${item.provenance}`.trim(),
@@ -1286,12 +1287,12 @@ export function InvestigationReport({
   const requiredNextStepItems = requiredGapChecks
     .map((check) => ({
       label: `Required: ${publicCheckLabel(check.label)}`,
-      detail: check.note,
+      ...(check.note ? { detail: publicCheckNote(check.note) } : {}),
     }));
   const enrichmentNextStepItems = enrichmentGapChecks
     .map((check) => ({
       label: publicCheckLabel(check.label),
-      detail: check.note,
+      ...(check.note ? { detail: publicCheckNote(check.note) } : {}),
     }));
   const nextStepItems = [
     // Lead with the concrete scan blockers, but reserve room for the highest
