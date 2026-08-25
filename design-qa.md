@@ -1,3 +1,52 @@
+# Design QA — true centered report score (2026-08-24)
+
+- Source visual truth: `docs/design-qa/score-center-2026-08-24-v2/reference-current-report.png`
+- Desktop implementation: `docs/design-qa/score-center-2026-08-24-v2/implementation-desktop-visible.jpg`
+- Mobile implementation: `docs/design-qa/score-center-2026-08-24-v2/implementation-mobile-visible.jpg`
+- Combined comparison: `docs/design-qa/score-center-2026-08-24-v2/comparison.jpg`
+- Source pixels: 3416 × 2248; focused decision-brief crop normalized to 968px width
+- Desktop CSS viewport: 1440 × 900; browser transport capture: 968 × 891
+- Mobile CSS viewport: 390 × 844; browser transport capture: 375 × 812
+- Density normalization: device scale 1; the source decision brief and implementation decision brief were normalized to the same 968px comparison width
+- State: light-theme saved-report decision brief with a numeric score and completed-check status
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- The source screenshot confirms the defect: the enlarged score is centered only inside a narrow trailing result column, leaving it visibly right-aligned against the complete decision brief.
+- The implementation uses equal flexible tracks on both sides of the score. Browser geometry measured the complete heading center and score center at exactly 712.5 CSS pixels, a 0px delta.
+- The decision title remains left-aligned and the score is now the true visual center. No score, verdict, readiness, evidence, or report-content behavior changed.
+- Below 1024px the title and score stack. The 390px verification measured the score lockup and complete heading at the same 187.5px center with zero document overflow.
+
+## Required fidelity surfaces
+
+- Fonts and typography: the existing ARGUS display, sans, and mono hierarchy is unchanged. The shared 168px `ScoreRing`, score numerals, verdict, and completion copy remain intact.
+- Spacing and layout rhythm: the decision brief now uses a symmetric `1fr / auto / 1fr` desktop composition. The left decision rail and surrounding chapter spacing remain unchanged; tablet and mobile use a deliberate centered stack.
+- Colors and visual tokens: all existing score-band, verdict, line, panel, and ink tokens are preserved. No new color, gradient, or semantic state was introduced.
+- Image quality and asset fidelity: no new visual asset was required. The existing shared score component is reused; no CSS art, placeholder, emoji, inline SVG, or generated image was added.
+- Copy and content: `What this report means`, the saved score, verdict, check count, and provisional state use the existing production copy without alteration.
+
+## Interaction and browser checks
+
+- Shared decision canvas rendered in the in-app browser at 1440 × 900 and 390 × 844 CSS viewports.
+- Desktop center delta: 0px.
+- Mobile center delta: 0px.
+- Desktop and mobile document overflow: 0px.
+- Browser console: zero errors and zero warnings.
+
+## Comparison history
+
+### Iteration 1
+
+- Earlier P1 finding: PR #235 enlarged the ring but preserved the right-hand result column, so the product-owner request for a centered score was not met.
+- Fix: replaced the asymmetric result-column composition with symmetric outer tracks and moved the score to the middle track; added a pre-overlap stacked breakpoint.
+- Post-fix evidence: the combined comparison and geometry measurements above show the score at the complete brief's exact horizontal center on desktop and mobile.
+
+final result: passed
+
+---
+
 # Design QA — investigation report storytelling
 
 - Source visual truth: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/stonkbroker-report-audit/01-verdict-opening.png`

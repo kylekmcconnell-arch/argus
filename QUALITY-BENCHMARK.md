@@ -55,7 +55,9 @@ decision layer; when a required token chart or citation is missing; when a token
 report hides recorded collector gaps below a complete-looking score; or when a
 sourced token figure and an unestablished one look the same.
 When a saved numeric risk score exists, its shared large ring must remain the
-dominant visual result in the decision brief rather than a secondary edge stat.
+dominant visual result at the true horizontal center of the complete decision
+brief rather than a secondary edge stat or a centered element inside a trailing
+column.
 
 The report experience also fails when person, token, and token-plus-project
 reports use conflicting section names or navigation order; when a guide link has
