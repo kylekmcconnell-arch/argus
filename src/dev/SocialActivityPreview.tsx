@@ -64,6 +64,25 @@ const previewSnapshot: SocialActivitySnapshot = {
     estimatedUsd: 19.61,
   },
   note: "Counts come from X's recent-search API and exclude reposts.",
+  mentioners: [
+    {
+      postId: "1",
+      handle: "@whale",
+      displayName: "Whale",
+      text: "Clutch Markets is getting loud today.",
+      tweetUrl: "https://x.com/whale/status/1",
+      createdAt: capturedAt,
+      followers: 880_000,
+      avatarUrl: "https://pbs.twimg.com/profile_images/1/whale.jpg",
+    },
+    {
+      postId: "2",
+      handle: "@quiet",
+      text: "watching $CLUTCH",
+      tweetUrl: "https://x.com/quiet/status/2",
+      createdAt: capturedAt,
+    },
+  ],
 };
 
 export function SocialActivityPreview() {

@@ -20,6 +20,41 @@ export interface SocialActivityBucket {
   postCount: number;
 }
 
+/** One collected post that mentioned this bound subject. Fields are provider-supplied only. */
+export interface SocialActivityMentionCandidate {
+  id: string;
+  authorId: string;
+  createdAt: string;
+  handle?: string;
+  displayName?: string;
+  text?: string;
+  followers?: number;
+  avatarUrl?: string;
+  tweetUrl?: string;
+}
+
+/** Largest mentioner card persisted with the snapshot. Never scored. */
+export interface SocialActivityMention {
+  postId: string;
+  handle: string;
+  displayName?: string;
+  text: string;
+  tweetUrl: string;
+  createdAt: string;
+  /** Present only when the provider returned a follower count. Never invented. */
+  followers?: number;
+  /** Official X CDN URL when the provider returned one. Not identity proof. */
+  avatarUrl?: string;
+}
+
+export const SOCIAL_MENTION_CARD_MAX = 8;
+
+export interface SocialActivityMentionSelection {
+  posts: SocialActivityMentionCandidate[];
+  subjectHandle: string;
+  limit?: number;
+}
+
 export interface SocialActivitySnapshot {
   schemaVersion: 1;
   provider: "x-api-v2" | "twitterapi-io";
@@ -55,6 +90,11 @@ export interface SocialActivitySnapshot {
   };
   note: string;
   unavailableReason?: "not_configured" | "invalid_identity" | "provider_failed";
+  /**
+   * Largest public accounts that mentioned THIS bound query. Ranked by
+   * provider-returned followers. Absent on legacy snapshots.
+   */
+  mentioners?: SocialActivityMention[];
 }
 
 export interface SocialActivityScoreInput {
@@ -66,6 +106,94 @@ export interface SocialActivityScoreInput {
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
+
+export function normalizedSocialHandle(value?: string | null): string | null {
+  const handle = value?.trim().replace(/^@/, "") ?? "";
+  return HANDLE.test(handle) ? handle.toLowerCase() : null;
+}
+
+function tweetPermalink(handle: string, postId: string, rawUrl?: string): string | null {
+  if (rawUrl) {
+    try {
+      const parsed = new URL(rawUrl);
+      const host = parsed.hostname.toLowerCase();
+      if (
+        (parsed.protocol === "https:" || parsed.protocol === "http:")
+        && (host === "x.com" || host === "www.x.com" || host === "twitter.com" || host === "www.twitter.com")
+        && /\/status\/\d+/i.test(parsed.pathname)
+        && !parsed.username
+        && !parsed.password
+      ) return parsed.href;
+    } catch {
+      // Fall through to a constructed permalink when the provider URL is unusable.
+    }
+  }
+  return /^\d+$/.test(postId) || /^[A-Za-z0-9]+$/.test(postId)
+    ? `https://x.com/${handle}/status/${postId}`
+    : null;
+}
+
+/**
+ * Rank collected mention posts for the people-card board. Only posts already
+ * matched to this subject query are eligible. The subject's own account is
+ * excluded. Follower counts are never invented; posts without one still render
+ * and sort last.
+ */
+export function selectSocialMentioners(
+  posts: SocialActivityMentionCandidate[],
+  subjectHandle: string,
+  limit = SOCIAL_MENTION_CARD_MAX,
+): SocialActivityMention[] {
+  const subject = normalizedSocialHandle(subjectHandle);
+  const byHandle = new Map<string, SocialActivityMention>();
+  for (const post of posts) {
+    const handle = normalizedSocialHandle(post.handle);
+    if (!handle || handle === subject) continue;
+    const text = post.text?.replace(/\s+/g, " ").trim() ?? "";
+    if (!text) continue;
+    const tweetUrl = tweetPermalink(handle, post.id, post.tweetUrl);
+    if (!tweetUrl) continue;
+    const createdAt = post.createdAt;
+    const candidate: SocialActivityMention = {
+      postId: post.id,
+      handle: `@${handle}`,
+      ...(post.displayName?.trim() ? { displayName: post.displayName.trim() } : {}),
+      text,
+      tweetUrl,
+      createdAt,
+      ...(typeof post.followers === "number" && Number.isFinite(post.followers) && post.followers >= 0
+        ? { followers: Math.round(post.followers) }
+        : {}),
+      ...(post.avatarUrl ? { avatarUrl: post.avatarUrl } : {}),
+    };
+    const prior = byHandle.get(handle);
+    if (!prior) {
+      byHandle.set(handle, candidate);
+      continue;
+    }
+    const priorFollowers = prior.followers;
+    const nextFollowers = candidate.followers;
+    const richerFollowers = (nextFollowers ?? -1) > (priorFollowers ?? -1);
+    const sameFollowers = nextFollowers === priorFollowers
+      || (nextFollowers === undefined && priorFollowers === undefined);
+    const newer = Date.parse(candidate.createdAt) > Date.parse(prior.createdAt);
+    if (richerFollowers || (sameFollowers && newer)) byHandle.set(handle, candidate);
+  }
+  return [...byHandle.values()]
+    .sort((left, right) => {
+      const leftFollowers = left.followers;
+      const rightFollowers = right.followers;
+      if (leftFollowers !== undefined && rightFollowers !== undefined && leftFollowers !== rightFollowers) {
+        return rightFollowers - leftFollowers;
+      }
+      if (leftFollowers !== undefined && rightFollowers === undefined) return -1;
+      if (leftFollowers === undefined && rightFollowers !== undefined) return 1;
+      return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+    })
+    .slice(0, Math.max(0, Math.min(SOCIAL_MENTION_CARD_MAX, Math.round(limit))));
+}
 
 /**
  * A deterministic activity index, deliberately separate from every ARGUS

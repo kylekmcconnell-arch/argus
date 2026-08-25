@@ -160,6 +160,80 @@ describe("social activity collector", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes("cursor=cursor-2"))).toBe(true);
   });
 
+  it("persists twitterapi.io handle, text, followers, and avatar so mentioners can be ranked", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (!url.searchParams.get("cursor") && url.searchParams.get("query")?.includes("until_time:")) {
+        return response({
+          tweets: [
+            {
+              id: "9001",
+              text: "Largest mention of Clutch Markets",
+              url: "https://x.com/whale/status/9001",
+              createdAt: "2026-08-22T21:00:00.000Z",
+              author: {
+                id: "author-whale",
+                userName: "whale",
+                name: "Whale",
+                followers: 880_000,
+                profilePicture: "https://pbs.twimg.com/profile_images/1/whale.jpg",
+              },
+            },
+            {
+              id: "9002",
+              text: "Our own launch thread",
+              createdAt: "2026-08-22T21:10:00.000Z",
+              author: {
+                id: "author-self",
+                userName: "clutch",
+                followers: 2_000_000,
+                profilePicture: "https://pbs.twimg.com/profile_images/1/self.jpg",
+              },
+            },
+            {
+              id: "9003",
+              text: "RT @whale: Largest mention of Clutch Markets",
+              createdAt: "2026-08-22T21:20:00.000Z",
+              author: { id: "author-rt", userName: "reposter", followers: 500_000 },
+            },
+            {
+              id: "9004",
+              text: "Smaller mention",
+              createdAt: "2026-08-22T20:00:00.000Z",
+              author: { id: "author-mid", userName: "midsize", followers: 12_000 },
+            },
+            {
+              id: "9005",
+              text: "No follower field, still a real mention",
+              createdAt: "2026-08-22T19:00:00.000Z",
+              author: { id: "author-quiet", userName: "quiet" },
+            },
+          ],
+          has_next_page: false,
+          next_cursor: "",
+        });
+      }
+      return response({ tweets: [], has_next_page: false, next_cursor: "" });
+    }) as typeof fetch;
+
+    const snapshot = await collectSocialActivity(
+      { handle: "@clutch", ticker: "CLUTCH", projectName: "Clutch Markets" },
+      { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl, maxPosts: 40 },
+    );
+
+    expect(snapshot.mentioners?.map((row) => row.handle)).toEqual(["@whale", "@midsize", "@quiet"]);
+    expect(snapshot.mentioners?.[0]).toMatchObject({
+      postId: "9001",
+      text: "Largest mention of Clutch Markets",
+      tweetUrl: "https://x.com/whale/status/9001",
+      followers: 880_000,
+      avatarUrl: "https://pbs.twimg.com/profile_images/1/whale.jpg",
+    });
+    expect(snapshot.mentioners?.[2].followers).toBeUndefined();
+    expect(JSON.stringify(snapshot.mentioners)).not.toContain("influence");
+    expect(snapshot.mentioners?.some((row) => row.handle === "@clutch")).toBe(false);
+  });
+
   it("records a provider pagination gap instead of calling it a post limit", async () => {
     const fetchImpl = vi.fn(async () => response({
       tweets: [],

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { trustedOfficialXAvatarUrl } from "../lib/avatars";
 
 // Legacy/current-intelligence profile-photo integrity screen. Fresh reports use
 // the frozen core result; this panel is only an explicitly separate overlay.
@@ -48,6 +49,80 @@ function photoScreenData(value: unknown): PhotoScreenData {
         ? raw.note
         : "Profile-photo integrity provider returned no usable conclusion.",
   };
+}
+
+/**
+ * Visual avatar only. A loaded photo is not identity proof; a broken image
+ * falls back to a letter and is never treated as the speaker.
+ */
+export function PfpAvatar({
+  handle,
+  previewUrl,
+  panelCostToken,
+  size = 44,
+  className = "",
+}: {
+  handle?: string;
+  previewUrl?: string;
+  panelCostToken?: string;
+  size?: number;
+  className?: string;
+}) {
+  const trustedPreview = trustedOfficialXAvatarUrl(previewUrl);
+  const cleanHandle = handle?.replace(/^@/, "").trim() ?? "";
+  const [src, setSrc] = useState<string | null>(trustedPreview);
+  const [failed, setFailed] = useState(!trustedPreview && !cleanHandle);
+  const ran = useRef(false);
+
+  useEffect(() => {
+    if (ran.current || trustedPreview || !cleanHandle) return;
+    ran.current = true;
+    (async () => {
+      try {
+        const params = new URLSearchParams({ handle: cleanHandle });
+        const response = await fetch(`/api/pfp-check?${params}`, panelCostToken
+          ? { headers: { "x-argus-panel-token": panelCostToken } }
+          : undefined);
+        const raw = await response.json().catch(() => ({})) as unknown;
+        const body = photoScreenData(raw);
+        const official = body.imageData || trustedOfficialXAvatarUrl(body.imageUrl);
+        if (official) setSrc(official);
+        else setFailed(true);
+      } catch {
+        setFailed(true);
+      }
+    })();
+  }, [cleanHandle, panelCostToken, trustedPreview]);
+
+  const letter = (cleanHandle[0] ?? "?").toUpperCase();
+  const dim = { width: size, height: size };
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        width={size}
+        height={size}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => {
+          setFailed(true);
+          setSrc(null);
+        }}
+        className={`shrink-0 rounded-full border border-line bg-void object-cover ${className}`}
+        style={dim}
+      />
+    );
+  }
+  return (
+    <span
+      aria-hidden="true"
+      className={`flex shrink-0 items-center justify-center rounded-full border border-line bg-panel-2 text-[13px] font-medium text-signal-lift ${className}`}
+      style={dim}
+    >
+      {letter}
+    </span>
+  );
 }
 
 export function PfpCheck({ handle, brand, panelCostToken }: { handle: string; brand?: boolean; panelCostToken?: string }) {

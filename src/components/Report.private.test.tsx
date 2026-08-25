@@ -16,7 +16,7 @@ vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
 vi.mock("./RingAlert", () => ({ RingAlert: (props: Record<string, unknown>) => { harness.livePanel("ring-alert", props); return null; } }));
 vi.mock("./SanctionsNameScreen", () => ({ SanctionsNameScreen: () => { harness.livePanel("sanctions"); return null; } }));
 vi.mock("./LegalScreen", () => ({ LegalScreen: () => { harness.livePanel("legal"); return null; } }));
-vi.mock("./PfpCheck", () => ({ PfpCheck: () => { harness.livePanel("pfp"); return null; } }));
+vi.mock("./PfpCheck", () => ({ PfpCheck: () => { harness.livePanel("pfp"); return null; }, PfpAvatar: () => null }));
 vi.mock("./PersonGithub", () => ({ PersonGithub: (props: Record<string, unknown>) => { harness.livePanel("person-github", props); return null; } }));
 vi.mock("./VcReport", () => ({ VcReport: () => { harness.livePanel("vc"); return null; } }));
 vi.mock("./KolReport", () => ({ KolReport: () => { harness.livePanel("kol"); return null; } }));

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChatsCircle, UsersThree } from "@phosphor-icons/react";
-import type { SocialActivityBucket, SocialActivitySnapshot } from "../data/socialActivity";
+import type { SocialActivityBucket, SocialActivityMention, SocialActivitySnapshot } from "../data/socialActivity";
+import { PfpAvatar } from "./PfpCheck";
 
 type WindowChoice = "24h" | "7d";
 
@@ -66,7 +67,66 @@ function incompleteCopy(snapshot: SocialActivitySnapshot): string {
   return "X returned more result pages than this saved scan collected. Account figures are minimums, so the activity score stays withheld.";
 }
 
-export function SocialActivityPanel({ snapshot, className = "" }: { snapshot: SocialActivitySnapshot; className?: string }) {
+const followers = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+
+function MentionerBoard({
+  mentioners,
+  panelCostToken,
+}: {
+  mentioners: SocialActivityMention[];
+  panelCostToken?: string;
+}) {
+  if (!mentioners.length) return null;
+  return (
+    <div className="mt-5 border-t border-line/70 pt-5">
+      <h3 className="text-[16px] font-semibold text-ink">Who talked about it</h3>
+      <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
+        Largest public X accounts that mentioned the bound identifiers in this saved search. Ranked by follower count when X returned one. This is not an influence score.
+      </p>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {mentioners.map((mention) => (
+          <article key={mention.postId} className="panel p-4" aria-label={`Mention by ${mention.handle}`}>
+            <div className="flex items-start gap-3">
+              <PfpAvatar
+                handle={mention.handle}
+                previewUrl={mention.avatarUrl}
+                panelCostToken={panelCostToken}
+                size={48}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <p className="text-[14px] font-semibold text-ink">{mention.handle}</p>
+                  {mention.followers !== undefined && (
+                    <p className="mono text-[11px] text-ink-faint">{followers.format(mention.followers)} followers</p>
+                  )}
+                </div>
+                <blockquote className="mt-2 text-[13.5px] leading-relaxed text-ink">“{mention.text}”</blockquote>
+                <a
+                  href={mention.tweetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="link-ext mt-2 inline-flex text-[11px]"
+                >
+                  View post
+                </a>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function SocialActivityPanel({
+  snapshot,
+  className = "",
+  panelCostToken,
+}: {
+  snapshot: SocialActivitySnapshot;
+  className?: string;
+  panelCostToken?: string;
+}) {
   const [choice, setChoice] = useState<WindowChoice>("24h");
   const window = choice === "24h" ? snapshot.windows.last24Hours : snapshot.windows.last7Days;
   const chartBuckets = useMemo(() => {
@@ -154,6 +214,7 @@ export function SocialActivityPanel({ snapshot, className = "" }: { snapshot: So
           {snapshot.state === "partial" && (
             <p className="mt-3 text-[11px] font-medium text-caution">{incompleteCopy(snapshot)}</p>
           )}
+          <MentionerBoard mentioners={snapshot.mentioners ?? []} panelCostToken={panelCostToken} />
         </>
       )}
 

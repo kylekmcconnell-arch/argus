@@ -1,9 +1,12 @@
 import { env } from "./config";
 import { recordCall } from "./cost";
 import { cacheGet, cacheSet } from "./cache";
+import { trustedOfficialXAvatarUrl } from "../src/lib/avatars";
 import {
   socialActivityScore,
+  selectSocialMentioners,
   type SocialActivityBucket,
+  type SocialActivityMention,
   type SocialActivitySnapshot,
   type SocialActivityIncompleteReason,
   type SocialActivityWindow,
@@ -51,6 +54,12 @@ interface SearchPost {
   id: string;
   authorId: string;
   createdAt: string;
+  handle?: string;
+  displayName?: string;
+  text?: string;
+  followers?: number;
+  avatarUrl?: string;
+  tweetUrl?: string;
 }
 
 interface CountsResult {
@@ -229,7 +238,9 @@ async function collectSearch(
     url.searchParams.set("start_time", start.toISOString());
     url.searchParams.set("end_time", end.toISOString());
     url.searchParams.set("max_results", String(Math.min(100, Math.max(10, remaining))));
-    url.searchParams.set("tweet.fields", "author_id,created_at");
+    url.searchParams.set("tweet.fields", "author_id,created_at,text");
+    url.searchParams.set("expansions", "author_id");
+    url.searchParams.set("user.fields", "username,name,public_metrics,profile_image_url");
     if (nextToken) url.searchParams.set("next_token", nextToken);
     const payload = await fetchJson(fetchImpl, url, bearer, "search");
     requests += 1;
@@ -243,14 +254,15 @@ async function collectSearch(
       incompleteReason: "provider_error",
     };
     const rows = Array.isArray(payload.data) ? payload.data : [];
+    const users = usersById(payload);
     postReads += rows.length;
     recordCall("x-api", "post-read", rows.length * POST_READ_USD, `${rows.length} public posts`, "succeeded");
     for (const row of rows) {
-      const record = asRecord(row);
-      if (typeof record.id !== "string" || typeof record.author_id !== "string" || typeof record.created_at !== "string") continue;
-      const at = Date.parse(record.created_at);
+      const post = officialXPost(row, users);
+      if (!post) continue;
+      const at = Date.parse(post.createdAt);
       if (!Number.isFinite(at)) continue;
-      posts.set(record.id, { id: record.id, authorId: record.author_id, createdAt: record.created_at });
+      posts.set(post.id, post);
       oldestAt = oldestAt === null ? at : Math.min(oldestAt, at);
     }
     const token = asRecord(payload.meta).next_token;
@@ -300,21 +312,127 @@ function windowFrom(
   };
 }
 
+function usersById(payload: JsonRecord): Map<string, JsonRecord> {
+  const includes = asRecord(payload.includes);
+  const users = Array.isArray(includes.users) ? includes.users : [];
+  const map = new Map<string, JsonRecord>();
+  for (const row of users) {
+    const record = asRecord(row);
+    if (typeof record.id === "string") map.set(record.id, record);
+  }
+  return map;
+}
+
+function providedFollowerCount(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.round(value);
+    if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  }
+  return undefined;
+}
+
+function providedHandle(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const handle = value.trim().replace(/^@/, "");
+    if (/^[A-Za-z0-9_]{1,15}$/.test(handle)) return handle;
+  }
+  return undefined;
+}
+
+function providedText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function providedTweetUrl(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    try {
+      const parsed = new URL(value);
+      const host = parsed.hostname.toLowerCase();
+      if (
+        (parsed.protocol === "https:" || parsed.protocol === "http:")
+        && (host === "x.com" || host === "www.x.com" || host === "twitter.com" || host === "www.twitter.com")
+        && /\/status\/\d+/i.test(parsed.pathname)
+        && !parsed.username
+        && !parsed.password
+      ) return parsed.href;
+    } catch {
+      // Ignore unusable provider URLs and keep looking.
+    }
+  }
+  return undefined;
+}
+
+function authorFields(author: JsonRecord): Pick<SearchPost, "handle" | "displayName" | "followers" | "avatarUrl"> {
+  const handle = providedHandle(author.userName, author.username, author.screen_name);
+  const displayName = typeof author.name === "string" && author.name.trim() ? author.name.trim() : undefined;
+  const metrics = asRecord(author.public_metrics);
+  const followers = providedFollowerCount(
+    author.followers,
+    author.followersCount,
+    author.followers_count,
+    metrics.followers_count,
+  );
+  const avatarUrl = trustedOfficialXAvatarUrl(
+    typeof author.profilePicture === "string" ? author.profilePicture
+      : typeof author.profile_image_url_https === "string" ? author.profile_image_url_https
+        : typeof author.profile_image_url === "string" ? author.profile_image_url
+          : typeof author.profile_image === "string" ? author.profile_image
+            : null,
+  ) ?? undefined;
+  return {
+    ...(handle ? { handle } : {}),
+    ...(displayName ? { displayName } : {}),
+    ...(followers !== undefined ? { followers } : {}),
+    ...(avatarUrl ? { avatarUrl } : {}),
+  };
+}
+
+function officialXPost(row: unknown, users: Map<string, JsonRecord>): SearchPost | null {
+  const record = asRecord(row);
+  if (typeof record.id !== "string" || typeof record.author_id !== "string" || typeof record.created_at !== "string") {
+    return null;
+  }
+  const at = Date.parse(record.created_at);
+  if (!Number.isFinite(at)) return null;
+  const author = users.get(record.author_id) ?? {};
+  const text = providedText(record.text);
+  const tweetUrl = providedTweetUrl(record.url);
+  return {
+    id: record.id,
+    authorId: record.author_id,
+    createdAt: record.created_at,
+    ...authorFields(author),
+    ...(text ? { text } : {}),
+    ...(tweetUrl ? { tweetUrl } : {}),
+  };
+}
+
 function twitterApiIoPost(row: unknown): SearchPost | null {
   const record = asRecord(row);
   const author = asRecord(record.author);
   const id = typeof record.id === "string" ? record.id : null;
+  const handle = providedHandle(author.userName, author.username, author.screen_name);
   const authorId = typeof author.id === "string"
     ? author.id
-    : typeof author.userName === "string"
-      ? author.userName.toLowerCase()
+    : handle
+      ? handle.toLowerCase()
       : null;
   const createdAt = typeof record.createdAt === "string" ? record.createdAt : null;
   const text = typeof record.text === "string" ? record.text : "";
   const isRepost = record.retweeted_tweet !== undefined && record.retweeted_tweet !== null
     || /^RT\s+@/i.test(text);
   if (!id || !authorId || !createdAt || isRepost || !Number.isFinite(Date.parse(createdAt))) return null;
-  return { id, authorId, createdAt: new Date(createdAt).toISOString() };
+  const tweetUrl = providedTweetUrl(record.url, record.twitterUrl);
+  return {
+    id,
+    authorId,
+    createdAt: new Date(createdAt).toISOString(),
+    ...authorFields(author),
+    ...(providedText(text) ? { text } : {}),
+    ...(tweetUrl ? { tweetUrl } : {}),
+  };
 }
 
 function hourlyBuckets(posts: SearchPost[], start: Date, end: Date): SocialActivityBucket[] {
@@ -461,7 +579,7 @@ export async function collectSocialActivity(
   );
   const fetchImpl = options.fetchImpl ?? fetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1000));
-  const cacheKey = `social-activity:v1:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
+  const cacheKey = `social-activity:v2:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
   if (!options.fetchImpl) {
     const cached = await cacheGet(cacheKey, { operation: "social-activity-hit", meta: "15 minute activity snapshot" });
     if (cached) {
@@ -513,6 +631,7 @@ export async function collectSocialActivity(
         })
       : null;
   const state = counts.ok && last7Days.authorCoverageComplete ? "complete" : "partial";
+  const mentioners: SocialActivityMention[] = selectSocialMentioners(search.posts, identity.handle);
   const snapshot: SocialActivitySnapshot = {
     schemaVersion: 1,
     provider,
@@ -548,6 +667,7 @@ export async function collectSocialActivity(
         : search.incompleteReason === "provider_error"
           ? `X stopped responding before ARGUS finished the search. Unique-account counts are minimums.`
           : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`,
+    ...(mentioners.length ? { mentioners } : {}),
   };
   if (!options.fetchImpl) void cacheSet(cacheKey, JSON.stringify(snapshot));
   return snapshot;
