@@ -178,4 +178,65 @@ describe("social activity collector", () => {
     expect(snapshot.note).toContain("more result pages");
     expect(snapshot.note).not.toContain("configured limit");
   });
+
+  it("defaults the inspected-post ceiling to 5,000 and keeps a floor of 10", async () => {
+    const previous = process.env.ARGUS_SOCIAL_ACTIVITY_MAX_POSTS;
+    delete process.env.ARGUS_SOCIAL_ACTIVITY_MAX_POSTS;
+    const fetchImpl = vi.fn(async () => response({ tweets: [], has_next_page: false, next_cursor: "" })) as typeof fetch;
+    try {
+      const snapshot = await collectSocialActivity(
+        { handle: "@clutch" },
+        { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl },
+      );
+      expect(snapshot.collection.maxPosts).toBe(5_000);
+
+      const clamped = await collectSocialActivity(
+        { handle: "@clutch" },
+        { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl, maxPosts: 99_999 },
+      );
+      expect(clamped.collection.maxPosts).toBe(5_000);
+
+      const floored = await collectSocialActivity(
+        { handle: "@clutch" },
+        { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl, maxPosts: 1 },
+      );
+      expect(floored.collection.maxPosts).toBe(10);
+    } finally {
+      if (previous === undefined) delete process.env.ARGUS_SOCIAL_ACTIVITY_MAX_POSTS;
+      else process.env.ARGUS_SOCIAL_ACTIVITY_MAX_POSTS = previous;
+    }
+  });
+
+  it("can collect 5,000 twitterapi.io posts without pagination_incomplete becoming the hidden cap", async () => {
+    const pageSize = 20;
+    let page = 0;
+    const fetchImpl = vi.fn(async () => {
+      const start = page * pageSize;
+      page += 1;
+      return response({
+        tweets: Array.from({ length: pageSize }, (_, index) => ({
+          id: `busy-${start + index}`,
+          author: { id: `author-${(start + index) % 400}` },
+          createdAt: "2026-08-22T20:30:00.000Z",
+          text: "busy account mention",
+        })),
+        has_next_page: true,
+        next_cursor: `cursor-${page}`,
+      });
+    }) as typeof fetch;
+
+    const snapshot = await collectSocialActivity(
+      { handle: "@clutch" },
+      { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl, maxPosts: 5_000 },
+    );
+
+    expect(snapshot.provider).toBe("twitterapi-io");
+    expect(snapshot.collection.maxPosts).toBe(5_000);
+    expect(snapshot.windows.last7Days.inspectedPosts).toBe(5_000);
+    expect(snapshot.collection.searchRequests).toBeGreaterThan(100);
+    expect(snapshot.collection.incompleteReason).toBe("post_limit");
+    expect(snapshot.activityScore).toBeNull();
+    expect(snapshot.note).toContain("maximum 5,000 posts");
+    expect(snapshot.note).toContain("minimums");
+  });
 });

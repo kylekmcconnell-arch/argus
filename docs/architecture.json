@@ -80,7 +80,7 @@
    "socialActivity.ts": {
     "collects": "24-hour and seven-day public X post counts, unique author breadth, momentum, top-author concentration and a separate activity-only score",
     "via": "official X API v2 recent counts + search when configured, otherwise twitterapi.io advanced-search across bounded six-hour slices; exact bound project identifiers only; reposts excluded",
-    "cost": "official X: $0.005 per counts request plus $0.005 per returned post; twitterapi.io: about $0.00015 per returned post at the 2026-08-23 published rate; default ceiling 200 posts",
+    "cost": "official X: $0.005 per counts request plus $0.005 per returned post; twitterapi.io: about $0.00015 per returned post at the 2026-08-23 published rate; default ceiling 5000 posts",
     "failurePolicy": "missing credentials or failed reads remain unavailable; a reached post ceiling makes unique-account counts minimums and withholds concentration plus activity score; never affects safety scoring"
    },
    "groundedSearch.ts": {
@@ -258,7 +258,7 @@
    "ARGUS_GENERAL_WEB_PROVIDER": "grok forces legacy grok-direct",
    "ARGUS_ENTITY_REUSE": "on = predicate-specific verified-fact cooldowns; live risk and additive event searches still refresh",
    "ARGUS_GROK_AUDIT_CEILING_USD": "default 8.00 mid-run Grok stop"
-   ,"ARGUS_SOCIAL_ACTIVITY_MAX_POSTS": "default 200, clamped 10-500; bounded official-X author pagination ceiling"
+   ,"ARGUS_SOCIAL_ACTIVITY_MAX_POSTS": "default 5000, clamped 10-5000; twitterapi.io production ceiling, official X unused unless configured"
   },
   "providerCapabilities": {
    "VITE_ARKHAM_PROVIDER_ENABLED": "default off; true reactivates client Arkham calls and makes a missing scan-time funding trace decision-critical"

@@ -113,12 +113,12 @@ describe("SocialActivityPanel", () => {
       activityScore: null,
       collection: {
         ...snapshot.collection,
-        maxPosts: 500,
-        postReads: 500,
+        maxPosts: 5000,
+        postReads: 5000,
         incompleteReason: "post_limit",
       },
     }} />));
-    expect(container.textContent).toContain("maximum 500 posts allowed for this saved scan");
+    expect(container.textContent).toContain("maximum 5,000 posts allowed for this saved scan");
     expect(container.textContent).toContain("activity score stays withheld");
   });
 });
