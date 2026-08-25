@@ -1,22 +1,16 @@
 import { TrustGraph } from "../components/TrustGraph";
 
-// Presentation harness only. Nodes and edges match the TrustGraph contract
-// tests so the preview does not invent a live-report web.
-const nodes = [
-  { type: "Person", key: "@subject", subject: true, label: "Subject" },
-  { type: "Person", key: "@peer" },
-  { type: "Company", key: "@fund", label: "Fund" },
-  { type: "Company", key: "project.example", label: "Project" },
-  { type: "Identity", subtype: "Wallet", key: "wallet:base:0xdef" },
-  { type: "Person", key: "@rival" },
+// The live EARN investigation web Kyle circled: subject @earnonhood and the
+// two recorded edges only. Do not add people, wallets, or hops.
+const earnNodes = [
+  { type: "Person", key: "@earnonhood", subject: true },
+  { type: "Identity", subtype: "Wallet", key: "robinhood:0xa3b6aee90017b72c0812dc1e013de70eb2917ba3" },
+  { type: "Person", key: "Tharmas", label: "Tharmas" },
 ];
 
-const edges = [
-  { src: "@subject", dst: "@peer", type: "ASSOCIATES_WITH", verdict: "Unconfirmed", source_url: "https://x.com/peer/status/1" },
-  { src: "@subject", dst: "@fund", type: "AFFILIATED_WITH", verdict: "Confirmed" },
-  { src: "@fund", dst: "project.example", type: "INVESTED_IN", verdict: "Confirmed" },
-  { src: "@subject", dst: "wallet:base:0xdef", type: "HELD_BY", verdict: "Contradicted" },
-  { src: "@subject", dst: "@rival", type: "ASSOCIATES_WITH", verdict: "Contradicted" },
+const earnEdges = [
+  { src: "@earnonhood", dst: "robinhood:0xa3b6aee90017b72c0812dc1e013de70eb2917ba3", type: "CONTROLS_WALLET" },
+  { src: "@earnonhood", dst: "Tharmas", type: "TEAM" },
 ];
 
 export function TrustGraphPreview() {
@@ -32,7 +26,7 @@ export function TrustGraphPreview() {
         </header>
         <section className="panel mt-6 p-4">
           <div className="eyebrow mb-2">Connection map · select a person, wallet, or project to inspect it</div>
-          <TrustGraph nodes={nodes} edges={edges} onAudit={() => undefined} onOpenProject={() => undefined} />
+          <TrustGraph nodes={earnNodes} edges={earnEdges} onAudit={() => undefined} />
         </section>
       </div>
     </main>

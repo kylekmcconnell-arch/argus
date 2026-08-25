@@ -9,8 +9,20 @@ import {
   collectTrustGraphHops,
   prefersTrustGraphMotion,
   trustGraphKind,
+  trustGraphLinkSentence,
   trustGraphReadingLine,
+  trustGraphStage,
 } from "./TrustGraph";
+
+const earnNodes = [
+  { type: "Person", key: "@earnonhood", subject: true },
+  { type: "Identity", subtype: "Wallet", key: "robinhood:0xa3b6aee90017b72c0812dc1e013de70eb2917ba3" },
+  { type: "Person", key: "Tharmas", label: "Tharmas" },
+];
+const earnEdges = [
+  { src: "@earnonhood", dst: "robinhood:0xa3b6aee90017b72c0812dc1e013de70eb2917ba3", type: "CONTROLS_WALLET" },
+  { src: "@earnonhood", dst: "Tharmas", type: "TEAM" },
+];
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -88,6 +100,30 @@ describe("TrustGraph reading line", () => {
   });
 });
 
+describe("TrustGraph sparse EARN web", () => {
+  it("keeps the two recorded links and does not invent more", () => {
+    expect(collectTrustGraphHops(earnNodes, earnEdges, "@earnonhood")).toHaveLength(2);
+    expect(trustGraphStage(2).sparse).toBe(true);
+    expect(trustGraphLinkSentence(earnEdges[0], "@earnonhood", "Wallet 0xa3b6aee90017b72c0812dc1e013de70eb2917ba3"))
+      .toBe("@earnonhood controls Wallet 0xa3b6aee90017b72c0812dc1e013de70eb2917ba3.");
+    expect(trustGraphLinkSentence(earnEdges[1], "@earnonhood", "Tharmas"))
+      .toBe("Tharmas is on the team for @earnonhood.");
+
+    const html = renderToStaticMarkup(<TrustGraph nodes={earnNodes} edges={earnEdges} />);
+    expect(html).toContain("2 recorded links.");
+    expect(html).toContain('data-trust-graph-sparse="true"');
+    expect(html).toContain("@earnonhood");
+    expect(html).toContain("Tharmas");
+    expect(html).toContain("Wallet 0xa3b6aee90017b72c0812dc1e013de70eb2917ba3");
+    expect(html).toContain("controls");
+    expect(html).toContain("is on the team for");
+    expect(html).toContain("Recorded connections");
+    expect(html).not.toContain("@fund");
+    expect(html).not.toContain("project.example");
+    expect(html).not.toContain("@peer");
+  });
+});
+
 describe("TrustGraph empty state", () => {
   it("stays honest when only the subject was recorded", () => {
     const html = renderToStaticMarkup(
@@ -116,6 +152,30 @@ describe("TrustGraph interaction", () => {
     await act(async () => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
+  });
+
+  it("explains each recorded EARN link from the two real edges only", async () => {
+    const onAudit = vi.fn();
+    await act(async () => {
+      root.render(<TrustGraph nodes={earnNodes} edges={earnEdges} onAudit={onAudit} />);
+    });
+
+    expect(container.textContent).toContain("2 recorded links.");
+    expect(container.querySelectorAll("[data-depth]")).toHaveLength(2);
+
+    await act(async () => {
+      (container.querySelector('[data-node-key="Tharmas"]') as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.querySelector("[data-trust-graph-inspector]")?.textContent).toContain("Tharmas is on the team for @earnonhood.");
+    expect(onAudit).not.toHaveBeenCalled();
+
+    await act(async () => {
+      (container.querySelector('[data-node-key="robinhood:0xa3b6aee90017b72c0812dc1e013de70eb2917ba3"]') as HTMLElement)
+        .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(container.querySelector("[data-trust-graph-inspector]")?.textContent)
+      .toContain("@earnonhood controls Wallet 0xa3b6aee90017b72c0812dc1e013de70eb2917ba3.");
+    expect(container.querySelector("[data-trust-graph-inspector] .tint-signal")).toBeNull();
   });
 
   it("selects on first click and keeps audit opening as an explicit control", async () => {

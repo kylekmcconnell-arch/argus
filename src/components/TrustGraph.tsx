@@ -59,6 +59,34 @@ export function trustGraphKind(node: PanoptesNode): TrustGraphKind {
   return "companies";
 }
 
+export function trustGraphLinkSentence(edge: PanoptesEdge | undefined, srcLabel: string, dstLabel: string): string {
+  if (!edge) return `${srcLabel} is connected to ${dstLabel}.`;
+  const relation = publicRelationshipLabel(edge.type);
+  const type = String(edge.type).trim().replace(/[\s-]+/g, "_").toUpperCase();
+  // Stored TEAM edges run subject → person; the public phrase reads person-first.
+  if (type === "TEAM") return `${dstLabel} ${relation} ${srcLabel}.`;
+  return `${srcLabel} ${relation} ${dstLabel}.`;
+}
+
+export function trustGraphStage(periCount: number, connectionCount = 0): {
+  sparse: boolean;
+  W: number;
+  R1: number;
+  ringGap: number;
+  subjectSize: number;
+  periSize: number;
+} {
+  const sparse = periCount > 0 && periCount <= 4 && connectionCount === 0;
+  return {
+    sparse,
+    W: sparse ? 720 : 840,
+    R1: sparse ? 124 : periCount <= 8 ? 148 : 168,
+    ringGap: sparse ? 92 : 82,
+    subjectSize: sparse ? 64 : 44,
+    periSize: sparse ? 48 : 32,
+  };
+}
+
 export function trustGraphReadingLine(stats: {
   links: number;
   contradicted: number;
@@ -231,14 +259,15 @@ function IdentityFace({
 
 function CompanyMark({ x, y, size, fill, ring }: { x: number; y: number; size: number; fill: string; ring: string }) {
   const half = size / 2;
+  const u = size / 22;
   return (
     <g>
-      <rect x={x - half} y={y - half} width={size} height={size} rx={5} fill={fill} stroke={ring} strokeWidth="1.8" />
+      <rect x={x - half} y={y - half} width={size} height={size} rx={Math.max(5, size * 0.16)} fill={fill} stroke={ring} strokeWidth="1.8" />
       <path
-        d={`M${x - 5} ${y + 5} V${y - 2} H${x - 1} V${y + 5} M${x + 1} ${y + 5} V${y - 5} H${x + 5} V${y + 5}`}
+        d={`M${x - 5 * u} ${y + 5 * u} V${y - 2 * u} H${x - 1 * u} V${y + 5 * u} M${x + 1 * u} ${y + 5 * u} V${y - 5 * u} H${x + 5 * u} V${y + 5 * u}`}
         fill="none"
         stroke={ring}
-        strokeWidth="1.2"
+        strokeWidth="1.4"
         opacity="0.85"
       />
     </g>
@@ -317,14 +346,19 @@ export function TrustGraph({
   const firstHops = peri.filter((entry) => entry.depth === 1);
   const secondHops = peri.filter((entry) => entry.depth === 2);
   const firstRings = Math.max(1, Math.min(2, Math.ceil(firstHops.length / 14)));
-  const W = 840;
-  const R1 = empty ? 0 : 168;
-  const RING_GAP = 82;
+  const stage = trustGraphStage(peri.length, connections.length);
+  const W = stage.W;
+  const R1 = empty ? 0 : stage.R1;
+  const RING_GAP = stage.ringGap;
   const secondR = R1 + firstRings * RING_GAP;
   const outerR = connections.length > 0 ? secondR + 74 : secondR;
-  const H = empty ? 360 : Math.max(520, Math.round(outerR * 2 * 0.82 + 168));
+  const H = empty
+    ? 360
+    : Math.max(stage.sparse ? 428 : 520, Math.round(outerR * 2 * 0.82 + stage.subjectSize + 120));
   const cx = W / 2;
   const cy = H / 2;
+  const subjectSize = stage.subjectSize;
+  const periSize = stage.periSize;
 
   const placedFirst = firstHops.map((entry, index) => {
     const ring = index % firstRings;
@@ -424,7 +458,7 @@ export function TrustGraph({
   };
 
   return (
-    <div className="trust-graph" data-trust-graph-motion={motion}>
+    <div className="trust-graph" data-trust-graph-motion={motion} data-trust-graph-sparse={stage.sparse ? "true" : "false"}>
       <p id={readingLineId} className="text-[13.5px] leading-relaxed text-ink">
         {readingLine}{" "}
         <span className="text-ink-dim">A link by itself does not mean wrongdoing.</span>
@@ -500,7 +534,7 @@ export function TrustGraph({
                     x2={entry.x}
                     y2={entry.y}
                     stroke={edgeStroke(entry.edge, nodeStyle(entry.node, entry.edge).ring)}
-                    strokeWidth={lit ? 3.2 : isHighConcentration(entry.edge) || isContradicted(entry.edge) ? 2 : 1.4}
+                    strokeWidth={lit ? (stage.sparse ? 4 : 3.2) : isHighConcentration(entry.edge) || isContradicted(entry.edge) ? 2.4 : stage.sparse ? 2.2 : 1.4}
                     strokeDasharray={edgeDash(entry.edge)}
                     strokeLinecap="round"
                     opacity={entry.edge?.verdict === "Unconfirmed" ? 0.55 : 0.88}
@@ -511,7 +545,7 @@ export function TrustGraph({
                       x={(x1 + entry.x) / 2}
                       y={(y1 + entry.y) / 2 - 6}
                       textAnchor="middle"
-                      fontSize="10"
+                      fontSize={stage.sparse ? 12 : 10}
                       fill={lit ? "var(--color-ink)" : "var(--color-ink-faint)"}
                     >
                       {publicRelationshipLabel(entry.edge.type)}
@@ -572,27 +606,27 @@ export function TrustGraph({
                   <title>{`${st.label}${entry.edge ? ` · ${publicRelationshipLabel(entry.edge.type)}` : ""}`}</title>
                   {kind === "people" ? (
                     <>
-                      <circle cx={entry.x} cy={entry.y} r={lit ? 20 : 17} fill="none" stroke={st.ring} strokeWidth={lit ? 2.2 : 1.4} opacity="0.55" />
-                      <foreignObject x={entry.x - 16} y={entry.y - 16} width="32" height="32" overflow="visible">
-                        <div className="flex h-8 w-8 items-center justify-center">
-                          <IdentityFace label={st.label} handle={handle} size={32} panelCostToken={panelCostToken} />
+                      <circle cx={entry.x} cy={entry.y} r={periSize / 2 + (lit ? 6 : 4)} fill="none" stroke={st.ring} strokeWidth={lit ? 2.4 : 1.6} opacity="0.55" />
+                      <foreignObject x={entry.x - periSize / 2} y={entry.y - periSize / 2} width={periSize} height={periSize} overflow="visible">
+                        <div className="flex items-center justify-center" style={{ width: periSize, height: periSize }}>
+                          <IdentityFace label={st.label} handle={handle} size={periSize} panelCostToken={panelCostToken} />
                         </div>
                       </foreignObject>
                     </>
                   ) : kind === "wallets" ? (
-                    <WalletMark x={entry.x} y={entry.y} size={lit ? 26 : 22} fill={st.fill} ring={st.ring} />
+                    <WalletMark x={entry.x} y={entry.y} size={lit ? periSize + 4 : periSize} fill={st.fill} ring={st.ring} />
                   ) : (
-                    <CompanyMark x={entry.x} y={entry.y} size={lit ? 26 : 22} fill={st.fill} ring={st.ring} />
+                    <CompanyMark x={entry.x} y={entry.y} size={lit ? periSize + 4 : periSize} fill={st.fill} ring={st.ring} />
                   )}
                   <text
                     x={entry.x}
-                    y={entry.y + (entry.y < cy ? -24 : 30)}
+                    y={entry.y + (entry.y < cy ? -(periSize / 2 + 16) : periSize / 2 + 20)}
                     textAnchor="middle"
-                    fontSize={lit ? 12 : 11}
+                    fontSize={stage.sparse || lit ? 13 : 11}
                     fontWeight={lit ? 600 : 500}
                     fill={lit ? "var(--color-ink)" : "var(--color-ink-dim)"}
                   >
-                    {trunc(st.label, lit ? 28 : 22)}
+                    {trunc(st.label, stage.sparse || lit ? 28 : 22)}
                   </text>
                 </g>
               );
@@ -635,24 +669,24 @@ export function TrustGraph({
             })}
 
             <g className="trust-graph-node trust-graph-subject" data-node-key={String(subject.key)}>
-              <circle className="trust-graph-halo" cx={cx} cy={cy} r={48} fill="none" stroke="var(--color-signal)" strokeWidth="1.2" opacity="0.22" />
-              <circle cx={cx} cy={cy} r={36} fill="none" stroke="var(--color-signal)" strokeWidth="1.6" opacity="0.4" />
-              <foreignObject x={cx - 22} y={cy - 22} width="44" height="44" overflow="visible">
-                <div className="flex h-11 w-11 items-center justify-center">
+              <circle className="trust-graph-halo" cx={cx} cy={cy} r={subjectSize / 2 + 18} fill="none" stroke="var(--color-signal)" strokeWidth="1.4" opacity="0.22" />
+              <circle cx={cx} cy={cy} r={subjectSize / 2 + 8} fill="none" stroke="var(--color-signal)" strokeWidth="1.8" opacity="0.4" />
+              <foreignObject x={cx - subjectSize / 2} y={cy - subjectSize / 2} width={subjectSize} height={subjectSize} overflow="visible">
+                <div className="flex items-center justify-center" style={{ width: subjectSize, height: subjectSize }}>
                   {subjectHandle ? (
-                    <IdentityFace label={subjectLabel} handle={subjectHandle} size={44} panelCostToken={panelCostToken} />
+                    <IdentityFace label={subjectLabel} handle={subjectHandle} size={subjectSize} panelCostToken={panelCostToken} />
                   ) : (
                     <span
                       aria-hidden="true"
-                      className="flex items-center justify-center rounded-full border border-signal bg-signal text-[15px] font-semibold text-on-signal"
-                      style={{ width: 44, height: 44 }}
+                      className="flex items-center justify-center rounded-full border border-signal bg-signal font-semibold text-on-signal"
+                      style={{ width: subjectSize, height: subjectSize, fontSize: Math.round(subjectSize * 0.34) }}
                     >
                       {letterFrom(subjectLabel)}
                     </span>
                   )}
                 </div>
               </foreignObject>
-              <text x={cx} y={cy + 46} textAnchor="middle" fontSize="13" fontWeight={600} fill="var(--color-ink)">
+              <text x={cx} y={cy + subjectSize / 2 + 20} textAnchor="middle" fontSize={stage.sparse ? 15 : 13} fontWeight={600} fill="var(--color-ink)">
                 {trunc(subjectLabel, 28)}
               </text>
             </g>
@@ -683,7 +717,15 @@ export function TrustGraph({
           depth={selectedEntry.depth}
           parentLabel={selectedEntry.parentKey ? nodeLabel(parentByKey.get(selectedEntry.parentKey)?.node ?? { type: "Company", key: selectedEntry.parentKey }) : undefined}
           subjectLabel={subjectLabel}
-          relation={selectedEntry.edge ? publicRelationshipLabel(selectedEntry.edge.type) : "is connected to"}
+          how={trustGraphLinkSentence(
+            selectedEntry.edge,
+            publicEntityLabel(String(selectedEntry.edge?.src ?? subject.key)),
+            publicEntityLabel(
+              String(selectedEntry.edge?.dst ?? selectedEntry.node.key),
+              String(selectedEntry.node.type),
+              typeof selectedEntry.node.label === "string" ? selectedEntry.node.label : undefined,
+            ),
+          )}
           status={relationshipStatus(selectedEntry.edge)}
           source={safeSourceLink(selectedEntry.edge?.source_url)}
           openLabel={nodeAction(selectedEntry.node, onAudit, onOpenProject) ? `Open ${nodeStyle(selectedEntry.node, selectedEntry.edge).label}` : undefined}
@@ -701,7 +743,7 @@ export function TrustGraph({
           depth={2}
           parentLabel={selectedConn.c.ties.map((tie) => tie.label).join(", ") || undefined}
           subjectLabel={subjectLabel}
-          relation={`shares ${selectedConn.c.ties.length} ${selectedConn.c.ties.length === 1 ? "entity" : "entities"} with`}
+          how={`${subjectLabel} shares ${selectedConn.c.ties.length} ${selectedConn.c.ties.length === 1 ? "entity" : "entities"} with ${selectedConn.c.other}.`}
           status={{
             label: selectedConn.c.otherVerdict ?? "Observed",
             tone: selectedConn.c.otherVerdict === "PASS"
@@ -730,21 +772,17 @@ export function TrustGraph({
             {peri.map((entry, index) => {
               const edge = entry.edge;
               const action = nodeAction(entry.node, onAudit, onOpenProject);
-              const relation = edge ? publicRelationshipLabel(edge.type) : "is connected to";
               const status = relationshipStatus(edge);
               const sourceLabel = publicEntityLabel(String(edge?.src ?? subject.key));
               const targetLabel = nodeLabel(entry.node);
+              const sentence = trustGraphLinkSentence(edge, sourceLabel, targetLabel);
               const rowId = `p:${entry.node.key}`;
               return (
                 <li key={`${entry.depth}:${entry.node.key}:${index}`} className={`grid gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${selected === rowId ? "bg-panel" : ""}`}>
                   <button type="button" className="min-w-0 text-left" onClick={() => setSelected(rowId)} aria-current={selected === rowId ? "true" : undefined}>
                     <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
                       <span className="chip chip-sm">{entry.depth === 1 ? "direct" : "second hop"}</span>
-                      <span className="mono text-ink-faint">from</span>
-                      <span className="truncate text-ink">{sourceLabel}</span>
-                      <span className="text-ink-dim">{relation}</span>
-                      <span className="mono text-ink-faint">to</span>
-                      <span className="truncate text-ink">{targetLabel}</span>
+                      <span className="truncate text-ink">{sentence}</span>
                     </div>
                     <p className="mt-1 text-[11px] text-ink-faint">
                       {entry.depth === 2 && entry.parentKey
@@ -809,7 +847,7 @@ function Inspector({
   depth,
   parentLabel,
   subjectLabel,
-  relation,
+  how,
   status,
   source,
   openLabel,
@@ -825,7 +863,7 @@ function Inspector({
   depth: 1 | 2;
   parentLabel?: string;
   subjectLabel: string;
-  relation: string;
+  how: string;
   status: { label: string; tone: string };
   source: { href: string; label: string } | null;
   openLabel?: string;
@@ -834,9 +872,9 @@ function Inspector({
   extra?: string;
 }) {
   const hop = depth === 1 ? "Direct link to the subject." : `Second hop via ${parentLabel ?? "another recorded entity"}.`;
-  const how = depth === 1
-    ? `${subjectLabel} ${relation} ${name}.`
-    : `${name} connects through ${parentLabel ?? "another recorded entity"}, not directly to ${subjectLabel}. ${parentLabel ?? "That entity"} ${relation} ${name}.`;
+  const explanation = depth === 2
+    ? `${name} connects through ${parentLabel ?? "another recorded entity"}, not directly to ${subjectLabel}. ${how}`
+    : how;
   return (
     <aside className="panel mt-3 p-4" aria-labelledby={titleId} data-trust-graph-inspector="true">
       <div className="flex items-start gap-3">
@@ -863,7 +901,7 @@ function Inspector({
             </div>
             <button type="button" className="btn-chip" onClick={onDismiss}>close</button>
           </div>
-          <p className="mt-3 text-[13.5px] leading-relaxed text-ink">{how}</p>
+          <p className="mt-3 text-[13.5px] leading-relaxed text-ink">{explanation}</p>
           <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{hop} A link by itself does not mean wrongdoing.</p>
           {extra && <p className="mt-1 text-[12.5px] text-ink-dim">{extra}</p>}
           <div className="mt-3 flex flex-wrap items-center gap-2">
