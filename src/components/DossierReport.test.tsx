@@ -186,6 +186,54 @@ describe("DossierReport", () => {
     expect(container.textContent).toContain("Design preview · derived from report 7c51822f");
   });
 
+  it("keeps coverage copy aligned with open questions and strips ledger jargon", () => {
+    const payload = livePayload();
+    payload.intelligence = {
+      signals: [{
+        kind: "coverage_gap",
+        finding: "The final integrity gate recorded 2 fail-closed integrity events. Counts include duplicate source IDs and rejected archetype evidence.",
+      }, {
+        kind: "observation",
+        finding: "Price sits -39.7410894525038% below the reported high.",
+      }],
+      measurements: [{
+        label: "Registry-reported drawdown from lifetime high",
+        value: -39.7410894525038,
+        unit: "percent",
+        domain: "market",
+      }],
+      lenses: [{
+        id: "investment",
+        label: "Investment",
+        question: "What supports a decision?",
+        signalIds: ["drawdown"],
+      }],
+    };
+    (payload.intelligence as { signals: Array<Record<string, unknown>> }).signals[1]!.id = "drawdown";
+    payload.researchPlan = {
+      tasks: [
+        { capability: "people_and_control", state: "unavailable", question: "Who operates and controls the project?" },
+        { capability: "analyst_synthesis", state: "partial", question: "What conclusion follows?" },
+      ],
+    };
+
+    render(payload);
+
+    const coverageHeading = container.querySelector("#dossier-coverage h2")?.textContent ?? "";
+    expect(coverageHeading).toMatch(/\d+ research questions? still need evidence/);
+    expect(coverageHeading).not.toContain("No research questions still need evidence");
+    expect(container.textContent).not.toMatch(/fail-closed|integrity gate|duplicate source IDs|rejected archetype|-39\.7410894525038/i);
+    const measureToggle = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Every measurement"));
+    expect(measureToggle).toBeTruthy();
+    act(() => { measureToggle!.click(); });
+    expect(container.textContent).toContain("-39.7%");
+    expect(container.textContent).not.toContain("-39.7410894525038");
+    const rabbit = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("rabbit hole"));
+    expect(rabbit?.textContent).toMatch(/Go down this rabbit hole · \d+/);
+    const count = Number(/(\d+)/.exec(rabbit?.textContent ?? "")?.[1] ?? 0);
+    expect(coverageHeading).toContain(String(count));
+  });
+
   it("uses the full-width report canvas without a duplicate pinned file in live reports", () => {
     render(livePayload());
     expect(container.querySelector('[data-dossier-layout="full-width"]')).not.toBeNull();

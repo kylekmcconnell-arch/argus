@@ -159,6 +159,39 @@ describe("dossier model", () => {
 
     expect(dossier.beats.find((b) => b.id === "coverage")!.heading)
       .toBe("0 leads. No research questions still need evidence.");
+    expect(dossier.openQuestions).toEqual([]);
+  });
+
+  it("keeps the coverage heading count aligned with the open-question list", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [],
+      checkRuns: [{ checkId: "supplemental-search", label: "Supplemental search", status: "checked-empty" }],
+      basicFactLeads: [],
+      providerFailures: [],
+      intelligence: {
+        signals: [{
+          kind: "coverage_gap",
+          finding: "The frozen scoring analyst recorded 4 unresolved questions: who operates the project.",
+        }],
+      },
+      researchPlan: {
+        tasks: [
+          { capability: "people_and_control", state: "unavailable", question: "Who operates and controls the project?" },
+          { capability: "project_fundamentals", state: "partial", question: "Is there a live product?" },
+          { capability: "token_and_market", state: "planned", question: "What is the official token?" },
+          { capability: "legal_and_adverse", state: "unavailable", question: "Are there verified legal actions?" },
+          { capability: "analyst_synthesis", state: "partial", question: "What conclusion follows?" },
+        ],
+      },
+    });
+    const coverage = dossier.beats.find((b) => b.id === "coverage")!;
+    const count = dossier.openQuestions.length;
+
+    expect(count).toBeGreaterThan(0);
+    expect(coverage.heading).toBe(`0 leads. ${count} research questions still need evidence.`);
+    expect(coverage.heading).not.toContain("No research questions still need evidence");
+    expect(dossier.openQuestions.join(" ")).not.toMatch(/frozen scoring analyst|scorer-packet|fail-closed/i);
   });
 
   it("does not print unbound aggregator funding as a raised figure or led-by", () => {

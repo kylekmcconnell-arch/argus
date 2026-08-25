@@ -68,8 +68,57 @@ const POLARITY_LABELS: Record<IntelligenceSignalPolarity, string> = {
 
 const PUBLIC_SIGNAL_HEADLINES: Record<string, string> = {
   "strict-product-description": "Direct sources describe what the product does",
-  "goplus-fired-contract-flag": "GoPlus reported a contract or deployer warning",
+  "goplus-fired-contract-flag": "A contract or deployer warning was recorded",
 };
+
+const PROVIDER_ONLY = /^(?:goplus|dexscreener|twitterapi(?:\.io)?|monid(?:\.ai)?|coingecko|blockscout|site-fetch|honeypot\.is|cryptorank|rugcheck)$/i;
+
+function roundPublicNumber(value: string): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  const magnitude = Math.abs(numeric);
+  if (Number.isInteger(numeric) || magnitude >= 100) return String(Math.round(numeric));
+  return numeric.toFixed(1).replace(/\.0$/, "");
+}
+
+/** Reader-facing numbers. Raw unrounded floats must never reach the public canvas. */
+export function publicNumberText(value: number | string): string {
+  return roundPublicNumber(String(value).trim());
+}
+
+function collapseIntegrityDump(value: string): string | null {
+  if (!/fail-closed integrity|integrity gate recorded|duplicate source IDs|invalid lineage|rejected archetype/i.test(value)) {
+    return null;
+  }
+  const eventCount = value.match(/recorded\s+(\d+)\s+fail-closed/i)?.[1];
+  return eventCount
+    ? `${eventCount} report item${eventCount === "1" ? "" : "s"} failed the source-link check. ARGUS excluded those items instead of treating them as evidence.`
+    : "Some report items failed the source-link check. ARGUS excluded them instead of treating them as evidence.";
+}
+
+function rewriteSiteNotLive(value: string): string | null {
+  if (!/sitenotlive/i.test(value)) return null;
+  if (/coming[- ]soon|early[- ]access|parked/i.test(value)) {
+    return "The project website is not live yet. It still shows a coming-soon or early-access page.";
+  }
+  return "The project website is not live yet.";
+}
+
+/** Drop vendor names when they are the entire explanation. */
+export function publicProviderExplanation(value: string | null | undefined): string | undefined {
+  const cleaned = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return undefined;
+  if (PROVIDER_ONLY.test(cleaned)) return undefined;
+  return publicIntelligenceText(cleaned);
+}
+
+/** Public title for a saved finding type or artifact heading. */
+export function publicFindingTitle(value: string | null | undefined): string {
+  if (value == null || !String(value).trim()) return "";
+  const site = rewriteSiteNotLive(value);
+  if (site) return site.replace(/\. It still shows.*$/, "");
+  return publicIntelligenceText(value);
+}
 
 export function publicMeasurementTitle(measurement: IntelligenceMeasurement): string {
   return MEASUREMENT_TITLES[measurement.id] ?? measurement.label;
@@ -145,23 +194,44 @@ function strengthBandSummary(value: string): string | null {
  * presentation boundary so older immutable reports benefit without rewriting
  * their stored evidence or rule receipts.
  */
-export function publicIntelligenceText(value: string): string {
+export function publicIntelligenceText(value: string | null | undefined): string {
+  if (value == null || !String(value).trim()) return "";
   const bands = strengthBandSummary(value);
   if (bands) return bands;
+  const integrity = collapseIntegrityDump(value);
+  if (integrity) return integrity;
+  const site = rewriteSiteNotLive(value);
+  if (site) return site;
+  if (PROVIDER_ONLY.test(value.trim())) return "A saved market or contract record.";
   return plainLanguageSummary(value)
+    .replace(/\bdirect-subject scorer[- ]packet records?\b/gi, "saved records tied to this project")
+    .replace(/\bscorer[- ]packet records?\b/gi, "saved evidence records")
     .replace(/\bscorer[- ]packet\b/gi, "saved evidence review")
+    .replace(/\bfrozen scoring analyst\b/gi, "saved review")
+    .replace(/\bfrozen question ledger\b/gi, "saved open-question list")
+    .replace(/\bfrozen ledger\b/gi, "saved evidence")
+    .replace(/\bstrict direct-subject evidence\b/gi, "evidence tied directly to this project")
+    .replace(/\bdirect-subject\b/gi, "project-tied")
     .replace(/\baxis-level evidence ranges\b/gi, "evidence strength in each area")
     .replace(/\bassessed[-_ ]null\b/gi, "checked, but not confirmed")
+    .replace(/\binvalid lineage\b/gi, "broken source trail")
+    .replace(/\brejected archetype evidence\b/gi, "evidence that did not match this project type")
+    .replace(/\bduplicate source IDs\b/gi, "repeated sources")
+    .replace(/\bduplicate measurement IDs\b/gi, "repeated measurements")
     .replace(/\blineage contract\b/gi, "source-link check")
     .replace(/\blineage\b/gi, "source trail")
     .replace(/\bfail-closed integrity events?\b/gi, "items withheld by the source-link check")
+    .replace(/\bintegrity gate\b/gi, "source-link check")
     .replace(/\bdeterministic\b/gi, "rule-based")
     .replace(/\bfrozen\b/gi, "saved")
     .replace(/\bbounded subset\b/gi, "limited set of evidence")
     .replace(/\bbounded\b/gi, "limited")
     .replace(/\bpublic-surface boundar(?:y|ies)\b/gi, "online record dates")
     .replace(/\blaunch boundar(?:y|ies)\b/gi, "online record dates")
+    .replace(/\bGoPlus (?:reports?|assigns|flags?|returned)\b/gi, "A contract-safety check")
+    .replace(/\b(?:DexScreener|CoinGecko|Blockscout|twitterapi\.io|Monid) (?:reports?|returned|lists?|assigns)\b/gi, "A saved market record")
     .replace(/\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)\b/g, (date) => publicDate(date))
+    .replace(/-?\d+\.\d{4,}/g, (match) => roundPublicNumber(match))
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -179,6 +249,48 @@ export function publicSignalCopy(signal: DerivedIntelligenceSignal): PublicSigna
       whyItMatters: "A conclusion should not influence a decision unless its sources and calculations can be checked.",
       changeCondition: "Run the report again after the affected sources are linked correctly.",
       tone: "tint-avoid",
+    };
+  }
+
+  if (
+    /sitenotlive/i.test(`${signal.ruleId} ${signal.headline} ${signal.finding}`)
+    || signal.ruleId === "verified-direct-subject-adverse-finding" && /sitenotlive/i.test(signal.headline)
+  ) {
+    const comingSoon = /coming[- ]soon|early[- ]access|parked/i.test(signal.finding);
+    return {
+      status: POLARITY_LABELS[signal.polarity],
+      priority: SEVERITY_LABELS[signal.severity],
+      headline: "The project website is not live yet",
+      finding: comingSoon
+        ? "The project website is not live yet. It still shows a coming-soon or early-access page."
+        : publicIntelligenceText(signal.finding) || "The project website is not live yet.",
+      whyItMatters: "A coming-soon page is not a live product. ARGUS does not treat the site as working.",
+      changeCondition: publicIntelligenceText(signal.changeCondition),
+      tone: signal.polarity === "risk" ? "tint-avoid" : "tint-caution",
+    };
+  }
+
+  if (signal.ruleId === "analyst-material-axis-gap") {
+    return {
+      status: "Needs review",
+      priority: SEVERITY_LABELS[signal.severity],
+      headline: "Some diligence questions are still unanswered",
+      finding: publicIntelligenceText(signal.finding),
+      whyItMatters: "Open questions show what could still change the score. Missing evidence is not treated as a clean result.",
+      changeCondition: "Answer the listed questions with sources that name this project.",
+      tone: "tint-caution",
+    };
+  }
+
+  if (signal.ruleId === "verified-direct-axis-counter-evidence") {
+    return {
+      status: POLARITY_LABELS[signal.polarity],
+      priority: SEVERITY_LABELS[signal.severity],
+      headline: "Saved records tied to this project limit one part of the score",
+      finding: publicIntelligenceText(signal.finding),
+      whyItMatters: publicIntelligenceText(signal.whyItMatters),
+      changeCondition: publicIntelligenceText(signal.changeCondition),
+      tone: "tint-caution",
     };
   }
 

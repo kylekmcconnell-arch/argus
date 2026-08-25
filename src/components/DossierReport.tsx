@@ -662,8 +662,8 @@ export function DossierReport({
                     <Stat n={`${d.coverage.questionsAnswered}/${d.coverage.questionsTotal}`} k="questions answered" />
                     <Stat n={String(d.coverage.leads)} k="leads never confirmed" />
                     <Stat n={String(d.coverage.failedProviders.length)} k={d.coverage.failedProviders.length
-                      ? `providers silent · ${d.coverage.failedProviders.join(", ")}`
-                      : "providers silent"} />
+                      ? `${d.coverage.failedProviders.length} data source${d.coverage.failedProviders.length === 1 ? "" : "s"} did not respond`
+                      : "data sources responded"} />
                   </div>
                 </div>
               )}

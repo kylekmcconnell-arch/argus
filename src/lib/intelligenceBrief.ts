@@ -4,7 +4,7 @@ import type {
   IntelligenceQuestion,
   IntelligenceSpineSnapshot,
 } from "../intelligence/types";
-import { publicQuestionStateLabel, publicSignalCopy } from "./intelligencePresentation";
+import { publicIntelligenceText, publicQuestionStateLabel, publicSignalCopy } from "./intelligencePresentation";
 
 export interface IntelligenceBriefItem {
   id: string;
@@ -92,8 +92,8 @@ function questionItem(question: IntelligenceQuestion): IntelligenceBriefItem {
   const materiality = question.materiality.charAt(0).toUpperCase() + question.materiality.slice(1);
   return {
     id: `intelligence-question:${question.id}`,
-    title: sentence(question.prompt),
-    detail: sentence(question.basis),
+    title: sentence(publicIntelligenceText(question.prompt)),
+    detail: sentence(publicIntelligenceText(question.basis)),
     provenance: `${materiality} question · ${publicQuestionStateLabel(question.state)}`,
     domain: question.domain,
     sourceRefs,

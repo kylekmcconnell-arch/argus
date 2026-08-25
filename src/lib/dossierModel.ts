@@ -15,6 +15,8 @@ import {
 } from "./provenance";
 import type { EntityLedgerRow, EntityScorecard } from "../intelligence/entityScorecards";
 import { teamIdentityKeys } from "./teamIdentity";
+import { publicIntelligenceText, publicNumberText } from "./intelligencePresentation";
+import { publicCheckLabel, publicCheckNote } from "./plainLanguage";
 
 export interface DossierReceiptSource {
   url: string;
@@ -136,6 +138,59 @@ export interface Dossier {
   beats: DossierBeat[];
   /** Recorded documents only, sorted by how many dossier figures cite them. */
   sources: DossierSourceRow[];
+}
+
+const INTERNAL_RESEARCH_CAPABILITIES = new Set(["role_resolution", "analyst_synthesis"]);
+const OPEN_CHECK_STATES = new Set(["unknown", "unavailable", "stale"]);
+const OPEN_RESEARCH_STATES = new Set(["planned", "partial", "unavailable"]);
+
+function uniquePublicQuestions(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const questions: string[] = [];
+  for (const value of values) {
+    const cleaned = value.replace(/\s+/g, " ").trim();
+    const key = cleaned.toLowerCase();
+    if (!cleaned || seen.has(key)) continue;
+    seen.add(key);
+    questions.push(cleaned);
+  }
+  return questions;
+}
+
+function researchOpenQuestions(payload: Record<string, unknown>): string[] {
+  const plan = (payload.researchPlan ?? {}) as Record<string, unknown>;
+  return arr<Record<string, unknown>>(plan.tasks)
+    .filter((task) => !INTERNAL_RESEARCH_CAPABILITIES.has(str(task.capability)) && str(task.state) !== "skipped")
+    .filter((task) => OPEN_RESEARCH_STATES.has(str(task.state)))
+    .map((task) => publicIntelligenceText(str(task.question)))
+    .filter(Boolean);
+}
+
+function leftoverOpenQuestions(leftover: RawCheck[]): string[] {
+  return leftover
+    .filter((check) => OPEN_CHECK_STATES.has(str(check.status)))
+    .map((check) => {
+      const note = str(check.note);
+      if (note) return publicCheckNote(note);
+      const label = str(check.label);
+      return label ? publicCheckLabel(label) : "";
+    })
+    .filter(Boolean);
+}
+
+function coverageGapQuestions(payload: Record<string, unknown>): string[] {
+  return arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown> | undefined)?.signals)
+    .filter((signal) => str(signal.kind) === "coverage_gap")
+    .map((signal) => publicIntelligenceText(str(signal.finding) || str(signal.headline)))
+    .filter(Boolean);
+}
+
+function publicMeasureValue(value: string, unit: string): string {
+  const numeric = Number(value.replace(/%$/, ""));
+  if (!Number.isFinite(numeric)) return publicIntelligenceText(value);
+  if (unit === "percent" || /%$/.test(value) || /percent/i.test(unit)) return `${publicNumberText(numeric)}%`;
+  if (/\.\d{4,}/.test(value)) return publicNumberText(numeric);
+  return value;
 }
 
 const AXIS_LABELS: Record<string, string> = {
@@ -664,15 +719,20 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
   const team = collectTeam(payload);
   const claimed = new Set(BEAT_CHECKS.flatMap((b) => b.checks));
   const leftover = checks.filter((c) => !claimed.has(str(c.checkId)));
-  // checked-empty is a completed search with no result, not unfinished work.
-  // Calling it "open" contradicted the canonical required-check counter on
-  // otherwise complete reports such as SuperGemma.
-  const openCount = leftover.filter((c) => ["unknown", "unavailable", "stale"].includes(str(c.status))).length;
+  // One public open-question list: leftover unfinished checks, coverage-gap
+  // findings, and research-plan work still needing evidence. The heading count
+  // must match this list so a finished required-check counter cannot claim
+  // "nothing is open" beside unanswered questions.
+  const openQuestions = uniquePublicQuestions([
+    ...leftoverOpenQuestions(leftover),
+    ...coverageGapQuestions(payload),
+    ...researchOpenQuestions(payload),
+  ]);
   const headingCtx = {
     subject,
     team,
     leadCount: leads.length,
-    openCheckCount: openCount,
+    openCheckCount: openQuestions.length,
     verdict,
   };
   const beats: DossierBeat[] = [];
@@ -703,8 +763,8 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     figures: [
       ...coverageFigures,
       ...leftover.filter((c) => str(c.status) !== "confirmed").map((c): DossierFigure => ({
-        label: str(c.label),
-        value: str(c.note) || str(c.status) || EMPTY_VALUE,
+        label: publicCheckLabel(str(c.label) || str(c.checkId)),
+        value: (str(c.note) ? publicCheckNote(str(c.note)) : "") || str(c.status) || EMPTY_VALUE,
         provenance: provenanceForCheckStatus(str(c.status) as never) ?? { tier: "unestablished" },
         receipt: null,
         unboundNote: null,
@@ -790,9 +850,9 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       .filter((c) => c.outlet),
     lenses: (() => {
       const intel = (payload.intelligence ?? {}) as Record<string, unknown>;
-      const byId = new Map(arr<Record<string, unknown>>(intel.signals).map((sig) => [str(sig.id), str(sig.finding)]));
+      const byId = new Map(arr<Record<string, unknown>>(intel.signals).map((sig) => [str(sig.id), publicIntelligenceText(str(sig.finding))]));
       return arr<Record<string, unknown>>(intel.lenses).map((l): Lens => ({
-        id: str(l.id), label: str(l.label), question: str(l.question),
+        id: str(l.id), label: str(l.label), question: publicIntelligenceText(str(l.question)),
         findings: arr<unknown>(l.signalIds).map((sid) => byId.get(str(sid)) ?? "").filter(Boolean),
       })).filter((l) => l.id && l.findings.length);
     })(),
@@ -802,18 +862,15 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     // summary pretending to be a record.
     measures: arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown>)?.measurements)
       .map((m): KeyMeasure => ({
-        label: str(m.label),
-        value: String(m.value ?? ""),
+        label: publicIntelligenceText(str(m.label)),
+        value: publicMeasureValue(String(m.value ?? ""), str(m.unit)),
         unit: str(m.unit),
         domain: str(m.domain) || "other",
       }))
       .filter((m) => m.label && m.value),
     entityScorecards: arr<EntityScorecard>((payload.intelligence as Record<string, unknown>)?.entityScorecards),
     entityLedger: arr<EntityLedgerRow>((payload.intelligence as Record<string, unknown>)?.entityLedger),
-    openQuestions: arr<Record<string, unknown>>((payload.intelligence as Record<string, unknown>)?.signals)
-      .filter((sig) => str(sig.kind) === "coverage_gap")
-      .map((sig) => str(sig.finding))
-      .filter(Boolean),
+    openQuestions,
     cost: num((payload.cost as Record<string, unknown>)?.usd) === null ? null : {
       usd: num((payload.cost as Record<string, unknown>).usd),
       estimated: (payload.cost as Record<string, unknown>).estimated === true,

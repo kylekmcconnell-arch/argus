@@ -171,8 +171,19 @@ export function publicCheckLabel(value: string): string {
 }
 
 /** Reader explanation for a saved check outcome. */
-export function publicCheckNote(value: string): string {
-  return plainLanguageSummary(value)
+export function publicCheckNote(value: string | null | undefined): string {
+  const trimmed = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!trimmed) return "";
+  if (/\bHTTP 403\b/i.test(trimmed) || /denied the automated request/i.test(trimmed)) {
+    const host = trimmed.match(/\b((?:[a-z0-9-]+\.)+[a-z]{2,})\b/i)?.[1];
+    return host
+      ? `${host} blocked the automated check, so ARGUS could not finish reviewing the website.`
+      : "The website blocked the automated check, so ARGUS could not finish reviewing it.";
+  }
+  if (/sitenotlive/i.test(trimmed) || /coming[- ]soon|early[- ]access page|parked page/i.test(trimmed)) {
+    return "The project website is not live yet. It still shows a coming-soon or early-access page.";
+  }
+  return plainLanguageSummary(trimmed)
     .replace(/token creator unresolved;\s*trace completion outcome not recorded/gi, "ARGUS could not identify the token creator, so the funding check did not finish.")
     .replace(/redeployed-rug clone check;\s*completion outcome not recorded/gi, "We could not finish checking whether this contract copies code from a known scam.")
     .replace(/completion outcome not recorded/gi, "This check did not finish.")

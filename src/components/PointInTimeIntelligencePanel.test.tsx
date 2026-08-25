@@ -419,7 +419,8 @@ describe("PointInTimeIntelligencePanel", () => {
     expect(thesis?.textContent).toContain("Current read");
     expect(thesis?.textContent).toContain("ARGUS rates this report CAUTION");
     expect(thesis?.textContent).toContain("Strongest supporting finding: Direct sources describe what the product does.");
-    expect(thesis?.textContent).toContain("Strongest concern: GoPlus reported a contract or deployer warning.");
+    expect(thesis?.textContent).toContain("Strongest concern: A contract or deployer warning was recorded.");
+    expect(thesis?.textContent).not.toMatch(/GoPlus/i);
     expect(thesis?.textContent).not.toMatch(/This report is CAUTION|strict direct-subject|fired .* flag/i);
   });
 
