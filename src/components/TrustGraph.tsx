@@ -202,7 +202,7 @@ function safeSourceLink(value: unknown): { href: string; label: string } | null 
 function nodeAction(node: PanoptesNode, onAudit?: (q: string) => void, onOpenProject?: (name: string) => void): (() => void) | undefined {
   if (node.subject) return undefined;
   const key = String(node.key);
-  if ((node.type === "Person" || isHandleKey(key)) && onAudit) return () => onAudit(key);
+  if (isHandleKey(key) && onAudit) return () => onAudit(key);
   if (node.type === "Company" && onOpenProject) return () => onOpenProject(key);
   return undefined;
 }
@@ -274,13 +274,18 @@ function CompanyMark({ x, y, size, fill, ring }: { x: number; y: number; size: n
   );
 }
 
-function WalletMark({ x, y, size, fill, ring }: { x: number; y: number; size: number; fill: string; ring: string }) {
+function WalletMark({ x, y, size, fill, ring, letter }: { x: number; y: number; size: number; fill: string; ring: string; letter: string }) {
   const r = size / 2;
   const points = Array.from({ length: 6 }, (_, i) => {
     const a = (Math.PI / 3) * i - Math.PI / 6;
     return `${x + Math.cos(a) * r},${y + Math.sin(a) * r}`;
   }).join(" ");
-  return <polygon points={points} fill={fill} stroke={ring} strokeWidth="1.8" />;
+  return (
+    <g>
+      <polygon points={points} fill={fill} stroke={ring} strokeWidth="2" />
+      <text x={x} y={y + size * 0.18} textAnchor="middle" fontSize={Math.max(12, size * 0.38)} fontWeight={600} fill="var(--color-ink)">{letter}</text>
+    </g>
+  );
 }
 
 // Radial rings stay hop-honest: first hop on the inner rings, second hop on the
@@ -614,7 +619,7 @@ export function TrustGraph({
                       </foreignObject>
                     </>
                   ) : kind === "wallets" ? (
-                    <WalletMark x={entry.x} y={entry.y} size={lit ? periSize + 4 : periSize} fill={st.fill} ring={st.ring} />
+                    <WalletMark x={entry.x} y={entry.y} size={lit ? periSize + 4 : periSize} fill="color-mix(in oklab, var(--color-signal) 10%, var(--color-panel-2))" ring={st.ring} letter={letterFrom(st.label)} />
                   ) : (
                     <CompanyMark x={entry.x} y={entry.y} size={lit ? periSize + 4 : periSize} fill={st.fill} ring={st.ring} />
                   )}

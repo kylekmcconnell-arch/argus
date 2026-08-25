@@ -167,6 +167,7 @@ describe("TrustGraph interaction", () => {
       (container.querySelector('[data-node-key="Tharmas"]') as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(container.querySelector("[data-trust-graph-inspector]")?.textContent).toContain("Tharmas is on the team for @earnonhood.");
+    expect(container.querySelector("[data-trust-graph-inspector] .tint-signal")).toBeNull();
     expect(onAudit).not.toHaveBeenCalled();
 
     await act(async () => {
