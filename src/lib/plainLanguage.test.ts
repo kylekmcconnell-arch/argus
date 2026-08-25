@@ -7,8 +7,10 @@ import {
   publicCheckNote,
   publicCheckStatus,
   publicEntityLabel,
+  publicOfficialSiteSentence,
   publicPhaseLabel,
   publicRelationshipLabel,
+  savedSiteSubstanceStatus,
 } from "./plainLanguage";
 
 describe("plainLanguageSummary", () => {
@@ -72,6 +74,25 @@ describe("public report labels", () => {
     expect(publicCheckNote("supergemma.ai serves a verified coming-soon page"))
       .toBe("The project website is not live yet. It still shows a coming-soon or early-access page.");
     expect(publicCheckNote("SiteNotLive")).toContain("not live yet");
+    expect(publicOfficialSiteSentence({ website: "https://earnonhood.com", status: "live" }))
+      .toBe("The official site is live.");
+    expect(publicOfficialSiteSentence({ website: "https://earnonhood.com", status: "access_blocked" }))
+      .toBe("The official site (earnonhood.com) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.");
+    expect(publicOfficialSiteSentence({ website: "https://parked.example", status: "coming_soon", checkNote: "parked page" }))
+      .toBe("The official site is a parked page.");
+    expect(publicOfficialSiteSentence({ website: "https://earnonhood.com" }))
+      .toBe("An official site is on file. ARGUS could not classify it.");
+    expect(publicOfficialSiteSentence({ website: "https://earnonhood.com", status: "access_blocked" }))
+      .not.toContain("is live");
+    expect(publicOfficialSiteSentence({})).toBe("ARGUS did not find an official site.");
+    expect(savedSiteSubstanceStatus({
+      website: "https://earnonhood.com",
+      intelligence: { measurements: [{ id: "official_site_response_state", value: "live" }] },
+    })).toBe("live");
+    expect(savedSiteSubstanceStatus({
+      website: "https://earnonhood.com",
+      checkRuns: [{ note: "HTTP 403" }],
+    })).toBeNull();
     expect(publicCheckNote("assessed token identity: nothing bound. A null result on this axis, not adverse conduct evidence."))
       .toContain("no result was recorded in this area");
     expect(publicCheckNote("assessed token identity: nothing bound. A null result on this axis, not adverse conduct evidence."))
