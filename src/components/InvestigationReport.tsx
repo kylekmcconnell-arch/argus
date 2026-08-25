@@ -785,6 +785,14 @@ export function InvestigationReport({
     : { subjectLeads: [], relatedEntityLeads: [], subjectAdverseLeads: [] };
   const accountGoverning = accountReport?.role_reports?.find((rr) => rr.role === accountReport.governing_role);
   const accountAxes = accountGoverning ? Object.entries(accountGoverning.axes ?? {}) : [];
+  const tokenCompositionRows = orderByPlainAxis((token.axes ?? []).map((a) => ({
+    axis: a.key,
+    label: plainAxisLabel(a.key, a.label),
+    score: a.score,
+    weight: a.weight,
+    rationale: a.rationale,
+    evidenceHref: `#dimension-${a.key}` as const,
+  })));
   // The deployer wallet's age, said in the unit that carries it and stamped with
   // what it was measured to. Null when the trail never measured one: a wallet
   // whose first activity sits outside the pagination window is not a new wallet
@@ -1581,6 +1589,7 @@ export function InvestigationReport({
             evidenceHref="#investigation-evidence"
             methodologyHref="#investigation-methodology"
             challengeAnchorId={shareView ? null : "investigation-challenge"}
+            composition={tokenCompositionRows.length > 0 ? tokenCompositionRows : undefined}
           />
 
           {LEGACY_REPORT_HERO_ENABLED && <div className={`investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 ${readiness.status === "ready" ? "" : "xl:grid-cols-3"}`}>
@@ -1777,14 +1786,7 @@ export function InvestigationReport({
             )}
             <ScoreComposition
               heading={accountAxes.length > 0 ? "The token · its own 100" : "How the score is built"}
-              rows={orderByPlainAxis(token.axes.map((a) => ({
-                axis: a.key,
-                label: plainAxisLabel(a.key, a.label),
-                score: a.score,
-                weight: a.weight,
-                rationale: a.rationale,
-                evidenceHref: `#dimension-${a.key}` as const,
-              })))}
+              rows={tokenCompositionRows}
               totalScore={token.score}
               capNote={token.capApplied ? `limited to ${token.score}` : null}
               challengeAnchor={shareView ? null : "#investigation-challenge"}

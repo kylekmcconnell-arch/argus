@@ -1805,6 +1805,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
     ?? report.role_reports[0];
   const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
+  const compositionRows = governingAxes.map(([axis, a]) => ({
+    axis,
+    label: diligenceAreaLabel(axis),
+    score: a.score,
+    weight: a.weight,
+    rationale: a.rationale,
+    supportCount: a.evidenceRefs?.length,
+    counterCount: a.counterEvidenceRefs?.length,
+    questionCount: a.gaps?.length,
+    evidenceHref: f.projectStrengthBands ? `#dimension-${axis}` as const : undefined,
+  }));
   const governingSubjectClass = report.governing_role
     && Object.values(SubjectClass).includes(report.governing_role as SubjectClass)
     ? report.governing_role as SubjectClass
@@ -3340,6 +3351,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           evidenceHref="#evidence-ledger"
           methodologyHref="#scan-methodology"
           challengeAnchorId={shareView ? null : "ask-report"}
+          composition={presentation.primaryScore && compositionRows.length > 0 ? compositionRows : undefined}
         />
 
         <ProviderFailureNotice failures={f.providerFailures} />
@@ -3349,17 +3361,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             challenge the score */}
         {presentation.primaryScore && governingAxes.length > 0 && (
           <ScoreComposition
-            rows={governingAxes.map(([axis, a]) => ({
-              axis,
-              label: diligenceAreaLabel(axis),
-              score: a.score,
-              weight: a.weight,
-              rationale: a.rationale,
-              supportCount: a.evidenceRefs?.length,
-              counterCount: a.counterEvidenceRefs?.length,
-              questionCount: a.gaps?.length,
-              evidenceHref: f.projectStrengthBands ? `#dimension-${axis}` as const : undefined,
-            }))}
+            rows={compositionRows}
             totalScore={report.governing_score}
             capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
             challengeAnchor={shareView ? null : "#ask-report"}

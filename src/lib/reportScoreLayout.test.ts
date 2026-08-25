@@ -13,8 +13,8 @@ describe("canonical report score layout", () => {
   });
 
   it("restores the oversized score hero proportions", () => {
-    expect(css).toMatch(/\.decision-brief-heading\s*\{[^}]*min-height:\s*312px/s);
-    expect(css).toMatch(/\.decision-score-lockup\s*\{[^}]*min-width:\s*304px[^}]*gap:\s*10px/s);
+    expect(css).toMatch(/\.decision-brief-heading\s*\{[^}]*min-height:\s*360px/s);
+    expect(css).toMatch(/\.decision-score-lockup\s*\{[^}]*min-width:\s*344px[^}]*gap:\s*10px/s);
   });
 
   it("stacks and centers the score before the layout can overlap", () => {

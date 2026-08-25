@@ -10,7 +10,8 @@ import { requestChallenge } from "../lib/challenge";
 import type { DecisionDiscovery, VerdictArgument } from "../lib/reportInsights";
 import type { DecisionLensId } from "../intelligence/types";
 import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief";
-import { ScoreRing } from "./ScoreRing";
+import { HERO_SCORE_RING_SIZE, ScoreRing } from "./ScoreRing";
+import type { CompositionRow } from "./ScoreComposition";
 import type { TokenDecisionBoundary } from "../lib/decisionBoundary";
 
 export interface DecisionCanvasItem {
@@ -244,6 +245,7 @@ export function InvestigationDecisionCanvas({
   methodologyHref = "#token-methodology",
   challengeAnchorId = null,
   checkScopeLabel = "Required report checks",
+  composition,
 }: {
   verdictLabel: string;
   /** Saved ARGUS risk score. Null means the scoring contract withheld it. */
@@ -273,6 +275,8 @@ export function InvestigationDecisionCanvas({
   challengeAnchorId?: string | null;
   /** Public name for the exact check set behind successful/applicable. */
   checkScopeLabel?: string;
+  /** Real ScoreComposition rows. Drives the hero ring pieces when present. */
+  composition?: CompositionRow[];
 }) {
   const verdictItems = favorable ? supports : concerns;
   const countervailingItems = favorable ? concerns : supports;
@@ -313,22 +317,24 @@ export function InvestigationDecisionCanvas({
             score={score}
             verdict={verdictLabel}
             color={verdictColor}
-            size={240}
+            size={HERO_SCORE_RING_SIZE}
             bands={score != null}
-          />
-          <div className="decision-score-copy">
-            <p className={`mono text-[11px] font-semibold uppercase tracking-[0.1em] ${verdictClass}`}>{verdictLabel}</p>
-            {score == null && (
-              <p className="mono mt-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-ink">Score withheld</p>
-            )}
-            <p className="mono mt-1 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
-              {score != null && scoreIsProvisional
-                ? `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete · provisional`
-                : applicable === 0
-                  ? "No checks saved"
-                  : `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete`}
-            </p>
-          </div>
+            composition={composition}
+          >
+            <div className="decision-score-copy">
+              <p className={`score-ring-verdict mono text-[11px] font-semibold uppercase tracking-[0.1em] ${verdictClass}`}>{verdictLabel}</p>
+              {score == null && (
+                <p className="mono mt-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-ink">Score withheld</p>
+              )}
+              <p className="mono mt-1 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
+                {score != null && scoreIsProvisional
+                  ? `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete · provisional`
+                  : applicable === 0
+                    ? "No checks saved"
+                    : `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete`}
+              </p>
+            </div>
+          </ScoreRing>
         </div>
       </header>
 
