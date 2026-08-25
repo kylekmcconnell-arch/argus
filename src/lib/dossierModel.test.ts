@@ -416,34 +416,71 @@ describe("live report field names", () => {
 });
 
 describe("count-true headings", () => {
-  it("names the audited handle and whether an official site is on file", () => {
-    const bound = buildDossier({
+  it("names the audited handle and the saved sitecheck status of the official site", () => {
+    const subjectHeading = (payload: Record<string, unknown>) => buildDossier({
       handle: "@alice",
       display_name: "Alice Project",
-      website: "https://alice.example/",
       report: { verdict: "PASS", score_total: 70 },
       basicFacts: [],
       checkRuns: [{ checkId: "identity-resolution", label: "Identity", status: "confirmed", note: "Posting steady (~2.0d gap, last post 12d ago)" }],
       basicFactLeads: [],
       providerFailures: [],
-    });
-    expect(bound.beats.find((b) => b.id === "subject")!.heading).toBe("This is the @alice we audited. An official site is on file.");
-    expect(bound.beats.find((b) => b.id === "subject")!.heading).not.toContain("Posting steady");
-    expect(bound.beats.find((b) => b.id === "subject")!.heading).not.toContain("Alice Project");
-    expect(bound.beats.find((b) => b.id === "subject")!.heading).not.toMatch(/bound|live|blocked/i);
+      ...payload,
+    }).beats.find((b) => b.id === "subject")!.heading;
 
-    const unbound = buildDossier({
-      handle: "@alice",
-      display_name: "Alice Project",
-      website: null,
-      report: { verdict: "PASS", score_total: 70 },
-      basicFacts: [],
-      checkRuns: [{ checkId: "identity-resolution", label: "Identity", status: "confirmed" }],
-      basicFactLeads: [],
-      providerFailures: [],
+    const live = subjectHeading({
+      website: "https://alice.example/",
+      intelligence: { measurements: [{ id: "official_site_response_state", value: "live" }] },
     });
-    expect(unbound.beats.find((b) => b.id === "subject")!.heading).toBe("This is the @alice we audited. ARGUS did not find an official site.");
-    expect(unbound.beats.find((b) => b.id === "subject")!.heading).not.toMatch(/bound|live|blocked/i);
+    expect(live).toBe("This is the @alice we audited. The official site is live.");
+    expect(live).not.toContain("Posting steady");
+    expect(live).not.toContain("Alice Project");
+    expect(live).not.toMatch(/bound/i);
+
+    expect(subjectHeading({
+      website: "https://alice.example/",
+      profile: { site_substance_status: "access_blocked" },
+      checkRuns: [
+        { checkId: "identity-resolution", label: "Identity", status: "confirmed" },
+        {
+          checkId: "project-product-substance",
+          label: "Product and website substance",
+          status: "checked-empty",
+          note: "The official site (alice.example) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.",
+        },
+      ],
+    })).toBe("This is the @alice we audited. The official site (alice.example) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.");
+
+    expect(subjectHeading({
+      website: "https://alice.example/",
+      profile: { site_substance_status: "coming_soon" },
+    })).toBe("This is the @alice we audited. The official site is a coming-soon or parked page.");
+
+    expect(subjectHeading({
+      website: "https://alice.example/",
+      intelligence: { measurements: [{ id: "official_site_response_state", value: "unavailable" }] },
+    })).toBe("This is the @alice we audited. An official site is on file. ARGUS could not classify it.");
+
+    const unknown = subjectHeading({ website: "https://alice.example/" });
+    expect(unknown).toBe("This is the @alice we audited. An official site is on file. ARGUS could not classify it.");
+    expect(unknown).not.toMatch(/bound|live|blocked/i);
+
+    const missing = subjectHeading({ website: null });
+    expect(missing).toBe("This is the @alice we audited. ARGUS did not find an official site.");
+    expect(missing).not.toMatch(/bound|live|blocked/i);
+
+    expect(subjectHeading({
+      website: "https://alice.example/",
+      checkRuns: [
+        { checkId: "identity-resolution", label: "Identity", status: "confirmed" },
+        {
+          checkId: "project-product-substance",
+          label: "Product and website substance",
+          status: "checked-empty",
+          note: "alice.example denied the automated request (HTTP 403)",
+        },
+      ],
+    })).toBe("This is the @alice we audited. An official site is on file. ARGUS could not classify it.");
   });
 
   it("splits first-party naming from independent confirmation on the team beat", () => {

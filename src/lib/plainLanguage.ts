@@ -179,6 +179,57 @@ export function publicCheckLabel(value: string): string {
     .trim();
 }
 
+const SAVED_SITE_SUBSTANCE_STATUSES = new Set([
+  "live",
+  "coming_soon",
+  "access_blocked",
+  "unreachable",
+  "unavailable",
+  "client_rendered",
+]);
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function asSiteSubstanceStatus(value: unknown): string | null {
+  const status = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return SAVED_SITE_SUBSTANCE_STATUSES.has(status) ? status : null;
+}
+
+/**
+ * Read the sitecheck classification already saved on a report payload.
+ * Frozen dossiers persist this as intelligence.measurements
+ * `official_site_response_state`; collector bags keep
+ * `profile.site_substance_status`. Never infer live from a URL or a 403 note.
+ */
+export function savedSiteSubstanceStatus(payload: Record<string, unknown>): string | null {
+  const profile = asRecord(payload.profile);
+  const fromProfile = asSiteSubstanceStatus(profile?.site_substance_status);
+  if (fromProfile) return fromProfile;
+
+  const evidenceProfile = asRecord(asRecord(payload.evidence)?.profile);
+  const fromEvidence = asSiteSubstanceStatus(evidenceProfile?.site_substance_status);
+  if (fromEvidence) return fromEvidence;
+
+  const fromTop = asSiteSubstanceStatus(payload.site_substance_status);
+  if (fromTop) return fromTop;
+
+  const measurements = asRecord(payload.intelligence)?.measurements;
+  if (Array.isArray(measurements)) {
+    for (const row of measurements) {
+      const measurement = asRecord(row);
+      if (measurement && String(measurement.id ?? "").trim() === "official_site_response_state") {
+        const fromMeasurement = asSiteSubstanceStatus(measurement.value);
+        if (fromMeasurement) return fromMeasurement;
+      }
+    }
+  }
+  return null;
+}
+
 /** Reader explanation for a saved check outcome. */
 export function publicCheckNote(value: string | null | undefined): string {
   const trimmed = (value ?? "").replace(/\s+/g, " ").trim();
@@ -229,6 +280,51 @@ export function publicCheckStatus(value: string | null | undefined): string {
   const trimmed = (value ?? "").replace(/\s+/g, " ").trim();
   if (!trimmed) return "";
   return PUBLIC_CHECK_STATUSES[trimmed.toLowerCase()] ?? publicCheckNote(trimmed);
+}
+
+function officialSiteHost(website: string | null | undefined): string {
+  const raw = (website ?? "").trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).hostname.replace(/^www\./i, "");
+  } catch {
+    return raw.replace(/^https?:\/\//i, "").replace(/^www\./i, "").split("/")[0] ?? "";
+  }
+}
+
+/**
+ * Public identity sentence for the official site, from the saved sitecheck
+ * status only. A website URL without a classification is on file, not live.
+ */
+export function publicOfficialSiteSentence({
+  website,
+  status,
+  checkNote,
+}: {
+  website?: string | null;
+  status?: string | null;
+  checkNote?: string | null;
+}): string {
+  if (!(website ?? "").trim()) return "ARGUS did not find an official site.";
+  const classified = asSiteSubstanceStatus(status);
+  if (classified === "live" || classified === "client_rendered") {
+    return "The official site is live.";
+  }
+  if (classified === "coming_soon") {
+    const parked = /parked/i.test(checkNote ?? "");
+    return parked
+      ? "The official site is a parked page."
+      : "The official site is a coming-soon or parked page.";
+  }
+  if (classified === "access_blocked") {
+    const host = officialSiteHost(website);
+    const note = (checkNote ?? "").trim()
+      || (host
+        ? `The official site (${host}) blocked the automated request`
+        : "The official site blocked the automated request");
+    return publicCheckNote(note);
+  }
+  return "An official site is on file. ARGUS could not classify it.";
 }
 
 /** Reader label for a live-scan phase. Internal P0 codes stay on the event. */

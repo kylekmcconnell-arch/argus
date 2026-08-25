@@ -16,7 +16,7 @@ import {
 import type { EntityLedgerRow, EntityScorecard } from "../intelligence/entityScorecards";
 import { teamIdentityKeys } from "./teamIdentity";
 import { publicIntelligenceText, publicNumberText } from "./intelligencePresentation";
-import { publicCheckLabel, publicCheckNote, publicCheckStatus } from "./plainLanguage";
+import { publicCheckLabel, publicCheckNote, publicCheckStatus, publicOfficialSiteSentence, savedSiteSubstanceStatus } from "./plainLanguage";
 
 export interface DossierReceiptSource {
   url: string;
@@ -453,6 +453,8 @@ function headingFor(
   figures: DossierFigure[],
   ctx: {
     subject: { handle: string; website: string | null };
+    siteSubstanceStatus?: string | null;
+    siteCheckNote?: string | null;
     team: TeamMember[];
     leadCount: number;
     openCheckCount: number;
@@ -465,9 +467,11 @@ function headingFor(
     const first = who === "the subject"
       ? "This is the subject we audited."
       : `This is the ${who} we audited.`;
-    const site = ctx.subject.website
-      ? "An official site is on file."
-      : "ARGUS did not find an official site.";
+    const site = publicOfficialSiteSentence({
+      website: ctx.subject.website,
+      status: ctx.siteSubstanceStatus,
+      checkNote: ctx.siteCheckNote,
+    });
     return `${first} ${site}`;
   }
 
@@ -730,8 +734,11 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     ...coverageGapQuestions(payload),
     ...researchOpenQuestions(payload),
   ]);
+  const siteCheck = checks.find((check) => str(check.checkId) === "project-product-substance");
   const headingCtx = {
     subject,
+    siteSubstanceStatus: savedSiteSubstanceStatus(payload),
+    siteCheckNote: siteCheck ? str(siteCheck.note) : "",
     team,
     leadCount: leads.length,
     openCheckCount: openQuestions.length,

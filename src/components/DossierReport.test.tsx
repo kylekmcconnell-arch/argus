@@ -82,7 +82,7 @@ describe("DossierReport", () => {
   it("renders buildDossier of the live payload, never the dynex fixture", () => {
     render(livePayload());
     expect(container.textContent).toContain("@clutchmarkets");
-    expect(container.textContent).toContain("This is the @clutchmarkets we audited. An official site is on file.");
+    expect(container.textContent).toContain("This is the @clutchmarkets we audited. An official site is on file. ARGUS could not classify it.");
     expect(container.textContent).toContain("The project named 1 founder. Nobody else confirmed them.");
     expect(container.textContent).not.toContain("Handle resolves to the official site.");
     expect(container.textContent).not.toContain("The project account is identified.");
@@ -302,7 +302,7 @@ describe("DossierReport", () => {
       expect(io).not.toHaveBeenCalled();
       expect(container.querySelectorAll("[data-settled=\"false\"]")).toHaveLength(0);
       expect(container.querySelectorAll("[data-settled=\"true\"]").length).toBeGreaterThan(0);
-      expect(container.textContent).toContain("This is the @clutchmarkets we audited. An official site is on file.");
+      expect(container.textContent).toContain("This is the @clutchmarkets we audited. An official site is on file. ARGUS could not classify it.");
       expect(container.textContent).toContain("Unestablished");
     } finally {
       Object.defineProperty(window, "IntersectionObserver", { configurable: true, writable: true, value: previousIO });
