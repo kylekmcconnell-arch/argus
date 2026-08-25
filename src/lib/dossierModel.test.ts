@@ -234,8 +234,35 @@ describe("dossier model", () => {
     expect(text).not.toContain("$11.0M");
     const activity = dossier.beats.find((b) => b.id === "activity");
     expect(activity?.figures.some((f) => f.label === "funding" && f.value === "Series B")).toBe(true);
-    expect(activity?.heading).toBe("No bound funding is on file.");
+    expect(activity?.heading).toBe("ARGUS did not find a confirmed raise tied to this project.");
+    expect(activity?.heading).not.toMatch(/bound|on file/i);
     expect(activity?.heading).not.toMatch(/BlackRock|led by|\$11/);
+  });
+
+  it("states activity counts in plain English without bound-on-file jargon", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [
+        {
+          predicate: "funding", value: "Seed", status: "verified",
+          sources: [source("https://dynexcoin.org/investors", "Seed round listed on the @dynexcoin site.")],
+        },
+        {
+          predicate: "investor", value: "Example Capital", status: "verified",
+          sources: [source("https://dynexcoin.org/investors", "Example Capital is named on the @dynexcoin site.")],
+        },
+        {
+          predicate: "traction", value: "posts daily", status: "verified",
+          sources: [source("https://x.com/dynexcoin/status/1", "The @dynexcoin account posts daily.")],
+        },
+      ],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    const heading = dossier.beats.find((b) => b.id === "activity")!.heading;
+    expect(heading).toBe(
+      "1 traction fact is tied to this project. 1 confirmed raise is tied to this project. 1 investor is tied to this project.",
+    );
+    expect(heading).not.toMatch(/bound|on file/i);
   });
 });
 
