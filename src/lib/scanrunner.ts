@@ -125,9 +125,14 @@ export function startInvestigationScan(
   const ref = norm(input.ref);
   const key = `investigation:${ref}`;
   const existing = runs.get(key);
-  if (existing && existing.status === "running") return existing;
+  if (existing && existing.status === "running" && !opts?.force) return existing;
+  if (existing) {
+    aborts.get(key)?.();
+    aborts.delete(key);
+  }
 
-  const run: ScanRun = { id: `inv:${ref}:${Date.now()}`, kind: "investigation", ref, input: rawInput, label: trunc(rawInput.replace(/^[@$]/, "")), priv, steps: [], pct: 0, status: "running", startedAt: Date.now(), intent: opts?.intent, creditKey: crypto.randomUUID() };
+  const creditKey = crypto.randomUUID();
+  const run: ScanRun = { id: `inv:${ref}:${creditKey}`, kind: "investigation", ref, input: rawInput, label: trunc(rawInput.replace(/^[@$]/, "")), priv, steps: [], pct: 0, status: "running", startedAt: Date.now(), intent: opts?.intent, creditKey };
   runs.set(key, run);
   emit();
 

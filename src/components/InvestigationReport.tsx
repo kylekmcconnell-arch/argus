@@ -718,6 +718,7 @@ export function InvestigationReport({
   onOpenProjectAccount,
   onReAudit,
   onOpenBrief,
+  rescanError,
   shareView = false,
 }: {
   inv: Investigation;
@@ -727,6 +728,8 @@ export function InvestigationReport({
   onOpenProjectAccount: () => void;
   onReAudit?: () => void;
   onOpenBrief?: () => void;
+  /** Plain failure from an explicit Rescan that could not start (address or credit). */
+  rescanError?: string | null;
   /** Read-only share capability view: every workspace action is absent. */
   shareView?: boolean;
 }) {
@@ -1443,6 +1446,11 @@ export function InvestigationReport({
           </div>
         </div>
       </header>
+      {rescanError && (
+        <div role="alert" className="report-frame mt-4 rounded-xl border border-avoid/30 bg-avoid/5 px-4 py-3 text-[12.5px] leading-relaxed text-avoid">
+          {rescanError}
+        </div>
+      )}
 
       <div className="report-frame">
         {versionContext && (

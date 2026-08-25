@@ -11,10 +11,13 @@ export function InvestigationRun({
   input,
   onDone,
   onError,
+  expectedRunId,
 }: {
   input: RunnableTokenInput;
   onDone: (inv: Investigation, priv: boolean, scanId: string) => void;
   onError: (message: string) => void;
+  /** When set, ignore a stale done/error run left over from the previous scan of this address. */
+  expectedRunId?: string;
 }) {
   const [, setTick] = useState(0);
   const terminalNotificationRef = useRef<string | null>(null);
@@ -25,27 +28,28 @@ export function InvestigationRun({
   }, [input]);
 
   const run = getScanRun("investigation", input.ref);
+  const attached = expectedRunId ? (run?.id === expectedRunId ? run : undefined) : run;
 
   useEffect(() => {
-    if (!run) return;
-    const notificationKey = `${run.id}:${run.status}`;
-    if (run.status === "running" || terminalNotificationRef.current === notificationKey) return;
+    if (!attached) return;
+    const notificationKey = `${attached.id}:${attached.status}`;
+    if (attached.status === "running" || terminalNotificationRef.current === notificationKey) return;
     terminalNotificationRef.current = notificationKey;
-    if (run.status === "done" && run.result) onDone(run.result as Investigation, run.priv, run.id);
-    else if (run.status === "error") onError(run.error ?? "The investigation did not finish.");
-  }, [onDone, onError, run, run?.status]);
+    if (attached.status === "done" && attached.result) onDone(attached.result as Investigation, attached.priv, attached.id);
+    else if (attached.status === "error") onError(attached.error ?? "The investigation did not finish.");
+  }, [onDone, onError, attached, attached?.status]);
 
   const label = input.ref.length > 20 ? input.ref.slice(0, 8) + "…" + input.ref.slice(-4) : input.ref;
-  const working = !run || run.status === "running";
+  const working = !attached || attached.status === "running";
   return (
     <AuditConsole
       handle={label}
       subtitle="Live multi-surface evidence · observed sources appear as they respond · continues in background"
-      steps={run?.steps ?? []}
+      steps={attached?.steps ?? []}
       working={working}
       mode="live"
       kind="investigation"
-      hop={run?.hop}
+      hop={attached?.hop}
     />
   );
 }

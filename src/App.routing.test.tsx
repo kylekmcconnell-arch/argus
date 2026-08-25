@@ -87,13 +87,15 @@ vi.mock("./components/Report", () => ({
 }));
 
 vi.mock("./components/InvestigationReport", () => ({
-  InvestigationReport: (props: { onAudit: (q: string) => void; onOpenToken: () => void; onOpenProjectAccount: () => void; onOpenBrief?: () => void }) => (
+  InvestigationReport: (props: { onAudit: (q: string) => void; onOpenToken: () => void; onOpenProjectAccount: () => void; onOpenBrief?: () => void; onReAudit?: () => void; rescanError?: string | null }) => (
     <div data-testid="stored-investigation-report">
       Stored investigation report
       <button data-testid="open-derived-token" onClick={props.onOpenToken}>Open token</button>
       <button data-testid="open-derived-account" onClick={props.onOpenProjectAccount}>Open account</button>
       <button data-testid="investigation-pivot" onClick={() => props.onAudit("@investigation_pivot")}>Audit founder pivot</button>
       {props.onOpenBrief && <button data-testid="investigation-case-brief" onClick={props.onOpenBrief}>Case brief</button>}
+      {props.onReAudit && <button data-testid="investigation-rescan" onClick={props.onReAudit}>Rescan</button>}
+      {props.rescanError && <div role="alert" data-testid="investigation-rescan-error">{props.rescanError}</div>}
     </div>
   ),
 }));
@@ -125,8 +127,11 @@ vi.mock("./components/TokenRun", () => ({
 }));
 
 vi.mock("./components/InvestigationRun", () => ({
-  InvestigationRun: ({ onDone }: { onDone: (result: Record<string, unknown>, priv: boolean, scanId: string) => void }) => (
-    <button data-testid="finish-investigation-run" onClick={() => onDone({ token: { address: "0x5555555555555555555555555555555555555555", symbol: "PRIVATE" }, projectAccount: { handle: "@private_project", report: { audit_id: "private-project-account" } } }, true, "private-investigation-scan")}>Finish investigation run</button>
+  InvestigationRun: ({ onDone, onError }: { onDone: (result: Record<string, unknown>, priv: boolean, scanId: string) => void; onError: (message: string) => void }) => (
+    <>
+      <button data-testid="finish-investigation-run" onClick={() => onDone({ token: { address: "0x5555555555555555555555555555555555555555", symbol: "PRIVATE" }, projectAccount: { handle: "@private_project", report: { audit_id: "private-project-account" } } }, true, "private-investigation-scan")}>Finish investigation run</button>
+      <button data-testid="fail-investigation-run" onClick={() => onError("You have no investigation credits left.")}>Fail credits</button>
+    </>
   ),
 }));
 
@@ -353,7 +358,10 @@ beforeEach(() => {
   harness.resolveStoredCases.mockResolvedValue({ status: "ok", subjects: [] });
   harness.resolveTokenSubject.mockResolvedValue({ state: "not_found" });
   harness.startTokenScan.mockImplementation((_input, priv: boolean) => ({ priv }));
-  harness.startInvestigationScan.mockImplementation((_input, priv: boolean) => ({ priv }));
+  harness.startInvestigationScan.mockImplementation((_input, priv: boolean) => ({
+    priv,
+    id: `scan-${harness.startInvestigationScan.mock.calls.length + 1}`,
+  }));
   harness.startPersonAudit.mockImplementation((_input, priv: boolean) => ({ priv }));
   harness.syncReport.mockResolvedValue({ state: "failed" });
   harness.personContribution.mockReturnValue({
@@ -1363,5 +1371,156 @@ describe("App routing safety", () => {
     expect(confirm).toHaveBeenCalledWith("Discard your unsaved case brief changes and note draft?");
     expect(view.querySelector("[data-testid='case-brief-panel']")).not.toBeNull();
     expectNoRunnerStarted();
+  });
+
+  it("starts a forced investigation rescan from a stored ?inv= report and leaves Version 4", async () => {
+    const address = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "PA-42A62AED77094B45AC29",
+        kind: "investigation",
+        ref: address,
+        query: "$EARN",
+        status: "open",
+      }],
+    });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "investigation",
+        ref: address,
+        payload: { token: { address, symbol: "EARN" } },
+        versionContext: { caseId: "PA-42A62AED77094B45AC29", reportVersionId: "version-4", version: 4 },
+      },
+    });
+
+    const view = await renderApp(`/?inv=${address}`);
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-investigation-report']")).not.toBeNull());
+    harness.startInvestigationScan.mockClear();
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='investigation-rescan']")?.click());
+    await settle();
+
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(
+      { kind: "token", ref: address, via: "evm" },
+      false,
+      { force: true },
+    );
+    expect(view.querySelector("[data-testid='finish-investigation-run']")).not.toBeNull();
+    expect(view.querySelector("[data-testid='stored-investigation-report']")).toBeNull();
+  });
+
+  it("starts a forced investigation rescan from a Recent-cases ?s= stored report", async () => {
+    const address = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "investigation",
+        ref: address,
+        payload: { token: { address, symbol: "EARN" } },
+        versionContext: { caseId: "PA-42A62AED77094B45AC29", reportVersionId: "version-4", version: 4 },
+      },
+    });
+
+    const view = await renderApp(`/?s=${address}&kind=investigation`);
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-investigation-report']")).not.toBeNull());
+    harness.startInvestigationScan.mockClear();
+    harness.fetchReportState.mockClear();
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='investigation-rescan']")?.click());
+    await settle();
+
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(
+      { kind: "token", ref: address, via: "evm" },
+      false,
+      { force: true },
+    );
+    expect(view.querySelector("[data-testid='finish-investigation-run']")).not.toBeNull();
+    expect(view.querySelector("[data-testid='stored-investigation-report']")).toBeNull();
+    expect(harness.fetchReportState).not.toHaveBeenCalled();
+  });
+
+  it("does not reopen the stored evidence version after Rescan leaves ?version=", async () => {
+    const versionId = "00000000-0000-4000-8000-000000000252";
+    const address = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    harness.fetchReportVersion.mockResolvedValue({
+      kind: "investigation",
+      ref: address,
+      payload: { token: { address, symbol: "EARN" } },
+      versionContext: { caseId: "PA-42A62AED77094B45AC29", reportVersionId: versionId, version: 4 },
+    });
+
+    const view = await renderApp(`/?version=${versionId}`);
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-investigation-report']")).not.toBeNull());
+    expect(view.textContent).toContain("Immutable evidence review");
+    harness.startInvestigationScan.mockClear();
+    harness.fetchReportVersion.mockClear();
+    harness.fetchReportState.mockClear();
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='investigation-rescan']")?.click());
+    await settle();
+
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(
+      { kind: "token", ref: address, via: "evm" },
+      false,
+      { force: true },
+    );
+    expect(view.querySelector("[data-testid='finish-investigation-run']")).not.toBeNull();
+    expect(view.querySelector("[data-testid='stored-investigation-report']")).toBeNull();
+    expect(view.textContent).not.toContain("Immutable evidence review");
+    expect(harness.fetchReportVersion).not.toHaveBeenCalled();
+    expect(harness.fetchReportState).not.toHaveBeenCalled();
+  });
+
+  it("shows a plain report error when Rescan cannot run the stored address", async () => {
+    const address = "$EARN";
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "investigation",
+        ref: address,
+        payload: { token: { address, symbol: "EARN" } },
+        versionContext: { caseId: "PA-42A62AED77094B45AC29", reportVersionId: "version-4", version: 4 },
+      },
+    });
+
+    const view = await renderApp(`/?s=${encodeURIComponent(address)}&kind=investigation`);
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-investigation-report']")).not.toBeNull());
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='investigation-rescan']")?.click());
+    await settle();
+
+    expect(harness.startInvestigationScan).not.toHaveBeenCalled();
+    expect(view.querySelector("[data-testid='stored-investigation-report']")).not.toBeNull();
+    expect(view.querySelector("[data-testid='investigation-rescan-error']")?.textContent).toContain("Address used: $EARN");
+    expect(view.querySelector("[data-testid='investigation-rescan-error']")?.textContent).toContain("$ticker");
+  });
+
+  it("keeps credit exhaustion visible instead of restoring Version 4", async () => {
+    const address = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "investigation",
+        ref: address,
+        payload: { token: { address, symbol: "EARN" } },
+        versionContext: { caseId: "PA-42A62AED77094B45AC29", reportVersionId: "version-4", version: 4 },
+      },
+    });
+
+    const view = await renderApp(`/?s=${address}&kind=investigation`);
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-investigation-report']")).not.toBeNull());
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='investigation-rescan']")?.click());
+    await settle();
+    expect(view.querySelector("[data-testid='fail-investigation-run']")).not.toBeNull();
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='fail-investigation-run']")?.click());
+    await settle();
+
+    expect(view.querySelector("[data-testid='stored-investigation-report']")).toBeNull();
+    expect(view.textContent).toContain("You have no investigation credits left.");
+    expect(view.textContent).toContain("Retry audit");
   });
 });
