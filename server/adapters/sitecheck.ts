@@ -21,6 +21,7 @@ export type SiteSubstanceReason =
   | "transport"
   | "dns_and_transport"
   | "http_access"
+  | "rate_limit"
   | "anti_bot"
   | "http"
   | "content";
@@ -81,6 +82,14 @@ function hostname(url: string): string {
 export function officialSiteAccessDeniedFinding(domain: string): string {
   const host = hostname(domain.includes("://") ? domain : `https://${domain}`);
   return `The official site (${host}) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.`;
+}
+
+/** True only for a confirmed 401/403/anti-bot denial. HTTP 429 is a rate-limit gap. */
+export function isConfirmedOfficialSiteAccessDenial(site: Pick<SiteSubstance, "status" | "reason" | "detail">): boolean {
+  if (site.status !== "access_blocked") return false;
+  if (site.reason === "rate_limit") return false;
+  if (/\bHTTP 429\b/i.test(site.detail) || /\brate-limited\b/i.test(site.detail)) return false;
+  return site.reason === "anti_bot" || site.reason === "http_access" || site.reason === undefined;
 }
 
 function isAntiBotResponse(response: Response, body: string): boolean {
@@ -197,7 +206,7 @@ async function get(
       kind: "failure",
       url: finalUrl,
       status: "access_blocked",
-      reason: "http_access",
+      reason: response.status === 429 ? "rate_limit" : "http_access",
       detail: response.status === 429
         ? "the site rate-limited the automated liveness request (HTTP 429)"
         : `the site denied the automated liveness request (HTTP ${response.status})`,

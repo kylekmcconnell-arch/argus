@@ -88,6 +88,56 @@ describe("site-liveness evidence attribution", () => {
     expect(JSON.stringify({ checks, calls: emit.mock.calls })).not.toMatch(/Website live|live site|promoting a token/i);
   });
 
+  it("keeps an HTTP 429 access block as an open rate-limit gap, not a finished website check", () => {
+    const { ctx, evidence, checks, emit } = context();
+
+    applySiteSubstanceOutcome(ctx, "earnonhood.com", {
+      url: "https://earnonhood.com",
+      status: "access_blocked",
+      reason: "rate_limit",
+      detail: "the site rate-limited the automated liveness request (HTTP 429)",
+    });
+
+    expect(evidence.findings).toEqual([]);
+    expect(checks).toEqual([expect.objectContaining({
+      id: "project-product-substance",
+      status: "unavailable",
+      note: expect.stringContaining("rate-limited the automated liveness request (HTTP 429)"),
+    })]);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: "Website check unavailable",
+      tone: "neutral",
+      detail: expect.stringContaining("HTTP 429"),
+    }));
+    expect(JSON.stringify({ checks, calls: emit.mock.calls })).not.toContain("could not read the page");
+    expect(JSON.stringify({ checks, calls: emit.mock.calls })).not.toContain("Official site blocked the request");
+
+    const requiredChecks: ScanCheck[] = PROJECT_REQUIRED_CHECK_IDS.map((checkId) => (
+      checkId === "project-product-substance"
+        ? {
+            checkId,
+            label: "Product and website substance",
+            status: "unavailable" as const,
+            note: "earnonhood.com: the site rate-limited the automated liveness request (HTTP 429); no adverse site-liveness conclusion was drawn",
+            decisionCritical: true,
+          }
+        : {
+            checkId,
+            label: checkId,
+            status: "confirmed" as const,
+            note: "completed",
+            decisionCritical: true,
+          }
+    ));
+    expect(deriveDecisionReadiness(requiredChecks)).toMatchObject({
+      status: "provisional",
+      successful: 6,
+      applicable: 7,
+      unresolved: 1,
+      providerUnavailable: 1,
+    });
+  });
+
   it("does not let a neutral fetch gap override independent confirmed product evidence", () => {
     const evidence = emptyEvidence("@project");
     evidence.roles = [SubjectClass.PROJECT];

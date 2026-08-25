@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getCost, withCostLedger } from "../cost";
-import { checkSiteSubstance, officialSiteAccessDeniedFinding } from "./sitecheck";
+import { checkSiteSubstance, isConfirmedOfficialSiteAccessDenial, officialSiteAccessDeniedFinding } from "./sitecheck";
 
 const response = (
   body: string | null,
@@ -57,6 +57,31 @@ describe("checkSiteSubstance attribution", () => {
     );
     expect(officialSiteAccessDeniedFinding("https://www.earnonhood.com/omni")).toContain("www.earnonhood.com");
     expect(officialSiteAccessDeniedFinding("earnonhood.com")).not.toMatch(/live|successful|Dashboard|docs/i);
+    expect(isConfirmedOfficialSiteAccessDenial({
+      status: "access_blocked",
+      reason: "http_access",
+      detail: "the site denied the automated liveness request (HTTP 403)",
+    })).toBe(true);
+    expect(isConfirmedOfficialSiteAccessDenial({
+      status: "access_blocked",
+      reason: "http_access",
+      detail: "the site denied the automated liveness request (HTTP 401)",
+    })).toBe(true);
+    expect(isConfirmedOfficialSiteAccessDenial({
+      status: "access_blocked",
+      reason: "anti_bot",
+      detail: "the site served an anti-bot challenge instead of its homepage (HTTP 200)",
+    })).toBe(true);
+    expect(isConfirmedOfficialSiteAccessDenial({
+      status: "access_blocked",
+      reason: "rate_limit",
+      detail: "the site rate-limited the automated liveness request (HTTP 429)",
+    })).toBe(false);
+    expect(isConfirmedOfficialSiteAccessDenial({
+      status: "access_blocked",
+      reason: "http_access",
+      detail: "the site rate-limited the automated liveness request (HTTP 429)",
+    })).toBe(false);
   });
 
   it("ignores invalid domains without making a provider attempt", async () => {
@@ -78,7 +103,7 @@ describe("checkSiteSubstance attribution", () => {
 
     expect(captured.result).toMatchObject({
       status: "access_blocked",
-      reason: "http_access",
+      reason: status === 429 ? "rate_limit" : "http_access",
     });
     expect(captured.result?.detail).toContain(`HTTP ${status}`);
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({

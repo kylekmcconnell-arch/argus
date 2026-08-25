@@ -74,8 +74,10 @@ immutable technical receipts available on demand.
 It also fails when a recoverable official-site 403 is published without trying
 the bounded safe reader path, when a confirmed repeated official-site 403 is
 left as an unfinished required check instead of a finished access-denied result,
-when recovered bytes are mislabeled as an independent source, or when an HTTP
-429 is described as a rejected configuration instead of a rate limit.
+when recovered bytes are mislabeled as an independent source, when an HTTP
+429 is described as a rejected configuration instead of a rate limit, or when a
+429 is treated as a finished official-site block instead of an open rate-limit
+gap.
 
 ## Live founder canaries
 
