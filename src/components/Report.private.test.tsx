@@ -439,7 +439,7 @@ describe("private person report evidence boundary", () => {
     expect(context).not.toContain("Model Venture");
   });
 
-  it("shows exact team-role proof, developer-profile lineage, and every leadership-currency state", () => {
+  it("presents probable team identity as a large source-grounded section without exposing the internal label", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier: Dossier = {
       ...base,
@@ -482,12 +482,19 @@ describe("private person report evidence boundary", () => {
         ...base.report,
         roles: ["PROJECT"],
         governing_role: "PROJECT",
+        identity_confidence: "Probable",
       },
     } as Dossier;
 
     act(() => root.render(<Report dossier={dossier} onReset={() => {}} />));
 
-    expect(container.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("role proof");
+    expect(container.querySelector("#report-team-heading")?.textContent).toContain("People tied to this project");
+    expect(container.textContent).toContain("ARGUS found 1 source-grounded person");
+    expect(container.textContent).toContain("1 named person");
+    expect(container.textContent).not.toContain("Probable");
+    expect(container.querySelector(".team-person-card")?.textContent).toContain("Ada Example");
+    expect(container.querySelector(".team-person-card")?.textContent).toContain("Chief Technology Officer");
+    expect(container.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("Open role source");
     expect(container.querySelector('a[href="https://github.com/ada-example"]')?.textContent).toContain("GitHub");
     expect(container.querySelector('a[href="https://x.com/ada_example"]')?.textContent).toContain("profile link proof");
     const continuity = container.querySelector('[aria-label="Frozen leadership continuity ledger"]');

@@ -102,7 +102,7 @@ import {
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
-import { plainLanguageSummary, plainReportStatusLabel, publicConcernTitle } from "../lib/plainLanguage";
+import { formatRoleLabel, plainLanguageSummary, plainReportStatusLabel, publicConcernTitle } from "../lib/plainLanguage";
 import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
@@ -428,6 +428,8 @@ function sourceProviderLabel(provider: string): string {
     github: "GitHub",
     opensanctions: "Sanctions screening",
     courtlistener: "Court records",
+    "operator attribution (followings + bio claim)": "Official X profiles",
+    "operator attribution (amplified + bio claim)": "Official X profiles",
   };
   if (known[provider]) return known[provider];
   const plain = provider.replace(/[_-]+/g, " ").trim();
@@ -2742,7 +2744,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         : ic === "Confirmed"
           ? { key: "identity", label: "Identity verified", tone: "pass", href: "#identity-evidence", title: findCheck("identity-resolution")?.note ?? "Official identity resolved and confirmed." }
           : ic === "Probable"
-            ? { key: "identity", label: "Identity probable", tone: "caution", href: "#identity-evidence", title: "Identity resolution is probable, not confirmed." }
+            ? { key: "identity", label: "Identity link found", tone: "caution", href: "#identity-evidence", title: "ARGUS found a public identity link, but it is not independently confirmed." }
             : organizationAccount
               ? { key: "identity", label: "Organization unverified", tone: "caution", href: "#identity-evidence", title: "The public brand account was identified, but its legal entity and operators were not confirmed." }
               : { key: "identity", label: "Identity unresolved", tone: "caution", href: "#identity-evidence", title: "No confirmed identity resolution is recorded." },
@@ -3726,27 +3728,36 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             pseudonymous individual, not a project team — the name-search team is a
             collision, and the contradictions section already explains it. */}
         {report.governing_role !== "KOL" && webTeam && webTeam.length > 0 ? (
-          <div className="mt-3">
-            <div className="mb-1.5 flex flex-wrap items-center gap-2">
-              <span className="chip normal-case">{displayIdentityConfidence}</span>
-              <span className="text-[11px] text-ink-faint">identity resolved through the named team · click a handle to audit them</span>
-            </div>
-            <Card className="divide-y divide-line/60">
+          <section className="team-diligence-card panel mt-3" aria-labelledby="report-team-heading">
+            <header className="team-diligence-header">
+              <div>
+                <div className="eyebrow">Team</div>
+                <h3 id="report-team-heading" className="mt-1 text-[clamp(22px,2.2vw,30px)] font-medium leading-tight tracking-[-0.025em] text-ink">
+                  People tied to this project
+                </h3>
+                <p className="mt-2 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim">
+                  ARGUS found {webTeam.length} source-grounded {webTeam.length === 1 ? "person" : "people"}. Each card shows the public evidence linking them to the project.
+                </p>
+              </div>
+              <span className="verdict-pill tint-signal">
+                {webTeam.length} named {webTeam.length === 1 ? "person" : "people"}
+              </span>
+            </header>
+            <div className={`mt-5 grid gap-3 ${webTeam.length > 1 ? "xl:grid-cols-2" : ""}`}>
               {webTeam.map((p, i) => {
                 const roleProof = safeSourceLink(p.sourceUrl ?? p.source);
                 return (
-                <div key={i} className="px-4 py-2.5 text-[12.5px]">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <Avatar src={personAvatar(p.handle, p.linkedin)} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
-                      <span className="text-ink">{p.name}</span>
-                      {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
-                      <span className="chip shrink-0">{p.role}</span>
+                <article key={`${p.name}:${p.handle ?? ""}:${i}`} className="team-person-card">
+                    <span className="team-person-main">
+                      <Avatar src={personAvatar(p.handle, p.linkedin)} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={40} rounded="rounded-full" letterClass="text-[13px]" />
+                      <span className="text-[15.5px] font-medium text-ink">{p.name}</span>
+                      {p.handle && <span className="mono text-[11.5px] text-ink-faint">{p.handle}</span>}
+                      <span className="chip tint-signal shrink-0 normal-case tracking-normal">{formatRoleLabel(p.role)}</span>
                       {p.linkedin && (
                         <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                       )}
                       {roleProof && (
-                        <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">role proof</a>
+                        <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">Open role source</a>
                       )}
                       {p.developerProfiles?.map((profile) => {
                         const profileLink = safeSourceLink(profile.url);
@@ -3765,17 +3776,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                           </span>
                         );
                       })}
-                      {p.evidence && <span className="text-[11px] text-ink-faint">· {p.evidence}</span>}
-                      <span className="text-[11px] text-ink-faint">({p.source})</span>
+                      <span className="team-person-evidence">
+                        {p.evidence ? `${plainLanguageSummary(p.evidence)} ` : ""}
+                        <span className="mono">Source: {sourceProviderLabel(p.provider ?? p.source)}.</span>
+                      </span>
                     </span>
                     {p.handle && onAudit ? (
-                      <button onClick={() => onAudit(p.handle!)} className="btn-chip tint-signal shrink-0">audit →</button>
+                      <button onClick={() => onAudit(p.handle!)} className="btn-secondary min-h-9 shrink-0 px-3 text-[11.5px]">Review</button>
                     ) : (
-                      <span className="mono shrink-0 text-[11px] text-ink-faint">named only</span>
+                      <span className="shrink-0 text-[11px] text-ink-faint">No X profile</span>
                     )}
-                  </div>
                   {p.projects && p.projects.length > 0 && (
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[26px] text-[11px] text-ink-faint">
+                    <div className="mt-3 flex min-w-full flex-wrap items-center gap-1.5 pl-[48px] text-[11px] text-ink-faint">
                       <span>also:</span>
                       {p.projects.map((pr, j) => (
                         onOpenProject ? (
@@ -3788,20 +3800,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       ))}
                     </div>
                   )}
-                </div>
+                </article>
                 );
               })}
-            </Card>
+            </div>
             {f.prior_handles && f.prior_handles.length > 0 && (
-              <p className="mt-1.5 text-[12.5px] leading-relaxed text-caution">
+              <p className="mt-4 text-[12.5px] leading-relaxed text-caution">
                 ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
               </p>
             )}
-          </div>
+          </section>
         ) : (
           <div className="panel mt-3 flex items-start gap-3 px-4 py-3">
             <span className={`chip normal-case mt-0.5 ${displayIdentityConfidence === "SuspectedImpersonation" ? "tint-unverifiable" : ""}`}>
-              {displayIdentityConfidence}
+              {displayIdentityConfidence === "Confirmed"
+                ? "Identity verified"
+                : displayIdentityConfidence === "Probable"
+                  ? "Identity link found"
+                  : displayIdentityConfidence === "SuspectedImpersonation"
+                    ? "Possible impersonation"
+                    : "Identity not verified"}
             </span>
             <div className="min-w-0">
               <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>

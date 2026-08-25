@@ -49,6 +49,55 @@ final result: passed
 
 ---
 
+# Design QA — public team evidence language and hierarchy (2026-08-24)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-24 at 8.24.34 PM.png`
+- Desktop implementation: `docs/design-qa/team-public-language-2026-08-24/implementation-desktop-final.png`
+- Mobile implementation: `docs/design-qa/team-public-language-2026-08-24/implementation-mobile.png`
+- Combined comparison: `docs/design-qa/team-public-language-2026-08-24/comparison.png`
+- Source pixels: 4094 × 198; normalized to 1007 × 49 for the combined comparison
+- Desktop implementation pixels: 1007 × 720; focused comparison crop: 1007 × 390
+- Mobile implementation pixels and CSS viewport: 390 × 844 at device scale 1
+- State: light-theme saved project report, one source-grounded creator, internal identity confidence `Probable`
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- The source exposed the internal `Probable` taxonomy and compressed the entire team result into a roughly 40px row.
+- The implementation keeps that frozen confidence value unchanged but replaces the public label with `Identity link found` where a compact status is required.
+- The team evidence now has a 22–30px chapter heading, a plain explanation of exactly what ARGUS found, a named-person count, a 40px avatar, a full evidence card, a public source label, the exact role-source link, and a clear Review action.
+- The one-person desktop state uses the full available report width. Multiple people retain the established two-column report card pattern.
+- At 390px, the header, count, person card, evidence, and action stack into one readable column with no horizontal overflow.
+
+## Required fidelity surfaces
+
+- Fonts and typography: existing ARGUS sans and mono roles remain; the person name and chapter title receive the established report hierarchy instead of adding a new type system.
+- Spacing and layout rhythm: the team block grows from a compact row to the repository's existing decision-critical team card treatment. Desktop and mobile card padding follow the shared responsive tokens.
+- Colors and visual tokens: only existing panel, line, ink, signal, and neutral button tokens are used. The identity link is not colored as verified.
+- Image quality and asset fidelity: the existing saved avatar and Phosphor-based application chrome remain unchanged; no generated, placeholder, CSS, inline-SVG, or emoji asset was added.
+- Copy and content: `Probable`, `identity resolved`, `role proof`, and the parenthetical internal operator-attribution label are removed from public presentation. Exact evidence, provider attribution, role-source URL, handle, role, and review action remain visible.
+
+## Interaction and browser checks
+
+- `Open role source` remains a real external link to the saved proof URL.
+- `Review` remains connected to the existing handle-audit callback.
+- Desktop and mobile browser renders contain no public `Probable` text for this state.
+- Mobile `documentElement.scrollWidth` and `body.scrollWidth` both equal the 390px viewport.
+- Browser console: zero errors and zero warnings.
+
+## Comparison history
+
+The first visual pass confirmed the larger hierarchy but the capture aligned the chapter beneath the sticky report header. The final desktop and mobile captures were realigned to show the full section. No implementation defect was found, and no P0/P1/P2 visual-fix loop was required.
+
+## Follow-up polish
+
+- P3: a later report-wide copy pass can standardize `Open role source` with other source-link verbs outside this section.
+
+final result: passed
+
+---
+
 # Design QA — large centered decision score (2026-08-24)
 
 - Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-24 at 7.57.22 PM.png`
