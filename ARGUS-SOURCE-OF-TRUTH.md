@@ -159,10 +159,11 @@ states on the one reconciled person. Provenance colour is source-of-truth, not
 pass/fail.
 
 The saved ARGUS risk score is the dominant visual result in the opening
-decision brief. It uses the shared large ScoreRing treatment, centered in its
-own result column, while verdict and required-check completion remain separate
-labels. Enlarging or moving that result never changes the score, readiness, or
-evidence contract.
+decision brief. It uses the shared large ScoreRing treatment at the true
+horizontal center of the complete brief, not merely centered inside a trailing
+result column. Verdict and required-check completion remain separate labels.
+Enlarging or moving that result never changes the score, readiness, or evidence
+contract.
 
 Token reports use a separate chronological spine from `buildTokenStory()`:
 launch, liquidity, holders, contract, presence, and gaps. Headline market
