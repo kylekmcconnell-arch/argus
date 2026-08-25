@@ -147,6 +147,31 @@ afterEach(async () => {
 });
 
 describe("investigation exact sharing", () => {
+  it("keeps the header case label stable across saved versions of the same case", () => {
+    const caseId = "aaf133f8-7a13-4df0-ae17-000000000008";
+    const context = (version: number) => ({
+      caseId,
+      reportVersionId: `version-${version}`,
+      version,
+      completenessState: "partial" as const,
+      attestationState: "server_collected" as const,
+      methodologyVersion: "test-v1",
+      createdAt: "2026-08-25T12:00:00.000Z",
+      checks: [],
+    });
+
+    render(investigation({ versionContext: context(8) }));
+    expect(container.querySelector('[aria-label="Case PA-AAF133F87A134DF0AE17"]')?.textContent).toContain(
+      "/ PA-AAF133F87A134DF0AE17",
+    );
+
+    render(investigation({ versionContext: context(9) }));
+    expect(container.querySelector('[aria-label="Case PA-AAF133F87A134DF0AE17"]')?.textContent).toContain(
+      "/ PA-AAF133F87A134DF0AE17",
+    );
+    expect(container.textContent).toContain("saved report v9");
+  });
+
   it("uses fluid report frames instead of a centered fixed-width shell", () => {
     render(investigation());
 

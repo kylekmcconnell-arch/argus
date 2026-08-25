@@ -1478,7 +1478,9 @@ describe("atomic immutable report bundle", () => {
     }
 
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      case_id: "00000000-0000-4000-8000-000000000033",
       report_version_id: reportVersionId,
+      version: 2,
       evidence_count: prepared.evidenceItems.length,
       check_count: prepared.checkRuns.length,
       axis_evidence_count: prepared.axisEvidence.length,
@@ -1504,7 +1506,11 @@ describe("atomic immutable report bundle", () => {
         providerSnapshot: {},
         cost: {},
       },
-    )).resolves.toBe(reportVersionId);
+    )).resolves.toEqual({
+      caseId: "00000000-0000-4000-8000-000000000033",
+      reportVersionId,
+      version: 2,
+    });
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0][0]).toBe(
@@ -1549,7 +1555,9 @@ describe("atomic immutable report bundle", () => {
 
   it("fails closed when the RPC reports child counts that do not match the frozen payload", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      case_id: "00000000-0000-4000-8000-000000000033",
       report_version_id: "00000000-0000-4000-8000-000000000022",
+      version: 2,
       evidence_count: 0,
       check_count: 0,
       axis_evidence_count: 0,
@@ -1576,6 +1584,38 @@ describe("atomic immutable report bundle", () => {
         cost: {},
       },
     )).rejects.toThrow("inconsistent child counts");
+  });
+
+  it("fails closed when the RPC omits the durable case receipt", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      report_version_id: "00000000-0000-4000-8000-000000000022",
+      evidence_count: 1,
+      check_count: 1,
+      axis_evidence_count: 0,
+    }]), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(persistReportVersionBundle(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        kind: "person",
+        canonicalRef: "alice",
+        query: "@alice",
+        createdBy: "00000000-0000-4000-8000-000000000010",
+        payload,
+        checks: payload.checkRuns,
+        runId: "bundle-audit-missing-case",
+        attestationState: "analyst_submitted",
+        verdict: "INCOMPLETE",
+        score: null,
+        completenessState: "partial",
+        methodologyVersion: null,
+        providerSnapshot: {},
+        cost: {},
+      },
+    )).rejects.toThrow("no case receipt");
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
 

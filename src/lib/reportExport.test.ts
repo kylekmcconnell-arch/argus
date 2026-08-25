@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { reportToHtml, reportFilename } from "./reportExport";
+import { publicCaseLabel } from "./caseLabel";
 import { buildReport, SUBJECTS } from "../data/subjects";
 import type { Dossier } from "../data/dossier";
+import type { ReportVersionContext } from "./reportVersion";
 import type { ThreatScan } from "../threat/types";
 import type { TokenDossier } from "../token/audit";
 
@@ -109,6 +111,40 @@ describe("reportToHtml", () => {
     const skipped: Dossier = { ...first, threat: null, threatNote: "No project token could be attributed to this subject." };
     expect(reportToHtml(skipped)).toContain("No project token could be attributed");
     expect(reportToHtml(first)).not.toContain("Project token · threat scan");
+  });
+
+  it("keeps the case label stable across saved versions and prints unique report IDs", () => {
+    const caseId = "aaf133f8-7a13-4df0-ae17-000000000008";
+    const context = (version: number, reportVersionId: string): ReportVersionContext => ({
+      caseId,
+      reportVersionId,
+      version,
+      completenessState: "partial",
+      attestationState: "server_collected",
+      methodologyVersion: "test-v1",
+      createdAt: "2026-08-25T12:00:00.000Z",
+      checks: [],
+    });
+    const v8: Dossier = {
+      ...first,
+      report: { ...first.report, audit_id: "PA-AAF133F87A134DF0AE17" },
+      versionContext: context(8, "version-8"),
+    };
+    const v9: Dossier = {
+      ...first,
+      report: { ...first.report, audit_id: "PA-A74E3B463FCB43C89558" },
+      versionContext: context(9, "version-9"),
+    };
+    const caseLabel = publicCaseLabel(caseId)!;
+    const html8 = reportToHtml(v8);
+    const html9 = reportToHtml(v9);
+
+    expect(html8).toContain(`/ ${caseLabel}`);
+    expect(html9).toContain(`/ ${caseLabel}`);
+    expect(html8).toContain("Report ID PA-AAF133F87A134DF0AE17");
+    expect(html9).toContain("Report ID PA-A74E3B463FCB43C89558");
+    expect(html8).not.toContain("Report ID PA-A74E3B463FCB43C89558");
+    expect(html9).not.toContain("Report ID PA-AAF133F87A134DF0AE17");
   });
 
   it("lists publishable findings when present", () => {

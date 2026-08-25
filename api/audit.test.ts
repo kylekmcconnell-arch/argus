@@ -250,7 +250,11 @@ describe("person audit input guard", () => {
         ],
       },
     } as never);
-    persistReportVersionBundle.mockResolvedValue(reportVersionId);
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId,
+      version: 1,
+    });
     const { res, captured } = response();
 
     await handler(request("argus"), res);
@@ -327,7 +331,11 @@ describe("person audit input guard", () => {
       cost: { schemaVersion: 1, calls: [{ provider: "grok", op: "live-search", calls: 1, usd: 0.1 }] },
     } as never);
     recordProviderUsageBatch.mockRejectedValueOnce(new Error("provider usage batch attribution failed (503)"));
-    persistReportVersionBundle.mockResolvedValue("00000000-0000-4000-8000-000000000302");
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId: "00000000-0000-4000-8000-000000000302",
+      version: 1,
+    });
     const { res, captured } = response();
 
     await handler(request("argus"), res);
@@ -411,7 +419,11 @@ describe("person audit input guard", () => {
       report: { audit_id: "audit-run-observed-empty", composite_verdict: "INCOMPLETE", governing_score: null },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    persistReportVersionBundle.mockResolvedValue(reportVersionId);
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId,
+      version: 1,
+    });
     const { res, captured } = response();
 
     await handler(request("argus"), res);
@@ -461,7 +473,11 @@ describe("person audit input guard", () => {
       },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    persistReportVersionBundle.mockResolvedValue(reportVersionId);
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId,
+      version: 1,
+    });
     const { res, captured } = response();
 
     await handler(request("world_xyz"), res);
@@ -501,7 +517,11 @@ describe("person audit input guard", () => {
       },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    persistReportVersionBundle.mockResolvedValue(reportVersionId);
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId,
+      version: 1,
+    });
     const { res } = response();
 
     await handler(request("partial_founder"), res);
@@ -528,7 +548,11 @@ describe("person audit input guard", () => {
       },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    persistReportVersionBundle.mockResolvedValue(reportVersionId);
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId,
+      version: 1,
+    });
     const { res } = response();
 
     await handler(request("argus"), res);
@@ -568,7 +592,11 @@ describe("person audit input guard", () => {
       graph: { nodes: [{ type: "Person", key: "@argus", subject: true }], edges: [] },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    persistReportVersionBundle.mockResolvedValue(reportVersionId);
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId,
+      version: 1,
+    });
     const { res, captured } = response();
 
     await handler(request("argus"), res);

@@ -546,7 +546,7 @@ async function createImmutableVersion(
   auth: AuthContext,
   row: Record<string, unknown>,
   raw: JsonRecord,
-): Promise<string> {
+): Promise<{ caseId: string; reportVersionId: string; version: number }> {
   const payload = row.payload;
   const payloadRecord = asRecord(payload);
   const qualifiedCompleteness = coverageQualifiedCompleteness({
@@ -554,7 +554,7 @@ async function createImmutableVersion(
     attestation: "analyst_submitted",
     checks: Array.isArray(raw.checkRuns) ? raw.checkRuns : [],
   });
-  const versionId = await persistReportVersionBundle(credentials, {
+  const persisted = await persistReportVersionBundle(credentials, {
     organizationId: auth.organizationId,
     kind: row.kind as "person" | "token" | "investigation" | "site",
     canonicalRef: String(row.ref),
@@ -577,8 +577,8 @@ async function createImmutableVersion(
     providerSnapshot: payloadRecord.providerSnapshot ?? payloadRecord.providers ?? {},
     cost: Object.keys(asRecord(payloadRecord.cost)).length ? asRecord(payloadRecord.cost) : {},
   });
-  await activateReportVersion(credentials, auth.organizationId, versionId);
-  return versionId;
+  await activateReportVersion(credentials, auth.organizationId, persisted.reportVersionId);
+  return persisted;
 }
 
 async function attachServerVersion(
@@ -586,7 +586,7 @@ async function attachServerVersion(
   auth: AuthContext,
   ref: string,
   payload: JsonRecord,
-): Promise<string> {
+): Promise<{ caseId: string; reportVersionId: string; version: number }> {
   const persistence = asRecord(payload.persistence);
   const versionId = typeof persistence.reportVersionId === "string"
     ? persistence.reportVersionId
@@ -594,7 +594,7 @@ async function attachServerVersion(
   if (!versionId) throw new Error("server-attested person report version required");
 
   const versionResponse = await fetch(
-    `${credentials.url}/rest/v1/report_versions?select=id,case_id,payload,attestation_state&id=eq.${encodeURIComponent(versionId)}&organization_id=eq.${encodeURIComponent(auth.organizationId)}&limit=1`,
+    `${credentials.url}/rest/v1/report_versions?select=id,case_id,payload,attestation_state,version&id=eq.${encodeURIComponent(versionId)}&organization_id=eq.${encodeURIComponent(auth.organizationId)}&limit=1`,
     { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
   );
   if (!versionResponse.ok) throw new Error(`server report lookup failed (${versionResponse.status})`);
@@ -603,6 +603,7 @@ async function attachServerVersion(
     case_id?: unknown;
     payload?: unknown;
     attestation_state?: unknown;
+    version?: unknown;
   }>;
   const version = Array.isArray(versions) ? versions[0] : null;
   if (!version || version.attestation_state !== "server_collected") {
@@ -630,6 +631,11 @@ async function attachServerVersion(
   if (typeof storedAuditId !== "string" || storedAuditId !== submittedAuditId) {
     throw new Error("server report content does not match its immutable version");
   }
+  const caseId = typeof version.case_id === "string" ? version.case_id : "";
+  const persistedVersion = typeof version.version === "number" && Number.isSafeInteger(version.version) && version.version > 0
+    ? version.version
+    : 0;
+  if (!caseId || !persistedVersion) throw new Error("server report is missing its case receipt");
   await persistProvenance(
     credentials,
     { organizationId: auth.organizationId, reportVersionId: versionId, attestationState: "server_collected" },
@@ -637,7 +643,7 @@ async function attachServerVersion(
     storedPayload.checkRuns,
   );
   await activateReportVersion(credentials, auth.organizationId, versionId);
-  return versionId;
+  return { caseId, reportVersionId: versionId, version: persistedVersion };
 }
 
 function projection(kind: string, payload: unknown): { verdict: string | null; score: number | null } {
@@ -919,7 +925,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (kind === "person") {
-        const reportVersionId = await attachServerVersion(
+        const persisted = await attachServerVersion(
           credentials,
           auth,
           ref,
@@ -927,7 +933,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         );
         // The server stream already wrote the immutable payload and latest
         // projection. Client re-posts may only attach check outcomes.
-        res.status(200).json({ ok: true, reportVersionId, linked: true });
+        res.status(200).json({
+          ok: true,
+          reportVersionId: persisted.reportVersionId,
+          caseId: persisted.caseId,
+          version: persisted.version,
+          linked: true,
+        });
         return;
       }
 
@@ -963,15 +975,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
 
       if (CASE_KINDS.has(kind)) {
-        row.report_version_id = await createImmutableVersion(credentials, auth, row, body);
-        const reportVersionId = String(row.report_version_id);
-        const panelCostToken = issuePanelCostToken(auth.organizationId, reportVersionId);
+        const persisted = await createImmutableVersion(credentials, auth, row, body);
+        row.report_version_id = persisted.reportVersionId;
+        const panelCostToken = issuePanelCostToken(auth.organizationId, persisted.reportVersionId);
         // The bundle RPC atomically wrote the immutable version and every
         // provenance child before activation. A second parent/provenance write
-        // would reintroduce partial persistence.
+        // would reintroduce partial persistence. caseId/version come from that
+        // same receipt so a rescan can attach the durable case immediately.
         res.status(200).json({
           ok: true,
-          reportVersionId,
+          reportVersionId: persisted.reportVersionId,
+          caseId: persisted.caseId,
+          version: persisted.version,
           ...(materialDelta ? { reportDelta: materialDelta } : {}),
           ...(panelCostToken ? { panelCostToken } : {}),
         });

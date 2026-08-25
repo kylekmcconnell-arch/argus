@@ -15,6 +15,7 @@ const harness = vi.hoisted(() => ({
   reconProps: [] as Array<Record<string, unknown>>,
   reconMounts: 0,
   tokenReports: [] as Array<Record<string, unknown>>,
+  investigationReports: [] as Array<Record<string, unknown>>,
   personReports: [] as Array<Record<string, unknown>>,
   projectViews: [] as Array<Record<string, unknown>>,
   caseBriefTargets: [] as Array<Record<string, unknown>>,
@@ -87,7 +88,17 @@ vi.mock("./components/Report", () => ({
 }));
 
 vi.mock("./components/InvestigationReport", () => ({
-  InvestigationReport: (props: { onAudit: (q: string) => void; onOpenToken: () => void; onOpenProjectAccount: () => void; onOpenBrief?: () => void; onReAudit?: () => void; rescanError?: string | null }) => (
+  InvestigationReport: (props: {
+    inv?: Record<string, unknown>;
+    onAudit: (q: string) => void;
+    onOpenToken: () => void;
+    onOpenProjectAccount: () => void;
+    onOpenBrief?: () => void;
+    onReAudit?: () => void;
+    rescanError?: string | null;
+  }) => {
+    if (props.inv) harness.investigationReports.push(props.inv);
+    return (
     <div data-testid="stored-investigation-report">
       Stored investigation report
       <button data-testid="open-derived-token" onClick={props.onOpenToken}>Open token</button>
@@ -97,7 +108,8 @@ vi.mock("./components/InvestigationReport", () => ({
       {props.onReAudit && <button data-testid="investigation-rescan" onClick={props.onReAudit}>Rescan</button>}
       {props.rescanError && <div role="alert" data-testid="investigation-rescan-error">{props.rescanError}</div>}
     </div>
-  ),
+    );
+  },
 }));
 
 vi.mock("./components/TokenReport", () => ({
@@ -130,6 +142,18 @@ vi.mock("./components/InvestigationRun", () => ({
   InvestigationRun: ({ onDone, onError }: { onDone: (result: Record<string, unknown>, priv: boolean, scanId: string) => void; onError: (message: string) => void }) => (
     <>
       <button data-testid="finish-investigation-run" onClick={() => onDone({ token: { address: "0x5555555555555555555555555555555555555555", symbol: "PRIVATE" }, projectAccount: { handle: "@private_project", report: { audit_id: "private-project-account" } } }, true, "private-investigation-scan")}>Finish investigation run</button>
+      <button data-testid="finish-public-investigation-run" onClick={() => onDone({
+        token: {
+          address: "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3",
+          symbol: "EARN",
+          name: "EARN",
+          verdict: "PASS",
+          score: 80,
+          safety: { available: false, simChecked: false },
+        },
+        projectAccount: null,
+        founderNote: "Live persist",
+      }, false, "public-investigation-scan")}>Finish public investigation run</button>
       <button data-testid="fail-investigation-run" onClick={() => onError("You have no investigation credits left.")}>Fail credits</button>
     </>
   ),
@@ -216,6 +240,20 @@ vi.mock("./lib/reports", () => ({
   storedTokenDossier: (report: { payload: Record<string, unknown>; versionContext?: unknown }) => report.versionContext
     ? { ...report.payload, versionContext: report.versionContext }
     : report.payload,
+  savedVersionContext: (
+    _kind: string,
+    _payload: unknown,
+    receipt: { caseId: string; reportVersionId: string; version: number },
+  ) => ({
+    caseId: receipt.caseId,
+    reportVersionId: receipt.reportVersionId,
+    version: receipt.version,
+    completenessState: "partial",
+    attestationState: "analyst_submitted",
+    methodologyVersion: null,
+    createdAt: "2026-08-25T22:00:00.000Z",
+    checks: [],
+  }),
   syncReport: harness.syncReport,
 }));
 
@@ -344,6 +382,7 @@ beforeEach(() => {
   harness.reconProps.length = 0;
   harness.reconMounts = 0;
   harness.tokenReports.length = 0;
+  harness.investigationReports.length = 0;
   harness.personReports.length = 0;
   harness.projectViews.length = 0;
   harness.caseBriefTargets.length = 0;
@@ -922,10 +961,10 @@ describe("App routing safety", () => {
 
   it("serializes same-token persistence and never lets the older completion replace the newer scan", async () => {
     const address = "0x2222222222222222222222222222222222222222";
-    let resolveFirst!: (value: { state: "persisted"; reportVersionId: string; panelCostToken: string }) => void;
-    let resolveSecond!: (value: { state: "persisted"; reportVersionId: string; panelCostToken: string }) => void;
-    const firstPersistence = new Promise<{ state: "persisted"; reportVersionId: string; panelCostToken: string }>((resolve) => { resolveFirst = resolve; });
-    const secondPersistence = new Promise<{ state: "persisted"; reportVersionId: string; panelCostToken: string }>((resolve) => { resolveSecond = resolve; });
+    let resolveFirst!: (value: { state: "persisted"; caseId: string; version: number; reportVersionId: string; panelCostToken: string }) => void;
+    let resolveSecond!: (value: { state: "persisted"; caseId: string; version: number; reportVersionId: string; panelCostToken: string }) => void;
+    const firstPersistence = new Promise<{ state: "persisted"; caseId: string; version: number; reportVersionId: string; panelCostToken: string }>((resolve) => { resolveFirst = resolve; });
+    const secondPersistence = new Promise<{ state: "persisted"; caseId: string; version: number; reportVersionId: string; panelCostToken: string }>((resolve) => { resolveSecond = resolve; });
     harness.syncReport.mockReset()
       .mockReturnValueOnce(firstPersistence)
       .mockReturnValueOnce(secondPersistence);
@@ -956,7 +995,7 @@ describe("App routing safety", () => {
     }));
 
     await act(async () => {
-      resolveFirst({ state: "persisted", reportVersionId: "version-1", panelCostToken: "panel-1" });
+      resolveFirst({ state: "persisted", caseId: "case-token", version: 1, reportVersionId: "version-1", panelCostToken: "panel-1" });
       await Promise.resolve();
     });
     await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(2));
@@ -969,12 +1008,17 @@ describe("App routing safety", () => {
     }));
 
     await act(async () => {
-      resolveSecond({ state: "persisted", reportVersionId: "version-2", panelCostToken: "panel-2" });
+      resolveSecond({ state: "persisted", caseId: "case-token", version: 2, reportVersionId: "version-2", panelCostToken: "panel-2" });
       await Promise.resolve();
     });
     await vi.waitFor(() => expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
       headline: "second scan",
       persistence: expect.objectContaining({ state: "persisted", scanId: "scan-2", reportVersionId: "version-2" }),
+      versionContext: expect.objectContaining({
+        caseId: "case-token",
+        version: 2,
+        reportVersionId: "version-2",
+      }),
     })));
   });
 
@@ -1012,6 +1056,8 @@ describe("App routing safety", () => {
     const address = "0x6666666666666666666666666666666666666666";
     harness.syncReport.mockResolvedValue({
       state: "persisted",
+      caseId: "00000000-0000-4000-8000-000000000266",
+      version: 1,
       reportVersionId: "00000000-0000-4000-8000-000000000266",
       panelCostToken: "signed-investigation-capability",
     });
@@ -1045,6 +1091,88 @@ describe("App routing safety", () => {
       expect.objectContaining({ team: { names: [] } }),
       "signed-investigation-capability",
     ));
+  });
+
+  it("attaches persist receipt versionContext so a live investigation is immediately a saved report", async () => {
+    const address = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    const candidate = {
+      input: { kind: "token" as const, ref: address, via: "evm" as const },
+      canonicalRef: address,
+      chain: "ethereum",
+      symbol: "EARN",
+      name: "EARN",
+      pairAddress: "pair-earn",
+      liquidityUsd: 100,
+    };
+    harness.landingInput = address;
+    harness.resolveTokenSubject.mockResolvedValue({ state: "resolved", candidate });
+    harness.syncReport.mockResolvedValue({
+      state: "persisted",
+      caseId: "case-earn-live",
+      version: 2,
+      reportVersionId: "rv-earn-v2",
+      panelCostToken: "pct-earn",
+    });
+
+    const view = await renderApp();
+    await submitLanding();
+    expect(view.querySelector("[data-testid='finish-public-investigation-run']")).not.toBeNull();
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='finish-public-investigation-run']")?.click());
+    await settle();
+    expect(harness.investigationReports.at(-1)).toEqual(expect.objectContaining({
+      persistence: expect.objectContaining({ state: "pending", scanId: "public-investigation-scan" }),
+    }));
+    expect(harness.investigationReports.at(-1)?.versionContext).toBeUndefined();
+
+    await act(async () => {
+      harness.scanOnComplete?.({
+        id: "public-investigation-scan",
+        kind: "investigation",
+        priv: false,
+        creditKey: "credit-earn",
+        startedAt: Date.now(),
+        result: {
+          rootRef: address,
+          token: {
+            ...tokenResult(address, "Live persist"),
+            symbol: "EARN",
+            name: "EARN",
+            verdict: "PASS",
+            score: 80,
+          },
+          projectX: null,
+          siteUrl: null,
+          recon: null,
+          projectAccount: null,
+          founders: [],
+          founderNote: "Live persist",
+          deployerTrail: null,
+          webTeam: [],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(harness.investigationReports.at(-1)).toEqual(expect.objectContaining({
+        versionContext: expect.objectContaining({
+          caseId: "case-earn-live",
+          version: 2,
+          reportVersionId: "rv-earn-v2",
+        }),
+      }));
+    });
+    expect(harness.syncReport).toHaveBeenCalledWith(
+      "investigation",
+      address,
+      "$EARN",
+      expect.objectContaining({
+        token: expect.objectContaining({ address }),
+      }),
+      "PASS",
+      80,
+    );
   });
 
   it("retries a failed quick lookup as a quick token audit, not a full investigation", async () => {

@@ -3,10 +3,9 @@ import { runRecon, type Recon } from "../collect/recon";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
 import { ScoreTicker } from "./ScoreTicker";
-import type { ReportKind } from "../lib/reports";
+import { savedVersionContext, syncReport, type ReportKind, type ReportSyncResult } from "../lib/reports";
 import { PrivateToggle } from "./PrivateToggle";
 import { beginScan, endScan } from "../lib/activescans";
-import { syncReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
 import type { WebPerson, WebTeamDiscoveryResult } from "../lib/investigation";
@@ -247,13 +246,18 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
     // Persist before launching paid supplements. /api/report returns a signed,
     // short-lived capability for this exact immutable site version; without it,
     // deep team and X discovery fail closed instead of creating unbound spend.
-    let persistence: ReportPersistenceContext = { state: "failed" };
+    let persistence: ReportSyncResult = { state: "failed", reason: "The website check was not saved." };
     if (r.retrieval.status !== "gap") {
       let host = r.retrieval.url;
       try { host = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
       persistence = await syncReport("site", host, host, { recon: r }, r.verdict?.verdict, r.verdict?.score);
     }
-    if (isCurrent()) setResultPersistence(persistence);
+    if (isCurrent()) {
+      setResultPersistence(persistence);
+      if (persistence.state === "persisted") {
+        setSnapshotContext(savedVersionContext("site", { recon: r }, persistence));
+      }
+    }
 
     // Coverage gaps remain useful activity-log evidence. Successful recon
     // results compound the shared graph only after their immutable save exists.
