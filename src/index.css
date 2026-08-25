@@ -496,11 +496,11 @@
 }
 .decision-score-lockup {
   display: grid;
-  min-width: 156px;
+  min-width: 248px;
   justify-items: center;
-  gap: 5px;
+  gap: 7px;
   border-left: 1px solid var(--color-line);
-  padding: 4px 8px 2px 24px;
+  padding: 6px 12px 4px 32px;
   text-align: center;
 }
 .decision-score-copy {
@@ -562,20 +562,17 @@
   }
   .decision-score-lockup {
     width: 100%;
-    grid-template-columns: auto auto 1fr;
+    grid-template-columns: 1fr;
     align-items: center;
-    justify-items: start;
+    justify-items: center;
     border-top: 1px solid var(--color-line);
     border-left: 0;
     padding: 16px 0 0;
-    text-align: left;
-  }
-  .decision-score-lockup > :first-child {
-    grid-column: 1 / -1;
+    text-align: center;
   }
   .decision-score-copy {
-    justify-items: start;
-    padding-left: 8px;
+    justify-items: center;
+    padding-left: 0;
   }
   .investigation-story-cover::before {
     inset-inline: -8px;
