@@ -55,6 +55,7 @@ import { decisionCriticalChecks, isAdverseFinding, personChecks } from "../lib/s
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { applyReportCheckContract, hasExplicitReportCheckContract } from "../lib/reportCheckContract";
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
+import { reportIdentity } from "../lib/caseLabel";
 import { AddInfo } from "./AddInfo";
 import { ScoreComposition } from "./ScoreComposition";
 import { DimensionChapters } from "./DimensionChapters";
@@ -1850,6 +1851,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       ? ROLE_META[roles[0]]?.label ?? roles[0]
       : "subject";
   const versionContext = f.versionContext ?? f.viewVersionContext;
+  const identity = reportIdentity({ caseId: versionContext?.caseId, auditId: report.audit_id });
+  const caseLabel = identity.caseLabel;
+  const slashLabel = caseLabel ?? identity.reportId;
   const frozenDiligenceChecks = versionContext?.checks ?? f.checkRuns ?? [];
   const identityResolutionCheck = frozenDiligenceChecks.find((check) => check.checkId === "identity-resolution");
   const fullResolvedName = (f.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2;
@@ -2880,7 +2884,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <ArrowLeft aria-hidden="true" size={15} weight="bold" />
             <span className="max-sm:sr-only">New investigation</span>
           </button>
-          <span className="mono hidden text-[11px] text-ink-faint md:inline">/ {report.audit_id}</span>
+          {slashLabel && (
+            <span className="mono hidden text-[11px] text-ink-faint md:inline" aria-label={caseLabel ? `Case ${caseLabel}` : `Report ${slashLabel}`}>
+              / {slashLabel}
+            </span>
+          )}
           {immutableReviewHref ? (
             <a
               className="chip tint-signal"
@@ -3094,6 +3102,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <details className="mt-3 border-t border-line/60 pt-3 text-[11px]">
             <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-dim">Report details</summary>
             <dl className="mt-3 grid gap-3 sm:grid-cols-3" aria-label="Saved report details">
+              {caseLabel && (
+                <div>
+                  <dt className="stat-label">Case</dt>
+                  <dd className="mono mt-1 break-all text-ink-dim">{caseLabel}</dd>
+                </div>
+              )}
               <div>
                 <dt className="stat-label">Report ID</dt>
                 <dd className="mono mt-1 break-all text-ink-dim">{report.audit_id}</dd>

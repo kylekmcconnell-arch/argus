@@ -10,6 +10,7 @@
 // DOM-free so it unit-tests without a browser. The two exporters are thin wrappers.
 import type { Dossier } from "../data/dossier";
 import type { SubjectClass } from "../engine";
+import { publicCaseLabel } from "./caseLabel";
 import { ROLE_META, axisLabel, capLabel } from "./verdict";
 
 /* ── helpers ──────────────────────────────────────────────────────── */
@@ -467,6 +468,8 @@ export interface ReportHtmlOptions {
 // no window - safe to unit-test and to reuse on a server if ever needed.
 export function reportToHtml(d: Dossier, opts: ReportHtmlOptions = {}): string {
   const r = d.report;
+  const caseLabel = publicCaseLabel(d.versionContext?.caseId ?? d.viewVersionContext?.caseId);
+  const headerId = caseLabel ?? r.audit_id;
   const title = opts.docTitle ?? `${d.display_name || d.handle} - ${verdictLabel(r.composite_verdict)} · ARGUS`;
   const stamp = opts.generatedAt ?? "";
   const printScript = opts.autoPrint ? `<script>window.onload=function(){setTimeout(function(){window.print();},120);};</script>` : "";
@@ -481,7 +484,7 @@ ${printScript}
 <body>
   <header class="masthead">
     <span class="brand"><span class="eye">◉</span> ARGUS</span>
-    <span class="id">/ ${esc(r.audit_id)}</span>
+    <span class="id">/ ${esc(headerId)}</span>
     <span class="tag">${d.live ? "LIVE" : "CURATED"} · PRINCIPAL AUDIT</span>
   </header>
   ${subjectBlock(d)}
@@ -500,6 +503,7 @@ ${printScript}
     total rather than averaging into it; the composite is the most severe role band, never a mean. Identity is
     rewarded, not gated. API-only acquisition, evidence-disciplined, reproducible.
     ${stamp ? `<br/>Generated ${esc(stamp)} · ARGUS forensic due-diligence.` : ""}
+    ${caseLabel && r.audit_id ? `<br/>Report ID ${esc(r.audit_id)}` : ""}
   </footer>
 </body></html>`;
 }

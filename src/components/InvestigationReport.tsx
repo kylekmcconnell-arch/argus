@@ -23,6 +23,7 @@ import {
 } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { applyReportCheckContract } from "../lib/reportCheckContract";
+import { publicCaseLabel } from "../lib/caseLabel";
 import { ArkhamName } from "./ArkhamName";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { AddInfo } from "./AddInfo";
@@ -744,6 +745,7 @@ export function InvestigationReport({
   const [watched, setWatched] = useState(() => isWatched(inv.token.address));
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const versionContext = inv.versionContext;
+  const caseLabel = publicCaseLabel(versionContext?.caseId);
   const frozenReportVersionId = versionContext?.reportVersionId
     ?? (inv.persistence?.state === "persisted" ? inv.persistence.reportVersionId : undefined)
     ?? undefined;
@@ -1398,7 +1400,9 @@ export function InvestigationReport({
               <span className="max-sm:sr-only">New investigation</span>
             </button>
           )}
-          <span className="mono hidden text-[11px] text-ink-faint sm:inline">/ token + project report</span>
+          <span className="mono hidden text-[11px] text-ink-faint sm:inline" aria-label={caseLabel ? `Case ${caseLabel}` : undefined}>
+            / {caseLabel ?? "token + project report"}
+          </span>
           <span className={`chip shrink-0 ${versionContext ? "" : "tint-signal"}`}>
             <span className="sm:hidden">{versionContext ? `v${versionContext.version}` : "live"}</span>
             <span className="hidden sm:inline">{versionContext ? `saved report v${versionContext.version}` : "new scan"}</span>

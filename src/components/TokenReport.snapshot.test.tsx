@@ -303,6 +303,9 @@ describe("token report supplemental evidence boundary", () => {
   it("keeps every current-data panel paused on an immutable snapshot until explicit opt-in", () => {
     render(dossier({ versionContext }));
 
+    expect(container.querySelector('[aria-label="Case PA-00000000000040008000"]')?.textContent).toContain(
+      "/ PA-00000000000040008000",
+    );
     expect(container.textContent).toContain("SAVED REPORT v2");
     expect(container.textContent).toContain("This report uses data saved on");
     expect(harness.livePanel).not.toHaveBeenCalled();

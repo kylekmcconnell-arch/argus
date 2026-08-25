@@ -15,6 +15,7 @@ import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness, type DecisionReadiness } from "../lib/decisionReadiness";
 import { applyReportCheckContract, hasExplicitReportCheckContract } from "../lib/reportCheckContract";
+import { publicCaseLabel } from "../lib/caseLabel";
 import {
   coverageQualifiedCompleteness,
   presentPublicReport,
@@ -142,6 +143,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const arkhamEnabled = arkhamProviderEnabled();
   const arkhamDeployer = arkhamEnabled && d.deployer && !sameWalletAddress(d.deployer, d.address) ? d.deployer : null;
   const versionContext = d.versionContext ?? d.viewVersionContext;
+  const caseLabel = publicCaseLabel(versionContext?.caseId);
   const embeddedFacet = Boolean(d.viewVersionContext || d.viewPersistence);
   const livePersistence = d.viewPersistence ?? d.persistence;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
@@ -349,7 +351,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             <ArrowLeft size={15} weight="bold" aria-hidden="true" />
             New investigation
           </button>
-          <span className="mono text-[11px] text-ink-faint">/ token report</span>
+          <span className="mono text-[11px] text-ink-faint" aria-label={caseLabel ? `Case ${caseLabel}` : undefined}>
+            / {caseLabel ?? "token report"}
+          </span>
           <span className={`chip ${versionContext ? "" : "tint-signal"}`}>
             {versionContext ? `saved report v${versionContext.version}` : "new scan"}
           </span>
