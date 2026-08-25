@@ -28,7 +28,7 @@ vi.mock("./_provenance.js", () => ({
 
 import { requireArgusAuth } from "./_auth.js";
 import { activateReportVersion } from "./_provenance.js";
-import handler from "./report";
+import handler, { reportSearchParams } from "./report";
 
 interface CapturedResponse {
   statusCode: number;
@@ -48,11 +48,14 @@ function response(): { res: VercelResponse; captured: CapturedResponse } {
 
 function request(
   method: string,
-  options: { query?: Record<string, string>; body?: unknown } = {},
+  options: { query?: Record<string, string>; url?: string; body?: unknown } = {},
 ): VercelRequest {
+  const query = options.query ?? {};
+  const search = new URLSearchParams(query).toString();
   return {
     method,
-    query: options.query ?? {},
+    url: options.url ?? (search ? `/api/report?${search}` : "/api/report"),
+    query,
     body: options.body,
     headers: {},
   } as unknown as VercelRequest;
@@ -651,5 +654,48 @@ describe("report case lifecycle API", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(captured.statusCode).toBe(409);
     expect(captured.body).toMatchObject({ error: "case_subject_ambiguous" });
+  });
+
+  it("follows WHATWG request-URL flags even when a stubbed query object disagrees", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([{
+      case_id: "00000000-0000-4000-8000-000000000101",
+      subject_kind: "token",
+      subject_ref: "0xabc",
+      display_query: "$ABC",
+      case_status: "open",
+    }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("GET", {
+      url: "/api/report?resolve=%24ABC",
+      query: { spend: "1" },
+    }), res);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://database.example/rest/v1/rpc/resolve_case_subject");
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toMatchObject({ available: true });
+  });
+
+  it("treats a malformed request URL as an empty query instead of throwing", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("GET", { url: "http://%" }), res);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(captured.statusCode).toBe(400);
+    expect(captured.body).toEqual({ error: "ref_required" });
+  });
+});
+
+describe("reportSearchParams", () => {
+  it("reads search flags from the request URL without using url.parse", () => {
+    expect(reportSearchParams({ url: "/api/report?list&status=archived" }).get("status")).toBe("archived");
+    expect(reportSearchParams({ url: "/api/report?list&status=archived" }).has("list")).toBe(true);
+    expect(reportSearchParams({ url: "/api/report" }).has("list")).toBe(false);
+    expect([...reportSearchParams({ url: "http://%" }).keys()]).toEqual([]);
   });
 });

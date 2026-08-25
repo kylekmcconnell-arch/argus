@@ -677,8 +677,27 @@ function payloadRef(kind: string, payload: unknown): string | null {
   return null;
 }
 
+/**
+ * Read /api/report flags from the request URL with the WHATWG URL API.
+ * Avoids Node's deprecated `url.parse()` path used to populate `req.query`.
+ */
+export function reportSearchParams(req: Pick<VercelRequest, "url">): URLSearchParams {
+  const rawUrl = typeof req.url === "string" ? req.url : "";
+  if (!rawUrl) return new URLSearchParams();
+  try {
+    return new URL(rawUrl, "http://argus.local").searchParams;
+  } catch {
+    return new URLSearchParams();
+  }
+}
+
+function queryString(params: URLSearchParams, key: string): string {
+  return params.get(key) ?? "";
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const requestedDeleteKind = typeof req.query.kind === "string" ? req.query.kind : "";
+  const query = reportSearchParams(req);
+  const requestedDeleteKind = queryString(query, "kind");
   const minimumRole = req.method === "PATCH"
     ? "owner"
     : req.method === "DELETE"
@@ -697,9 +716,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (req.method === "GET") {
-      if (req.query.versionId != null) {
-        const reportVersionId = typeof req.query.versionId === "string" && UUID.test(req.query.versionId)
-          ? req.query.versionId
+      if (query.has("versionId")) {
+        const reportVersionId = UUID.test(queryString(query, "versionId"))
+          ? queryString(query, "versionId")
           : "";
         if (!reportVersionId) {
           res.status(400).json({ error: "valid_report_version_id_required" });
@@ -713,7 +732,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json({ available: true, ...exact });
         return;
       }
-      if (req.query.spend != null) {
+      if (query.has("spend")) {
         // Spend truth lives in the append-only usage event stream: it carries
         // the run ledger recorded at persist time AND follow-up panel spend,
         // each stamped when the money was actually spent. report_versions
@@ -763,8 +782,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         return;
       }
-      if (req.query.resolve != null) {
-        const input = typeof req.query.resolve === "string" ? req.query.resolve.trim() : "";
+      if (query.has("resolve")) {
+        const input = queryString(query, "resolve").trim();
         if (!input || input.length > 500) {
           res.status(400).json({ error: "valid_case_input_required" });
           return;
@@ -774,8 +793,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
-      if (req.query.list != null) {
-        const requestedStatus = typeof req.query.status === "string" ? req.query.status : "open";
+      if (query.has("list")) {
+        const requestedStatus = query.has("status") ? queryString(query, "status") : "open";
         if (requestedStatus !== "open" && requestedStatus !== "archived") {
           res.status(400).json({ error: "invalid_report_status" });
           return;
@@ -811,7 +830,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
-      if (req.query.watches != null) {
+      if (query.has("watches")) {
         const response = await fetch(
           `${credentials.url}/rest/v1/${TABLE}?select=ref,payload,ts&${orgFilter}&kind=eq.watch&order=ts.desc&limit=100`,
           { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
@@ -825,12 +844,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
-      const rawRef = typeof req.query.ref === "string" ? req.query.ref.trim() : "";
+      const rawRef = queryString(query, "ref").trim();
       if (!rawRef) {
         res.status(400).json({ error: "ref_required" });
         return;
       }
-      const requestedKind = typeof req.query.kind === "string" ? req.query.kind : "";
+      const requestedKind = queryString(query, "kind");
       if (requestedKind && !STORED_KINDS.has(requestedKind)) {
         res.status(400).json({ error: "invalid_kind" });
         return;
@@ -997,12 +1016,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === "DELETE") {
-      const ref = normRef(typeof req.query.ref === "string" ? req.query.ref : "");
+      const ref = normRef(queryString(query, "ref"));
       if (!ref) {
         res.status(400).json({ error: "ref_required" });
         return;
       }
-      const requestedKind = typeof req.query.kind === "string" ? req.query.kind : "";
+      const requestedKind = queryString(query, "kind");
       if (requestedKind && !STORED_KINDS.has(requestedKind)) {
         res.status(400).json({ error: "invalid_kind" });
         return;
