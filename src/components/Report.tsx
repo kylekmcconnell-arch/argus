@@ -4498,9 +4498,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           {(visibleGraphEdges.length > 0 || (showTrustGraphSupplemental && connections.length > 0)) && (
             <div className="min-w-0 lg:col-span-2">
-              <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">
+              <Section title="Connection web" kicker="select a node to inspect it · subject → projects → the people behind them">
                 <Card className="p-2">
-                  <TrustGraph nodes={visibleGraphNodes} edges={visibleGraphEdges} connections={showTrustGraphSupplemental ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} />
+                  <TrustGraph nodes={visibleGraphNodes} edges={visibleGraphEdges} connections={showTrustGraphSupplemental ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} panelCostToken={panelCostToken} />
                 </Card>
               </Section>
             </div>

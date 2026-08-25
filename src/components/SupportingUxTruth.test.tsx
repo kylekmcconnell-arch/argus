@@ -122,7 +122,7 @@ describe("supporting-page truth states", () => {
     expect(container.textContent).not.toContain("Healthy");
   });
 
-  it("gives actionable graph nodes a keyboard path and a readable equivalent", () => {
+  it("gives graph nodes a keyboard select path and a visible readable ledger", () => {
     const html = renderToStaticMarkup(
       <TrustGraph
         nodes={[
@@ -136,9 +136,10 @@ describe("supporting-page truth states", () => {
 
     expect(html).toContain('role="button"');
     expect(html).toContain('tabindex="0"');
-    expect(html).toContain("Open @peer");
-    expect(html).toContain("Readable connection list");
+    expect(html).toContain("Select @peer");
+    expect(html).toContain("Recorded connections");
     expect(html).toContain("is associated with");
+    expect(html).toContain("open →");
   });
 
   it("does not label a large token holder as a contradicted relationship", () => {

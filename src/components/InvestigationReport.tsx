@@ -2429,8 +2429,8 @@ export function InvestigationReport({
               title="How these people and wallets connect"
               description="The graph shows recorded links. A link by itself does not mean wrongdoing."
             />
-            <Card title="Connection map · select a person, wallet, or project to open it">
-              <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={showCurrentIntelligence ? connections : []} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
+            <Card title="Connection map · select a person, wallet, or project to inspect it">
+              <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={showCurrentIntelligence ? connections : []} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} panelCostToken={panelCostToken} />
             </Card>
           </div>
         )}

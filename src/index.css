@@ -1575,6 +1575,52 @@ h1.display-sm {
   animation: rise-in 0.24s ease-out both;
 }
 
+.trust-graph-stage {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: min(68vh, 640px);
+  background:
+    radial-gradient(ellipse at 50% 48%, color-mix(in oklab, var(--color-signal) 8%, transparent), transparent 42%),
+    var(--color-panel);
+  border: 1px solid color-mix(in oklab, var(--color-line) 80%, transparent);
+  border-radius: var(--radius-lg);
+}
+[data-trust-graph-sparse="true"] .trust-graph-stage {
+  max-height: min(52vh, 460px);
+}
+@keyframes trust-graph-node-in {
+  from { opacity: 0; transform: scale(0.78); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes trust-graph-edge-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes trust-graph-halo {
+  0%, 100% { opacity: 0.18; }
+  50% { opacity: 0.4; }
+}
+[data-trust-graph-motion="enter"] .trust-graph-node {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: trust-graph-node-in 560ms var(--ease-premium) both;
+}
+[data-trust-graph-motion="enter"] .trust-graph-edge {
+  animation: trust-graph-edge-in 640ms var(--ease-premium) both;
+}
+[data-trust-graph-motion="enter"] .trust-graph-halo,
+[data-trust-graph-motion="done"] .trust-graph-halo {
+  animation: trust-graph-halo 2.8s ease-in-out infinite;
+}
+[data-trust-graph-motion="static"] .trust-graph-node,
+[data-trust-graph-motion="done"] .trust-graph-node,
+[data-trust-graph-motion="static"] .trust-graph-edge,
+[data-trust-graph-motion="done"] .trust-graph-edge {
+  opacity: 1;
+  transform: none;
+}
+
 .scan-line {
   background: linear-gradient(90deg, transparent, var(--color-signal), transparent);
 }
@@ -1729,6 +1775,9 @@ h1.display-sm {
   :where(.animate-bounce, .animate-ping, .animate-pulse, .animate-spin) { animation: none !important; }
   .scores-marquee { animation: none; }
   .rise-in { animation: none; }
+  .trust-graph-node,
+  .trust-graph-edge,
+  .trust-graph-halo { animation: none !important; transform: none; }
   .sweep { animation: none; }
   .scan-bar::after { animation: none; width: 100%; opacity: 0.4; }
   .pulse-ring::after { animation: none; opacity: 0; }
