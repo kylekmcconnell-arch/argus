@@ -45,6 +45,20 @@ const streamedResponse = (
 
 const SHELL = '<div id="root"></div><script type="module" src="/app.js"></script>';
 
+const failedOfficialRecovery = () => ({
+  status: "failed" as const,
+  reason: "reader_recovery_failed_http_403",
+});
+
+const earnOmnipoolPage = [
+  "Title: EARN on Robinhood chain",
+  "URL Source: https://earnonhood.com/",
+  "Markdown Content:",
+  "EARN on Robinhood chain omnipool. Deposit, withdraw, staking, and the live dashboard.",
+  "Connect wallet to use the explorer, docs, and product features on the official site.",
+  "Operational product information. ".repeat(16),
+].join("\n");
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -94,10 +108,11 @@ describe("checkSiteSubstance attribution", () => {
 
   it.each([401, 403, 429])("classifies HTTP %i as access blocked, never unreachable", async (status) => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(response("request denied", status)));
+    const recoverOfficialText = vi.fn(async () => failedOfficialRecovery());
     vi.stubGlobal("fetch", fetchMock);
 
     const captured = await withCostLedger(async () => ({
-      result: await checkSiteSubstance("example.org"),
+      result: await checkSiteSubstance("example.org", { recoverOfficialText }),
       cost: getCost(),
     }));
 
@@ -106,22 +121,24 @@ describe("checkSiteSubstance attribution", () => {
       reason: status === 429 ? "rate_limit" : "http_access",
     });
     expect(captured.result?.detail).toContain(`HTTP ${status}`);
+    expect(recoverOfficialText).toHaveBeenCalledTimes(status === 403 ? 1 : 0);
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "site-fetch",
       op: "substance",
-      calls: status === 403 ? 4 : 2,
-      partial: status === 403 ? 4 : 2,
+      calls: status === 403 ? 5 : 2,
+      partial: status === 403 ? 5 : 2,
       failed: 0,
       meta: expect.stringContaining(`http_${status}_access_blocked`),
     }));
   });
 
-  it("keeps a confirmed earnonhood.com HTTP 403 as access blocked after the bounded retry, never live", async () => {
+  it("keeps a confirmed earnonhood.com HTTP 403 as access blocked when official-site reader recovery also fails", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(response("request denied", 403)));
+    const recoverOfficialText = vi.fn(async () => failedOfficialRecovery());
     vi.stubGlobal("fetch", fetchMock);
 
     const captured = await withCostLedger(async () => ({
-      result: await checkSiteSubstance("earnonhood.com"),
+      result: await checkSiteSubstance("earnonhood.com", { recoverOfficialText }),
       cost: getCost(),
     }));
 
@@ -131,7 +148,8 @@ describe("checkSiteSubstance attribution", () => {
       detail: expect.stringContaining("HTTP 403"),
     });
     expect(captured.result?.status).not.toBe("live");
-    expect(captured.result?.detail).not.toMatch(/live site|Dashboard|docs/i);
+    expect(captured.result?.retrievalMethod).toBeUndefined();
+    expect(captured.result?.detail).not.toMatch(/live site|Dashboard|docs|reader recovery/i);
     expect(officialSiteAccessDeniedFinding("earnonhood.com")).toContain("could not read the page");
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       "https://earnonhood.com",
@@ -139,6 +157,8 @@ describe("checkSiteSubstance attribution", () => {
       "https://www.earnonhood.com",
       "https://www.earnonhood.com",
     ]);
+    expect(recoverOfficialText).toHaveBeenCalledTimes(1);
+    expect(recoverOfficialText).toHaveBeenCalledWith("https://earnonhood.com");
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "site-fetch",
       op: "substance",
@@ -149,6 +169,84 @@ describe("checkSiteSubstance attribution", () => {
       op: "substance",
       meta: expect.stringContaining("http_403_access_blocked"),
     }));
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "site-fetch",
+      op: "substance",
+      meta: expect.stringContaining("reader_recovery_failed_http_403"),
+    }));
+  });
+
+  it("classifies the official EARN page after a confirmed HTTP 403 when bounded reader recovery succeeds", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(response("Cloudflare", 403)));
+    const recoverOfficialText = vi.fn(async (url: string) => ({
+      status: "ok" as const,
+      url,
+      host: "earnonhood.com",
+      contentType: "text/plain",
+      text: earnOmnipoolPage,
+      contentHash: "earn-recovered",
+      capturedAt: "2026-08-25T08:00:00.000Z",
+      retrievalMethod: "reader_recovery" as const,
+      retrievalProvider: "jina-reader" as const,
+      retrievalUrl: `https://r.jina.ai/${url}`,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captured = await withCostLedger(async () => ({
+      result: await checkSiteSubstance("earnonhood.com", { recoverOfficialText }),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toMatchObject({
+      url: "https://earnonhood.com",
+      status: "live",
+      retrievalMethod: "reader_recovery",
+      detail: expect.stringMatching(/EARN on Robinhood chain/i),
+    });
+    expect(captured.result?.detail).toContain("same official site");
+    expect(captured.result?.detail).not.toMatch(/r\.jina\.ai|independent source/i);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://earnonhood.com",
+      "https://earnonhood.com",
+      "https://www.earnonhood.com",
+      "https://www.earnonhood.com",
+    ]);
+    expect(recoverOfficialText).toHaveBeenCalledTimes(1);
+    expect(recoverOfficialText).toHaveBeenCalledWith("https://earnonhood.com");
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "site-fetch",
+      op: "substance",
+      meta: expect.stringContaining("reader_recovery_after_http_403"),
+      succeeded: 1,
+    }));
+  });
+
+  it("keeps a confirmed HTTP 403 access-denied when reader recovery returns an anti-bot challenge", async () => {
+    const recoverOfficialText = vi.fn(async (url: string) => ({
+      status: "ok" as const,
+      url,
+      host: "example.org",
+      contentType: "text/plain",
+      text: [
+        "Title: Just a moment...",
+        "URL Source: https://example.org/",
+        "Markdown Content:",
+        "Enable JavaScript and cookies to continue",
+      ].join("\n"),
+      contentHash: "challenge",
+      capturedAt: "2026-08-25T08:00:00.000Z",
+      retrievalMethod: "reader_recovery" as const,
+      retrievalProvider: "jina-reader" as const,
+      retrievalUrl: `https://r.jina.ai/${url}`,
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(response("denied", 403))));
+
+    await expect(checkSiteSubstance("example.org", { recoverOfficialText })).resolves.toMatchObject({
+      status: "access_blocked",
+      reason: "http_access",
+      detail: expect.stringContaining("HTTP 403"),
+    });
+    expect(recoverOfficialText).toHaveBeenCalledTimes(1);
   });
 
   it("recovers when a public project site returns one transient HTTP 403", async () => {

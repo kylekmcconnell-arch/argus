@@ -137,8 +137,12 @@ Cloudflare page, or other anti-bot response is an access gap, never evidence tha
 site or product is dead. Only a directly served parked or explicit coming-soon page
 can support that conclusion. Site checks may retry one transient `403` against the
 same URL. A retry only marks the site live when it receives a real successful
-page. A confirmed repeated `403`, or an equivalent hard access denial (`401` or
-anti-bot), completes the required website-substance check as a finished
+page. After a confirmed repeated `403`, site checks try the bounded safe reader
+once against the official URL. Recovered bytes are the same official site, never
+an independent source, and may be classified live, coming-soon, or parked by the
+same served-page rules as a direct read. If recovery fails or returns an
+anti-bot challenge, a confirmed `403` or an equivalent hard access denial
+(`401` or anti-bot) completes the required website-substance check as a finished
 access-denied result: ARGUS could not read the page. That result never invents
 page content, never raises the score, and never supports an adverse
 site-activity conclusion. A `429` remains an open rate-limit gap, not a

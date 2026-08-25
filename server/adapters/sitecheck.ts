@@ -4,7 +4,12 @@
 // Only a parked page or explicit coming-soon page served by the domain can
 // support a SiteNotLive finding downstream.
 import { recordCall } from "../cost";
-import { antiBotChallengeBody } from "../publicWeb";
+import {
+  antiBotChallengeBody,
+  bodyLooksLikeAntiBotChallenge,
+  fetchPublicTextWithRecovery,
+  type PublicTextWithRecoveryResult,
+} from "../publicWeb";
 
 export type SiteSubstanceStatus =
   | "live"
@@ -32,6 +37,14 @@ export interface SiteSubstance {
   detail: string;
   /** Machine-readable attribution. Coming-soon reasons are verified markers. */
   reason?: SiteSubstanceReason;
+  /** How official-page bytes were obtained. Reader recovery is the same official site, not an independent source. */
+  retrievalMethod?: "direct" | "reader_recovery";
+}
+
+export type RecoverOfficialSiteText = (url: string) => Promise<PublicTextWithRecoveryResult>;
+
+export interface SiteCheckDependencies {
+  recoverOfficialText?: RecoverOfficialSiteText;
 }
 
 const COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*soon|join[\s_-]*(the[\s_-]*)?waitlist|\bwaitlist\b|early[\s_-]*access|get[\s_-]*notified|notify[\s_-]*me|be[\s_-]*the[\s_-]*first|request[\s_-]*access|sign[\s_-]*up[\s_-]*for[\s_-]*(early[\s_-]*)?access/i;
@@ -50,7 +63,13 @@ const BUNDLE_MARKER = /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i;
 const BUNDLE_READ_CAP_BYTES = 512 * 1024;
 const BUNDLE_READ_CAP_LABEL = "512 KB";
 
-type PageSuccess = { kind: "page"; url: string; html: string; truncated: boolean };
+type PageSuccess = {
+  kind: "page";
+  url: string;
+  html: string;
+  truncated: boolean;
+  retrievalMethod?: "direct" | "reader_recovery";
+};
 type PageFailure = { kind: "failure" } & SiteSubstance;
 type PageResult = PageSuccess | PageFailure;
 
@@ -90,6 +109,34 @@ export function isConfirmedOfficialSiteAccessDenial(site: Pick<SiteSubstance, "s
   if (site.reason === "rate_limit") return false;
   if (/\bHTTP 429\b/i.test(site.detail) || /\brate-limited\b/i.test(site.detail)) return false;
   return site.reason === "anti_bot" || site.reason === "http_access" || site.reason === undefined;
+}
+
+function isConfirmedOfficialSiteHttp403(site: Pick<SiteSubstance, "status" | "reason" | "detail">): boolean {
+  return site.status === "access_blocked"
+    && site.reason === "http_access"
+    && /\bHTTP 403\b/i.test(site.detail);
+}
+
+function sameOfficialHost(candidate: string, official: string): boolean {
+  try {
+    const left = new URL(candidate).hostname.replace(/^www\./i, "").toLowerCase();
+    const right = new URL(official).hostname.replace(/^www\./i, "").toLowerCase();
+    return Boolean(left) && left === right;
+  } catch {
+    return false;
+  }
+}
+
+function pageTitle(html: string): string {
+  const markup = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  if (markup) return markup.replace(/\s+/g, " ").trim();
+  return html.match(/^Title:\s*(.+)$/m)?.[1].replace(/\s+/g, " ").trim() ?? "";
+}
+
+function withOfficialReaderRecovery(detail: string, method?: "direct" | "reader_recovery"): string {
+  return method === "reader_recovery"
+    ? `${detail}; recovered through the bounded reader of the same official site`
+    : detail;
 }
 
 function isAntiBotResponse(response: Response, body: string): boolean {
@@ -320,29 +367,44 @@ function metaContent(html: string, name: string): string {
   return html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${escaped}["']`, "i"))?.[1] ?? "";
 }
 
-export async function checkSiteSubstance(domain: string): Promise<SiteSubstance | null> {
-  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase().trim();
-  if (!d || !/\.[a-z]{2,}$/i.test(d)) return null;
-
-  const candidates = d.startsWith("www.")
-    ? [`https://${d}`, `https://${d.slice(4)}`]
-    : [`https://${d}`, `https://www.${d}`];
-  const failures: PageFailure[] = [];
-  let page: PageSuccess | undefined;
-  for (const candidate of candidates) {
-    const result = await get(candidate);
-    if (result.kind === "page") {
-      page = result;
-      break;
-    }
-    failures.push(result);
+async function recoverOfficialSitePage(
+  officialUrl: string,
+  recoverOfficialText: RecoverOfficialSiteText,
+): Promise<PageSuccess | null> {
+  const recovered = await recoverOfficialText(officialUrl);
+  if (recovered.status !== "ok") {
+    recordCall("site-fetch", "substance", 0, recovered.reason || "reader_recovery_failed", "partial");
+    return null;
   }
-  if (!page) return failedSiteResult(d, failures);
+  if (!sameOfficialHost(recovered.url, officialUrl)) {
+    recordCall("site-fetch", "substance", 0, "reader_recovery_offsite", "partial");
+    return null;
+  }
+  if (bodyLooksLikeAntiBotChallenge(recovered.text) || antiBotChallengeBody(recovered.contentType, recovered.text)) {
+    recordCall("site-fetch", "substance", 0, "reader_anti_bot_challenge", "partial");
+    return null;
+  }
+  if (!recovered.text.trim()) {
+    recordCall("site-fetch", "substance", 0, "reader_recovery_empty_body", "partial");
+    return null;
+  }
+  recordCall("site-fetch", "substance", 0, "reader_recovery_after_http_403", "succeeded");
+  return {
+    kind: "page",
+    // Citations stay on the official URL. Reader recovery is not a second source.
+    url: officialUrl,
+    html: recovered.text,
+    truncated: false,
+    retrievalMethod: "reader_recovery",
+  };
+}
 
+async function classifyServedPage(page: PageSuccess): Promise<SiteSubstance> {
   const meta = metaContent(page.html, "description");
-  const title = page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1].replace(/\s+/g, " ").trim() ?? "";
+  const title = pageTitle(page.html);
   const body = stripText(page.html);
   const hasSubstantialProductSurface = body.length >= 400 && PRODUCT.test(body);
+  const retrievalMethod = page.retrievalMethod;
 
   // Registrar parking / for-sale pages are direct served-page evidence.
   if (PARKED.test(page.html)) {
@@ -350,7 +412,11 @@ export async function checkSiteSubstance(domain: string): Promise<SiteSubstance 
       url: page.url,
       status: "coming_soon",
       reason: "parked",
-      detail: "the served homepage is a registrar parking or domain-for-sale page",
+      retrievalMethod,
+      detail: withOfficialReaderRecovery(
+        "the served homepage is a registrar parking or domain-for-sale page",
+        retrievalMethod,
+      ),
     };
   }
 
@@ -367,12 +433,22 @@ export async function checkSiteSubstance(domain: string): Promise<SiteSubstance 
       url: page.url,
       status: "coming_soon",
       reason: "coming_soon",
-      detail: `the served homepage explicitly presents a coming-soon or waitlist surface ("${excerpt.slice(0, 80)}")`,
+      retrievalMethod,
+      detail: withOfficialReaderRecovery(
+        `the served homepage explicitly presents a coming-soon or waitlist surface ("${excerpt.slice(0, 80)}")`,
+        retrievalMethod,
+      ),
     };
   }
 
   if (hasSubstantialProductSurface) {
-    return { url: page.url, status: "live", detail: `live site${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
+    const excerpt = meta || (retrievalMethod === "reader_recovery" ? title : "");
+    return {
+      url: page.url,
+      status: "live",
+      retrievalMethod,
+      detail: withOfficialReaderRecovery(`live site${excerpt ? `: "${excerpt.slice(0, 80)}"` : ""}`, retrievalMethod),
+    };
   }
 
   // A static shell proves a web app is served, but not which route or component
@@ -397,18 +473,63 @@ export async function checkSiteSubstance(domain: string): Promise<SiteSubstance 
     return {
       url: page.url,
       status: "client_rendered",
-      detail: bundleHint
+      retrievalMethod,
+      detail: withOfficialReaderRecovery(bundleHint
         ? "client-rendered app; its bundle contains an unrendered coming-soon string, which is not treated as homepage liveness evidence"
         // A capped read that found no marker did not reach the marker. It must
         // never harden into "the bundle declares nothing", which is the shape a
         // silent miss would take once it reaches the report.
         : bundleReadCapped
           ? `client-rendered app; static read could not confirm a product surface${quoteNote}; its script bundles were read only up to ${BUNDLE_READ_CAP_LABEL}, so no coming-soon marker was reached rather than shown to be absent`
-          : `client-rendered app; static read could not confirm a product surface${quoteNote}`,
+          : `client-rendered app; static read could not confirm a product surface${quoteNote}`, retrievalMethod),
     };
   }
 
   // Some content, no clear product surface: the host served a normal page and
   // no explicit adverse liveness evidence was observed.
-  return { url: page.url, status: "live", detail: `site is up${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
+  const excerpt = meta || (retrievalMethod === "reader_recovery" ? title : "");
+  return {
+    url: page.url,
+    status: "live",
+    retrievalMethod,
+    detail: withOfficialReaderRecovery(`site is up${excerpt ? `: "${excerpt.slice(0, 80)}"` : ""}`, retrievalMethod),
+  };
+}
+
+export async function checkSiteSubstance(
+  domain: string,
+  dependencies: SiteCheckDependencies = {},
+): Promise<SiteSubstance | null> {
+  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase().trim();
+  if (!d || !/\.[a-z]{2,}$/i.test(d)) return null;
+
+  const candidates = d.startsWith("www.")
+    ? [`https://${d}`, `https://${d.slice(4)}`]
+    : [`https://${d}`, `https://www.${d}`];
+  const failures: PageFailure[] = [];
+  let page: PageSuccess | undefined;
+  for (const candidate of candidates) {
+    const result = await get(candidate);
+    if (result.kind === "page") {
+      page = result;
+      break;
+    }
+    failures.push(result);
+  }
+  if (!page) {
+    const pending = failedSiteResult(d, failures);
+    // After the one-shot same-origin 403 retry, try the existing publicWeb
+    // recovery once against the official URL. 429, 401, and anti-bot denials
+    // stay on today's finished or open access-gap paths.
+    if (isConfirmedOfficialSiteHttp403(pending)) {
+      const recovered = await recoverOfficialSitePage(
+        pending.url,
+        dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery,
+      );
+      if (recovered) page = recovered;
+    }
+    if (!page) return pending;
+  }
+
+  return classifyServedPage(page);
 }
