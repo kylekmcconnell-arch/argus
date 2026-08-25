@@ -1,5 +1,5 @@
 export type SocialActivityState = "complete" | "partial" | "unavailable";
-export type SocialActivityIncompleteReason = "post_limit" | "provider_error" | "pagination_incomplete";
+export type SocialActivityIncompleteReason = "post_limit" | "provider_error" | "pagination_incomplete" | "time_budget";
 
 export interface SocialActivityWindow {
   start: string;

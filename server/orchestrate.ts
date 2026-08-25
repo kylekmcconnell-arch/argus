@@ -60,6 +60,7 @@ import {
   ANALYST_FINALIZATION_RESERVE_MS,
   COLLECTION_ANALYST_RESERVE_MS,
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
+  SOCIAL_ACTIVITY_BUDGET_MS,
   TRUST_GRAPH_SCREEN_RESERVE_MS,
 } from "../src/lib/investigationRuntime";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
@@ -4106,25 +4107,40 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes(SubjectClass.PROJECT)) {
     const socialStageStartedAt = startRuntimeStage("social-activity");
-    evidence.socialActivity = await collectSocialActivity({
-      handle: evidence.profile.handle,
-      ticker: evidence.projectToken?.symbol ?? ctx.tokenSymbol,
-      projectName: evidence.projectToken?.name ?? evidence.profile.display_name,
-    });
-    const social = evidence.socialActivity;
-    emit({
-      phase: "Research",
-      label: social.state === "complete"
-        ? "Social activity captured"
-        : social.state === "partial"
-          ? "Social activity partly captured"
-          : "Social activity unavailable",
-      detail: social.state === "complete"
-        ? `${social.windows.last7Days.uniqueAccounts?.toLocaleString() ?? 0} unique public X accounts matched the project over seven days.`
-        : social.note,
-      source: "X API v2",
-      tone: social.state === "complete" ? "neutral" : "warn",
-    });
+    // Social activity is enrichment. An unbounded 5,000-post collect can burn
+    // the remaining scan and skip connection screening. Do not start it after
+    // the collection deadline; otherwise time-box it so required checks finish.
+    if (collectionOverBudget()) {
+      emit({
+        phase: "Research",
+        label: "Social activity skipped",
+        detail: "Collection time budget reached; skipped social activity so required checks can finish.",
+        source: "X API v2",
+        tone: "warn",
+      });
+    } else {
+      evidence.socialActivity = await collectSocialActivity({
+        handle: evidence.profile.handle,
+        ticker: evidence.projectToken?.symbol ?? ctx.tokenSymbol,
+        projectName: evidence.projectToken?.name ?? evidence.profile.display_name,
+      }, {
+        deadlineAt: Math.min(Date.now() + SOCIAL_ACTIVITY_BUDGET_MS, collectionDeadlineAt),
+      });
+      const social = evidence.socialActivity;
+      emit({
+        phase: "Research",
+        label: social.state === "complete"
+          ? "Social activity captured"
+          : social.state === "partial"
+            ? "Social activity partly captured"
+            : "Social activity unavailable",
+        detail: social.state === "complete"
+          ? `${social.windows.last7Days.uniqueAccounts?.toLocaleString() ?? 0} unique public X accounts matched the project over seven days.`
+          : social.note,
+        source: "X API v2",
+        tone: social.state === "complete" ? "neutral" : "warn",
+      });
+    }
     finishRuntimeStage("social-activity", socialStageStartedAt);
   }
   // AFTER the roles are updated, never before. The hydration bails unless

@@ -7591,6 +7591,7 @@ var ANALYST_REPAIR_TIMEOUT_MS = 9e4;
 var ANALYST_FINALIZATION_RESERVE_MS = 9e4;
 var COLLECTION_ANALYST_RESERVE_MS = 25e4;
 var TRUST_GRAPH_SCREEN_RESERVE_MS = 6e4;
+var SOCIAL_ACTIVITY_BUDGET_MS = 45e3;
 
 // server/agent.ts
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -31535,6 +31536,20 @@ function safeProjectName(value) {
   const name = value?.replace(/["\\]/g, " ").replace(/\s+/g, " ").trim() ?? "";
   return name.length >= 3 && name.length <= 48 && /[A-Za-z]/.test(name) ? name : null;
 }
+var SHORT_GENERIC_PROJECT_NAME = /^[A-Za-z]{1,4}$/;
+function pastDeadline(deadlineAt) {
+  return typeof deadlineAt === "number" && Number.isFinite(deadlineAt) && Date.now() >= deadlineAt;
+}
+function projectNameSearchTerm(projectName2, handle, ticker) {
+  if (projectName2.toLowerCase() === handle.toLowerCase()) return null;
+  const tokens = projectName2.split(" ").filter(Boolean);
+  if (tokens.length === 1) {
+    const token = tokens[0];
+    if (ticker && token.toUpperCase() === ticker) return null;
+    if (SHORT_GENERIC_PROJECT_NAME.test(token)) return null;
+  }
+  return projectName2;
+}
 function buildSocialActivityQuery(identity) {
   const handle = normalizedHandle3(identity.handle);
   if (!handle) return null;
@@ -31542,7 +31557,8 @@ function buildSocialActivityQuery(identity) {
   const projectName2 = safeProjectName(identity.projectName);
   const terms = [`@${handle}`];
   if (ticker) terms.push(`$${ticker}`);
-  if (projectName2 && projectName2.toLowerCase() !== handle.toLowerCase()) terms.push(`"${projectName2}"`);
+  const nameTerm = projectName2 ? projectNameSearchTerm(projectName2, handle, ticker) : null;
+  if (nameTerm) terms.push(`"${nameTerm}"`);
   return {
     handle: `@${handle}`,
     ...ticker ? { ticker: `$${ticker}` } : {},
@@ -31631,14 +31647,20 @@ async function collectCounts(fetchImpl, bearer, query, start, end) {
   });
   return { ok: true, buckets };
 }
-async function collectSearch(fetchImpl, bearer, query, start, end, maxPosts) {
+async function collectSearch(fetchImpl, bearer, query, start, end, maxPosts, deadlineAt) {
   const posts = /* @__PURE__ */ new Map();
   let nextToken = null;
   let complete = false;
   let oldestAt = null;
   let requests = 0;
   let postReads = 0;
+  let incompleteReason;
   do {
+    if (pastDeadline(deadlineAt)) {
+      complete = false;
+      incompleteReason = "time_budget";
+      break;
+    }
     const remaining = maxPosts - posts.size;
     if (remaining <= 0) break;
     const url = new URL(`${X_API}/tweets/search/recent`);
@@ -31677,6 +31699,7 @@ async function collectSearch(fetchImpl, bearer, query, start, end, maxPosts) {
     nextToken = typeof token === "string" && token ? token : null;
     complete = nextToken === null;
   } while (nextToken && posts.size < maxPosts);
+  if (!complete && !incompleteReason) incompleteReason = "post_limit";
   return {
     ok: true,
     posts: [...posts.values()],
@@ -31684,7 +31707,7 @@ async function collectSearch(fetchImpl, bearer, query, start, end, maxPosts) {
     oldestAt,
     requests,
     postReads,
-    ...!complete ? { incompleteReason: "post_limit" } : {}
+    ...incompleteReason ? { incompleteReason } : {}
   };
 }
 function countPosts(buckets, start, end, countsComplete) {
@@ -31824,7 +31847,7 @@ function hourlyBuckets(posts, start, end) {
   }
   return buckets;
 }
-async function collectTwitterApiIo(fetchImpl, key, query, start, end, maxPosts) {
+async function collectTwitterApiIo(fetchImpl, key, query, start, end, maxPosts, deadlineAt) {
   const posts = /* @__PURE__ */ new Map();
   let requests = 0;
   let successfulRequests = 0;
@@ -31836,6 +31859,11 @@ async function collectTwitterApiIo(fetchImpl, key, query, start, end, maxPosts) 
     let cursor = "";
     const seenCursors = /* @__PURE__ */ new Set();
     do {
+      if (pastDeadline(deadlineAt)) {
+        complete = false;
+        incompleteReason = "time_budget";
+        break;
+      }
       if (requests >= TWITTERAPI_IO_MAX_REQUESTS) {
         complete = false;
         incompleteReason = "pagination_incomplete";
@@ -31889,6 +31917,7 @@ async function collectTwitterApiIo(fetchImpl, key, query, start, end, maxPosts) 
       seenCursors.add(nextCursor);
       cursor = nextCursor;
     } while (cursor);
+    if (incompleteReason === "time_budget") break;
     if (incompleteReason === "pagination_incomplete" && requests >= TWITTERAPI_IO_MAX_REQUESTS) break;
   }
   const values = [...posts.values()];
@@ -31899,7 +31928,7 @@ async function collectTwitterApiIo(fetchImpl, key, query, start, end, maxPosts) 
   const oldestAt = complete && values.length ? Math.min(...values.map((post) => Date.parse(post.createdAt))) : null;
   return {
     search: {
-      ok: successfulRequests > 0,
+      ok: successfulRequests > 0 || incompleteReason === "time_budget",
       posts: values,
       complete,
       oldestAt,
@@ -31948,10 +31977,10 @@ async function collectSocialActivity(rawIdentity, options = {}) {
   const last24Start = new Date(end.getTime() - DAY_MS4);
   const previous24Start = new Date(end.getTime() - 2 * DAY_MS4);
   const last7Start = new Date(end.getTime() - 7 * DAY_MS4);
-  const twitterApiIo = !bearer && twitterApiKey ? await collectTwitterApiIo(fetchImpl, twitterApiKey, identity.query, last7Start, end, maxPosts) : null;
+  const twitterApiIo = !bearer && twitterApiKey ? await collectTwitterApiIo(fetchImpl, twitterApiKey, identity.query, last7Start, end, maxPosts, options.deadlineAt) : null;
   const [counts, search] = twitterApiIo ? [{ ok: twitterApiIo.search.complete, buckets: twitterApiIo.buckets }, twitterApiIo.search] : await Promise.all([
     collectCounts(fetchImpl, bearer, identity.query, last7Start, end),
-    collectSearch(fetchImpl, bearer, identity.query, last7Start, end, maxPosts)
+    collectSearch(fetchImpl, bearer, identity.query, last7Start, end, maxPosts, options.deadlineAt)
   ]);
   if (!counts.ok && !search.ok) {
     return unavailableSnapshot2(identity, now, "provider_failed", "X did not return usable activity data. No zero or clean result was inferred.", provider);
@@ -31997,7 +32026,7 @@ async function collectSocialActivity(rawIdentity, options = {}) {
       estimatedUsd: twitterApiIo?.estimatedUsd ?? Math.round(((counts.ok ? COUNTS_REQUEST_USD : 0) + search.postReads * POST_READ_USD) * 1e4) / 1e4,
       ...search.incompleteReason ? { incompleteReason: search.incompleteReason } : {}
     },
-    note: state === "complete" ? `Public X posts matched to the bound project identifiers through ${provider === "x-api-v2" ? "the official X API" : "twitterapi.io"}. Reposts are excluded.` : search.incompleteReason === "post_limit" ? `ARGUS collected the maximum ${maxPosts.toLocaleString()} posts allowed for this saved scan. Unique-account counts are minimums.` : search.incompleteReason === "provider_error" ? `X stopped responding before ARGUS finished the search. Unique-account counts are minimums.` : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`,
+    note: state === "complete" ? `Public X posts matched to the bound project identifiers through ${provider === "x-api-v2" ? "the official X API" : "twitterapi.io"}. Reposts are excluded.` : search.incompleteReason === "post_limit" ? `ARGUS collected the maximum ${maxPosts.toLocaleString()} posts allowed for this saved scan. Unique-account counts are minimums.` : search.incompleteReason === "provider_error" ? `X stopped responding before ARGUS finished the search. Unique-account counts are minimums.` : search.incompleteReason === "time_budget" ? "ARGUS stopped the social-activity search to leave time for required checks. Unique-account counts are minimums." : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`,
     ...mentioners.length ? { mentioners } : {}
   };
   if (!options.fetchImpl) void cacheSet(cacheKey, JSON.stringify(snapshot));
@@ -34853,19 +34882,31 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   evidence.roles = rolesAfterBasicFacts;
   if (rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */)) {
     const socialStageStartedAt = startRuntimeStage("social-activity");
-    evidence.socialActivity = await collectSocialActivity({
-      handle: evidence.profile.handle,
-      ticker: evidence.projectToken?.symbol ?? ctx.tokenSymbol,
-      projectName: evidence.projectToken?.name ?? evidence.profile.display_name
-    });
-    const social = evidence.socialActivity;
-    emit({
-      phase: "Research",
-      label: social.state === "complete" ? "Social activity captured" : social.state === "partial" ? "Social activity partly captured" : "Social activity unavailable",
-      detail: social.state === "complete" ? `${social.windows.last7Days.uniqueAccounts?.toLocaleString() ?? 0} unique public X accounts matched the project over seven days.` : social.note,
-      source: "X API v2",
-      tone: social.state === "complete" ? "neutral" : "warn"
-    });
+    if (collectionOverBudget()) {
+      emit({
+        phase: "Research",
+        label: "Social activity skipped",
+        detail: "Collection time budget reached; skipped social activity so required checks can finish.",
+        source: "X API v2",
+        tone: "warn"
+      });
+    } else {
+      evidence.socialActivity = await collectSocialActivity({
+        handle: evidence.profile.handle,
+        ticker: evidence.projectToken?.symbol ?? ctx.tokenSymbol,
+        projectName: evidence.projectToken?.name ?? evidence.profile.display_name
+      }, {
+        deadlineAt: Math.min(Date.now() + SOCIAL_ACTIVITY_BUDGET_MS, collectionDeadlineAt)
+      });
+      const social = evidence.socialActivity;
+      emit({
+        phase: "Research",
+        label: social.state === "complete" ? "Social activity captured" : social.state === "partial" ? "Social activity partly captured" : "Social activity unavailable",
+        detail: social.state === "complete" ? `${social.windows.last7Days.uniqueAccounts?.toLocaleString() ?? 0} unique public X accounts matched the project over seven days.` : social.note,
+        source: "X API v2",
+        tone: social.state === "complete" ? "neutral" : "warn"
+      });
+    }
     finishRuntimeStage("social-activity", socialStageStartedAt);
   }
   hydrateProjectTeamFromVerifiedFacts(evidence);

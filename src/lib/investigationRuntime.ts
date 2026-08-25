@@ -56,6 +56,15 @@ export const COLLECTION_ANALYST_RESERVE_MS = 250_000;
 // is preserved while the never-waive screen becomes reliable.
 export const TRUST_GRAPH_SCREEN_RESERVE_MS = 60_000;
 
+// Social-activity search is enrichment, not a required check. After the 5,000-post
+// ceiling, a generic-word query (EARN matching the English word) can paginate
+// for minutes and skip connection screening while finalization still runs.
+// Cap the in-scan collect so later required work, especially the never-waive
+// trust-graph screen, still fits. Standalone /api/social-activity is unbounded
+// except for the post ceiling. A time-boxed collect withholds the activity
+// score rather than inventing one.
+export const SOCIAL_ACTIVITY_BUDGET_MS = 45_000;
+
 // This is an inactivity deadline, not a cap on the whole investigation. The
 // route emits heartbeats every 15 seconds even while the longer scorer is
 // working, so 90 seconds with no streamed bytes means the connection itself is
