@@ -547,9 +547,9 @@ export function TrustGraph({
                   />
                   {entry.edge && (lit || peri.length <= 12) && (
                     <text
-                      x={(x1 + entry.x) / 2}
-                      y={(y1 + entry.y) / 2 - 6}
-                      textAnchor="middle"
+                      x={(x1 + entry.x) / 2 + (Math.abs(entry.x - cx) < 12 ? 36 : 0)}
+                      y={(y1 + entry.y) / 2 - (Math.abs(entry.x - cx) < 12 ? 0 : 6)}
+                      textAnchor={Math.abs(entry.x - cx) < 12 ? "start" : "middle"}
                       fontSize={stage.sparse ? 12 : 10}
                       fill={lit ? "var(--color-ink)" : "var(--color-ink-faint)"}
                     >
@@ -691,7 +691,15 @@ export function TrustGraph({
                   )}
                 </div>
               </foreignObject>
-              <text x={cx} y={cy + subjectSize / 2 + 20} textAnchor="middle" fontSize={stage.sparse ? 15 : 13} fontWeight={600} fill="var(--color-ink)">
+              <rect
+                x={cx - Math.min(90, subjectLabel.length * 4.6 + 14)}
+                y={cy + subjectSize / 2 + 8}
+                width={Math.min(180, subjectLabel.length * 9.2 + 28)}
+                height={stage.sparse ? 22 : 20}
+                rx={11}
+                fill="var(--color-panel)"
+              />
+              <text x={cx} y={cy + subjectSize / 2 + (stage.sparse ? 24 : 22)} textAnchor="middle" fontSize={stage.sparse ? 14 : 13} fontWeight={600} fill="var(--color-ink)">
                 {trunc(subjectLabel, 28)}
               </text>
             </g>
