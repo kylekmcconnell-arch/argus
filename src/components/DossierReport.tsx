@@ -10,6 +10,7 @@
 // - First-party named team is not independently corroborated.
 // - Provenance colours are source-of-truth, not pass/fail.
 import { useEffect, useRef, useState } from "react";
+import { GithubLogo, LinkedinLogo, LinkSimple, XLogo } from "@phosphor-icons/react";
 import { ProvenanceTag } from "./ProvenanceTag";
 import { buildDossier, type Dossier, type DossierFigure, type DossierSourceRow, type StrengthBand, type KeyMeasure } from "../lib/dossierModel";
 
@@ -48,6 +49,13 @@ function hostOf(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, ""); }
   catch { return ""; }
 }
+
+const TEAM_PROFILE_ICONS = {
+  x: XLogo,
+  linkedin: LinkedinLogo,
+  github: GithubLogo,
+  huggingface: LinkSimple,
+};
 
 /* ── the six scored axes, drawn as the ranges the engine actually records ── */
 export function BandChart({ bands, only }: { bands: StrengthBand[]; only?: string }) {
@@ -597,7 +605,7 @@ export function DossierReport({
                   <p className="mono mb-2 text-[10px] uppercase tracking-[0.12em] text-ink-faint">
                     {d.team.filter((m) => m.firstParty).length} named by the subject · {d.team.filter((m) => !m.firstParty).length} found only by search
                   </p>
-                  <div className="grid grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     {d.team.map((m) => (
                       <div key={m.name} className={`panel-inset flex items-start gap-2.5 px-3 py-2.5 ${m.firstParty ? "border-l-2 border-sourced" : "border-l-2 border-unverifiable/50"}`}>
                         {m.avatarUrl ? (
@@ -615,6 +623,27 @@ export function DossierReport({
                           <p className={`mono mt-1.5 text-[10px] ${m.firstParty ? "text-sourced" : "text-unverifiable"}`}>
                             {m.firstParty ? "named by the account itself" : "web search only"}
                           </p>
+                          {m.profiles.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`${m.name} profiles`}>
+                              {m.profiles.map((profile) => {
+                                const Icon = TEAM_PROFILE_ICONS[profile.provider];
+                                return (
+                                  <a
+                                    key={`${profile.provider}:${profile.url}`}
+                                    href={profile.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    aria-label={`Open ${m.name} on ${profile.label}`}
+                                    title={`${m.name} on ${profile.label}`}
+                                    className="inline-flex min-h-7 items-center gap-1 rounded-full border border-control-line px-2 text-[11px] font-medium text-ink-dim transition hover:border-signal hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal"
+                                  >
+                                    <Icon size={13} weight="regular" aria-hidden="true" />
+                                    {profile.label}
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}

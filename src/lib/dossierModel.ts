@@ -76,10 +76,18 @@ export interface StrengthBand {
 
 export interface CoverageStat { state: string; count: number }
 
+export interface TeamProfileLink {
+  provider: "x" | "linkedin" | "github" | "huggingface";
+  label: string;
+  url: string;
+}
+
 export interface TeamMember {
   name: string;
   role: string;
   handle: string | null;
+  /** Identity-bound public profiles preserved by the frozen team record. */
+  profiles: TeamProfileLink[];
   /** True only when the subject's own account named this person. */
   firstParty: boolean;
   /**
@@ -485,6 +493,60 @@ function collectTeam(payload: Record<string, unknown>): TeamMember[] {
   ];
   const indexByIdentity = new Map<string, number>();
   const team: TeamMember[] = [];
+
+  const normalizedProfileUrl = (
+    provider: TeamProfileLink["provider"],
+    offered: string,
+  ): TeamProfileLink | null => {
+    const candidate = /^https?:\/\//i.test(offered) ? offered : `https://${offered}`;
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port) return null;
+      const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+      const allowed = provider === "linkedin"
+        ? host === "linkedin.com" && /^\/in\/[A-Za-z0-9_%.-]+\/?$/i.test(parsed.pathname)
+        : provider === "github"
+          ? host === "github.com" && /^\/[A-Za-z0-9-]+\/?$/i.test(parsed.pathname)
+          : provider === "huggingface"
+            ? host === "huggingface.co" && /^\/[A-Za-z0-9_.-]+\/?$/i.test(parsed.pathname)
+            : false;
+      if (!allowed) return null;
+      parsed.hash = "";
+      parsed.search = "";
+      parsed.pathname = parsed.pathname.replace(/\/$/, "");
+      return {
+        provider,
+        label: provider === "linkedin" ? "LinkedIn" : provider === "github" ? "GitHub" : "Hugging Face",
+        url: parsed.toString().replace(/\/$/, ""),
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const profileLinks = (member: Record<string, unknown>): TeamProfileLink[] => {
+    const links: TeamProfileLink[] = [];
+    const handle = str(member.handle).replace(/^@/, "");
+    if (/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
+      links.push({ provider: "x", label: "X", url: `https://x.com/${handle}` });
+    }
+    const linkedin = normalizedProfileUrl("linkedin", str(member.linkedin));
+    if (linkedin) links.push(linkedin);
+
+    const github = (member.github ?? {}) as Record<string, unknown>;
+    if (str(github.confidence) === "gold") {
+      const profile = normalizedProfileUrl("github", `github.com/${str(github.login)}`);
+      if (profile) links.push(profile);
+    }
+    for (const profile of arr<Record<string, unknown>>(member.developerProfiles)) {
+      const provider = str(profile.provider);
+      if (provider !== "github" && provider !== "huggingface") continue;
+      const normalized = normalizedProfileUrl(provider, str(profile.url));
+      if (normalized) links.push(normalized);
+    }
+    return [...new Map(links.map((link) => [`${link.provider}:${link.url.toLowerCase()}`, link])).values()];
+  };
+
   for (const m of rows) {
     const name = str(m.name);
     if (!name) continue;
@@ -493,6 +555,7 @@ function collectTeam(payload: Record<string, unknown>): TeamMember[] {
       name,
       role: str(m.role),
       handle: str(m.handle) || null,
+      profiles: profileLinks(m),
       firstParty,
       avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
       avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
@@ -519,6 +582,10 @@ function collectTeam(payload: Record<string, unknown>): TeamMember[] {
       independentlyConfirmed: preferred.independentlyConfirmed || secondary.independentlyConfirmed,
       avatarUrl: preferred.avatarUrl ?? secondary.avatarUrl,
       avatarCapturedAt: preferred.avatarCapturedAt ?? secondary.avatarCapturedAt,
+      profiles: [...new Map(
+        [...preferred.profiles, ...secondary.profiles]
+          .map((link) => [`${link.provider}:${link.url.toLowerCase()}`, link]),
+      ).values()],
     };
     team[existingIndex] = merged;
     for (const key of [...identityKeys, ...teamIdentityKeys(merged)]) {

@@ -58,6 +58,16 @@ const livePayload = (): Record<string, unknown> => ({
     handle: "@firstparty",
     handleProvenance: "subject_first_party",
     avatarUrl: "https://pbs.twimg.com/x.jpg",
+    linkedin: "linkedin.com/in/first-party",
+    developerProfiles: [{
+      provider: "github",
+      url: "https://github.com/first-party",
+      sourceUrl: "https://x.com/firstparty",
+    }, {
+      provider: "github",
+      url: "https://github.com/first-party/",
+      sourceUrl: "https://x.com/firstparty",
+    }],
   }, {
     name: "Search Only",
     role: "advisor",
@@ -144,6 +154,31 @@ describe("DossierReport", () => {
     expect(container.textContent).toContain("Search Only");
     expect(container.querySelector('img[src="https://example.org/someone.jpg"]')).toBeNull();
     expect(container.querySelector('img[src="https://pbs.twimg.com/x.jpg"]')).not.toBeNull();
+  });
+
+  it("links team members to saved identity-bound social profiles without guessing", () => {
+    render(livePayload());
+    expect(container.querySelector('a[href="https://x.com/firstparty"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://linkedin.com/in/first-party"]')).not.toBeNull();
+    expect(container.querySelectorAll('a[href="https://github.com/first-party"]')).toHaveLength(1);
+    expect(container.querySelector('a[aria-label="Open @firstparty on X"]')).not.toBeNull();
+    expect(container.querySelector('a[href*="Search%20Only"]')).toBeNull();
+  });
+
+  it("hides malformed, company-level, and unbound team profile URLs", () => {
+    const payload = livePayload();
+    payload.webTeamLeads = [{
+      name: "Unsafe Link",
+      role: "founder",
+      linkedin: "javascript:alert(1)",
+      developerProfiles: [{ provider: "github", url: "https://example.com/not-github", sourceUrl: "https://example.com" }],
+    }, {
+      name: "Company Page",
+      role: "advisor",
+      linkedin: "https://linkedin.com/company/not-a-person",
+    }];
+    render(payload);
+    expect(container.querySelectorAll("#dossier-team a")).toHaveLength(0);
   });
 
   it("keeps the fixture harness header only in theatrical DEV mode", () => {

@@ -47,6 +47,38 @@ final result: passed
 
 ---
 
+# Design QA — team social links (2026-08-24)
+
+- Source visual truth: `docs/design-qa/team-social-links-2026-08-24/reference-team-card.png`
+- Browser implementation: `docs/design-qa/team-social-links-2026-08-24/implementation-team-links.png`
+- Combined comparison: `docs/design-qa/team-social-links-2026-08-24/comparison.png`
+- State: light-theme saved report, desktop report rail, team section visible
+
+## Findings
+
+The source showed a resolved person card without a destination to inspect that
+person's public identity. The implementation preserves the existing team-card
+layout and adds compact, keyboard-focusable profile controls only for valid
+identity-bound X, LinkedIn, GitHub, or Hugging Face records. No actionable P0,
+P1, or P2 visual difference remains.
+
+## Safety and responsive behavior
+
+- Display names never become guessed profile URLs.
+- LinkedIn company pages, malformed URLs, wrong-host developer profiles, and model-only identity links remain hidden.
+- Duplicate profiles collapse to one control.
+- The existing two-column desktop grid collapses to one column at the small-screen breakpoint.
+
+## Verification
+
+- Browser preview rendered the expected X profile controls with descriptive accessible names.
+- Focused component and dossier-scope tests cover valid links, invalid links, deduplication, and frozen-evidence boundaries.
+- Existing typography, color, radius, provenance, and report-rail tokens are unchanged.
+
+final result: passed
+
+---
+
 # Design QA — oversized centered report score (2026-08-24)
 
 - Source visual truth: `docs/design-qa/oversized-score-2026-08-24/reference-current-score.png`, showing the 168px report score the user identified as too small
