@@ -62,7 +62,11 @@ describe("public report labels", () => {
     expect(publicCheckNote("deployer unresolved; trace completion outcome not recorded"))
       .toBe("ARGUS could not identify the token creator, so the funding check did not finish.");
     expect(publicCheckNote("earnonhood.com denied the automated request (HTTP 403); no adverse website conclusion was drawn"))
-      .toBe("earnonhood.com blocked the automated check, so ARGUS could not finish reviewing the website.");
+      .toBe("The official site (earnonhood.com) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.");
+    expect(publicCheckNote("the site rate-limited the automated liveness request (HTTP 429)"))
+      .toContain("rate-limited");
+    expect(publicCheckNote("the site rate-limited the automated liveness request (HTTP 429)"))
+      .not.toContain("could not read the page");
     expect(publicCheckNote("supergemma.ai serves a verified coming-soon page"))
       .toBe("The project website is not live yet. It still shows a coming-soon or early-access page.");
     expect(publicCheckNote("SiteNotLive")).toContain("not live yet");

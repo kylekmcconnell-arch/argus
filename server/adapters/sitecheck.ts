@@ -21,6 +21,7 @@ export type SiteSubstanceReason =
   | "transport"
   | "dns_and_transport"
   | "http_access"
+  | "rate_limit"
   | "anti_bot"
   | "http"
   | "content";
@@ -75,6 +76,20 @@ function errorCode(error: unknown): string | undefined {
 
 function hostname(url: string): string {
   try { return new URL(url).hostname; } catch { return url; }
+}
+
+/** Public sentence for a confirmed official-site access denial. Never implies the page was read. */
+export function officialSiteAccessDeniedFinding(domain: string): string {
+  const host = hostname(domain.includes("://") ? domain : `https://${domain}`);
+  return `The official site (${host}) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.`;
+}
+
+/** True only for a confirmed 401/403/anti-bot denial. HTTP 429 is a rate-limit gap. */
+export function isConfirmedOfficialSiteAccessDenial(site: Pick<SiteSubstance, "status" | "reason" | "detail">): boolean {
+  if (site.status !== "access_blocked") return false;
+  if (site.reason === "rate_limit") return false;
+  if (/\bHTTP 429\b/i.test(site.detail) || /\brate-limited\b/i.test(site.detail)) return false;
+  return site.reason === "anti_bot" || site.reason === "http_access" || site.reason === undefined;
 }
 
 function isAntiBotResponse(response: Response, body: string): boolean {
@@ -176,9 +191,10 @@ async function get(
   if (response.status === 403 && retryAccessDenied) {
     // A number of otherwise public project sites intermittently return one
     // edge-level 403 during a cold or bot-mitigation transition, then serve the
-    // same public page normally. One bounded retry closes that transient gap;
-    // a second 403 remains explicitly unavailable and can never become clean
-    // evidence merely because ARGUS tried twice.
+    // same public page normally. One bounded retry is the only path that can
+    // still mark the site live. A second 403 is a confirmed access denial: it
+    // finishes the required website check as blocked, never as a successful
+    // read, and never as product-substance evidence.
     recordCall("site-fetch", "substance", 0, "http_403_access_blocked_retry", "partial");
     await new Promise((resolve) => setTimeout(resolve, 250));
     return get(url, opts, false);
@@ -190,7 +206,7 @@ async function get(
       kind: "failure",
       url: finalUrl,
       status: "access_blocked",
-      reason: "http_access",
+      reason: response.status === 429 ? "rate_limit" : "http_access",
       detail: response.status === 429
         ? "the site rate-limited the automated liveness request (HTTP 429)"
         : `the site denied the automated liveness request (HTTP ${response.status})`,

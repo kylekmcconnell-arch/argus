@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { emptyEvidence } from "../src/data/evidence";
-import { SubjectClass } from "../src/engine";
-import type { SiteSubstance } from "./adapters/sitecheck";
+import { getProfile, SubjectClass } from "../src/engine";
+import { deriveDecisionReadiness } from "../src/lib/decisionReadiness";
+import type { ScanCheck } from "../src/lib/scanChecklist";
+import { officialSiteAccessDeniedFinding, type SiteSubstance } from "./adapters/sitecheck";
+import { buildScoringEvidencePacket, deriveProjectStrengthBands } from "./agent";
 import type { CheckObservation, CollectContext } from "./adapters/types";
 import { PersonCheckTracker } from "./checks";
 import { applySiteSubstanceOutcome, bioWebsiteDomain } from "./orchestrate";
@@ -34,9 +37,19 @@ const failure = (
       : "DNS resolution failed for project.example",
 });
 
+const PROJECT_REQUIRED_CHECK_IDS = [
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
+  "trust-graph-connections",
+] as const;
+
 describe("site-liveness evidence attribution", () => {
-  it.each(["access_blocked", "unavailable", "unreachable"] as const)(
-    "keeps a project %s result neutral and emits no SiteNotLive evidence",
+  it.each(["unavailable", "unreachable"] as const)(
+    "keeps a project %s result an open neutral gap and emits no SiteNotLive evidence",
     (status) => {
       const { ctx, evidence, checks, emit } = context();
 
@@ -55,6 +68,75 @@ describe("site-liveness evidence attribution", () => {
       expect(JSON.stringify({ checks, calls: emit.mock.calls })).not.toContain("promoting a token");
     },
   );
+
+  it("finishes a confirmed official-site access block as an access-denied result, not an open check", () => {
+    const { ctx, evidence, checks, emit } = context();
+
+    applySiteSubstanceOutcome(ctx, "project.example", failure("access_blocked"));
+
+    expect(evidence.findings).toEqual([]);
+    expect(checks).toEqual([expect.objectContaining({
+      id: "project-product-substance",
+      status: "checked-empty",
+      note: officialSiteAccessDeniedFinding("project.example"),
+    })]);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: "Official site blocked the request",
+      tone: "neutral",
+      detail: expect.stringContaining("could not read the page"),
+    }));
+    expect(JSON.stringify({ checks, calls: emit.mock.calls })).not.toMatch(/Website live|live site|promoting a token/i);
+  });
+
+  it("keeps an HTTP 429 access block as an open rate-limit gap, not a finished website check", () => {
+    const { ctx, evidence, checks, emit } = context();
+
+    applySiteSubstanceOutcome(ctx, "earnonhood.com", {
+      url: "https://earnonhood.com",
+      status: "access_blocked",
+      reason: "rate_limit",
+      detail: "the site rate-limited the automated liveness request (HTTP 429)",
+    });
+
+    expect(evidence.findings).toEqual([]);
+    expect(checks).toEqual([expect.objectContaining({
+      id: "project-product-substance",
+      status: "unavailable",
+      note: expect.stringContaining("rate-limited the automated liveness request (HTTP 429)"),
+    })]);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: "Website check unavailable",
+      tone: "neutral",
+      detail: expect.stringContaining("HTTP 429"),
+    }));
+    expect(JSON.stringify({ checks, calls: emit.mock.calls })).not.toContain("could not read the page");
+    expect(JSON.stringify({ checks, calls: emit.mock.calls })).not.toContain("Official site blocked the request");
+
+    const requiredChecks: ScanCheck[] = PROJECT_REQUIRED_CHECK_IDS.map((checkId) => (
+      checkId === "project-product-substance"
+        ? {
+            checkId,
+            label: "Product and website substance",
+            status: "unavailable" as const,
+            note: "earnonhood.com: the site rate-limited the automated liveness request (HTTP 429); no adverse site-liveness conclusion was drawn",
+            decisionCritical: true,
+          }
+        : {
+            checkId,
+            label: checkId,
+            status: "confirmed" as const,
+            note: "completed",
+            decisionCritical: true,
+          }
+    ));
+    expect(deriveDecisionReadiness(requiredChecks)).toMatchObject({
+      status: "provisional",
+      successful: 6,
+      applicable: 7,
+      unresolved: 1,
+      providerUnavailable: 1,
+    });
+  });
 
   it("does not let a neutral fetch gap override independent confirmed product evidence", () => {
     const evidence = emptyEvidence("@project");
@@ -83,6 +165,74 @@ describe("site-liveness evidence attribution", () => {
       provider: expect.stringContaining("basic-facts-web"),
     });
     expect(productCheck?.note).not.toContain("anti-bot");
+  });
+
+  it("completes the EARN / earnonhood.com required website check after a confirmed HTTP 403 without inflating score or gates", () => {
+    const { ctx, evidence, checks, emit } = context();
+    applySiteSubstanceOutcome(ctx, "earnonhood.com", {
+      url: "https://earnonhood.com",
+      status: "access_blocked",
+      reason: "http_access",
+      detail: "the site denied the automated liveness request (HTTP 403)",
+    });
+
+    expect(evidence.findings).toEqual([]);
+    expect(evidence.profile.site_substance_status).toBe("access_blocked");
+    expect(checks).toEqual([expect.objectContaining({
+      id: "project-product-substance",
+      status: "checked-empty",
+      note: officialSiteAccessDeniedFinding("earnonhood.com"),
+    })]);
+    expect(JSON.stringify({ checks, calls: emit.mock.calls, evidence })).not.toMatch(
+      /Website live|live site|Dashboard|docs|whitepaper|page content/i,
+    );
+
+    const requiredChecks: ScanCheck[] = PROJECT_REQUIRED_CHECK_IDS.map((checkId) => (
+      checkId === "project-product-substance"
+        ? {
+            checkId,
+            label: "Product and website substance",
+            status: "checked-empty" as const,
+            note: officialSiteAccessDeniedFinding("earnonhood.com"),
+            decisionCritical: true,
+          }
+        : {
+            checkId,
+            label: checkId,
+            status: "confirmed" as const,
+            note: "completed",
+            decisionCritical: true,
+          }
+    ));
+    const readiness = deriveDecisionReadiness(requiredChecks);
+    expect(readiness).toMatchObject({
+      status: "ready",
+      successful: 7,
+      applicable: 7,
+      unresolved: 0,
+      providerUnavailable: 0,
+    });
+    expect(readiness.findings).toBe(0);
+
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@earnonhood",
+        display_name: "EARN",
+        bio: "On-chain product",
+        website: "https://earnonhood.com",
+        site_substance_status: "access_blocked",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-08-25T00:00:00.000Z",
+      },
+      checkOutcomes: requiredChecks,
+    }, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+    expect(bands.P2_product_substance.tier).toBe("assessed_null");
+    expect(bands.P2_product_substance).not.toHaveProperty("floorTier");
+    expect(bands.P2_product_substance.minScore ?? 0).toBe(0);
   });
 
   it.each([
