@@ -312,7 +312,7 @@ export function InvestigationDecisionCanvas({
             score={score}
             verdict={verdictLabel}
             color={verdictColor}
-            size={168}
+            size={240}
             bands={score != null}
           />
           <div className="decision-score-copy">
