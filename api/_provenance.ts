@@ -9,6 +9,13 @@ export interface ProvenanceContext {
   attestationState: "server_collected" | "analyst_submitted" | "legacy_unattested";
 }
 
+/** Receipt already returned by persist_report_version / persist_report_version_bundle. */
+export interface PersistReportVersionReceipt {
+  caseId: string;
+  reportVersionId: string;
+  version: number;
+}
+
 const asRecord = (value: unknown): JsonRecord | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as JsonRecord
@@ -850,11 +857,21 @@ export interface PersistGapInvestigationProposalBundleInput extends PersistRepor
   executionReceipts: unknown;
 }
 
+function persistReceipt(row: JsonRecord | null): PersistReportVersionReceipt | null {
+  const caseId = typeof row?.case_id === "string" ? row.case_id : "";
+  const reportVersionId = typeof row?.report_version_id === "string" ? row.report_version_id : "";
+  const version = typeof row?.version === "number" && Number.isSafeInteger(row.version) && row.version > 0
+    ? row.version
+    : 0;
+  if (!caseId || !reportVersionId || !version) return null;
+  return { caseId, reportVersionId, version };
+}
+
 /** Persist the immutable parent and every frozen provenance child atomically. */
 export async function persistReportVersionBundle(
   credentials: ServiceCredentials,
   input: PersistReportVersionBundleInput,
-): Promise<string> {
+): Promise<PersistReportVersionReceipt> {
   // This can throw on malformed scorer lineage. Because it runs before fetch,
   // no parent report_versions row can be stranded by local validation.
   const provenance = prepareProvenanceRows(
@@ -891,10 +908,8 @@ export async function persistReportVersionBundle(
   }
   const result = await response.json() as unknown;
   const row = Array.isArray(result) ? asRecord(result[0]) : null;
-  const reportVersionId = typeof row?.report_version_id === "string"
-    ? row.report_version_id
-    : "";
-  if (!reportVersionId) throw new Error("immutable report bundle write returned no id");
+  const receipt = persistReceipt(row);
+  if (!receipt) throw new Error("immutable report bundle write returned no case receipt");
   if (
     row?.evidence_count !== provenance.evidenceItems.length
     || row?.check_count !== provenance.checkRuns.length
@@ -902,7 +917,7 @@ export async function persistReportVersionBundle(
   ) {
     throw new Error("immutable report bundle returned inconsistent child counts");
   }
-  return reportVersionId;
+  return receipt;
 }
 
 /**

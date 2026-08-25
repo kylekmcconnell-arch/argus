@@ -159,7 +159,7 @@ export async function persistServerDossier(
   if (dossier.live && !hasObservedLedger) {
     throw new Error("live provider usage ledger is missing");
   }
-  const reportVersionId = await persistReportVersionBundle(credentials, {
+  const persisted = await persistReportVersionBundle(credentials, {
     organizationId: auth.organizationId,
     kind: "person",
     canonicalRef: ref,
@@ -177,6 +177,7 @@ export async function persistServerDossier(
     providerSnapshot: dossier?.providerSnapshot ?? dossier?.providers ?? {},
     cost: dossier?.cost ?? {},
   });
+  const reportVersionId = persisted.reportVersionId;
   if (costLines.length > 0) {
     await recordProviderUsageBatch(
       auth.organizationId,

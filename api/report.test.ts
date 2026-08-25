@@ -163,7 +163,11 @@ describe("report case lifecycle API", () => {
     const address = "0x00000000000000000000000000000000000000aa";
     const versionId = "00000000-0000-4000-8000-000000000301";
     const clientRunId = "00000000-0000-4000-8000-000000000302";
-    persistReportVersionBundle.mockResolvedValue(versionId);
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId: versionId,
+      version: 1,
+    });
     const { res, captured } = response();
 
     await handler(request("POST", {
@@ -201,6 +205,8 @@ describe("report case lifecycle API", () => {
     expect(captured.body).toEqual({
       ok: true,
       reportVersionId: versionId,
+      caseId: "00000000-0000-4000-8000-000000000201",
+      version: 1,
       panelCostToken: "signed-panel-token",
     });
   });
@@ -226,7 +232,11 @@ describe("report case lifecycle API", () => {
         created_at: "2026-08-23T01:00:00.000Z",
       }]));
     vi.stubGlobal("fetch", fetchMock);
-    persistReportVersionBundle.mockResolvedValue(currentVersionId);
+    persistReportVersionBundle.mockResolvedValue({
+      caseId: "00000000-0000-4000-8000-000000000201",
+      reportVersionId: currentVersionId,
+      version: 5,
+    });
     const { res, captured } = response();
 
     await handler(request("POST", {
@@ -257,6 +267,8 @@ describe("report case lifecycle API", () => {
     expect(captured.body).toMatchObject({
       ok: true,
       reportVersionId: currentVersionId,
+      caseId: "00000000-0000-4000-8000-000000000201",
+      version: 5,
       reportDelta: { category: "contract_control" },
     });
   });
@@ -271,6 +283,7 @@ describe("report case lifecycle API", () => {
         case_id: caseId,
         payload: storedPayload,
         attestation_state: "server_collected",
+        version: 3,
       }]))
       .mockResolvedValueOnce(jsonResponse([{
         id: caseId,
@@ -291,8 +304,70 @@ describe("report case lifecycle API", () => {
       },
     }), res);
 
-    expect(captured.body).toEqual({ ok: true, reportVersionId: versionId, linked: true });
+    expect(captured.body).toEqual({
+      ok: true,
+      reportVersionId: versionId,
+      caseId,
+      version: 3,
+      linked: true,
+    });
     expect(issuePanelCostToken).not.toHaveBeenCalled();
+  });
+
+  it("reuses one case across two investigation persists of the same contract and increments version", async () => {
+    const address = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    const caseId = "00000000-0000-4000-8000-000000000277";
+    persistReportVersionBundle
+      .mockResolvedValueOnce({
+        caseId,
+        reportVersionId: "00000000-0000-4000-8000-000000000401",
+        version: 1,
+      })
+      .mockResolvedValueOnce({
+        caseId,
+        reportVersionId: "00000000-0000-4000-8000-000000000402",
+        version: 2,
+      });
+
+    const first = response();
+    await handler(request("POST", {
+      body: {
+        kind: "investigation",
+        ref: address,
+        query: "$EARN",
+        payload: { token: { address, symbol: "EARN", report: { audit_id: "PA-AAF133F87A134DF0AE17" } } },
+        clientRunId: "00000000-0000-4000-8000-000000000501",
+      },
+    }), first.res);
+    const second = response();
+    await handler(request("POST", {
+      body: {
+        kind: "investigation",
+        ref: address,
+        query: "$EARN",
+        caseId,
+        versionContext: { caseId },
+        payload: { token: { address, symbol: "EARN", report: { audit_id: "PA-A74E3B463FCB43C89558" } } },
+        clientRunId: "00000000-0000-4000-8000-000000000502",
+      },
+    }), second.res);
+
+    expect(first.captured.body).toMatchObject({
+      ok: true,
+      caseId,
+      version: 1,
+      reportVersionId: "00000000-0000-4000-8000-000000000401",
+    });
+    expect(second.captured.body).toMatchObject({
+      ok: true,
+      caseId,
+      version: 2,
+      reportVersionId: "00000000-0000-4000-8000-000000000402",
+    });
+    expect((first.captured.body as { caseId: string }).caseId)
+      .toBe((second.captured.body as { caseId: string }).caseId);
+    expect((first.captured.body as { reportVersionId: string }).reportVersionId)
+      .not.toBe((second.captured.body as { reportVersionId: string }).reportVersionId);
   });
 
   it("maps archived cases from their last published immutable version", async () => {

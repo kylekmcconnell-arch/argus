@@ -22,8 +22,40 @@ export type ReportStatus = "open" | "archived";
 export type ReportLifecycleAction = "archive" | "restore";
 
 export type ReportSyncResult =
-  | { state: "persisted"; reportVersionId: string; panelCostToken: string; reportDelta?: MaterialReportDelta }
+  | {
+    state: "persisted";
+    reportVersionId: string;
+    caseId: string;
+    version: number;
+    panelCostToken: string;
+    reportDelta?: MaterialReportDelta;
+  }
   | { state: "failed"; reason: string };
+
+const payloadCaseId = (payload: unknown): string | undefined => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+  const context = (payload as { versionContext?: { caseId?: unknown } }).versionContext;
+  return typeof context?.caseId === "string" && context.caseId.trim() ? context.caseId.trim() : undefined;
+};
+
+/** Build the live saved-report identity from the persist receipt plus local checks. */
+export function savedVersionContext(
+  kind: ReportKind,
+  payload: unknown,
+  receipt: { caseId: string; reportVersionId: string; version: number },
+): ReportVersionContext {
+  const checks = reportChecks(kind, payload);
+  return {
+    caseId: receipt.caseId,
+    reportVersionId: receipt.reportVersionId,
+    version: receipt.version,
+    completenessState: reportCompleteness(kind, payload, checks),
+    attestationState: "analyst_submitted",
+    methodologyVersion: null,
+    createdAt: new Date().toISOString(),
+    checks,
+  };
+}
 
 const RETRYABLE_SAVE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
@@ -235,6 +267,7 @@ export async function syncReport(
   // the same value, so a response lost after a successful commit cannot create
   // duplicate report versions or charge downstream work twice.
   const clientRunId = crypto.randomUUID();
+  const priorCaseId = payloadCaseId(payload);
   const requestBody = JSON.stringify({
     kind,
     ref,
@@ -245,6 +278,7 @@ export async function syncReport(
     checkRuns,
     completenessState,
     clientRunId,
+    ...(priorCaseId ? { caseId: priorCaseId, versionContext: { caseId: priorCaseId } } : {}),
   });
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -270,15 +304,26 @@ export async function syncReport(
       }
       const body = (await response.json().catch(() => ({}))) as {
         reportVersionId?: unknown;
+        caseId?: unknown;
+        version?: unknown;
         panelCostToken?: unknown;
         reportDelta?: unknown;
       };
-      if (typeof body.reportVersionId !== "string" || typeof body.panelCostToken !== "string") {
+      if (
+        typeof body.reportVersionId !== "string"
+        || typeof body.panelCostToken !== "string"
+        || typeof body.caseId !== "string"
+        || typeof body.version !== "number"
+        || !Number.isSafeInteger(body.version)
+        || body.version < 1
+      ) {
         return { state: "failed", reason: "Report storage returned an incomplete save receipt." };
       }
       return {
         state: "persisted",
         reportVersionId: body.reportVersionId,
+        caseId: body.caseId,
+        version: body.version,
         panelCostToken: body.panelCostToken,
         ...(body.reportDelta && typeof body.reportDelta === "object"
           ? { reportDelta: body.reportDelta as MaterialReportDelta }

@@ -11,6 +11,7 @@ import {
   reportChecks,
   reportCompleteness,
   resolveStoredCases,
+  savedVersionContext,
   syncReport,
   storedSiteRecon,
   withTokenGapInvestigationPlan,
@@ -138,6 +139,8 @@ describe("report save reliability", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: "temporarily_unavailable" }), { status: 503 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         reportVersionId: "00000000-0000-4000-8000-000000000123",
+        caseId: "00000000-0000-4000-8000-000000000120",
+        version: 2,
         panelCostToken: "signed-panel-token",
       }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -187,6 +190,8 @@ describe("report save reliability", () => {
     };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       reportVersionId: "00000000-0000-4000-8000-000000000123",
+      caseId: "00000000-0000-4000-8000-000000000119",
+      version: 2,
       panelCostToken: "signed-panel-token",
       reportDelta,
     }), { status: 200 })));
@@ -237,6 +242,87 @@ describe("report save reliability", () => {
       reason: "Your account does not have permission to save this report.",
     });
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("returns the durable case receipt so two persists of one investigation stay on the same case", async () => {
+    const address = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    const caseId = "00000000-0000-4000-8000-000000000277";
+    const investigation = {
+      token: {
+        address,
+        symbol: "EARN",
+        chain: "ethereum",
+        report: { audit_id: "PA-AAF133F87A134DF0AE17" },
+        safety: { available: false, simChecked: false },
+        topHolders: [],
+        bundleCount: 0,
+        insiderPct: 0,
+        bundleRisk: "low",
+      },
+    } as unknown as Investigation;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        reportVersionId: "00000000-0000-4000-8000-000000000401",
+        caseId,
+        version: 1,
+        panelCostToken: "panel-1",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        reportVersionId: "00000000-0000-4000-8000-000000000402",
+        caseId,
+        version: 2,
+        panelCostToken: "panel-2",
+      }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await syncReport("investigation", address, "$EARN", investigation);
+    const second = await syncReport("investigation", address, "$EARN", {
+      ...investigation,
+      versionContext: savedVersionContext("investigation", investigation, {
+        caseId,
+        reportVersionId: "00000000-0000-4000-8000-000000000401",
+        version: 1,
+      }),
+    });
+
+    expect(first).toMatchObject({ state: "persisted", caseId, version: 1 });
+    expect(second).toMatchObject({ state: "persisted", caseId, version: 2 });
+    if (first.state !== "persisted" || second.state !== "persisted") throw new Error("expected persists");
+    expect(first.reportVersionId).not.toBe(second.reportVersionId);
+    expect(savedVersionContext("investigation", investigation, first).caseId)
+      .toBe(savedVersionContext("investigation", investigation, second).caseId);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      caseId,
+      versionContext: { caseId },
+    });
+  });
+
+  it("fails closed when the save receipt omits case identity", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      reportVersionId: "00000000-0000-4000-8000-000000000123",
+      panelCostToken: "signed-panel-token",
+    }), { status: 200 })));
+
+    await expect(syncReport(
+      "investigation",
+      "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3",
+      "$EARN",
+      {
+        token: {
+          address: "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3",
+          symbol: "EARN",
+          chain: "ethereum",
+          safety: { available: false, simChecked: false },
+          topHolders: [],
+          bundleCount: 0,
+          insiderPct: 0,
+          bundleRisk: "low",
+        },
+      } as unknown as Investigation,
+    )).resolves.toEqual({
+      state: "failed",
+      reason: "Report storage returned an incomplete save receipt.",
+    });
   });
 });
 

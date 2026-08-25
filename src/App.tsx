@@ -6,6 +6,7 @@ import { Landing } from "./components/Landing";
 import { logAudit, hydrateSharedLog, reconcileAuditOutcome } from "./lib/auditlog";
 import {
   syncReport,
+  savedVersionContext,
   fetchReport,
   fetchReportVersion,
   fetchReportState,
@@ -617,9 +618,13 @@ export default function App() {
           failureDetail: persisted.reason,
         } : {}),
       });
+      const versionContext = persisted.state === "persisted"
+        ? savedVersionContext("investigation", inv, persisted)
+        : undefined;
       const settled: Investigation = {
         ...inv,
         ...(persisted.state === "persisted" && persisted.reportDelta ? { reportDelta: persisted.reportDelta } : {}),
+        ...(versionContext ? { versionContext } : {}),
         persistence: { ...persisted, scanId },
       };
       if (!settleCachedScan(
@@ -630,7 +635,6 @@ export default function App() {
       )) return;
       setInvestigation((current) => (
         current
-        && !current.versionContext
         && current.persistence?.scanId === scanId
         && normalizeSubjectRef(current.token.address) === normalizeSubjectRef(inv.token.address)
           ? settled
@@ -640,12 +644,20 @@ export default function App() {
         current
         && current.viewPersistence?.scanId === scanId
         && normalizeSubjectRef(current.address) === normalizeSubjectRef(inv.token.address)
-          ? { ...current, viewPersistence: settled.persistence }
+          ? {
+            ...current,
+            viewPersistence: settled.persistence,
+            ...(versionContext ? { viewVersionContext: versionContext } : {}),
+          }
           : current
       ));
       setDossier((current) => (
         current?.viewPersistence?.scanId === scanId
-          ? { ...current, viewPersistence: settled.persistence }
+          ? {
+            ...current,
+            viewPersistence: settled.persistence,
+            ...(versionContext ? { viewVersionContext: versionContext } : {}),
+          }
           : current
       ));
       if (
@@ -671,7 +683,6 @@ export default function App() {
             )) return;
             setInvestigation((current) => (
               current
-              && !current.versionContext
               && current.persistence?.scanId === scanId
               && normalizeSubjectRef(current.token.address) === normalizeSubjectRef(inv.token.address)
                 ? supplemented
@@ -723,9 +734,13 @@ export default function App() {
           failureDetail: persisted.reason,
         } : {}),
       });
+      const versionContext = persisted.state === "persisted"
+        ? savedVersionContext("token", d, persisted)
+        : undefined;
       const settled: TokenDossier = {
         ...d,
         ...(persisted.state === "persisted" && persisted.reportDelta ? { reportDelta: persisted.reportDelta } : {}),
+        ...(versionContext ? { versionContext } : {}),
         persistence: { ...persisted, scanId },
       };
       if (!settleCachedScan(
@@ -736,9 +751,8 @@ export default function App() {
       )) return;
       setTokenDossier((current) => (
         current
-        && !current.versionContext
-        && !current.viewVersionContext
         && current.persistence?.scanId === scanId
+        && !current.viewVersionContext
         && normalizeSubjectRef(current.address) === normalizeSubjectRef(d.address)
           ? settled
           : current
