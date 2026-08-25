@@ -759,7 +759,7 @@ describe("investigation exact sharing", () => {
 
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).toContain("Finished checks");
-    expect(container.textContent).toContain("Research and follow-up");
+    expect(container.textContent).toContain("What is still open");
     expect(container.querySelector('[role="progressbar"][aria-label="Checks finished"]')).not.toBeNull();
   });
 

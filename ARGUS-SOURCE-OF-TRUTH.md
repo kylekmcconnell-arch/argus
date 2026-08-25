@@ -135,7 +135,9 @@ Provider diagnostics remain visible, but an optional vendor failure does not mak
 an otherwise answered investment case incomplete. A `401`, `403`, `429`,
 Cloudflare page, or other anti-bot response is an access gap, never evidence that a
 site or product is dead. Only a directly served parked or explicit coming-soon page
-can support that conclusion.
+can support that conclusion. Site checks may retry one transient `403` against the
+same URL. A retry only completes the check when it receives a real successful
+response; a repeated denial remains an explicit access gap.
 
 ## Decision experience
 
@@ -147,6 +149,11 @@ adds a sticky report guide with the current decision state and one next check. O
 smaller screens the same destinations become a horizontal section guide. The rail
 is orientation, not a second evidence surface: facts, receipts, and methodology
 remain in the report body and are never duplicated into the rail.
+
+When a required decision check is unfinished, the opening decision brief names
+that check and its plain-language failure reason before listing supplemental
+research questions. A generic follow-up question must not hide which required
+check keeps the report provisional.
 
 The report opens with the interactive dossier as the reading document:
 named beats derived by `buildDossier()` from the live payload (identity,

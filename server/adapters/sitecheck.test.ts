@@ -76,10 +76,34 @@ describe("checkSiteSubstance attribution", () => {
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "site-fetch",
       op: "substance",
-      calls: 2,
-      partial: 2,
+      calls: status === 403 ? 4 : 2,
+      partial: status === 403 ? 4 : 2,
       failed: 0,
       meta: expect.stringContaining(`http_${status}_access_blocked`),
+    }));
+  });
+
+  it("recovers when a public project site returns one transient HTTP 403", async () => {
+    const product = `Dashboard docs governance staking. ${"A working product surface for customers and builders. ".repeat(12)}`;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response("request denied", 403))
+      .mockResolvedValueOnce(response(`<html><body>${product}</body></html>`));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captured = await withCostLedger(async () => ({
+      result: await checkSiteSubstance("example.org"),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toMatchObject({ status: "live" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "site-fetch",
+      op: "substance",
+      calls: 2,
+      succeeded: 1,
+      partial: 1,
+      meta: expect.stringContaining("http_403_access_blocked_retry"),
     }));
   });
 
@@ -176,22 +200,29 @@ describe("checkSiteSubstance attribution", () => {
     const product = `Dashboard docs governance staking. ${"A working product surface for customers and builders. ".repeat(12)}`;
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response("denied", 403))
+      .mockResolvedValueOnce(response("denied again", 403))
       .mockResolvedValueOnce(response(`<html><body>${product}</body></html>`));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(checkSiteSubstance("example.org")).resolves.toMatchObject({ status: "live" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://example.org",
+      "https://example.org",
+      "https://www.example.org",
+    ]);
   });
 
   it("falls back from an explicit www host to the bare host without constructing www.www", async () => {
     const product = `Dashboard docs governance staking. ${"A working product surface for customers and builders. ".repeat(12)}`;
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response("denied", 403))
+      .mockResolvedValueOnce(response("denied again", 403))
       .mockResolvedValueOnce(response(`<html><body>${product}</body></html>`));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(checkSiteSubstance("www.example.org")).resolves.toMatchObject({ status: "live" });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://www.example.org",
       "https://www.example.org",
       "https://example.org",
     ]);

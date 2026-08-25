@@ -55,6 +55,50 @@ function decisionBasisText(): string {
 }
 
 describe("private person report evidence boundary", () => {
+  it("puts the exact unfinished required check ahead of general research questions", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const requiredChecks = [
+      "project-token-identity",
+      "project-product-substance",
+      "project-team-identity",
+      "project-backing-partners",
+      "project-traction-liveness",
+      "project-transparency",
+      "trust-graph-connections",
+    ];
+    const dossier = {
+      ...base,
+      checkRuns: requiredChecks.map((checkId) => checkId === "project-product-substance"
+        ? {
+            checkId,
+            label: "Product and website substance",
+            status: "unavailable" as const,
+            note: "earnonhood.com denied the automated request (HTTP 403); no adverse website conclusion was drawn",
+            provider: "site-fetch",
+            decisionCritical: true,
+          }
+        : {
+            checkId,
+            label: checkId,
+            status: "confirmed" as const,
+            note: "completed",
+            decisionCritical: true,
+          }),
+      completeness_state: "partial" as const,
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const brief = container.querySelector('[data-canonical-decision-brief="true"]')!;
+    const openRail = brief.querySelector('aside[aria-label="Required report checks"]')!;
+    expect(openRail.textContent).toContain("6 finished, 1 open");
+    expect(openRail.textContent).toContain("What is still open");
+    expect(openRail.textContent).toContain("Product and website substance");
+    expect(openRail.textContent).toContain("earnonhood.com denied the automated request (HTTP 403)");
+  });
+
   it("renders the SuperGemma regression fixture through one canonical report experience", () => {
     const dossier: Dossier = {
       ...buildReport(SUBJECTS[1]),

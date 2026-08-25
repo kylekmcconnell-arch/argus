@@ -128,7 +128,11 @@ async function readBody(response: Response, maxBytes?: number): Promise<{ text: 
   return { text, truncated };
 }
 
-async function get(url: string, opts?: { requireHtml?: boolean; maxBytes?: number }): Promise<PageResult> {
+async function get(
+  url: string,
+  opts?: { requireHtml?: boolean; maxBytes?: number },
+  retryAccessDenied = true,
+): Promise<PageResult> {
   let response: Response;
   try {
     response = await fetch(url, {
@@ -169,6 +173,17 @@ async function get(url: string, opts?: { requireHtml?: boolean; maxBytes?: numbe
   }
 
   const finalUrl = response.url || url;
+  if (response.status === 403 && retryAccessDenied) {
+    // A number of otherwise public project sites intermittently return one
+    // edge-level 403 during a cold or bot-mitigation transition, then serve the
+    // same public page normally. One bounded retry closes that transient gap;
+    // a second 403 remains explicitly unavailable and can never become clean
+    // evidence merely because ARGUS tried twice.
+    recordCall("site-fetch", "substance", 0, "http_403_access_blocked_retry", "partial");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    return get(url, opts, false);
+  }
+
   if (response.status === 401 || response.status === 403 || response.status === 429) {
     recordCall("site-fetch", "substance", 0, `http_${response.status}_access_blocked`, "partial");
     return {
