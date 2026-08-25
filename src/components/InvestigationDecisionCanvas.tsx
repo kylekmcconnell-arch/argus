@@ -450,7 +450,7 @@ export function InvestigationDecisionCanvas({
 
             <div className="mt-4 border-t border-line/60 pt-4">
               <DecisionLedgerList
-                title="Research and follow-up"
+                title="What is still open"
                 items={nextSteps}
                 href={methodologyHref}
                 emptyCopy={applicable === 0 ? "No required check results were saved." : "No checks remain open."}

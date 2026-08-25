@@ -79,7 +79,7 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain("Early risk score");
     expect(html).toContain("5/7 token safety checks complete · provisional");
     expect(html).toContain("Token safety checks");
-    expect(html).toContain("Research and follow-up");
+    expect(html).toContain("What is still open");
   });
 
   it("shows one evidence-bound discovery with its proof and reversal condition", () => {

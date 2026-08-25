@@ -2634,6 +2634,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   });
   const toDecisionCanvasItems = (items: readonly ReportCanvasNarrativeItem[]): DecisionCanvasItem[] =>
     items.map((item) => ({ label: item.title, ...(item.detail ? { detail: item.detail } : {}) }));
+  const unresolvedRequiredNextSteps: ReportCanvasNarrativeItem[] = unresolvedChecks.map((check, index) => ({
+    id: `required-check-${check.checkId || index}`,
+    title: check.label,
+    detail: plainLanguageSummary(check.note || (
+      check.status === "stale"
+        ? "The saved result is out of date. Run this check again."
+        : check.retryable === false
+          ? "ARGUS does not currently have a supported source that can finish this check."
+          : "This required check did not finish. A rescan may complete it."
+    )),
+    href: "#scan-methodology" as `#${string}`,
+  }));
   const decisionCanvasSupports = toDecisionCanvasItems(supportNarrative);
   const decisionCanvasConcerns = toDecisionCanvasItems(
     [...confidenceLimits, ...lowAxisDrivers, ...subjectLeadNarrative]
@@ -2641,7 +2653,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       .slice(0, 8),
   );
   const decisionCanvasContext = toDecisionCanvasItems(intelligenceContextNarrative);
-  const decisionCanvasNextSteps = toDecisionCanvasItems(verificationNext);
+  const decisionCanvasNextSteps = toDecisionCanvasItems(
+    [...unresolvedRequiredNextSteps, ...verificationNext]
+      .filter((item, index, items) => items.findIndex((candidate) => candidate.title === item.title) === index)
+      .slice(0, 6),
+  );
   const decisionCanvasVerified = decisionCriticalChecks(diligenceChecks)
     .filter((check) => check.status === "confirmed"
       || check.status === "reported"
