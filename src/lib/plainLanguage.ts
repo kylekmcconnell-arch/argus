@@ -48,6 +48,15 @@ export function plainLanguageSummary(value: string): string {
     .replace(/\bmodel-only\b/gi, "suggested by AI only")
     .replace(/\bCEX listings?\b/gi, "centralized exchange listings")
     .replace(/\bFDV\b/g, "all-token value")
+    .replace(/\bP0\s*[·.]\s*Intake\b/gi, "Starting the scan")
+    .replace(/\bchecked-empty\b/gi, "nothing found")
+    .replace(/\ba null result on this axis(?:, not adverse(?: conduct)? evidence)?\b/gi, "no result was recorded in this area")
+    .replace(/\bnull result on this axis\b/gi, "no result in this area")
+    .replace(/\bbound project identifiers\b/gi, "official X handle and ticker")
+    .replace(/\bbound identifiers\b/gi, "official X handle and ticker")
+    .replace(/\bare bound to this subject\b/gi, "are tied to this project")
+    .replace(/\bis bound to this subject\b/gi, "is tied to this project")
+    .replace(/\bbound to this subject\b/gi, "tied to this project")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -196,7 +205,38 @@ export function publicCheckNote(value: string | null | undefined): string {
     .replace(/owner active/gi, "contract owner still has control")
     .replace(/transfers can be paused/gi, "the owner can stop transfers")
     .replace(/no elevated concentration surfaced/gi, "no unusual wallet concentration found")
-    .replace(/frozen/gi, "saved");
+    .replace(/frozen/gi, "saved")
+    .replace(/\ba null result on this axis(?:, not adverse(?: conduct)? evidence)?\b/gi, "no result was recorded in this area")
+    .replace(/\bnull result on this axis\b/gi, "no result in this area")
+    .replace(/\bchecked-empty\b/gi, "nothing found")
+    .replace(/\bP0\s*[·.]\s*Intake\b/gi, "Starting the scan");
+}
+
+const PUBLIC_CHECK_STATUSES: Record<string, string> = {
+  confirmed: "finished",
+  reported: "reported by a source",
+  finding: "needs attention",
+  "checked-empty": "nothing found",
+  "not-applicable": "not needed",
+  unknown: "still open",
+  unavailable: "source unavailable",
+  stale: "out of date",
+  complete: "finished",
+};
+
+/** Reader label for a saved check status. Engine statuses stay on the record. */
+export function publicCheckStatus(value: string | null | undefined): string {
+  const trimmed = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!trimmed) return "";
+  return PUBLIC_CHECK_STATUSES[trimmed.toLowerCase()] ?? publicCheckNote(trimmed);
+}
+
+/** Reader label for a live-scan phase. Internal P0 codes stay on the event. */
+export function publicPhaseLabel(value: string | null | undefined): string {
+  const trimmed = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!trimmed) return "";
+  if (/^P0\s*[·.]\s*Intake$/i.test(trimmed)) return "Starting the scan";
+  return plainLanguageSummary(trimmed);
 }
 
 import { axisLabel } from "./verdict";

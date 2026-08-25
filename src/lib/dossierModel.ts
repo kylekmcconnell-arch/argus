@@ -16,7 +16,7 @@ import {
 import type { EntityLedgerRow, EntityScorecard } from "../intelligence/entityScorecards";
 import { teamIdentityKeys } from "./teamIdentity";
 import { publicIntelligenceText, publicNumberText } from "./intelligencePresentation";
-import { publicCheckLabel, publicCheckNote } from "./plainLanguage";
+import { publicCheckLabel, publicCheckNote, publicCheckStatus } from "./plainLanguage";
 
 export interface DossierReceiptSource {
   url: string;
@@ -333,7 +333,7 @@ function receiptFor(
   const fetched = clock(primary.capturedAt);
   if (fetched) chain.push(["Fetched", fetched]);
   // Bind state is recorded, not a second copy of capturedAt.
-  chain.push(["Bound to this subject", unbound ? "never" : "recorded"]);
+  chain.push(["Tied to this project", unbound ? "never" : "recorded"]);
   return {
     passage: str(primary.excerpt) || "No passage was recorded for this source.",
     sourceLabel: sourceLabelOf(primary),
@@ -465,7 +465,9 @@ function headingFor(
     const first = who === "the subject"
       ? "This is the subject we audited."
       : `This is the ${who} we audited.`;
-    const site = ctx.subject.website ? "The site is bound." : "No official site is bound.";
+    const site = ctx.subject.website
+      ? "An official site is on file."
+      : "ARGUS did not find an official site.";
     return `${first} ${site}`;
   }
 
@@ -524,9 +526,9 @@ function headingFor(
     const unbound = figures.filter((f) => f.unboundNote);
     if (unbound.length && !bound.length) return unboundHeading(figures) ?? "No legal entity is recorded.";
     if (bound.length && unbound.length) {
-      return `${plural(bound.length, "record is", "records are")} bound to this subject. ${unbound.length} name a different subject.`;
+      return `${plural(bound.length, "record is", "records are")} tied to this project. ${unbound.length} name a different subject.`;
     }
-    if (bound.length) return `${plural(bound.length, "record is", "records are")} bound to this subject.`;
+    if (bound.length) return `${plural(bound.length, "record is", "records are")} tied to this project.`;
     return "No legal entity is recorded.";
   }
 
@@ -764,7 +766,7 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       ...coverageFigures,
       ...leftover.filter((c) => str(c.status) !== "confirmed").map((c): DossierFigure => ({
         label: publicCheckLabel(str(c.label) || str(c.checkId)),
-        value: (str(c.note) ? publicCheckNote(str(c.note)) : "") || str(c.status) || EMPTY_VALUE,
+        value: (str(c.note) ? publicCheckNote(str(c.note)) : "") || publicCheckStatus(str(c.status)) || EMPTY_VALUE,
         provenance: provenanceForCheckStatus(str(c.status) as never) ?? { tier: "unestablished" },
         receipt: null,
         unboundNote: null,
@@ -786,7 +788,7 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
       tier: str(band?.tier) || "unknown",
       minScore: num(band?.minScore) ?? 0,
       maxScore: num(band?.maxScore) ?? 0,
-      reasons: arr<unknown>(band?.reasons).map(str).filter(Boolean),
+      reasons: arr<unknown>(band?.reasons).map((reason) => publicIntelligenceText(str(reason))).filter(Boolean),
     }))
     .sort((a, b) => a.axis.localeCompare(b.axis));
 

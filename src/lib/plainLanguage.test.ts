@@ -5,7 +5,9 @@ import {
   publicConcernTitle,
   publicCheckLabel,
   publicCheckNote,
+  publicCheckStatus,
   publicEntityLabel,
+  publicPhaseLabel,
   publicRelationshipLabel,
 } from "./plainLanguage";
 
@@ -70,6 +72,14 @@ describe("public report labels", () => {
     expect(publicCheckNote("supergemma.ai serves a verified coming-soon page"))
       .toBe("The project website is not live yet. It still shows a coming-soon or early-access page.");
     expect(publicCheckNote("SiteNotLive")).toContain("not live yet");
+    expect(publicCheckNote("assessed token identity: nothing bound. A null result on this axis, not adverse conduct evidence."))
+      .toContain("no result was recorded in this area");
+    expect(publicCheckNote("assessed token identity: nothing bound. A null result on this axis, not adverse conduct evidence."))
+      .not.toMatch(/null result on this axis/i);
+    expect(publicCheckStatus("checked-empty")).toBe("nothing found");
+    expect(publicPhaseLabel("P0 · Intake")).toBe("Starting the scan");
+    expect(plainLanguageSummary("Largest accounts mentioned the bound identifiers after P0 · Intake."))
+      .toBe("Largest accounts mentioned the official X handle and ticker after Starting the scan.");
   });
 
   it("keeps graph IDs typed while presenting readable nodes and relationships", () => {

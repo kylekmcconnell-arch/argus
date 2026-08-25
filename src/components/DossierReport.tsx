@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { GithubLogo, LinkedinLogo, LinkSimple, XLogo } from "@phosphor-icons/react";
 import { ProvenanceTag } from "./ProvenanceTag";
 import { buildDossier, type Dossier, type DossierFigure, type DossierSourceRow, type StrengthBand, type KeyMeasure } from "../lib/dossierModel";
+import { publicCheckStatus } from "../lib/plainLanguage";
 
 const TINT: Record<string, string> = {
   sourced: "text-sourced", derived: "text-derived", unestablished: "text-unverifiable",
@@ -102,7 +103,7 @@ export function CoverageGrid({ checks }: { checks: Array<{ state: string; count:
     <div>
       <div className="flex flex-wrap gap-[3px]">
         {dots.map((state, i) => (
-          <span key={i} title={state} className="h-[9px] w-[9px] rounded-[2px]"
+          <span key={i} title={publicCheckStatus(state)} className="h-[9px] w-[9px] rounded-[2px]"
             style={{ background: STATE_TINT[state] ?? "var(--color-ink-faint)" }} />
         ))}
       </div>
@@ -110,7 +111,7 @@ export function CoverageGrid({ checks }: { checks: Array<{ state: string; count:
         {checks.map((c) => (
           <span key={c.state} className="mono flex items-center gap-1 text-[10px] text-ink-faint">
             <span className="h-[7px] w-[7px] rounded-[2px]" style={{ background: STATE_TINT[c.state] ?? "var(--color-ink-faint)" }} />
-            {c.count} {c.state}
+            {c.count} {publicCheckStatus(c.state)}
           </span>
         ))}
       </div>
@@ -661,9 +662,18 @@ export function DossierReport({
                   <div className="flex flex-wrap gap-x-6 gap-y-2">
                     <Stat n={`${d.coverage.questionsAnswered}/${d.coverage.questionsTotal}`} k="questions answered" />
                     <Stat n={String(d.coverage.leads)} k="leads never confirmed" />
-                    <Stat n={String(d.coverage.failedProviders.length)} k={d.coverage.failedProviders.length
-                      ? `${d.coverage.failedProviders.length} data source${d.coverage.failedProviders.length === 1 ? "" : "s"} did not respond`
-                      : "data sources responded"} />
+                    {d.sources.length > 0 && (
+                      <Stat
+                        n={String(d.sources.length)}
+                        k={d.sources.length === 1 ? "recorded source" : "recorded sources"}
+                      />
+                    )}
+                    {d.coverage.failedProviders.length > 0 && (
+                      <Stat
+                        n={String(d.coverage.failedProviders.length)}
+                        k={`${d.coverage.failedProviders.length} data source${d.coverage.failedProviders.length === 1 ? "" : "s"} did not respond`}
+                      />
+                    )}
                   </div>
                 </div>
               )}

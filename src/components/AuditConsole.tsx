@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { TraceStep } from "../data/evidence";
 import type { InvestigationProgressKind } from "../lib/investigationProgress";
+import { publicPhaseLabel } from "../lib/plainLanguage";
 import { InvestigationProgressCanvas } from "./InvestigationProgressCanvas";
 
 const TONE: Record<TraceStep["tone"], { dot: string; label: string; className: string }> = {
@@ -65,7 +66,7 @@ export function AuditConsole({ handle, subtitle, steps, working, mode, kind = "p
   };
 
   const latest = steps.at(-1) ?? null;
-  const liveAnnouncement = latest ? `${latest.phase}: ${latest.label}. ${latest.detail}`
+  const liveAnnouncement = latest ? `${publicPhaseLabel(latest.phase)}: ${latest.label}. ${latest.detail}`
     : kind === "resolution" ? "Finding the right project or person."
       : working ? "Waiting for the first result." : "No results came back.";
 
@@ -93,7 +94,7 @@ export function AuditConsole({ handle, subtitle, steps, working, mode, kind = "p
                   return (
                     <article key={index} className={`research-ledger-row ${index === steps.length - 1 ? "rise-in" : ""}`}>
                       <div className="research-ledger-order"><span className={`research-ledger-dot ${tone.dot}`} />{String(index + 1).padStart(2, "0")}</div>
-                      <div className="research-ledger-source">{step.source || step.phase}</div>
+                      <div className="research-ledger-source">{step.source || publicPhaseLabel(step.phase)}</div>
                       <div className="min-w-0"><h3>{step.label}</h3><p>{step.detail}</p></div>
                       <div><span className={`research-ledger-status ${tone.className}`}>{tone.label}</span></div>
                     </article>
