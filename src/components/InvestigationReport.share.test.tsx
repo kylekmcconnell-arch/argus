@@ -827,6 +827,25 @@ describe("investigation exact sharing", () => {
     expect(onReAudit).toHaveBeenCalledOnce();
   });
 
+  it("shows a plain Rescan failure on the saved report instead of staying silent", () => {
+    act(() => {
+      root.render(
+        <InvestigationReport
+          inv={investigation()}
+          onAudit={() => {}}
+          onReset={() => {}}
+          onOpenToken={() => {}}
+          onOpenProjectAccount={() => {}}
+          onReAudit={() => {}}
+          rescanError="Rescan could not start. Address used: $EARN. a $ticker is not a runnable contract address. Paste the exact contract or a DexScreener URL."
+        />,
+      );
+    });
+    const alert = [...container.querySelectorAll("[role='alert']")]
+      .find((node) => node.textContent?.includes("Address used: $EARN"));
+    expect(alert?.textContent).toContain("$ticker");
+  });
+
   it("offers a clearly labeled live price refresh for older snapshots", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 404 })));
     render(investigation({

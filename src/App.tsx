@@ -29,6 +29,7 @@ import { probeBackend } from "./lib/live";
 import { startPersonAudit, setOnComplete, getRun } from "./lib/runner";
 import { startTokenScan, startInvestigationScan, setScanOnComplete, getScanRun, type ScanRun } from "./lib/scanrunner";
 import { isRunnableTokenInput, resolveInput, type RunnableTokenInput, type ResolvedInput } from "./lib/resolveInput";
+import { formatInvestigationRescanError, resolveInvestigationRescanInput } from "./lib/investigationRescan";
 import type { TokenDossier } from "./token/audit";
 import { resolveTokenSubject, type TokenCandidate } from "./token/resolveSubject";
 import type { NavTarget } from "./components/Sidebar";
@@ -309,6 +310,8 @@ export default function App() {
   const [storedReconVersionContext, setStoredReconVersionContext] = useState<ReportVersionContext | null>(null);
   const [investigationInput, setInvestigationInput] = useState<RunnableTokenInput | null>(null);
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
+  const [investigationScanId, setInvestigationScanId] = useState<string | null>(null);
+  const [investigationRescanError, setInvestigationRescanError] = useState<string | null>(null);
   const [viewedProject, setViewedProject] = useState<{ name: string; domain?: string; privateMode: boolean; panelCostToken?: string } | null>(null);
   // When a LIVE audit genuinely fails (vs. simply having no curated fixture), we
   // carry the real reason so the failure page tells the truth and offers a retry,
@@ -369,6 +372,10 @@ export default function App() {
     void next.then(clear, clear);
   }, []);
   const safeAuditRequestRef = useRef(0);
+  // URL boot may re-run when onOpenRecent / onSafeAuditMode identities change.
+  // An explicit Rescan must win over that stored-case reopen.
+  const urlBootConsumedRef = useRef(false);
+  const urlBootStartedRef = useRef(false);
   // Private/incognito toggle for the current NON-person flow (token / investigation
   // / site). Person audits carry their own private flag on the background run.
   // A private audit runs and shows the result but is never persisted, logged,
@@ -491,8 +498,35 @@ export default function App() {
     onAudit(raw, priv, force);
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, setInvestigationInput, setPhase, setPrivateMode, setQuery, showPrivacyConflict]);
 
+  const onInvestigationRescan = useCallback(() => {
+    if (!closeCaseBriefForNavigation()) return;
+    if (!investigation) return;
+    urlBootConsumedRef.current = true;
+    safeAuditRequestRef.current += 1;
+    const resolved = resolveInvestigationRescanInput(investigation.token.address);
+    if (!resolved.ok) {
+      setInvestigationRescanError(formatInvestigationRescanError(resolved.address, resolved.reason));
+      return;
+    }
+    setInvestigationRescanError(null);
+    setCaseNotice(null);
+    setLiveError(null);
+    leaveEvidenceReview();
+    const priv = investigation.persistence?.state === "private";
+    privRef.current = priv;
+    setPrivateMode(priv);
+    setQuery(resolved.input.ref);
+    setInvestigationInput(resolved.input);
+    setInvestigation(null);
+    const run = startInvestigationScan(resolved.input, priv, { force: true });
+    if (run.priv !== priv) { showPrivacyConflict(resolved.input.ref); return; }
+    setInvestigationScanId(run.id);
+    setPhase("investigation");
+  }, [closeCaseBriefForNavigation, investigation, leaveEvidenceReview, showPrivacyConflict]);
+
   const onInvestigationError = useCallback((message: string) => {
     setLiveError(message);
+    setInvestigationRescanError(message);
     setCaseNotice({ reason: "launch-failed", ref: query, mode: "investigation" });
     setPhase("notfound");
   }, [query, setPhase]);
@@ -1265,12 +1299,13 @@ export default function App() {
   // Share links resolve through the stored-report path. `?version=` is an
   // immutable evidence-review route used by Case Briefs and never launches a scan.
   useEffect(() => {
+    if (urlBootConsumedRef.current) return;
     if (evidenceReviewVersionId) {
       let cancelled = false;
       const timer = window.setTimeout(() => {
         void (async () => {
           const report = await fetchReportVersion(evidenceReviewVersionId);
-          if (cancelled) return;
+          if (cancelled || urlBootConsumedRef.current) return;
           const cached = report ? cachedFromStoredReport(report) : null;
           const ref = report?.ref ?? "";
           if (!cached || !ref) {
@@ -1291,7 +1326,10 @@ export default function App() {
       };
     }
     if (!boot.openRef) return;
+    if (urlBootStartedRef.current) return;
     const timer = window.setTimeout(() => {
+      if (urlBootConsumedRef.current) return;
+      urlBootStartedRef.current = true;
       const ref = boot.openRef as string;
       if (boot.openStoredOnly) void onOpenRecent(ref, boot.openKind);
       else if (boot.openKind === "token") void onSafeAuditMode(ref, false, "token", false);
@@ -1314,6 +1352,8 @@ export default function App() {
     setTokenBriefTarget(null);
     setInvestigationInput(null);
     setInvestigation(null);
+    setInvestigationScanId(null);
+    setInvestigationRescanError(null);
     setStoredRecon(null);
     setStoredReconBriefTarget(null);
     setStoredReconVersionContext(null);
@@ -1486,7 +1526,7 @@ export default function App() {
           : <ThreatLanding onScan={onThreatScan} />)}
 
       {phase === "investigation" && investigationInput && (
-        <InvestigationRun input={investigationInput} onDone={onInvestigationDone} onError={onInvestigationError} />
+        <InvestigationRun input={investigationInput} expectedRunId={investigationScanId ?? undefined} onDone={onInvestigationDone} onError={onInvestigationError} />
       )}
 
       {phase === "investigation-report" && investigation && (
@@ -1503,18 +1543,8 @@ export default function App() {
                 expectedReportVersionId: investigation.versionContext!.reportVersionId,
               })
             : undefined}
-          onReAudit={() => {
-            const input = resolveInput(investigation.token.address);
-            if (!isRunnableTokenInput(input)) return;
-            leaveEvidenceReview();
-            privRef.current = investigationReportPrivate;
-            setPrivateMode(investigationReportPrivate);
-            setInvestigationInput(input);
-            setInvestigation(null);
-            const run = startInvestigationScan(input, investigationReportPrivate, { force: true });
-            if (run.priv !== investigationReportPrivate) { showPrivacyConflict(input.ref); return; }
-            setPhase("investigation");
-          }}
+          rescanError={investigationRescanError}
+          onReAudit={onInvestigationRescan}
         />
       )}
 

@@ -12,7 +12,7 @@ vi.mock("./investigationCredits", () => ({ reserveInvestigationCredit: mocks.res
 vi.mock("./socialActivityClient", () => ({ collectTokenSocialActivity: mocks.collectTokenSocialActivity }));
 vi.mock("./investigation", () => ({ streamInvestigation: mocks.streamInvestigation }));
 
-import { getScanRun, startTokenScan } from "./scanrunner";
+import { getScanRun, startInvestigationScan, startTokenScan } from "./scanrunner";
 
 describe("background scan credit gate", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -43,5 +43,50 @@ describe("background scan credit gate", () => {
     expect(mocks.auditToken).toHaveBeenCalledOnce();
     expect(mocks.reserveInvestigationCredit.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.auditToken.mock.invocationCallOrder[0]);
+  });
+});
+
+describe("forced investigation rescan", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("replaces a running investigation when force is true", async () => {
+    const input = { kind: "token", via: "evm", ref: "0x0000000000000000000000000000000000000180" } as const;
+    mocks.reserveInvestigationCredit.mockResolvedValue({ chargedCredits: 1, remainingCredits: 10 });
+    mocks.streamInvestigation.mockImplementation(() => () => undefined);
+
+    const first = startInvestigationScan(input);
+    expect(first.status).toBe("running");
+    const second = startInvestigationScan(input, false, { force: true });
+
+    expect(second.id).not.toBe(first.id);
+    expect(second.creditKey).not.toBe(first.creditKey);
+    expect(getScanRun("investigation", input.ref)?.id).toBe(second.id);
+    expect(getScanRun("investigation", input.ref)?.status).toBe("running");
+    await vi.waitFor(() => expect(mocks.streamInvestigation).toHaveBeenCalled());
+    expect(mocks.streamInvestigation).toHaveBeenLastCalledWith(
+      input,
+      expect.any(Object),
+      expect.objectContaining({ forceTokenAudit: true }),
+    );
+  });
+
+  it("starts a new investigation after a completed run when force is true", async () => {
+    const input = { kind: "token", via: "evm", ref: "0x0000000000000000000000000000000000000181" } as const;
+    mocks.reserveInvestigationCredit.mockResolvedValue({ chargedCredits: 1, remainingCredits: 10 });
+    mocks.streamInvestigation.mockImplementationOnce((_input, handlers: { onDone: (inv: { token: { address: string } }) => void }) => {
+      handlers.onDone({ token: { address: input.ref } });
+      return () => undefined;
+    });
+
+    startInvestigationScan(input);
+    await vi.waitFor(() => expect(getScanRun("investigation", input.ref)?.status).toBe("done"));
+    const firstId = getScanRun("investigation", input.ref)!.id;
+
+    mocks.streamInvestigation.mockImplementation(() => () => undefined);
+    const second = startInvestigationScan(input, false, { force: true });
+
+    expect(second.id).not.toBe(firstId);
+    expect(second.status).toBe("running");
+    expect(getScanRun("investigation", input.ref)?.id).toBe(second.id);
   });
 });

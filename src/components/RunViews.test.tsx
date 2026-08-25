@@ -214,4 +214,29 @@ describe("run view console state", () => {
     expect(onError).not.toHaveBeenCalled();
     expect(latestConsole("investigation").working).toBe(false);
   });
+
+  it("does not complete a stale done run when expectedRunId names a new scan", async () => {
+    const stale = { token: { address: ADDRESS, symbol: "OLD" } };
+    harness.scanRuns.investigation = {
+      id: "stale-done",
+      kind: "investigation",
+      ref: ADDRESS,
+      input: ADDRESS,
+      label: "OLD",
+      priv: false,
+      steps: [],
+      pct: 100,
+      status: "done",
+      result: stale,
+      startedAt: 10,
+    };
+    const onDone = vi.fn();
+    const onError = vi.fn();
+
+    await render(<InvestigationRun input={input} expectedRunId="fresh-run" onDone={onDone} onError={onError} />);
+
+    expect(onDone).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(latestConsole("investigation").working).toBe(true);
+  });
 });
