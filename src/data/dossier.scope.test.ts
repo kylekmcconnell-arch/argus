@@ -112,6 +112,11 @@ describe("dossier finding scope", () => {
         name: "Verified Name",
         handle: "@model_link_candidate",
         linkedin: "linkedin.com/in/model-link-candidate",
+        developerProfiles: [{
+          provider: "github",
+          url: "https://github.com/model-link-candidate",
+          sourceUrl: "https://example.com/model-lead",
+        }],
         role: "COO",
         source: "team page",
         provider: "team-page",
@@ -152,6 +157,7 @@ describe("dossier finding scope", () => {
     expect(dossier.webTeam.find((member) => member.name === "Verified Name")).toMatchObject({
       handle: undefined,
       linkedin: undefined,
+      developerProfiles: undefined,
     });
     expect(dossier.webTeamLeads).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "Model Lead", evidence_origin: "model_lead", artifact_verified: false }),

@@ -163,7 +163,11 @@ reconcile by stable handle first and exact canonical name second. A provider
 presentation suffix may become a role-qualified alias, never a broad fuzzy
 match. First-party naming and independent confirmation remain separate evidence
 states on the one reconciled person. Provenance colour is source-of-truth, not
-pass/fail.
+pass/fail. A reconciled team card links to each valid public profile preserved
+on that person's frozen team record, including X, LinkedIn, and verified
+developer profiles. The report never constructs a profile from a display name,
+accepts a company page as a person's profile, or renders a model-only identity
+link.
 
 The saved ARGUS risk score is the dominant visual result in the opening
 decision brief. It uses the shared large ScoreRing treatment at the true
