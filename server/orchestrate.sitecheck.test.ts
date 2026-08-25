@@ -235,6 +235,34 @@ describe("site-liveness evidence attribution", () => {
     expect(bands.P2_product_substance.minScore ?? 0).toBe(0);
   });
 
+  it("treats recovered official-page evidence as the same official site, not an independent source", () => {
+    const { ctx, evidence, checks, emit } = context();
+
+    applySiteSubstanceOutcome(ctx, "earnonhood.com", {
+      url: "https://earnonhood.com",
+      status: "live",
+      retrievalMethod: "reader_recovery",
+      detail: 'live site: "EARN on Robinhood chain"; recovered through the bounded reader of the same official site',
+    });
+
+    expect(evidence.findings).toEqual([]);
+    expect(evidence.profile.site_substance_status).toBe("live");
+    expect(evidence.profile.website).toBe("https://earnonhood.com");
+    expect(checks).toEqual([expect.objectContaining({
+      id: "project-product-substance",
+      status: "confirmed",
+      sourceCount: 1,
+      note: expect.stringContaining("same official site"),
+    })]);
+    expect(checks[0]?.sourceCount).toBe(1);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: "Website live",
+      source: "site-fetch",
+      detail: expect.stringContaining("earnonhood.com"),
+    }));
+    expect(JSON.stringify({ checks, calls: emit.mock.calls })).not.toMatch(/r\.jina\.ai|independent source/i);
+  });
+
   it.each([
     ["coming_soon", "the served homepage explicitly presents a coming-soon surface"],
     ["parked", "the served homepage is a registrar parking page"],
