@@ -38,6 +38,8 @@ const NavigationConsolidationPreview = lazy(() => import('./dev/NavigationConsol
 const PublicAccessPreview = lazy(() => import('./dev/PublicAccessPreview.tsx').then((module) => ({ default: module.PublicAccessPreview })))
 // eslint-disable-next-line react-refresh/only-export-components
 const ReportClarityPreview = lazy(() => import('./dev/ReportClarityPreview.tsx').then((module) => ({ default: module.ReportClarityPreview })))
+// eslint-disable-next-line react-refresh/only-export-components
+const TrustGraphPreview = lazy(() => import('./dev/TrustGraphPreview.tsx').then((module) => ({ default: module.TrustGraphPreview })))
 
 // Observe 401s from ARGUS API routes so an expired session is stated once
 // instead of surfacing as a page of quietly dead panels.
@@ -97,6 +99,8 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><PublicAccessPreview /></Suspense>
       ) : designPreview === 'report-clarity' ? (
         <Suspense fallback={null}><ReportClarityPreview /></Suspense>
+      ) : designPreview === 'trust-graph' ? (
+        <Suspense fallback={null}><TrustGraphPreview /></Suspense>
       ) : sharedReportToken ? (
         <Suspense fallback={null}><SharedReportView token={sharedReportToken} /></Suspense>
       ) : publicView === 'leaderboard' ? (
