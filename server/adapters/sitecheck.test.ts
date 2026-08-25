@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getCost, withCostLedger } from "../cost";
-import { checkSiteSubstance } from "./sitecheck";
+import { checkSiteSubstance, officialSiteAccessDeniedFinding } from "./sitecheck";
 
 const response = (
   body: string | null,
@@ -51,6 +51,14 @@ afterEach(() => {
 });
 
 describe("checkSiteSubstance attribution", () => {
+  it("states a confirmed official-site block without claiming the page was read", () => {
+    expect(officialSiteAccessDeniedFinding("earnonhood.com")).toBe(
+      "The official site (earnonhood.com) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.",
+    );
+    expect(officialSiteAccessDeniedFinding("https://www.earnonhood.com/omni")).toContain("www.earnonhood.com");
+    expect(officialSiteAccessDeniedFinding("earnonhood.com")).not.toMatch(/live|successful|Dashboard|docs/i);
+  });
+
   it("ignores invalid domains without making a provider attempt", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -80,6 +88,41 @@ describe("checkSiteSubstance attribution", () => {
       partial: status === 403 ? 4 : 2,
       failed: 0,
       meta: expect.stringContaining(`http_${status}_access_blocked`),
+    }));
+  });
+
+  it("keeps a confirmed earnonhood.com HTTP 403 as access blocked after the bounded retry, never live", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(response("request denied", 403)));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captured = await withCostLedger(async () => ({
+      result: await checkSiteSubstance("earnonhood.com"),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toMatchObject({
+      status: "access_blocked",
+      reason: "http_access",
+      detail: expect.stringContaining("HTTP 403"),
+    });
+    expect(captured.result?.status).not.toBe("live");
+    expect(captured.result?.detail).not.toMatch(/live site|Dashboard|docs/i);
+    expect(officialSiteAccessDeniedFinding("earnonhood.com")).toContain("could not read the page");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://earnonhood.com",
+      "https://earnonhood.com",
+      "https://www.earnonhood.com",
+      "https://www.earnonhood.com",
+    ]);
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "site-fetch",
+      op: "substance",
+      meta: expect.stringContaining("http_403_access_blocked_retry"),
+    }));
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "site-fetch",
+      op: "substance",
+      meta: expect.stringContaining("http_403_access_blocked"),
     }));
   });
 

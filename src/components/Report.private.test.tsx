@@ -73,7 +73,7 @@ describe("private person report evidence boundary", () => {
             checkId,
             label: "Product and website substance",
             status: "unavailable" as const,
-            note: "earnonhood.com denied the automated request (HTTP 403); no adverse website conclusion was drawn",
+            note: "no frozen first-party product or website outcome was recorded",
             provider: "site-fetch",
             decisionCritical: true,
           }
@@ -96,10 +96,68 @@ describe("private person report evidence boundary", () => {
     expect(openRail.textContent).toContain("6 finished, 1 open");
     expect(openRail.textContent).toContain("What is still open");
     expect(openRail.textContent).toContain("Product and website substance");
-    expect(openRail.textContent).toContain("earnonhood.com blocked the automated check, so ARGUS could not finish reviewing the website.");
-    expect(openRail.textContent).not.toContain("HTTP 403");
+    expect(openRail.textContent).toContain("no frozen official product or website outcome was recorded");
     expect(openRail.textContent).toContain("1 open");
     expect(openRail.textContent).not.toContain("7 finished");
+  });
+
+  it("finishes an EARN / earnonhood.com confirmed 403 as a required website check without calling the site live or raising the score", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const requiredChecks = [
+      "project-token-identity",
+      "project-product-substance",
+      "project-team-identity",
+      "project-backing-partners",
+      "project-traction-liveness",
+      "project-transparency",
+      "trust-graph-connections",
+    ];
+    const accessDenied = "The official site (earnonhood.com) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.";
+    const dossier = {
+      ...base,
+      display_name: "EARN",
+      handle: "@earnonhood",
+      website: "https://earnonhood.com",
+      report: {
+        ...base.report,
+        governing_score: 51,
+        composite_verdict: "CAUTION",
+      },
+      checkRuns: requiredChecks.map((checkId) => checkId === "project-product-substance"
+        ? {
+            checkId,
+            label: "Product and website substance",
+            status: "checked-empty" as const,
+            note: accessDenied,
+            provider: "site-fetch",
+            decisionCritical: true,
+          }
+        : {
+            checkId,
+            label: checkId,
+            status: "confirmed" as const,
+            note: "completed",
+            decisionCritical: true,
+          }),
+      completeness_state: "complete" as const,
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const brief = container.querySelector('[data-canonical-decision-brief="true"]')!;
+    const openRail = brief.querySelector('aside[aria-label="Required report checks"]')!;
+    expect(openRail.textContent).toContain("7 finished, 0 open");
+    expect(openRail.textContent).toContain("No checks remain open.");
+    expect(openRail.textContent).toContain("Product and website substance");
+    expect(openRail.textContent).toContain("blocked the automated request");
+    expect(openRail.textContent).toContain("could not read the page");
+    expect(brief.textContent).toContain("7/7 required report checks complete");
+    expect(brief.textContent).not.toContain("7/7 required report checks complete · provisional");
+    expect(brief.textContent).toContain("51");
+    expect(brief.textContent).not.toMatch(/Website live|live site/i);
+    expect(container.textContent).not.toContain("6 finished, 1 open");
   });
 
   it("renders the SuperGemma regression fixture through one canonical report experience", () => {

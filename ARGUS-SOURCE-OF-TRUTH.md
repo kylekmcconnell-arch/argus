@@ -136,8 +136,11 @@ an otherwise answered investment case incomplete. A `401`, `403`, `429`,
 Cloudflare page, or other anti-bot response is an access gap, never evidence that a
 site or product is dead. Only a directly served parked or explicit coming-soon page
 can support that conclusion. Site checks may retry one transient `403` against the
-same URL. A retry only completes the check when it receives a real successful
-response; a repeated denial remains an explicit access gap.
+same URL. A retry only marks the site live when it receives a real successful
+page. A confirmed repeated `403`, or an equivalent hard access denial, completes
+the required website-substance check as a finished access-denied result: ARGUS
+could not read the page. That result never invents page content, never raises
+the score, and never supports an adverse site-activity conclusion.
 
 ## Decision experience
 

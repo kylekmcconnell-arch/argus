@@ -35,7 +35,7 @@ import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } 
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
-import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
+import { checkSiteSubstance, officialSiteAccessDeniedFinding, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
 import { collectDomainRegistration, deriveLaunchWindow } from "./adapters/domainAge";
 import { checkLeaderDepartures, type LeaderDepartureCheck } from "./adapters/peopledatalabs";
@@ -786,7 +786,28 @@ export function applySiteSubstanceOutcome(
     return;
   }
 
-  if (site.status === "access_blocked" || site.status === "unavailable" || site.status === "unreachable") {
+  if (site.status === "access_blocked") {
+    // The adapter already retried a transient 403. A confirmed 401/403/anti-bot
+    // denial finishes the required website-substance check as an access-denied
+    // result. It must not stay open, mark the site live, invent page content,
+    // or raise the product-substance score.
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "checked-empty",
+      note: officialSiteAccessDeniedFinding(domain),
+      provider: "site-fetch",
+    });
+    ctx.emit({
+      phase: "P2 · Substance",
+      label: "Official site blocked the request",
+      detail: `${officialSiteAccessDeniedFinding(domain)} This is a finished access-denied result, not evidence that the website or product is offline.`,
+      source: "site-fetch",
+      tone: "neutral",
+    });
+    return;
+  }
+
+  if (site.status === "unavailable" || site.status === "unreachable") {
     ctx.recordCheck?.({
       id: "project-product-substance",
       status: "unavailable",

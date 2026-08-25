@@ -174,11 +174,15 @@ export function publicCheckLabel(value: string): string {
 export function publicCheckNote(value: string | null | undefined): string {
   const trimmed = (value ?? "").replace(/\s+/g, " ").trim();
   if (!trimmed) return "";
-  if (/\bHTTP 403\b/i.test(trimmed) || /denied the automated request/i.test(trimmed)) {
+  const rateLimited = /\bHTTP 429\b/i.test(trimmed) || /\brate-limited\b/i.test(trimmed);
+  const accessDenied = /\bHTTP 40[13]\b/i.test(trimmed)
+    || /denied the automated(?: liveness)? request/i.test(trimmed)
+    || /blocked the automated request/i.test(trimmed);
+  if (!rateLimited && accessDenied) {
     const host = trimmed.match(/\b((?:[a-z0-9-]+\.)+[a-z]{2,})\b/i)?.[1];
     return host
-      ? `${host} blocked the automated check, so ARGUS could not finish reviewing the website.`
-      : "The website blocked the automated check, so ARGUS could not finish reviewing it.";
+      ? `The official site (${host}) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.`
+      : "The official site blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.";
   }
   if (/sitenotlive/i.test(trimmed) || /coming[- ]soon|early[- ]access page|parked page/i.test(trimmed)) {
     return "The project website is not live yet. It still shows a coming-soon or early-access page.";

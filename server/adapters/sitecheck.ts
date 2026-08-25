@@ -77,6 +77,12 @@ function hostname(url: string): string {
   try { return new URL(url).hostname; } catch { return url; }
 }
 
+/** Public sentence for a confirmed official-site access denial. Never implies the page was read. */
+export function officialSiteAccessDeniedFinding(domain: string): string {
+  const host = hostname(domain.includes("://") ? domain : `https://${domain}`);
+  return `The official site (${host}) blocked the automated request, so ARGUS could not read the page. No adverse site-activity conclusion was drawn from that block alone.`;
+}
+
 function isAntiBotResponse(response: Response, body: string): boolean {
   const mitigation = response.headers.get("cf-mitigated") ?? "";
   const challenge = response.headers.get("x-datadome")
@@ -176,9 +182,10 @@ async function get(
   if (response.status === 403 && retryAccessDenied) {
     // A number of otherwise public project sites intermittently return one
     // edge-level 403 during a cold or bot-mitigation transition, then serve the
-    // same public page normally. One bounded retry closes that transient gap;
-    // a second 403 remains explicitly unavailable and can never become clean
-    // evidence merely because ARGUS tried twice.
+    // same public page normally. One bounded retry is the only path that can
+    // still mark the site live. A second 403 is a confirmed access denial: it
+    // finishes the required website check as blocked, never as a successful
+    // read, and never as product-substance evidence.
     recordCall("site-fetch", "substance", 0, "http_403_access_blocked_retry", "partial");
     await new Promise((resolve) => setTimeout(resolve, 250));
     return get(url, opts, false);
