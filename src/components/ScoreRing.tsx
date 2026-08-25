@@ -22,7 +22,15 @@ export function ScoreRing({ score, verdict, size = 86, bands = false, color }: {
     strokeDasharray: `${Math.max(0, ((to - from) / 100) * c - 3)} ${c}`,
     strokeDashoffset: -((from / 100) * c) - 1.5,
   });
-  const numberSize = size >= 120 ? "text-[32px]" : size >= 80 ? "text-[22px]" : "text-[18px]";
+  const numberSize = size >= 220
+    ? "text-[48px]"
+    : size >= 160
+      ? "text-[38px]"
+      : size >= 120
+        ? "text-[32px]"
+        : size >= 80
+          ? "text-[22px]"
+          : "text-[18px]";
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
@@ -52,7 +60,7 @@ export function ScoreRing({ score, verdict, size = 86, bands = false, color }: {
         <span className={`mono ${numberSize} font-semibold leading-none tabular`} style={{ color: ringColor }}>
           {score == null ? "N/A" : score}
         </span>
-        <span className="mono text-[10px] text-ink-faint">/ 100</span>
+        <span className={`mono text-ink-faint ${size >= 220 ? "mt-1 text-[12px]" : "text-[10px]"}`}>/ 100</span>
       </div>
     </div>
   );

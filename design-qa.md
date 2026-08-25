@@ -47,6 +47,31 @@ final result: passed
 
 ---
 
+# Design QA — oversized centered report score (2026-08-24)
+
+- Source visual truth: `docs/design-qa/oversized-score-2026-08-24/reference-current-score.png`, showing the 168px report score the user identified as too small
+- Desktop implementation: `docs/design-qa/oversized-score-2026-08-24/implementation-desktop.png`
+- State: authenticated light-theme canonical decision-report preview with a completed score
+
+## Findings
+
+The score is restored as the dominant visual anchor of the decision brief. The ring is 240px, the score numeral is 48px, and the three-column layout keeps the ring mathematically centered in the report rather than centered in the leftover space beside the copy.
+
+- Typography: the score numeral scales with the larger ring while the `/ 100` denominator remains secondary.
+- Spacing: the decision hero grows to 312px high and preserves clear separation from the review controls below.
+- Responsive behavior: the existing tablet/mobile breakpoint still moves the lockup into its own centered row at full width.
+- Tokens and semantics: verdict colors, score bands, labels, and accessible SVG structure are unchanged.
+
+## Verification
+
+- Focused component and geometry suite: 9 tests passed.
+- Static layout contract asserts the 240px ring, true center column, 312px hero height, and responsive stacking behavior.
+- Desktop implementation was inspected in the in-app browser with no overlap or horizontal overflow.
+
+final result: passed
+
+---
+
 # Design QA — investigation report storytelling
 
 - Source visual truth: `/Users/kyle/.codex/visualizations/2026/08/22/01a02b5f-5cc0-7f63-8391-250cbbe26c8f/stonkbroker-report-audit/01-verdict-opening.png`

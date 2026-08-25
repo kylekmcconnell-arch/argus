@@ -496,7 +496,7 @@
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   position: relative;
-  min-height: 226px;
+  min-height: 312px;
 }
 .decision-brief-heading::before {
   position: absolute;
@@ -510,10 +510,10 @@
 .decision-score-lockup {
   display: grid;
   grid-column: 2;
-  min-width: 248px;
+  min-width: 304px;
   justify-items: center;
-  gap: 7px;
-  padding: 6px 12px 4px;
+  gap: 10px;
+  padding: 12px 20px 8px;
   text-align: center;
 }
 .decision-score-copy {
@@ -575,7 +575,7 @@
     align-items: center;
     justify-items: center;
     border-top: 1px solid var(--color-line);
-    padding: 16px 0 0;
+    padding: 20px 0 0;
     text-align: center;
   }
 }

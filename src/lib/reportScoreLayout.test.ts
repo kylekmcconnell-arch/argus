@@ -12,6 +12,11 @@ describe("canonical report score layout", () => {
     expect(css).not.toMatch(/\.decision-score-lockup\s*\{[^}]*border-left:/s);
   });
 
+  it("restores the oversized score hero proportions", () => {
+    expect(css).toMatch(/\.decision-brief-heading\s*\{[^}]*min-height:\s*312px/s);
+    expect(css).toMatch(/\.decision-score-lockup\s*\{[^}]*min-width:\s*304px[^}]*gap:\s*10px/s);
+  });
+
   it("stacks and centers the score before the layout can overlap", () => {
     expect(css).toMatch(/@media \(max-width: 1023px\)[\s\S]*?\.decision-score-lockup\s*\{[^}]*grid-column:\s*1[^}]*width:\s*100%/s);
   });
