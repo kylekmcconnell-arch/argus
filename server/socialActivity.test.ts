@@ -18,6 +18,26 @@ describe("social activity collector", () => {
     expect(buildSocialActivityQuery({ handle: "not a handle" })).toBeNull();
   });
 
+  it("does not OR a quoted project name that is the ticker or a short generic word", () => {
+    const earn = buildSocialActivityQuery({ handle: "@earnonhood", ticker: "EARN", projectName: "EARN" });
+    expect(earn).not.toBeNull();
+    expect(earn!.query).toContain("@earnonhood");
+    expect(earn!.query).toContain("$EARN");
+    expect(earn!.query).not.toContain('"EARN"');
+    expect(earn!.query).toBe("(@earnonhood OR $EARN) -is:retweet");
+
+    const clutchTickerName = buildSocialActivityQuery({ handle: "@clutch", ticker: "CLUTCH", projectName: "CLUTCH" });
+    expect(clutchTickerName?.query).toBe("(@clutch OR $CLUTCH) -is:retweet");
+    expect(clutchTickerName?.query).not.toContain('"CLUTCH"');
+
+    const moon = buildSocialActivityQuery({ handle: "@moonproject", projectName: "MOON" });
+    expect(moon?.query).toBe("(@moonproject) -is:retweet");
+    expect(moon?.query).not.toContain('"MOON"');
+
+    const distinctive = buildSocialActivityQuery({ handle: "@projectbtc", ticker: "BTC", projectName: "Bitcoin" });
+    expect(distinctive?.query).toBe('(@projectbtc OR $BTC OR "Bitcoin") -is:retweet');
+  });
+
   it("freezes exact counts, unique authors, concentration, and an activity-only score", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
@@ -312,5 +332,77 @@ describe("social activity collector", () => {
     expect(snapshot.activityScore).toBeNull();
     expect(snapshot.note).toContain("maximum 5,000 posts");
     expect(snapshot.note).toContain("minimums");
+  });
+
+  it("stops pagination at the scan deadline and withholds the activity score", async () => {
+    let pages = 0;
+    const fetchImpl = vi.fn(async () => {
+      pages += 1;
+      return response({
+        tweets: [{
+          id: `page-${pages}`,
+          author: { id: `author-${pages}`, userName: `acct${pages}`, followers: 10 },
+          createdAt: "2026-08-22T20:30:00.000Z",
+          text: "mentioned @clutch",
+        }],
+        has_next_page: true,
+        next_cursor: `cursor-${pages}`,
+      });
+    }) as typeof fetch;
+
+    const snapshot = await collectSocialActivity(
+      { handle: "@clutch" },
+      { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl, maxPosts: 5_000, deadlineAt: Date.now() - 1 },
+    );
+
+    expect(snapshot.state).toBe("partial");
+    expect(snapshot.collection.incompleteReason).toBe("time_budget");
+    expect(snapshot.activityScore).toBeNull();
+    expect(snapshot.note).toContain("required checks");
+    expect(snapshot.note).toContain("minimums");
+    expect(pages).toBe(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps collected mentioners from a tightened query and still withholds the score when time runs out mid-search", async () => {
+    const start = 1_700_000_000_000;
+    let nowMs = start;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    let pages = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      pages += 1;
+      nowMs += 30_000;
+      return response({
+        tweets: [{
+          id: `900${pages}`,
+          text: pages === 1 ? "watching @earnonhood" : "another @earnonhood mention",
+          createdAt: pages === 1 ? "2026-08-22T21:00:00.000Z" : "2026-08-22T20:00:00.000Z",
+          author: {
+            id: pages === 1 ? "author-whale" : "author-mid",
+            userName: pages === 1 ? "whale" : "midsize",
+            followers: pages === 1 ? 880_000 : 12_000,
+          },
+        }],
+        has_next_page: true,
+        next_cursor: `cursor-${pages + 1}`,
+      });
+    });
+    const fetchImpl = fetchMock as typeof fetch;
+
+    try {
+      const snapshot = await collectSocialActivity(
+        { handle: "@earnonhood", ticker: "EARN", projectName: "EARN" },
+        { now: NOW, bearer: null, twitterApiKey: "existing-key", fetchImpl, maxPosts: 5_000, deadlineAt: start + 20_000 },
+      );
+
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("earnonhood"))).toBe(true);
+      expect(fetchMock.mock.calls.some(([input]) => String(input).includes("%22EARN%22"))).toBe(false);
+      expect(snapshot.mentioners?.map((row) => row.handle)).toEqual(["@whale"]);
+      expect(snapshot.activityScore).toBeNull();
+      expect(snapshot.collection.incompleteReason).toBe("time_budget");
+      expect(pages).toBe(1);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

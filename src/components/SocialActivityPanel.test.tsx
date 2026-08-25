@@ -128,6 +128,21 @@ describe("SocialActivityPanel", () => {
     expect(container.textContent).toContain("activity score stays withheld");
   });
 
+  it("says the activity score stays withheld when the search stopped for the scan time budget", () => {
+    act(() => root.render(<SocialActivityPanel snapshot={{
+      ...snapshot,
+      state: "partial",
+      activityScore: null,
+      collection: {
+        ...snapshot.collection,
+        postReads: 80,
+        incompleteReason: "time_budget",
+      },
+    }} />));
+    expect(container.textContent).toContain("leave time for required checks");
+    expect(container.textContent).toContain("activity score stays withheld");
+  });
+
   it("renders mentioner people-cards with follower counts and tweet links, without an influence score", () => {
     act(() => root.render(<SocialActivityPanel snapshot={{
       ...snapshot,

@@ -48,6 +48,8 @@ export interface SocialActivityCollectorOptions {
   bearer?: string | null;
   twitterApiKey?: string | null;
   maxPosts?: number;
+  /** Stop pagination at this instant. Score stays withheld when the search is incomplete. */
+  deadlineAt?: number;
 }
 
 interface SearchPost {
@@ -92,6 +94,33 @@ function safeProjectName(value?: string | null): string | null {
   return name.length >= 3 && name.length <= 48 && /[A-Za-z]/.test(name) ? name : null;
 }
 
+const SHORT_GENERIC_PROJECT_NAME = /^[A-Za-z]{1,4}$/;
+
+function pastDeadline(deadlineAt?: number): boolean {
+  return typeof deadlineAt === "number" && Number.isFinite(deadlineAt) && Date.now() >= deadlineAt;
+}
+
+/**
+ * A mention query must be about THIS bound subject. A same-word collision is
+ * not a mention. Do not OR a project name that is a single token equal to the
+ * ticker, or a short generic / dictionary-ish word (≤4 letters). `"EARN"`
+ * must never become a query term.
+ */
+function projectNameSearchTerm(
+  projectName: string,
+  handle: string,
+  ticker: string | null,
+): string | null {
+  if (projectName.toLowerCase() === handle.toLowerCase()) return null;
+  const tokens = projectName.split(" ").filter(Boolean);
+  if (tokens.length === 1) {
+    const token = tokens[0];
+    if (ticker && token.toUpperCase() === ticker) return null;
+    if (SHORT_GENERIC_PROJECT_NAME.test(token)) return null;
+  }
+  return projectName;
+}
+
 export function buildSocialActivityQuery(identity: SocialActivityIdentity): {
   handle: string;
   ticker?: string;
@@ -104,7 +133,8 @@ export function buildSocialActivityQuery(identity: SocialActivityIdentity): {
   const projectName = safeProjectName(identity.projectName);
   const terms = [`@${handle}`];
   if (ticker) terms.push(`$${ticker}`);
-  if (projectName && projectName.toLowerCase() !== handle.toLowerCase()) terms.push(`"${projectName}"`);
+  const nameTerm = projectName ? projectNameSearchTerm(projectName, handle, ticker) : null;
+  if (nameTerm) terms.push(`"${nameTerm}"`);
   return {
     handle: `@${handle}`,
     ...(ticker ? { ticker: `$${ticker}` } : {}),
@@ -222,6 +252,7 @@ async function collectSearch(
   start: Date,
   end: Date,
   maxPosts: number,
+  deadlineAt?: number,
 ): Promise<SearchResult> {
   const posts = new Map<string, SearchPost>();
   let nextToken: string | null = null;
@@ -229,8 +260,14 @@ async function collectSearch(
   let oldestAt: number | null = null;
   let requests = 0;
   let postReads = 0;
+  let incompleteReason: SocialActivityIncompleteReason | undefined;
 
   do {
+    if (pastDeadline(deadlineAt)) {
+      complete = false;
+      incompleteReason = "time_budget";
+      break;
+    }
     const remaining = maxPosts - posts.size;
     if (remaining <= 0) break;
     const url = new URL(`${X_API}/tweets/search/recent`);
@@ -270,6 +307,7 @@ async function collectSearch(
     complete = nextToken === null;
   } while (nextToken && posts.size < maxPosts);
 
+  if (!complete && !incompleteReason) incompleteReason = "post_limit";
   return {
     ok: true,
     posts: [...posts.values()],
@@ -277,7 +315,7 @@ async function collectSearch(
     oldestAt,
     requests,
     postReads,
-    ...(!complete ? { incompleteReason: "post_limit" as const } : {}),
+    ...(incompleteReason ? { incompleteReason } : {}),
   };
 }
 
@@ -459,6 +497,7 @@ async function collectTwitterApiIo(
   start: Date,
   end: Date,
   maxPosts: number,
+  deadlineAt?: number,
 ): Promise<{ search: SearchResult; buckets: SocialActivityBucket[]; estimatedUsd: number }> {
   const posts = new Map<string, SearchPost>();
   let requests = 0;
@@ -473,6 +512,11 @@ async function collectTwitterApiIo(
     const seenCursors = new Set<string>();
 
     do {
+      if (pastDeadline(deadlineAt)) {
+        complete = false;
+        incompleteReason = "time_budget";
+        break;
+      }
       if (requests >= TWITTERAPI_IO_MAX_REQUESTS) {
         complete = false;
         incompleteReason = "pagination_incomplete";
@@ -528,6 +572,7 @@ async function collectTwitterApiIo(
       cursor = nextCursor;
     } while (cursor);
 
+    if (incompleteReason === "time_budget") break;
     if (incompleteReason === "pagination_incomplete" && requests >= TWITTERAPI_IO_MAX_REQUESTS) break;
   }
 
@@ -539,7 +584,7 @@ async function collectTwitterApiIo(
   const oldestAt = complete && values.length ? Math.min(...values.map((post) => Date.parse(post.createdAt))) : null;
   return {
     search: {
-      ok: successfulRequests > 0,
+      ok: successfulRequests > 0 || incompleteReason === "time_budget",
       posts: values,
       complete,
       oldestAt,
@@ -597,13 +642,13 @@ export async function collectSocialActivity(
   const last7Start = new Date(end.getTime() - 7 * DAY_MS);
 
   const twitterApiIo = !bearer && twitterApiKey
-    ? await collectTwitterApiIo(fetchImpl, twitterApiKey, identity.query, last7Start, end, maxPosts)
+    ? await collectTwitterApiIo(fetchImpl, twitterApiKey, identity.query, last7Start, end, maxPosts, options.deadlineAt)
     : null;
   const [counts, search] = twitterApiIo
     ? [{ ok: twitterApiIo.search.complete, buckets: twitterApiIo.buckets } satisfies CountsResult, twitterApiIo.search] as const
     : await Promise.all([
         collectCounts(fetchImpl, bearer!, identity.query, last7Start, end),
-        collectSearch(fetchImpl, bearer!, identity.query, last7Start, end, maxPosts),
+        collectSearch(fetchImpl, bearer!, identity.query, last7Start, end, maxPosts, options.deadlineAt),
       ]);
   if (!counts.ok && !search.ok) {
     return unavailableSnapshot(identity, now, "provider_failed", "X did not return usable activity data. No zero or clean result was inferred.", provider);
@@ -666,6 +711,8 @@ export async function collectSocialActivity(
         ? `ARGUS collected the maximum ${maxPosts.toLocaleString()} posts allowed for this saved scan. Unique-account counts are minimums.`
         : search.incompleteReason === "provider_error"
           ? `X stopped responding before ARGUS finished the search. Unique-account counts are minimums.`
+          : search.incompleteReason === "time_budget"
+            ? "ARGUS stopped the social-activity search to leave time for required checks. Unique-account counts are minimums."
           : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`,
     ...(mentioners.length ? { mentioners } : {}),
   };

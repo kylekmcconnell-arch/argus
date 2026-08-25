@@ -4,6 +4,7 @@ import {
   ANALYST_SCORING_TIMEOUT_MS,
   COLLECTION_ANALYST_RESERVE_MS,
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
+  SOCIAL_ACTIVITY_BUDGET_MS,
   TRUST_GRAPH_SCREEN_RESERVE_MS,
 } from "./investigationRuntime";
 
@@ -33,5 +34,11 @@ describe("investigation runtime budget invariants", () => {
   it("keeps collection reserve + finalization reserve inside the function ceiling", () => {
     const ceilingMs = DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000;
     expect(COLLECTION_ANALYST_RESERVE_MS + ANALYST_FINALIZATION_RESERVE_MS).toBeLessThan(ceilingMs);
+  });
+
+  it("caps social-activity collection so a 5,000-post search cannot starve required checks", () => {
+    expect(SOCIAL_ACTIVITY_BUDGET_MS).toBeGreaterThanOrEqual(15_000);
+    expect(SOCIAL_ACTIVITY_BUDGET_MS).toBeLessThanOrEqual(45_000);
+    expect(SOCIAL_ACTIVITY_BUDGET_MS).toBeLessThan(TRUST_GRAPH_SCREEN_RESERVE_MS);
   });
 });

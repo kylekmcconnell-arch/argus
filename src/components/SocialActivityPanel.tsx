@@ -64,6 +64,9 @@ function incompleteCopy(snapshot: SocialActivitySnapshot): string {
   if (reason === "provider_error") {
     return "X stopped responding before ARGUS finished this saved search. Account figures are minimums, so the activity score stays withheld.";
   }
+  if (reason === "time_budget") {
+    return "ARGUS stopped this social search to leave time for required checks. Account figures are minimums, so the activity score stays withheld.";
+  }
   return "X returned more result pages than this saved scan collected. Account figures are minimums, so the activity score stays withheld.";
 }
 
