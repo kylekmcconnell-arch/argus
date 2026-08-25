@@ -51,6 +51,13 @@ const TONE_COLOR: Record<NonNullable<CompositionRow["tone"]>, string> = {
   caution: "var(--color-caution)",
   fail: "var(--color-fail)",
 };
+
+/** The same band color the composition strip uses. ScoreRing pieces reuse it. */
+export function compositionRowColor(row: Pick<CompositionRow, "score" | "weight" | "tone">): string {
+  if (row.tone) return TONE_COLOR[row.tone];
+  const ratio = row.weight > 0 ? Math.max(0, Math.min(1, row.score / row.weight)) : 0;
+  return bandColor(ratio);
+}
 const TONE_WORD: Record<NonNullable<CompositionRow["tone"]>, string> = {
   pass: "clear",
   caution: "warning",
@@ -64,7 +71,7 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
 }) {
   const [open, setOpen] = useState(false);
   const ratio = row.weight > 0 ? Math.max(0, Math.min(1, row.score / row.weight)) : 0;
-  const color = row.tone ? TONE_COLOR[row.tone] : bandColor(ratio);
+  const color = compositionRowColor(row);
   const word = row.tone ? TONE_WORD[row.tone] : bandWord(ratio);
   const support = row.supportCount ?? 0;
   const counter = row.counterCount ?? 0;

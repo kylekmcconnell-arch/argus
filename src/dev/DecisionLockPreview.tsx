@@ -14,6 +14,12 @@ export function DecisionLockPreview() {
           score={35}
           favorable={false}
           verdictTone="caution"
+          composition={[
+            { axis: "T2", label: "Contract safety", score: 8, weight: 26, rationale: "Mint authority remains active.", tone: "fail" },
+            { axis: "T3", label: "Taxes and tradeability", score: 12, weight: 12, rationale: "Buying and selling worked in the saved test.", tone: "pass" },
+            { axis: "T1", label: "Liquidity", score: 18, weight: 24, rationale: "Trading funds are not locked.", tone: "caution" },
+            { axis: "T6", label: "Maturity", score: 10, weight: 10, rationale: "The project has a public footprint.", tone: "pass" },
+          ]}
           discovery={{
             id: "control-path:token-project-person",
             headline: "$EXAMPLE connects to a named operator through the official project account",

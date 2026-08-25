@@ -23,8 +23,8 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain("No checks saved");
     expect(html).toContain("Score withheld");
     expect(html).toContain('data-report-score="prominent"');
-    expect(html).toContain('width:240px');
-    expect(html).toContain('height:240px');
+    expect(html).toContain('width:280px');
+    expect(html).toContain('height:280px');
     expect(html).toContain("ARGUS risk score withheld");
     expect(html).toContain("No check results were saved");
     expect(html).not.toContain("0/0 checks");
@@ -51,9 +51,41 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain("ARGUS risk score 45 out of 100");
     expect(html).toContain('data-report-score="prominent"');
     expect(html).toContain("ARGUS risk score");
-    expect(html).toContain('<svg width="240" height="240"');
+    expect(html).toContain('<svg width="280" height="280"');
     expect(html).toContain("7/7 required report checks complete");
     expect(html).not.toContain(">100%</p>");
+  });
+
+  it("draws real composition pieces on the hero ring and keeps the saved score and 7/7 copy", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        verdictLabel="Caution"
+        score={52}
+        favorable={false}
+        verdictTone="caution"
+        composition={[
+          { axis: "T2", label: "Contract safety", score: 8, weight: 26, rationale: "Mint still live." },
+          { axis: "T1", label: "Liquidity", score: 18, weight: 24, rationale: "Unlocked LP." },
+          { axis: "T6", label: "Maturity", score: 10, weight: 10, rationale: "Public footprint." },
+        ]}
+        supports={[]}
+        concerns={[]}
+        nextSteps={[]}
+        verified={[]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain('data-composition-piece="T2"');
+    expect(html).toContain('data-composition-piece="T1"');
+    expect(html).toContain('data-composition-piece="T6"');
+    expect(html).not.toContain("data-score-arc");
+    expect(html).toContain("ARGUS risk score 52 out of 100");
+    expect(html).toContain("Caution");
+    expect(html).toContain("7/7 required report checks complete");
+    expect(html).toContain("score-ring-verdict");
   });
 
   it("labels an early score when required checks remain open", () => {

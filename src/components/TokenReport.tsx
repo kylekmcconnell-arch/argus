@@ -223,6 +223,14 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId : null),
   );
   const controlPathDiscovery = buildPublicControlPathDiscovery([d.graph], "#token-relationships");
+  const compositionRows = orderByPlainAxis(d.axes.map((a) => ({
+    axis: a.key,
+    label: plainAxisLabel(a.key, a.label),
+    score: a.score,
+    weight: a.weight,
+    rationale: a.rationale,
+    evidenceHref: `#dimension-${a.key}` as const,
+  })));
   const projectSite = d.socials.find((x) => x.label === "site" && /^https?:\/\//i.test(x.url))?.url;
   const projectDomain = projectSite ? projectSite.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase() : null;
   // The project's GitHub org (from its socials), for commit forensics — same
@@ -471,6 +479,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           applicable={readiness.applicable}
           checkScopeLabel="Token safety checks"
           capturedAt={capturedAt}
+          composition={compositionRows.length > 0 ? compositionRows : undefined}
         />
 
         <ReportExperienceLayout
@@ -542,14 +551,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           <h2 className="af-h2 mt-3">{compositionHeadline(d.axes.length)}</h2>
           <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
         <ScoreComposition
-          rows={orderByPlainAxis(d.axes.map((a) => ({
-            axis: a.key,
-            label: plainAxisLabel(a.key, a.label),
-            score: a.score,
-            weight: a.weight,
-            rationale: a.rationale,
-            evidenceHref: `#dimension-${a.key}` as const,
-          })))}
+          rows={compositionRows}
           totalScore={d.score}
           capNote={d.capApplied ? `limited to ${d.score}` : null}
           challengeAnchor={shareView ? null : "#token-challenge"}
