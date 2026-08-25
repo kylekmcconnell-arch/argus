@@ -49,7 +49,7 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain("ARGUS risk score 45 out of 100");
     expect(html).toContain('data-report-score="prominent"');
     expect(html).toContain("ARGUS risk score");
-    expect(html).toContain("<svg");
+    expect(html).toContain('<svg width="168" height="168"');
     expect(html).toContain("7/7 required report checks complete");
     expect(html).not.toContain(">100%</p>");
   });

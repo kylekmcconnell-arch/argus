@@ -49,6 +49,42 @@ final result: passed
 
 ---
 
+# Design QA — large centered decision score (2026-08-24)
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-24 at 7.57.22 PM.png`
+- Desktop implementation: `docs/design-qa/score-center-2026-08-24/implementation-desktop-v2.png`
+- Mobile implementation: `docs/design-qa/score-center-2026-08-24/implementation-mobile-v2.png`
+- Combined comparison: `docs/design-qa/score-center-2026-08-24/comparison-v2.png`
+- Focused score crop: `docs/design-qa/score-center-2026-08-24/implementation-score-v2.png`
+- State: saved EarnOnHood-style report, early/provisional 36/100 score, six of seven required checks complete
+
+## Findings
+
+The saved report's existing shared `ScoreRing` is restored as the dominant visual result without changing its score, verdict, readiness, report content, or surrounding chapter layout. The ring is 168px on desktop and centered in the existing result column. At a 390 × 844 mobile viewport, it becomes a centered single-column lockup with no horizontal overflow (`scrollWidth` 375).
+
+## Required fidelity surfaces
+
+- Layout: current report grid and content order preserved.
+- Typography: existing report typography preserved.
+- Color: existing fail/avoid verdict color preserved.
+- Spacing: only the score result column was widened to fit the larger shared ring.
+- Responsive behavior: centered at desktop and mobile with no horizontal overflow.
+- Data behavior: score value, verdict, readiness, and required-check calculations are unchanged.
+
+## Comparison history
+
+1. The first local fixture used the wrong verdict tone, producing a black ring. The fixture was corrected to the report's red `avoid` tone before final comparison.
+2. The first mobile pass allowed the completion line to stack beside the enlarged ring. The responsive lockup was changed to a centered single column.
+
+## Runtime checks
+
+- Final verified preview produced no browser errors or warnings.
+- The combined comparison confirms the existing report copy, color, and layout remain unchanged around the larger centered score.
+
+final result: passed
+
+---
+
 # Design QA — restored report score prominence (2026-08-24)
 
 - Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-24 at 12.51.23 AM.png`
