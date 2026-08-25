@@ -506,15 +506,15 @@ function headingFor(
     const boundInvestor = figures.filter((f) => f.label === "investor" && !f.unboundNote);
     const parts: string[] = [];
     if (boundTraction.length) {
-      parts.push(`${plural(boundTraction.length, "traction record is", "traction records are")} on file.`);
+      parts.push(`${plural(boundTraction.length, "traction fact is", "traction facts are")} tied to this project.`);
     }
     if (boundFunding.length) {
-      parts.push(`${plural(boundFunding.length, "funding record is", "funding records are")} bound to this subject.`);
+      parts.push(`${plural(boundFunding.length, "confirmed raise is", "confirmed raises are")} tied to this project.`);
     } else {
-      parts.push("No bound funding is on file.");
+      parts.push("ARGUS did not find a confirmed raise tied to this project.");
     }
     if (boundInvestor.length) {
-      parts.push(`${plural(boundInvestor.length, "investor is", "investors are")} bound to this subject.`);
+      parts.push(`${plural(boundInvestor.length, "investor is", "investors are")} tied to this project.`);
     }
     return parts.join(" ");
   }
