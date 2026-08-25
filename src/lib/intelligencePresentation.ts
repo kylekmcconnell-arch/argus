@@ -106,6 +106,11 @@ const STRENGTH_LABELS: Record<string, string> = {
   exceptional: "very strong evidence",
 };
 
+/** Public copy for scorer bands. Engine enum values must never reach a report. */
+export function publicStrengthLabel(value: string): string {
+  return STRENGTH_LABELS[value.trim().toLowerCase()] ?? "evidence reviewed";
+}
+
 function sentenceCase(value: string): string {
   const cleaned = value.trim();
   return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : cleaned;

@@ -108,4 +108,16 @@ describe("personDimensionChapters", () => {
     expect(chapters[0].facts.some((f) => f.label === "Recorded range")).toBe(false);
     expect(chapters[0].lead).toBe("");
   });
+
+  it("translates internal null bands into public language", () => {
+    const chapters = personDimensionChapters({
+      P6_transparency_integrity: { tier: "assessed_null", minScore: 0, maxScore: 4 },
+    });
+    expect(chapters[0].facts).toContainEqual({
+      label: "Evidence strength",
+      value: "checked, but no reliable supporting evidence was confirmed",
+      tone: "fail",
+    });
+    expect(JSON.stringify(chapters[0])).not.toContain("assessed_null");
+  });
 });

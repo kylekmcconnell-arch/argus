@@ -960,8 +960,24 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
     : null;
   return (
     <li className={`panel-inset min-w-0 ${prominent ? `border-l-2 ${strictlyVerified ? "border-sourced/40" : "border-signal/35"} px-3.5 py-3` : "px-3 py-2.5"}`}>
-      <div className="flex items-start justify-between gap-2.5">
-        <div className="min-w-0 flex-1">
+      <div className="min-w-0">
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {!strictlyVerified ? (
+            <ProvenanceTag
+              state={sourceReported ? { tier: "derived" } : { tier: "sourced" }}
+              label={sourceReported ? "Reported by a source" : "Additional context"}
+            />
+          ) : fact.status === "corroborated" ? (
+            <ProvenanceTag state={provenanceForBasicFactStatus(fact.status)!} label={meta.label} />
+          ) : (
+            <ProvenanceTag
+              state={provenanceForBasicFactStatus(fact.status)!}
+              label={meta.label}
+              icon={<CheckCircle aria-hidden="true" size={12} weight="fill" />}
+            />
+          )}
+        </div>
+        <div className="min-w-0">
           {statGrid ? (
             <FactStatGrid parsed={statGrid} />
           ) : (
@@ -976,22 +992,6 @@ function AnsweredFactCard({ fact, audience, prominent, extra }: {
           </p>
           {extra}
         </div>
-        {!strictlyVerified ? (
-          <ProvenanceTag
-            state={sourceReported ? { tier: "derived" } : { tier: "sourced" }}
-            label={sourceReported ? "Reported by a source" : "Additional context"}
-            className="shrink-0"
-          />
-        ) : fact.status === "corroborated" ? (
-          <ProvenanceTag state={provenanceForBasicFactStatus(fact.status)!} label={meta.label} className="shrink-0" />
-        ) : (
-          <ProvenanceTag
-            state={provenanceForBasicFactStatus(fact.status)!}
-            label={meta.label}
-            icon={<CheckCircle aria-hidden="true" size={12} weight="fill" />}
-            className="shrink-0"
-          />
-        )}
       </div>
       {!strictlyVerified && (
         <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-faint">
@@ -1147,7 +1147,7 @@ export function BasicFactsPanel({
             </ul>
           )}
           {supportingRows.length > 0 && (
-            <ul className="grid gap-1.5 p-4 sm:grid-cols-2 xl:grid-cols-3 sm:p-5 sm:pt-3" aria-label="Confirmed basic facts">
+            <ul className="grid gap-1.5 p-4 sm:grid-cols-2 sm:p-5 sm:pt-3" aria-label="Confirmed basic facts">
               {supportingRows.map((fact, index) => (
                 <AnsweredFactCard key={fact.factId || `${fact.predicate}:${index}`} fact={fact} audience={audience} prominent={false} />
               ))}
@@ -1176,7 +1176,7 @@ export function BasicFactsPanel({
               Useful information from a provider or another source. It did not affect the score.
             </p>
           </div>
-          <ul className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
             {contextRows.map((fact, index) => (
               <AnsweredFactCard
                 key={fact.factId || `${fact.predicate}:${index}`}

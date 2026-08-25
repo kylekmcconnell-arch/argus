@@ -47,6 +47,19 @@ final result: passed
 
 ---
 
+# Public report clarity — 2026-08-24
+
+- Reference: `docs/design-qa/report-public-clarity-2026-08-24/reference.png`
+- Implementation: `docs/design-qa/report-public-clarity-2026-08-24/implementation.png`
+- Combined comparison: `docs/design-qa/report-public-clarity-2026-08-24/comparison.png`
+- Viewport: 1325px wide with a 260px sticky report rail, matching the constrained production report layout.
+- Verified: context cards remain two columns; provenance badges have their own row; titles, questions, and source controls do not overlap; DEX-native market data uses three meaningful metrics and omits an unavailable global rank.
+- Evidence integrity: the preview labels Tharmas as the recorded creator and describes the saved product claim without upgrading either to an independently verified founder or usage claim.
+
+final result: passed
+
+---
+
 # Design QA — team social links (2026-08-24)
 
 - Source visual truth: `docs/design-qa/team-social-links-2026-08-24/reference-team-card.png`

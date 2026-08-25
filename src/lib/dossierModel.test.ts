@@ -102,7 +102,39 @@ describe("dossier model", () => {
       basicFactLeads: [], providerFailures: [],
     });
     // not-applicable is excluded entirely; it is not an open question.
-    expect(dossier.beats.find((b) => b.id === "product")!.heading).toBe("No product or repository is recorded.");
+    expect(dossier.beats.find((b) => b.id === "product")!.heading)
+      .toBe("A live product was verified. No product name or repository was recorded.");
+  });
+
+  it("never turns an unbound network name into a Product headline", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [{
+        predicate: "network", value: "Robinhood", status: "verified",
+        sources: [source("https://example.com/robinhood", "Robinhood is a network.")],
+      }],
+      checkRuns: [{ checkId: "project-product-substance", label: "Product", status: "unknown" }],
+      basicFactLeads: [], providerFailures: [],
+    });
+
+    const heading = dossier.beats.find((b) => b.id === "product")!.heading;
+    expect(heading).toBe("No product or repository was verified in this section.");
+    expect(heading).not.toContain("belongs to someone else");
+  });
+
+  it("names a first-party creator as a creator instead of a generic person", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [], checkRuns: [{ checkId: "project-team-identity", status: "confirmed" }],
+      basicFactLeads: [], providerFailures: [],
+      webTeamLeads: [{
+        name: "Tharmas", role: "creator", handle: "@0xTharmas",
+        handleProvenance: "subject_first_party", artifactVerified: true,
+      }],
+    });
+
+    expect(dossier.beats.find((b) => b.id === "team")!.heading)
+      .toBe("The project named 1 creator. 1 is independently confirmed.");
   });
 
   it("summarises unresolved coverage from leads, open checks and dead providers", () => {

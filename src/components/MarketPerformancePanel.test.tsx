@@ -157,7 +157,7 @@ describe("MarketPerformancePanel", () => {
     }));
   });
 
-  it("does not imply a CoinGecko rank source for a DEX-native token", () => {
+  it("omits rank when a DEX-native token has no rank source", () => {
     act(() => root.render(
       <MarketPerformancePanel
         projectToken={projectToken({
@@ -171,9 +171,8 @@ describe("MarketPerformancePanel", () => {
       />,
     ));
 
-    expect(container.textContent).toContain("Market rank");
-    expect(container.textContent).toContain("Not available");
-    expect(container.textContent).toContain("Rank was not available");
+    expect(container.textContent).not.toContain("Market rank");
+    expect(container.textContent).not.toContain("Not available");
     expect(container.textContent).not.toContain("CoinGecko global rank");
   });
 

@@ -152,6 +152,7 @@ export function MarketPerformancePanel({
   const liquidity = projectToken?.liquidityUsd ?? token?.liquidityUsd;
   const currentPrice = projectToken?.priceUsd ?? token?.priceUsd;
   const rank = projectToken?.rank ?? token?.cg?.rank ?? liveMarket?.rank;
+  const showRank = finite(rank) || hasCoinGeckoRankContext;
   // The close series cannot see a candle that ran and gave it back, so prefer
   // the fall from the reported in-window high when the source carried one. The
   // label always names which reading it is: "peak" reads as a record, and this
@@ -265,7 +266,7 @@ export function MarketPerformancePanel({
         </div>
       </header>
 
-      <dl className="grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4">
+      <dl className={`grid gap-px bg-line sm:grid-cols-2 ${showRank ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
         <div className="bg-panel px-4 py-3.5">
           <dt className="stat-label">{marketCapIsDexValuation ? "DEX valuation" : "Market cap"}</dt>
           <dd className="mono mt-1 text-[22px] font-semibold leading-none text-ink tabular-nums">{money(marketCap)}</dd>
@@ -302,19 +303,19 @@ export function MarketPerformancePanel({
             {history ? "saved price history" : "price when scanned"}
           </dd>
         </div>
-        <div className="bg-panel px-4 py-3.5">
-          <dt className="stat-label">Market rank</dt>
-          <dd className="mono mt-1 text-[22px] font-semibold leading-none text-ink tabular-nums">
-            {finite(rank)
-              ? `#${rank.toLocaleString()}`
-              : hasCoinGeckoRankContext && token?.cg?.listed === false
-                ? "Not listed"
-                : "Not available"}
-          </dd>
-          <dd className="mt-1 text-[10.5px] text-ink-faint">
-            {hasCoinGeckoRankContext ? "CoinGecko global rank" : "Rank was not available"}
-          </dd>
-        </div>
+        {showRank && (
+          <div className="bg-panel px-4 py-3.5">
+            <dt className="stat-label">Market rank</dt>
+            <dd className="mono mt-1 text-[22px] font-semibold leading-none text-ink tabular-nums">
+              {finite(rank)
+                ? `#${rank.toLocaleString()}`
+                : token?.cg?.listed === false
+                  ? "Not listed"
+                  : "Not ranked"}
+            </dd>
+            <dd className="mt-1 text-[10.5px] text-ink-faint">CoinGecko global rank</dd>
+          </div>
+        )}
       </dl>
 
       <div className="grid gap-0 lg:grid-cols-[minmax(0,0.92fr)_minmax(0,1.35fr)]">

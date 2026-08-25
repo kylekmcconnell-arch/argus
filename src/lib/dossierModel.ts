@@ -375,6 +375,12 @@ function namedRoleLabel(named: TeamMember[]): { count: number; one: string; many
   if (named.length > 0 && named.every((m) => /founder/i.test(m.role))) {
     return { count: named.length, one: "founder", many: "founders" };
   }
+  if (named.length === 1 && /creator/i.test(named[0].role)) {
+    return { count: 1, one: "creator", many: "creators" };
+  }
+  if (named.length > 0 && named.every((m) => /creator/i.test(m.role))) {
+    return { count: named.length, one: "creator", many: "creators" };
+  }
   return { count: named.length, one: "person", many: "people" };
 }
 
@@ -395,6 +401,7 @@ function headingFor(
     team: TeamMember[];
     leadCount: number;
     openCheckCount: number;
+    productCheckConfirmed?: boolean;
     verdict: { call: string; score: number | null };
   },
 ): string {
@@ -429,7 +436,13 @@ function headingFor(
     if (products.length) parts.push(`${plural(products.length, "product is", "products are")} on file.`);
     if (repos.length) parts.push(`${plural(repos.length, "repository is", "repositories are")} on file.`);
     if (parts.length) return parts.join(" ");
-    return unboundHeading(figures) ?? "No product or repository is recorded.";
+    if (ctx.productCheckConfirmed) {
+      return "A live product was verified. No product name or repository was recorded.";
+    }
+    // An unbound network or platform name is not a product. The generic
+    // identity-collision fallback ("X belongs to someone else") is useful for
+    // legal entities, but nonsensical as a Product headline.
+    return "No product or repository was verified in this section.";
   }
 
   if (beatId === "activity") {
@@ -672,7 +685,11 @@ export function buildDossier(payload: Record<string, unknown>): Dossier {
     if (!mine.length && !figures.length) continue;
     beats.push({
       id: spec.id, label: spec.label, kicker: spec.kicker,
-      heading: headingFor(spec.id, figures, headingCtx),
+      heading: headingFor(spec.id, figures, {
+        ...headingCtx,
+        productCheckConfirmed: spec.id === "product"
+          && mine.some((check) => str(check.checkId) === "project-product-substance" && str(check.status) === "confirmed"),
+      }),
       figures,
     });
   }
