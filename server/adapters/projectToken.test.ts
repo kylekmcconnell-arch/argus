@@ -637,6 +637,53 @@ describe("verified project-token collection", () => {
 });
 
 describe("token declared on the project's own site", () => {
+  it("recovers an official token declaration after a direct 403", async () => {
+    const siteToken = "0xe934e36a439c94017b64a3fece66af12099abf50";
+    const sitePool = "0x2222222222222222222222222222222222222222";
+    const { ctx, evidence } = context("@projectdex", "Project Dex", "https://project.example/");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://project.example/") return new Response("blocked", { status: 403 });
+      if (url.includes(`/latest/dex/tokens/${siteToken}`)) return json({
+        pairs: [{
+          chainId: "base",
+          pairAddress: sitePool,
+          url: `https://dexscreener.com/base/${sitePool}`,
+          baseToken: { address: siteToken, name: "Project Dex", symbol: "PDX" },
+          quoteToken: { address: OTHER_TOKEN, symbol: "USDC" },
+          liquidity: { usd: 2_500_000 },
+        }],
+      });
+      if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+    const recoverOfficialText = vi.fn(async (url: string) => ({
+      status: "ok" as const,
+      url,
+      host: "project.example",
+      contentType: "text/markdown",
+      text: `URL Source: ${url}\n\nOfficial token contract: ${siteToken}`,
+      contentHash: "recovered-token-page",
+      capturedAt: "2026-08-24T20:00:00.000Z",
+      retrievalMethod: "reader_recovery" as const,
+      retrievalProvider: "jina-reader" as const,
+      retrievalUrl: `https://r.jina.ai/${url}`,
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx, { recoverOfficialText })).resolves.toMatchObject({ state: "executed" });
+    expect(recoverOfficialText).toHaveBeenCalledWith("https://project.example/");
+    expect(evidence.projectToken).toMatchObject({
+      verification: "official_domain",
+      address: siteToken,
+      sourceUrl: "https://project.example/",
+      producerSources: {
+        identity: { provider: "official_site", sourceUrl: "https://project.example/" },
+      },
+    });
+  });
+
   it("keeps official-site identity separate from DEX market and liquidity producers", async () => {
     const siteToken = "0xe934e36a439c94017b64a3fece66af12099abf50";
     const sitePool = "0x2222222222222222222222222222222222222222";
@@ -1078,4 +1125,3 @@ describe("launched-product CoinGecko recall", () => {
     expect(evidence.projectToken).toBeUndefined();
   });
 });
-

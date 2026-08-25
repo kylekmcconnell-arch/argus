@@ -4,6 +4,7 @@ import { readCandle, summarizeCandles, type Candle } from "../../src/lib/priceHi
 import { env } from "../config";
 import { captureTimestamp } from "../captureTime";
 import { recordCall } from "../cost";
+import { fetchPublicTextWithRecovery, type PublicTextWithRecoveryResult } from "../publicWeb";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
 
 const COINGECKO_PUBLIC = "https://api.coingecko.com/api/v3";
@@ -778,6 +779,7 @@ async function resolveSiteDeclaredOnPage(
   ctx: CollectContext,
   scope: OfficialWebsiteScope,
   fetchImpl: typeof fetch,
+  recoverOfficialText: (url: string) => Promise<PublicTextWithRecoveryResult>,
 ): Promise<{ snapshot: ProjectTokenSnapshot; sourceUrl: string } | null> {
   let html: string;
   let identityCapturedAt: string;
@@ -788,14 +790,33 @@ async function resolveSiteDeclaredOnPage(
       signal: AbortSignal.timeout(9_000),
     });
     if (!response.ok) {
-      recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
+      if (response.status === 403 || response.status === 429) {
+        const recovered = await recoverOfficialText(scope.canonicalUrl);
+        if (recovered.status === "ok") {
+          html = recovered.text.slice(0, 400_000);
+          identityCapturedAt = captureTimestamp();
+          recordCall("site-fetch", "token-declaration", 0, `reader_recovery_after_http_${response.status}`, "succeeded");
+        } else {
+          recordCall("site-fetch", "token-declaration", 0, `http_${response.status} · ${recovered.reason}`, "failed");
+          return null;
+        }
+      } else {
+        recordCall("site-fetch", "token-declaration", 0, `http_${response.status}`, response.status === 404 ? "partial" : "failed");
+        return null;
+      }
+    } else {
+      html = (await response.text()).slice(0, 400_000);
+      identityCapturedAt = captureTimestamp();
+    }
+  } catch {
+    const recovered = await recoverOfficialText(scope.canonicalUrl);
+    if (recovered.status !== "ok") {
+      recordCall("site-fetch", "token-declaration", 0, `transport_error · ${recovered.reason}`, "failed");
       return null;
     }
-    html = (await response.text()).slice(0, 400_000);
+    html = recovered.text.slice(0, 400_000);
     identityCapturedAt = captureTimestamp();
-  } catch {
-    recordCall("site-fetch", "token-declaration", 0, "transport_error", "failed");
-    return null;
+    recordCall("site-fetch", "token-declaration", 0, "reader_recovery_after_transport_error", "succeeded");
   }
   const candidates = siteContractCandidates(html);
   if (!candidates.length) {
@@ -897,13 +918,14 @@ async function collectSiteDeclaredToken(
   ctx: CollectContext,
   fetchImpl: typeof fetch = fetch,
   extraOfficialUrls: readonly string[] = [],
+  recoverOfficialText: (url: string) => Promise<PublicTextWithRecoveryResult> = fetchPublicTextWithRecovery,
 ): Promise<{ snapshot: ProjectTokenSnapshot; sourceUrl: string } | null> {
   const scopes = officialWebsiteScopes(ctx, extraOfficialUrls);
   if (!scopes.length) return null;
 
   const declared: Array<{ snapshot: ProjectTokenSnapshot; sourceUrl: string }> = [];
   for (const scope of scopes) {
-    const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl);
+    const found = await resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialText);
     if (found) declared.push(found);
   }
   if (!declared.length) return null;
@@ -1093,7 +1115,10 @@ function historyCoverageNote(history: ProjectTokenSnapshot["history"]): string {
   return ` and ${history.points.length} frozen ${history.timeframe} price points${span}${volume}`;
 }
 
-export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<AdapterRunResult> {
+export async function collectProjectTokenIdentity(
+  ctx: CollectContext,
+  dependencies: { recoverOfficialText?: (url: string) => Promise<PublicTextWithRecoveryResult> } = {},
+): Promise<AdapterRunResult> {
   const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
   const registryQueries = projectRegistrySearchQueries(
     ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""),
@@ -1247,7 +1272,12 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     // Last tier before an assessed null: the project's own domain. A registry
     // that never got the project's socials cannot speak for it, but the
     // project's own site can, and it is the stronger evidence of the two.
-    const declared = await collectSiteDeclaredToken(ctx, fetch, registryHomepages);
+    const declared = await collectSiteDeclaredToken(
+      ctx,
+      fetch,
+      registryHomepages,
+      dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery,
+    );
     if (declared) {
       ctx.evidence.projectToken = declared.snapshot;
       ctx.recordCheck?.({

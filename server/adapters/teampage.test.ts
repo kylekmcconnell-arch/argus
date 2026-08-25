@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { recordCall } from "../cost";
 import { bindProfileAnchor, profileAnchors, teamDocumentUrlsFromIndex, teamMemberIsDirectlySupported } from "./teampage";
 
 const structuredMock = vi.hoisted(() => vi.fn());
@@ -69,6 +70,52 @@ describe("official project team document discovery", () => {
         sourceUrl,
       }),
     ]);
+  });
+
+  it("recovers an official homepage credit after a direct 403", async () => {
+    vi.mocked(recordCall).mockClear();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("blocked", { status: 403 })));
+    const recoverOfficialText = vi.fn(async (url: string) => url === "https://example.org/"
+      ? {
+          status: "ok" as const,
+          url,
+          host: "example.org",
+          contentType: "text/plain",
+          text: `Built by Alice Example. ${"official protocol product documentation. ".repeat(8)}`,
+          contentHash: "recovered-hash",
+          capturedAt: "2026-08-24T20:00:00.000Z",
+          retrievalMethod: "reader_recovery" as const,
+          retrievalProvider: "jina-reader" as const,
+          retrievalUrl: `https://r.jina.ai/${url}`,
+        }
+      : { status: "failed" as const, reason: "reader_recovery_failed_http_404" });
+
+    const { fetchTeamPage } = await import("./teampage");
+    const team = await fetchTeamPage("example.org", "Example", { recoverOfficialText });
+
+    expect(team).toEqual([
+      expect.objectContaining({ name: "Alice Example", sourceUrl: "https://example.org/" }),
+    ]);
+    expect(recordCall).toHaveBeenCalledWith(
+      "site-fetch",
+      "site-credits",
+      0,
+      "reader_recovery_after_http_403",
+      "succeeded",
+    );
+  });
+
+  it("keeps the original failed outcome when official-site recovery also fails", async () => {
+    vi.mocked(recordCall).mockClear();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("blocked", { status: 403 })));
+    const recoverOfficialText = vi.fn(async () => ({
+      status: "failed" as const,
+      reason: "reader_recovery_failed_http_403",
+    }));
+
+    const { fetchTeamPage } = await import("./teampage");
+    await expect(fetchTeamPage("example.org", "Example", { recoverOfficialText })).resolves.toEqual([]);
+    expect(recordCall).toHaveBeenCalledWith("site-fetch", "site-credits", 0, "http_403", "failed");
   });
 
   it("expands the roster only from forum posts authored by an already verified founder", async () => {
