@@ -82,7 +82,7 @@ describe("DossierReport", () => {
   it("renders buildDossier of the live payload, never the dynex fixture", () => {
     render(livePayload());
     expect(container.textContent).toContain("@clutchmarkets");
-    expect(container.textContent).toContain("This is the @clutchmarkets we audited. The site is bound.");
+    expect(container.textContent).toContain("This is the @clutchmarkets we audited. An official site is on file.");
     expect(container.textContent).toContain("The project named 1 founder. Nobody else confirmed them.");
     expect(container.textContent).not.toContain("Handle resolves to the official site.");
     expect(container.textContent).not.toContain("The project account is identified.");
@@ -91,6 +91,33 @@ describe("DossierReport", () => {
     expect(container.textContent).not.toContain("Fourteen people. Nine of them proven.");
     expect(container.textContent).not.toContain("Design preview");
     expect(container.textContent).not.toContain("7c51822f");
+    expect(container.textContent).not.toMatch(/The site is bound|No official site is bound|data sources responded/i);
+  });
+
+  it("counts recorded sources instead of calling zero failed providers a response", () => {
+    render(livePayload());
+    expect(container.textContent).toContain("recorded source");
+    expect(container.textContent).not.toContain("0 data sources responded");
+    expect(container.textContent).not.toContain("data sources responded");
+    expect(container.textContent).not.toContain("checked-empty");
+    expect(container.textContent).not.toContain("P0 · Intake");
+  });
+
+  it("names data sources that did not respond without inventing a responded count", () => {
+    const payload = livePayload();
+    payload.providerFailures = [{ provider: "opensanctions" }, { provider: "github" }];
+    payload.checkRuns = [
+      ...(payload.checkRuns as Array<Record<string, unknown>>),
+      { checkId: "supplemental-search", label: "Supplemental search", status: "checked-empty", note: "A null result on this axis, not adverse evidence." },
+    ];
+    render(payload);
+    expect(container.textContent).toContain("2 data sources did not respond");
+    expect(container.textContent).toContain("recorded source");
+    expect(container.textContent).toContain("nothing found");
+    expect(container.textContent).toContain("no result was recorded in this area");
+    expect(container.textContent).not.toContain("0 data sources responded");
+    expect(container.textContent).not.toContain("checked-empty");
+    expect(container.textContent).not.toMatch(/null result on this axis/i);
   });
 
   it("renders a role scorecard and typed evidence ledger without a second score", () => {
@@ -275,7 +302,7 @@ describe("DossierReport", () => {
       expect(io).not.toHaveBeenCalled();
       expect(container.querySelectorAll("[data-settled=\"false\"]")).toHaveLength(0);
       expect(container.querySelectorAll("[data-settled=\"true\"]").length).toBeGreaterThan(0);
-      expect(container.textContent).toContain("This is the @clutchmarkets we audited. The site is bound.");
+      expect(container.textContent).toContain("This is the @clutchmarkets we audited. An official site is on file.");
       expect(container.textContent).toContain("Unestablished");
     } finally {
       Object.defineProperty(window, "IntersectionObserver", { configurable: true, writable: true, value: previousIO });
@@ -356,7 +383,7 @@ describe("DossierReport", () => {
     expect(link?.className).toContain("link-ext");
     expect(link?.textContent).toContain("sec.gov");
     expect(container.textContent).toContain("Fetched");
-    expect(container.textContent).toContain("Bound to this subject");
+    expect(container.textContent).toContain("Tied to this project");
     expect(container.textContent).toContain("never");
     expect(container.textContent).not.toContain("Accepted by a person");
     expect(container.textContent).not.toContain("Artifact verified");

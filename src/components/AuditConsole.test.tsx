@@ -119,6 +119,9 @@ describe("AuditConsole", () => {
     const announcement = container?.querySelector("[aria-live='polite']");
     expect(announcement?.textContent).toBe("Analyst: Score axes. Scoring collected evidence.");
     expect(announcement?.textContent).not.toContain("Resolve profile");
+    expect(container?.textContent).toContain("Starting the scan");
+    expect(container?.querySelector(".research-ledger-source")?.textContent).toBe("Starting the scan");
+    expect(container?.textContent).not.toContain("P0 · Intake");
     expect(status?.contains(announcement ?? null)).toBe(false);
     expect(container?.textContent).not.toMatch(/\b\d+%/);
   });

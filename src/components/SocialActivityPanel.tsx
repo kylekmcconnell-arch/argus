@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChatsCircle, UsersThree } from "@phosphor-icons/react";
 import type { SocialActivityBucket, SocialActivityMention, SocialActivitySnapshot } from "../data/socialActivity";
+import { plainLanguageSummary } from "../lib/plainLanguage";
 import { PfpAvatar } from "./PfpCheck";
 
 type WindowChoice = "24h" | "7d";
@@ -72,11 +73,37 @@ function incompleteCopy(snapshot: SocialActivitySnapshot): string {
 
 const followers = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
 
+function projectIdentityPhrase(queryBasis: SocialActivitySnapshot["queryBasis"]): string {
+  const handle = queryBasis.handle?.trim();
+  const ticker = queryBasis.ticker?.trim();
+  if (handle && ticker) return `this project's ${handle} and ${ticker}`;
+  if (handle) return `this project's ${handle}`;
+  if (ticker) return `this project's ${ticker}`;
+  return "this project's official X handle and ticker";
+}
+
+function publicSocialSearchNote(snapshot: SocialActivitySnapshot): string {
+  const identity = projectIdentityPhrase(snapshot.queryBasis);
+  if (snapshot.state === "partial") {
+    return `This saved search matched public X posts to ${identity}. Reposts are excluded.`;
+  }
+  const stored = (snapshot.note ?? "").trim();
+  if (!stored) return `Public X posts were matched to ${identity}. Reposts are excluded.`;
+  return plainLanguageSummary(stored)
+    .replace(/\bthe project's official X handle and ticker\b/gi, identity)
+    .replace(/\bthe official X handle and ticker\b/gi, identity)
+    .replace(/\bthe project's bound identifiers\b/gi, identity)
+    .replace(/\bbound project identifiers\b/gi, identity)
+    .replace(/\bbound identifiers\b/gi, identity);
+}
+
 function MentionerBoard({
   mentioners,
+  identity,
   panelCostToken,
 }: {
   mentioners: SocialActivityMention[];
+  identity: string;
   panelCostToken?: string;
 }) {
   if (!mentioners.length) return null;
@@ -84,7 +111,7 @@ function MentionerBoard({
     <div className="mt-5 border-t border-line/70 pt-5">
       <h3 className="text-[16px] font-semibold text-ink">Who talked about it</h3>
       <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
-        Largest public X accounts that mentioned the bound identifiers in this saved search. Ranked by follower count when X returned one. This is not an influence score.
+        Largest public X accounts that mentioned {identity} in this saved search. Ranked by follower count when X returned one. This is not an influence score.
       </p>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         {mentioners.map((mention) => (
@@ -145,9 +172,8 @@ export function SocialActivityPanel({
   const peoplePrefix = window.authorCoverageComplete ? "" : "at least ";
   const period = choice === "24h" ? "in the last 24 hours" : "over the last 7 days";
   const subject = snapshot.queryBasis.projectName || "this project";
-  const savedSearchNote = snapshot.state === "partial"
-    ? "This saved search matched public X posts to the project's bound identifiers. Reposts are excluded."
-    : snapshot.note;
+  const identity = projectIdentityPhrase(snapshot.queryBasis);
+  const savedSearchNote = publicSocialSearchNote(snapshot);
 
   return (
     <section id="social-activity" className={`panel scroll-mt-28 px-5 py-5 ${className}`} aria-labelledby="social-activity-title">
@@ -217,12 +243,12 @@ export function SocialActivityPanel({
           {snapshot.state === "partial" && (
             <p className="mt-3 text-[11px] font-medium text-caution">{incompleteCopy(snapshot)}</p>
           )}
-          <MentionerBoard mentioners={snapshot.mentioners ?? []} panelCostToken={panelCostToken} />
+          <MentionerBoard mentioners={snapshot.mentioners ?? []} identity={identity} panelCostToken={panelCostToken} />
         </>
       )}
 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-2 border-t border-line/70 pt-3 text-[11px] leading-relaxed text-ink-faint">
-        <p className="max-w-3xl">{savedSearchNote} Matches use the bound project identifiers saved with this report.</p>
+        <p className="max-w-3xl">{savedSearchNote} Matches use {identity} saved with this report.</p>
         <a href={snapshot.sourceUrl} target="_blank" rel="noreferrer" className="link-ext shrink-0">View matching X posts</a>
         <p className="w-full mono">Updated {new Date(snapshot.capturedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" })} UTC</p>
         <details className="w-full">

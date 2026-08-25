@@ -40,6 +40,20 @@ describe("dossier model", () => {
     expect(entity.unboundNote).toContain("sec.gov");
     expect(entity.unboundNote).toContain("none naming this subject");
     expect(perimeter.heading).toBe("Dynex Capital, Inc. belongs to someone else.");
+    expect(perimeter.heading).not.toMatch(/bound to this subject/i);
+  });
+
+  it("says legal records are tied to this project, not bound to this subject", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [{
+        predicate: "legal_entity", value: "Dynex Labs Ltd", status: "verified",
+        sources: [source("https://dynexcoin.org/legal", "Dynex Labs Ltd is the operator named on the @dynexcoin site.")],
+      }],
+      checkRuns: [], basicFactLeads: [], providerFailures: [],
+    });
+    expect(dossier.beats.find((b) => b.id === "perimeter")!.heading).toBe("1 record is tied to this project.");
+    expect(JSON.stringify(dossier.beats.find((b) => b.id === "perimeter"))).not.toMatch(/bound to this subject/i);
   });
 
   it("demotes a fact the ledger called verified when nothing binds it", () => {
@@ -84,7 +98,7 @@ describe("dossier model", () => {
     const chain = dossier.beats.find((b) => b.id === "perimeter")!.figures[0].receipt!.chain;
     expect(chain).toEqual([
       ["Fetched", "04:52:55"],
-      ["Bound to this subject", "never"],
+      ["Tied to this project", "never"],
     ]);
     expect(chain.filter(([, when]) => when === "04:52:55")).toHaveLength(1);
   });
@@ -160,6 +174,29 @@ describe("dossier model", () => {
     expect(dossier.beats.find((b) => b.id === "coverage")!.heading)
       .toBe("0 leads. No research questions still need evidence.");
     expect(dossier.openQuestions).toEqual([]);
+    expect(JSON.stringify(dossier.beats.find((b) => b.id === "coverage")!.figures))
+      .not.toMatch(/checked-empty|null result on this axis/i);
+    expect(dossier.beats.find((b) => b.id === "coverage")!.figures.some((figure) => figure.value === "nothing found")).toBe(true);
+  });
+
+  it("rewrites leftover axis-null notes without inventing a finding", () => {
+    const dossier = buildDossier({
+      ...subject,
+      basicFacts: [],
+      checkRuns: [{
+        checkId: "project-token-identity",
+        label: "Official token",
+        status: "finding",
+        note: "assessed token identity: nothing bound. A null result on this axis, not adverse conduct evidence.",
+      }],
+      basicFactLeads: [],
+      providerFailures: [],
+    });
+    const leftover = dossier.beats.find((b) => b.id === "coverage")!.figures
+      .map((figure) => `${figure.label} ${figure.value}`)
+      .join(" ");
+    expect(leftover).toContain("no result was recorded in this area");
+    expect(leftover).not.toMatch(/null result on this axis|checked-empty|P0 · Intake/i);
   });
 
   it("keeps the coverage heading count aligned with the open-question list", () => {
@@ -379,7 +416,7 @@ describe("live report field names", () => {
 });
 
 describe("count-true headings", () => {
-  it("names the audited handle and whether an official site is bound", () => {
+  it("names the audited handle and whether an official site is on file", () => {
     const bound = buildDossier({
       handle: "@alice",
       display_name: "Alice Project",
@@ -390,9 +427,10 @@ describe("count-true headings", () => {
       basicFactLeads: [],
       providerFailures: [],
     });
-    expect(bound.beats.find((b) => b.id === "subject")!.heading).toBe("This is the @alice we audited. The site is bound.");
+    expect(bound.beats.find((b) => b.id === "subject")!.heading).toBe("This is the @alice we audited. An official site is on file.");
     expect(bound.beats.find((b) => b.id === "subject")!.heading).not.toContain("Posting steady");
     expect(bound.beats.find((b) => b.id === "subject")!.heading).not.toContain("Alice Project");
+    expect(bound.beats.find((b) => b.id === "subject")!.heading).not.toMatch(/bound|live|blocked/i);
 
     const unbound = buildDossier({
       handle: "@alice",
@@ -404,7 +442,8 @@ describe("count-true headings", () => {
       basicFactLeads: [],
       providerFailures: [],
     });
-    expect(unbound.beats.find((b) => b.id === "subject")!.heading).toBe("This is the @alice we audited. No official site is bound.");
+    expect(unbound.beats.find((b) => b.id === "subject")!.heading).toBe("This is the @alice we audited. ARGUS did not find an official site.");
+    expect(unbound.beats.find((b) => b.id === "subject")!.heading).not.toMatch(/bound|live|blocked/i);
   });
 
   it("splits first-party naming from independent confirmation on the team beat", () => {
@@ -541,7 +580,7 @@ describe("dossier sources and receipts", () => {
     });
     expect(bound.beats.find((b) => b.id === "product")!.figures[0].receipt!.chain).toEqual([
       ["Fetched", "04:52:55"],
-      ["Bound to this subject", "recorded"],
+      ["Tied to this project", "recorded"],
     ]);
   });
 

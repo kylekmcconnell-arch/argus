@@ -59,6 +59,9 @@ describe("SocialActivityPanel", () => {
     expect(container.textContent).toContain("unique accounts talked about Clutch in the last 24 hours");
     expect(container.textContent).toContain("Measures conversation activity, not project quality or safety.");
     expect(container.textContent).toContain("+42%");
+    expect(container.textContent).toContain("matched to this project's @clutch and $CLUTCH");
+    expect(container.textContent).toContain("Matches use this project's @clutch and $CLUTCH saved with this report.");
+    expect(container.textContent).not.toMatch(/bound identifiers|bound project identifiers/i);
   });
 
   it("switches to the seven-day breadth without changing the saved evidence", () => {
@@ -172,7 +175,10 @@ describe("SocialActivityPanel", () => {
     expect(container.querySelector('a[href="https://x.com/whale/status/1"]')).not.toBeNull();
     expect(container.textContent).toContain("@quiet");
     expect(container.textContent).toContain("not an influence score");
+    expect(container.textContent).toContain("mentioned this project's @clutch and $CLUTCH");
+    expect(container.textContent).toContain("Matches use this project's @clutch and $CLUTCH saved with this report.");
     expect(container.textContent).not.toMatch(/influence score:\s*\d/i);
     expect(container.textContent).not.toContain("#1");
+    expect(container.textContent).not.toMatch(/bound identifiers|bound project identifiers/i);
   });
 });
