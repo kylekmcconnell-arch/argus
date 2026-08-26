@@ -1802,6 +1802,20 @@ export function deriveProjectStrengthBands(
     : undefined;
   const verifiedToken = token?.verified === true
     && (token.verification === "official_x" || token.verification === "official_domain");
+  // This is narrower than an `official_x` registry match. It means ARGUS read
+  // the audited account's provider-frozen bio, found one explicitly labelled
+  // contract, and resolved that exact address to the market record. Publishing
+  // the canonical contract on the first-party account is real disclosure
+  // evidence, while a CoinGecko Twitter link alone is not.
+  const explicitOfficialBioContract = verifiedToken
+    && token?.verification === "official_x"
+    && token.producerSources
+    && typeof token.producerSources === "object"
+    && !Array.isArray(token.producerSources)
+    && (token.producerSources as Record<string, unknown>).identity
+    && typeof (token.producerSources as Record<string, unknown>).identity === "object"
+    && !Array.isArray((token.producerSources as Record<string, unknown>).identity)
+    && ((token.producerSources as Record<string, unknown>).identity as Record<string, unknown>).provider === "twitterapi";
   const rank = typeof token?.rank === "number" ? token.rank : Number.POSITIVE_INFINITY;
   const marketCap = typeof token?.marketCapUsd === "number" ? token.marketCapUsd : 0;
   const volume = typeof token?.volume24hUsd === "number" ? token.volume24hUsd : 0;
@@ -2145,13 +2159,13 @@ export function deriveProjectStrengthBands(
   // Floor: strict corroborated auditFact. Ceiling: multiple registry-matched
   // audit discovery leads can also unlock the exceptional ceiling (H2-safe:
   // floor never rises on soft evidence).
-  let p6FloorTier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
+  let p6FloorTier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditFacts.length || explicitOfficialBioContract ? "emerging" : "none";
   if (
     ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0)
     || (legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0)
   ) p6FloorTier = "solid";
   if (governanceFacts.length && auditFacts.length && (legalFacts.length || repositoryFacts.length)) p6FloorTier = "exceptional";
-  let p6Tier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditExceptionalCeiling ? "emerging" : "none";
+  let p6Tier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditExceptionalCeiling || explicitOfficialBioContract ? "emerging" : "none";
   if (
     ((governanceFacts.length > 0 || auditExceptionalCeiling) && disclosureBase.length > 0)
     || (legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0)
@@ -2161,10 +2175,16 @@ export function deriveProjectStrengthBands(
     ...(legalFacts.length ? ["verified legal operator"] : []),
     ...(repositoryFacts.length ? ["public repository disclosure"] : []),
     ...(governanceFacts.length ? ["verified governance disclosure"] : []),
+    ...(explicitOfficialBioContract ? ["official X bio disclosed the exact canonical token contract"] : []),
     ...(auditFacts.length
       ? ["verified audit disclosure"]
       : auditLeadCount >= 2 ? [`${auditLeadCount} registry-matched auditor leads from bounded audit discovery sources`] : []),
-  ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]), p6FloorTier);
+  ], artifactIds([
+    ...disclosureBase,
+    ...governanceFacts,
+    ...auditFacts,
+    ...(explicitOfficialBioContract && token ? [token] : []),
+  ]), p6FloorTier);
   return bands;
 }
 
@@ -3068,9 +3088,20 @@ const eligibleAxesFor = (
         ? ["F2_track_record", "F4_build_substance"]
         : [])
     : [];
+  const explicitOfficialBioContract = section === "projectToken"
+    && value.verified === true
+    && value.verification === "official_x"
+    && value.producerSources
+    && typeof value.producerSources === "object"
+    && !Array.isArray(value.producerSources)
+    && (value.producerSources as Record<string, unknown>).identity
+    && typeof (value.producerSources as Record<string, unknown>).identity === "object"
+    && !Array.isArray((value.producerSources as Record<string, unknown>).identity)
+    && ((value.producerSources as Record<string, unknown>).identity as Record<string, unknown>).provider === "twitterapi";
   const projectTokenAxes = section === "projectToken"
     ? [
         "P3_token_conduct",
+        ...(explicitOfficialBioContract ? ["P6_transparency_integrity"] : []),
         ...([value.marketCapUsd, value.volume24hUsd, value.liquidityUsd].some((metric) =>
           typeof metric === "number" && Number.isFinite(metric) && metric > 0)
           ? ["P5_traction_and_liveness"]
@@ -3326,9 +3357,21 @@ const providerFor = (section: string, payload: Record<string, unknown>): string 
   }
   if (section === "ventureToken") return "coingecko";
   if (section === "projectToken") {
+    const producerSources = payload.producerSources
+      && typeof payload.producerSources === "object"
+      && !Array.isArray(payload.producerSources)
+      ? payload.producerSources as Record<string, unknown>
+      : undefined;
+    const identity = producerSources?.identity
+      && typeof producerSources.identity === "object"
+      && !Array.isArray(producerSources.identity)
+      ? producerSources.identity as Record<string, unknown>
+      : undefined;
+    const identityProvider = identity ? recordText(identity, ["provider"], 100) : undefined;
+    if (identityProvider) return identityProvider;
     const observed = Array.isArray(payload.providers)
       ? payload.providers.filter((value): value is string =>
-          value === "coingecko" || value === "dexscreener" || value === "geckoterminal")
+          value === "twitterapi" || value === "coingecko" || value === "dexscreener" || value === "geckoterminal")
       : [];
     return observed.length ? [...new Set(observed)].join("/") : "coingecko";
   }
