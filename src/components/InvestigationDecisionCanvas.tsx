@@ -329,6 +329,7 @@ export function InvestigationDecisionCanvas({
   presentationStyle = 1,
   subjectName,
   subjectSummary,
+  reportSummary,
   verdictLabel,
   score,
   scoreLabel = "ARGUS risk score",
@@ -365,6 +366,8 @@ export function InvestigationDecisionCanvas({
   subjectName?: string | undefined;
   /** Saved first-party or registry description of what the subject actually does. */
   subjectSummary?: string | null | undefined;
+  /** Grok analyst sentence explaining what governs the saved report result. */
+  reportSummary?: string | null | undefined;
   verdictLabel: string;
   /** Saved ARGUS risk score. Null means the scoring contract withheld it. */
   score: number | null;
@@ -423,11 +426,14 @@ export function InvestigationDecisionCanvas({
   const cleanSubject = (subjectName ?? "").replace(/[.\s]+$/, "").trim();
   const cleanSummary = (subjectSummary ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   const summary = cleanSummary.length > 360 ? `${cleanSummary.slice(0, 357).trimEnd()}…` : cleanSummary;
+  const cleanReportSummary = (reportSummary ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   const primaryWhy = favorable ? supports[0] : concerns[0];
   const counterWhy = favorable ? concerns[0] : supports[0];
-  const whyParts = argument
-    ? [argument.forLine, argument.againstLine, argument.moveLine].filter((value): value is string => Boolean(value))
-    : [primaryWhy?.label, counterWhy?.label].filter((value): value is string => Boolean(value));
+  const whyParts = cleanReportSummary
+    ? [cleanReportSummary, argument?.moveLine].filter((value): value is string => Boolean(value))
+    : argument
+      ? [argument.forLine, argument.againstLine, argument.moveLine].filter((value): value is string => Boolean(value))
+      : [primaryWhy?.label, counterWhy?.label].filter((value): value is string => Boolean(value));
   const whyCopy = whyParts.map(plainDecisionText).join(" ");
   const primaryScore: DecisionCanvasScore = {
     label: scoreLabel,

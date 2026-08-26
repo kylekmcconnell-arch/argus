@@ -12,7 +12,7 @@ import { grokSearch } from "./adapters/x";
 const RECENT_ACTIVITY_CAP = 24;
 const RECENT_ACTIVITY_ITEM_CHARS = 500;
 const SELF_POST_SAMPLE_CHARS = 6000;
-const WHAT_MAX_CHARS = 240;
+const WHAT_MAX_CHARS = 360;
 const QUOTE_MAX_CHARS = 280;
 const MENTIONED_HANDLE_CAP = 8;
 const ORIENTATION_TIMEOUT_MS = 45_000;
@@ -92,7 +92,10 @@ const ORIENTATION_SYSTEM = [
   "You MAY x_search that exact @handle and fetch the official site host from the packet.",
   "Do not open-web fish other domains or invent handles.",
   "Answer: What is this? Who is it for? Is it a product/protocol/company brand (PROJECT), a person who founds or builds (FOUNDER), a capital allocator (INVESTOR), or unknown (UNKNOWN)?",
-  "One-sentence what from the packet plus live X of THIS handle. audience is who it is for, or \"\".",
+  "Write what as polished report-opening copy, not a transcript of the X bio: one or two compact sentences in plain English from the packet, official site, and live X of THIS handle.",
+  "Lead with the product or protocol function. Then state its intended user, network, mechanism, or token role only when the bound artifacts support it.",
+  "Never copy slogans, emoji separators, @handles, URLs, or contract addresses into what. Do not discuss the ARGUS score or make an investment recommendation in what.",
+  "audience is who it is for, or \"\".",
   "Quote @handles only when they appear in the packet artifacts or in live x_search of THIS subject. Never from a display name alone.",
   "Do not invent a token, contract address, or legal name.",
   "Do not treat display name as identity. The bind keys are the twitterapi handle and the official website host in the packet.",

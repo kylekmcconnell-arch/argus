@@ -6930,6 +6930,7 @@ function assembleDossier(ev, live) {
     avatar_url: ev.profile.avatar_url,
     bio: ev.profile.bio,
     website: ev.profile.website,
+    ...ev.subjectOrientation ? { subjectOrientation: structuredClone(ev.subjectOrientation) } : {},
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,
@@ -8826,6 +8827,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const productActivity = recentActivity.filter((row) => PROJECT_PRODUCT_ACTIVITY.test(String(row.text ?? row.value ?? row.claim ?? row.title ?? "")));
   const token = packet.projectToken && typeof packet.projectToken === "object" && !Array.isArray(packet.projectToken) ? packet.projectToken : void 0;
   const verifiedToken = token?.verified === true && (token.verification === "official_x" || token.verification === "official_domain");
+  const explicitOfficialBioContract = verifiedToken && token?.verification === "official_x" && token.producerSources && typeof token.producerSources === "object" && !Array.isArray(token.producerSources) && token.producerSources.identity && typeof token.producerSources.identity === "object" && !Array.isArray(token.producerSources.identity) && token.producerSources.identity.provider === "twitterapi";
   const rank = typeof token?.rank === "number" ? token.rank : Number.POSITIVE_INFINITY;
   const marketCap = typeof token?.marketCapUsd === "number" ? token.marketCapUsd : 0;
   const volume = typeof token?.volume24hUsd === "number" ? token.volume24hUsd : 0;
@@ -9019,18 +9021,24 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...token ? [token] : []
   ]), p5FloorTier);
   const disclosureBase = [...legalFacts, ...officialFacts, ...repositoryFacts];
-  let p6FloorTier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
+  let p6FloorTier = disclosureBase.length || governanceFacts.length || auditFacts.length || explicitOfficialBioContract ? "emerging" : "none";
   if ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0 || legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0) p6FloorTier = "solid";
   if (governanceFacts.length && auditFacts.length && (legalFacts.length || repositoryFacts.length)) p6FloorTier = "exceptional";
-  let p6Tier = disclosureBase.length || governanceFacts.length || auditExceptionalCeiling ? "emerging" : "none";
+  let p6Tier = disclosureBase.length || governanceFacts.length || auditExceptionalCeiling || explicitOfficialBioContract ? "emerging" : "none";
   if ((governanceFacts.length > 0 || auditExceptionalCeiling) && disclosureBase.length > 0 || legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0) p6Tier = "solid";
   if (governanceFacts.length && auditExceptionalCeiling && (legalFacts.length || repositoryFacts.length)) p6Tier = "exceptional";
   setBand("P6_transparency_integrity", p6Tier, [
     ...legalFacts.length ? ["verified legal operator"] : [],
     ...repositoryFacts.length ? ["public repository disclosure"] : [],
     ...governanceFacts.length ? ["verified governance disclosure"] : [],
+    ...explicitOfficialBioContract ? ["official X bio disclosed the exact canonical token contract"] : [],
     ...auditFacts.length ? ["verified audit disclosure"] : auditLeadCount >= 2 ? [`${auditLeadCount} registry-matched auditor leads from bounded audit discovery sources`] : []
-  ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]), p6FloorTier);
+  ], artifactIds([
+    ...disclosureBase,
+    ...governanceFacts,
+    ...auditFacts,
+    ...explicitOfficialBioContract && token ? [token] : []
+  ]), p6FloorTier);
   return bands;
 }
 var INVESTOR_POSITIVE_OUTCOME = /\b(?:exit(?:ed|s)?|ipo|acquir(?:ed|er|es|ing|quisition)|realized|return(?:ed|s)?|multiple|profitable|distribution)\b/i;
@@ -9796,8 +9804,10 @@ var eligibleAxesFor = (section, value, axisCatalog2, sourceArtifactPeers = [], s
     ...trustedProjectProfileDaysSincePost(value) !== null ? ["P5_traction_and_liveness"] : []
   ] : [];
   const ventureTokenAxes = section === "ventureToken" ? value.verified === true && (value.verification === "official_x" || value.verification === "official_domain") ? ["F2_track_record", "F4_build_substance"] : [] : [];
+  const explicitOfficialBioContract = section === "projectToken" && value.verified === true && value.verification === "official_x" && value.producerSources && typeof value.producerSources === "object" && !Array.isArray(value.producerSources) && value.producerSources.identity && typeof value.producerSources.identity === "object" && !Array.isArray(value.producerSources.identity) && value.producerSources.identity.provider === "twitterapi";
   const projectTokenAxes = section === "projectToken" ? [
     "P3_token_conduct",
+    ...explicitOfficialBioContract ? ["P6_transparency_integrity"] : [],
     ...[value.marketCapUsd, value.volume24hUsd, value.liquidityUsd].some((metric) => typeof metric === "number" && Number.isFinite(metric) && metric > 0) ? ["P5_traction_and_liveness"] : []
   ] : [];
   const teamAxes = section === "team" ? SECTION_AXIS_ELIGIBILITY.team.filter((axis) => axis !== "P2_product_substance" && (axis !== "P4_backing_and_partners" || PROJECT_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? "") && !PROJECT_NON_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? ""))) : [];
@@ -9973,7 +9983,11 @@ var providerFor = (section, payload) => {
   }
   if (section === "ventureToken") return "coingecko";
   if (section === "projectToken") {
-    const observed = Array.isArray(payload.providers) ? payload.providers.filter((value) => value === "coingecko" || value === "dexscreener" || value === "geckoterminal") : [];
+    const producerSources = payload.producerSources && typeof payload.producerSources === "object" && !Array.isArray(payload.producerSources) ? payload.producerSources : void 0;
+    const identity = producerSources?.identity && typeof producerSources.identity === "object" && !Array.isArray(producerSources.identity) ? producerSources.identity : void 0;
+    const identityProvider = identity ? recordText(identity, ["provider"], 100) : void 0;
+    if (identityProvider) return identityProvider;
+    const observed = Array.isArray(payload.providers) ? payload.providers.filter((value) => value === "twitterapi" || value === "coingecko" || value === "dexscreener" || value === "geckoterminal") : [];
     return observed.length ? [...new Set(observed)].join("/") : "coingecko";
   }
   const attributed = recordText(payload, ["source_author", "source"], 100);
@@ -17709,7 +17723,7 @@ function analyzeCadence(posts, now) {
 var RECENT_ACTIVITY_CAP = 24;
 var RECENT_ACTIVITY_ITEM_CHARS = 500;
 var SELF_POST_SAMPLE_CHARS = 6e3;
-var WHAT_MAX_CHARS = 240;
+var WHAT_MAX_CHARS = 360;
 var QUOTE_MAX_CHARS = 280;
 var MENTIONED_HANDLE_CAP = 8;
 var ORIENTATION_TIMEOUT_MS = 45e3;
@@ -17774,7 +17788,10 @@ var ORIENTATION_SYSTEM = [
   "You MAY x_search that exact @handle and fetch the official site host from the packet.",
   "Do not open-web fish other domains or invent handles.",
   "Answer: What is this? Who is it for? Is it a product/protocol/company brand (PROJECT), a person who founds or builds (FOUNDER), a capital allocator (INVESTOR), or unknown (UNKNOWN)?",
-  'One-sentence what from the packet plus live X of THIS handle. audience is who it is for, or "".',
+  "Write what as polished report-opening copy, not a transcript of the X bio: one or two compact sentences in plain English from the packet, official site, and live X of THIS handle.",
+  "Lead with the product or protocol function. Then state its intended user, network, mechanism, or token role only when the bound artifacts support it.",
+  "Never copy slogans, emoji separators, @handles, URLs, or contract addresses into what. Do not discuss the ARGUS score or make an investment recommendation in what.",
+  'audience is who it is for, or "".',
   "Quote @handles only when they appear in the packet artifacts or in live x_search of THIS subject. Never from a display name alone.",
   "Do not invent a token, contract address, or legal name.",
   "Do not treat display name as identity. The bind keys are the twitterapi handle and the official website host in the packet.",

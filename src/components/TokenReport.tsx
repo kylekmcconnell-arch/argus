@@ -489,6 +489,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           presentationStyle={reportStyle}
           subjectName={d.name || `$${d.symbol}`}
           subjectSummary={d.cg?.description}
+          reportSummary={d.headline}
           verdictLabel={presentationMeta.label}
           score={d.score}
           scoreLabel="Token safety score"

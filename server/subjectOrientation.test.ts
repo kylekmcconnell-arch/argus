@@ -352,6 +352,8 @@ describe("orientSubjectWithGrok", () => {
       expect(body.tools).toEqual([{ type: "web_search" }, { type: "x_search" }]);
       expect(body.max_tool_calls).toBe(3);
       expect(JSON.stringify(body.input)).toContain("x_search that exact handle only");
+      expect(JSON.stringify(body.input)).toContain("polished report-opening copy");
+      expect(JSON.stringify(body.input)).toContain("Never copy slogans, emoji separators, @handles, URLs, or contract addresses into what");
       expect(JSON.stringify(body.input)).not.toContain("You may only use the packet");
       return json({
         output_text: JSON.stringify({

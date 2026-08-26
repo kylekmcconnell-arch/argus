@@ -84,6 +84,7 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { SocialActivityPanel } from "./SocialActivityPanel";
+import { reportOpeningNarrative } from "../lib/reportNarrative";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import { visibleInvestigativeLeads } from "../lib/subjectLeads";
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
@@ -926,6 +927,17 @@ export function InvestigationReport({
       ? "This project account review is missing one or more required checks. Open the full report to see what is still needed."
       : projectAccount.headline
     : undefined;
+  const projectSubjectSummary = projectAccount
+    ? reportOpeningNarrative({
+        name: projectAccount.display_name || projectAccount.handle,
+        handle: projectAccount.handle,
+        bio: projectAccount.bio,
+        ...(projectAccount.website ? { website: projectAccount.website } : {}),
+        ...(projectAccount.subjectOrientation ? { subjectOrientation: projectAccount.subjectOrientation } : {}),
+        ...(projectAccount.basicFacts?.length ? { basicFacts: projectAccount.basicFacts } : {}),
+        ...(projectAccount.projectToken ? { projectToken: projectAccount.projectToken } : {}),
+      })
+    : token.cg?.description;
   const marketCap = token.mcap ?? token.cg?.mcapUsd ?? undefined;
   const fullyDilutedValue = token.fdv
     ?? projectAccount?.projectToken?.fdvUsd
@@ -1589,7 +1601,8 @@ export function InvestigationReport({
           <InvestigationDecisionCanvas
             presentationStyle={reportStyle}
             subjectName={projectAccount?.display_name || projectAccount?.handle || token.name || `$${token.symbol}`}
-            subjectSummary={projectAccount?.bio || token.cg?.description}
+            subjectSummary={projectSubjectSummary}
+            reportSummary={projectAccountHeadline}
             verdictLabel={readiness.status === "ready" ? observedTokenMeta.label : readinessLabel}
             score={token.score}
             scoreLabel="Token safety score"

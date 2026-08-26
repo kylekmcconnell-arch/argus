@@ -25,7 +25,8 @@ export function DualScorePreview() {
         <InvestigationDecisionCanvas
           presentationStyle={2}
           subjectName="EARN on Hood"
-          subjectSummary="A live onchain yield product with an official token, observable market activity and sustained public interest. The product and the asset are related, but they answer different diligence questions."
+          subjectSummary="EARN on Hood turns tokenized stocks into onchain yield strategies for users seeking real-world-asset exposure. Its linked $EARN token is issued on Robinhood Chain and assessed separately for mechanical risk."
+          reportSummary="The live product and observable token activity are credible, while limited team disclosure and independent assurance cap the project assessment."
           verdictLabel="Caution"
           score={54}
           scoreLabel="Project diligence score"

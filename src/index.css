@@ -568,9 +568,12 @@
   white-space: normal;
 }
 .report-style-2 .decision-subject-summary {
+  min-width: 0;
   max-width: 66ch;
   font-size: clamp(16px, 1.25vw, 18px);
   line-height: 1.62;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .report-style-2 .decision-why {
   max-width: 68ch;

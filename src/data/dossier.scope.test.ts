@@ -4,6 +4,27 @@ import { assembleDossier } from "./dossier";
 import { emptyEvidence } from "./evidence";
 
 describe("dossier finding scope", () => {
+  it("preserves Grok's bound subject orientation for the report opening", () => {
+    const evidence = emptyEvidence("@earnonhood");
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "EARN turns tokenized stocks into onchain yield strategies.",
+      audience: "users seeking real-world-asset yield",
+      boundHandle: "@earnonhood",
+      boundDomain: "earnonhood.com",
+      sourceUrls: ["https://x.com/earnonhood", "https://earnonhood.com/"],
+    };
+
+    const dossier = assembleDossier(evidence, true);
+    expect(dossier.subjectOrientation).toEqual(evidence.subjectOrientation);
+
+    evidence.subjectOrientation.sourceUrls.push("https://example.com/mutated");
+    expect(dossier.subjectOrientation?.sourceUrls).toEqual([
+      "https://x.com/earnonhood",
+      "https://earnonhood.com/",
+    ]);
+  });
+
   it("retains related adverse leads in the immutable report without publishing them as subject findings", () => {
     const evidence = emptyEvidence("@subject");
     evidence.roles = [SubjectClass.FOUNDER];

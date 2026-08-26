@@ -112,6 +112,7 @@ import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { SocialActivityPanel } from "./SocialActivityPanel";
+import { reportOpeningNarrative } from "../lib/reportNarrative";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import {
   SUBJECT_LEAD_RELATIONSHIP,
@@ -1388,17 +1389,6 @@ function meaningfulTeamMember(member: ReportTeamMember): boolean {
     && !placeholderEntityValue(role);
 }
 
-function isNarrativeProductValue(value: string): boolean {
-  const normalized = value.trim();
-  if (!normalized) return false;
-  // A saved website answer can share the broad "product" predicate. It is a
-  // useful link, but repeating a bare URL/domain as what the product does makes
-  // the editorial opening worse than the saved project description.
-  if (/^https?:\/\//i.test(normalized)) return false;
-  if (/^(?:www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[/?#]\S*)?$/i.test(normalized)) return false;
-  return true;
-}
-
 function groundedTeamMember(member: ReportTeamMember): boolean {
   return meaningfulTeamMember(member)
     && member.evidence_origin !== "model_lead"
@@ -1810,14 +1800,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       || fact === firstFundingFact)
       .map((fact) => fact === firstFundingFact ? consolidatedFundingFact : fact)
     : publicationBasicFacts;
-  const openingProductFact = basicFacts.find((fact) =>
-    canonicalBasicFactPredicate(fact.predicate) === "product"
-    && (fact.status === "verified" || fact.status === "corroborated")
-    && typeof fact.value === "string"
-    && isNarrativeProductValue(fact.value));
-  const openingSubjectSummary = openingProductFact && typeof openingProductFact.value === "string"
-    ? `What it does: ${openingProductFact.value.trim()}.`
-    : f.bio;
+  const openingSubjectSummary = roles.includes(SubjectClass.PROJECT)
+    ? reportOpeningNarrative({
+        name: f.display_name || f.handle,
+        handle: f.handle,
+        bio: f.bio,
+        ...(f.website ? { website: f.website } : {}),
+        ...(f.subjectOrientation ? { subjectOrientation: f.subjectOrientation } : {}),
+        ...(basicFacts.length ? { basicFacts } : {}),
+        ...(f.projectToken ? { projectToken: f.projectToken } : {}),
+      })
+    : f.subjectOrientation?.what || f.bio;
   const basicFactResearchAttempted = basicFacts.length > 0
     || basicFactLeads.length > 0
     || (f.basicFactQuestionLedger?.length ?? 0) > 0;
@@ -3388,6 +3381,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           presentationStyle={reportStyle}
           subjectName={f.display_name || f.handle}
           subjectSummary={openingSubjectSummary}
+          reportSummary={f.headline}
           verdictLabel={m.label}
           score={presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null}
           scoreLabel={roles.includes(SubjectClass.PROJECT) ? "Project diligence score" : "Person diligence score"}

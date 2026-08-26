@@ -131,6 +131,37 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).not.toContain('<svg width="280" height="280"');
   });
 
+  it("uses the Grok report headline as the narrative spine instead of disconnected score fragments", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        presentationStyle={2}
+        subjectName="EARN"
+        subjectSummary="EARN turns tokenized stocks into onchain yield strategies for users seeking real-world-asset exposure."
+        reportSummary="The live product and observable token activity are credible, while limited team and assurance evidence cap the result."
+        verdictLabel="Caution"
+        score={52}
+        favorable={false}
+        verdictTone="caution"
+        argument={{
+          forLine: "Token design and conduct.",
+          againstLine: "No outside backers or partners are verified.",
+          moveLine: "Independent audits and a fuller operator record would materially strengthen the assessment.",
+        }}
+        supports={[]}
+        concerns={[]}
+        nextSteps={[]}
+        verified={[]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain("The live product and observable token activity are credible");
+    expect(html).toContain("Independent audits and a fuller operator record");
+    expect(html).not.toContain("Token design and conduct. No outside backers");
+  });
+
   it("keeps Style 1 on the single canonical score even when a linked score exists", () => {
     const html = renderToStaticMarkup(
       <InvestigationDecisionCanvas
