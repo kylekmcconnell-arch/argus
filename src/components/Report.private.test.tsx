@@ -230,6 +230,36 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelector('[aria-label="Report result and check status"]')?.classList.contains("hidden")).toBe(true);
   });
 
+  it("does not mistake a saved website value for the product narrative", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      bio: "DeFi for real-world assets, live on Robinhood Chain.",
+      basicFacts: [{
+        factId: "earn-product-site",
+        subjectKey: "@earnonhood",
+        predicate: "product",
+        value: "earnonhood.com",
+        normalizedValue: "earnonhood.com",
+        status: "verified",
+        critical: true,
+        attributionScope: "direct_subject",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "official-site",
+        sources: [],
+      }],
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const brief = container.querySelector('[data-canonical-decision-brief="true"]');
+    expect(brief?.textContent).toContain("DeFi for real-world assets, live on Robinhood Chain.");
+    expect(brief?.textContent).not.toContain("What it does: earnonhood.com");
+  });
+
   it("promotes a fully sourced official-claim conflict into the shared decision brief", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier: Dossier = {

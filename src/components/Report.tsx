@@ -1389,6 +1389,17 @@ function meaningfulTeamMember(member: ReportTeamMember): boolean {
     && !placeholderEntityValue(role);
 }
 
+function isNarrativeProductValue(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  // A saved website answer can share the broad "product" predicate. It is a
+  // useful link, but repeating a bare URL/domain as what the product does makes
+  // the editorial opening worse than the saved project description.
+  if (/^https?:\/\//i.test(normalized)) return false;
+  if (/^(?:www\.)?(?:[a-z0-9-]+\.)+[a-z]{2,}(?:[/?#]\S*)?$/i.test(normalized)) return false;
+  return true;
+}
+
 function groundedTeamMember(member: ReportTeamMember): boolean {
   return meaningfulTeamMember(member)
     && member.evidence_origin !== "model_lead"
@@ -1804,7 +1815,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     canonicalBasicFactPredicate(fact.predicate) === "product"
     && (fact.status === "verified" || fact.status === "corroborated")
     && typeof fact.value === "string"
-    && fact.value.trim().length > 0);
+    && isNarrativeProductValue(fact.value));
   const openingSubjectSummary = openingProductFact && typeof openingProductFact.value === "string"
     ? `What it does: ${openingProductFact.value.trim()}.`
     : f.bio;
