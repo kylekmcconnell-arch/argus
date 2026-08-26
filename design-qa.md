@@ -1,33 +1,23 @@
-# Sticky report table of contents - design QA
+# State of the House brand-accent differentiation - design QA
 
 ## Evidence
 
-- User reference: `/Users/kyle/Downloads/Screenshot 2026-08-26 at 11.43.15 AM.png`
+- User reference context: `/Users/kyle/Downloads/Screenshot 2026-08-26 at 11.43.15 AM.png`
 - Tested implementation: `http://127.0.0.1:4173/?design-preview=earn-dual-score`
-- Visual state: canonical Style 2 opening with the new contents bar immediately above “State of the House.”
-- Same-input comparison: the supplied report screenshot and the rendered sticky-navigation preview were opened together before final review.
+- Visual state: light theme, sticky contents bar visible, canonical dual-score report opening.
 
-## Design comparison
+## Comparison
 
-The reference establishes the insertion point and the report’s restrained editorial language: the navigation belongs between the subject context and the State of the House chapter, without turning into a second toolbar. The implementation uses the existing ARGUS border, panel, typography, icon, spacing, and active-state tokens. It remains a single quiet horizontal line above the story instead of adding a large navigation panel.
+The previous opening rendered the project name and “The state of the house” with nearly identical black display treatment, causing the report chapter to read like a repeated identity title. The revised treatment preserves EARN as the black subject name and assigns only “The state of the house” the existing ARGUS brand green.
 
-The table of contents is horizontally scrollable when destinations exceed the available width. It includes only sections present in the report: Decision, Summary, Risks, Market, Social, People, Connections, Evidence, Method, and Challenge where applicable. Counts remain attached to destinations that benefit from them.
+This follows the selected Auric reference’s two-tone editorial hierarchy while using ARGUS’s own brand token rather than introducing a new color. The change is deliberately limited to the narrative headline; green evidence dots and pass scores retain their existing semantic meaning elsewhere.
 
-## Findings and fixes
+## Verification
 
-- [P1] The existing report guide began after the decision opening and became a right rail at large widths, so it could not orient readers at the start of the report. Fixed by placing the canonical contents bar before `#report-summary`.
-- [P1] A static list would not tell readers where they are. Fixed with `IntersectionObserver`-based active-section tracking and `aria-current="location"`.
-- [P1] Two simultaneous navigation systems would add clutter. Fixed by suppressing the old embedded guide navigation while preserving its status and next-step rail.
-- [P2] Long destination lists could widen the page. Fixed with an independently scrolling navigation row; browser verification reports no page-level horizontal overflow.
-- [P2] Anchor jumps could hide section headings beneath sticky chrome. Existing scroll offsets are retained, and the interaction check landed the target below both sticky headers.
-
-## Interaction and automated verification
-
-- Initial active destination: Decision.
-- Deep-link test: `#preview-social` lands with the table of contents at 65px and the Social section at 128px.
-- Scroll-spy test: Social becomes the active destination after navigation.
-- Runtime check: no Vite overlay or visible runtime error.
-- Layout check: no horizontal page overflow.
-- Automated checks: targeted ESLint passes; TypeScript passes; 3,985 tests pass across 376 files; production build passes.
+- Computed light-theme accent: `rgb(0, 168, 107)` from `--color-brand`.
+- The project name remains `--color-ink`.
+- Heading wrapping, score-card alignment, and sticky navigation remain unchanged.
+- Browser check reports no horizontal overflow, Vite overlay, or visible runtime error.
+- The heading remains large display text, so the brand-green contrast is suitable for its size.
 
 final result: passed

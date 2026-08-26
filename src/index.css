@@ -563,7 +563,7 @@
   display: block;
 }
 .report-style-2 .decision-state-accent {
-  color: color-mix(in oklab, var(--color-signal) 62%, var(--color-ink));
+  color: var(--color-brand);
   max-width: 100%;
   white-space: normal;
 }
