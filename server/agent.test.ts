@@ -6232,6 +6232,85 @@ describe("derived project bands always persist", () => {
     expect(bands.P4_backing_and_partners.tier).toBe("assessed_null");
   });
 
+  it("waives token conduct for a project whose bio explicitly declares no token", () => {
+    // MultiHopper case: the official bio says the project has no token, the
+    // canonical token search confirms it, and the old behavior still banded
+    // P3 assessed_null (0-39% of weight) - a red 15/100 for a product
+    // decision. The declaration now opens the exceptional ceiling.
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@multihopper",
+        display_name: "MultiHopper",
+        bio: "Cross-chain routing infrastructure. We have no token. Any token claiming to be MultiHopper is a scam.",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-08-24T00:00:00.000Z",
+      },
+      checkOutcomes: [
+        { checkId: "project-token-identity", status: "checked-empty", provider: "test" },
+      ],
+    }, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+    const p3 = bands.P3_token_conduct;
+    expect(p3.tier).toBe("exceptional");
+    expect(p3.maxScore).toBe(20);
+    expect(p3.reasons).toContain(
+      "official profile explicitly declares the project has no token; token conduct criteria waived until a token launches",
+    );
+    expect(p3.anchorArtifactIds.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("enforces a solid floor when a confirmed token-identity check corroborates the declaration", () => {
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@multihopper",
+        display_name: "MultiHopper",
+        bio: "There is no token.",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-08-24T00:00:00.000Z",
+      },
+      checkOutcomes: [
+        { checkId: "project-token-identity", status: "confirmed", provider: "test" },
+      ],
+    }, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+    const p3 = bands.P3_token_conduct;
+    expect(p3.tier).toBe("exceptional");
+    expect(p3.floorTier).toBe("solid");
+    expect(p3.minScore).toBe(Math.ceil(20 * 0.7));
+  });
+
+  it("does not waive token conduct for promises or usage copy", () => {
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    for (const bio of [
+      "Token launch coming soon. Stay tuned.",
+      "Play instantly - no token needed to start.",
+      "Building the best token analytics platform.",
+    ]) {
+      const packet = buildScoringEvidencePacket({
+        profile: {
+          handle: "@someproject",
+          display_name: "Some Project",
+          bio,
+          profile_collection_state: "resolved",
+          profile_provider: "twitterapi",
+          profile_captured_at: "2026-08-24T00:00:00.000Z",
+        },
+        checkOutcomes: [
+          { checkId: "project-token-identity", status: "checked-empty", provider: "test" },
+        ],
+      }, axes);
+      const bands = deriveProjectStrengthBands(packet, axes);
+      expect(bands.P3_token_conduct.tier, bio).toBe("assessed_null");
+    }
+  });
+
   it("anchors a tier lifted only by team rows that carry no artifactId", () => {
     const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
       .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
