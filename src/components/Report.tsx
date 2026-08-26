@@ -319,14 +319,16 @@ function SubjectProfileContext({
   dossier,
   roles,
   hasTerminalXState,
+  summary,
 }: {
   dossier: Dossier;
   roles: SubjectClass[];
   hasTerminalXState: boolean;
+  summary: string;
 }) {
   return (
     <>
-      <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">{dossier.bio}</p>
+      <p className="mt-2 max-w-2xl break-words text-[13.5px] leading-relaxed text-ink-dim">{summary}</p>
       <ReportDisclaimer className="mt-2 max-w-2xl" />
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {roles.map((role) => (
@@ -3111,7 +3113,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
 
           <div className="mt-2 hidden sm:block">
-            <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} />
+            <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} summary={openingSubjectSummary} />
           </div>
           <details className="mt-3 border-t border-line/60 pt-1 sm:hidden">
             <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 text-[11.5px] text-ink-dim [&::-webkit-details-marker]:hidden">
@@ -3119,7 +3121,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <span className="mono text-[10px] uppercase tracking-wide text-signal-lift">Profile context</span>
             </summary>
             <div className="pb-1">
-              <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} />
+              <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} summary={openingSubjectSummary} />
             </div>
           </details>
 
