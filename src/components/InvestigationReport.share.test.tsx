@@ -999,6 +999,35 @@ describe("investigation exact sharing", () => {
     expect(harness.clipboard).toHaveBeenCalledWith("http://localhost:3000/?share=opaque");
   });
 
+  it("switches between the full file and the brief with the two style buttons", () => {
+    render(investigation({
+      token: {
+        ...token(),
+        axes: [
+          { key: "T1", label: "Liquidity & lock", score: 18, weight: 24, rationale: "Deep liquidity." },
+          { key: "T2", label: "Contract safety", score: 16, weight: 26, rationale: "Owner powers present." },
+        ],
+      },
+    }));
+
+    // Full file is the default: the composition is in the reading flow.
+    expect(container.querySelector("#composition")).not.toBeNull();
+    const briefButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Brief");
+    const fullButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Full file");
+    expect(briefButton).toBeDefined();
+    expect(fullButton).toBeDefined();
+    expect(fullButton?.getAttribute("aria-pressed")).toBe("true");
+
+    act(() => briefButton?.click());
+    expect(container.querySelector("#composition")).toBeNull();
+    expect(briefButton?.getAttribute("aria-pressed")).toBe("true");
+
+    act(() => fullButton?.click());
+    expect(container.querySelector("#composition")).not.toBeNull();
+  });
+
   it("copy tldr mints a share link and pastes it under the verdict lines", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

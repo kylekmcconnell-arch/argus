@@ -6,15 +6,47 @@
    clean document. */
 
 export type ShareState = "idle" | "creating" | "copied" | "error";
+export type ReadingStyle = "full" | "brief";
 
-export function ReportActionsRow({ canShare, shareState, onShare, onExportPdf }: {
+const STYLE_OPTIONS: { value: ReadingStyle; label: string; title: string }[] = [
+  { value: "full", label: "Full file", title: "The complete file: composition, chapters, and every evidence section in the reading flow" },
+  { value: "brief", label: "Brief", title: "The decision brief only; the composition and chapters stay one click away" },
+];
+
+export function ReportActionsRow({ canShare, shareState, onShare, onExportPdf, readingStyle, onReadingStyle }: {
   canShare: boolean;
   shareState: ShareState;
   onShare: () => void;
   onExportPdf: () => void;
+  /** When provided, the two style buttons render at the left of the row. */
+  readingStyle?: ReadingStyle;
+  onReadingStyle?: (style: ReadingStyle) => void;
 }) {
   return (
-    <div className="af-doc mt-5 flex flex-wrap justify-end gap-2 print:hidden" aria-label="Report actions">
+    <div className={`af-doc mt-5 flex flex-wrap gap-2 print:hidden ${readingStyle && onReadingStyle ? "justify-between" : "justify-end"}`} aria-label="Report actions">
+      {readingStyle && onReadingStyle && (
+        <div className="flex gap-2" role="group" aria-label="Report style">
+          {STYLE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onReadingStyle(option.value)}
+              aria-pressed={readingStyle === option.value}
+              title={option.title}
+              className="af-back cursor-pointer"
+              style={{
+                marginTop: 0,
+                ...(readingStyle === option.value
+                  ? { borderColor: "var(--color-signal)", color: "var(--color-ink)" }
+                  : {}),
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap justify-end gap-2">
       {canShare && (
         <button
           type="button"
@@ -39,6 +71,7 @@ export function ReportActionsRow({ canShare, shareState, onShare, onExportPdf }:
       >
         Export PDF ↓
       </button>
+      </div>
     </div>
   );
 }
