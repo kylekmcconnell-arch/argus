@@ -82,6 +82,7 @@ import { buildDecisionBasis } from "../lib/decisionBasis";
 import {
   ReportCanvasNarrativeSection,
   ReportCanvasRailCard,
+  ReportStickyTableOfContents,
   ReportExperienceLayout,
   type ReportCanvasNavItem,
   type ReportCanvasNarrativeItem,
@@ -2898,7 +2899,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         ? "avoid"
         : "neutral";
   const reportNavItems: ReportCanvasNavItem[] = [
-    { href: "#dossier", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
+    { href: "#report-summary", label: "Decision", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
+    { href: "#dossier", label: "Summary", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> },
     { href: "#decision-summary", label: "Risks", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: decisionQuestionCount },
     ...(f.projectToken ? [{ href: "#project-token" as const, label: "Market", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
@@ -3379,6 +3381,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         </section>
 
+        <ReportStickyTableOfContents items={reportNavItems} />
+
         <InvestigationDecisionCanvas
           presentationStyle={reportStyle}
           subjectName={f.display_name || f.handle}
@@ -3439,6 +3443,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
         <ReportExperienceLayout
           items={reportNavItems}
+          showGuideNavigation={false}
           status={{
             label: m.label,
             detail: readiness.status === "ready" ? "Required evidence checks are finished." : readinessTitle,

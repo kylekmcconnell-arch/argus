@@ -1,4 +1,6 @@
+import { Database, FileText, Fingerprint, ListChecks, Megaphone, UserFocus } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "../components/InvestigationDecisionCanvas";
+import { ReportStickyTableOfContents, type ReportCanvasNavItem } from "../components/ReportCanvasPrimitives";
 
 const projectComposition = [
   { axis: "P1", label: "Team and leadership", score: 9, weight: 16, rationale: "One creator is linked; the operating team is only partly disclosed." },
@@ -19,9 +21,21 @@ const tokenComposition = [
 ];
 
 export function DualScorePreview() {
+  const navigation: ReportCanvasNavItem[] = [
+    { href: "#report-summary", label: "Decision", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
+    { href: "#preview-risks", label: "Risks", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: 2 },
+    { href: "#preview-social", label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> },
+    { href: "#preview-people", label: "People", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
+    { href: "#preview-evidence", label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: 14 },
+    { href: "#preview-method", label: "Method", icon: <UserFocus aria-hidden="true" size={15} weight="bold" />, count: 7 },
+  ];
   return (
-    <main className="min-h-screen bg-void px-6 py-8 text-ink">
+    <main className="min-h-screen bg-void text-ink">
+      <header className="sticky top-0 z-30 flex h-[65px] items-center border-b border-line bg-void/95 px-6 backdrop-blur">
+        <span className="mono text-[12px] font-semibold uppercase tracking-[0.16em]">ARGUS · Report preview</span>
+      </header>
       <div className="report-frame report-style-2 mx-auto max-w-[1500px] rounded-2xl border border-line bg-panel px-8 shadow-sm">
+        <ReportStickyTableOfContents items={navigation} />
         <InvestigationDecisionCanvas
           presentationStyle={2}
           subjectName="EARN on Hood"
@@ -55,6 +69,14 @@ export function DualScorePreview() {
           successful={7}
           applicable={7}
         />
+        <div className="space-y-8 py-8">
+          {navigation.slice(1).map((item) => (
+            <section key={item.href} id={item.href.slice(1)} className="scroll-mt-32 border-t border-line py-20">
+              <p className="eyebrow">{item.label}</p>
+              <h2 className="display-sm mt-2 text-[28px] text-ink">{item.label} section</h2>
+            </section>
+          ))}
+        </div>
       </div>
     </main>
   );

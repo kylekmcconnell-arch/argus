@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ReportExperienceLayout, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
+import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -66,5 +66,28 @@ describe("ReportExperienceLayout", () => {
     const aside = container.querySelector("aside");
     expect(aside?.textContent).not.toContain("source passage 123");
     expect(container.textContent).toContain("source passage 123");
+  });
+
+  it("renders a sticky table of contents independently of the supporting guide rail", () => {
+    act(() => {
+      root.render(
+        <>
+          <ReportStickyTableOfContents items={items} />
+          <ReportExperienceLayout
+            items={items}
+            showGuideNavigation={false}
+            status={{ label: "Ready", detail: "Required checks finished.", tone: "pass" }}
+          >
+            <section id="report-summary">Summary body</section>
+          </ReportExperienceLayout>
+        </>,
+      );
+    });
+
+    const toc = container.querySelector('[data-report-sticky-toc="true"]');
+    expect(toc).not.toBeNull();
+    expect(toc?.querySelector('nav[aria-label="Report table of contents"]')).not.toBeNull();
+    expect(toc?.querySelector('a[href="#report-summary"]')?.getAttribute("aria-current")).toBe("location");
+    expect(container.querySelectorAll('nav[aria-label="Report guide"]')).toHaveLength(0);
   });
 });
