@@ -90,4 +90,17 @@ describe("ReportExperienceLayout", () => {
     expect(toc?.querySelector('a[href="#report-summary"]')?.getAttribute("aria-current")).toBe("location");
     expect(container.querySelectorAll('nav[aria-label="Report guide"]')).toHaveLength(0);
   });
+
+  it("reclaims the full report width when the supporting rail has no content", () => {
+    act(() => {
+      root.render(
+        <ReportExperienceLayout items={items} showGuideNavigation={false}>
+          <section id="report-summary">Summary body</section>
+        </ReportExperienceLayout>,
+      );
+    });
+
+    expect(container.querySelector("aside")).toBeNull();
+    expect(container.textContent).toContain("Summary body");
+  });
 });

@@ -2893,13 +2893,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       sub: "Matched through CoinGecko",
     }] : []),
   ];
-  const reportGuideTone = presentedVerdict === "PASS"
-    ? "pass"
-    : presentedVerdict === "CAUTION" || presentedVerdict === "PROVISIONAL" || presentedVerdict === "INCOMPLETE"
-      ? "caution"
-      : presentedVerdict === "FAIL" || presentedVerdict === "AVOID"
-        ? "avoid"
-        : "neutral";
   const reportNavItems: ReportCanvasNavItem[] = [
     { href: "#report-summary", label: "Decision", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
     ...(presentation.primaryScore && governingAxes.length > 0 ? [{ href: "#composition" as const, label: "Score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" /> }] : []),
@@ -3447,13 +3440,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         <ReportExperienceLayout
           items={reportNavItems}
           showGuideNavigation={false}
-          status={{
-            label: m.label,
-            detail: readiness.status === "ready" ? "Required evidence checks are finished." : readinessTitle,
-            meta: `${readiness.successful}/${readiness.applicable} checks finished`,
-            tone: reportGuideTone,
-          }}
-          nextStep={verificationNext[0]?.title}
         >
         {reportStyle === 2 && (
           <>
