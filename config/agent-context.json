@@ -42,5 +42,14 @@
     "grok": "GROK.md",
     "cursor": ".cursor/rules/00-agent-contract.mdc",
     "copilot": ".github/copilot-instructions.md"
+  },
+  "designCanon": {
+    "contract": "DESIGN.md",
+    "owner": "Enigma",
+    "rules": [
+      "auric-file-structure-is-canonical-report-reading-layer",
+      "composition-section-always-visible-never-an-appendix",
+      "dossier-beats-layout-off-report-surfaces"
+    ]
   }
 }
