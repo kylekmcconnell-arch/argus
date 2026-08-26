@@ -534,9 +534,15 @@
 .report-style-2 .text-ink-faint {
   color: color-mix(in oklab, var(--color-ink) 66%, var(--color-panel));
 }
+.report-style-2 .canonical-decision-detail-source {
+  display: none;
+}
+.report-style-2 .legacy-reading-duplicate {
+  display: none;
+}
 .report-style-2 .decision-brief-heading {
   grid-template-columns: minmax(0, 1fr) minmax(500px, 610px);
-  min-height: clamp(430px, 48vw, 590px);
+  min-height: clamp(400px, 44vw, 540px);
   gap: clamp(24px, 4vw, 64px);
   align-items: center;
   border-bottom: 1px solid var(--color-line);
@@ -796,6 +802,78 @@
   font-size: 13px;
   line-height: 1.5;
 }
+.report-style-2 .canonical-decision-brief,
+.report-style-2 .canonical-people-section {
+  max-width: 1020px;
+  margin-inline: auto;
+  padding-block: clamp(44px, 5.5vw, 70px);
+  border-bottom: 1px solid var(--color-line);
+}
+.report-style-2 .canonical-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 24px;
+}
+.report-style-2 .canonical-decision-grid > section {
+  min-width: 0;
+  padding: 24px;
+}
+.report-style-2 .canonical-decision-grid > section:nth-child(2) {
+  border-left: 1px solid var(--color-line);
+}
+.report-style-2 .canonical-decision-grid > section:last-child {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--color-line);
+}
+.report-style-2 .canonical-market-section,
+.report-style-2 .canonical-social-section {
+  max-width: 1020px;
+  margin-inline: auto;
+}
+.report-style-2 .canonical-evidence-disclosure {
+  max-width: 1020px;
+  margin-inline: auto;
+  overflow: clip;
+}
+.report-style-2 .canonical-evidence-disclosure > summary {
+  display: flex;
+  min-height: 68px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 17px 20px;
+}
+.report-style-2 .canonical-evidence-disclosure > summary::-webkit-details-marker { display: none; }
+.report-style-2 .canonical-evidence-disclosure > summary::after {
+  content: "+";
+  flex: 0 0 auto;
+  color: var(--color-brand);
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1;
+}
+.report-style-2 .canonical-evidence-disclosure[open] > summary::after { content: "−"; }
+.report-style-2 .canonical-evidence-disclosure > summary > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+.report-style-2 .canonical-evidence-disclosure > summary strong {
+  color: var(--color-ink);
+  font-size: 15px;
+  font-weight: 650;
+}
+.report-style-2 .canonical-evidence-disclosure > summary small,
+.report-style-2 .canonical-evidence-disclosure > summary .mono {
+  color: var(--color-ink-dim);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.report-style-2 .canonical-evidence-disclosure-body {
+  border-top: 1px solid var(--color-line);
+  padding: 16px;
+}
 @media (max-width: 1023px) {
   .report-style-2 .decision-brief-heading {
     grid-template-columns: minmax(0, 1fr);
@@ -828,6 +906,14 @@
   .report-style-2 .score-composition-trigger {
     padding-inline: 16px;
   }
+  .report-style-2 .canonical-decision-grid { grid-template-columns: minmax(0, 1fr); }
+  .report-style-2 .canonical-decision-grid > section:nth-child(2) {
+    border-top: 1px solid var(--color-line);
+    border-left: 0;
+  }
+  .report-style-2 .canonical-decision-grid > section:last-child { grid-column: 1; }
+  .report-style-2 .canonical-evidence-disclosure > summary { align-items: flex-start; }
+  .report-style-2 .canonical-evidence-disclosure > summary > .mono { display: none; }
   .decision-dual-scores-grid { grid-template-columns: minmax(0, 1fr); }
 }
 .score-ring-verdict {

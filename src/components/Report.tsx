@@ -321,15 +321,17 @@ function SubjectProfileContext({
   roles,
   hasTerminalXState,
   summary,
+  showSummary = true,
 }: {
   dossier: Dossier;
   roles: SubjectClass[];
   hasTerminalXState: boolean;
   summary: string;
+  showSummary?: boolean;
 }) {
   return (
     <>
-      <p className="mt-2 max-w-2xl break-words text-[13.5px] leading-relaxed text-ink-dim">{summary}</p>
+      {showSummary && <p className="mt-2 max-w-2xl break-words text-[13.5px] leading-relaxed text-ink-dim">{summary}</p>}
       <ReportDisclaimer className="mt-2 max-w-2xl" />
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {roles.map((role) => (
@@ -2900,15 +2902,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         : "neutral";
   const reportNavItems: ReportCanvasNavItem[] = [
     { href: "#report-summary", label: "Decision", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
-    { href: "#dossier", label: "Summary", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> },
-    { href: "#decision-summary", label: "Risks", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: decisionQuestionCount },
+    ...(presentation.primaryScore && governingAxes.length > 0 ? [{ href: "#composition" as const, label: "Score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" /> }] : []),
+    ...(roles.includes(SubjectClass.PROJECT)
+      ? [{ href: "#dossier-product" as const, label: "Product", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]
+      : [{ href: "#dossier" as const, label: "Summary", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]),
+    { href: "#identity-evidence", label: "People", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
     ...(f.projectToken ? [{ href: "#project-token" as const, label: "Market", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
-    { href: "#identity-evidence", label: "People", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
     { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
     ...(f.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> }] : []),
-    { href: "#evidence-ledger", label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount },
-    ...(diligenceChecks.length > 0 ? [{ href: "#scan-methodology" as const, label: "Method", icon: <UserFocus aria-hidden="true" size={15} weight="bold" />, count: diligenceChecks.length }] : []),
+    { href: "#evidence-ledger", label: "Evidence & method", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount },
     ...(!shareView ? [{ href: "#ask-report" as const, label: "Challenge", icon: <MagnifyingGlassPlus aria-hidden="true" size={15} weight="bold" /> }] : []),
   ];
 
@@ -3115,7 +3118,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
 
           <div className="mt-2 hidden sm:block">
-            <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} summary={openingSubjectSummary} />
+            <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} summary={openingSubjectSummary} showSummary={reportStyle !== 2} />
           </div>
           <details className="mt-3 border-t border-line/60 pt-1 sm:hidden">
             <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 text-[11.5px] text-ink-dim [&::-webkit-details-marker]:hidden">
@@ -3123,7 +3126,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <span className="mono text-[10px] uppercase tracking-wide text-signal-lift">Profile context</span>
             </summary>
             <div className="pb-1">
-              <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} summary={openingSubjectSummary} />
+              <SubjectProfileContext dossier={f} roles={roles} hasTerminalXState={hasTerminalXState} summary={openingSubjectSummary} showSummary={reportStyle !== 2} />
             </div>
           </details>
 
@@ -3452,58 +3455,290 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           }}
           nextStep={verificationNext[0]?.title}
         >
-        <DossierReport payload={f as unknown as Record<string, unknown>} />
+        {reportStyle === 2 && (
+          <>
+            <section id="decision-brief" className="canonical-decision-brief story-chapter report-section scroll-mt-28">
+              <header className="report-section-heading">
+                <div>
+                  <p className="eyebrow text-signal-lift">02 · Decision brief</p>
+                  <h2 className="story-chapter-title mt-2 text-ink">The case, without the repetition.</h2>
+                  <p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">
+                    The strongest evidence, the main concerns, and the questions most likely to change the result.
+                  </p>
+                </div>
+              </header>
+              <div className="canonical-decision-grid panel overflow-hidden">
+                <ReportCanvasNarrativeSection
+                  id="canonical-verdict-rationale"
+                  title={favorableVerdict ? "What supports this result" : "Main concerns"}
+                  description="The three decision-changing points that most strongly govern the result."
+                  tone={decisionNarrativeTone}
+                  items={verdictNarrative.slice(0, 3)}
+                  emptyCopy="No decision-changing concern was recorded. Review the evidence before relying on the result."
+                />
+                <ReportCanvasNarrativeSection
+                  id="canonical-confidence-limits"
+                  title={favorableVerdict ? "Main concerns" : "What looks credible"}
+                  description="The strongest counterweight to the governing result."
+                  tone={favorableVerdict ? "caution" : "pass"}
+                  items={countervailingNarrative.slice(0, 3)}
+                  emptyCopy="No countervailing finding was recorded in this saved report."
+                />
+                <ReportCanvasNarrativeSection
+                  id="canonical-verification-next"
+                  title="What to check next"
+                  description="The three unanswered questions most likely to change the result."
+                  tone="signal"
+                  items={verificationNext.slice(0, 3)}
+                  emptyCopy="No unresolved decision question was recorded."
+                />
+              </div>
+            </section>
+
+            <DossierReport
+              payload={f as unknown as Record<string, unknown>}
+              includeBeats={roles.includes(SubjectClass.PROJECT) ? ["product"] : undefined}
+              includeSources={false}
+            />
+
+            <section id="identity-evidence" className="canonical-people-section story-chapter report-section scroll-mt-28" aria-labelledby="report-team-heading">
+              <header className="report-section-heading">
+                <div>
+                  <p className="eyebrow text-signal-lift">People &amp; control</p>
+                  <h2 id="report-team-heading" className="story-chapter-title mt-2 text-ink">
+                    {webTeam && webTeam.length > 0
+                      ? "People tied to this project"
+                      : "The people behind this project remain unresolved."}
+                  </h2>
+                  <p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">
+                    {webTeam && webTeam.length > 0
+                      ? `ARGUS found ${webTeam.length} source-grounded ${webTeam.length === 1 ? "person" : "people"}. Each card shows the public evidence linking them to the project.`
+                      : f.identity_note}
+                  </p>
+                </div>
+                {webTeam && webTeam.length > 0 && (
+                  <span className="verdict-pill tint-signal">
+                    {webTeam.length} named {webTeam.length === 1 ? "person" : "people"}
+                  </span>
+                )}
+              </header>
+              {webTeam && webTeam.length > 0 && (
+                <div className={`grid gap-3 ${webTeam.length > 1 ? "xl:grid-cols-2" : ""}`}>
+                  {webTeam.map((person, index) => {
+                    const roleProof = safeSourceLink(person.sourceUrl ?? person.source);
+                    return (
+                      <article key={`${person.name}:${person.handle ?? ""}:${index}`} className="team-person-card panel">
+                        <span className="team-person-main">
+                          <Avatar src={trustedOfficialXAvatarUrl(person.avatarUrl) ?? personAvatar(person.handle, person.linkedin)} letter={(person.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={52} rounded="rounded-full" letterClass="text-[13px]" />
+                          <span className="text-[16px] font-semibold text-ink">{person.name}</span>
+                          {person.handle && <span className="mono text-[12px] text-ink-faint">{person.handle}</span>}
+                          <span className="chip tint-signal shrink-0 normal-case tracking-normal">{formatRoleLabel(person.role)}</span>
+                          {roleProof && <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Open role source</a>}
+                          <span className="team-person-evidence text-[13px] leading-relaxed">
+                            {person.evidence ? `${plainLanguageSummary(person.evidence)} ` : ""}
+                            <span className="mono">Source: {sourceProviderLabel(person.provider ?? person.source)}.</span>
+                          </span>
+                        </span>
+                        {person.handle && onAudit && (
+                          <button onClick={() => onAudit(person.handle!)} className="btn-secondary min-h-10 shrink-0 px-3 text-[12px]">Review</button>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {f.projectToken && (
+              <div className="canonical-market-section py-5">
+                <ProjectTokenCard
+                  token={f.projectToken}
+                  chains={f.projectToken.deployedChains}
+                  showCurrentIntelligence={showCurrentIntelligence}
+                  refreshCurrentMarket={currentIntelligenceEnabled}
+                  onAudit={onAudit}
+                  onLoadCurrentIntelligence={versionContext
+                    ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
+                    : undefined}
+                />
+              </div>
+            )}
+
+            {f.socialActivity && roles.includes(SubjectClass.PROJECT) && (
+              <SocialActivityPanel
+                snapshot={f.socialActivity}
+                className="canonical-social-section mt-3"
+                panelCostToken={panelCostToken}
+                afterActivity={subjectLeads.length > 0 ? (
+                  <div id="subject-leads" className="scroll-mt-28">
+                    <SubjectAccusationStage
+                      leads={subjectLeads}
+                      subject={report.handle}
+                      summary={subjectLeadSummary}
+                      panelCostToken={panelCostToken}
+                    />
+                  </div>
+                ) : undefined}
+              />
+            )}
+          </>
+        )}
+
+        {reportStyle !== 2 && <DossierReport payload={f as unknown as Record<string, unknown>} />}
         {f.projectStrengthBands && (
-          <DimensionChapters
-            chapters={personDimensionChapters(f.projectStrengthBands)}
-            checksHref="#scan-methodology"
-          />
-        )}
-
-        {prioritizeDecisionIntelligence && f.intelligence && (
-          <PointInTimeIntelligencePanel
-            snapshot={f.intelligence}
-            thesisEligible={presentation.final && !decisionFrameworkUnavailable}
-            governingVerdict={presentedVerdict}
-            selectedLensId={decisionLensId}
-            onSelectedLensChange={setDecisionLensId}
-          />
-        )}
-
-        {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
-
-        {showBasicFacts && (
-          <div className="mt-5">
-            <BasicFactsPanel
-              facts={basicFacts}
-              leads={basicFactLeads}
-              fillRequired={fillDecisionFacts}
-              audience={basicFactsAudience}
-              questionLedger={f.basicFactQuestionLedger}
-              fundingRounds={fundingEvidence.rounds}
-              supportingAffiliationCount={evidence.ventures.filter((venture) =>
-                venture.evidence_origin !== "model_lead" && venture.artifact_verified === true).length}
+          reportStyle === 2 ? (
+            <details className="canonical-evidence-disclosure panel mt-7 scroll-mt-28">
+              <summary>
+                <span>
+                  <strong>Evidence behind each score dimension</strong>
+                  <small>Open the six detailed chapters and their source-backed reasons.</small>
+                </span>
+                <span className="mono">{Object.keys(f.projectStrengthBands).length} chapters</span>
+              </summary>
+              <DimensionChapters
+                chapters={personDimensionChapters(f.projectStrengthBands)}
+                checksHref="#scan-methodology"
+              />
+            </details>
+          ) : (
+            <DimensionChapters
+              chapters={personDimensionChapters(f.projectStrengthBands)}
+              checksHref="#scan-methodology"
             />
-          </div>
+          )
         )}
 
-        {f.operatorLaunches && (
-          <div className="mt-3">
-            <OperatorTrackRecord
-              history={f.operatorLaunches}
-              operatorHandle={operatorHandleForDossier}
-              creatorWallet={f.operatorLaunches.creatorWallet}
+        {reportStyle === 2 ? (
+          (f.intelligence || f.researchPlan || showBasicFacts) && (
+            <details id="evidence-questions" className="canonical-evidence-disclosure panel mt-5 scroll-mt-28">
+              <summary>
+                <span>
+                  <strong>Research coverage and open questions</strong>
+                  <small>The full question ledger, source coverage, and refresh triggers.</small>
+                </span>
+                <span className="mono">Evidence detail</span>
+              </summary>
+              <div className="canonical-evidence-disclosure-body">
+                {f.intelligence && (
+                  <PointInTimeIntelligencePanel
+                    snapshot={f.intelligence}
+                    thesisEligible={presentation.final && !decisionFrameworkUnavailable}
+                    governingVerdict={presentedVerdict}
+                    selectedLensId={decisionLensId}
+                    onSelectedLensChange={setDecisionLensId}
+                  />
+                )}
+                {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
+                {showBasicFacts && (
+                  <div className="mt-5">
+                    <BasicFactsPanel
+                      facts={basicFacts}
+                      leads={basicFactLeads}
+                      fillRequired={fillDecisionFacts}
+                      audience={basicFactsAudience}
+                      questionLedger={f.basicFactQuestionLedger}
+                      fundingRounds={fundingEvidence.rounds}
+                      supportingAffiliationCount={evidence.ventures.filter((venture) =>
+                        venture.evidence_origin !== "model_lead" && venture.artifact_verified === true).length}
+                    />
+                  </div>
+                )}
+              </div>
+            </details>
+          )
+        ) : (
+          <>
+            {prioritizeDecisionIntelligence && f.intelligence && (
+              <PointInTimeIntelligencePanel
+                snapshot={f.intelligence}
+                thesisEligible={presentation.final && !decisionFrameworkUnavailable}
+                governingVerdict={presentedVerdict}
+                selectedLensId={decisionLensId}
+                onSelectedLensChange={setDecisionLensId}
+              />
+            )}
+            {f.researchPlan && <ResearchPlanPanel plan={f.researchPlan} className="mt-3" />}
+            {showBasicFacts && (
+              <div className="mt-5">
+                <BasicFactsPanel
+                  facts={basicFacts}
+                  leads={basicFactLeads}
+                  fillRequired={fillDecisionFacts}
+                  audience={basicFactsAudience}
+                  questionLedger={f.basicFactQuestionLedger}
+                  fundingRounds={fundingEvidence.rounds}
+                  supportingAffiliationCount={evidence.ventures.filter((venture) =>
+                    venture.evidence_origin !== "model_lead" && venture.artifact_verified === true).length}
+                />
+              </div>
+            )}
+          </>
+        )}
+
+        {reportStyle === 2 ? (
+          (f.operatorLaunches || f.protocolTvl || f.protocolFees || f.holderProfile || f.companyEnrichment || f.website || f.protocolFunding) && (
+            <details className="canonical-evidence-disclosure panel mt-5 scroll-mt-28">
+              <summary>
+                <span>
+                  <strong>Operating history, usage and capital evidence</strong>
+                  <small>Track record, adoption signals and the underlying company and funding ledgers.</small>
+                </span>
+                <span className="mono">Evidence detail</span>
+              </summary>
+              <div className="canonical-evidence-disclosure-body">
+                {f.operatorLaunches && (
+                  <div className="mt-3">
+                    <OperatorTrackRecord
+                      history={f.operatorLaunches}
+                      operatorHandle={operatorHandleForDossier}
+                      creatorWallet={f.operatorLaunches.creatorWallet}
+                    />
+                  </div>
+                )}
+                {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
+                  <div className="mt-3">
+                    <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
+                  </div>
+                )}
+                <DiligenceEvidenceLedgers
+                  className="mt-3"
+                  company={f.companyEnrichment}
+                  officialWebsite={f.website}
+                  protocolFunding={f.protocolFunding}
+                  protocolTvl={f.protocolTvl}
+                  canonicalGeckoId={f.projectToken?.coingeckoId}
+                />
+              </div>
+            </details>
+          )
+        ) : (
+          <>
+            {f.operatorLaunches && (
+              <div className="mt-3">
+                <OperatorTrackRecord
+                  history={f.operatorLaunches}
+                  operatorHandle={operatorHandleForDossier}
+                  creatorWallet={f.operatorLaunches.creatorWallet}
+                />
+              </div>
+            )}
+            {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
+              <div className="mt-3">
+                <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
+              </div>
+            )}
+            <DiligenceEvidenceLedgers
+              className="mt-3"
+              company={f.companyEnrichment}
+              officialWebsite={f.website}
+              protocolFunding={f.protocolFunding}
+              protocolTvl={f.protocolTvl}
+              canonicalGeckoId={f.projectToken?.coingeckoId}
             />
-          </div>
+          </>
         )}
 
-        {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
-          <div className="mt-3">
-            <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
-          </div>
-        )}
-
-        {f.socialActivity && roles.includes(SubjectClass.PROJECT) && (
+        {reportStyle !== 2 && f.socialActivity && roles.includes(SubjectClass.PROJECT) && (
           <SocialActivityPanel
             snapshot={f.socialActivity}
             className="mt-3"
@@ -3521,16 +3756,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           />
         )}
 
-        <DiligenceEvidenceLedgers
-          className="mt-3"
-          company={f.companyEnrichment}
-          officialWebsite={f.website}
-          protocolFunding={f.protocolFunding}
-          protocolTvl={f.protocolTvl}
-          canonicalGeckoId={f.projectToken?.coingeckoId}
-        />
-
-        {f.projectToken && (
+        {reportStyle !== 2 && f.projectToken && (
           <div className="py-5">
             <ProjectTokenCard
               token={f.projectToken}
@@ -3545,7 +3771,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
 
-        <div id="decision-summary" className="grid scroll-mt-28 gap-4 py-5">
+        <div id="decision-summary" className="legacy-reading-duplicate grid scroll-mt-28 gap-4 py-5">
           {partialAxisAssessment && (
             <section className="finding tint-caution px-5 py-4" aria-label="Partial decision assessment">
               <div className="flex flex-wrap items-start gap-3">
@@ -3681,7 +3907,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         </div>
 
-        {f.intelligence && !prioritizeDecisionIntelligence && (
+        {reportStyle !== 2 && f.intelligence && !prioritizeDecisionIntelligence && (
           <PointInTimeIntelligencePanel
             snapshot={f.intelligence}
             thesisEligible={presentation.final && !decisionFrameworkUnavailable}
@@ -3695,7 +3921,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <EvmControlSurfacePanel snapshot={f.evmControlReality} />
         )}
 
-        <div id="decision-basis" className="scroll-mt-28">
+        <div id="decision-basis" className="legacy-reading-duplicate scroll-mt-28">
           <DecisionBasis
             roleReport={governingRoleReport}
             catalog={f.axisEvidenceCatalog}
@@ -3705,7 +3931,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           />
         </div>
 
-        <div className="panel mt-5 px-5">
+        <div className="legacy-reading-duplicate panel mt-5 px-5">
           <ReportCanvasNarrativeSection
             id="verification-next"
             title="What to check next"
@@ -3746,7 +3972,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
 
-        <div id="identity-evidence" className="scroll-mt-28">
+        <div id={reportStyle === 2 ? "identity-evidence-detail" : "identity-evidence"} className="scroll-mt-28">
         {/* Supplemental live checks are deliberately separated from the frozen
             score. They self-gate on a resolved real name and never imply broad
             legal or sanctions clearance. */}
@@ -3765,7 +3991,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             pseudonymous individual, not a project team — the name-search team is a
             collision, and the contradictions section already explains it. */}
         {report.governing_role !== "KOL" && webTeam && webTeam.length > 0 ? (
-          <section className="team-diligence-card panel mt-3" aria-labelledby="report-team-heading">
+          <section className="legacy-reading-duplicate team-diligence-card panel mt-3" aria-labelledby="report-team-heading">
             <header className="team-diligence-header">
               <div>
                 <div className="eyebrow">Team</div>
@@ -3848,7 +4074,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             )}
           </section>
         ) : (
-          <div className="panel mt-3 flex items-start gap-3 px-4 py-3">
+          <div className="legacy-reading-duplicate panel mt-3 flex items-start gap-3 px-4 py-3">
             <span className={`chip normal-case mt-0.5 ${displayIdentityConfidence === "SuspectedImpersonation" ? "tint-unverifiable" : ""}`}>
               {displayIdentityConfidence === "Confirmed"
                 ? "Identity verified"
@@ -3972,8 +4198,57 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
 
-        <div id="evidence-ledger" className="scroll-mt-28" />
-        <section className="panel mt-5 px-5 py-5" aria-label="Where this evidence came from">
+        <div id="relationships" className="scroll-mt-28" />
+        {/* connections — the compounding web: other audited subjects tied to this one */}
+        {showTrustGraphSupplemental && connections.length > 0 && (
+          <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
+            <Card className="divide-y divide-line/60">
+              {connections.map((c) => {
+                const vm = c.otherVerdict ? verdictMeta(c.otherVerdict) : null;
+                return (
+                  <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
+                      <div className="min-w-0">
+                      <span className="mono text-[12.5px] text-ink">{c.other}</span>
+                      {vm && <span className={`verdict-pill ml-2 ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={c.otherVerdict === "FAIL" ? undefined : ({ "--tint": vm.color } as React.CSSProperties)}>{vm.label}</span>}
+                      <div className="mt-0.5 text-[12.5px] leading-snug text-ink-dim">
+                        {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
+                        {c.ties.length > 0 && (
+                          <span>via {c.ties.map((t, ti) => (
+                            <span key={t.key}>
+                              {ti > 0 && ", "}
+                              {onOpenProject && t.type === "Company" ? (
+                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-lift hover:underline">{t.label}</button>
+                              ) : (
+                                <span className="text-ink">{t.label}</span>
+                              )}
+                            </span>
+                          ))}</span>
+                        )}
+                      </div>
+                      </div>
+                    </div>
+                    {onAudit && (
+                      <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+          </Section>
+        )}
+
+        <details id="evidence-ledger" className="canonical-evidence-disclosure panel mt-5 scroll-mt-28">
+          <summary>
+            <span>
+              <strong>Sources, provenance and frozen evidence</strong>
+              <small>The complete source ledger, report date, graph screen and profile-authenticity evidence.</small>
+            </span>
+            <span className="mono">Evidence appendix</span>
+          </summary>
+          <div className="canonical-evidence-disclosure-body">
+        <section className="panel px-5 py-5" aria-label="Where this evidence came from">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <div>
               <p className="eyebrow text-signal-lift">Sources</p>
@@ -4021,50 +4296,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         )}
 
         <FrozenSourceLedger artifacts={f.sourceArtifacts ?? []} subjectHandle={report.handle} profile={fundScaleProfile} roles={roles} />
-
-        <div id="relationships" className="scroll-mt-28" />
-        {/* connections — the compounding web: other audited subjects tied to this one */}
-        {showTrustGraphSupplemental && connections.length > 0 && (
-          <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
-            <Card className="divide-y divide-line/60">
-              {connections.map((c) => {
-                const vm = c.otherVerdict ? verdictMeta(c.otherVerdict) : null;
-                return (
-                  <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
-                    <div className="flex min-w-0 items-start gap-2">
-                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
-                      <div className="min-w-0">
-                      <span className="mono text-[12.5px] text-ink">{c.other}</span>
-                      {vm && <span className={`verdict-pill ml-2 ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={c.otherVerdict === "FAIL" ? undefined : ({ "--tint": vm.color } as React.CSSProperties)}>{vm.label}</span>}
-                      <div className="mt-0.5 text-[12.5px] leading-snug text-ink-dim">
-                        {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
-                        {c.ties.length > 0 && (
-                          <span>via {c.ties.map((t, ti) => (
-                            <span key={t.key}>
-                              {ti > 0 && ", "}
-                              {onOpenProject && t.type === "Company" ? (
-                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-lift hover:underline">{t.label}</button>
-                              ) : (
-                                <span className="text-ink">{t.label}</span>
-                              )}
-                            </span>
-                          ))}</span>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-                    {onAudit && (
-                      <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
-                    )}
-                  </div>
-                );
-              })}
-            </Card>
-          </Section>
-        )}
+          </div>
+        </details>
 
         {/* role breakdown — governing role full-width and expanded, the rest below */}
-        <div id="role-breakdown" className="scroll-mt-28">
+        <div id="role-breakdown" className="legacy-reading-duplicate scroll-mt-28">
           <Section title="Score breakdown" kicker="Each role is checked separately. The lowest role score is used.">
             {(() => {
               const gov = report.role_reports.find((rr) => rr.role === report.governing_role);

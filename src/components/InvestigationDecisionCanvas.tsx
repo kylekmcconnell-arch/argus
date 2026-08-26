@@ -359,6 +359,7 @@ export function InvestigationDecisionCanvas({
   openItemsLabel = "What is still open",
   composition,
   secondaryScore,
+  showDecisionDetails = true,
 }: {
   /** Style 2 is the narrative reading view; Style 1 keeps the compact brief. */
   presentationStyle?: 1 | 2;
@@ -406,6 +407,8 @@ export function InvestigationDecisionCanvas({
   composition?: CompositionRow[];
   /** A separately scored linked facet. Style 2 shows both without blending them. */
   secondaryScore?: DecisionCanvasScore | null | undefined;
+  /** Report surfaces can supply a single later decision brief instead of repeating this detail panel. */
+  showDecisionDetails?: boolean;
 }) {
   const verdictItems = favorable ? supports : concerns;
   const countervailingItems = favorable ? concerns : supports;
@@ -523,7 +526,7 @@ export function InvestigationDecisionCanvas({
         )}
       </header>
 
-      <div className="panel mt-3 overflow-hidden">
+      {showDecisionDetails && <div className="canonical-decision-detail-source panel mt-3 overflow-hidden">
         {discovery && (
           <section
             className="border-b border-line/70 bg-panel-2/30 px-5 py-4"
@@ -665,7 +668,7 @@ export function InvestigationDecisionCanvas({
             )}
           </aside>
         </div>
-      </div>
+      </div>}
     </section>
   );
 }

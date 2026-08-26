@@ -459,15 +459,23 @@ export function DossierReport({
   payload,
   theatrical = false,
   id = "dossier",
+  includeBeats,
+  includeSources = true,
 }: {
   /** Live report payload. Must never be the dynex design fixture in production. */
   payload: Record<string, unknown>;
   /** Full-viewport beats + fixture chrome. DEV preview harness only. */
   theatrical?: boolean;
   id?: string;
+  /** Optional reading-view subset. The full dossier remains the default. */
+  includeBeats?: string[];
+  /** Lets the canonical report keep the source ledger in one appendix. */
+  includeSources?: boolean;
 }) {
   const d = buildDossier(payload);
-  const beats = d.beats;
+  const beats = includeBeats?.length
+    ? d.beats.filter((beat) => includeBeats.includes(beat.id))
+    : d.beats;
   const beatIds = beats.map((b) => b.id);
   const beatKey = beatIds.join("|");
   const reduced = useReducedMotion();
@@ -729,7 +737,7 @@ export function DossierReport({
               {!theatrical && b.id === "verdict" && <EvidenceOriginGuide />}
             </section>
           ))}
-          {d.sources.length > 0 && (
+          {includeSources && d.sources.length > 0 && (
             <section
               id="dossier-sources"
               data-beat="sources"
