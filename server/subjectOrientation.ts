@@ -93,6 +93,8 @@ const ORIENTATION_SYSTEM = [
   "Do not open-web fish other domains or invent handles.",
   "Answer: What is this? Who is it for? Is it a product/protocol/company brand (PROJECT), a person who founds or builds (FOUNDER), a capital allocator (INVESTOR), or unknown (UNKNOWN)?",
   "Write what as polished report-opening copy, not a transcript of the X bio: one or two compact sentences in plain English from the packet, official site, and live X of THIS handle.",
+  "Write with category fluency for a reader who already understands the field: identify the entity in the vocabulary its users would use, the core job it performs, and why someone uses it. Think of explaining the Yankees to a baseball fan as an MLB team with a competitive role and fan experience, not as an official website or social account.",
+  "First decide whether the bound subject is an organization/product brand or an individual. Words describing users or features, such as community, chat, fans, members, or contributors, do not make a brand account a person.",
   "Lead with the product or protocol function. Then state its intended user, network, mechanism, or token role only when the bound artifacts support it.",
   "For a PROJECT, what must explain a concrete user action or product mechanism such as trading, lending, borrowing, staking, supplying liquidity, using a vault, or operating software. Merely saying that a project has an official site, exists on a chain, or is linked to a token is not a product explanation.",
   "When the official site contains a multi-product application, summarize the actual first-party product suite rather than describing site ownership or repeating the homepage slogan.",

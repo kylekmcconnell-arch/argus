@@ -432,6 +432,14 @@ var PATTERNS = {
     /\b(?:prediction|betting|forecasting) market\b/i,
     /\b(?:decentralized )?exchange\b/i,
     /\bmarketplace\b/i,
+    // Product-category nouns describe what a brand ships. Keep them specific
+    // enough that a person's incidental "wallet" mention is not sufficient;
+    // providerBackedRoles still requires a provider-resolved official site
+    // before PROJECT can govern.
+    /\b(?:bitcoin|crypto|digital asset|self-custodial|non-custodial|privacy-first|multisig|mobile|hardware) wallet\b/i,
+    /\b(?:mobile|web|desktop|consumer|payments?|trading|social|chat|crypto|bitcoin|defi) app\b/i,
+    /\b(?:an?|the) (?:privacy-first |self-custodial |non-custodial )?wallet (?:for|that|with)\b/i,
+    /\bapp (?:for|that)\b/i,
     // "Product" is a useful brand-account signal, but not when it is plainly a
     // person's job title. Server routing additionally requires the resolved X
     // profile to link a credible official site before PROJECT can govern.
@@ -490,7 +498,9 @@ var PATTERNS = {
     /\bambassador\b/i,
     /\bmod\b/i,
     /\bmoderator\b/i,
-    /\bcommunity\b/i,
+    /\bcommunity (?:manager|lead|moderator|mod|ambassador|contributor|member)\b/i,
+    /\bteam member\b/i,
+    /\bmember (?:of|at)\b/i,
     /\bcontributor\b/i
   ]
 };
@@ -17789,6 +17799,8 @@ var ORIENTATION_SYSTEM = [
   "Do not open-web fish other domains or invent handles.",
   "Answer: What is this? Who is it for? Is it a product/protocol/company brand (PROJECT), a person who founds or builds (FOUNDER), a capital allocator (INVESTOR), or unknown (UNKNOWN)?",
   "Write what as polished report-opening copy, not a transcript of the X bio: one or two compact sentences in plain English from the packet, official site, and live X of THIS handle.",
+  "Write with category fluency for a reader who already understands the field: identify the entity in the vocabulary its users would use, the core job it performs, and why someone uses it. Think of explaining the Yankees to a baseball fan as an MLB team with a competitive role and fan experience, not as an official website or social account.",
+  "First decide whether the bound subject is an organization/product brand or an individual. Words describing users or features, such as community, chat, fans, members, or contributors, do not make a brand account a person.",
   "Lead with the product or protocol function. Then state its intended user, network, mechanism, or token role only when the bound artifacts support it.",
   "For a PROJECT, what must explain a concrete user action or product mechanism such as trading, lending, borrowing, staking, supplying liquidity, using a vault, or operating software. Merely saying that a project has an official site, exists on a chain, or is linked to a token is not a product explanation.",
   "When the official site contains a multi-product application, summarize the actual first-party product suite rather than describing site ownership or repeating the homepage slogan.",
@@ -33443,14 +33455,16 @@ function axisCatalog(roles) {
   return out;
 }
 var siteSubstanceExcerptByEvidence = /* @__PURE__ */ new WeakMap();
-function shouldCollectSubjectOrientation(resolvedRoles) {
-  return resolvedRoles.length === 0 || resolvedRoles.includes("PROJECT" /* PROJECT */);
+function shouldCollectSubjectOrientation(resolvedRoles, evidence) {
+  if (resolvedRoles.length === 0 || resolvedRoles.includes("PROJECT" /* PROJECT */)) return true;
+  if (evidence && resolvedRoles.length === 1 && resolvedRoles[0] === "MEMBER" /* MEMBER */ && evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && canonicalOfficialWebsite(evidence.profile.website) !== null && !evidence.profile.identity_binding && !evidence.profile.resolved_name?.trim()) return true;
+  return false;
 }
 async function maybeOrientSubject(ctx, siteExcerpt) {
   const prior = ctx.evidence.subjectOrientation;
   if (prior && prior.kind !== "UNKNOWN") return;
   const resolvedRoles = providerBackedRoles(ctx.evidence);
-  if (!shouldCollectSubjectOrientation(resolvedRoles)) return;
+  if (!shouldCollectSubjectOrientation(resolvedRoles, ctx.evidence)) return;
   const excerpt = (siteExcerpt ?? siteSubstanceExcerptByEvidence.get(ctx.evidence) ?? "").trim() || void 0;
   const orientation = await orientSubjectWithGrok(ctx.evidence, { siteExcerpt: excerpt });
   if (!orientation) return;
@@ -33472,6 +33486,7 @@ async function maybeOrientSubject(ctx, siteExcerpt) {
 function providerBackedRoles(evidence) {
   const roles = /* @__PURE__ */ new Set();
   let bioPrimaryProjectVerified = false;
+  let verifiedOfficialProjectProfile = false;
   let investorBeyondBio = false;
   const profileDeclaredToken = evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(evidence.profile.profile_captured_at ?? "")) ? declaredTokenFromBio(evidence.profile.bio) : null;
   const projectBound = projectOrientationBound(evidence);
@@ -33483,12 +33498,19 @@ function providerBackedRoles(evidence) {
     const providerCapturedAt = Date.parse(evidence.profile.profile_captured_at ?? "");
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);
     const projectProfileVerified = evidence.profile.profile_provider === "twitterapi" && Number.isFinite(providerCapturedAt) && (officialSite !== null || profileDeclaredToken !== null);
+    verifiedOfficialProjectProfile = projectProfileVerified;
     bioPrimaryProjectVerified = projectProfileVerified && classification.subject_class === "PROJECT" /* PROJECT */ && classification.scores["PROJECT" /* PROJECT */] > classification.scores["INVESTOR" /* INVESTOR */];
     profileRoles.forEach((role) => {
       if (role === "FOUNDER" /* FOUNDER */ && projectBound) return;
       if (role !== "PROJECT" /* PROJECT */ || projectProfileVerified) roles.add(role);
     });
+    if (bioPrimaryProjectVerified) roles.delete("MEMBER" /* MEMBER */);
     if (profileDeclaredToken) roles.add("PROJECT" /* PROJECT */);
+  }
+  const organizationAvatar = evidence.profileAuthenticity?.classification === "logo_or_cartoon" && (evidence.profileAuthenticity.confidence ?? 0) >= 0.7;
+  if (roles.size === 1 && roles.has("MEMBER" /* MEMBER */) && verifiedOfficialProjectProfile && evidence.profile.site_substance_status === "live" && organizationAvatar && !evidence.profile.identity_binding && !evidence.profile.resolved_name?.trim()) {
+    roles.delete("MEMBER" /* MEMBER */);
+    roles.add("PROJECT" /* PROJECT */);
   }
   for (const venture of evidence.ventures) {
     if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;
@@ -33549,6 +33571,7 @@ function providerBackedRoles(evidence) {
   }
   if (projectBound || canonicalTokenProjectBound) {
     roles.delete("FOUNDER" /* FOUNDER */);
+    roles.delete("MEMBER" /* MEMBER */);
     const other = [...roles].filter((role) => role !== "PROJECT" /* PROJECT */);
     if (other.length === 0) roles.add("PROJECT" /* PROJECT */);
   }
