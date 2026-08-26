@@ -648,7 +648,8 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Investigative team candidates");
+    expect(container.textContent).toContain("Needs verification");
+    expect(container.textContent).not.toContain("Investigative team candidates");
     expect(container.textContent).toContain("Model Team Lead");
     expect(container.textContent).toContain("not identity proof");
     expect(container.textContent).not.toContain("identity resolved through the named team");
@@ -708,9 +709,9 @@ describe("private person report evidence boundary", () => {
 
     act(() => root.render(<Report dossier={dossier} onReset={() => {}} />));
 
-    expect(container.querySelector("#report-team-heading")?.textContent).toContain("People tied to this project");
+    expect(container.querySelector("#report-team-heading")?.textContent).toContain("One roster. Evidence first.");
     expect(container.textContent).toContain("ARGUS found 1 source-grounded person");
-    expect(container.textContent).toContain("1 named person");
+    expect(container.textContent).toContain("1 verified · 0 to verify");
     expect(container.textContent).not.toContain("Probable");
     expect(container.querySelector(".team-person-card")?.textContent).toContain("Ada Example");
     expect(container.querySelector(".team-person-card")?.textContent).toContain("Chief Technology Officer");
@@ -718,12 +719,11 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("Open role source");
     expect(container.querySelector('a[href="https://github.com/ada-example"]')?.textContent).toContain("GitHub");
     expect(container.querySelector('a[href="https://x.com/ada_example"]')?.textContent).toContain("profile link proof");
-    const continuity = container.querySelector('[aria-label="Frozen leadership continuity ledger"]');
-    expect(continuity?.textContent).toContain("provider record lists project");
-    expect(continuity?.textContent).toContain("provider record ends Mar 1, 2024");
-    expect(continuity?.textContent).toContain("provider record did not answer for this project");
-    expect(continuity?.textContent).toContain("not evidence that this person was never involved");
-    expect(continuity?.querySelector('a[href="https://linkedin.com/in/ada-example"]')).not.toBeNull();
+    expect(container.querySelector(".team-person-card")?.textContent).toContain("current in provider record");
+    expect(container.textContent).toContain("Leadership records to reconcile");
+    expect(container.textContent).toContain("provider record ends Mar 1, 2024");
+    expect(container.textContent).toContain("provider record did not answer for this project");
+    expect(container.querySelector('a[href="https://linkedin.com/in/ada-example"]')).not.toBeNull();
   });
 
   it("renders a server-derived model-enriched lead once, not re-derived from the sanitized team copy", () => {
@@ -756,11 +756,9 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    const candidatesCard = () => [...container.querySelectorAll<HTMLElement>("div")]
-      .find((el) => el.className.includes("border-caution/25"));
-    expect(candidatesCard()).toBeDefined();
-    expect((candidatesCard()?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(1);
-    expect(candidatesCard()?.textContent).toContain("candidate @jane_founder");
+    expect(container.textContent).not.toContain("Needs verification");
+    expect(container.textContent).not.toContain("candidate @jane_founder");
+    expect((container.querySelector("#identity-evidence")?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(1);
 
     // A legacy sanitized row no longer has the model-supplied handle. It fails
     // closed instead of resurfacing an unverifiable name-only candidate.
@@ -768,7 +766,7 @@ describe("private person report evidence boundary", () => {
     act(() => {
       root.render(<Report dossier={legacy} onReset={() => {}} onAudit={() => {}} />);
     });
-    expect((candidatesCard()?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(0);
+    expect(container.textContent).not.toContain("candidate @jane_founder");
   });
 
   it("hides model-only team names that have no stable identity locator", () => {
@@ -793,6 +791,42 @@ describe("private person report evidence boundary", () => {
 
     expect(container.textContent).not.toContain("Dr. Unrelated Executive");
     expect(container.textContent).not.toContain("Investigative team candidates");
+  });
+
+  it("keeps support accounts, integrations, grantors, and speakers out of team candidates", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const candidate = (name: string, handle: string, role: string) => ({
+      name,
+      handle,
+      role,
+      source: "Saved orientation research",
+      provider: "grok",
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
+    });
+    const dossier = {
+      ...base,
+      webTeam: [],
+      webTeamLeads: [
+        candidate("Skyler", "@skyler", "Community Manager"),
+        candidate("Ask Fedi", "@askfedi", "Support account"),
+        candidate("Tapnob", "@tapnobhq", "Mini-app integration"),
+        candidate("HRF", "@hrf", "Grantor"),
+        candidate("Conference Guest", "@guest", "Event speaker"),
+      ],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const people = container.querySelector("#identity-evidence");
+    expect(people?.textContent).toContain("Needs verification");
+    expect(people?.textContent).toContain("Skyler");
+    expect(people?.textContent).not.toContain("Ask Fedi");
+    expect(people?.textContent).not.toContain("Tapnob");
+    expect(people?.textContent).not.toContain("HRF");
+    expect(people?.textContent).not.toContain("Conference Guest");
   });
 
   it("cleans namesake citations and answers the project product from the frozen official profile", () => {

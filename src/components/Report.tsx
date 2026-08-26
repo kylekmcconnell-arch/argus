@@ -1410,6 +1410,18 @@ function sanitizedGroundedTeamMember(member: ReportTeamMember): ReportTeamMember
   };
 }
 
+const TEAM_CANDIDATE_ROLE = /\b(?:founder|co-?founder|chief|ceo|cto|cfo|coo|head of|manager|director|lead|engineer|developer|designer|marketing|operations?|operator|employee|staff|team member|community (?:master|manager|lead)|ambassador|advisor|adviser)\b/i;
+
+function normalizedTeamIdentity(value: string | null | undefined): string {
+  return (value ?? "").trim().replace(/^@/, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function teamIdentityKeys(member: Pick<ReportTeamMember, "name" | "handle" | "linkedin">): string[] {
+  return [member.handle, member.linkedin, member.name]
+    .map(normalizedTeamIdentity)
+    .filter(Boolean);
+}
+
 function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
   // assembleDossier already emits model-enriched grounded members into
   // webTeamLeads (handle kept, source suffixed); re-deriving them from the
@@ -1428,14 +1440,26 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
       provider: "grok",
     }];
   });
+  const groundedKeys = new Set((dossier.webTeam ?? [])
+    .filter(groundedTeamMember)
+    .flatMap(teamIdentityKeys));
   const seen = new Set<string>();
   return [...(dossier.webTeamLeads ?? []), ...inferred].filter((member) => {
     if (!meaningfulTeamMember(member)) return false;
+    // Orientation also discovers support accounts, integrations, grantors,
+    // speakers, customers, and community examples. Those remain available in
+    // the evidence appendix, but they are not team candidates.
+    if (!TEAM_CANDIDATE_ROLE.test(member.role)) return false;
     // A model-only name with no stable identity locator is not an actionable
     // candidate. Showing generic names makes unrelated search snippets look
     // like team evidence and gives the reader no way to verify them.
     if (!member.handle?.trim() && !member.linkedin?.trim()) return false;
-    const key = [member.name, member.handle ?? "", member.linkedin ?? "", member.role, member.source].join("|").toLowerCase();
+    const identityKeys = teamIdentityKeys(member);
+    // One person gets one state. If a source-grounded roster card exists, its
+    // stronger evidence wins and the model-enriched copy cannot reappear below
+    // as an unverified candidate.
+    if (identityKeys.some((key) => groundedKeys.has(key))) return false;
+    const key = identityKeys[0] ?? [member.name, member.role, member.source].join("|").toLowerCase();
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -1634,6 +1658,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   };
   const webTeam = (dossier.webTeam ?? []).filter(groundedTeamMember).map(sanitizedGroundedTeamMember);
   const webTeamLeads = reportTeamLeads(dossier);
+  const leadershipRows = report.governing_role === "PROJECT" ? (dossier.leaderDepartures ?? []) : [];
+  const leadershipForMember = (member: ReportTeamMember) => {
+    const memberKeys = new Set(teamIdentityKeys(member));
+    return leadershipRows.find((row) => {
+      const rowKeys = [row.name, row.linkedin].map(normalizedTeamIdentity).filter(Boolean);
+      return rowKeys.some((key) => memberKeys.has(key));
+    });
+  };
+  const unmatchedLeadershipRows = leadershipRows.filter((row) =>
+    !webTeam.some((member) => leadershipForMember(member) === row));
   // The operator is the verified team member the launch history was traced
   // through; fall back to the subject's own handle so the panel never renders
   // an empty attribution.
@@ -3495,26 +3529,39 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <div>
                   <p className="eyebrow text-signal-lift">People &amp; control</p>
                   <h2 id="report-team-heading" className="story-chapter-title mt-2 text-ink">
-                    {webTeam && webTeam.length > 0
-                      ? "People tied to this project"
+                    {webTeam.length > 0
+                      ? "One roster. Evidence first."
                       : "The people behind this project remain unresolved."}
                   </h2>
                   <p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">
-                    {webTeam && webTeam.length > 0
-                      ? `ARGUS found ${webTeam.length} source-grounded ${webTeam.length === 1 ? "person" : "people"}. Each card shows the public evidence linking them to the project.`
+                    {webTeam.length > 0
+                      ? `ARGUS found ${webTeam.length} source-grounded ${webTeam.length === 1 ? "person" : "people"}. Leadership continuity and unresolved team leads stay attached to this roster instead of repeating elsewhere.`
                       : f.identity_note}
                   </p>
                 </div>
-                {webTeam && webTeam.length > 0 && (
+                {(webTeam.length > 0 || webTeamLeads.length > 0) && (
                   <span className="verdict-pill tint-signal">
-                    {webTeam.length} named {webTeam.length === 1 ? "person" : "people"}
+                    {webTeam.length} verified · {webTeamLeads.length} to verify
                   </span>
                 )}
               </header>
-              {webTeam && webTeam.length > 0 && (
+              {webTeam.length > 0 && (
                 <div className={`grid gap-3 ${webTeam.length > 1 ? "xl:grid-cols-2" : ""}`}>
                   {webTeam.map((person, index) => {
                     const roleProof = safeSourceLink(person.sourceUrl ?? person.source);
+                    const continuity = leadershipForMember(person);
+                    const continuityProfile = safeSourceLink(continuity?.linkedin
+                      ? /^https?:\/\//i.test(continuity.linkedin) ? continuity.linkedin : `https://${continuity.linkedin}`
+                      : undefined);
+                    const continuityLabel = continuity?.state === "current"
+                      ? "current in provider record"
+                      : continuity?.state === "departed"
+                        ? continuity.ended
+                          ? `provider record ends ${frozenDateLabel(continuity.ended)}`
+                          : "provider record marks role ended"
+                        : continuity?.state === "absent"
+                          ? "continuity not established"
+                          : null;
                     return (
                       <article key={`${person.name}:${person.handle ?? ""}:${index}`} className="team-person-card panel">
                         <span className="team-person-main">
@@ -3523,6 +3570,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                           {person.handle && <span className="mono text-[12px] text-ink-faint">{person.handle}</span>}
                           <span className="chip tint-signal shrink-0 normal-case tracking-normal">{formatRoleLabel(person.role)}</span>
                           {roleProof && <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Open role source</a>}
+                          {continuityLabel && (
+                            <span className={`chip ${continuity?.state === "current" ? "tint-pass" : continuity?.state === "departed" ? "tint-caution" : ""}`}>
+                              {continuityLabel}
+                            </span>
+                          )}
+                          {continuityProfile && <a href={continuityProfile.href} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Confirm continuity</a>}
                           <span className="team-person-evidence text-[13px] leading-relaxed">
                             {person.evidence ? `${plainLanguageSummary(person.evidence)} ` : ""}
                             <span className="mono">Source: {sourceProviderLabel(person.provider ?? person.source)}.</span>
@@ -3534,6 +3587,51 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       </article>
                     );
                   })}
+                </div>
+              )}
+              {webTeamLeads.length > 0 && (
+                <div className="mt-6 border-t border-line/70 pt-5">
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <h3 className="text-[16px] font-semibold text-ink">Needs verification</h3>
+                    <span className="chip tint-caution">{webTeamLeads.length} team {webTeamLeads.length === 1 ? "lead" : "leads"}</span>
+                    <span className="text-[11.5px] text-ink-faint">not identity proof · not scored</span>
+                  </div>
+                  <Card className="divide-y divide-line/60 border-caution/25">
+                    {webTeamLeads.map((member, index) => (
+                      <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-[12.5px]">
+                        <span className="font-medium text-ink-dim">{member.name}</span>
+                        <span className="chip">{member.role}</span>
+                        {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
+                        <span className="text-[11px] text-ink-faint">{sourceProviderLabel(member.provider ?? member.source)}</span>
+                        {member.evidence && <span className="min-w-full text-[11px] leading-relaxed text-ink-faint">{member.evidence}</span>}
+                        {member.handle && onAudit && <button type="button" onClick={() => onAudit(member.handle!)} className="btn-chip tint-caution ml-auto min-h-11">Verify →</button>}
+                      </div>
+                    ))}
+                  </Card>
+                </div>
+              )}
+              {unmatchedLeadershipRows.length > 0 && (
+                <div className="mt-6 border-t border-line/70 pt-5">
+                  <h3 className="text-[16px] font-semibold text-ink">Leadership records to reconcile</h3>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">Provider records that do not map to a verified roster card. They are context, not additional team members.</p>
+                  <ol className="mt-3 divide-y divide-line/60 rounded-xl border border-line/70">
+                    {unmatchedLeadershipRows.map((row, index) => {
+                      const profile = safeSourceLink(row.linkedin ? /^https?:\/\//i.test(row.linkedin) ? row.linkedin : `https://${row.linkedin}` : undefined);
+                      const stateLabel = row.state === "current"
+                        ? "provider record lists project"
+                        : row.state === "departed"
+                          ? row.ended ? `provider record ends ${frozenDateLabel(row.ended)}` : "provider record marks role ended"
+                          : "provider record did not answer for this project";
+                      return (
+                        <li key={`${row.name}:${row.role}:${index}`} className="flex flex-wrap items-center gap-1.5 px-4 py-3 text-[12px]">
+                          <span className="font-medium text-ink">{row.name}</span>
+                          <span className="text-ink-faint">{row.role}</span>
+                          <span className={`chip ${row.state === "current" ? "tint-pass" : row.state === "departed" ? "tint-caution" : ""}`}>{stateLabel}</span>
+                          {profile && <a href={profile.href} target="_blank" rel="noreferrer" className="link-ext ml-auto text-[11px]">Confirm on LinkedIn</a>}
+                        </li>
+                      );
+                    })}
+                  </ol>
                 </div>
               )}
             </section>
@@ -3979,25 +4077,40 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             NAME and wrongly presented it as this handle's identity. A KOL is a
             pseudonymous individual, not a project team — the name-search team is a
             collision, and the contradictions section already explains it. */}
-        {report.governing_role !== "KOL" && webTeam && webTeam.length > 0 ? (
+        {report.governing_role !== "KOL" && (webTeam.length > 0 || webTeamLeads.length > 0 || leadershipRows.length > 0) ? (
           <section className="legacy-reading-duplicate team-diligence-card panel mt-3" aria-labelledby="report-team-heading">
             <header className="team-diligence-header">
               <div>
-                <div className="eyebrow">Team</div>
+                <div className="eyebrow">People & control</div>
                 <h3 id="report-team-heading" className="mt-1 text-[clamp(22px,2.2vw,30px)] font-medium leading-tight tracking-[-0.025em] text-ink">
-                  People tied to this project
+                  One roster. Evidence first.
                 </h3>
                 <p className="mt-2 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim">
-                  ARGUS found {webTeam.length} source-grounded {webTeam.length === 1 ? "person" : "people"}. Each card shows the public evidence linking them to the project.
+                  {webTeam.length > 0
+                    ? `ARGUS found ${webTeam.length} source-grounded ${webTeam.length === 1 ? "person" : "people"}. Leadership continuity and unresolved candidates are attached here instead of repeated in separate team sections.`
+                    : "No source-grounded team member is published yet. The identities below still require verification."}
                 </p>
               </div>
               <span className="verdict-pill tint-signal">
-                {webTeam.length} named {webTeam.length === 1 ? "person" : "people"}
+                {webTeam.length} verified · {webTeamLeads.length} to verify
               </span>
             </header>
-            <div className={`mt-5 grid gap-3 ${webTeam.length > 1 ? "xl:grid-cols-2" : ""}`}>
+            {webTeam.length > 0 && <div className={`mt-5 grid gap-3 ${webTeam.length > 1 ? "xl:grid-cols-2" : ""}`}>
               {webTeam.map((p, i) => {
                 const roleProof = safeSourceLink(p.sourceUrl ?? p.source);
+                const continuity = leadershipForMember(p);
+                const continuityProfile = safeSourceLink(continuity?.linkedin
+                  ? /^https?:\/\//i.test(continuity.linkedin) ? continuity.linkedin : `https://${continuity.linkedin}`
+                  : undefined);
+                const continuityLabel = continuity?.state === "current"
+                  ? "current in provider record"
+                  : continuity?.state === "departed"
+                    ? continuity.ended
+                      ? `provider record ends ${frozenDateLabel(continuity.ended)}`
+                      : "provider record marks role ended"
+                    : continuity?.state === "absent"
+                      ? "continuity not established"
+                      : null;
                 return (
                 <article key={`${p.name}:${p.handle ?? ""}:${i}`} className="team-person-card">
                     <span className="team-person-main">
@@ -4010,6 +4123,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       )}
                       {roleProof && (
                         <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">Open role source</a>
+                      )}
+                      {continuityLabel && (
+                        <span className={`chip ${continuity?.state === "current" ? "tint-pass" : continuity?.state === "departed" ? "tint-caution" : ""}`}>
+                          {continuityLabel}
+                        </span>
+                      )}
+                      {continuityProfile && (
+                        <a href={continuityProfile.href} target="_blank" rel="noreferrer" className="link-ext text-[11px]">Confirm continuity</a>
                       )}
                       {p.developerProfiles?.map((profile) => {
                         const profileLink = safeSourceLink(profile.url);
@@ -4055,7 +4176,67 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 </article>
                 );
               })}
-            </div>
+            </div>}
+            {webTeamLeads.length > 0 && (
+              <div className="mt-5 border-t border-line/70 pt-4">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <h4 className="text-[14px] font-medium text-ink">Needs verification</h4>
+                  <span className="chip tint-caution">{webTeamLeads.length} team {webTeamLeads.length === 1 ? "lead" : "leads"}</span>
+                  <span className="text-[11px] text-ink-faint">not identity proof · not scored</span>
+                </div>
+                <Card className="divide-y divide-line/60 border-caution/25">
+                  {webTeamLeads.map((member, index) => (
+                    <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-[12.5px]">
+                      <span className="font-medium text-ink-dim">{member.name}</span>
+                      <span className="chip">{member.role}</span>
+                      {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
+                      {member.linkedin && <span className="text-[11px] text-ink-faint">LinkedIn candidate recorded</span>}
+                      <span className="text-[11px] text-ink-faint">{sourceProviderLabel(member.provider ?? member.source)}</span>
+                      {member.evidence && <span className="min-w-full text-[11px] leading-relaxed text-ink-faint">{member.evidence}</span>}
+                      {member.handle && onAudit && (
+                        <button
+                          type="button"
+                          onClick={() => onAudit(member.handle!)}
+                          className="btn-chip tint-caution ml-auto min-h-11"
+                        >
+                          verify →
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </Card>
+              </div>
+            )}
+            {unmatchedLeadershipRows.length > 0 && (
+              <div className="mt-5 border-t border-line/70 pt-4">
+                <h4 className="text-[14px] font-medium text-ink">Leadership records to reconcile</h4>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+                  Provider records that do not map to a source-grounded roster card. They are context, not additional team members.
+                </p>
+                <ol className="mt-2 divide-y divide-line/60 rounded-xl border border-line/70">
+                  {unmatchedLeadershipRows.map((row, index) => {
+                    const profile = safeSourceLink(row.linkedin
+                      ? /^https?:\/\//i.test(row.linkedin) ? row.linkedin : `https://${row.linkedin}`
+                      : undefined);
+                    const stateLabel = row.state === "current"
+                      ? "provider record lists project"
+                      : row.state === "departed"
+                        ? row.ended
+                          ? `provider record ends ${frozenDateLabel(row.ended)}`
+                          : "provider record marks role ended"
+                        : "provider record did not answer for this project";
+                    return (
+                      <li key={`${row.name}:${row.role}:${index}`} className="flex flex-wrap items-center gap-1.5 px-4 py-3 text-[12px]">
+                        <span className="font-medium text-ink">{row.name}</span>
+                        <span className="text-ink-faint">{row.role}</span>
+                        <span className={`chip ${row.state === "current" ? "tint-pass" : row.state === "departed" ? "tint-caution" : ""}`}>{stateLabel}</span>
+                        {profile && <a href={profile.href} target="_blank" rel="noreferrer" className="link-ext ml-auto text-[11px]">Confirm on LinkedIn</a>}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            )}
             {f.prior_handles && f.prior_handles.length > 0 && (
               <p className="mt-4 text-[12.5px] leading-relaxed text-caution">
                 ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
@@ -4084,83 +4265,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
 
-        {(f.leaderDepartures?.length ?? 0) > 0 && report.governing_role === "PROJECT" && (
-          <section className="panel mt-3 overflow-hidden" aria-label="Frozen leadership continuity ledger">
-            <div className="border-b border-line/60 px-4 py-3">
-              <p className="eyebrow">Frozen leadership continuity</p>
-              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
-                Licensed employment-record responses for the named leaders checked in this scan. A current row means the saved provider record listed the project. It is not a claim about the viewer's current date.
-                {capturedLabel ? ` Report saved ${capturedLabel}.` : " The report save time was not available in this view."}
-              </p>
-            </div>
-            <ol className="divide-y divide-line/60">
-              {f.leaderDepartures!.map((row, index) => {
-                const profile = safeSourceLink(row.linkedin
-                  ? /^https?:\/\//i.test(row.linkedin) ? row.linkedin : `https://${row.linkedin}`
-                  : undefined);
-                const stateLabel = row.state === "current"
-                  ? "provider record lists project"
-                  : row.state === "departed"
-                    ? row.ended
-                      ? `provider record ends ${frozenDateLabel(row.ended)}`
-                      : "provider record marks role ended; date not recorded"
-                    : "provider record did not answer for this project";
-                const stateTone = row.state === "current"
-                  ? "tint-pass"
-                  : row.state === "departed"
-                    ? "tint-caution"
-                    : "";
-                return (
-                  <li key={`${row.name}:${row.role}:${index}`} className="flex flex-wrap items-center gap-1.5 px-4 py-3 text-[12px]">
-                    <span className="font-medium text-ink">{row.name}</span>
-                    <span className="text-ink-faint">{row.role}</span>
-                    <span className={`chip ${stateTone}`}>{stateLabel}</span>
-                    {profile && (
-                      <a href={profile.href} target="_blank" rel="noreferrer" className="link-ext ml-auto text-[11px]">
-                        confirm on LinkedIn
-                      </a>
-                    )}
-                    {row.state === "absent" && (
-                      <span className="min-w-full text-[10.5px] leading-relaxed text-ink-faint">
-                        No matching row is an unanswered provider read, not evidence that this person was never involved.
-                      </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ol>
-          </section>
-        )}
-
-        {webTeamLeads.length > 0 && (
-          <div className="mt-3">
-            <div className="mb-1.5 flex flex-wrap items-center gap-2">
-              <span className="chip tint-caution">Investigative team candidates</span>
-              <span className="text-[11px] text-ink-faint">unverified leads · not identity proof · not scored or sent to report chat</span>
-            </div>
-            <Card className="divide-y divide-line/60 border-caution/25">
-              {webTeamLeads.map((member, index) => (
-                <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-[12.5px]">
-                  <span className="font-medium text-ink-dim">{member.name}</span>
-                  <span className="chip">{member.role}</span>
-                  {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
-                  {member.linkedin && <span className="text-[11px] text-ink-faint">LinkedIn candidate recorded</span>}
-                  <span className="text-[11px] text-ink-faint">{sourceProviderLabel(member.provider ?? member.source)}</span>
-                  {member.evidence && <span className="min-w-full text-[11px] leading-relaxed text-ink-faint">{member.evidence}</span>}
-                  {member.handle && onAudit && (
-                    <button
-                      type="button"
-                      onClick={() => onAudit(member.handle!)}
-                      className="btn-chip tint-caution ml-auto min-h-11"
-                    >
-                      verify →
-                    </button>
-                  )}
-                </div>
-              ))}
-            </Card>
-          </div>
-        )}
         </div>
 
         {/* contradictions — claims that do not match the evidence */}
