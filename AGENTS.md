@@ -33,3 +33,22 @@ workflow. Never bypass protected branches or required checks.
 
 Repository-specific instructions below remain mandatory within this routing and
 authority contract.
+
+## Design canon (product-owner decisions; do not override)
+
+`DESIGN.md` is the binding visual contract. Three decisions are settled by the
+product owner (Enigma) and must not be reversed by any agent without a new,
+explicit instruction in the task at hand:
+
+1. The Auric File structure is the canonical report reading layer on every
+   scan surface: warm paper, serif judgment headlines, the composition strip,
+   dimension chapters, the case grid, and receipt popovers.
+2. The composition section (`#composition`: the score strips and the dimension
+   chapters) stays ALWAYS visible in the reading flow. Never collapse it into
+   a `<details>`/appendix, remove its expanding rows, or strip its
+   "Read the evidence" and "Challenge this" links.
+3. The dossier-beats layout (`DossierReport`) stays off the report surfaces;
+   it is preserved only as the standalone sharing format.
+
+A redesign that conflicts with these stops before shipping and opens an issue
+labeled `needs-routing` instead.
