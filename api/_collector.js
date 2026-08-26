@@ -28568,6 +28568,13 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
         provider: "twitterapi/dexscreener",
         sourceCount: 2
       });
+      ctx.recordCheck?.({
+        id: "project-product-substance",
+        status: "confirmed",
+        note: `$${snapshot2.symbol} is a live token-native product: the official X bio declares the exact ${snapshot2.chain} contract and DexScreener resolves an exact-address market${snapshot2.liquidityUsd !== void 0 ? ` with $${Math.round(snapshot2.liquidityUsd).toLocaleString()} liquidity` : ""}`,
+        provider: "twitterapi/dexscreener",
+        sourceCount: 2
+      });
       if ((snapshot2.liquidityUsd ?? 0) >= MIN_POOL_LIQUIDITY_USD) {
         ctx.recordCheck?.({
           id: "project-traction-liveness",

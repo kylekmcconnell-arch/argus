@@ -151,6 +151,12 @@ describe("verified project-token collection", () => {
       provider: "twitterapi/dexscreener",
     }));
     expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-product-substance",
+      status: "confirmed",
+      provider: "twitterapi/dexscreener",
+      note: expect.stringContaining("live token-native product"),
+    }));
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
       id: "project-traction-liveness",
       status: "confirmed",
       provider: "dexscreener/geckoterminal",

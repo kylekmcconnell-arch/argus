@@ -1248,6 +1248,19 @@ export async function collectProjectTokenIdentity(
         provider: "twitterapi/dexscreener",
         sourceCount: 2,
       });
+      // For token-native projects the launched product is the exact contract,
+      // not necessarily a conventional website. Once the first-party account
+      // binds that contract and an exact-address DEX market proves it is live,
+      // the product-substance question is answered. Keep traction separate so
+      // a thin pool can still finish this check without earning liquidity or
+      // adoption credit it does not deserve.
+      ctx.recordCheck?.({
+        id: "project-product-substance",
+        status: "confirmed",
+        note: `$${snapshot.symbol} is a live token-native product: the official X bio declares the exact ${snapshot.chain} contract and DexScreener resolves an exact-address market${snapshot.liquidityUsd !== undefined ? ` with $${Math.round(snapshot.liquidityUsd).toLocaleString()} liquidity` : ""}`,
+        provider: "twitterapi/dexscreener",
+        sourceCount: 2,
+      });
       if ((snapshot.liquidityUsd ?? 0) >= MIN_POOL_LIQUIDITY_USD) {
         ctx.recordCheck?.({
           id: "project-traction-liveness",
