@@ -150,29 +150,20 @@ afterEach(async () => {
 });
 
 describe("investigation exact sharing", () => {
-  it("defaults every investigation to Style 2 and preserves the canonical report when styles change", () => {
+  it("renders only the canonical Style 2 investigation without a style selector", () => {
     render(investigation());
 
-    const desktopStyleControl = container.querySelector<HTMLElement>('header [aria-label="Report style"]');
-    const buttons = [...(desktopStyleControl?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
-    expect(buttons.map((button) => button.textContent?.trim())).toEqual(["Style 1", "Style 2"]);
-    expect(buttons[1]?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
     expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
     expect(container.textContent).toContain("The state of the house");
-
-    act(() => buttons[0]?.click());
-
-    expect(window.location.search).toContain("reportStyle=1");
-    expect(container.querySelector(".report-frame.report-style-1")).not.toBeNull();
-    expect(container.textContent).toContain("What this report means");
   });
 
-  it("opens an explicit Style 1 deep link and exposes both styles on non-EARN reports", () => {
+  it("ignores a legacy Style 1 deep link and keeps the canonical investigation", () => {
     window.history.replaceState(null, "", "/?s=%24ARG&kind=token&reportStyle=1");
     render(investigation());
-    expect(container.querySelector('header [aria-label="Report style"]')).not.toBeNull();
-    expect(container.querySelector(".report-frame.report-style-1")).not.toBeNull();
-    expect(container.textContent).toContain("What this report means");
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
+    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.textContent).toContain("The state of the house");
   });
 
   it("keeps the header case label stable across saved versions of the same case", () => {

@@ -84,7 +84,6 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { SocialActivityPanel } from "./SocialActivityPanel";
-import { ReportStyleControl, useReportStyle } from "./ReportStyleControl";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import { visibleInvestigativeLeads } from "../lib/subjectLeads";
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
@@ -744,7 +743,7 @@ export function InvestigationReport({
   const arkhamEnabled = arkhamProviderEnabled();
   const [spent, setSpent] = useState(0);
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
-  const [reportStyle, chooseReportStyle] = useReportStyle();
+  const reportStyle = 2 as const;
   const [watched, setWatched] = useState(() => isWatched(inv.token.address));
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const versionContext = inv.versionContext;
@@ -1429,9 +1428,6 @@ export function InvestigationReport({
             <span className="sm:hidden">{versionContext ? `v${versionContext.version}` : "live"}</span>
             <span className="hidden sm:inline">{versionContext ? `saved report v${versionContext.version}` : "new scan"}</span>
           </span>
-          <div className="hidden sm:block">
-            <ReportStyleControl style={reportStyle} onChange={chooseReportStyle} />
-          </div>
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {onOpenBrief && (
               <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact investigation case" className="btn-primary btn-brand flex min-h-11 shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium">
@@ -1471,9 +1467,6 @@ export function InvestigationReport({
                   <span className="sr-only">More report actions</span>
                 </summary>
                 <div className="absolute right-0 top-[calc(100%+0.4rem)] z-20 min-w-52 overflow-hidden rounded-lg border border-line bg-panel py-1 soft-shadow">
-                  <div className="mx-1 mb-1 border-b border-line p-1 pb-2">
-                    <ReportStyleControl compact style={reportStyle} onChange={chooseReportStyle} />
-                  </div>
                   <a href="#investigation-challenge" className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
                     <ShieldWarning size={16} weight="duotone" aria-hidden="true" />
                     Challenge report

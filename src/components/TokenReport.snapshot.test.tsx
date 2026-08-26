@@ -179,29 +179,20 @@ afterEach(() => {
 });
 
 describe("token report supplemental evidence boundary", () => {
-  it("defaults every token report to Style 2 and keeps the canonical data when styles change", () => {
+  it("renders only the canonical Style 2 report without a style selector", () => {
     render(dossier());
 
-    const styleControl = container.querySelector<HTMLElement>('header [aria-label="Report style"]');
-    const buttons = [...(styleControl?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
-    expect(buttons.map((button) => button.textContent?.trim())).toEqual(["Style 1", "Style 2"]);
-    expect(buttons[1]?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
     expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
     expect(container.textContent).toContain("The state of the house");
-
-    act(() => buttons[0]?.click());
-
-    expect(window.location.search).toContain("reportStyle=1");
-    expect(container.querySelector(".report-frame.report-style-1")).not.toBeNull();
-    expect(container.textContent).toContain("What this report means");
   });
 
-  it("opens an explicit Style 1 deep link and exposes both styles on non-EARN reports", () => {
+  it("ignores a legacy Style 1 deep link and keeps the canonical report", () => {
     window.history.replaceState(null, "", "/?s=%24ARG&kind=token&reportStyle=1");
     render(dossier());
-    expect(container.querySelector('header [aria-label="Report style"]')).not.toBeNull();
-    expect(container.querySelector(".report-frame.report-style-1")).not.toBeNull();
-    expect(container.textContent).toContain("What this report means");
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
+    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.textContent).toContain("The state of the house");
   });
 
   it("keeps a complete six-check token report complete when project graph and creator follow-ups are open", () => {

@@ -63,7 +63,6 @@ import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, i
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
-import { ReportStyleControl, useReportStyle } from "./ReportStyleControl";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -150,7 +149,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const caseLabel = publicCaseLabel(versionContext?.caseId);
   const embeddedFacet = Boolean(d.viewVersionContext || d.viewPersistence);
   const livePersistence = d.viewPersistence ?? d.persistence;
-  const [reportStyle, chooseReportStyle] = useReportStyle();
+  const reportStyle = 2 as const;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
@@ -379,7 +378,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           <span className={`chip ${versionContext ? "" : "tint-signal"}`}>
             {versionContext ? `saved report v${versionContext.version}` : "new scan"}
           </span>
-          <ReportStyleControl style={reportStyle} onChange={chooseReportStyle} />
           <div className="scrollbar-none order-3 flex w-full items-center gap-2 overflow-x-auto pb-1 sm:order-none sm:ml-auto sm:w-auto sm:justify-end sm:overflow-visible sm:pb-0">
             {onOpenBrief && (
               <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact token case" className="btn-primary btn-brand flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">

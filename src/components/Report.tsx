@@ -112,7 +112,6 @@ import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { SocialActivityPanel } from "./SocialActivityPanel";
-import { ReportStyleControl, useReportStyle } from "./ReportStyleControl";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import {
   SUBJECT_LEAD_RELATIONSHIP,
@@ -1609,7 +1608,7 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
 
 export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
-  const [reportStyle, chooseReportStyle] = useReportStyle();
+  const reportStyle = 2 as const;
   const { role } = useArgusAuth();
   const f = dossier;
   const hasTerminalXState = f.x_account_status === "suspended" || f.x_account_status === "unavailable";
@@ -2950,9 +2949,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               {versionContext ? `VERSION ${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
             </span>
           )}
-          <div className="hidden sm:block">
-            <ReportStyleControl style={reportStyle} onChange={chooseReportStyle} />
-          </div>
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {onOpenBrief && (
               <button
@@ -3026,9 +3022,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <span className="sr-only">More report actions</span>
               </summary>
               <div className="panel absolute right-0 top-full z-30 mt-1.5 w-56 p-1.5 shadow-xl">
-                <div className="mb-1 border-b border-line pb-2">
-                  <ReportStyleControl compact style={reportStyle} onChange={chooseReportStyle} />
-                </div>
                 {onRescan && (
                   <button type="button" onClick={onRescan} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
                     <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />

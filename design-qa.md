@@ -1,57 +1,54 @@
-# Style 2 dual-score restoration — design QA
+# Canonical report and scan-theme repair - design QA
 
 ## Evidence
 
-- Source visual truth: `/Users/kyle/Documents/ARGUS-earn-report-style2/.codex-audit/style2-two-score-reference-hero.png`
-- Rendered implementation: `/Users/kyle/Documents/ARGUS-earn-report-style2/.codex-audit/style2-dual-score-restored.png`
-- Responsive implementation, initial: `/Users/kyle/Documents/ARGUS-earn-report-style2/.codex-audit/style2-dual-score-mobile.png`
-- Responsive implementation, final: `/Users/kyle/Documents/ARGUS-earn-report-style2/.codex-audit/style2-dual-score-mobile-final.png`
-- Source pixels: 1310 × 1049 at browser density 1.
-- Implementation pixels: 1310 × 1167 full-page capture at browser density 1; browser viewport width 1310 CSS px.
-- Mobile pixels: 390 × 2646 full-page capture at browser density 1; viewport 390 × 844 CSS px.
-- State: light theme, completed report, Style 2, separate project-diligence and token-safety scores, six composition dimensions per score.
-- Normalization: source and desktop implementation were captured in the same browser at the same 1310 CSS-pixel width and density. The implementation is taller because the retained canonical State of the House brief includes the evidence ledger directly below the opening.
+- User reference: `/Users/kyle/Downloads/Screenshot 2026-08-26 at 11.22.39 AM.png`
+- Desktop implementation: `/Users/kyle/Documents/ARGUS-earn-report-style2/.codex-audit/report-desktop.jpg`
+- Light scan implementation: `/Users/kyle/Documents/ARGUS-earn-report-style2/.codex-audit/light-scan-screen.jpg`
+- Responsive implementation: `/Users/kyle/Documents/ARGUS-earn-report-style2/.codex-audit/report-mobile.jpg`
+- Same-input comparison: `/Users/kyle/Documents/ARGUS-earn-report-style2/.codex-audit/report-comparison.jpg`
+- Reference pixels: 1315 x 842.
+- Desktop implementation pixels: 1310 x 1105 at browser density 1; its top 842 pixels were used for the direct comparison.
+- Mobile report pixels: 319 x 3118 at browser density 1.
+- Light scan pixels: 319 x 724 at browser density 1.
+- Tested state: light theme, active investigation progress, canonical Style 2 report opening, and separate token-safety and project-diligence scores.
 
 ## Full-view comparison
 
-The original Style 2 reference and the restored implementation were opened together in one comparison input. The defining relationship is restored: narrative/verdict on the left and two independently labeled score cards on the right. Both cards retain the compact numeric hierarchy, semantic caution/pass colors, segmented evidence composition, current-segment label, per-dimension points, and explanation that the scores answer different questions.
+The reference and implementation were placed together in one 2625 x 842 comparison input. The reference exposes a P1 layout collision: the unbroken “The state of the house” accent continues beneath the score cards. The implementation keeps the same narrative-and-two-score composition while constraining the narrative grid item and allowing the accent to wrap inside its own column. No title text crosses the card boundary.
 
-The opening narrative differs intentionally from the original “Promising, with material gaps” headline. The current Style 2 keeps the approved “State of the house” narrative and the canonical concerns/credible/checks ledger so the design does not reintroduce the hardcoded EARN-only report body.
+The scan workspace was also checked in the product’s active light theme. Its computed workspace background and document background both resolve to `rgb(247, 247, 245)`, so the investigation surface no longer substitutes a black terminal palette inside the light application shell.
 
-## Focused-region comparison
+## Focused comparison
 
-The score-card region was compared at readable size because the full report makes its labels too small to judge. Fonts, spacing, color, animation state, and copy were inspected directly:
-
-- Fonts and typography: display hierarchy remains large and readable; score labels and evidence labels use the report’s mono language; the 54 and 79 numerals retain strong optical weight.
-- Spacing and layout rhythm: the two cards share a balanced grid, matching padding and aligned tracks; the explanatory copy sits below both cards instead of being repeated.
-- Colors and visual tokens: project caution uses amber, token pass uses green, and every segment uses the same score-composition semantic token as the full ledger.
-- Image quality and assets: this region contains no logos, photography, illustration, or non-standard icon assets; no placeholder or approximate asset was introduced.
-- Copy and content: “Project diligence score” and “Token safety score” are explicit, and the explainer says why the values must not be blended.
+- Typography: the State of the House display treatment remains prominent; the title wraps without clipping, shrinking, or overlapping the score cards.
+- Spacing and layout: the narrative and dual-score regions preserve their desktop grid and collapse into a readable single-column mobile flow.
+- Colors and tokens: the scan workspace now consumes the active global theme tokens; light mode is consistently light while the existing dark theme remains available through the application theme system.
+- Images and assets: no image, logo, or icon asset changed in this repair, and no placeholder asset was introduced.
+- Copy and content: both “Token safety score” and “Project diligence score” remain explicit. No Style 1 or Style 2 selector is exposed.
 
 ## Findings and comparison history
 
 ### Iteration 1
 
-- [P2] Mobile score block began too close to the vertical story rule.
-  - Evidence: `.codex-audit/style2-dual-score-mobile.png` showed the score kicker and explanatory copy starting against the left rule rather than aligning with the narrative column.
-  - Impact: the score section looked clipped and visually detached from the approved document rhythm on a narrow screen.
-  - Fix: added the same responsive inline start padding used by the narrative column to `.report-style-2 .decision-dual-scores`.
+- [P1] The report headline bled into the dual-score cards because the accent was forced onto one unbroken line inside a constrained two-column grid.
+- [P1] The investigation workspace overrode every application color token with a hardcoded dark palette, even when the surrounding shell was in light mode.
+- [P2] Style 1 and Style 2 controls remained visible even though Style 2 had become the canonical report.
 
 ### Iteration 2
 
-- Post-fix evidence: `.codex-audit/style2-dual-score-mobile-final.png`.
-- The kicker, both score cards, and the explainer now align with the narrative measure; there is no horizontal overflow, clipped copy, or collision with the story rule.
+- Added shrink constraints to the narrative grid item and allowed the accent to wrap at the column boundary.
+- Removed the workspace-level dark token overrides so the loading screen inherits the active product theme.
+- Removed the report-style control and its URL/local-storage resolver from all public report routes. Legacy `reportStyle=1` links now render the canonical report.
+- Post-fix desktop, mobile, and scan captures show no overlap, clipping, horizontal overflow, or cross-theme dark panel.
 - No actionable P0, P1, or P2 visual mismatch remains.
 
-## Browser verification
+## Browser and automated verification
 
-- Primary state tested: Style 2 completed-report opening at desktop and 390 px mobile.
-- Interactions tested: composition entrance animation, current-dimension label updates, responsive two-column-to-one-column transition.
-- Browser console: a fresh local preview tab reported no application errors. Extension-only warnings from the pre-existing browser environment were excluded.
-- Automated coverage: dual-score Style 2 rendering, Style 1 single-score preservation, report/investigation regression suites, TypeScript build, and production build.
-
-## Follow-up polish
-
-- [P3] The desktop implementation preserves more vertical breathing room than the dense original memo. This is acceptable because it follows the current approved State of the House reading style and improves legibility.
+- Browser DOM check: zero report-style selectors, the State of the House opening present, and both score cards present.
+- Browser runtime check: no Vite error overlay or visible application runtime error in either local preview.
+- Theme check: the light scan workspace and root use the same computed background color.
+- Responsive check: both score cards stack cleanly at 319 CSS pixels.
+- Automated checks: production build passes; targeted report, sharing, decision-canvas, and progress-canvas tests pass; full suite passes after removing the deleted selector component from the tracked-file copy-policy scan.
 
 final result: passed

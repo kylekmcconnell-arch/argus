@@ -544,16 +544,19 @@
 }
 .report-style-2 .decision-brief-heading > :first-child {
   grid-column: 1;
+  min-width: 0;
   max-width: 880px;
   padding-inline-start: clamp(18px, 2.2vw, 34px);
 }
 .report-style-2 .decision-state-title {
-  max-width: none;
+  min-width: 0;
+  max-width: 100%;
   margin-top: 16px;
   font-size: clamp(2.5rem, 3.6vw, 5.2rem);
   font-weight: 400;
   line-height: 0.98;
   letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
   text-wrap: balance;
 }
 .report-style-2 .decision-state-title > span {
@@ -561,7 +564,8 @@
 }
 .report-style-2 .decision-state-accent {
   color: color-mix(in oklab, var(--color-signal) 62%, var(--color-ink));
-  white-space: nowrap;
+  max-width: 100%;
+  white-space: normal;
 }
 .report-style-2 .decision-subject-summary {
   max-width: 66ch;
@@ -2236,27 +2240,14 @@ h1.display-sm {
 }
 .public-access-eye { display: flex; flex-direction: column; align-items: center; justify-content: center; }
 
-/* Live evidence command deck. The interior is a deliberate dark terminal:
-   every stage and number is derived from observed trace events, while the ETA
-   is a plainly labelled estimate based on the documented route envelope. */
+/* Live evidence command deck. It follows the active application theme so a
+   light workspace never drops into an unrelated black page mid-investigation.
+   Dark mode keeps the terminal character through the same shared tokens. */
 .research-workspace {
-  --color-panel: #07100d;
-  --color-panel-2: #0b1712;
-  --color-ink: #e7f8ef;
-  --color-ink-dim: #b4cfc1;
-  --color-ink-faint: #789989;
-  --color-line: rgb(98 153 125 / 0.2);
-  --color-line-2: rgb(105 181 141 / 0.32);
-  --color-control-line: rgb(105 181 141 / 0.38);
-  --color-brand: #52f5a5;
-  --color-brand-dim: #2acb82;
-  --color-signal: #52f5a5;
-  --color-signal-lift: #85f7bd;
-  --color-pass: #52f5a5;
   position: relative;
   min-height: 100%;
   padding: clamp(1.25rem, 3vw, 3.5rem);
-  background: #030806;
+  background: var(--color-void);
   color: var(--color-ink);
 }
 .research-workspace-inner { width: 100%; max-width: 1440px; margin-inline: auto; }
@@ -2267,7 +2258,7 @@ h1.display-sm {
   border: 1px solid var(--color-line-2);
   border-radius: var(--radius-lg);
   background: var(--color-panel);
-  box-shadow: 0 30px 90px -46px rgb(0 0 0 / 0.9), inset 0 1px 0 rgb(123 255 187 / 0.04);
+  box-shadow: var(--shadow);
 }
 .research-command-main { display: flex; min-height: 500px; flex-direction: column; padding: clamp(1.6rem, 3vw, 3rem); }
 .research-live-label { display: flex; align-items: center; gap: .55rem; font-family: var(--font-mono); font-size: 10px; letter-spacing: .13em; color: var(--color-brand); }
