@@ -76,7 +76,6 @@ import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { VerdictHero } from "./VerdictHero";
 import { ReportActionsRow } from "./ReportActionsRow";
-import { initialReportStyle, persistReportStyle, type ReportStyle } from "../lib/reportStyle";
 import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
 import {
   BasicFactsPanel,
@@ -752,13 +751,6 @@ export function InvestigationReport({
     ?? undefined;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
   const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
-  // The two report styles (shareable via ?reportStyle=1|2): Style 1 is the
-  // Auric File canon, the default; Style 2 is the dossier story experience.
-  const [readingStyle, setReadingStyle] = useState<ReportStyle>(initialReportStyle);
-  const chooseReadingStyle = (style: ReportStyle) => {
-    setReadingStyle(style);
-    persistReportStyle(style);
-  };
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
   );
@@ -1488,16 +1480,6 @@ export function InvestigationReport({
       )}
 
       <div className="report-frame">
-        {/* the document's own actions, first thing on the page: switch the
-            reading style, share the read-only file, save the PDF */}
-        <ReportActionsRow
-          canShare={canShare}
-          shareState={shareState}
-          onShare={() => void share()}
-          onExportPdf={() => printReportPdf(inv.token.name || inv.token.symbol)}
-          readingStyle={readingStyle}
-          onReadingStyle={chooseReadingStyle}
-        />
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -1565,6 +1547,14 @@ export function InvestigationReport({
             contractAddress={token.address}
             chain={token.chain}
             links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
+          />
+
+          {/* the document's own actions: share the read-only file, save the PDF */}
+          <ReportActionsRow
+            canShare={canShare}
+            shareState={shareState}
+            onShare={() => void share()}
+            onExportPdf={() => printReportPdf(inv.token.name || inv.token.symbol)}
           />
 
           {/* Legacy editorial/score heroes are quarantined. The shared decision
@@ -1769,60 +1759,7 @@ export function InvestigationReport({
               The account's dimensions lead with the team; the token's follow.
               Two recorded scores stay two honest strips, never blended. The
               full ledger is progressively disclosed after the decision brief. */}
-          {/* the composition: always visible, never an appendix (Enigma's
-              canon: this is the file's table of contents, with the working
-              dropdowns and the jump links into each chapter). */}
-          {readingStyle === "style1" && token.axes?.length > 0 && (
-            <section id="composition" className="af-doc mt-10 scroll-mt-28">
-              <p className="af-sec-label">The composition</p>
-              <h2 className="af-h2 mt-3">{accountAxes.length > 0 ? "Two separate scores. Every dimension preserved." : compositionHeadline(token.axes.length)}</h2>
-              <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
-              <div>
-            {accountAxes.length > 0 && (
-              <ScoreComposition
-                heading={`The project account · ${projectAccount?.handle ?? "its own 100"}`}
-                rows={orderByPlainAxis(accountAxes.map(([key, a]) => ({
-                  axis: key,
-                  label: plainAxisLabel(key, axisLabel(key)),
-                  score: a.score,
-                  weight: a.weight,
-                  rationale: a.rationale,
-                  evidenceHref: "#investigation-people" as const,
-                })))}
-                totalScore={accountGoverning?.score_total ?? null}
-                challengeAnchor={shareView ? null : "#investigation-challenge"}
-              />
-            )}
-            <ScoreComposition
-              heading={accountAxes.length > 0 ? "The token · its own 100" : "How the score is built"}
-              rows={tokenCompositionRows}
-              totalScore={token.score}
-              capNote={token.capApplied ? `limited to ${token.score}` : null}
-              challengeAnchor={shareView ? null : "#investigation-challenge"}
-            />
-            {/* the reading spine: Auric File chapters only (Enigma: do not use
-              the dossier-beats layout here; it stays available as the
-              standalone sharing format). */}
-                <div className="af-doc">
-                {projectAccount?.projectStrengthBands && (
-                  <DimensionChapters
-                    chapters={personDimensionChapters(projectAccount.projectStrengthBands)}
-                    checksHref="#investigation-methodology"
-                  />
-                )}
-                <DimensionChapters
-                  chapters={tokenDimensionChapters(token)}
-                  checksHref="#investigation-methodology"
-                />
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* Style 2 preserves the reading experience Kyle shipped on
-              2026-08-25, verbatim: the evidence ledger stays a collapsed
-              appendix here. Style 1 above carries the open-composition fix. */}
-          {readingStyle === "style2" && token.axes?.length > 0 && (
+          {token.axes?.length > 0 && (
             <details id="composition" className="evidence-appendix af-doc group mt-8 scroll-mt-28">
               <summary className="evidence-appendix-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                 <div>
@@ -1858,6 +1795,9 @@ export function InvestigationReport({
               capNote={token.capApplied ? `limited to ${token.score}` : null}
               challengeAnchor={shareView ? null : "#investigation-challenge"}
             />
+            {/* the reading spine: Auric File chapters only (Enigma: do not use
+              the dossier-beats layout here; it stays available as the
+              standalone sharing format). */}
                 <div className="af-doc">
                 {projectAccount?.projectStrengthBands && (
                   <DimensionChapters

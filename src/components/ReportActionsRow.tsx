@@ -5,49 +5,16 @@
    share view only Export PDF remains. Hidden in print so the PDF stays a
    clean document. */
 
-import type { ReportStyle } from "../lib/reportStyle";
-
 export type ShareState = "idle" | "creating" | "copied" | "error";
 
-const STYLE_OPTIONS: { value: ReportStyle; label: string; title: string }[] = [
-  { value: "style1", label: "Style 1", title: "The Auric file: composition, chapters, and every evidence section in the reading flow" },
-  { value: "style2", label: "Style 2", title: "The story presentation: the dossier opening, with the evidence ledger as an appendix" },
-];
-
-export function ReportActionsRow({ canShare, shareState, onShare, onExportPdf, readingStyle, onReadingStyle }: {
+export function ReportActionsRow({ canShare, shareState, onShare, onExportPdf }: {
   canShare: boolean;
   shareState: ShareState;
   onShare: () => void;
   onExportPdf: () => void;
-  /** When provided, the two style buttons render at the left of the row. */
-  readingStyle?: ReportStyle;
-  onReadingStyle?: (style: ReportStyle) => void;
 }) {
   return (
-    <div className={`af-doc mt-5 flex flex-wrap gap-2 print:hidden ${readingStyle && onReadingStyle ? "justify-between" : "justify-end"}`} aria-label="Report actions">
-      {readingStyle && onReadingStyle && (
-        <div className="flex gap-2" role="group" aria-label="Report style">
-          {STYLE_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => onReadingStyle(option.value)}
-              aria-pressed={readingStyle === option.value}
-              title={option.title}
-              className="af-back cursor-pointer"
-              style={{
-                marginTop: 0,
-                ...(readingStyle === option.value
-                  ? { borderColor: "var(--color-signal)", color: "var(--color-ink)" }
-                  : {}),
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="flex flex-wrap justify-end gap-2">
+    <div className="af-doc mt-5 flex flex-wrap justify-end gap-2 print:hidden" aria-label="Report actions">
       {canShare && (
         <button
           type="button"
@@ -72,7 +39,6 @@ export function ReportActionsRow({ canShare, shareState, onShare, onExportPdf, r
       >
         Export PDF ↓
       </button>
-      </div>
     </div>
   );
 }
