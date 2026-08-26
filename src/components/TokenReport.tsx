@@ -406,6 +406,16 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       </header>
 
       <div className="report-frame">
+        {/* the document's own actions, first thing on the page: switch the
+            reading style, share the read-only file, save the PDF */}
+        <ReportActionsRow
+          canShare={canShare}
+          shareState={shareState}
+          onShare={() => void share()}
+          onExportPdf={() => printReportPdf(d.name || d.symbol)}
+          readingStyle={readingStyle}
+          onReadingStyle={chooseReadingStyle}
+        />
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -548,16 +558,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified by a supported collector on <span className="capitalize">{d.chain}</span>. Those axes are scored conservatively; this report cannot claim that path is complete.
           </div>
         )}
-
-        {/* the document's own actions: share the read-only file, save the PDF */}
-        <ReportActionsRow
-          canShare={canShare}
-          shareState={shareState}
-          onShare={() => void share()}
-          onExportPdf={() => printReportPdf(d.name || d.symbol)}
-          readingStyle={readingStyle}
-          onReadingStyle={chooseReadingStyle}
-        />
 
         {/* the composition: the file's table of contents, Auric File framing */}
         {readingStyle === "style1" && (
