@@ -570,7 +570,7 @@ export const PROJECT_SCORING_POLICY = [
   "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
   "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
-  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis.",
+  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis. EXCEPTION: when the official profile biography in the packet explicitly declares the project has no token and no canonical token is bound, there is no token-conduct risk surface to assess and the null search result CONFIRMS the declaration. Score P3 at the top of its allowed band as clean conduct, and write the rationale as: the project explicitly declares itself token-free, so token conduct criteria are waived until a token launches. Never describe a declared-token-free project as lacking demonstrated conduct history, and never score it low for not having a token.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
   "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end as a null result on this axis only, never counter-evidence against any other axis.",
   "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
@@ -1692,6 +1692,27 @@ const retainSourceArtifacts = (source: readonly unknown[], limit: number): unkno
 
 export type ProjectScoreBand = ProjectStrengthBandRecord;
 
+/**
+ * Explicit first-party "we have no token" declaration in the official profile
+ * biography. A project that states this has NO token-conduct risk surface:
+ * scoring P3 in the bottom band for "lack of demonstrated conduct history"
+ * punishes the subject for a product decision (and for warning users away
+ * from impersonation scams). Patterns are conservative existence claims;
+ * "no token needed/required/gating" is usage copy, not an existence claim,
+ * and "token launch soon" promises one rather than disclaiming one.
+ */
+const NO_TOKEN_DECLARATION = new RegExp([
+  String.raw`\bno (?:official )?(?:token|coin)s?\b(?!\s*(?:needed|required|gate|gating|sale))`,
+  String.raw`\b(?:do(?:es)? not|don'?t|doesn'?t) have an? (?:official )?(?:token|coin)\b`,
+  String.raw`\bthere is no (?:official )?(?:token|coin)\b`,
+  String.raw`\btoken:?\s*none\b`,
+  String.raw`\btoken-?less\b`,
+  String.raw`\bno (?:token|coin) (?:has been |was )?(?:launched|issued|released|deployed)\b`,
+  String.raw`\bhave(?: not|n'?t) (?:launched|issued|released) an? (?:token|coin)\b`,
+  String.raw`\bnever launch(?:ed|ing)? an? (?:token|coin)\b`,
+  String.raw`\b(?:any|all|every) (?:token|coin)s? (?:claiming|impersonat\w+|using|named|bearing)\b[\s\S]{0,60}\b(?:scams?|fake|not ours|unofficial)\b`,
+].join("|"), "i");
+
 const PROJECT_EARLY_STAGE = /\b(?:alpha|beta|testnet|prototype|demo|pilot|coming soon|pre-?launch|waitlist)\b/i;
 const PROJECT_MATURE_STAGE = /\b(?:live|mainnet|production|in production|operational|operating)\b/i;
 const TOKEN_MARKET_ONLY_TRACTION = /\b(?:token|trading volume|volume|market cap|liquidity|price|fdv)\b/i;
@@ -2043,6 +2064,19 @@ export function deriveProjectStrengthBands(
   // verification still fails closed to "none".
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0]
     .filter(Boolean).length;
+  // A first-party "no token" declaration waives the token-conduct criteria:
+  // the axis measures token conduct RISK, and a project that explicitly
+  // declares it has no token (and binds none) has no such risk surface. The
+  // ceiling opens on the declaration alone (a self-description, H2
+  // ceiling-only); the enforced floor additionally needs ARGUS's own
+  // completed token-identity search confirming no token exists, which turns
+  // the self-claim into a corroborated fact. Any verified limiting evidence
+  // (a prior token that collapsed under this project) disables the waiver.
+  const p3NullSearch = assessmentArtifactFor("P3_token_conduct", "project-token-identity");
+  const declaredTokenless = !token
+    && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0
+    && typeof profile?.bio === "string"
+    && NO_TOKEN_DECLARATION.test(String(profile.bio));
   // Ceiling uses registry-matched audit discovery leads. Floor uses the strict
   // corroborated auditFact only, so an unverified lead widens the allowed range
   // without minting an enforced minimum (H2).
@@ -2051,19 +2085,21 @@ export function deriveProjectStrengthBands(
       && tokenDisclosures.length > 0
       && auditExceptionalCeiling ? "exceptional"
       : moderateMarket ? "solid" : "emerging")
-    : !token && tokenlessConductCategories > 0
-      ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
-      : "none";
+    : declaredTokenless ? "exceptional"
+      : !token && tokenlessConductCategories > 0
+        ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
+        : "none";
   const p3FloorTier: ProjectStrengthTier = verifiedToken
     ? (scaleSignals >= 2
       && tokenDisclosures.length > 0
       && auditFacts.length > 0 ? "exceptional"
       : moderateMarket ? "solid" : "emerging")
-    : !token && tokenlessConductCategories > 0
-      ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
-      : "none";
+    : declaredTokenless ? (p3NullSearch ? "solid" : "none")
+      : !token && tokenlessConductCategories > 0
+        ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
+        : "none";
   const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0
-    ? assessmentArtifactFor("P3_token_conduct", "project-token-identity")
+    ? p3NullSearch
     : null;
   let p3FinalTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3CeilingTier;
   let p3FinalFloorTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3FloorTier;
@@ -2071,7 +2107,10 @@ export function deriveProjectStrengthBands(
   if (severeUnrecoveredProtocolIncident && (p3FinalFloorTier === "solid" || p3FinalFloorTier === "exceptional")) p3FinalFloorTier = "emerging";
   setBand("P3_token_conduct", p3FinalTier, [
     ...(verifiedToken ? ["canonical token verified"] : []),
-    ...(!token && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : []),
+    ...(declaredTokenless
+      ? ["official profile explicitly declares the project has no token; token conduct criteria waived until a token launches"]
+      : []),
+    ...(!token && !declaredTokenless && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : []),
     ...(p3Assessment ? ["completed token-identity assessment bound no canonical token"] : []),
     ...(moderateMarket ? ["measured market activity"] : []),
     ...(governanceFacts.length ? ["verified token governance"] : []),
@@ -2083,6 +2122,9 @@ export function deriveProjectStrengthBands(
   ], [
     ...artifactIds([...(token ? [token] : []), ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
     ...(p3Assessment ? [p3Assessment.artifactId] : []),
+    // The waived band anchors on the completed search that corroborates the
+    // declaration; without it the anchor fallback in setBand still applies.
+    ...(declaredTokenless && p3NullSearch ? [p3NullSearch.artifactId] : []),
   ], p3FinalFloorTier);
 
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
