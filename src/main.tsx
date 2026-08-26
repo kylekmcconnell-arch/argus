@@ -42,6 +42,8 @@ const ReportClarityPreview = lazy(() => import('./dev/ReportClarityPreview.tsx')
 const TrustGraphPreview = lazy(() => import('./dev/TrustGraphPreview.tsx').then((module) => ({ default: module.TrustGraphPreview })))
 // eslint-disable-next-line react-refresh/only-export-components
 const EarnReportStyle2Preview = lazy(() => import('./components/EarnReportStyle2.tsx').then((module) => ({ default: module.EarnReportStyle2 })))
+// eslint-disable-next-line react-refresh/only-export-components
+const DualScorePreview = lazy(() => import('./dev/DualScorePreview.tsx').then((module) => ({ default: module.DualScorePreview })))
 
 // Observe 401s from ARGUS API routes so an expired session is stated once
 // instead of surfacing as a page of quietly dead panels.
@@ -105,6 +107,8 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><TrustGraphPreview /></Suspense>
       ) : designPreview === 'earn-report-style-2' ? (
         <Suspense fallback={null}><EarnReportStyle2Preview /></Suspense>
+      ) : designPreview === 'earn-dual-score' ? (
+        <Suspense fallback={null}><DualScorePreview /></Suspense>
       ) : sharedReportToken ? (
         <Suspense fallback={null}><SharedReportView token={sharedReportToken} /></Suspense>
       ) : publicView === 'leaderboard' ? (

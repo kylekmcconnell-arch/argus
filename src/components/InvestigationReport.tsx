@@ -795,6 +795,17 @@ export function InvestigationReport({
     : { subjectLeads: [], relatedEntityLeads: [], subjectAdverseLeads: [] };
   const accountGoverning = accountReport?.role_reports?.find((rr) => rr.role === accountReport.governing_role);
   const accountAxes = accountGoverning ? Object.entries(accountGoverning.axes ?? {}) : [];
+  const projectCompositionRows = accountAxes.map(([axis, value]) => ({
+    axis,
+    label: axisLabel(axis),
+    score: value.score,
+    weight: value.weight,
+    rationale: value.rationale,
+    supportCount: value.evidenceRefs?.length,
+    counterCount: value.counterEvidenceRefs?.length,
+    questionCount: value.gaps?.length,
+    evidenceHref: "#investigation-evidence" as const,
+  }));
   const tokenCompositionRows = orderByPlainAxis((token.axes ?? []).map((a) => ({
     axis: a.key,
     label: plainAxisLabel(a.key, a.label),
@@ -1616,6 +1627,14 @@ export function InvestigationReport({
             methodologyHref="#investigation-methodology"
             challengeAnchorId={shareView ? null : "investigation-challenge"}
             composition={tokenCompositionRows.length > 0 ? tokenCompositionRows : undefined}
+            secondaryScore={projectAccount && accountReport ? {
+              label: "Project diligence score",
+              score: typeof accountReport.governing_score === "number" ? accountReport.governing_score : null,
+              verdictLabel: verdictMeta(accountReport.composite_verdict).label,
+              context: "Team, product, token conduct, backers, traction and transparency.",
+              composition: projectCompositionRows,
+              unavailableCopy: "The linked project report did not publish a diligence score.",
+            } : undefined}
           />
 
           {LEGACY_REPORT_HERO_ENABLED && <div className={`investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 ${readiness.status === "ready" ? "" : "xl:grid-cols-3"}`}>

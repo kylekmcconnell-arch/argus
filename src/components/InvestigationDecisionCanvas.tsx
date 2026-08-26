@@ -1,3 +1,4 @@
+import { useEffect, useState, type CSSProperties } from "react";
 import { ArrowRight, ClockCounterClockwise, Database, LockKey, Sparkle } from "@phosphor-icons/react";
 import {
   ReportCanvasNarrativeSection,
@@ -11,12 +12,116 @@ import type { DecisionDiscovery, VerdictArgument } from "../lib/reportInsights";
 import type { DecisionLensId } from "../intelligence/types";
 import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief";
 import { HERO_SCORE_RING_SIZE, ScoreRing } from "./ScoreRing";
-import type { CompositionRow } from "./ScoreComposition";
+import { compositionRowColor, type CompositionRow } from "./ScoreComposition";
 import type { TokenDecisionBoundary } from "../lib/decisionBoundary";
 
 export interface DecisionCanvasItem {
   label: string;
   detail?: string | undefined;
+}
+
+export interface DecisionCanvasScore {
+  label: string;
+  score: number | null;
+  verdictLabel: string;
+  context?: string | undefined;
+  composition?: CompositionRow[] | undefined;
+  scoreIsProvisional?: boolean | undefined;
+  successful?: number | undefined;
+  applicable?: number | undefined;
+  checkScopeLabel?: string | undefined;
+  unavailableCopy?: string | undefined;
+}
+
+function scoreTone(score: number | null): "pass" | "caution" | "fail" | "unknown" {
+  if (score == null) return "unknown";
+  if (score >= 70) return "pass";
+  if (score >= 40) return "caution";
+  return "fail";
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window === "undefined"
+    || typeof window.matchMedia !== "function"
+    || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function DualScoreCard({ score }: { score: DecisionCanvasScore }) {
+  const rows = (score.composition ?? []).filter((row) => row.score > 0);
+  const rowCount = rows.length;
+  const [activeIndex, setActiveIndex] = useState(() => prefersReducedMotion() ? Math.max(0, rows.length - 1) : -1);
+
+  useEffect(() => {
+    if (prefersReducedMotion() || rowCount === 0) return;
+    const timers = Array.from({ length: rowCount }, (_, index) => window.setTimeout(() => setActiveIndex(index), 420 + index * 430));
+    return () => timers.forEach(window.clearTimeout);
+  }, [rowCount]);
+
+  const active = activeIndex >= 0 ? rows[activeIndex] : undefined;
+  const tone = scoreTone(score.score);
+  const checksCopy = score.applicable == null
+    ? null
+    : score.applicable === 0
+      ? "No checks saved"
+      : `${score.successful ?? 0}/${score.applicable} ${(score.checkScopeLabel ?? "checks").toLowerCase()} complete${score.scoreIsProvisional ? " · provisional" : ""}`;
+
+  return (
+    <article
+      className={`decision-dual-score-card decision-dual-score-card--${tone}`}
+      aria-label={score.score == null ? `${score.label} not measured` : `${score.label} ${score.score} out of 100`}
+    >
+      <div className="decision-dual-score-head">
+        <div className="min-w-0">
+          <p className="decision-dual-score-label mono">{score.label}</p>
+          <p className="decision-dual-score-number">
+            <strong>{score.score ?? "N/A"}</strong>
+            <span>{score.score == null ? "not measured" : "/ 100"}</span>
+          </p>
+        </div>
+        <span className={`decision-dual-score-verdict decision-dual-score-verdict--${tone}`}>
+          {score.score == null ? "Unavailable" : score.verdictLabel}
+        </span>
+      </div>
+
+      {rows.length > 0 ? (
+        <>
+          <div className="decision-dual-score-track" aria-label={`${score.label} evidence composition`}>
+            {rows.map((row, index) => (
+              <span
+                key={row.axis}
+                className="decision-dual-score-segment"
+                style={{
+                  "--segment-color": compositionRowColor(row),
+                  "--segment-grow": Math.max(row.score, 0),
+                  "--segment-delay": `${280 + index * 430}ms`,
+                } as CSSProperties}
+              />
+            ))}
+          </div>
+          <div className="decision-dual-score-active mono" aria-live="polite">
+            <span>{active ? `Adding ${active.label}` : "Building score composition"}</span>
+            <strong>{active ? `+${Math.round(active.score)} pts` : "0 pts"}</strong>
+          </div>
+          <ul className="decision-dual-score-legend">
+            {rows.map((row) => (
+              <li key={row.axis} className={active?.axis === row.axis ? "is-active" : undefined}>
+                <i style={{ background: compositionRowColor(row) }} />
+                <span>{row.label}</span>
+                <strong>{Math.round(row.score)}</strong>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <p className="decision-dual-score-unavailable">
+          {score.unavailableCopy ?? "This saved report does not contain a linked score for this question."}
+        </p>
+      )}
+
+      {score.context && <p className="decision-dual-score-context">{score.context}</p>}
+      {checksCopy && <p className="decision-dual-score-checks mono">{checksCopy}</p>}
+    </article>
+  );
 }
 
 function DecisionBoundaryBlock({ boundary, evidenceHref }: {
@@ -252,6 +357,7 @@ export function InvestigationDecisionCanvas({
   checkScopeLabel = "Required report checks",
   openItemsLabel = "What is still open",
   composition,
+  secondaryScore,
 }: {
   /** Style 2 is the narrative reading view; Style 1 keeps the compact brief. */
   presentationStyle?: 1 | 2;
@@ -295,6 +401,8 @@ export function InvestigationDecisionCanvas({
   openItemsLabel?: string;
   /** Real ScoreComposition rows. Drives the hero ring pieces when present. */
   composition?: CompositionRow[];
+  /** A separately scored linked facet. Style 2 shows both without blending them. */
+  secondaryScore?: DecisionCanvasScore | null | undefined;
 }) {
   const verdictItems = favorable ? supports : concerns;
   const countervailingItems = favorable ? concerns : supports;
@@ -321,6 +429,18 @@ export function InvestigationDecisionCanvas({
     ? [argument.forLine, argument.againstLine, argument.moveLine].filter((value): value is string => Boolean(value))
     : [primaryWhy?.label, counterWhy?.label].filter((value): value is string => Boolean(value));
   const whyCopy = whyParts.map(plainDecisionText).join(" ");
+  const primaryScore: DecisionCanvasScore = {
+    label: scoreLabel,
+    score,
+    verdictLabel,
+    ...(scoreContext ? { context: scoreContext } : {}),
+    ...(composition ? { composition } : {}),
+    scoreIsProvisional,
+    successful,
+    applicable,
+    checkScopeLabel,
+  };
+  const showDualScores = presentationStyle === 2 && Boolean(secondaryScore);
 
   return (
     <section id="report-summary" data-canonical-decision-brief="true" className="story-chapter report-section mt-6 scroll-mt-28">
@@ -349,39 +469,52 @@ export function InvestigationDecisionCanvas({
             </p>
           )}
         </div>
-        <div
-          className="decision-score-lockup shrink-0"
-          data-report-score="prominent"
-          aria-label={score == null ? `${scoreLabel} withheld` : `${scoreLabel} ${score} out of 100`}
-        >
-          <p className="mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
-            {scoreLabel}
-          </p>
-          {scoreContext && <p className="mt-1 max-w-[18rem] text-center text-[10.5px] leading-snug text-ink-faint">{scoreContext}</p>}
-          <ScoreRing
-            score={score}
-            verdict={verdictLabel}
-            color={verdictColor}
-            size={HERO_SCORE_RING_SIZE}
-            bands={score != null}
-            composition={composition}
-            fallbackLabel={scoreLabel}
-          >
-            <div className="decision-score-copy">
-              <p className={`score-ring-verdict mono text-[11px] font-semibold uppercase tracking-[0.1em] ${verdictClass}`}>{verdictLabel}</p>
-              {score == null && (
-                <p className="mono mt-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-ink">Score withheld</p>
-              )}
-              <p className="mono mt-1 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
-                {score != null && scoreIsProvisional
-                  ? `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete · provisional`
-                  : applicable === 0
-                    ? "No checks saved"
-                    : `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete`}
-              </p>
+        {showDualScores ? (
+          <div className="decision-dual-scores shrink-0" data-report-score="dual" aria-label="Two separate ARGUS scores">
+            <p className="decision-dual-scores-kicker mono">Scores &amp; evidence composition</p>
+            <div className="decision-dual-scores-grid">
+              <DualScoreCard key={`${primaryScore.label}-${primaryScore.score}`} score={primaryScore} />
+              <DualScoreCard key={`${secondaryScore!.label}-${secondaryScore!.score}`} score={secondaryScore!} />
             </div>
-          </ScoreRing>
-        </div>
+            <p className="decision-dual-scores-explainer">
+              These scores answer different questions. They stay separate so project diligence cannot hide token risk, and token mechanics cannot stand in for an accountable organization.
+            </p>
+          </div>
+        ) : (
+          <div
+            className="decision-score-lockup shrink-0"
+            data-report-score="prominent"
+            aria-label={score == null ? `${scoreLabel} withheld` : `${scoreLabel} ${score} out of 100`}
+          >
+            <p className="mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
+              {scoreLabel}
+            </p>
+            {scoreContext && <p className="mt-1 max-w-[18rem] text-center text-[10.5px] leading-snug text-ink-faint">{scoreContext}</p>}
+            <ScoreRing
+              score={score}
+              verdict={verdictLabel}
+              color={verdictColor}
+              size={HERO_SCORE_RING_SIZE}
+              bands={score != null}
+              composition={composition}
+              fallbackLabel={scoreLabel}
+            >
+              <div className="decision-score-copy">
+                <p className={`score-ring-verdict mono text-[11px] font-semibold uppercase tracking-[0.1em] ${verdictClass}`}>{verdictLabel}</p>
+                {score == null && (
+                  <p className="mono mt-1 text-[12px] font-semibold uppercase tracking-[0.08em] text-ink">Score withheld</p>
+                )}
+                <p className="mono mt-1 text-[10px] uppercase tracking-[0.1em] text-ink-faint">
+                  {score != null && scoreIsProvisional
+                    ? `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete · provisional`
+                    : applicable === 0
+                      ? "No checks saved"
+                      : `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete`}
+                </p>
+              </div>
+            </ScoreRing>
+          </div>
+        )}
       </header>
 
       <div className="panel mt-3 overflow-hidden">

@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Dossier } from "../data/dossier";
 import { buildReport, SUBJECTS } from "../data/subjects";
+import type { ThreatScan } from "../threat/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -32,6 +33,7 @@ vi.mock("./Avatar", () => ({
   Avatar: ({ src }: { src: string | null }) => src ? <img src={src} alt="" /> : null,
 }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
+vi.mock("./ThreatScanPage", () => ({ ThreatReport: () => null }));
 
 import { Report } from "./Report";
 
@@ -57,6 +59,40 @@ function decisionBasisText(): string {
 }
 
 describe("private person report evidence boundary", () => {
+  it("uses the linked token scan as Style 2's separate second score", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: {
+        ...base.report,
+        governing_score: 54,
+        composite_verdict: "CAUTION",
+      },
+      threat: {
+        dossier: {
+          score: 79,
+          verdict: "PASS",
+          axes: [
+            { key: "T1", label: "Liquidity & lock", score: 18, weight: 24, rationale: "Usable pool." },
+            { key: "T2", label: "Contract safety", score: 16, weight: 26, rationale: "No critical flag." },
+          ],
+        },
+      } as unknown as ThreatScan,
+    } as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const dual = container.querySelector('[data-report-score="dual"]');
+    expect(dual).not.toBeNull();
+    expect(dual?.textContent).toContain("Person diligence score54");
+    expect(dual?.textContent).toContain("Token safety score79");
+    expect(dual?.textContent).toContain("The liquidity");
+    expect(dual?.textContent).toContain("Code & security");
+    expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
+  });
+
   it("puts the exact unfinished required check ahead of general research questions", () => {
     const base = buildReport(SUBJECTS[1]);
     const requiredChecks = [

@@ -59,7 +59,7 @@ import { reportIdentity } from "../lib/caseLabel";
 import { AddInfo } from "./AddInfo";
 import { ScoreComposition } from "./ScoreComposition";
 import { DimensionChapters } from "./DimensionChapters";
-import { compositionHeadline, personDimensionChapters } from "../lib/dimensionChapters";
+import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel } from "../lib/dimensionChapters";
 import { DossierReport } from "./DossierReport";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
@@ -1838,6 +1838,28 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     questionCount: a.gaps?.length,
     evidenceHref: f.projectStrengthBands ? `#dimension-${axis}` as const : undefined,
   }));
+  const linkedTokenDossier = f.threat?.dossier;
+  const linkedTokenCompositionRows = linkedTokenDossier
+    ? orderByPlainAxis(linkedTokenDossier.axes.map((tokenAxis) => ({
+      axis: tokenAxis.key,
+      label: plainAxisLabel(tokenAxis.key, tokenAxis.label),
+      score: tokenAxis.score,
+      weight: tokenAxis.weight,
+      rationale: tokenAxis.rationale,
+      evidenceHref: "#project-token-threat" as const,
+    })))
+    : [];
+  const linkedTokenScore = linkedTokenDossier || f.projectToken
+    ? {
+      label: "Token safety score",
+      score: linkedTokenDossier?.score ?? null,
+      verdictLabel: linkedTokenDossier?.verdict ?? "Not measured",
+      context: "Contract, tradeability, liquidity, holders, market data and sanctions.",
+      composition: linkedTokenCompositionRows,
+      unavailableCopy: f.threatNote
+        ?? "A project token is linked, but this saved project report does not contain a completed token-safety score.",
+    }
+    : undefined;
   const governingSubjectClass = report.governing_role
     && Object.values(SubjectClass).includes(report.governing_role as SubjectClass)
     ? report.governing_role as SubjectClass
@@ -3400,6 +3422,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           methodologyHref="#scan-methodology"
           challengeAnchorId={shareView ? null : "ask-report"}
           composition={presentation.primaryScore && compositionRows.length > 0 ? compositionRows : undefined}
+          secondaryScore={linkedTokenScore}
         />
 
         <ProviderFailureNotice failures={f.providerFailures} />
@@ -4466,7 +4489,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               field = older report from before the fold-in; a note without a
               scan = the leg was skipped or failed, and says why. */}
           {(f.threat || f.threatNote) && (
-            <div className="min-w-0 lg:col-span-2">
+            <div id="project-token-threat" className="min-w-0 scroll-mt-28 lg:col-span-2">
               <Section title="Project token · threat scan" kicker={f.threatNote ?? "the token threat leg of this audit"}>
                 {f.threat ? (
                   <Card className="p-2">
