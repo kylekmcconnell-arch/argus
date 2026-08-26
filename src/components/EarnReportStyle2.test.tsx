@@ -29,7 +29,7 @@ describe("EarnReportStyle2", () => {
   it("states incomplete social coverage and uses a market-size band", () => {
     const html = renderToStaticMarkup(<EarnReportStyle2 />);
 
-    expect(html).toContain("Coverage incomplete — score withheld");
+    expect(html).toContain("Coverage incomplete: score withheld");
     expect(html).toContain("market-size band · not a global rank");
     expect(html).toContain("Activity score withheld");
   });

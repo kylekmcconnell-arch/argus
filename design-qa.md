@@ -5,6 +5,10 @@
 - Source visual truth: `/Users/kyle/Documents/ARGUS-earn-report-fix/design-references/earn-report-v2-option-1.png`
 - Rendered implementation: `http://127.0.0.1:5173/?design-preview=earn-report-style-2`
 - Primary implementation capture: `/Users/kyle/Documents/ARGUS-earn-report-style2/design-references/qa/earn-style2-top-1440x1024.jpg`
+- Production token-route capture: `/Users/kyle/Documents/ARGUS-earn-report-style2/design-references/qa/earn-token-style2-production.png`
+- Production Style 1 control capture: `/Users/kyle/Documents/ARGUS-earn-report-style2/design-references/qa/earn-token-style1-production.png`
+- Production mobile token-route capture: `/Users/kyle/Documents/ARGUS-earn-report-style2/design-references/qa/earn-token-style2-mobile-production.png`
+- Source / production comparison canvas: `/Users/kyle/Documents/ARGUS-earn-report-style2/design-references/qa/earn-token-style2-comparison.png`
 - Focused captures:
   - `/Users/kyle/Documents/ARGUS-earn-report-style2/design-references/qa/earn-style2-web-1440x1024.jpg`
   - `/Users/kyle/Documents/ARGUS-earn-report-style2/design-references/qa/earn-style2-people-1440x1024.jpg`
@@ -15,17 +19,18 @@
 - Mobile implementation pixels / CSS viewport: 390 × 844 at device density 1.
 - Density normalization: both desktop images were shown together in one comparison input and visually fit to the same comparison canvas; no @2x downsampling was required.
 - State: light theme, completed loading sequence, report top; focused Web & Product and People states; mobile report top; named loading sequence in progress.
+- Production route verified: `https://argus-one-flax.vercel.app/?s=0xA3b6AEe90017b72c0812dC1e013De70eB2917ba3&kind=token&reportStyle=2`.
 
 ## Full-view comparison evidence
 
-The source and final desktop render were placed together in the same comparison input at the matched desktop state. The implementation preserves the source's editorial decision-memo hierarchy, split verdict/score composition, restrained light palette, compact evidence typography, narrative triptych, and social/market signal strip. The intentional deviations improve the requested usefulness: each score segment names the dimension being added, the two scores are explicitly distinguished, and Web analysis is visible in the masthead rather than discoverable only below the fold.
+The source and final production token-route render were placed together in the same 2880 × 1024 comparison input at the matched desktop state. The implementation preserves the source's editorial decision-memo hierarchy, split verdict/score composition, restrained light palette, compact evidence typography, narrative triptych, and social/market signal strip. The intentional deviations improve the requested usefulness: each score segment names the dimension being added, the two scores are explicitly distinguished, Web analysis is visible in the masthead rather than discoverable only below the fold, and the authenticated report toolbar now exposes Style 1 and Style 2 on the canonical `$EARN` route.
 
 ## Focused region comparison evidence
 
 - Web & Product: the masthead entry and full web chapter are both visible, with the official domain, project binding, dates, product claims, explicit evidence limits, and working official-source links.
 - People: the placeholder letter avatar was replaced by the real `@0xTharmas` profile image; the captured image is sharp, circularly cropped, correctly scaled, and paired with the exact role-source boundary.
 - Loading: the capture names the currently active research phase and the remaining phases, so it does not read as an unexplained loading ring.
-- Mobile: the 390 px capture has no horizontal clipping, overlap, or broken headline wrapping. The Style 1 / Style 2 choice is also available in the normal mobile report-actions menu.
+- Mobile: the 390 px production capture has no overlap or broken headline wrapping. The Style 1 / Style 2 control remains visible above the horizontally scrollable action row on the standalone token report; the project report retains the choice in its mobile actions menu.
 
 ## Required fidelity surfaces
 
@@ -46,6 +51,8 @@ The source and final desktop render were placed together in the same comparison 
 - Connection-type filtering.
 - Challenge text entry, enabled submit, and saved confirmation.
 - Desktop and 390 px responsive states.
+- Standalone `$EARN` token Style 1 / Style 2 switching, including URL add/remove behavior.
+- Direct `reportStyle=2` token deep-link loading.
 - No application error boundary or development-server error surfaced during the browser-rendered run.
 
 ## Comparison history
@@ -54,6 +61,7 @@ The source and final desktop render were placed together in the same comparison 
 2. Initial finding — P1, image fidelity: the team card used a placeholder `T`. Fix: replaced it with the live `@0xTharmas` profile photo and meaningful alt text. Post-fix evidence: people capture above.
 3. Initial finding — P2, mobile access: the desktop style segmented control was hidden below the `sm` breakpoint. Fix: added the same Style 1 / Style 2 choice to the mobile report-actions menu. Post-fix evidence: 390 × 844 responsive capture and component inspection.
 4. Final comparison: no actionable P0, P1, or P2 differences remain. The source's application shell is intentionally absent from the isolated development harness; production embeds Style 2 inside the existing authenticated ARGUS shell and report toolbar.
+5. Production route finding — P1, integration: the first selector integration covered the combined-investigation renderer, but the recent `$EARN` case opens the standalone `TokenReport` renderer. Fix: wired the canonical EARN address into both renderers, added focused regression coverage, promoted a corrected artifact, and verified the exact `kind=token` route in the authenticated in-app browser.
 
 ## Follow-up polish
 
@@ -62,7 +70,8 @@ The source and final desktop render were placed together in the same comparison 
 ## Implementation checklist
 
 - [x] Style 1 remains the default.
-- [x] Style 2 is available only on the EARN on Hood project report.
+- [x] Style 2 is available on both canonical EARN on Hood surfaces: `@earnonhood` and the `$EARN` token address.
+- [x] Other project and token reports do not expose the EARN style control.
 - [x] Style choice is URL-addressable with `reportStyle=2`.
 - [x] Web analysis is visible above the fold and remains a full chapter.
 - [x] Real creator image is visible.

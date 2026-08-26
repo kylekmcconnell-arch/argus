@@ -50,6 +50,7 @@ vi.mock("./MethodologyChecklist", () => ({
   MethodologyChecklist: ({ id }: { id?: string }) => <div id={id} data-panel="methodology" />,
 }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => <span /> }));
+vi.mock("./EarnReportStyle2", () => ({ EarnReportStyle2: () => <div data-panel="earn-report-style-2">EARN unified decision memo</div> }));
 
 import { TokenReport } from "./TokenReport";
 
@@ -157,6 +158,7 @@ function render(report: TokenDossier): void {
 
 beforeEach(() => {
   vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "true");
+  window.history.replaceState(null, "", "/");
   harness.clipboard.mockReset().mockResolvedValue(undefined);
   harness.livePanel.mockReset();
   harness.askReport.mockReset();
@@ -178,6 +180,32 @@ afterEach(() => {
 });
 
 describe("token report supplemental evidence boundary", () => {
+  it("offers both report styles on the canonical EARN token and persists Style 2 in the URL", () => {
+    const earnAddress = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    render(dossier({ address: earnAddress, symbol: "EARN", name: "EARN" }));
+
+    const styleControl = container.querySelector<HTMLElement>('header [aria-label="Report style"]');
+    const buttons = [...(styleControl?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual(["Style 1", "Style 2"]);
+    expect(buttons[0]?.getAttribute("aria-pressed")).toBe("true");
+
+    act(() => buttons[1]?.click());
+
+    expect(window.location.search).toContain("reportStyle=2");
+    expect(container.querySelector('[data-panel="earn-report-style-2"]')?.textContent).toContain("EARN unified decision memo");
+  });
+
+  it("opens the EARN Style 2 deep link directly and leaves other token reports unchanged", () => {
+    const earnAddress = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    window.history.replaceState(null, "", "/?s=%24EARN&kind=token&reportStyle=2");
+    render(dossier({ address: earnAddress, symbol: "EARN", name: "EARN" }));
+    expect(container.querySelector('[data-panel="earn-report-style-2"]')).not.toBeNull();
+
+    render(dossier());
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
+    expect(container.querySelector('[data-panel="earn-report-style-2"]')).toBeNull();
+  });
+
   it("keeps a complete six-check token report complete when project graph and creator follow-ups are open", () => {
     render(dossier({
       versionContext: {

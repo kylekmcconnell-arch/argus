@@ -61,6 +61,9 @@ import { deriveDecisionDiscovery, deriveNoticedSignals, isConcentratedLiquidityP
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
+import { EarnReportStyle2 } from "./EarnReportStyle2";
+
+const EARN_TOKEN_ADDRESS = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -141,12 +144,25 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 
 export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief, shareView = false }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const arkhamEnabled = arkhamProviderEnabled();
+  const isEarnToken = d.address.trim().toLowerCase() === EARN_TOKEN_ADDRESS;
   const arkhamDeployer = arkhamEnabled && d.deployer && !sameWalletAddress(d.deployer, d.address) ? d.deployer : null;
   const versionContext = d.versionContext ?? d.viewVersionContext;
   const caseLabel = publicCaseLabel(versionContext?.caseId);
   const embeddedFacet = Boolean(d.viewVersionContext || d.viewPersistence);
   const livePersistence = d.viewPersistence ?? d.persistence;
+  const [earnReportStyle, setEarnReportStyle] = useState<1 | 2>(() => {
+    if (typeof window === "undefined") return 1;
+    return new URLSearchParams(window.location.search).get("reportStyle") === "2" ? 2 : 1;
+  });
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
+  const chooseEarnReportStyle = (style: 1 | 2) => {
+    setEarnReportStyle(style);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (style === 2) url.searchParams.set("reportStyle", "2");
+    else url.searchParams.delete("reportStyle");
+    window.history.replaceState(window.history.state, "", url);
+  };
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
   );
@@ -366,6 +382,26 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           <span className={`chip ${versionContext ? "" : "tint-signal"}`}>
             {versionContext ? `saved report v${versionContext.version}` : "new scan"}
           </span>
+          {isEarnToken && (
+            <div className="ml-1 flex min-h-9 shrink-0 items-center rounded-full border border-line bg-panel p-0.5" aria-label="Report style">
+              <button
+                type="button"
+                aria-pressed={earnReportStyle === 1}
+                onClick={() => chooseEarnReportStyle(1)}
+                className={`min-h-8 rounded-full px-3 text-[10.5px] font-medium transition ${earnReportStyle === 1 ? "bg-ink text-void" : "text-ink-dim hover:bg-panel-2 hover:text-ink"}`}
+              >
+                Style 1
+              </button>
+              <button
+                type="button"
+                aria-pressed={earnReportStyle === 2}
+                onClick={() => chooseEarnReportStyle(2)}
+                className={`min-h-8 rounded-full px-3 text-[10.5px] font-medium transition ${earnReportStyle === 2 ? "bg-ink text-void" : "text-ink-dim hover:bg-panel-2 hover:text-ink"}`}
+              >
+                Style 2
+              </button>
+            </div>
+          )}
           <div className="scrollbar-none order-3 flex w-full items-center gap-2 overflow-x-auto pb-1 sm:order-none sm:ml-auto sm:w-auto sm:justify-end sm:overflow-visible sm:pb-0">
             {onOpenBrief && (
               <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact token case" className="btn-primary btn-brand flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
@@ -406,6 +442,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         </div>
       </header>
 
+      {isEarnToken && earnReportStyle === 2 ? (
+        <div className="report-frame">
+          <EarnReportStyle2 />
+        </div>
+      ) : (
       <div className="report-frame">
         {versionContext && (
           <div className="mt-4">
@@ -794,6 +835,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         </div>
         </ReportExperienceLayout>
       </div>
+      )}
     </div>
   );
 }

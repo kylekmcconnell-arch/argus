@@ -162,7 +162,7 @@ const notableMentions = [
   { handle: "@thetokenxpress", followers: "150.3K", quote: "@EARNONROBINHOOD @EARNONHOOD", url: "https://x.com/TheTokenXpress/status/2092428535080337409" },
   { handle: "@crypt0_pioneer", followers: "130.9K", quote: "@EARNONROBINHOOD @EARNONHOOD can I get a follow back?", url: "https://x.com/Crypt0_Pioneer/status/2092403061960683782" },
   { handle: "@sana_shahuk", followers: "128.5K", quote: "Definitely feels like one to watch.", url: "https://x.com/Sana_ShahUk/status/2092402296185610670" },
-  { handle: "@bankrbot", followers: "115.1K", quote: "$EARN on Robinhood Chain — price, volume, holders and contract snapshot.", url: "https://x.com/bankrbot/status/2091700582910448045" },
+  { handle: "@bankrbot", followers: "115.1K", quote: "$EARN on Robinhood Chain: price, volume, holders and contract snapshot.", url: "https://x.com/bankrbot/status/2091700582910448045" },
   { handle: "@znsconnect", followers: "108K", quote: "Feels like the early days of a full onchain finance stack.", url: "https://x.com/ZNSConnect/status/2090807772312965262" },
   { handle: "@robin_hoodailys", followers: "89.3K", quote: "@EARNONHOOD Nice.", url: "https://x.com/robin_Hoodailys/status/2092037381939777760" },
 ];
@@ -473,7 +473,7 @@ export function EarnReportStyle2() {
             </div>
             <div className="earn-v2-signal-strip__notice">
               <WarningIcon size={18} aria-hidden />
-              <span><strong>Coverage incomplete — score withheld</strong><small>The saved author search ended before quality concentration could be calculated.</small></span>
+              <span><strong>Coverage incomplete: score withheld</strong><small>The saved author search ended before quality concentration could be calculated.</small></span>
             </div>
             <div>
               <p className="earn-v2-kicker">Estimated market size</p>
@@ -765,7 +765,7 @@ export function EarnReportStyle2() {
 
           <section className="earn-v2-section earn-v2-sources" id="method">
             <div className="earn-v2-section-heading">
-              <div><p className="earn-v2-kicker">12 · Sources, coverage & method</p><h2>What this report knows—and what it does not</h2></div>
+              <div><p className="earn-v2-kicker">12 · Sources, coverage & method</p><h2>What this report knows, and what it does not</h2></div>
               <p>All values are frozen to the saved scan window. Current conditions may differ.</p>
             </div>
             <div className="earn-v2-source-grid">

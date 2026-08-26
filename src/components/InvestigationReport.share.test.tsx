@@ -48,6 +48,7 @@ vi.mock("./NamesakeCheck", () => ({ NamesakeCheck: () => { harness.livePanel("na
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => null }));
 vi.mock("./RingAlert", () => ({ RingAlert: () => { harness.livePanel("ring-alert"); return null; } }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => null }));
+vi.mock("./EarnReportStyle2", () => ({ EarnReportStyle2: () => <div data-panel="earn-report-style-2">EARN unified decision memo</div> }));
 vi.mock("./SnapshotEvidenceControl", () => ({
   LiveSupplementalNotice: () => null,
   SnapshotEvidenceControl: () => null,
@@ -125,6 +126,7 @@ function render(inv: Investigation, onReAudit?: () => void, onOpenBrief?: () => 
 
 beforeEach(() => {
   vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "true");
+  window.history.replaceState(null, "", "/");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -147,6 +149,39 @@ afterEach(async () => {
 });
 
 describe("investigation exact sharing", () => {
+  it("offers both report styles only for the canonical EARN token and preserves the choice in the URL", () => {
+    const earnAddress = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    render(investigation({
+      rootRef: earnAddress,
+      token: { ...token(), address: earnAddress, symbol: "EARN", name: "EARN" },
+    }));
+
+    const desktopStyleControl = container.querySelector<HTMLElement>('header [aria-label="Report style"]');
+    const buttons = [...(desktopStyleControl?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual(["Style 1", "Style 2"]);
+    expect(buttons[0]?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector('[data-panel="earn-report-style-2"]')).toBeNull();
+
+    act(() => buttons[1]?.click());
+
+    expect(window.location.search).toContain("reportStyle=2");
+    expect(container.querySelector('[data-panel="earn-report-style-2"]')?.textContent).toContain("EARN unified decision memo");
+  });
+
+  it("opens an EARN token Style 2 deep link directly without exposing the selector on other tokens", () => {
+    const earnAddress = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
+    window.history.replaceState(null, "", "/?s=%24EARN&kind=token&reportStyle=2");
+    render(investigation({
+      rootRef: earnAddress,
+      token: { ...token(), address: earnAddress, symbol: "EARN", name: "EARN" },
+    }));
+    expect(container.querySelector('[data-panel="earn-report-style-2"]')).not.toBeNull();
+
+    render(investigation());
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
+    expect(container.querySelector('[data-panel="earn-report-style-2"]')).toBeNull();
+  });
+
   it("keeps the header case label stable across saved versions of the same case", () => {
     const caseId = "aaf133f8-7a13-4df0-ae17-000000000008";
     const context = (version: number) => ({
