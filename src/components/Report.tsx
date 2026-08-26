@@ -3411,10 +3411,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           }}
           nextStep={verificationNext[0]?.title}
         >
+        {/* Style 2 is the experience Kyle shipped on 2026-08-25, verbatim:
+            the dossier story opens the file and everything below it stays.
+            Style 1 (the Auric File, default) reads without the dossier. */}
         {readingStyle === "style2" && (
           <DossierReport payload={f as unknown as Record<string, unknown>} />
         )}
-        {readingStyle === "style1" && f.projectStrengthBands && (
+        {f.projectStrengthBands && (
           <DimensionChapters
             chapters={personDimensionChapters(f.projectStrengthBands)}
             checksHref="#scan-methodology"

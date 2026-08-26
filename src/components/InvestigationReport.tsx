@@ -76,7 +76,6 @@ import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { VerdictHero } from "./VerdictHero";
 import { ReportActionsRow } from "./ReportActionsRow";
-import { DossierReport } from "./DossierReport";
 import { initialReportStyle, persistReportStyle, type ReportStyle } from "../lib/reportStyle";
 import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
 import {
@@ -1394,7 +1393,7 @@ export function InvestigationReport({
     { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
     ...(hasConnectionsChapter ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
     ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
-    ...(readingStyle === "style1" && token.axes?.length ? [{ href: "#composition" as const, label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> }] : []),
+    ...(token.axes?.length ? [{ href: "#composition" as const, label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> }] : []),
     { href: "#investigation-methodology", label: "Method", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
     ...(!shareView ? [{ href: "#investigation-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
   ];
@@ -1820,29 +1819,59 @@ export function InvestigationReport({
             </section>
           )}
 
-          {/* Style 2: the dossier story experience (Kyle's layout), the whole
-              reading layer told as a narrative. Explicit choice, never the
-              default (design canon). */}
-          {readingStyle === "style2" && (
-            <div className="af-doc mt-10">
-              <DossierReport
-                payload={{
-                  ...(projectAccount ? (projectAccount as unknown as Record<string, unknown>) : {
-                    handle: projectX ?? "",
-                    display_name: token.name || token.symbol,
-                    website: siteUrl,
-                    headline: token.headline,
-                    avatar_url: token.imageUrl,
-                    report: { verdict: token.verdict, score_total: token.score },
-                  }),
-                  checkRuns: projectAccount?.checkRuns?.length ? projectAccount.checkRuns : diligenceChecks,
-                  basicFacts: projectAccount?.basicFacts?.length ? projectAccount.basicFacts : projectBasicFacts,
-                  basicFactLeads: projectAccount?.basicFactLeads ?? projectBasicFactLeads,
-                  webTeam: groundedProjectTeamMembers,
-                  webTeamLeads: projectAccount?.webTeamLeads ?? [],
-                }}
+          {/* Style 2 preserves the reading experience Kyle shipped on
+              2026-08-25, verbatim: the evidence ledger stays a collapsed
+              appendix here. Style 1 above carries the open-composition fix. */}
+          {readingStyle === "style2" && token.axes?.length > 0 && (
+            <details id="composition" className="evidence-appendix af-doc group mt-8 scroll-mt-28">
+              <summary className="evidence-appendix-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                <div>
+                  <p className="af-sec-label">Evidence ledger</p>
+                  <h2 className="af-h2 mt-2">{accountAxes.length > 0 ? "Two separate scores. Every dimension preserved." : compositionHeadline(token.axes.length)}</h2>
+                  <p className="af-prose mt-2">Open the complete score math and every evidence chapter.</p>
+                </div>
+                <span className="mono shrink-0 text-[10.5px] uppercase tracking-[0.1em] text-signal-lift">
+                  <span className="group-open:hidden">Open evidence</span>
+                  <span className="hidden group-open:inline">Close evidence</span>
+                </span>
+              </summary>
+              <div className="evidence-appendix-body">
+            {accountAxes.length > 0 && (
+              <ScoreComposition
+                heading={`The project account · ${projectAccount?.handle ?? "its own 100"}`}
+                rows={orderByPlainAxis(accountAxes.map(([key, a]) => ({
+                  axis: key,
+                  label: plainAxisLabel(key, axisLabel(key)),
+                  score: a.score,
+                  weight: a.weight,
+                  rationale: a.rationale,
+                  evidenceHref: "#investigation-people" as const,
+                })))}
+                totalScore={accountGoverning?.score_total ?? null}
+                challengeAnchor={shareView ? null : "#investigation-challenge"}
               />
-            </div>
+            )}
+            <ScoreComposition
+              heading={accountAxes.length > 0 ? "The token · its own 100" : "How the score is built"}
+              rows={tokenCompositionRows}
+              totalScore={token.score}
+              capNote={token.capApplied ? `limited to ${token.score}` : null}
+              challengeAnchor={shareView ? null : "#investigation-challenge"}
+            />
+                <div className="af-doc">
+                {projectAccount?.projectStrengthBands && (
+                  <DimensionChapters
+                    chapters={personDimensionChapters(projectAccount.projectStrengthBands)}
+                    checksHref="#investigation-methodology"
+                  />
+                )}
+                <DimensionChapters
+                  chapters={tokenDimensionChapters(token)}
+                  checksHref="#investigation-methodology"
+                />
+                </div>
+              </div>
+            </details>
           )}
 
           {(requiredGapChecks.length > 0 || readiness.status !== "ready") && <section

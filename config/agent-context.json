@@ -49,7 +49,7 @@
     "rules": [
       "auric-file-structure-is-canonical-report-reading-layer",
       "composition-section-always-visible-in-style1-never-an-appendix",
-      "dossier-beats-layout-only-as-style2-explicit-choice-never-default"
+      "style2-preserves-the-2026-08-25-report-experience-verbatim-never-default"
     ]
   }
 }

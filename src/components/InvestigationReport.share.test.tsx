@@ -48,7 +48,6 @@ vi.mock("./NamesakeCheck", () => ({ NamesakeCheck: () => { harness.livePanel("na
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => null }));
 vi.mock("./RingAlert", () => ({ RingAlert: () => { harness.livePanel("ring-alert"); return null; } }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => null }));
-vi.mock("./DossierReport", () => ({ DossierReport: () => <div data-panel="dossier-story" /> }));
 vi.mock("./SnapshotEvidenceControl", () => ({
   LiveSupplementalNotice: () => null,
   SnapshotEvidenceControl: () => null,
@@ -1011,10 +1010,10 @@ describe("investigation exact sharing", () => {
       },
     }));
 
-    // Style 1 (the Auric file) is the default: composition in the flow, no
-    // dossier story mounted.
-    expect(container.querySelector("#composition")).not.toBeNull();
-    expect(container.querySelector('[data-panel="dossier-story"]')).toBeNull();
+    // Style 1 (the Auric file) is the default: the composition reads as an
+    // open section in the flow, never a collapsed appendix.
+    expect(container.querySelector("section#composition")).not.toBeNull();
+    expect(container.querySelector("details.evidence-appendix")).toBeNull();
     const styleTwo = [...container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent?.trim() === "Style 2");
     const styleOne = [...container.querySelectorAll<HTMLButtonElement>("button")]
@@ -1024,14 +1023,16 @@ describe("investigation exact sharing", () => {
     expect(styleOne?.getAttribute("aria-pressed")).toBe("true");
 
     act(() => styleTwo?.click());
-    // Style 2 is the dossier story: completely different reading layer.
-    expect(container.querySelector("#composition")).toBeNull();
-    expect(container.querySelector('[data-panel="dossier-story"]')).not.toBeNull();
+    // Style 2 preserves the 2026-08-25 experience: the evidence ledger is a
+    // collapsed appendix again, exactly as it shipped.
+    expect(container.querySelector("section#composition")).toBeNull();
+    expect(container.querySelector("details.evidence-appendix#composition")).not.toBeNull();
+    expect(container.textContent).toContain("Evidence ledger");
     expect(styleTwo?.getAttribute("aria-pressed")).toBe("true");
 
     act(() => styleOne?.click());
-    expect(container.querySelector("#composition")).not.toBeNull();
-    expect(container.querySelector('[data-panel="dossier-story"]')).toBeNull();
+    expect(container.querySelector("section#composition")).not.toBeNull();
+    expect(container.querySelector("details.evidence-appendix")).toBeNull();
   });
 
   it("copy tldr mints a share link and pastes it under the verdict lines", async () => {
