@@ -317,6 +317,12 @@ async function callGrokExtract(system: string, user: string, maxTokens: number, 
     {
       input_tokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0,
       output_tokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0,
+      num_server_side_tools_used: typeof usage.num_server_side_tools_used === "number"
+        ? usage.num_server_side_tools_used
+        : undefined,
+      cost_in_usd_ticks: typeof usage.cost_in_usd_ticks === "number" || typeof usage.cost_in_usd_ticks === "string"
+        ? usage.cost_in_usd_ticks
+        : undefined,
     },
     0,
     op,

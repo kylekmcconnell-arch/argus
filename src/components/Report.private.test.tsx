@@ -547,6 +547,48 @@ describe("private person report evidence boundary", () => {
     expect(synthesis).toContain("Critical protocol loss");
   });
 
+  it("does not treat a temporarily unavailable X probe as a missing-account alert", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier: Dossier = {
+      ...base,
+      handle: "@driftprotocol",
+      display_name: "Drift Protocol",
+      x_account_status: "temporarily_unavailable",
+      x_account_status_source_url: "https://x.com/driftprotocol",
+      x_account_status_captured_at: "2026-08-19T12:00:00.000Z",
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const alert = container.querySelector('[aria-label="Material subject alerts"]');
+    expect(alert?.textContent ?? "").not.toContain("Official X account unavailable");
+    expect(alert?.textContent ?? "").not.toContain("Official X account suspended");
+    expect(container.textContent).not.toContain("X profile metrics unavailable");
+  });
+
+  it("keeps a frozen unavailable notice on an old saved report", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier: Dossier = {
+      ...base,
+      handle: "@driftprotocol",
+      display_name: "Drift Protocol",
+      followers: "N/A",
+      joined: "N/A",
+      x_account_status: "unavailable",
+      x_account_status_source_url: "https://x.com/driftprotocol",
+      x_account_status_captured_at: "2026-07-24T12:00:00.000Z",
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const alert = container.querySelector('[aria-label="Material subject alerts"]');
+    expect(alert?.textContent).toContain("Official X account unavailable");
+  });
+
   it("mounts the complete provider ledgers in a standalone report", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier: Dossier = {

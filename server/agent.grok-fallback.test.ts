@@ -82,7 +82,11 @@ describe("Grok analyst primary", () => {
             }),
           },
         }],
-        usage: { prompt_tokens: 800, completion_tokens: 120 },
+        usage: {
+          prompt_tokens: 800,
+          completion_tokens: 120,
+          cost_in_usd_ticks: 84_000_000,
+        },
       }), { status: 200, headers: { "content-type": "application/json" } });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -113,7 +117,13 @@ describe("Grok analyst primary", () => {
       "https://api.x.ai/v1/chat/completions",
     ]);
     expect(result.cost.calls).toEqual(expect.arrayContaining([
-      expect.objectContaining({ provider: "grok", op: "record_verdict", status: "succeeded" }),
+      expect.objectContaining({
+        provider: "grok",
+        op: "record_verdict",
+        status: "succeeded",
+        usd: 0.0084,
+        meta: expect.stringContaining("exact xAI cost"),
+      }),
     ]));
     expect(result.cost.calls.some((line) => line.provider === "claude")).toBe(false);
   });

@@ -1663,6 +1663,7 @@ export async function discoverGrokBasicFactLeadsDetailed(
       discoveryPrompt(ctx, batchQuestions, phase),
       {
         maxToolCalls: phase === "repair" ? REPAIR_SEARCH_USES : PRIMARY_SEARCH_USES_PER_BATCH,
+        tools: ["web_search"],
         cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grok:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}`,
         bypassCache: options.bypassCache,
         claimProviderCall: () => {

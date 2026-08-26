@@ -37,6 +37,7 @@ import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fm
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance, isConfirmedOfficialSiteAccessDenial, officialSiteAccessDeniedFinding, type SiteSubstance } from "./adapters/sitecheck";
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
+import { shouldAnnounceOfficialXAccountStatus, xAccountIdentityEstablished } from "../src/lib/xAccountState";
 import { collectDomainRegistration, deriveLaunchWindow } from "./adapters/domainAge";
 import { checkLeaderDepartures, type LeaderDepartureCheck } from "./adapters/peopledatalabs";
 import { enrichFirstPartyTeamAvatars } from "./adapters/teamEnrichment";
@@ -668,21 +669,37 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
     }
     ctx.emit({ phase: "P0 · Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} · ${ctx.evidence.profile.followers} followers · joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   } else if (prof) {
-    ctx.evidence.profile.profile_collection_state = "unavailable";
-    ctx.evidence.profile.profile_provider = "twitterapi";
-    ctx.evidence.profile.profile_captured_at = undefined;
+    const identityEstablished = xAccountIdentityEstablished(ctx.evidence.profile);
     ctx.evidence.profile.x_account_status = prof.accountStatus;
     ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
     ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
-    ctx.emit({
-      phase: "P0 · Intake",
-      label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
-      detail: prof.accountStatus === "suspended"
-        ? `${prof.handle} currently renders X's terminal Account suspended state. Continuing through the verified official site and public records.`
-        : `${prof.handle} currently has no live public X profile. Continuing through the verified official site and public records.`,
-      source: "x.com",
-      tone: "warn",
-    });
+    if (!identityEstablished && prof.accountStatus !== "temporarily_unavailable") {
+      ctx.evidence.profile.profile_collection_state = "unavailable";
+      ctx.evidence.profile.profile_provider = "twitterapi";
+      ctx.evidence.profile.profile_captured_at = undefined;
+    }
+    if (shouldAnnounceOfficialXAccountStatus({
+      accountStatus: prof.accountStatus,
+      identityEstablished,
+    })) {
+      ctx.emit({
+        phase: "P0 · Intake",
+        label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
+        detail: prof.accountStatus === "suspended"
+          ? `${prof.handle} currently renders X's terminal Account suspended state. Continuing through the verified official site and public records.`
+          : `${prof.handle} currently has no live public X profile. Continuing through the verified official site and public records.`,
+        source: "x.com",
+        tone: "warn",
+      });
+    } else if (prof.accountStatus === "temporarily_unavailable") {
+      ctx.emit({
+        phase: "P0 · Intake",
+        label: "X profile probe temporarily unavailable",
+        detail: `${prof.handle}: X did not return an explicit Account suspended or account does not exist page. The probe is temporarily unavailable; identity already established elsewhere is left in place.`,
+        source: "x.com",
+        tone: "neutral",
+      });
+    }
   } else {
     ctx.evidence.profile.profile_collection_state = "unavailable";
     ctx.evidence.profile.profile_provider = "twitterapi";

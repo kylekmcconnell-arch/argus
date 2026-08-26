@@ -113,7 +113,7 @@ export interface SubjectProfile {
    * separate from identity resolution: an official site can still prove which
    * account belongs to a project even when X has suspended that account.
    */
-  x_account_status?: "active" | "suspended" | "unavailable";
+  x_account_status?: "active" | "suspended" | "unavailable" | "temporarily_unavailable";
   /** Public X profile URL used to establish the frozen account state. */
   x_account_status_source_url?: string;
   /** Capture time for the public account-state observation. */
@@ -883,7 +883,7 @@ export interface WebTeamMember {
   avatarContentHash?: string;
   avatarCapturedAt?: string;
   followers?: number;
-  accountStatus?: "active" | "suspended" | "unavailable";
+  accountStatus?: "active" | "suspended" | "unavailable" | "temporarily_unavailable";
   enrichmentProvider?: string;
   enrichmentSourceUrl?: string;
 }

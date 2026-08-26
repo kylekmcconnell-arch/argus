@@ -14,6 +14,11 @@ import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower, WebTeamMember } from "../../src/data/evidence";
 import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
+import {
+  classifyPublicXAccountPage,
+  shouldAnnounceOfficialXAccountStatus,
+  xAccountIdentityEstablished,
+} from "../../src/lib/xAccountState";
 import { NOTABLE_ACCOUNTS } from "./notableAccounts";
 import { groundedSearch, groundedSearchProvisioned } from "./groundedSearch";
 import { captureTimestamp } from "../captureTime";
@@ -24,6 +29,12 @@ const asRecord = (value: unknown): JsonRecord =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 const optionalNumber = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
+const optionalCostTicks = (value: unknown): number | string | undefined =>
+  typeof value === "number" && Number.isFinite(value)
+    ? value
+    : typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value.trim())
+      ? value.trim()
+      : undefined;
 
 const twitterProviderFailure = (payload: JsonRecord): string | null => {
   const status = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
@@ -35,22 +46,17 @@ const twitterProviderFailure = (payload: JsonRecord): string | null => {
 
 // Grok search via the current Responses API + tools (the legacy search_parameters
 // Live Search API was retired -> 410 Gone). Returns the model's text, or null.
-/** Ceiling on live-search spend for a single audit, in the cost ledger's own
- * accounting. This is a RUNAWAY GUARD ONLY, deliberately set well above a
- * normal audit: measured discovery alone books ~$3-4 of ledger-Grok (many
- * live-search calls, each billed per source), and a full audit does more. The
- * previous $3.00 value was chosen against the old under-counting ledger and
- * silently truncated normal collection mid-run once the ledger was corrected;
- * $8 clears a normal audit (measured $3-4 of
- * discovery-Grok, plus the rest of the pipeline) while still tripping a
- * pathological multi-times-normal loop. NOTE: the ledger's per-source
- * estimate is uncalibrated against the real xAI invoice, so these are
- * ledger-dollars, not billed dollars; the guard is sized in the same units it
- * measures. */
+/** Ceiling on live-search spend for a single audit. Successful xAI responses
+ * contribute the provider's exact usage.cost_in_usd_ticks charge; only calls
+ * whose response omits that field use the conservative model/tool estimate. */
 const GROK_AUDIT_SPEND_CEILING_USD = Number(env("ARGUS_GROK_AUDIT_CEILING_USD") || "8.00");
+
+export type GrokSearchTool = "web_search" | "x_search";
 
 export async function grokSearch(system: string, user: string, opts?: {
   maxToolCalls?: number;
+  /** Limit the provider to the evidence corpus the question actually needs. */
+  tools?: readonly GrokSearchTool[];
   cacheKey?: string;
   /** Force a fresh provider call for release canaries and failover checks. */
   bypassCache?: boolean;
@@ -59,6 +65,9 @@ export async function grokSearch(system: string, user: string, opts?: {
 }): Promise<string | null> {
   const key = env("XAI_API_KEY");
   if (!key) return null;
+  const requestedTools = opts?.tools?.length
+    ? [...new Set(opts.tools)]
+    : ["web_search", "x_search"] satisfies GrokSearchTool[];
   // 24h read-through cache: a subject's team/affiliations don't change
   // hour-to-hour, and live search is the dominant spend. Keyed by the CALLER's
   // stable subject key (never the raw prompt — prompts embed volatile posts).
@@ -66,11 +75,10 @@ export async function grokSearch(system: string, user: string, opts?: {
     const hit = await cacheGet(opts.cacheKey);
     if (hit) return hit;
   }
-  // COST: xAI bills live search PER SOURCE on top of tokens, and an unbounded
-  // agentic loop can pull dozens of sources per call. max_tool_calls caps the
-  // search loop (the dominant spend); if the API rejects the param we retry
-  // once without it. Every physical attempt is recorded, including the rejected
-  // compatibility call and transport/parse failures.
+  // COST: xAI bills tokens plus successful server-side tool invocations.
+  // max_tool_calls caps the search loop; if the API rejects the param we retry
+  // once without it. Every physical attempt is recorded, including rejected
+  // compatibility calls and transport/parse failures.
   const call = async (withCap: boolean): Promise<{ status: number | null; text: string | null; budgetExhausted?: boolean }> => {
     if (opts?.claimProviderCall && !opts.claimProviderCall()) {
       return { status: null, text: null, budgetExhausted: true };
@@ -92,7 +100,7 @@ export async function grokSearch(system: string, user: string, opts?: {
         body: JSON.stringify({
           model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
           input: [{ role: "system", content: system }, { role: "user", content: user }],
-          tools: [{ type: "web_search" }, { type: "x_search" }],
+          tools: requestedTools.map((type) => ({ type })),
           ...(withCap ? { max_tool_calls: opts?.maxToolCalls ?? 3 } : {}),
         }),
         signal: AbortSignal.timeout(45000),
@@ -121,13 +129,21 @@ export async function grokSearch(system: string, user: string, opts?: {
       input_tokens: optionalNumber(usageRecord.input_tokens),
       output_tokens: optionalNumber(usageRecord.output_tokens),
       num_sources_used: optionalNumber(usageRecord.num_sources_used),
+      num_server_side_tools_used: optionalNumber(usageRecord.num_server_side_tools_used),
+      cost_in_usd_ticks: optionalCostTicks(usageRecord.cost_in_usd_ticks),
     };
     const nestedText = output
       .flatMap((item) => Array.isArray(item.content) ? item.content.map(asRecord) : [])
       .map((content) => typeof content.text === "string" ? content.text : "")
       .join(" ");
     const text = typeof d.output_text === "string" ? d.output_text : nestedText;
-    console.log("[grok-usage]", JSON.stringify({ in: usage.input_tokens, out: usage.output_tokens, toolCalls }));
+    console.log("[grok-usage]", JSON.stringify({
+      in: usage.input_tokens,
+      out: usage.output_tokens,
+      toolCalls,
+      billableToolCalls: usage.num_server_side_tools_used,
+      costTicks: usage.cost_in_usd_ticks,
+    }));
     addGrokUsage(
       usage,
       toolCalls,
@@ -245,7 +261,7 @@ export async function generalWebSearch(system: string, user: string, opts?: {
     if (viaGrounded || (!groundedUnavailable && !providerFallbacksEnabled())) return viaGrounded;
   }
   if (env("XAI_API_KEY")) {
-    const viaGrok = await grokSearch(system, user, opts);
+    const viaGrok = await grokSearch(system, user, { ...opts, tools: ["web_search"] });
     if (viaGrok || !providerFallbacksEnabled() || !env("ANTHROPIC_API_KEY")) return viaGrok;
   }
   if (env("ANTHROPIC_API_KEY") && providerFallbacksEnabled()) {
@@ -303,7 +319,7 @@ async function twFetch(url: string, key: string, tries = 2): Promise<Response | 
 // ── twitterapi.io: profile ───────────────────────────────────────────────
 export interface XProfile {
   handle: string;
-  accountStatus?: "active" | "suspended" | "unavailable";
+  accountStatus?: "active" | "suspended" | "unavailable" | "temporarily_unavailable";
   statusSourceUrl?: string;
   statusCapturedAt?: string;
   name?: string;
@@ -335,31 +351,33 @@ export async function publicXAccountState(
     });
   } catch {
     recordCall("x-public", "account-state", 0, `${u} · transport_error`, "failed");
-    return null;
+    return {
+      handle: `@${u}`,
+      accountStatus: "temporarily_unavailable",
+      statusSourceUrl,
+      statusCapturedAt: captureTimestamp(),
+    };
   }
-  if (!response.ok) {
-    recordCall("x-public", "account-state", 0, `${u} · http_${response.status}`, "failed");
-    return null;
-  }
-  let html: string;
+  let html = "";
   try {
     html = await response.text();
   } catch {
     recordCall("x-public", "account-state", 0, `${u} · unreadable`, "failed");
-    return null;
+    return {
+      handle: `@${u}`,
+      accountStatus: "temporarily_unavailable",
+      statusSourceUrl,
+      statusCapturedAt: captureTimestamp(),
+    };
   }
-  const suspended = /\bAccount suspended\b/i.test(html)
-    || /unavailable_reason\s*[:=]\s*["']Suspended["']/i.test(html)
-    || /unavailable_reason\\?["']?\s*:\s*\\?["']Suspended\\?["']/i.test(html);
-  const unavailable = suspended
-    || /\bThis account (?:doesn['’]t|does not) exist\b/i.test(html)
-    || /unavailable_reason\s*[:=]\s*["'](?:NotFound|Unavailable|Deactivated)["']/i.test(html);
-  if (!unavailable) {
-    recordCall("x-public", "account-state", 0, `${u} · no_terminal_state`, "succeeded");
-    return null;
-  }
-  const accountStatus = suspended ? "suspended" : "unavailable";
-  recordCall("x-public", "account-state", 0, `${u} · ${accountStatus}`, "succeeded");
+  const accountStatus = classifyPublicXAccountPage(html);
+  recordCall(
+    "x-public",
+    "account-state",
+    0,
+    `${u} · ${accountStatus}${response.ok ? "" : ` · http_${response.status}`}`,
+    accountStatus === "temporarily_unavailable" ? "partial" : "succeeded",
+  );
   return {
     handle: `@${u}`,
     accountStatus,
@@ -2816,21 +2834,38 @@ export const xAdapter: Adapter = {
       }
       ctx.emit({ phase: "P0 · Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle}, ${fmtFollowers(prof.followers)} followers`, source: "twitterapi.io", tone: "neutral" });
     } else if (prof) {
-      ctx.evidence.profile.profile_collection_state = "unavailable";
-      ctx.evidence.profile.profile_provider = "twitterapi";
-      ctx.evidence.profile.profile_captured_at = undefined;
+      const identityEstablished = xAccountIdentityEstablished(ctx.evidence.profile)
+        || Boolean(haveProfile);
       ctx.evidence.profile.x_account_status = prof.accountStatus;
       ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
       ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
-      ctx.emit({
-        phase: "P0 · Intake",
-        label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
-        detail: prof.accountStatus === "suspended"
-          ? `${prof.handle} currently renders X's terminal Account suspended state. Identity discovery continues through the official site and other public records.`
-          : `${prof.handle} currently has no live public X profile. Identity discovery continues through the official site and other public records.`,
-        source: "x.com",
-        tone: "warn",
-      });
+      if (!identityEstablished && prof.accountStatus !== "temporarily_unavailable") {
+        ctx.evidence.profile.profile_collection_state = "unavailable";
+        ctx.evidence.profile.profile_provider = "twitterapi";
+        ctx.evidence.profile.profile_captured_at = undefined;
+      }
+      if (shouldAnnounceOfficialXAccountStatus({
+        accountStatus: prof.accountStatus,
+        identityEstablished,
+      })) {
+        ctx.emit({
+          phase: "P0 · Intake",
+          label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
+          detail: prof.accountStatus === "suspended"
+            ? `${prof.handle} currently renders X's terminal Account suspended state. Identity discovery continues through the official site and other public records.`
+            : `${prof.handle} currently has no live public X profile. Identity discovery continues through the official site and other public records.`,
+          source: "x.com",
+          tone: "warn",
+        });
+      } else if (prof.accountStatus === "temporarily_unavailable") {
+        ctx.emit({
+          phase: "P0 · Intake",
+          label: "X profile probe temporarily unavailable",
+          detail: `${prof.handle}: X did not return an explicit Account suspended or account does not exist page. The probe is temporarily unavailable; identity already established elsewhere is left in place.`,
+          source: "x.com",
+          tone: "neutral",
+        });
+      }
     }
 
     // recent posts (skip if already pulled upstream for claim extraction)

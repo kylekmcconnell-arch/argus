@@ -230,7 +230,12 @@ async function classifyImage(image: TrustedImage): Promise<ReturnType<typeof val
         try {
           const body = await response.json() as {
             choices?: Array<{ message?: { content?: unknown } }>;
-            usage?: { prompt_tokens?: number; completion_tokens?: number };
+            usage?: {
+              prompt_tokens?: number;
+              completion_tokens?: number;
+              num_server_side_tools_used?: number;
+              cost_in_usd_ticks?: number | string;
+            };
           };
           const content = body.choices?.[0]?.message?.content;
           const parsedRaw = (() => {
@@ -239,7 +244,12 @@ async function classifyImage(image: TrustedImage): Promise<ReturnType<typeof val
           })();
           const parsed = validateVisionInput(parsedRaw);
           addGrokUsage(
-            { input_tokens: body.usage?.prompt_tokens, output_tokens: body.usage?.completion_tokens },
+            {
+              input_tokens: body.usage?.prompt_tokens,
+              output_tokens: body.usage?.completion_tokens,
+              num_server_side_tools_used: body.usage?.num_server_side_tools_used,
+              cost_in_usd_ticks: body.usage?.cost_in_usd_ticks,
+            },
             0,
             "profile-photo-integrity",
             parsed ? "succeeded" : "partial",
