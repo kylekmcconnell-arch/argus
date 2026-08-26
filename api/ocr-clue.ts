@@ -3,7 +3,7 @@
 // wallet addresses, ENS/basename/.sol names, and @handles — so the find-wallet
 // flow can resolve them. Gated on XAI_API_KEY; Claude is fallback-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { claudeVision, grokVision, parseJsonObject, providerFallbacksEnabled } from "./_llm";
+import { claudeVision, grokVision, parseJsonObject, providerFallbacksEnabled } from "./_llm.js";
 
 export const config = { maxDuration: 30 };
 

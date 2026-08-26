@@ -17,7 +17,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
-import { claudeMessages, grokChat, providerFallbacksEnabled } from "./_llm";
+import { claudeMessages, grokChat, providerFallbacksEnabled } from "./_llm.js";
 
 export const config = { maxDuration: 60 };
 
