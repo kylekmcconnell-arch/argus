@@ -50,7 +50,7 @@ explicit instruction in the task at hand:
 3. Style 2 preserves the report experience shipped on 2026-08-25, verbatim:
    the dossier story (`DossierReport`) opening the person report with the
    full flow kept below it, and the collapsed evidence-ledger appendix on
-   investigations. It is the reader's explicit choice via the style buttons
+   investigation and token scans. It is the reader's explicit choice via the style buttons
    or `?reportStyle=2` — never the default. Style 1 (the Auric File) remains
    the default everywhere. Do not restyle Style 2 without owner sign-off.
 

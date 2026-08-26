@@ -429,4 +429,25 @@ describe("token report supplemental evidence boundary", () => {
     expect(copiedReport).toContain("RISK WARNING: FAIL");
     expect(copiedReport).toContain("CHECKS INCOMPLETE");
   });
+
+  it("offers Style 1 and Style 2 on token scans, with Style 2 as the evidence-ledger appendix", () => {
+    render(dossier({}));
+
+    // Style 1 (the default): the composition reads as an open section.
+    expect(container.querySelector("section#composition")).not.toBeNull();
+    expect(container.querySelector("details.evidence-appendix")).toBeNull();
+    const styleTwo = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Style 2");
+    expect(styleTwo).toBeDefined();
+
+    act(() => styleTwo?.click());
+    expect(container.querySelector("section#composition")).toBeNull();
+    expect(container.querySelector("details.evidence-appendix#composition")).not.toBeNull();
+    expect(container.textContent).toContain("Evidence ledger");
+
+    const styleOne = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Style 1");
+    act(() => styleOne?.click());
+    expect(container.querySelector("section#composition")).not.toBeNull();
+  });
 });

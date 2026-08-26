@@ -57,6 +57,7 @@ import { ScoreComposition } from "./ScoreComposition";
 import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
+import { initialReportStyle, persistReportStyle, type ReportStyle } from "../lib/reportStyle";
 import { deriveDecisionDiscovery, deriveNoticedSignals, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
@@ -243,6 +244,13 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const otherLinks = d.socials.filter((x) => x.label !== "site" && !/x\.com|twitter\.com/i.test(x.url));
   const [watched, setWatched] = useState(() => isWatched(d.address));
   const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
+  // Style 1 (Auric file, default) vs Style 2 (the evidence-ledger appendix
+  // presentation), shareable via ?reportStyle=1|2 like every other scan.
+  const [readingStyle, setReadingStyle] = useState<ReportStyle>(initialReportStyle);
+  const chooseReadingStyle = (style: ReportStyle) => {
+    setReadingStyle(style);
+    persistReportStyle(style);
+  };
   const [copiedTxt, setCopiedTxt] = useState(false);
   const copyReport = () => {
     navigator.clipboard?.writeText(tokenReportText(d, readiness, presentation, {
@@ -547,26 +555,61 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           shareState={shareState}
           onShare={() => void share()}
           onExportPdf={() => printReportPdf(d.name || d.symbol)}
+          readingStyle={readingStyle}
+          onReadingStyle={chooseReadingStyle}
         />
 
         {/* the composition: the file's table of contents, Auric File framing */}
-        <section id="composition" className="af-doc mt-10 scroll-mt-28">
-          <p className="af-sec-label">The composition</p>
-          <h2 className="af-h2 mt-3">{compositionHeadline(d.axes.length)}</h2>
-          <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
-        <ScoreComposition
-          rows={compositionRows}
-          totalScore={d.score}
-          capNote={d.capApplied ? `limited to ${d.score}` : null}
-          challengeAnchor={shareView ? null : "#token-challenge"}
-        />
+        {readingStyle === "style1" && (
+          <section id="composition" className="af-doc mt-10 scroll-mt-28">
+            <p className="af-sec-label">The composition</p>
+            <h2 className="af-h2 mt-3">{compositionHeadline(d.axes.length)}</h2>
+            <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
+          <ScoreComposition
+            rows={compositionRows}
+            totalScore={d.score}
+            capNote={d.capApplied ? `limited to ${d.score}` : null}
+            challengeAnchor={shareView ? null : "#token-challenge"}
+          />
 
-        </section>
+          </section>
+        )}
 
         {/* the reading spine: each weighted dimension as its own chapter */}
-        <div className="af-doc">
-          <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
-        </div>
+        {readingStyle === "style1" && (
+          <div className="af-doc">
+            <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
+          </div>
+        )}
+
+        {/* Style 2: the evidence-ledger appendix presentation, matching what
+            Style 2 means on investigation scans. */}
+        {readingStyle === "style2" && (
+          <details id="composition" className="evidence-appendix af-doc group mt-8 scroll-mt-28">
+            <summary className="evidence-appendix-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+              <div>
+                <p className="af-sec-label">Evidence ledger</p>
+                <h2 className="af-h2 mt-2">{compositionHeadline(d.axes.length)}</h2>
+                <p className="af-prose mt-2">Open the complete score math and every evidence chapter.</p>
+              </div>
+              <span className="mono shrink-0 text-[10.5px] uppercase tracking-[0.1em] text-signal-lift">
+                <span className="group-open:hidden">Open evidence</span>
+                <span className="hidden group-open:inline">Close evidence</span>
+              </span>
+            </summary>
+            <div className="evidence-appendix-body">
+              <ScoreComposition
+                rows={compositionRows}
+                totalScore={d.score}
+                capNote={d.capApplied ? `limited to ${d.score}` : null}
+                challengeAnchor={shareView ? null : "#token-challenge"}
+              />
+              <div className="af-doc">
+                <DimensionChapters chapters={tokenDimensionChapters(d)} checksHref="#token-methodology" />
+              </div>
+            </div>
+          </details>
+        )}
 
         {/* panels */}
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
