@@ -30,7 +30,7 @@ const POLICY_PATHS = [
   ".github/workflows/report-lane-ownership.yml",
   "scripts/check-report-lane-ownership.mjs",
   "scripts/report-lane-ownership-policy.mjs",
-  "scripts/report-lane-ownership-policy.test.mjs",
+  "scripts/report-lane-ownership-policy.node-tests.mjs",
 ];
 
 const pathMatches = (file, pattern) => pattern.endsWith("/")
@@ -47,14 +47,17 @@ export function evaluateReportLaneOwnership({ actor, baseRef, files, approvals =
   const errors = [];
   const branchOwner = REPORT_LANE_BRANCHES[baseRef];
 
-  if (branchOwner && normalizedActor.toLowerCase() !== branchOwner.toLowerCase()) {
-    errors.push(`${baseRef} is owned by @${branchOwner}; @${normalizedActor || "unknown"} cannot edit this staging branch.`);
-  }
-
   const kyleFiles = changedUnder(files, "src/reports/kyle/");
   const enigmaFiles = changedUnder(files, "src/reports/enigma/");
   const sharedFiles = changedShared(files);
   const policyFiles = changedPolicy(files);
+  const policyOnlyMaintenance = policyFiles.length > 0 && policyFiles.length === files.length;
+  const kyleMaintainingPolicy = normalizedActor.toLowerCase() === REPORT_LANE_OWNERS.kyle.toLowerCase()
+    && policyOnlyMaintenance;
+
+  if (branchOwner && normalizedActor.toLowerCase() !== branchOwner.toLowerCase() && !kyleMaintainingPolicy) {
+    errors.push(`${baseRef} is owned by @${branchOwner}; @${normalizedActor || "unknown"} cannot edit this staging branch.`);
+  }
 
   if (kyleFiles.length > 0 && normalizedActor.toLowerCase() !== REPORT_LANE_OWNERS.kyle.toLowerCase()) {
     errors.push(`Kyle-owned report files can only be changed by @${REPORT_LANE_OWNERS.kyle}: ${kyleFiles.join(", ")}`);

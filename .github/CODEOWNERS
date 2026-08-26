@@ -21,4 +21,4 @@
 /.github/workflows/report-lane-ownership.yml @kylekmcconnell-arch
 /scripts/check-report-lane-ownership.mjs @kylekmcconnell-arch
 /scripts/report-lane-ownership-policy.mjs @kylekmcconnell-arch
-/scripts/report-lane-ownership-policy.test.mjs @kylekmcconnell-arch
+/scripts/report-lane-ownership-policy.node-tests.mjs @kylekmcconnell-arch
