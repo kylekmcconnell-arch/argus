@@ -1759,20 +1759,15 @@ export function InvestigationReport({
               The account's dimensions lead with the team; the token's follow.
               Two recorded scores stay two honest strips, never blended. The
               full ledger is progressively disclosed after the decision brief. */}
+          {/* the composition: always visible, never an appendix (Enigma's
+              canon: this is the file's table of contents, with the working
+              dropdowns and the jump links into each chapter). */}
           {token.axes?.length > 0 && (
-            <details id="composition" className="evidence-appendix af-doc group mt-8 scroll-mt-28">
-              <summary className="evidence-appendix-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                <div>
-                  <p className="af-sec-label">Evidence ledger</p>
-                  <h2 className="af-h2 mt-2">{accountAxes.length > 0 ? "Two separate scores. Every dimension preserved." : compositionHeadline(token.axes.length)}</h2>
-                  <p className="af-prose mt-2">Open the complete score math and every evidence chapter.</p>
-                </div>
-                <span className="mono shrink-0 text-[10.5px] uppercase tracking-[0.1em] text-signal-lift">
-                  <span className="group-open:hidden">Open evidence</span>
-                  <span className="hidden group-open:inline">Close evidence</span>
-                </span>
-              </summary>
-              <div className="evidence-appendix-body">
+            <section id="composition" className="af-doc mt-10 scroll-mt-28">
+              <p className="af-sec-label">The composition</p>
+              <h2 className="af-h2 mt-3">{accountAxes.length > 0 ? "Two separate scores. Every dimension preserved." : compositionHeadline(token.axes.length)}</h2>
+              <p className="af-prose">Each row is a chapter of this file. The weight is how much it counts. Open a row for the short version, or jump straight to its chapter.</p>
+              <div>
             {accountAxes.length > 0 && (
               <ScoreComposition
                 heading={`The project account · ${projectAccount?.handle ?? "its own 100"}`}
@@ -1811,7 +1806,7 @@ export function InvestigationReport({
                 />
                 </div>
               </div>
-            </details>
+            </section>
           )}
 
           {(requiredGapChecks.length > 0 || readiness.status !== "ready") && <section
