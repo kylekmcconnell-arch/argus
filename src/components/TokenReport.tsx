@@ -63,6 +63,7 @@ import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, i
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
+import { useReportLane } from "../reports/shared/ReportLaneContext";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -142,6 +143,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 }
 
 export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief, shareView = false }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
+  const reportLane = useReportLane();
   const isEarn = isCanonicalEarnToken(d.chain, d.address);
   const arkhamEnabled = arkhamProviderEnabled();
   const arkhamDeployer = arkhamEnabled && d.deployer && !sameWalletAddress(d.deployer, d.address) ? d.deployer : null;
@@ -149,7 +151,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const caseLabel = publicCaseLabel(versionContext?.caseId);
   const embeddedFacet = Boolean(d.viewVersionContext || d.viewPersistence);
   const livePersistence = d.viewPersistence ?? d.persistence;
-  const reportStyle = 2 as const;
+  const reportStyle = reportLane.definition.presentationStyle;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
@@ -519,9 +521,14 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           composition={compositionRows.length > 0 ? compositionRows : undefined}
         />
 
-        <ReportStickyTableOfContents items={reportNavItems} />
+        {reportLane.definition.navigation === "sticky" && (
+          <ReportStickyTableOfContents items={reportNavItems} />
+        )}
 
-        <ReportExperienceLayout items={reportNavItems} showGuideNavigation={false}>
+        <ReportExperienceLayout
+          items={reportNavItems}
+          showGuideNavigation={reportLane.definition.navigation === "guide"}
+        >
         <TokenStory dossier={d} />
 
         {!shareView && (

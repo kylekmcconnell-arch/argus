@@ -114,6 +114,7 @@ import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { SocialActivityPanel } from "./SocialActivityPanel";
 import { reportOpeningNarrative } from "../lib/reportNarrative";
+import { useReportLane } from "../reports/shared/ReportLaneContext";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import {
   SUBJECT_LEAD_RELATIONSHIP,
@@ -1626,8 +1627,9 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
 }
 
 export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
+  const reportLane = useReportLane();
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
-  const reportStyle = 2 as const;
+  const reportStyle = reportLane.definition.presentationStyle;
   const { role } = useArgusAuth();
   const f = dossier;
   const hasTerminalXState = f.x_account_status === "suspended" || f.x_account_status === "unavailable";
@@ -3411,7 +3413,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         </section>
 
-        <ReportStickyTableOfContents items={reportNavItems} />
+        {reportLane.definition.navigation === "sticky" && (
+          <ReportStickyTableOfContents items={reportNavItems} />
+        )}
 
         <InvestigationDecisionCanvas
           presentationStyle={reportStyle}
@@ -3473,7 +3477,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
         <ReportExperienceLayout
           items={reportNavItems}
-          showGuideNavigation={false}
+          showGuideNavigation={reportLane.definition.navigation === "guide"}
         >
         {reportStyle === 2 && (
           <>

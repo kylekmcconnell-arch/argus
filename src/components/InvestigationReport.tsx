@@ -105,6 +105,7 @@ import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
 import { projectWebSurfaces } from "../lib/projectWebSurfaces";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import type { DecisionLensId } from "../intelligence/types";
+import { useReportLane } from "../reports/shared/ReportLaneContext";
 
 // Kept only as a rollback seam while the canonical decision brief settles.
 // This is not a runtime/user flag and must remain false until the legacy hero
@@ -741,10 +742,11 @@ export function InvestigationReport({
   /** Read-only share capability view: every workspace action is absent. */
   shareView?: boolean;
 }) {
+  const reportLane = useReportLane();
   const arkhamEnabled = arkhamProviderEnabled();
   const [spent, setSpent] = useState(0);
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
-  const reportStyle = 2 as const;
+  const reportStyle = reportLane.definition.presentationStyle;
   const [watched, setWatched] = useState(() => isWatched(inv.token.address));
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const versionContext = inv.versionContext;
@@ -1945,12 +1947,17 @@ export function InvestigationReport({
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 
-        <ReportStickyTableOfContents
-          items={reportNavItems}
-          stickyOffsetClass="top-[101px] sm:top-[65px]"
-        />
+        {reportLane.definition.navigation === "sticky" && (
+          <ReportStickyTableOfContents
+            items={reportNavItems}
+            stickyOffsetClass="top-[101px] sm:top-[65px]"
+          />
+        )}
 
-        <ReportExperienceLayout items={reportNavItems} showGuideNavigation={false}>
+        <ReportExperienceLayout
+          items={reportNavItems}
+          showGuideNavigation={reportLane.definition.navigation === "guide"}
+        >
 
         {projectAccount?.intelligence && (
           <PointInTimeIntelligencePanel
