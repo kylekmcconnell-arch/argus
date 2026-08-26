@@ -43,14 +43,16 @@ explicit instruction in the task at hand:
 1. The Auric File structure is the canonical report reading layer on every
    scan surface: warm paper, serif judgment headlines, the composition strip,
    dimension chapters, the case grid, and receipt popovers.
-2. The composition section (`#composition`: the score strips and the dimension
-   chapters) stays ALWAYS visible in the reading flow. Never collapse it into
-   a `<details>`/appendix, remove its expanding rows, or strip its
-   "Read the evidence" and "Challenge this" links.
-3. The dossier-beats layout (`DossierReport`) renders only as Style 2, the
-   reader's explicit choice via the style buttons or `?reportStyle=2`. It is
-   never the default report layer, and Style 1 (the Auric File) remains the
-   default everywhere.
+2. In Style 1 the composition section (`#composition`: the score strips and
+   the dimension chapters) stays ALWAYS visible in the reading flow. Never
+   collapse it into a `<details>`/appendix, remove its expanding rows, or
+   strip its "Read the evidence" and "Challenge this" links.
+3. Style 2 preserves the report experience shipped on 2026-08-25, verbatim:
+   the dossier story (`DossierReport`) opening the person report with the
+   full flow kept below it, and the collapsed evidence-ledger appendix on
+   investigations. It is the reader's explicit choice via the style buttons
+   or `?reportStyle=2` — never the default. Style 1 (the Auric File) remains
+   the default everywhere. Do not restyle Style 2 without owner sign-off.
 
 A redesign that conflicts with these stops before shipping and opens an issue
 labeled `needs-routing` instead.

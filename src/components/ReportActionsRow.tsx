@@ -11,7 +11,7 @@ export type ShareState = "idle" | "creating" | "copied" | "error";
 
 const STYLE_OPTIONS: { value: ReportStyle; label: string; title: string }[] = [
   { value: "style1", label: "Style 1", title: "The Auric file: composition, chapters, and every evidence section in the reading flow" },
-  { value: "style2", label: "Style 2", title: "The dossier story: the narrative reading experience" },
+  { value: "style2", label: "Style 2", title: "The story presentation: the dossier opening, with the evidence ledger as an appendix" },
 ];
 
 export function ReportActionsRow({ canShare, shareState, onShare, onExportPdf, readingStyle, onReadingStyle }: {
