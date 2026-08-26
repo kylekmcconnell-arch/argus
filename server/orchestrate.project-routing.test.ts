@@ -335,6 +335,27 @@ describe("provider-backed project routing", () => {
     ]);
   });
 
+  it("routes an organization bio with one explicit CA as PROJECT even when fund wording is present", () => {
+    const evidence = emptyEvidence("@strategicsuperr");
+    evidence.profile.display_name = "Strategic Super Reserve SSR";
+    evidence.profile.bio = "The Strategic Super Reserve by @EnigmaFund Venture Capital: Multichain DTFs to support builders & communities. CA: BpdHpqznEgYPXZNrJVRZvBhdWoafYLVVuLxTQo34pump";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-26T11:47:27.000Z";
+
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+  });
+
+  it("does not treat an unlabeled wallet in a fund bio as a project identity", () => {
+    const evidence = emptyEvidence("@actualfund");
+    evidence.profile.bio = "Venture Capital. Treasury wallet 0x6982508145454Ce325dDbE47a25d4ec3d2311933";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-26T11:47:27.000Z";
+
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.INVESTOR]);
+  });
+
   it("routes a person with a cryptic bio to FOUNDER on a verified founder fact", () => {
     // The @VitalikButerin shell: a personal, keyword-free bio (no "founder"),
     // no official website, and ventures that arrived only as model leads, so

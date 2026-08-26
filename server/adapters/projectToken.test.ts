@@ -6,6 +6,8 @@ import { collectProjectTokenIdentity, launchedProductSearchQueries, PLATFORM_CHA
 
 const SOLANA_TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const OTHER_TOKEN = "So11111111111111111111111111111111111111112";
+const SSR_TOKEN = "BpdHpqznEgYPXZNrJVRZvBhdWoafYLVVuLxTQo34pump";
+const SSR_POOL = "C2TLNU8AwnaWrnAGhQm4X6y9T79mcMnmbKTMsYGPHKJd";
 const PONS_TOKEN = "0x39dBED3a2bd333467115dE45665cC57F813C4571";
 const PONS_POOL = "0x10CC6BD38112cAc182db90B6a71d8Bb5939526bA";
 /** Seconds between two daily GeckoTerminal candles. */
@@ -73,6 +75,94 @@ afterEach(() => {
 });
 
 describe("verified project-token collection", () => {
+  it("binds SSR to the exact contract declared by its official X profile without requiring a website or CoinGecko", async () => {
+    const { ctx, evidence } = context("@strategicsuperr", "Strategic Super Reserve SSR", "");
+    evidence.profile.bio = `The Strategic Super Reserve by @EnigmaFund Venture Capital: Multichain DTFs to support builders & communities. CA: ${SSR_TOKEN}`;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({
+        pairs: [{
+          chainId: "solana",
+          pairAddress: SSR_POOL,
+          url: `https://dexscreener.com/solana/${SSR_POOL}`,
+          baseToken: { address: SSR_TOKEN, name: "Strategic Super Reserve", symbol: "SSR" },
+          quoteToken: { address: OTHER_TOKEN, symbol: "SOL" },
+          priceUsd: "0.0006793",
+          marketCap: 679_334,
+          fdv: 679_334,
+          volume: { h24: 218_441 },
+          liquidity: { usd: 68_520 },
+          info: { imageUrl: "https://cdn.dexscreener.com/ssr.png" },
+        }],
+      });
+      if (url.includes("/ohlcv/day?")) return json({
+        data: { attributes: { ohlcv_list: [
+          [300, 0.0006, 0.0008, 0.0005, 0.0006793, 70_000],
+          [200, 0.0005, 0.0007, 0.0004, 0.0006, 60_000],
+          [100, 0.0004, 0.0006, 0.0003, 0.0005, 50_000],
+        ] } },
+      });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captured = await withCostLedger(async () => ({
+      result: await collectProjectTokenIdentity(ctx),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("exact contract explicitly declared"),
+      attempts: 2,
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      name: "Strategic Super Reserve",
+      symbol: "SSR",
+      rank: null,
+      address: SSR_TOKEN,
+      chain: "solana",
+      officialX: "@strategicsuperr",
+      sourceUrl: "https://x.com/strategicsuperr",
+      priceUsd: 0.0006793,
+      marketCapUsd: 679_334,
+      fdvUsd: 679_334,
+      volume24hUsd: 218_441,
+      liquidityUsd: 68_520,
+      pairAddress: SSR_POOL,
+      imageUrl: "https://cdn.dexscreener.com/ssr.png",
+      providers: ["twitterapi", "dexscreener", "geckoterminal"],
+      producerSources: {
+        identity: {
+          provider: "twitterapi",
+          sourceUrl: "https://x.com/strategicsuperr",
+          capturedAt: "2026-07-12T17:00:00.000Z",
+        },
+        market: { provider: "dexscreener" },
+        liquidity: { provider: "dexscreener" },
+        history: { provider: "geckoterminal" },
+      },
+    });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+      provider: "twitterapi/dexscreener",
+    }));
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-traction-liveness",
+      status: "confirmed",
+      provider: "dexscreener/geckoterminal",
+    }));
+    expect(captured.cost.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: "dexscreener", op: "project-token-pairs", calls: 1, succeeded: 1 }),
+      expect.objectContaining({ provider: "geckoterminal", op: "project-token-ohlcv-day", calls: 1, succeeded: 1 }),
+    ]));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("coingecko"))).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("accepts an exact official X match and freezes market plus bounded pool history", async () => {
     const { ctx, evidence } = context();
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

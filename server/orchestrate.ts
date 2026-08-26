@@ -29,7 +29,7 @@ import {
   scanContradictions,
 } from "./agent";
 import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cost";
-import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
+import { declaredTokenFromBio, tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
 import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
@@ -1869,6 +1869,17 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   const roles = new Set<SubjectClass>();
   let bioPrimaryProjectVerified = false;
   let investorBeyondBio = false;
+  // A contract explicitly labelled in the provider-frozen official X bio is a
+  // first-party organization signal. It is stronger than generic role words:
+  // a brand account saying "Venture Capital ... CA: <mint>" is naming the
+  // product/token it operates, not proving that the account is a fund whose
+  // portfolio, legal entity and OFAC record should govern the whole report.
+  // Bare addresses do not qualify here because a person may publish a wallet.
+  const profileDeclaredToken = evidence.profile.profile_collection_state === "resolved"
+    && evidence.profile.profile_provider === "twitterapi"
+    && Number.isFinite(Date.parse(evidence.profile.profile_captured_at ?? ""))
+    ? declaredTokenFromBio(evidence.profile.bio)
+    : null;
   // Unique-id: a PROJECT-bound handle is the brand/protocol account. Display
   // name never binds a person. Founder facts describe some OTHER handle.
   const projectBound = projectOrientationBound(evidence);
@@ -1892,7 +1903,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);
     const projectProfileVerified = evidence.profile.profile_provider === "twitterapi"
       && Number.isFinite(providerCapturedAt)
-      && officialSite !== null;
+      && (officialSite !== null || profileDeclaredToken !== null);
     // Strict margin required: on a PROJECT/INVESTOR tie the fund lens keeps
     // governing, so a real fund with product-ish vocabulary never flips.
     bioPrimaryProjectVerified = projectProfileVerified
@@ -1904,6 +1915,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
       if (role === SubjectClass.FOUNDER && projectBound) return;
       if (role !== SubjectClass.PROJECT || projectProfileVerified) roles.add(role);
     });
+    if (profileDeclaredToken) roles.add(SubjectClass.PROJECT);
   }
   for (const venture of evidence.ventures) {
     if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;
@@ -1976,10 +1988,10 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // that merely talks about capital; when no venture record verified the
   // investing (vocabulary was the only investor evidence), the fund
   // methodology is the wrong lens and would starve the scan into INCOMPLETE.
-  if (roles.has(SubjectClass.INVESTOR) && !evidence.projectToken?.verified) {
-    if (bioPrimaryProjectVerified && !investorBeyondBio) {
+  if (roles.has(SubjectClass.INVESTOR)) {
+    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null) && !investorBeyondBio) {
       roles.delete(SubjectClass.INVESTOR);
-    } else {
+    } else if (!evidence.projectToken?.verified) {
       roles.delete(SubjectClass.PROJECT);
     }
   }

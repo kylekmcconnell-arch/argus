@@ -10709,6 +10709,24 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
 // src/lib/projectTokenLeg.ts
 var EVM_CA = /0x[a-fA-F0-9]{40}/;
 var SOL_WORD = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/;
+var DECLARED_CA = /(?:^|[^A-Za-z0-9])(?:ca|c\.a\.|contract(?:\s+address)?|token\s+contract|mint(?:\s+address)?)\s*[:=]\s*(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/gi;
+function declaredTokenFromBio(bio) {
+  const candidates = [...(bio ?? "").matchAll(DECLARED_CA)].flatMap((match) => {
+    const address = match[1] ?? "";
+    if (/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return [{ address, via: "evm", source: "the contract explicitly declared in the subject's own bio" }];
+    }
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
+      return [{ address, via: "solana", source: "the contract explicitly declared in the subject's own bio" }];
+    }
+    return [];
+  });
+  const unique2 = [...new Map(candidates.map((candidate) => [
+    candidate.via === "evm" ? candidate.address.toLowerCase() : candidate.address,
+    candidate
+  ])).values()];
+  return unique2.length === 1 ? unique2[0] : null;
+}
 function tokenFromBio(bio) {
   const b = bio ?? "";
   const evm = b.match(EVM_CA)?.[0];
@@ -28439,6 +28457,94 @@ function historyCoverageNote(history) {
   const volume = history.volume ? `, with reported volume ${history.volume.changePct >= 0 ? "up" : "down"} ${Math.abs(history.volume.changePct).toFixed(0)}% against the prior ${history.volume.prior.candles} ${unit}s${history.volume.isFloor ? " (a floor: not every candle reported volume)" : ""}` : "";
   return ` and ${history.points.length} frozen ${history.timeframe} price points${span}${volume}`;
 }
+async function collectProfileDeclaredToken(ctx, candidate) {
+  const rows = await dexPairs(candidate.address);
+  if (!rows) {
+    return {
+      state: "failed",
+      attempts: 1,
+      detail: "The official X bio declared a contract, but DexScreener could not be read."
+    };
+  }
+  const matching = rows.filter((row) => {
+    const base2 = isRecord4(row.baseToken) ? row.baseToken : {};
+    return sameAddress(cleanText2(base2.address), candidate.address);
+  });
+  if (!matching.length) {
+    return {
+      state: "empty",
+      attempts: 1,
+      detail: "The official X bio declared a contract, but DexScreener returned no market for that exact address."
+    };
+  }
+  const best = [...matching].sort((left, right) => {
+    const leftLiquidity = isRecord4(left.liquidity) ? finiteNumber2(left.liquidity.usd) ?? 0 : 0;
+    const rightLiquidity = isRecord4(right.liquidity) ? finiteNumber2(right.liquidity.usd) ?? 0 : 0;
+    return rightLiquidity - leftLiquidity;
+  })[0];
+  const base = isRecord4(best.baseToken) ? best.baseToken : {};
+  const info = isRecord4(best.info) ? best.info : {};
+  const name = cleanText2(base.name) || cleanText2(ctx.evidence.profile.display_name);
+  const symbol = cleanText2(base.symbol).toUpperCase();
+  const chain = cleanText2(best.chainId).toLowerCase();
+  const pairAddress = cleanText2(best.pairAddress);
+  if (!name || !symbol || !chain || !pairAddress) {
+    return {
+      state: "failed",
+      attempts: 1,
+      detail: "DexScreener returned the declared contract without complete token or pool identity."
+    };
+  }
+  const capturedAt = captureTimestamp();
+  const identityCapturedAt = ctx.evidence.profile.profile_captured_at ?? capturedAt;
+  const officialX = `@${normalizeHandle3(ctx.handle)}`;
+  const identitySourceUrl = `https://x.com/${normalizeHandle3(ctx.handle)}`;
+  const marketSourceUrl = cleanText2(best.url) || `${DEXSCREENER}/${encodeURIComponent(candidate.address)}`;
+  const priceUsd = finiteNumber2(best.priceUsd);
+  const marketCapUsd = finiteNumber2(best.marketCap);
+  const fdvUsd = finiteNumber2(best.fdv);
+  const volume24hUsd = isRecord4(best.volume) ? finiteNumber2(best.volume.h24) : void 0;
+  const liquidityUsd = isRecord4(best.liquidity) ? finiteNumber2(best.liquidity.usd) : void 0;
+  const hasMarketRead = priceUsd !== void 0 || marketCapUsd !== void 0 || fdvUsd !== void 0 || volume24hUsd !== void 0;
+  const historyResult = await tokenHistory(chain, pairAddress);
+  const history = historyResult.history;
+  return {
+    state: "matched",
+    attempts: 1 + historyResult.attempts,
+    detail: `verified $${symbol} from the exact contract explicitly declared by ${officialX}`,
+    snapshot: {
+      verified: true,
+      verification: "official_x",
+      name,
+      symbol,
+      rank: null,
+      address: candidate.address,
+      chain,
+      officialX,
+      sourceUrl: identitySourceUrl,
+      capturedAt: identityCapturedAt,
+      producerSources: {
+        identity: {
+          provider: "twitterapi",
+          sourceUrl: identitySourceUrl,
+          capturedAt: identityCapturedAt
+        },
+        ...hasMarketRead ? { market: { provider: "dexscreener", sourceUrl: marketSourceUrl, capturedAt } } : {},
+        ...liquidityUsd !== void 0 ? { liquidity: { provider: "dexscreener", sourceUrl: marketSourceUrl, capturedAt } } : {},
+        ...history?.sourceUrl && history.capturedAt ? { history: { provider: "geckoterminal", sourceUrl: history.sourceUrl, capturedAt: history.capturedAt } } : {}
+      },
+      providers: ["twitterapi", "dexscreener", ...history ? ["geckoterminal"] : []],
+      ...priceUsd !== void 0 ? { priceUsd } : {},
+      ...marketCapUsd !== void 0 ? { marketCapUsd } : {},
+      ...fdvUsd !== void 0 ? { fdvUsd } : {},
+      ...volume24hUsd !== void 0 ? { volume24hUsd } : {},
+      ...liquidityUsd !== void 0 ? { liquidityUsd } : {},
+      pairAddress,
+      ...history ? { history } : {},
+      ...cleanText2(info.imageUrl) ? { imageUrl: cleanText2(info.imageUrl) } : {}
+    }
+  };
+}
 async function collectProjectTokenIdentity(ctx, dependencies = {}) {
   const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
   const registryQueries = projectRegistrySearchQueries(
@@ -28446,7 +28552,61 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     ctx.evidence.subjectOrientation?.launchedProducts
   );
   const seeded = parseSeededContract(ctx);
-  if (!registryQueries.length && !seeded) return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
+  const profileDeclaredToken = ctx.evidence.profile.profile_collection_state === "resolved" && ctx.evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? "")) ? declaredTokenFromBio(ctx.evidence.profile.bio) : null;
+  if (!registryQueries.length && !seeded && !profileDeclaredToken) {
+    return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
+  }
+  if (profileDeclaredToken) {
+    const declared = await collectProfileDeclaredToken(ctx, profileDeclaredToken);
+    if (declared.state === "matched" && declared.snapshot) {
+      const snapshot2 = declared.snapshot;
+      ctx.evidence.projectToken = snapshot2;
+      ctx.recordCheck?.({
+        id: "project-token-identity",
+        status: "confirmed",
+        note: `$${snapshot2.symbol} is the exact ${snapshot2.chain} contract explicitly declared in the provider-frozen official X bio`,
+        provider: "twitterapi/dexscreener",
+        sourceCount: 2
+      });
+      if ((snapshot2.liquidityUsd ?? 0) >= MIN_POOL_LIQUIDITY_USD) {
+        ctx.recordCheck?.({
+          id: "project-traction-liveness",
+          status: "confirmed",
+          note: `$${snapshot2.symbol} has an exact-address DEX pool with $${Math.round(snapshot2.liquidityUsd ?? 0).toLocaleString()} liquidity${historyCoverageNote(snapshot2.history)}`,
+          provider: snapshot2.history ? "dexscreener/geckoterminal" : "dexscreener",
+          sourceCount: snapshot2.history ? 2 : 1
+        });
+      }
+      ctx.emit({
+        phase: "P0 \xB7 Routing",
+        label: `Official bio contract resolved \xB7 $${snapshot2.symbol}`,
+        detail: `${snapshot2.address} was explicitly declared by @${normalizeHandle3(ctx.handle)} and resolved to an exact ${snapshot2.chain} market. Project methodology is now bound to that contract.`,
+        source: "twitterapi / dexscreener",
+        tone: "good"
+      });
+      return { state: "executed", detail: declared.detail, attempts: declared.attempts };
+    }
+    const providerUnavailable = declared.state === "failed";
+    ctx.recordCheck?.({
+      id: "project-token-identity",
+      status: providerUnavailable ? "unavailable" : "finding",
+      note: declared.detail,
+      provider: "twitterapi/dexscreener",
+      sourceCount: 1
+    });
+    ctx.emit({
+      phase: "P0 \xB7 Routing",
+      label: providerUnavailable ? "Official bio contract could not be checked" : "Official bio contract has no resolved market",
+      detail: declared.detail,
+      source: "twitterapi / dexscreener",
+      tone: "warn"
+    });
+    return {
+      state: providerUnavailable ? "partial" : "executed",
+      detail: declared.detail,
+      attempts: declared.attempts
+    };
+  }
   const registryHomepages = [];
   let selected = null;
   let search = null;
@@ -33283,6 +33443,7 @@ function providerBackedRoles(evidence) {
   const roles = /* @__PURE__ */ new Set();
   let bioPrimaryProjectVerified = false;
   let investorBeyondBio = false;
+  const profileDeclaredToken = evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(evidence.profile.profile_captured_at ?? "")) ? declaredTokenFromBio(evidence.profile.bio) : null;
   const projectBound = projectOrientationBound(evidence);
   const canonicalTokenProjectBound = evidence.projectToken?.verified === true && Boolean(evidence.projectToken.officialX) && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle) && !evidence.profile.resolved_name?.trim();
   const selfDescription = evidence.profile.bio.trim() || (evidence.profile.self_post_sample ?? "").trim();
@@ -33291,12 +33452,13 @@ function providerBackedRoles(evidence) {
     const profileRoles = classification.applicable_classes;
     const providerCapturedAt = Date.parse(evidence.profile.profile_captured_at ?? "");
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);
-    const projectProfileVerified = evidence.profile.profile_provider === "twitterapi" && Number.isFinite(providerCapturedAt) && officialSite !== null;
+    const projectProfileVerified = evidence.profile.profile_provider === "twitterapi" && Number.isFinite(providerCapturedAt) && (officialSite !== null || profileDeclaredToken !== null);
     bioPrimaryProjectVerified = projectProfileVerified && classification.subject_class === "PROJECT" /* PROJECT */ && classification.scores["PROJECT" /* PROJECT */] > classification.scores["INVESTOR" /* INVESTOR */];
     profileRoles.forEach((role) => {
       if (role === "FOUNDER" /* FOUNDER */ && projectBound) return;
       if (role !== "PROJECT" /* PROJECT */ || projectProfileVerified) roles.add(role);
     });
+    if (profileDeclaredToken) roles.add("PROJECT" /* PROJECT */);
   }
   for (const venture of evidence.ventures) {
     if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;
@@ -33335,10 +33497,10 @@ function providerBackedRoles(evidence) {
   if (evidence.projectToken?.verified === true) {
     roles.add("PROJECT" /* PROJECT */);
   }
-  if (roles.has("INVESTOR" /* INVESTOR */) && !evidence.projectToken?.verified) {
-    if (bioPrimaryProjectVerified && !investorBeyondBio) {
+  if (roles.has("INVESTOR" /* INVESTOR */)) {
+    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null) && !investorBeyondBio) {
       roles.delete("INVESTOR" /* INVESTOR */);
-    } else {
+    } else if (!evidence.projectToken?.verified) {
       roles.delete("PROJECT" /* PROJECT */);
     }
   }
