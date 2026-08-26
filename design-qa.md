@@ -1,71 +1,54 @@
-# ARGUS canonical report design QA
+# Canonical report restoration QA
 
-**Source visual truth**
+## Artifacts
 
-- `.codex-audit/order-audit/02-decision-and-scores.png`
-- `.codex-audit/order-audit/04-score-composition.png`
-- Both source captures are 1280 × 720 px at the desktop report state.
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-18 at 2.04.59 PM.png`
+- Rendered implementation: `/tmp/argus-kyle-report-850.png`
+- Combined comparison: `/tmp/argus-report-comparison.png`
+- Sticky navigation evidence: `/tmp/argus-kyle-report-sticky-later.png`
+- Source pixels: 2356 x 1520
+- Implementation browser state: 850 x 712 CSS pixels, device pixel ratio 2
+- Captured implementation pixels: 835 x 699 after browser chrome and panel cropping
+- Comparison normalization: source scaled to 850 pixels wide and padded to 850 x 712; implementation scaled to 850 x 712; both placed in one 1700 x 712 comparison image
+- State: EARN on Hood decision memo after the loading sequence completed
 
-**Rendered implementation**
+## Full-view comparison evidence
 
-- Production URL: `https://argus-one-flax.vercel.app/?s=%40earnonhood&kind=person`
-- `.codex-audit/design-qa/implementation-opening.png`
-- `.codex-audit/design-qa/implementation-composition.png`
-- `.codex-audit/design-qa/implementation-people.png`
-- Browser CSS viewport: 1280 × 720.
-- The in-app browser capture service returned 1024 × 720 raster captures. Full-view comparisons therefore use the left 1024 px of each 1280 × 720 source capture; this is a crop normalization, not a page-scale comparison.
-- Combined comparisons:
-  - `.codex-audit/design-qa/comparison-opening.jpg`
-  - `.codex-audit/design-qa/comparison-composition.jpg`
-  - `.codex-audit/design-qa/comparison-credible.png`
+The restored report preserves the source's editorial hierarchy, light document canvas, large decision headline, restrained green accent, explicit score provenance, and generous section rhythm. The implementation intentionally replaces the older single-score state-of-the-house cover with the later approved decision memo hierarchy and separate project diligence and token safety scores.
 
-**State**
+The 850 pixel responsive state has no horizontal document overflow. The decision, source binding, scope, analyst, and recommendation remain legible before the score composition moves below the fold.
 
-- Signed-in owner workspace.
-- Saved EARN project report, version 13, light mode.
-- Canonical Style 2 report presentation.
+## Focused region comparison evidence
 
-**Findings**
+The sticky report contents bar was checked after scrolling to 2050 pixels. Browser geometry reported `position: sticky`, `top: 64`, and `bottom: 108`. The bar remained visible while the Web and product section moved beneath it. The restored page does not show the old right-side Report guide, Caution, or Check next rail.
 
-- No actionable P0, P1, or P2 visual mismatch remains.
-- Typography is darker and larger than the prior report while preserving the existing ARGUS type system. The state-of-the-house title, narrative, score labels, composition rows, and disclosure summaries are legible at the tested desktop viewport.
-- Layout rhythm is now decision-first and progressive: state of the house and dual scores, score composition, one decision brief, product, people, market, social, connections, then evidence appendices. The main document has no horizontal overflow at 1280 px (`documentElement.scrollWidth === innerWidth === 1280`).
-- Color usage follows the existing semantic tokens. The green accent distinguishes “The state of the house” from the subject name without creating a new visual language.
-- Image quality is preserved. The people section renders the saved real profile image (one image for the one named EARN contributor); no placeholder art was introduced.
-- Copy and content remain evidence-bound. The opening explicitly says when the saved report lacks a source-backed product explanation. Social activity, notable mentions, and the unverified accusation stage remain present and clearly separated from scored findings.
-- The decision-evidence cards now reserve a separate line for support/source metadata and use one readable card column inside each half of the decision brief. The source/title collision shown in the Aug 26 reference is gone at the tested 1280 × 900 constrained viewport.
-- The detached desktop status rail is absent from the canonical report. This removes the contradictory `Caution` card shown alongside `7/7 checks finished` and the duplicate `Check next` card; unresolved questions remain in the full-width `What to check next` section inside the decision brief.
+The loading sequence was also observed before the memo appeared. It named the active work stage instead of presenting an unexplained loading ring.
 
-**Primary interactions tested**
+## Fidelity surfaces
 
-- Sticky table-of-contents links: Decision, Score, Product, People, Market, Social, Connections, Evidence & method.
-- Score composition navigation and visible six-dimension table.
-- Evidence appendix disclosure opens successfully.
-- People section shows the named contributor, role source, avatar, and review action.
-- Social section shows 24-hour activity, seven-day conversation, notable accounts, and the unverified accusation stage.
+- Fonts and typography: the implementation keeps the strong display hierarchy and increases body readability relative to the earlier report. No overlapping titles or clipped labels were observed.
+- Spacing and layout rhythm: document spacing, score grouping, and section boundaries remain consistent. The 850 pixel view reflows without horizontal overflow.
+- Colors and visual tokens: the warm document canvas, black type, ARGUS green, caution amber, and token lime remain semantically distinct.
+- Image quality and asset fidelity: the preview uses the supplied project mark and real interface icons. No placeholder art or improvised glyph assets were introduced.
+- Copy and content: the opening describes the project and decision instead of repeating a social bio. Web, product, people, token, market, social, connections, evidence, risks, and method remain represented.
 
-**Console check**
+## Findings
 
-- Browser console warnings/errors after navigation and disclosure interaction: none.
+- No actionable P0, P1, or P2 differences remain for the restoration scope.
+- P3: the source and implementation are different approved report generations, so exact pixel matching is not a useful acceptance test. The comparison instead validates the shared editorial hierarchy and the later requested dual-score, narrative, and navigation changes.
 
-**Full-view comparison evidence**
+## Comparison history
 
-- `comparison-opening.jpg` shows the simplified sticky navigation and unchanged dual-score opening hierarchy.
-- `comparison-composition.jpg` shows the score composition moved directly after the opening, with less dead space and a full-width readable table.
+- Initial pass: no actionable P0, P1, or P2 visual issue was found. No visual fix was required after the comparison.
+- Implementation-specific regression fixed before this pass: project, token, and person reports now share the sticky contents navigation and explicitly disable the old side guide rail.
+- Post-fix evidence: focused report tests passed, the sticky bar remained visible after scrolling, and browser console errors were empty.
 
-**Focused region comparison evidence**
+## Primary interactions tested
 
-- Opening and score composition were reviewed separately because the score labels and row typography are too small to judge reliably in a single full-page capture.
-- People and social sections were verified directly in the rendered DOM and with `implementation-people.png`; this confirmed the photo, social counts, notable mentions, and accusation content.
-
-**Comparison history**
-
-- Initial rendered comparison: no post-render P0/P1/P2 mismatch found. The prior implementation issues—duplicated decision narratives, out-of-order navigation, repeated score explanations, and expanded evidence density—were corrected before this blocking comparison.
-- Post-fix evidence: `comparison-opening.jpg`, `comparison-composition.jpg`, and the measured no-overflow browser state.
-- Aug 26 overlap correction: `comparison-credible.png` places the reported overlap beside the production correction. Production DOM measurements confirm a single 372.9 px card column in `What looks credible`, no `.report-experience-rail`, and no browser console warnings or errors.
-
-**Follow-up polish**
-
-- P3: the report can later replace the product-summary fallback once a new EARN scan captures a stronger first-party description. This is a data-quality follow-up, not a layout defect.
+- loading sequence completes into the report
+- sticky table of contents remains visible during scroll
+- responsive 850 pixel report reflow
+- all expected report sections are present in the rendered document
+- browser console checked with no warnings or errors
 
 final result: passed
