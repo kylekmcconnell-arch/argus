@@ -999,42 +999,6 @@ describe("investigation exact sharing", () => {
     expect(harness.clipboard).toHaveBeenCalledWith("http://localhost:3000/?share=opaque");
   });
 
-  it("switches between Style 1 and Style 2 with the two buttons", () => {
-    render(investigation({
-      token: {
-        ...token(),
-        axes: [
-          { key: "T1", label: "Liquidity & lock", score: 18, weight: 24, rationale: "Deep liquidity." },
-          { key: "T2", label: "Contract safety", score: 16, weight: 26, rationale: "Owner powers present." },
-        ],
-      },
-    }));
-
-    // Style 1 (the Auric file) is the default: the composition reads as an
-    // open section in the flow, never a collapsed appendix.
-    expect(container.querySelector("section#composition")).not.toBeNull();
-    expect(container.querySelector("details.evidence-appendix")).toBeNull();
-    const styleTwo = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Style 2");
-    const styleOne = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Style 1");
-    expect(styleTwo).toBeDefined();
-    expect(styleOne).toBeDefined();
-    expect(styleOne?.getAttribute("aria-pressed")).toBe("true");
-
-    act(() => styleTwo?.click());
-    // Style 2 preserves the 2026-08-25 experience: the evidence ledger is a
-    // collapsed appendix again, exactly as it shipped.
-    expect(container.querySelector("section#composition")).toBeNull();
-    expect(container.querySelector("details.evidence-appendix#composition")).not.toBeNull();
-    expect(container.textContent).toContain("Evidence ledger");
-    expect(styleTwo?.getAttribute("aria-pressed")).toBe("true");
-
-    act(() => styleOne?.click());
-    expect(container.querySelector("section#composition")).not.toBeNull();
-    expect(container.querySelector("details.evidence-appendix")).toBeNull();
-  });
-
   it("copy tldr mints a share link and pastes it under the verdict lines", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

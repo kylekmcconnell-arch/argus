@@ -61,9 +61,6 @@ import { ScoreComposition } from "./ScoreComposition";
 import { DimensionChapters } from "./DimensionChapters";
 import { personDimensionChapters } from "../lib/dimensionChapters";
 import { DossierReport } from "./DossierReport";
-import { ReportActionsRow } from "./ReportActionsRow";
-import { exportReportPdf } from "../lib/reportExport";
-import { initialReportStyle, persistReportStyle, type ReportStyle } from "../lib/reportStyle";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
 import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
@@ -2021,13 +2018,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     && (explicitCurrentOverlay || !hasFrozenTrustGraphOutcome);
   const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
   const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
-  // Style 1 (Auric file, default) vs Style 2 (dossier story), shareable via
-  // ?reportStyle=1|2 and remembered per browser.
-  const [readingStyle, setReadingStyle] = useState<ReportStyle>(initialReportStyle);
-  const chooseReadingStyle = (style: ReportStyle) => {
-    setReadingStyle(style);
-    persistReportStyle(style);
-  };
   const canShare = !embeddedFacet && !shareView && Boolean(
     f.versionContext?.reportVersionId
     || (f.persistence?.state === "persisted" && f.persistence.reportVersionId),
@@ -3035,16 +3025,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       </header>
 
       <div className="report-frame">
-        {/* the document's own actions, first thing on the page: switch the
-            reading style, save the PDF */}
-        <ReportActionsRow
-          canShare={false}
-          shareState="idle"
-          onShare={() => {}}
-          onExportPdf={() => exportReportPdf(f)}
-          readingStyle={readingStyle}
-          onReadingStyle={chooseReadingStyle}
-        />
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -3412,12 +3392,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           }}
           nextStep={verificationNext[0]?.title}
         >
-        {/* Style 2 is the experience Kyle shipped on 2026-08-25, verbatim:
-            the dossier story opens the file and everything below it stays.
-            Style 1 (the Auric File, default) reads without the dossier. */}
-        {readingStyle === "style2" && (
-          <DossierReport payload={f as unknown as Record<string, unknown>} />
-        )}
+        <DossierReport payload={f as unknown as Record<string, unknown>} />
         {f.projectStrengthBands && (
           <DimensionChapters
             chapters={personDimensionChapters(f.projectStrengthBands)}
