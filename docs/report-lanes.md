@@ -15,7 +15,7 @@ Both owners can read and run both reports. The ownership boundary controls who m
 - Kyle: https://argus-git-codex-staging-kyle-reports-kyle-mcconnells-projects.vercel.app
 - Enigma: https://argus-git-codex-staging-enigma-kyle-mcconnells-projects.vercel.app
 
-Each stable staging hostname selects its matching report lane. Inside staging or local development, append `reportLane=kyle` or `reportLane=enigma` to inspect the other renderer. Production ignores this parameter and exposes no style selector.
+Each stable staging hostname selects its matching report lane. Both owners can open both URLs, but each renderer is built from its own protected branch. There is no public style selector and no query-string override; inspect the other renderer by opening its staging URL.
 
 ## Shared truth boundary
 

@@ -14,12 +14,12 @@ describe("report lane resolution", () => {
     expect(resolveReportLane({ hostname: "argus-git-codex-staging-enigma-kyle-mcconnells-projects.vercel.app", search: "" }).definition.id).toBe("enigma");
   });
 
-  it("lets either owner view the other lane only inside staging", () => {
+  it("does not let a query parameter switch report ownership", () => {
     expect(resolveReportLane({
       hostname: "argus-git-codex-staging-kyle-reports-kyle-mcconnells-projects.vercel.app",
       search: "?reportLane=enigma",
-    }).definition.id).toBe("enigma");
-    expect(resolveReportLane({ hostname: "localhost", search: "?reportLane=enigma", development: true }).definition.id).toBe("enigma");
+    }).definition.id).toBe("kyle");
+    expect(resolveReportLane({ hostname: "localhost", search: "?reportLane=enigma", development: true }).definition.id).toBe("kyle");
   });
 
   it("supports an explicit preview environment lane", () => {

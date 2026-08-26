@@ -21,16 +21,14 @@ const stagingLaneForHost = (hostname: string): ReportLaneId | null => {
 
 export function resolveReportLane(input: {
   hostname: string;
-  search: string;
+  search?: string;
   envLane?: string;
   development?: boolean;
 }): ResolvedReportLane {
   const hostLane = stagingLaneForHost(input.hostname);
   const envLane = normalizedLane(input.envLane);
-  const queryLane = normalizedLane(new URLSearchParams(input.search).get("reportLane"));
   const staging = Boolean(hostLane || input.development || envLane);
-  const requestedLane = staging && queryLane ? queryLane : null;
-  const id = requestedLane ?? envLane ?? hostLane ?? "kyle";
+  const id = envLane ?? hostLane ?? "kyle";
 
   return {
     definition: definitions[id],
