@@ -32,12 +32,16 @@ Layout, narrative order, typography, styling, and report-specific composition be
 
 ## Enforcement
 
-The `report-lane-ownership` check runs from the protected target branch, not from pull request code. It enforces:
+Both staging branches are protected: direct and force pushes are disabled, administrators are included, conversations must be resolved, and a pull request needs one approval from someone other than its last pusher. That review gate prevents either owner from changing the other report without the other person seeing and approving it.
+
+`CODEOWNERS` records the presentation boundary. The `report-lane-ownership` policy and its Node tests additionally enforce:
 
 1. Only Kyle may change the Kyle report directory.
 2. Only Enigma may change the Enigma report directory.
 3. Shared report files require approval from the other owner.
 4. Only Kyle may change the ownership policy.
-5. The Kyle and Enigma staging branches reject changes authored by the other owner.
+5. The Kyle and Enigma staging branches reject changes authored by the other owner, except policy-only maintenance by the repository owner.
+
+GitHub activates `pull_request_target` workflows only from the default branch. The automated ownership check is therefore staged but is not a required status check yet; it can replace the human approval gate after the workflow itself is explicitly approved into `main`.
 
 Production remains unchanged until an immutable report-lane commit is explicitly approved for promotion.
