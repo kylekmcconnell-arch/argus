@@ -106,6 +106,7 @@ import {
 import {
   collectProjectCompanyEnrichment,
   companyEnrichmentMatchesOfficialDomain,
+  type EnrichmentSection,
 } from "./adapters/monid";
 import { collectOperatorLaunches, describeLaunchHistory } from "./adapters/operatorLaunches";
 import { collectSocialActivity } from "./socialActivity";
@@ -2175,6 +2176,74 @@ const isStrictlyVerifiedFact = (fact: BasicFact): boolean =>
   && fact.providerProjection !== true
   && fact.floorEligible !== false;
 
+const sameOfficialDomain = (candidateUrl: string | undefined, officialWebsite: string | undefined): boolean => {
+  const expected = canonicalOfficialWebsite(officialWebsite)?.domain;
+  if (!candidateUrl || !expected) return false;
+  try {
+    const candidate = new URL(candidateUrl).hostname.toLowerCase().replace(/^www\./, "");
+    return candidate === expected || candidate.endsWith(`.${expected}`);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Route only the licensed company sections that still answer a real evidence
+ * gap. The predicates are intentionally strict: a model lead, a generic team
+ * mention, or a name-only funding record can never suppress paid collection.
+ *
+ * This is a quality-preserving cost gate, not a cheaper methodology. A section
+ * is omitted only when the frozen report already contains the same class of
+ * identity-bound evidence with at least as much usable detail.
+ */
+export function projectCompanyEnrichmentSections(
+  evidence: Pick<CollectedEvidence, "projectToken" | "protocolFunding" | "profile" | "webTeam" | "basicFacts">,
+): EnrichmentSection[] {
+  const sections: EnrichmentSection[] = [];
+  const canonicalGeckoId = evidence.projectToken?.verified === true
+    ? evidence.projectToken.coingeckoId?.trim().toLowerCase()
+    : undefined;
+  const protocolGeckoId = evidence.protocolFunding?.geckoId?.trim().toLowerCase();
+  const hasEquivalentFunding = Boolean(
+    canonicalGeckoId
+    && protocolGeckoId
+    && canonicalGeckoId === protocolGeckoId
+    && evidence.protocolFunding?.rounds.length,
+  );
+  if (!hasEquivalentFunding) sections.push("funding_detail");
+
+  const officialWebsite = evidence.projectToken?.homepage ?? evidence.profile.website;
+  const leadership = (evidence.webTeam ?? []).filter((member) =>
+    member.kind !== "org"
+    && member.artifact_verified === true
+    && member.evidence_origin === "deterministic"
+    && /\b(?:founder|co[- ]?founder|chief|ceo|cto|coo|cfo|president|director)\b/i.test(member.role)
+    && sameOfficialDomain(member.sourceUrl, officialWebsite));
+  // Monid management contributes names, titles, LinkedIn identities, and prior
+  // company context. A short first-party name list is not equivalent. Require
+  // a genuinely detailed roster before suppressing that section.
+  const hasEquivalentLeadership = leadership.length >= 3
+    && leadership.every((member) => Boolean(member.linkedin && member.evidence?.trim()));
+  if (!hasEquivalentLeadership) sections.push("management_profile");
+
+  const strictFacts = (evidence.basicFacts ?? []).filter(isStrictlyVerifiedFact);
+  const hasFact = (predicate: BasicFact["predicate"], valuePattern?: RegExp): boolean => strictFacts.some((fact) =>
+    fact.predicate === predicate
+    && (!valuePattern || valuePattern.test(fact.value)));
+  // Firmographic enrichment carries four distinct fields. Omit it only when
+  // stronger fetched public evidence already answers all four, not merely when
+  // the company name or founding year is known.
+  const hasEquivalentFirmographics = hasFact("legal_entity")
+    && hasFact("founded", /\b(?:19|20)\d{2}\b/)
+    && hasFact("traction", /\b(?:employees?|staff|headcount|team\s+of\s+\d+)\b/i)
+    && (
+      hasFact("control", /\b(?:ownership|privately\s+held|publicly\s+(?:listed|traded)|venture[- ]backed|investor[- ]backed)\b/i)
+      || hasFact("governance", /\b(?:ownership|privately\s+held|publicly\s+(?:listed|traded)|venture[- ]backed|investor[- ]backed)\b/i)
+    );
+  if (!hasEquivalentFirmographics) sections.push("firmographic");
+  return sections;
+}
+
 export function projectVerifiedBasicFacts(ctx: CollectContext): void {
   if (!providerBackedRoles(ctx.evidence).includes(SubjectClass.PROJECT)) return;
   const retainedFacts = (ctx.evidence.basicFacts ?? []).filter(isRetainedSourceFact);
@@ -2854,7 +2923,31 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
 async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
-  const outcome = await collectProtocolTvl(defiLlamaLookupName(token.name));
+  const protocolLookupName = defiLlamaLookupName(token.name);
+  // A project whose canonical token is recovered late should get the same free
+  // protocol evidence as a token resolved during cold intake. Fetch funding in
+  // parallel with TVL: an exact CoinGecko-id join can answer financing without
+  // paying Monid for a duplicate funding section.
+  const [outcome, fundingOutcome] = await Promise.all([
+    collectProtocolTvl(protocolLookupName),
+    ctx.evidence.protocolFunding
+      ? Promise.resolve(null)
+      : collectProtocolFunding(protocolLookupName),
+  ]);
+  if (
+    fundingOutcome?.available
+    && token.coingeckoId
+    && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, token.coingeckoId)
+  ) {
+    ctx.evidence.protocolFunding = { ...fundingOutcome.value };
+    ctx.emit({
+      phase: "Token",
+      label: `Protocol financing recovered · ${fundingOutcome.value.rounds.length} indexed round${fundingOutcome.value.rounds.length === 1 ? "" : "s"}`,
+      detail: "The free protocol record matched the canonical CoinGecko identity, so ARGUS will not buy a duplicate licensed funding section.",
+      source: "defillama",
+      tone: "neutral",
+    });
+  }
   if (
     !outcome.available
     || !token.coingeckoId
@@ -3976,9 +4069,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           const companyLookup = evidence.projectToken.homepage
             ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
           if (companyLookup) {
+            const sections = projectCompanyEnrichmentSections(evidence);
             const enrichment = await withWallClockBox(
               collectProjectCompanyEnrichment(companyLookup, {
-                sections: ["funding_detail", "management_profile", "firmographic"],
+                sections,
                 officialName: projectName,
               }),
               MONID_ENRICHMENT_BUDGET_MS,
@@ -4317,13 +4411,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     && evidence.companyEnrichment?.identityMatch !== "official_domain"
   ) {
     try {
-      const enrichment = await withWallClockBox(
-        collectProjectCompanyEnrichment(recoveredCompanyLookup, {
-          sections: ["funding_detail", "management_profile", "firmographic"],
-          officialName: evidence.profile.resolved_name ?? evidence.profile.display_name,
-        }),
-        MONID_ENRICHMENT_BUDGET_MS,
-      );
+      const sections = projectCompanyEnrichmentSections(evidence);
+      const enrichment = sections.length
+        ? await withWallClockBox(
+            collectProjectCompanyEnrichment(recoveredCompanyLookup, {
+              sections,
+              officialName: evidence.profile.resolved_name ?? evidence.profile.display_name,
+            }),
+            MONID_ENRICHMENT_BUDGET_MS,
+          )
+        : null;
       if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
         evidence.companyEnrichment = { ...enrichment.value };
         mergeManagementIntoWebTeam(evidence, emit);

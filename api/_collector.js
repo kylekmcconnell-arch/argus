@@ -33712,6 +33712,34 @@ function strictOrganizationLegalEntity(evidence) {
 }
 var isRetainedSourceFact = (fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated");
 var isStrictlyVerifiedFact = (fact) => isRetainedSourceFact(fact) && fact.providerProjection !== true && fact.floorEligible !== false;
+var sameOfficialDomain2 = (candidateUrl, officialWebsite) => {
+  const expected = canonicalOfficialWebsite(officialWebsite)?.domain;
+  if (!candidateUrl || !expected) return false;
+  try {
+    const candidate = new URL(candidateUrl).hostname.toLowerCase().replace(/^www\./, "");
+    return candidate === expected || candidate.endsWith(`.${expected}`);
+  } catch {
+    return false;
+  }
+};
+function projectCompanyEnrichmentSections(evidence) {
+  const sections = [];
+  const canonicalGeckoId = evidence.projectToken?.verified === true ? evidence.projectToken.coingeckoId?.trim().toLowerCase() : void 0;
+  const protocolGeckoId = evidence.protocolFunding?.geckoId?.trim().toLowerCase();
+  const hasEquivalentFunding = Boolean(
+    canonicalGeckoId && protocolGeckoId && canonicalGeckoId === protocolGeckoId && evidence.protocolFunding?.rounds.length
+  );
+  if (!hasEquivalentFunding) sections.push("funding_detail");
+  const officialWebsite = evidence.projectToken?.homepage ?? evidence.profile.website;
+  const leadership = (evidence.webTeam ?? []).filter((member) => member.kind !== "org" && member.artifact_verified === true && member.evidence_origin === "deterministic" && /\b(?:founder|co[- ]?founder|chief|ceo|cto|coo|cfo|president|director)\b/i.test(member.role) && sameOfficialDomain2(member.sourceUrl, officialWebsite));
+  const hasEquivalentLeadership = leadership.length >= 3 && leadership.every((member) => Boolean(member.linkedin && member.evidence?.trim()));
+  if (!hasEquivalentLeadership) sections.push("management_profile");
+  const strictFacts = (evidence.basicFacts ?? []).filter(isStrictlyVerifiedFact);
+  const hasFact = (predicate, valuePattern) => strictFacts.some((fact) => fact.predicate === predicate && (!valuePattern || valuePattern.test(fact.value)));
+  const hasEquivalentFirmographics = hasFact("legal_entity") && hasFact("founded", /\b(?:19|20)\d{2}\b/) && hasFact("traction", /\b(?:employees?|staff|headcount|team\s+of\s+\d+)\b/i) && (hasFact("control", /\b(?:ownership|privately\s+held|publicly\s+(?:listed|traded)|venture[- ]backed|investor[- ]backed)\b/i) || hasFact("governance", /\b(?:ownership|privately\s+held|publicly\s+(?:listed|traded)|venture[- ]backed|investor[- ]backed)\b/i));
+  if (!hasEquivalentFirmographics) sections.push("firmographic");
+  return sections;
+}
 function projectVerifiedBasicFacts(ctx) {
   if (!providerBackedRoles(ctx.evidence).includes("PROJECT" /* PROJECT */)) return;
   const retainedFacts = (ctx.evidence.basicFacts ?? []).filter(isRetainedSourceFact);
@@ -34174,7 +34202,21 @@ function recordProtocolSecurityIncidentFindings(evidence) {
 async function recoverProjectProtocolIncidentEvidence(ctx) {
   const token = ctx.evidence.projectToken;
   if (!token?.verified || ctx.evidence.protocolTvl) return;
-  const outcome = await collectProtocolTvl(defiLlamaLookupName(token.name));
+  const protocolLookupName = defiLlamaLookupName(token.name);
+  const [outcome, fundingOutcome] = await Promise.all([
+    collectProtocolTvl(protocolLookupName),
+    ctx.evidence.protocolFunding ? Promise.resolve(null) : collectProtocolFunding(protocolLookupName)
+  ]);
+  if (fundingOutcome?.available && token.coingeckoId && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, token.coingeckoId)) {
+    ctx.evidence.protocolFunding = { ...fundingOutcome.value };
+    ctx.emit({
+      phase: "Token",
+      label: `Protocol financing recovered \xB7 ${fundingOutcome.value.rounds.length} indexed round${fundingOutcome.value.rounds.length === 1 ? "" : "s"}`,
+      detail: "The free protocol record matched the canonical CoinGecko identity, so ARGUS will not buy a duplicate licensed funding section.",
+      source: "defillama",
+      tone: "neutral"
+    });
+  }
   if (!outcome.available || !token.coingeckoId || !protocolRecordMatchesCanonicalToken(outcome.value.geckoId, token.coingeckoId)) return;
   ctx.evidence.protocolTvl = {
     ...outcome.value
@@ -35047,9 +35089,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         if (!fundingIdentityMatched) {
           const companyLookup = evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
           if (companyLookup) {
+            const sections = projectCompanyEnrichmentSections(evidence);
             const enrichment = await withWallClockBox(
               collectProjectCompanyEnrichment(companyLookup, {
-                sections: ["funding_detail", "management_profile", "firmographic"],
+                sections,
                 officialName: projectName2
               }),
               MONID_ENRICHMENT_BUDGET_MS
@@ -35283,13 +35326,14 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const recoveredCompanyLookup = evidence.projectToken?.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
   if (capabilityIsAuthorized("people_and_control", "project_fundamentals") && !fixture && recoveredCompanyLookup && rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */) && evidence.companyEnrichment?.identityMatch !== "official_domain") {
     try {
-      const enrichment = await withWallClockBox(
+      const sections = projectCompanyEnrichmentSections(evidence);
+      const enrichment = sections.length ? await withWallClockBox(
         collectProjectCompanyEnrichment(recoveredCompanyLookup, {
-          sections: ["funding_detail", "management_profile", "firmographic"],
+          sections,
           officialName: evidence.profile.resolved_name ?? evidence.profile.display_name
         }),
         MONID_ENRICHMENT_BUDGET_MS
-      );
+      ) : null;
       if (enrichment?.available && companyEnrichmentMatchesOfficialDomain(enrichment.value, recoveredCompanyLookup)) {
         evidence.companyEnrichment = { ...enrichment.value };
         mergeManagementIntoWebTeam(evidence, emit);
