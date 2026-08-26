@@ -62,3 +62,16 @@ test("only Kyle can change the enforcement policy", () => {
     files: ["scripts/check-report-lane-ownership.mjs"],
   }).ok, false);
 });
+
+test("Kyle can repair only enforcement files on either staging branch", () => {
+  assert.equal(evaluateReportLaneOwnership({
+    actor: "kylekmcconnell-arch",
+    baseRef: "codex/staging-enigma",
+    files: ["scripts/report-lane-ownership-policy.mjs"],
+  }).ok, true);
+  assert.equal(evaluateReportLaneOwnership({
+    actor: "kylekmcconnell-arch",
+    baseRef: "codex/staging-enigma",
+    files: ["scripts/report-lane-ownership-policy.mjs", "README.md"],
+  }).ok, false);
+});
