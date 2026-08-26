@@ -3461,6 +3461,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   tone={decisionNarrativeTone}
                   items={verdictNarrative.slice(0, 3)}
                   emptyCopy="No decision-changing concern was recorded. Review the evidence before relying on the result."
+                  singleColumn
                 />
                 <ReportCanvasNarrativeSection
                   id="canonical-confidence-limits"
@@ -3469,6 +3470,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   tone={favorableVerdict ? "caution" : "pass"}
                   items={countervailingNarrative.slice(0, 3)}
                   emptyCopy="No countervailing finding was recorded in this saved report."
+                  singleColumn
                 />
                 <ReportCanvasNarrativeSection
                   id="canonical-verification-next"
@@ -3477,6 +3479,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   tone="signal"
                   items={verificationNext.slice(0, 3)}
                   emptyCopy="No unresolved decision question was recorded."
+                  singleColumn
                 />
               </div>
             </section>

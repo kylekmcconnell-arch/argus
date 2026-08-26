@@ -237,6 +237,7 @@ export function ReportCanvasNarrativeSection({
   tone,
   items,
   emptyCopy,
+  singleColumn = false,
 }: {
   id?: string;
   title: string;
@@ -244,6 +245,7 @@ export function ReportCanvasNarrativeSection({
   tone: ReportCanvasTone;
   items: ReportCanvasNarrativeItem[];
   emptyCopy: string;
+  singleColumn?: boolean;
 }) {
   return (
     <section id={id} className="scroll-mt-28 border-b border-line/60 py-5 last:border-b-0" aria-labelledby={id ? `${id}-title` : undefined}>
@@ -260,7 +262,7 @@ export function ReportCanvasNarrativeSection({
       </div>
 
       {items.length ? (
-        <ul className="mt-3 grid gap-1.5 pl-0 sm:pl-11 md:grid-cols-2" aria-label={title}>
+        <ul className={`mt-3 grid gap-1.5 pl-0 sm:pl-11 ${singleColumn ? "grid-cols-1" : "md:grid-cols-2"}`} aria-label={title}>
           {items.map((item) => {
             const body = (
               <>
