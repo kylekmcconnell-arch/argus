@@ -3,6 +3,7 @@ import {
   addClaudeUsage,
   addGrokUsage,
   getCost,
+  grokSpendUsd,
   providerFailureLines,
   recordCall,
   withCostLedger,
@@ -125,15 +126,44 @@ describe("per-audit cost isolation", () => {
   });
 });
 
-describe("live-search source accounting", () => {
-  it("never books zero cost when the provider reports tool calls but no sources", async () => {
+describe("xAI cost accounting", () => {
+  it("uses the provider's exact billed ticks instead of reconstructing token and tool cost", async () => {
     const captured = await withCostLedger(async () => {
-      // Exactly what xAI returns: several tool calls, num_sources_used 0.
-      addGrokUsage({ input_tokens: 20_000, output_tokens: 900, num_sources_used: 0 }, 6);
+      addGrokUsage({
+        input_tokens: 20_000,
+        output_tokens: 900,
+        num_server_side_tools_used: 6,
+        cost_in_usd_ticks: 62_000_000,
+      }, 6, "live-search");
+      return { cost: getCost(), spend: grokSpendUsd() };
+    });
+    const line = captured.cost.calls.find((entry) => entry.provider === "grok");
+    expect(line?.usd).toBe(0.0062);
+    expect(line?.meta).toContain("exact xAI cost");
+    expect(captured.spend).toBeCloseTo(0.0062, 10);
+  });
+
+  it("accepts exact billing ticks serialized as a string", () => {
+    const cost = withCostLedger(() => {
+      addGrokUsage({ cost_in_usd_ticks: "125000000" }, 0, "analysis");
+      return getCost();
+    });
+    expect(cost.calls.find((entry) => entry.op === "analysis")?.usd).toBe(0.0125);
+  });
+
+  it("falls back to current token and successful-tool prices when exact ticks are absent", async () => {
+    const captured = await withCostLedger(async () => {
+      addGrokUsage({
+        input_tokens: 20_000,
+        output_tokens: 900,
+        num_sources_used: 0,
+        num_server_side_tools_used: 6,
+      }, 6);
       return getCost();
     });
     expect(captured.sources).toBeGreaterThan(0);
     expect(captured.grokUsd).toBeGreaterThan(0.05);
+    expect(captured.calls.find((entry) => entry.provider === "grok")?.meta).toContain("estimated xAI cost");
   });
 
   it("prefers the provider's own source count when it actually reports one", async () => {

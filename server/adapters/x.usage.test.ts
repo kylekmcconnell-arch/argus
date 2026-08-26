@@ -51,6 +51,19 @@ describe("X provider attempt accounting", () => {
     expect(state?.statusCapturedAt).toEqual(expect.any(String));
   });
 
+  it("classifies a non-terminal X page as temporarily unavailable, not a missing account", async () => {
+    const state = await publicXAccountState("@driftprotocol", vi.fn().mockResolvedValue(new Response(
+      "<html><body>Something went wrong. Try reloading.</body></html>",
+      { status: 200 },
+    )) as unknown as typeof fetch);
+
+    expect(state).toEqual(expect.objectContaining({
+      handle: "@driftprotocol",
+      accountStatus: "temporarily_unavailable",
+      statusSourceUrl: "https://x.com/driftprotocol",
+    }));
+  });
+
   it("falls through from a provider 404 to the exact public X terminal state", async () => {
     vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
     const fetchMock = vi.fn()
@@ -99,7 +112,12 @@ describe("X provider attempt accounting", () => {
       .mockResolvedValueOnce(json({
         output_text: "grounded result",
         output: [{ type: "web_search_call" }],
-        usage: { input_tokens: 100, output_tokens: 50 },
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          num_server_side_tools_used: 1,
+          cost_in_usd_ticks: 62_000_000,
+        },
       }));
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -120,8 +138,11 @@ describe("X provider attempt accounting", () => {
       partial: 0,
       failed: 1,
       status: "partial",
+      usd: 0.0062,
       meta: expect.stringContaining("http_400"),
     }));
+    expect(captured.cost.calls.find((line) => line.provider === "grok")?.meta)
+      .toContain("exact xAI cost");
   });
 
   it("falls through to Grok when every grounded search request is rejected", async () => {
@@ -130,7 +151,7 @@ describe("X provider attempt accounting", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
     delete process.env.OPENROUTER_API_KEY;
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("serper")) return json({ message: "Unauthorized" }, 403);
       if (url.includes("api.anthropic.com")) throw new Error("Claude must not run with fallbacks off");
@@ -138,6 +159,9 @@ describe("X provider attempt accounting", () => {
         return json({ choices: [{ message: { content: '["one exact query"]' } }] });
       }
       expect(url).toBe("https://api.x.ai/v1/responses");
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        tools: [{ type: "web_search" }],
+      });
       return json({
         output_text: "GROK FALLBACK",
         output: [{ type: "web_search_call" }],

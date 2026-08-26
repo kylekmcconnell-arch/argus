@@ -497,6 +497,7 @@ export async function orientSubjectWithGrok(
   const search = options?.search ?? grokSearch;
   const text = await search(ORIENTATION_SYSTEM, liveSearchUser(packet), {
     maxToolCalls: ORIENTATION_MAX_TOOL_CALLS,
+    tools: ["web_search", "x_search"],
     cacheKey: `subject-orientation:${normalizeHandle(packet.handle)}`,
   });
   if (!text) return null;

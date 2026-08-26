@@ -293,6 +293,8 @@ async function structuredGrok<T>(
       prompt_tokens?: number;
       completion_tokens?: number;
       num_sources_used?: number;
+      num_server_side_tools_used?: number;
+      cost_in_usd_ticks?: number | string;
     };
   };
   try {
@@ -323,6 +325,8 @@ async function structuredGrok<T>(
     input_tokens: data.usage?.prompt_tokens,
     output_tokens: data.usage?.completion_tokens,
     num_sources_used: data.usage?.num_sources_used,
+    num_server_side_tools_used: data.usage?.num_server_side_tools_used,
+    cost_in_usd_ticks: data.usage?.cost_in_usd_ticks,
   };
   const valid = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
   addGrokUsage(usage, 0, tool.name, valid ? "succeeded" : "partial", valid ? undefined : "invalid_structured_output");
@@ -333,6 +337,7 @@ async function structuredGrok<T>(
     requestId,
     inputTokens: usage.input_tokens ?? null,
     outputTokens: usage.output_tokens ?? null,
+    costTicks: usage.cost_in_usd_ticks ?? null,
     elapsedMs: Date.now() - startedAt,
     ...(valid ? {} : { failure: "invalid_structured_output" }),
   }));

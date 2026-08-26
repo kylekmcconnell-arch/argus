@@ -3,7 +3,7 @@
 // the dossier so the report library can show a full A-to-Z cost breakdown.
 //
 // Prices are public list rates (estimates, labeled as such in the UI):
-//   grok-4-fast   $0.20/M in · $0.50/M out · live search ~$25/1K sources
+//   grok-4.3      $1.25/M in · $2.50/M out · server tools $5/1K calls
 //   claude sonnet $3/M in · $15/M out
 //   twitterapi.io ~$0.0002/request
 //   PDL           ~$0.10 per person match
@@ -18,9 +18,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 const PRICE = {
-  grokIn: 0.2 / 1e6,
-  grokOut: 0.5 / 1e6,
-  grokSource: 25 / 1000,
+  // Fallback only. Successful xAI responses now return their exact billed
+  // cost in usage.cost_in_usd_ticks, which always takes precedence. Grok 4.3
+  // is the current redirect target for retired grok-4-fast model slugs.
+  grokIn: 1.25 / 1e6,
+  grokOut: 2.5 / 1e6,
+  grokToolCall: 5 / 1000,
   claudeIn: 3 / 1e6,
   claudeOut: 15 / 1e6,
   claudeWebSearch: 10 / 1000,
@@ -137,12 +140,38 @@ export function recordTwitterapi(op: string, status: ProviderUsageStatus = "succ
 /** Grok spend so far in this audit's ledger, in USD. Lets a runaway subject be
  * stopped mid-run instead of discovered on the invoice. */
 export function grokSpendUsd(): number {
-  const { grok } = currentState();
-  return grok.in * PRICE.grokIn + grok.out * PRICE.grokOut + grok.sources * PRICE.grokSource;
+  const { ledger } = currentState();
+  return [...ledger.values()]
+    .filter((line) => line.provider === "grok")
+    .reduce((total, line) => total + line.usd, 0);
+}
+
+const XAI_TICKS_PER_USD = 10_000_000_000;
+
+function xaiCostUsd(value: unknown): number | undefined {
+  const ticks = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim()
+      ? Number(value)
+      : Number.NaN;
+  return Number.isFinite(ticks) && ticks >= 0
+    ? ticks / XAI_TICKS_PER_USD
+    : undefined;
+}
+
+export interface GrokUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  /** Legacy observability field. xAI no longer bills search per source. */
+  num_sources_used?: number;
+  /** Number of successfully executed, billable server-side tools. */
+  num_server_side_tools_used?: number;
+  /** Exact provider charge: 1 USD = 10^10 xAI billing ticks. */
+  cost_in_usd_ticks?: number | string;
 }
 
 export function addGrokUsage(
-  u: { input_tokens?: number; output_tokens?: number; num_sources_used?: number } | undefined,
+  u: GrokUsage | undefined,
   toolCalls?: number,
   op = "live-search",
   status: ProviderUsageStatus = "succeeded",
@@ -151,14 +180,20 @@ export function addGrokUsage(
   const { grok } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
-  // xAI bills live search PER SOURCE. It reports num_sources_used: 0 even when
-  // it reports several tool calls on the same response, so trusting that zero
-  // booked whole audits at $0.00 while the invoice charged dollars. Never
-  // report less than the tool calls imply: a ledger that under-reports is worse
-  // than no ledger, because it silently disables every budget built on it.
+  // Source count is retained for report observability only. Current xAI
+  // billing is per successful server-side tool invocation, not per source.
   const reportedSources = typeof u?.num_sources_used === "number" ? u.num_sources_used : 0;
   const impliedSources = (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
   const sources = Math.max(reportedSources, impliedSources);
+  const billableToolCalls = typeof u?.num_server_side_tools_used === "number"
+    ? Math.max(0, u.num_server_side_tools_used)
+    : Math.max(0, toolCalls ?? 0);
+  const exactUsd = xaiCostUsd(u?.cost_in_usd_ticks);
+  const usd = exactUsd ?? (
+    tin * PRICE.grokIn
+    + tout * PRICE.grokOut
+    + billableToolCalls * PRICE.grokToolCall
+  );
   grok.calls += 1;
   grok.in += tin;
   grok.out += tout;
@@ -166,8 +201,14 @@ export function addGrokUsage(
   recordCall(
     "grok",
     op,
-    tin * PRICE.grokIn + tout * PRICE.grokOut + sources * PRICE.grokSource,
-    [`${tin + tout} tok · ~${sources} sources`, outcomeMeta].filter(Boolean).join(" · "),
+    usd,
+    [
+      `${tin + tout} tok`,
+      sources ? `~${sources} sources` : "",
+      billableToolCalls ? `${billableToolCalls} billable tool${billableToolCalls === 1 ? "" : "s"}` : "",
+      exactUsd !== undefined ? "exact xAI cost" : "estimated xAI cost",
+      outcomeMeta,
+    ].filter(Boolean).join(" · "),
     status,
   );
 }
