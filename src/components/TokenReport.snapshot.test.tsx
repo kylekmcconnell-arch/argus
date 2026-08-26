@@ -245,7 +245,7 @@ describe("token report supplemental evidence boundary", () => {
       reportVersionId: versionContext.reportVersionId,
     }));
 
-    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report guide"]');
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report table of contents"]');
     expect(nav).not.toBeNull();
     const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
       .map((link) => link.getAttribute("href"));

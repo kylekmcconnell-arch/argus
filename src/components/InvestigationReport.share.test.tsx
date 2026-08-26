@@ -248,7 +248,7 @@ describe("investigation exact sharing", () => {
       } as unknown as NonNullable<Investigation["projectAccount"]>,
     }));
 
-    expect(container.querySelector('nav[aria-label="Report guide"] a[href="#social-activity"]')).not.toBeNull();
+    expect(container.querySelector('nav[aria-label="Report table of contents"] a[href="#social-activity"]')).not.toBeNull();
     expect(container.querySelector("#social-activity")?.textContent).toContain("Social activity");
     expect(container.querySelector("#social-activity")?.textContent).toContain("$PROLOGUE");
   });
@@ -310,7 +310,8 @@ describe("investigation exact sharing", () => {
     const statusCard = container.querySelector<HTMLElement>('[aria-label="Report status"]');
     const scoreCard = container.querySelector<HTMLElement>('[aria-label="Score while checks are open"]');
     const marketCard = container.querySelector<HTMLElement>('[aria-label="Market size"]');
-    expect(statusCard?.closest("aside")?.getAttribute("aria-label")).toBe("Report guide");
+    expect(statusCard).toBeNull();
+    expect(container.querySelector('aside[aria-label="Report guide"]')).toBeNull();
     expect(scoreCard).toBeNull();
     expect(marketCard).toBeNull();
 
@@ -837,7 +838,7 @@ describe("investigation exact sharing", () => {
       reportVersionId,
     }));
 
-    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report guide"]');
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report table of contents"]');
     expect(nav).not.toBeNull();
     const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
       .map((link) => link.getAttribute("href"));

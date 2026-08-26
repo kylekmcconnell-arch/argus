@@ -71,7 +71,7 @@ import { SecondOpinion } from "./SecondOpinion";
 import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
 import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
-import { ReportExperienceLayout, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
+import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
@@ -1945,19 +1945,12 @@ export function InvestigationReport({
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 
-        <ReportExperienceLayout
+        <ReportStickyTableOfContents
           items={reportNavItems}
-          label="Report guide"
-          mobileOffsetClass="top-[101px] sm:top-[65px]"
-          status={{
-            label: readiness.status === "ready" ? observedTokenMeta.label : readinessLabel,
-            detail: readiness.status === "ready" ? "Required safety checks are finished." : readinessLabel,
-            meta: `${readiness.successful}/${readiness.applicable} checks finished`,
-            tone: decisionCanvasTone,
-          }}
-          nextStep={nextStepItems[0]?.label}
-          nextStepHref="#investigation-methodology"
-        >
+          stickyOffsetClass="top-[101px] sm:top-[65px]"
+        />
+
+        <ReportExperienceLayout items={reportNavItems} showGuideNavigation={false}>
 
         {projectAccount?.intelligence && (
           <PointInTimeIntelligencePanel

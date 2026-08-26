@@ -54,7 +54,7 @@ import {
 } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
-import { ReportExperienceLayout, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
+import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
@@ -519,17 +519,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           composition={compositionRows.length > 0 ? compositionRows : undefined}
         />
 
-        <ReportExperienceLayout
-          items={reportNavItems}
-          status={{
-            label: presentationMeta.label,
-            detail: readiness.status === "ready" ? "Required safety checks are finished." : readiness.title,
-            meta: `${readiness.successful}/${readiness.applicable} checks finished`,
-            tone: decisionCanvasTone,
-          }}
-          nextStep={nextStepItems[0]?.label}
-          nextStepHref="#token-methodology"
-        >
+        <ReportStickyTableOfContents items={reportNavItems} />
+
+        <ReportExperienceLayout items={reportNavItems} showGuideNavigation={false}>
         <TokenStory dossier={d} />
 
         {!shareView && (
