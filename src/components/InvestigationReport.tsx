@@ -2066,7 +2066,20 @@ export function InvestigationReport({
               canonicalGeckoId={projectAccount?.projectToken?.coingeckoId}
             />
             {socialActivity && (
-              <SocialActivityPanel snapshot={socialActivity} className="mt-3" panelCostToken={panelCostToken} />
+              <SocialActivityPanel
+                snapshot={socialActivity}
+                className="mt-3"
+                panelCostToken={panelCostToken}
+                afterActivity={accountLeads.subjectLeads.length > 0 ? (
+                  <div id="subject-leads" className="scroll-mt-28">
+                    <SubjectAccusationStage
+                      leads={accountLeads.subjectLeads}
+                      subject={accountLeadSubject}
+                      panelCostToken={panelCostToken}
+                    />
+                  </div>
+                ) : undefined}
+              />
             )}
           </div>
         </div>
@@ -2077,17 +2090,13 @@ export function InvestigationReport({
             title="Who is behind this project"
             description="Team identity is a core diligence question. Start with the people and roles supported by sources, then review the project account and token creator."
           />
-          {accountLeads.subjectLeads.length > 0 && (
+          {accountLeads.subjectLeads.length > 0 && !socialActivity && (
             <div id="subject-leads" className="mb-4 scroll-mt-28">
-              <h3 className="text-[16px] font-semibold text-ink">What people accused</h3>
-              <p className="mt-1 text-[12.5px] text-ink-faint">these name the subject directly · never counted in this score</p>
-              <div className="mt-3">
-                <SubjectAccusationStage
-                  leads={accountLeads.subjectLeads}
-                  subject={accountLeadSubject}
-                  panelCostToken={panelCostToken}
-                />
-              </div>
+              <SubjectAccusationStage
+                leads={accountLeads.subjectLeads}
+                subject={accountLeadSubject}
+                panelCostToken={panelCostToken}
+              />
             </div>
           )}
           <div id="investigation-evidence" className="scroll-mt-28 grid gap-3 lg:grid-cols-2">

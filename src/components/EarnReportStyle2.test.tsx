@@ -26,12 +26,15 @@ describe("EarnReportStyle2", () => {
     expect(html).toContain("alt=\"Tharmas profile\"");
   });
 
-  it("states incomplete social coverage and uses a market-size band", () => {
+  it("uses an observed activity level, a market-cap percentile, and a visible accusation lead", () => {
     const html = renderToStaticMarkup(<EarnReportStyle2 />);
 
-    expect(html).toContain("Coverage incomplete: score withheld");
-    expect(html).toContain("market-size band · not a global rank");
-    expect(html).toContain("Activity score withheld");
+    expect(html).toContain("Active observed conversation");
+    expect(html).toContain("approx. top 20% by market cap");
+    expect(html).toContain("What people accused");
+    expect(html).toContain("Social mirror · weak source");
+    expect(html).not.toContain("score withheld");
+    expect(html).not.toContain("Not calculated");
   });
 
   it("names every loading phase and the score composition dimensions", () => {

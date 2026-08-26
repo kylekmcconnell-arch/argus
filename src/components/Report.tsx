@@ -3507,7 +3507,21 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         )}
 
         {f.socialActivity && roles.includes(SubjectClass.PROJECT) && (
-          <SocialActivityPanel snapshot={f.socialActivity} className="mt-3" panelCostToken={panelCostToken} />
+          <SocialActivityPanel
+            snapshot={f.socialActivity}
+            className="mt-3"
+            panelCostToken={panelCostToken}
+            afterActivity={subjectLeads.length > 0 ? (
+              <div id="subject-leads" className="scroll-mt-28">
+                <SubjectAccusationStage
+                  leads={subjectLeads}
+                  subject={report.handle}
+                  summary={subjectLeadSummary}
+                  panelCostToken={panelCostToken}
+                />
+              </div>
+            ) : undefined}
+          />
         )}
 
         <DiligenceEvidenceLedgers
@@ -4624,12 +4638,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {/* Leads that name the subject themselves are never filed behind a
             disclosure the reader has to open: a reader who sees only the
             collapsed related-entity list would read this page as clean. */}
-        {subjectLeads.length > 0 && (
+        {subjectLeads.length > 0 && !(f.socialActivity && roles.includes(SubjectClass.PROJECT)) && (
           <div id="subject-leads" className="scroll-mt-28">
-            <Section
-              title="What people accused"
-              kicker="these name the subject directly · never counted in this score"
-            >
+            <Section title="Adverse conversation" kicker="direct-subject leads · never counted in this score">
               <SubjectAccusationStage
                 leads={subjectLeads}
                 subject={report.handle}

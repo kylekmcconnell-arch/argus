@@ -105,9 +105,41 @@ export interface SocialActivityScoreInput {
   activeDays: number;
 }
 
+export interface ObservedSocialActivityLevel {
+  label: "Quiet" | "Emerging" | "Active" | "High";
+  detail: string;
+}
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
+
+/**
+ * A plain-language reading of the conversation ARGUS actually observed.
+ * Unlike the numeric activity score, this does not require a complete author
+ * register or an account-concentration calculation. It is intentionally a
+ * broad volume tier, never a quality, sentiment, safety, or influence score.
+ */
+export function observedSocialActivityLevel(
+  snapshot: Pick<SocialActivitySnapshot, "windows">,
+): ObservedSocialActivityLevel | null {
+  const accounts = snapshot.windows.last7Days.uniqueAccounts;
+  const posts = snapshot.windows.last7Days.postCount;
+  if (accounts === null && posts === null) return null;
+  const breadth = Math.max(0, accounts ?? 0);
+  const volume = Math.max(0, posts ?? 0);
+  const label: ObservedSocialActivityLevel["label"] = breadth >= 500 || volume >= 2_000
+    ? "High"
+    : breadth >= 100 || volume >= 300
+      ? "Active"
+      : breadth >= 20 || volume >= 60
+        ? "Emerging"
+        : "Quiet";
+  return {
+    label,
+    detail: "Observed conversation volume; not project quality or safety.",
+  };
+}
 
 export function normalizedSocialHandle(value?: string | null): string | null {
   const handle = value?.trim().replace(/^@/, "") ?? "";

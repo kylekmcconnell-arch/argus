@@ -110,9 +110,10 @@ describe("SocialActivityPanel", () => {
       },
       note: "ARGUS inspected 47 posts before the configured limit. Unique-account counts are minimums.",
     }} />));
-    expect(container.textContent).toContain("more result pages than this saved scan collected");
+    expect(container.textContent).toContain("more matching result pages existed than this saved search collected");
     expect(container.textContent).toContain("At least 47");
-    expect(container.textContent).not.toContain("reached its post limit");
+    expect(container.textContent).toContain("Emerging observed");
+    expect(container.textContent).not.toContain("Withheld");
     expect(container.textContent).not.toContain("before the configured limit");
   });
 
@@ -128,11 +129,12 @@ describe("SocialActivityPanel", () => {
         incompleteReason: "post_limit",
       },
     }} />));
-    expect(container.textContent).toContain("maximum 5,000 posts allowed for this saved scan");
-    expect(container.textContent).toContain("activity score stays withheld");
+    expect(container.textContent).toContain("reached its 5,000-post collection ceiling");
+    expect(container.textContent).toContain("High observed");
+    expect(container.textContent).not.toContain("activity score stays withheld");
   });
 
-  it("says the activity score stays withheld when the search stopped for the scan time budget", () => {
+  it("shows an observed activity level without turning a time-bounded search into an error", () => {
     act(() => root.render(<SocialActivityPanel snapshot={{
       ...snapshot,
       state: "partial",
@@ -148,12 +150,17 @@ describe("SocialActivityPanel", () => {
         last7Days: { ...snapshot.windows.last7Days, authorCoverageComplete: false },
       },
     }} />));
-    expect(container.textContent).toContain("leave time for required checks");
-    expect(container.textContent).toContain("activity score stays withheld");
-    expect(container.textContent).toContain("Full seven-day author coverage is required");
-    expect(container.textContent).toContain("Not calculated");
-    expect(container.textContent).toContain("because the author search is incomplete");
+    expect(container.textContent).toContain("Minimum observed counts");
+    expect(container.textContent).toContain("High observed");
+    expect(container.textContent).toContain("no safety or project score depends on this social pulse");
+    expect(container.textContent).not.toContain("Withheld");
+    expect(container.textContent).not.toContain("Not calculated");
     expect(container.textContent).not.toContain("Unknownfrom the 10 most active accounts");
+  });
+
+  it("renders report-specific context at the bottom of the social section", () => {
+    act(() => root.render(<SocialActivityPanel snapshot={snapshot} afterActivity={<div>Direct accusation context</div>} />));
+    expect(container.textContent).toContain("Direct accusation context");
   });
 
   it("renders mentioner people-cards with follower counts and tweet links, without an influence score", () => {

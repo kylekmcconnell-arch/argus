@@ -36,10 +36,9 @@ describe("ProjectLinks", () => {
     });
 
     const anchors = [...container.querySelectorAll("a")];
-    expect(anchors.map((anchor) => anchor.textContent)).toEqual([
-      "Clutch Markets site",
-      "$SB site",
-    ]);
+    expect(anchors[0].querySelector("strong")?.textContent).toBe("Clutch Markets site");
+    expect(anchors[0].textContent).toContain("Open the official first-party surface");
+    expect(anchors[1].textContent).toBe("$SB site");
     expect(anchors.map((anchor) => anchor.getAttribute("href"))).toEqual([
       "https://clutch.markets",
       "https://stonkbrokers.cash",
@@ -65,7 +64,8 @@ describe("ProjectLinks", () => {
     });
 
     expect(container.querySelector("section")?.getAttribute("aria-label")).toBe("Official project links");
-    expect(container.querySelector(".project-identity-primary")?.textContent).toBe("theinterfold.io");
+    expect(container.querySelector(".project-identity-primary strong")?.textContent).toBe("theinterfold.io");
+    expect(container.textContent).toContain("Web & product");
     expect([...container.querySelectorAll(".project-identity-resource")].map((link) => link.textContent)).toEqual([
       "X",
       "Telegram",

@@ -167,10 +167,7 @@ describe("UsageVisuals", () => {
       .toContain("outside assessed rows");
   });
 
-  // The collector can suppress concentration (unordered register, a register
-  // that sums past supply, or every row a pool). Rendering nothing leaves the
-  // reader to conclude concentration was fine; it was never measured.
-  it("says a suppressed distribution was not measured, and why", () => {
+  it("omits a suppressed distribution instead of publishing collection telemetry as a metric", () => {
     act(() => {
       root.render(
         <UsageVisuals
@@ -191,9 +188,7 @@ describe("UsageVisuals", () => {
       );
     });
     expect(container.querySelector('[aria-label^="Supply split"]')).toBeNull();
-    expect(container.textContent).toContain("not measured");
-    expect(container.textContent).toContain("sum past 100% of supply");
-    // Never a zero and never an empty bar standing in for the missing figure.
+    expect(container.textContent).toBe("");
     expect(container.textContent).not.toContain("of supply sits with the top 10");
   });
 

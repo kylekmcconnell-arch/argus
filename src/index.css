@@ -783,14 +783,59 @@
   gap: 10px;
   border: 1px solid var(--color-line-2);
   border-radius: var(--radius-md);
-  background: color-mix(in oklab, var(--color-panel) 82%, transparent);
+  background: color-mix(in oklab, var(--color-panel) 88%, var(--color-brand) 1.5%);
   padding: 10px 13px;
   color: var(--color-ink);
 }
 .project-identity-primary {
+  position: relative;
+  overflow: hidden;
+  min-height: 64px;
   font-size: 14px;
   font-weight: 570;
   transition: border-color var(--motion-fast) var(--ease-premium), color var(--motion-fast) var(--ease-premium), background var(--motion-fast) var(--ease-premium);
+}
+.project-identity-primary::before {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 12% 30%, color-mix(in oklab, var(--color-brand) 9%, transparent), transparent 45%);
+  content: "";
+  pointer-events: none;
+}
+.project-identity-favicon {
+  z-index: 1;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--color-brand) 18%, var(--color-line));
+  border-radius: 9px;
+  background: var(--color-panel);
+  box-shadow: 0 8px 20px -16px color-mix(in oklab, var(--color-brand) 60%, transparent);
+}
+.project-identity-favicon img {
+  width: 20px;
+  height: 20px;
+}
+.project-identity-primary-copy {
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.project-identity-primary-copy strong {
+  font-size: 14px;
+  font-weight: 620;
+}
+.project-identity-primary-copy small {
+  color: var(--color-ink-faint);
+  font-size: 10.5px;
+  font-weight: 430;
+  line-height: 1.25;
+}
+.project-identity-primary > svg {
+  z-index: 1;
 }
 .project-identity-primary:hover,
 .project-identity-primary:focus-visible {

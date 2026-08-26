@@ -16,7 +16,7 @@ vi.mock("./TokenSparkline", () => ({
   },
 }));
 
-import { marketSizeBand } from "../lib/marketPosition";
+import { marketCapPosition, marketSizeBand } from "../lib/marketPosition";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 
 const address = "0x4444444444444444444444444444444444444444";
@@ -158,7 +158,7 @@ describe("MarketPerformancePanel", () => {
     }));
   });
 
-  it("uses a transparent saved-value band when a DEX-native token has no global rank", () => {
+  it("uses an approximate market-cap percentile when a DEX-native token has no global rank", () => {
     act(() => root.render(
       <MarketPerformancePanel
         projectToken={projectToken({
@@ -173,9 +173,9 @@ describe("MarketPerformancePanel", () => {
     ));
 
     expect(container.textContent).not.toContain("Market rank");
-    expect(container.textContent).toContain("Market size band");
-    expect(container.textContent).toContain("$100M–$1B");
-    expect(container.textContent).toContain("Saved market cap · not a global rank");
+    expect(container.textContent).toContain("Market position");
+    expect(container.textContent).toContain("Top ~2%");
+    expect(container.textContent).toContain("Approximate market-cap position from the saved market cap");
     expect(container.textContent).not.toContain("Not listed");
   });
 
@@ -184,6 +184,13 @@ describe("MarketPerformancePanel", () => {
     expect(marketSizeBand(1_370_000)).toBe("$1M–$10M");
     expect(marketSizeBand(1_000_000_000)).toBe("$1B+");
     expect(marketSizeBand(null)).toBeNull();
+  });
+
+  it("keeps broad percentile thresholds deterministic", () => {
+    expect(marketCapPosition(1_530_000)?.label).toBe("Top ~20%");
+    expect(marketCapPosition(610_000_000)?.label).toBe("Top ~2%");
+    expect(marketCapPosition(80_000)?.label).toBe("Lower half");
+    expect(marketCapPosition(null)).toBeNull();
   });
 
   it("rejects a mismatched project token instead of lending its market record to the subject", () => {

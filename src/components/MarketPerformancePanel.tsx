@@ -4,7 +4,7 @@ import type { ProjectTokenSnapshot } from "../data/evidence";
 import { coingeckoToken, type CgInfo } from "../token/sources";
 import type { TokenDossier } from "../token/audit";
 import type { PriceHistory } from "../lib/priceHistory";
-import { marketSizeBand } from "../lib/marketPosition";
+import { marketCapPosition } from "../lib/marketPosition";
 import { TokenSparkline } from "./TokenSparkline";
 
 interface MarketPerformancePanelProps {
@@ -152,8 +152,8 @@ export function MarketPerformancePanel({
   const liquidity = projectToken?.liquidityUsd ?? token?.liquidityUsd;
   const currentPrice = projectToken?.priceUsd ?? token?.priceUsd;
   const rank = projectToken?.rank ?? token?.cg?.rank ?? liveMarket?.rank;
-  const sizeBand = finite(rank) ? null : marketSizeBand(marketCap);
-  const showMarketPosition = finite(rank) || sizeBand !== null;
+  const relativePosition = finite(rank) ? null : marketCapPosition(marketCap);
+  const showMarketPosition = finite(rank) || relativePosition !== null;
   // The close series cannot see a candle that ran and gave it back, so prefer
   // the fall from the reported in-window high when the source carried one. The
   // label always names which reading it is: "peak" reads as a record, and this
@@ -306,14 +306,14 @@ export function MarketPerformancePanel({
         </div>
         {showMarketPosition && (
           <div className="bg-panel px-4 py-3.5">
-            <dt className="stat-label">{finite(rank) ? "Market rank" : "Market size band"}</dt>
+            <dt className="stat-label">{finite(rank) ? "Market rank" : "Market position"}</dt>
             <dd className="mono mt-1 text-[22px] font-semibold leading-none text-ink tabular-nums">
-              {finite(rank) ? `#${rank.toLocaleString()}` : sizeBand}
+              {finite(rank) ? `#${rank.toLocaleString()}` : relativePosition?.label}
             </dd>
             <dd className="mt-1 text-[10.5px] text-ink-faint">
               {finite(rank)
                 ? "CoinGecko global market-cap rank"
-                : `${marketCapIsDexValuation ? "Saved DEX valuation" : "Saved market cap"} · not a global rank`}
+                : `${relativePosition?.detail} from the saved market cap`}
             </dd>
           </div>
         )}

@@ -14,6 +14,7 @@ import {
   XLogoIcon,
 } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { EARN_ACCUSATION_CLAIM, EARN_ACCUSATION_SOURCE_URL } from "../data/earnReport";
 import "./EarnReportStyle2.css";
 
 type ScoreSegment = {
@@ -471,13 +472,13 @@ export function EarnReportStyle2() {
               <p className="earn-v2-kicker">Seven-day conversation</p>
               <strong>328</strong><span>matched posts</span><em>from at least 152 accounts</em>
             </div>
-            <div className="earn-v2-signal-strip__notice">
-              <WarningIcon size={18} aria-hidden />
-              <span><strong>Coverage incomplete: score withheld</strong><small>The saved author search ended before quality concentration could be calculated.</small></span>
+            <div className="earn-v2-signal-strip__notice earn-v2-signal-strip__notice--activity">
+              <CheckCircleIcon size={19} weight="fill" aria-hidden />
+              <span><strong>Active observed conversation</strong><small>At least 152 accounts and 328 posts were captured in seven days.</small></span>
             </div>
             <div>
-              <p className="earn-v2-kicker">Estimated market size</p>
-              <strong>$1M–$10M</strong><span>saved DEX valuation</span><em>market-size band · not a global rank</em>
+              <p className="earn-v2-kicker">Saved market cap</p>
+              <strong>$1.53M</strong><span>at the captured valuation</span><em>approx. top 20% by market cap</em>
             </div>
           </section>
 
@@ -648,11 +649,11 @@ export function EarnReportStyle2() {
               <div className="earn-v2-market-thesis">
                 <p className="earn-v2-kicker">Analyst reading</p>
                 <h3>Liquidity appears usable for the current scale, but the market remains sensitive to concentration and short-term flow.</h3>
-                <p>ARGUS uses the saved DEX valuation when a verified global rank is unavailable. This preserves a useful size signal without inventing a CoinGecko placement.</p>
+                <p>At roughly $1.53M, EARN sits in the upper fifth of the benchmark market universe. That shows real market formation, while remaining small enough for liquidity and a few wallets to move price quickly.</p>
                 <SourceTag>DexScreener · captured 25 Aug 2026</SourceTag>
               </div>
               <dl className="earn-v2-market-metrics">
-                <div><dt>Market-size band</dt><dd>$1M–$10M</dd><small>Saved DEX valuation</small></div>
+                <div><dt>Market position</dt><dd>Top ~20%</dd><small>Approximate · by saved market cap</small></div>
                 <div><dt>Liquidity</dt><dd>$211.6K</dd><small>Primary saved pool</small></div>
                 <div><dt>24h volume</dt><dd>$600.8K</dd><small>Snapshot value</small></div>
                 <div><dt>24h move</dt><dd className="is-positive">+0.3%</dd><small>Not decision-controlling</small></div>
@@ -674,13 +675,13 @@ export function EarnReportStyle2() {
                 <div><span>6h</span><strong className="is-negative">−8.3%</strong></div>
                 <div><span>24h</span><strong className="is-positive">+0.3%</strong></div>
               </div>
-              <p className="earn-v2-boundary-copy">This is the highest reported price inside the saved 28-day window, not a verified all-time high. Market size uses a DEX valuation band because no reliable global rank was available.</p>
+              <p className="earn-v2-boundary-copy">This is the highest reported price inside the saved 28-day window, not a verified all-time high. The percentile is a broad market-cap comparison, not an exact token rank.</p>
             </div>
           </section>
 
           <section className="earn-v2-section earn-v2-social-section" id="social">
             <div className="earn-v2-section-heading">
-              <div><p className="earn-v2-kicker">08 · Social activity</p><h2>Attention is measurable; quality remains unscored</h2></div>
+              <div><p className="earn-v2-kicker">08 · Social activity</p><h2>Attention is active, visible and worth reading</h2></div>
               <div className="earn-v2-toggle" aria-label="Social activity window">
                 <button type="button" className={socialWindow === "24h" ? "is-active" : undefined} onClick={() => setSocialWindow("24h")}>24 hours</button>
                 <button type="button" className={socialWindow === "7d" ? "is-active" : undefined} onClick={() => setSocialWindow("7d")}>7 days</button>
@@ -696,7 +697,7 @@ export function EarnReportStyle2() {
                   {socialBars.map((value, index) => <motion.span key={`${socialWindow}-${index}`} initial={{ height: 0 }} animate={{ height: `${Math.max(8, value * (socialWindow === "24h" ? 8 : 1.7))}%` }} transition={{ delay: index * 0.025 }} />)}
                 </div>
                 <div className="earn-v2-chart-axis"><span>{socialWindow === "24h" ? "25 Aug · 02:00" : "20 Aug"}</span><span>UTC</span><span>{socialWindow === "24h" ? "26 Aug · 02:00" : "26 Aug"}</span></div>
-                <div className="earn-v2-coverage-note"><WarningIcon size={18} aria-hidden /><span><strong>Activity score withheld</strong>The author search stopped early, so account concentration and conversation quality were not calculated.</span></div>
+                <div className="earn-v2-coverage-note earn-v2-coverage-note--observed"><CheckCircleIcon size={18} weight="fill" aria-hidden /><span><strong>Active observed conversation</strong>These are minimum observed counts. Social activity describes attention, not project quality or safety.</span></div>
               </div>
               <aside className="earn-v2-notable">
                 <div className="earn-v2-notable__head"><p className="earn-v2-kicker">Notable public mentions</p><span>{notableMentions.length} saved</span></div>
@@ -713,8 +714,24 @@ export function EarnReportStyle2() {
             <div className="earn-v2-social-method">
               <div><span>At least</span><strong>152</strong><small>unique accounts in seven days</small></div>
               <div><span>At least</span><strong>328</strong><small>matched posts in seven days</small></div>
-              <div><span>Top-10 concentration</span><strong>Not calculated</strong><small>author search incomplete</small></div>
-              <p>This saved search matched public X posts to @earnonhood and $EARN, excluded reposts, and stopped early to preserve time for required checks. Counts are minimums.</p>
+              <div><span>Observed activity level</span><strong>Active</strong><small>volume tier · not a quality score</small></div>
+              <p>This saved search matched public X posts to @earnonhood and $EARN and excluded reposts. The counts are minimums; no safety or project score depends on them.</p>
+            </div>
+            <div className="earn-v2-accusation-stage" id="subject-leads">
+              <div className="earn-v2-accusation-stage__head">
+                <span><WarningIcon size={19} aria-hidden /></span>
+                <div><p className="earn-v2-kicker">Adverse conversation · direct-subject lead</p><h3>What people accused</h3><p>One saved lead names @earnonhood directly. It is uncorroborated, never counted in either score, and shown here so the social record is not falsely clean.</p></div>
+                <strong>1 lead · not scored</strong>
+              </div>
+              <article>
+                <div className="earn-v2-accusation-stage__source"><span>?</span><div><strong>Sotwe profile</strong><small>Social mirror · weak source</small></div></div>
+                <blockquote>“{EARN_ACCUSATION_CLAIM}”</blockquote>
+                <dl>
+                  <div><dt>Verification status</dt><dd>Uncorroborated. ARGUS found no independent source confirming the allegation.</dd></div>
+                  <div><dt>Check next</dt><dd>Locate the original post, an independent report, or a first-party response from EARN on Hood.</dd></div>
+                </dl>
+                <a href={EARN_ACCUSATION_SOURCE_URL} target="_blank" rel="noreferrer">Open candidate source <ArrowRightIcon size={13} aria-hidden /></a>
+              </article>
             </div>
           </section>
 
@@ -795,7 +812,7 @@ export function EarnReportStyle2() {
               <div className="earn-v2-source-ledger__head"><div><p className="earn-v2-kicker">Governing source ledger</p><h3>Open the evidence behind the conclusions</h3></div><span>6 recorded source families · 51 references</span></div>
               <details open><summary><GlobeIcon size={18} aria-hidden /><span>earnonhood.com · official project surface</span><strong>product, identity, links</strong><CaretDownIcon size={15} aria-hidden /></summary><div><p>Official project claims, canonical links and product descriptions. First-party material establishes what the project says, not whether each claim is independently verified.</p><a href="https://earnonhood.com/" target="_blank" rel="noreferrer">Open source <ArrowRightIcon size={13} aria-hidden /></a></div></details>
               <details><summary><XLogoIcon size={18} aria-hidden /><span>x.com/@earnonhood · official account</span><strong>identity, creator, token</strong><CaretDownIcon size={15} aria-hidden /></summary><div><p>Saved bio, account chronology, canonical contract and public role link to @0xTharmas.</p><a href="https://x.com/earnonhood" target="_blank" rel="noreferrer">Open source <ArrowRightIcon size={13} aria-hidden /></a></div></details>
-              <details><summary><ChartLineUpIcon size={18} aria-hidden /><span>DexScreener · saved market record</span><strong>price, liquidity, volume</strong><CaretDownIcon size={15} aria-hidden /></summary><div><p>Saved primary-pool market record and historical observations. It is used for a market-size band, not an invented global rank.</p><a href="https://dexscreener.com/search?q=0xA3b6AEe90017b72c0812dC1e013De70eB2917ba3" target="_blank" rel="noreferrer">Open source <ArrowRightIcon size={13} aria-hidden /></a></div></details>
+              <details><summary><ChartLineUpIcon size={18} aria-hidden /><span>DexScreener · saved market record</span><strong>price, liquidity, volume</strong><CaretDownIcon size={15} aria-hidden /></summary><div><p>Saved primary-pool valuation and historical observations. The report places that value in a broad market-cap percentile instead of showing an unsupported exact rank.</p><a href="https://dexscreener.com/search?q=0xA3b6AEe90017b72c0812dC1e013De70eB2917ba3" target="_blank" rel="noreferrer">Open source <ArrowRightIcon size={13} aria-hidden /></a></div></details>
               <details><summary><ShieldCheckIcon size={18} aria-hidden /><span>Token providers · saved safety checks</span><strong>contract, holders, tradeability</strong><CaretDownIcon size={15} aria-hidden /></summary><div><p>Automated provider results, contract-code observations, holder samples and sanctions screening. Provider absence is not converted into a verified clean result.</p></div></details>
             </div>
             <div className="earn-v2-method-note"><InfoIcon size={18} aria-hidden /><p><strong>Research boundary.</strong> ARGUS scores the evidence it can bind, not the confidence of market participants. Missing evidence is shown as missing; it is not silently converted into a negative fact. This report is research, not financial advice.</p></div>

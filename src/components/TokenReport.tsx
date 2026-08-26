@@ -7,6 +7,8 @@ import { isWatched, toggleWatch } from "../lib/watchlist";
 import { deployerRoleLabel, sameWalletAddress, type TokenDossier } from "../token/audit";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { SocialActivityPanel } from "./SocialActivityPanel";
+import { SubjectAccusationStage } from "./SubjectAccusationStage";
+import { EARN_SUBJECT_LEADS, isCanonicalEarnToken } from "../data/earnReport";
 import { EmbeddedThreatScan } from "./ThreatScanPage";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
@@ -143,6 +145,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 }
 
 export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief, shareView = false }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
+  const isEarn = isCanonicalEarnToken(d.chain, d.address);
   const arkhamEnabled = arkhamProviderEnabled();
   const isEarnToken = d.address.trim().toLowerCase() === EARN_TOKEN_ADDRESS;
   const arkhamDeployer = arkhamEnabled && d.deployer && !sameWalletAddress(d.deployer, d.address) ? d.deployer : null;
@@ -571,7 +574,21 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           />
         </div>
 
-        {d.socialActivity && <SocialActivityPanel snapshot={d.socialActivity} className="mt-4" panelCostToken={panelCostToken} />}
+        {d.socialActivity && (
+          <SocialActivityPanel
+            snapshot={d.socialActivity}
+            className="mt-4"
+            panelCostToken={panelCostToken}
+            afterActivity={isEarn ? (
+              <SubjectAccusationStage leads={EARN_SUBJECT_LEADS} subject="@earnonhood" />
+            ) : undefined}
+          />
+        )}
+        {isEarn && !d.socialActivity && (
+          <div id="subject-leads" className="panel mt-4 scroll-mt-28 px-5 py-5">
+            <SubjectAccusationStage leads={EARN_SUBJECT_LEADS} subject="@earnonhood" />
+          </div>
+        )}
 
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         {showCurrentIntelligence && panelCostToken && (
