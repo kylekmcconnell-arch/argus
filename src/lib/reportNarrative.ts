@@ -3,7 +3,14 @@ import type { ProjectTokenSnapshot, SubjectOrientation } from "../data/evidence"
 const EVM_CONTRACT = /\b0x[a-f0-9]{40}\b/gi;
 const SOLANA_CONTRACT = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 const URL_PATTERN = /https?:\/\/\S+/gi;
-const PRODUCT_VERBS = /\b(?:is|are|builds?|provides?|offers?|lets?|enables?|routes?|connects?|turns?|powers?|issues?|operates?|manages?|delivers?|gives?)\b/i;
+const PRODUCT_VERBS = /\b(?:builds?|provides?|offers?|lets?|enables?|routes?|connects?|turns?|powers?|issues?|operates?|manages?|delivers?|gives?|trades?|swaps?|lends?|borrows?|stakes?|earns?|allocates?|automates?|supplies?|pools?|vaults?)\b/i;
+const GENERIC_IDENTITY_COPY = /\b(?:official product surface|project behind|official (?:site|website)|linked to (?:the )?(?:site|website|domain))\b/i;
+
+function hasProductMechanism(value: string): boolean {
+  // A ticker-like project name (for example EARN) must not accidentally count
+  // as the verb "earn". Remove only an all-caps leading label before testing.
+  return PRODUCT_VERBS.test(value.replace(/^[A-Z][A-Z0-9$._-]{1,19}\b\s*/, ""));
+}
 
 function tidySentence(value: string): string {
   const cleaned = value
@@ -45,14 +52,14 @@ function narrativeProductFact(facts: NarrativeProductFact[] | undefined, bio: st
   return (facts ?? [])
     .filter((fact) => fact.predicate === "product")
     .map((fact) => typeof fact.value === "string" ? tidySentence(fact.value) : "")
-    .filter((value) => value.length >= 24 && PRODUCT_VERBS.test(value) && !substantiallyRepeats(value, bio))
+    .filter((value) => value.length >= 24 && hasProductMechanism(value) && !GENERIC_IDENTITY_COPY.test(value) && !substantiallyRepeats(value, bio))
     .sort((left, right) => right.length - left.length)[0] ?? "";
 }
 
 function boundGrokOverview(orientation: SubjectOrientation | undefined, bio: string): string {
   if (!orientation || orientation.kind === "UNKNOWN") return "";
   const overview = tidySentence(orientation.what);
-  if (overview.length < 24 || !PRODUCT_VERBS.test(overview) || substantiallyRepeats(overview, bio)) return "";
+  if (overview.length < 24 || !hasProductMechanism(overview) || GENERIC_IDENTITY_COPY.test(overview) || substantiallyRepeats(overview, bio)) return "";
   return overview;
 }
 
@@ -89,8 +96,8 @@ export function reportOpeningNarrative(input: ReportOpeningNarrativeInput): stri
     try { host = new URL(input.website).hostname.replace(/^www\./i, ""); } catch { host = ""; }
   }
   const token = input.projectToken?.verified && input.projectToken.symbol
-    ? ` with a linked $${input.projectToken.symbol} token${input.projectToken.chain ? ` on ${input.projectToken.chain}` : ""}`
+    ? ` and its linked $${input.projectToken.symbol} token${input.projectToken.chain ? ` on ${input.projectToken.chain}` : ""}`
     : "";
-  const identity = host ? `the official product surface at ${host}` : `the public identity bound to ${input.handle}`;
-  return tidySentence(`${input.name} is the project behind ${identity}${token}. ARGUS assessed its product, people, market activity, and control evidence as separate parts of the same decision file`);
+  const identity = host ? `${input.name} is linked to ${host}${token}` : `${input.name} is bound to ${input.handle}${token}`;
+  return `${tidySentence(identity)} This saved report did not establish a source-backed explanation of what the product does. Rescan to refresh its first-party product description.`;
 }

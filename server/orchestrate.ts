@@ -1835,10 +1835,20 @@ export function axisCatalog(roles: SubjectClass[]) {
 
 const siteSubstanceExcerptByEvidence = new WeakMap<CollectedEvidence, string>();
 
+export function shouldCollectSubjectOrientation(resolvedRoles: SubjectClass[]): boolean {
+  return resolvedRoles.length === 0 || resolvedRoles.includes(SubjectClass.PROJECT);
+}
+
 async function maybeOrientSubject(ctx: CollectContext, siteExcerpt?: string): Promise<void> {
   const prior = ctx.evidence.subjectOrientation;
   if (prior && prior.kind !== "UNKNOWN") return;
-  if (providerBackedRoles(ctx.evidence).length > 0) return;
+  // Deterministic routing answers which methodology to run, but it does not
+  // answer the reader's first question: what does this product actually do?
+  // Keep enriching verified PROJECT subjects with a bound first-party Grok
+  // orientation. Other already-resolved subject types do not need this extra
+  // product-narrative pass.
+  const resolvedRoles = providerBackedRoles(ctx.evidence);
+  if (!shouldCollectSubjectOrientation(resolvedRoles)) return;
   const excerpt = (siteExcerpt ?? siteSubstanceExcerptByEvidence.get(ctx.evidence) ?? "").trim() || undefined;
   const orientation = await orientSubjectWithGrok(ctx.evidence, { siteExcerpt: excerpt });
   if (!orientation) return;

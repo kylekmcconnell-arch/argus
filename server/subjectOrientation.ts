@@ -94,6 +94,8 @@ const ORIENTATION_SYSTEM = [
   "Answer: What is this? Who is it for? Is it a product/protocol/company brand (PROJECT), a person who founds or builds (FOUNDER), a capital allocator (INVESTOR), or unknown (UNKNOWN)?",
   "Write what as polished report-opening copy, not a transcript of the X bio: one or two compact sentences in plain English from the packet, official site, and live X of THIS handle.",
   "Lead with the product or protocol function. Then state its intended user, network, mechanism, or token role only when the bound artifacts support it.",
+  "For a PROJECT, what must explain a concrete user action or product mechanism such as trading, lending, borrowing, staking, supplying liquidity, using a vault, or operating software. Merely saying that a project has an official site, exists on a chain, or is linked to a token is not a product explanation.",
+  "When the official site contains a multi-product application, summarize the actual first-party product suite rather than describing site ownership or repeating the homepage slogan.",
   "Never copy slogans, emoji separators, @handles, URLs, or contract addresses into what. Do not discuss the ARGUS score or make an investment recommendation in what.",
   "audience is who it is for, or \"\".",
   "Quote @handles only when they appear in the packet artifacts or in live x_search of THIS subject. Never from a display name alone.",

@@ -11,6 +11,7 @@ import {
   protocolRecordMatchesCanonicalToken,
   projectVerifiedBasicFacts,
   providerBackedRoles,
+  shouldCollectSubjectOrientation,
 } from "./orchestrate";
 import {
   hydrateOfficialProjectIdentityFromFacts,
@@ -295,6 +296,12 @@ describe("provider-backed project routing", () => {
       { axis: "P5_traction_and_liveness", weight: 14, role: SubjectClass.PROJECT },
       { axis: "P6_transparency_integrity", weight: 12, role: SubjectClass.PROJECT },
     ]);
+  });
+
+  it("still collects a product explanation after deterministic PROJECT routing", () => {
+    expect(shouldCollectSubjectOrientation([SubjectClass.PROJECT])).toBe(true);
+    expect(shouldCollectSubjectOrientation([])).toBe(true);
+    expect(shouldCollectSubjectOrientation([SubjectClass.FOUNDER])).toBe(false);
   });
 
   it.each([
