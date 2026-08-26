@@ -76,6 +76,8 @@ import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
 import { VerdictHero } from "./VerdictHero";
 import { ReportActionsRow } from "./ReportActionsRow";
+import { DossierReport } from "./DossierReport";
+import { initialReportStyle, persistReportStyle, type ReportStyle } from "../lib/reportStyle";
 import { compositionHeadline, orderByPlainAxis, personDimensionChapters, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
 import {
   BasicFactsPanel,
@@ -751,15 +753,12 @@ export function InvestigationReport({
     ?? undefined;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
   const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
-  // The two report styles Enigma switches between: "full" is the Auric File
-  // canon (composition and chapters in the reading flow, the default);
-  // "brief" is the compact decision brief. The choice persists per browser.
-  const [readingStyle, setReadingStyle] = useState<"full" | "brief">(() => {
-    try { return localStorage.getItem("argus-reading-style") === "brief" ? "brief" : "full"; } catch { return "full"; }
-  });
-  const chooseReadingStyle = (style: "full" | "brief") => {
+  // The two report styles (shareable via ?reportStyle=1|2): Style 1 is the
+  // Auric File canon, the default; Style 2 is the dossier story experience.
+  const [readingStyle, setReadingStyle] = useState<ReportStyle>(initialReportStyle);
+  const chooseReadingStyle = (style: ReportStyle) => {
     setReadingStyle(style);
-    try { localStorage.setItem("argus-reading-style", style); } catch { /* style still applies for this view */ }
+    persistReportStyle(style);
   };
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
@@ -1395,7 +1394,7 @@ export function InvestigationReport({
     { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
     ...(hasConnectionsChapter ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
     ...(projectAccount?.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
-    ...(readingStyle === "full" && token.axes?.length ? [{ href: "#composition" as const, label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> }] : []),
+    ...(readingStyle === "style1" && token.axes?.length ? [{ href: "#composition" as const, label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> }] : []),
     { href: "#investigation-methodology", label: "Method", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
     ...(!shareView ? [{ href: "#investigation-challenge" as const, label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> }] : []),
   ];
@@ -1774,7 +1773,7 @@ export function InvestigationReport({
           {/* the composition: always visible, never an appendix (Enigma's
               canon: this is the file's table of contents, with the working
               dropdowns and the jump links into each chapter). */}
-          {readingStyle === "full" && token.axes?.length > 0 && (
+          {readingStyle === "style1" && token.axes?.length > 0 && (
             <section id="composition" className="af-doc mt-10 scroll-mt-28">
               <p className="af-sec-label">The composition</p>
               <h2 className="af-h2 mt-3">{accountAxes.length > 0 ? "Two separate scores. Every dimension preserved." : compositionHeadline(token.axes.length)}</h2>
@@ -1819,6 +1818,31 @@ export function InvestigationReport({
                 </div>
               </div>
             </section>
+          )}
+
+          {/* Style 2: the dossier story experience (Kyle's layout), the whole
+              reading layer told as a narrative. Explicit choice, never the
+              default (design canon). */}
+          {readingStyle === "style2" && (
+            <div className="af-doc mt-10">
+              <DossierReport
+                payload={{
+                  ...(projectAccount ? (projectAccount as unknown as Record<string, unknown>) : {
+                    handle: projectX ?? "",
+                    display_name: token.name || token.symbol,
+                    website: siteUrl,
+                    headline: token.headline,
+                    avatar_url: token.imageUrl,
+                    report: { verdict: token.verdict, score_total: token.score },
+                  }),
+                  checkRuns: projectAccount?.checkRuns?.length ? projectAccount.checkRuns : diligenceChecks,
+                  basicFacts: projectAccount?.basicFacts?.length ? projectAccount.basicFacts : projectBasicFacts,
+                  basicFactLeads: projectAccount?.basicFactLeads ?? projectBasicFactLeads,
+                  webTeam: groundedProjectTeamMembers,
+                  webTeamLeads: projectAccount?.webTeamLeads ?? [],
+                }}
+              />
+            </div>
           )}
 
           {(requiredGapChecks.length > 0 || readiness.status !== "ready") && <section
