@@ -340,20 +340,26 @@ describe("stored token and investigation checks", () => {
 
   it("uses frozen token outcomes instead of re-deriving from the payload", () => {
     const token = { versionContext } as TokenDossier;
-    expect(reportChecks("token", token)).toEqual(versionContext.checks);
+    const checks = reportChecks("token", token);
+    expect(checks).toContainEqual(versionContext.checks[0]);
+    expect(checks.filter((check) => check.decisionCritical === true)).toHaveLength(6);
   });
 
-  it("treats an authoritative empty frozen checklist as empty", () => {
+  it("fails closed with the current six-check contract when a frozen token checklist is empty", () => {
     const token = {
       versionContext: { ...versionContext, checks: [] },
     } as unknown as TokenDossier;
 
-    expect(reportChecks("token", token)).toEqual([]);
+    const checks = reportChecks("token", token);
+    expect(checks).toHaveLength(6);
+    expect(checks.every((check) => check.status === "unknown" && check.decisionCritical === true)).toBe(true);
   });
 
   it("uses frozen investigation outcomes instead of re-deriving from the payload", () => {
     const investigation = { token: {}, versionContext } as Investigation;
-    expect(reportChecks("investigation", investigation)).toEqual(versionContext.checks);
+    const checks = reportChecks("investigation", investigation);
+    expect(checks).toContainEqual(versionContext.checks[0]);
+    expect(checks.filter((check) => check.decisionCritical === true)).toHaveLength(7);
   });
 });
 

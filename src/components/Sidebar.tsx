@@ -79,7 +79,13 @@ function recentAudits(max: number): LogEntry[] {
   return out;
 }
 
-const KIND_LABEL: Record<LogEntry["kind"], string> = { person: "handle", token: "token", site: "site" };
+function reportScopeLabel(entry: Pick<LogEntry, "kind" | "flags">): string {
+  if (entry.kind === "token") return "token safety";
+  if (entry.kind === "site") return "site recon";
+  return entry.flags?.some((flag) => /^role:project$/i.test(flag))
+    ? "project diligence"
+    : "person diligence";
+}
 
 // Left rail: grouped investigation tools, compact case history, and account.
 type NavIcon = ComponentType<{ size?: number; weight?: "regular" | "bold" | "fill"; "aria-hidden"?: boolean }>;
@@ -485,7 +491,7 @@ export function Sidebar({
                 <span className={compact ? "sr-only" : "min-w-0 flex-1"}>
                   <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
                   <span className="block truncate text-[11px] text-ink-faint">
-                    {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}{readinessLabel === "PROVISIONAL" ? " · checks open" : readinessLabel === "BLOCKED" ? " · not ready" : ""}
+                    {reportScopeLabel(e)}{typeof e.score === "number" ? ` · ${e.score}` : ""}{readinessLabel === "PROVISIONAL" ? " · checks open" : readinessLabel === "BLOCKED" ? " · not ready" : ""}
                     {e.contributor && e.contributor !== me && e.contributor !== "anonymous" && (
                       <span className="text-signal-lift"> · {e.contributor}</span>
                     )}

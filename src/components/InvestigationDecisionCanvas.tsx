@@ -223,6 +223,8 @@ function DecisionLedgerList({
 export function InvestigationDecisionCanvas({
   verdictLabel,
   score,
+  scoreLabel = "ARGUS risk score",
+  scoreContext,
   scoreIsProvisional = false,
   favorable,
   verdictTone,
@@ -245,11 +247,16 @@ export function InvestigationDecisionCanvas({
   methodologyHref = "#token-methodology",
   challengeAnchorId = null,
   checkScopeLabel = "Required report checks",
+  openItemsLabel = "What is still open",
   composition,
 }: {
   verdictLabel: string;
   /** Saved ARGUS risk score. Null means the scoring contract withheld it. */
   score: number | null;
+  /** Names the rubric so linked project and token scores are never conflated. */
+  scoreLabel?: string;
+  /** Short scope statement explaining what this score measures. */
+  scoreContext?: string;
   /** Marks a saved score that readers may inspect while required checks remain open. */
   scoreIsProvisional?: boolean;
   favorable: boolean;
@@ -275,6 +282,8 @@ export function InvestigationDecisionCanvas({
   challengeAnchorId?: string | null;
   /** Public name for the exact check set behind successful/applicable. */
   checkScopeLabel?: string;
+  /** Heading for required gaps or non-blocking follow-up research. */
+  openItemsLabel?: string;
   /** Real ScoreComposition rows. Drives the hero ring pieces when present. */
   composition?: CompositionRow[];
 }) {
@@ -308,11 +317,12 @@ export function InvestigationDecisionCanvas({
         <div
           className="decision-score-lockup shrink-0"
           data-report-score="prominent"
-          aria-label={score == null ? "ARGUS risk score withheld" : `ARGUS risk score ${score} out of 100`}
+          aria-label={score == null ? `${scoreLabel} withheld` : `${scoreLabel} ${score} out of 100`}
         >
           <p className="mono text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
-            {score != null && scoreIsProvisional ? "Early risk score" : "ARGUS risk score"}
+            {scoreLabel}
           </p>
+          {scoreContext && <p className="mt-1 max-w-[18rem] text-center text-[10.5px] leading-snug text-ink-faint">{scoreContext}</p>}
           <ScoreRing
             score={score}
             verdict={verdictLabel}
@@ -457,7 +467,7 @@ export function InvestigationDecisionCanvas({
 
             <div className="mt-4 border-t border-line/60 pt-4">
               <DecisionLedgerList
-                title="What is still open"
+                title={openItemsLabel}
                 items={nextSteps}
                 href={methodologyHref}
                 emptyCopy={applicable === 0 ? "No required check results were saved." : "No checks remain open."}

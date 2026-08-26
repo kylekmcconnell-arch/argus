@@ -38,6 +38,7 @@ import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 import { TokenSnapshotVisuals } from "./TokenSnapshotVisuals";
 import { LpCustody } from "./LpCustody";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
+import { marketSizeBand } from "../lib/marketPosition";
 import { UsageVisuals } from "./UsageVisuals";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { RingAlert } from "./RingAlert";
@@ -776,6 +777,11 @@ export function InvestigationReport({
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
   const { token, projectX, siteUrl, recon, projectAccount, founders, deployerTrail } = inv;
+  // Social conversation is project-level evidence. Older investigation saves
+  // often persisted it on the embedded project-account dossier while the
+  // report looked only at token.socialActivity, which is why Prologue had no
+  // panel even though @fablesfi had been scanned.
+  const socialActivity = token.socialActivity ?? projectAccount?.socialActivity;
   const accountReport = projectAccount?.report;
   const accountLeadSubject = accountReport?.handle || projectAccount?.handle || projectX || "";
   const accountLeads = accountReport
@@ -1380,7 +1386,7 @@ export function InvestigationReport({
     { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
     { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
     { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
-    ...(token.socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
+    ...(socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
     ...(accountLeads.subjectLeads.length > 0 ? [{ href: "#subject-leads" as const, label: "Accusations", icon: <WarningCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
     { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
     ...(hasConnectionsChapter ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
@@ -1568,6 +1574,8 @@ export function InvestigationReport({
           <InvestigationDecisionCanvas
             verdictLabel={readiness.status === "ready" ? observedTokenMeta.label : readinessLabel}
             score={token.score}
+            scoreLabel="Token safety score"
+            scoreContext="Contract, tradeability, liquidity, holders, market data and sanctions."
             scoreIsProvisional={readiness.status !== "ready"}
             favorable={favorableVerdict}
             verdictTone={decisionCanvasTone}
@@ -1727,8 +1735,8 @@ export function InvestigationReport({
               </div>
               <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 xl:grid-cols-2" aria-label="Market size details">
                 <div>
-                  <dt className="stat-label">Market rank</dt>
-                  <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg?.rank}` : "Not available"}</dd>
+                  <dt className="stat-label">{token.cg?.rank ? "Market rank" : "Market size band"}</dt>
+                  <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg?.rank}` : marketSizeBand(marketCap) ?? "Not available"}</dd>
                 </div>
                 <div>
                   <dt className="stat-label" title="Estimated value if every token were available to trade.">Value if all circulate</dt>
@@ -1996,8 +2004,8 @@ export function InvestigationReport({
               protocolTvl={projectAccount?.protocolTvl}
               canonicalGeckoId={projectAccount?.projectToken?.coingeckoId}
             />
-            {token.socialActivity && (
-              <SocialActivityPanel snapshot={token.socialActivity} className="mt-3" panelCostToken={panelCostToken} />
+            {socialActivity && (
+              <SocialActivityPanel snapshot={socialActivity} className="mt-3" panelCostToken={panelCostToken} />
             )}
           </div>
         </div>

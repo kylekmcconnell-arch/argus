@@ -112,6 +112,7 @@ import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { SocialActivityPanel } from "./SocialActivityPanel";
+import { EarnReportStyle2 } from "./EarnReportStyle2";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import {
   SUBJECT_LEAD_RELATIONSHIP,
@@ -1597,8 +1598,21 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
 
 export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
+  const [earnReportStyle, setEarnReportStyle] = useState<1 | 2>(() => {
+    if (typeof window === "undefined") return 1;
+    return new URLSearchParams(window.location.search).get("reportStyle") === "2" ? 2 : 1;
+  });
   const { role } = useArgusAuth();
   const f = dossier;
+  const isEarnOnHood = f.handle.replace(/^@/, "").trim().toLowerCase() === "earnonhood";
+  const chooseEarnReportStyle = (style: 1 | 2) => {
+    setEarnReportStyle(style);
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (style === 2) url.searchParams.set("reportStyle", "2");
+    else url.searchParams.delete("reportStyle");
+    window.history.replaceState(window.history.state, "", url);
+  };
   const hasTerminalXState = f.x_account_status === "suspended" || f.x_account_status === "unavailable";
   const { report, graph, founderSummary, evidence } = dossier;
   const fundScaleProfile = {
@@ -2907,6 +2921,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               {versionContext ? `VERSION ${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
             </span>
           )}
+          {isEarnOnHood && (
+            <div className="ml-1 hidden min-h-9 shrink-0 items-center rounded-full border border-line bg-panel p-0.5 sm:flex" aria-label="Report style">
+              <button
+                type="button"
+                aria-pressed={earnReportStyle === 1}
+                onClick={() => chooseEarnReportStyle(1)}
+                className={`min-h-8 rounded-full px-3 text-[10.5px] font-medium transition ${earnReportStyle === 1 ? "bg-ink text-void" : "text-ink-dim hover:bg-panel-2 hover:text-ink"}`}
+              >
+                Style 1
+              </button>
+              <button
+                type="button"
+                aria-pressed={earnReportStyle === 2}
+                onClick={() => chooseEarnReportStyle(2)}
+                className={`min-h-8 rounded-full px-3 text-[10.5px] font-medium transition ${earnReportStyle === 2 ? "bg-ink text-void" : "text-ink-dim hover:bg-panel-2 hover:text-ink"}`}
+              >
+                Style 2
+              </button>
+            </div>
+          )}
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {onOpenBrief && (
               <button
@@ -2980,6 +3014,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <span className="sr-only">More report actions</span>
               </summary>
               <div className="panel absolute right-0 top-full z-30 mt-1.5 w-56 p-1.5 shadow-xl">
+                {isEarnOnHood && (
+                  <div className="mb-1 grid grid-cols-2 gap-1 border-b border-line p-1 pb-2" aria-label="Report style">
+                    <button
+                      type="button"
+                      aria-pressed={earnReportStyle === 1}
+                      onClick={() => chooseEarnReportStyle(1)}
+                      className={`min-h-10 rounded-md text-[11.5px] font-medium transition ${earnReportStyle === 1 ? "bg-ink text-void" : "bg-panel-2 text-ink-dim"}`}
+                    >
+                      Style 1
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={earnReportStyle === 2}
+                      onClick={() => chooseEarnReportStyle(2)}
+                      className={`min-h-10 rounded-md text-[11.5px] font-medium transition ${earnReportStyle === 2 ? "bg-ink text-void" : "bg-panel-2 text-ink-dim"}`}
+                    >
+                      Style 2
+                    </button>
+                  </div>
+                )}
                 {onRescan && (
                   <button type="button" onClick={onRescan} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
                     <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
@@ -3024,6 +3078,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         </div>
       </header>
 
+      {isEarnOnHood && earnReportStyle === 2 ? (
+        <div className="report-frame">
+          <EarnReportStyle2 />
+        </div>
+      ) : (
       <div className="report-frame">
         {versionContext && (
           <div className="mt-4">
@@ -3345,6 +3404,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         <InvestigationDecisionCanvas
           verdictLabel={m.label}
           score={presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null}
+          scoreLabel={roles.includes(SubjectClass.PROJECT) ? "Project diligence score" : "Person diligence score"}
+          scoreContext={roles.includes(SubjectClass.PROJECT)
+            ? "Team, product, token conduct, backers, traction and transparency."
+            : "Identity, operating record, relationships and attributable risk."}
           scoreIsProvisional={!presentation.final}
           favorable={favorableVerdict}
           verdictTone={decisionNarrativeTone}
@@ -4609,6 +4672,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         </div>
         </ReportExperienceLayout>
       </div>
+      )}
     </div>
   );
 }

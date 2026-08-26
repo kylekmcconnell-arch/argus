@@ -174,6 +174,17 @@ export function SocialActivityPanel({
   const subject = snapshot.queryBasis.projectName || "this project";
   const identity = projectIdentityPhrase(snapshot.queryBasis);
   const savedSearchNote = publicSocialSearchNote(snapshot);
+  const scoreExplanation = snapshot.state === "partial"
+    ? "Full seven-day author coverage is required; this search stopped early."
+    : snapshot.activityScore === null
+      ? "Not enough matched conversation was available to calculate it."
+      : "Measures conversation activity, not project quality or safety.";
+  const concentrationValue = snapshot.top10AccountSharePct === null
+    ? snapshot.state === "partial" ? "Not calculated" : "Not enough posts"
+    : `${snapshot.top10AccountSharePct}%`;
+  const concentrationLabel = snapshot.top10AccountSharePct === null && snapshot.state === "partial"
+    ? "because the author search is incomplete"
+    : "from the 10 most active accounts";
 
   return (
     <section id="social-activity" className={`panel scroll-mt-28 px-5 py-5 ${className}`} aria-labelledby="social-activity-title">
@@ -220,7 +231,7 @@ export function SocialActivityPanel({
                   <span className="text-ink">/ 100</span>
                 </div>
               )}
-              <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">Measures conversation activity, not project quality or safety.</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">{scoreExplanation}</p>
             </div>
           </div>
 
@@ -234,8 +245,8 @@ export function SocialActivityPanel({
               <div><span className="mono text-[15px] font-semibold text-ink">{snapshot.windows.last7Days.postCount === null ? "Unknown" : `${snapshot.collection.countsRequestCompleted ? "" : "At least "}${integer.format(snapshot.windows.last7Days.postCount)}`}</span><span className="ml-1 text-[12.5px] text-ink-dim">posts in 7 days</span></div>
             </div>
             <div className="py-3 sm:pl-4">
-              <span className="mono text-[15px] font-semibold text-ink">{snapshot.top10AccountSharePct === null ? "Unknown" : `${snapshot.top10AccountSharePct}%`}</span>
-              <span className="ml-1 text-[12.5px] text-ink-dim">from the 10 most active accounts</span>
+              <span className="mono text-[15px] font-semibold text-ink">{concentrationValue}</span>
+              <span className="ml-1 text-[12.5px] text-ink-dim">{concentrationLabel}</span>
             </div>
           </div>
 

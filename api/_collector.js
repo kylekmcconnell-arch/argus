@@ -31518,11 +31518,10 @@ var DAY_MS4 = 24 * HOUR_MS;
 var POST_READ_USD = 5e-3;
 var COUNTS_REQUEST_USD = 5e-3;
 var TWITTERAPI_IO_POST_USD = 15e-5;
-var TWITTERAPI_IO_SLICE_MS = 6 * HOUR_MS;
 var TWITTERAPI_IO_PAGE_SIZE = 20;
 var SOCIAL_ACTIVITY_MIN_POSTS = 10;
 var SOCIAL_ACTIVITY_MAX_POSTS = 5e3;
-var TWITTERAPI_IO_MAX_REQUESTS = Math.ceil(SOCIAL_ACTIVITY_MAX_POSTS / (TWITTERAPI_IO_PAGE_SIZE / 2)) + Math.ceil(7 * DAY_MS4 / TWITTERAPI_IO_SLICE_MS);
+var TWITTERAPI_IO_MAX_REQUESTS = Math.ceil(SOCIAL_ACTIVITY_MAX_POSTS / (TWITTERAPI_IO_PAGE_SIZE / 2));
 var asRecord6 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 function normalizedHandle3(value) {
   const handle = value.trim().replace(/^@/, "");
@@ -31854,72 +31853,67 @@ async function collectTwitterApiIo(fetchImpl, key, query, start, end, maxPosts, 
   let billedRows = 0;
   let complete = true;
   let incompleteReason;
-  for (let sliceEnd = end.getTime(); sliceEnd > start.getTime() && posts.size < maxPosts; sliceEnd -= TWITTERAPI_IO_SLICE_MS) {
-    const sliceStart = Math.max(start.getTime(), sliceEnd - TWITTERAPI_IO_SLICE_MS);
-    let cursor = "";
-    const seenCursors = /* @__PURE__ */ new Set();
-    do {
-      if (pastDeadline(deadlineAt)) {
+  let cursor = "";
+  const seenCursors = /* @__PURE__ */ new Set();
+  do {
+    if (pastDeadline(deadlineAt)) {
+      complete = false;
+      incompleteReason = "time_budget";
+      break;
+    }
+    if (requests >= TWITTERAPI_IO_MAX_REQUESTS) {
+      complete = false;
+      incompleteReason = "pagination_incomplete";
+      break;
+    }
+    const url = new URL(TWITTERAPI_IO);
+    url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(start.getTime() / 1e3)} until_time:${Math.ceil(end.getTime() / 1e3)}`);
+    url.searchParams.set("queryType", "Latest");
+    if (cursor) url.searchParams.set("cursor", cursor);
+    requests += 1;
+    let payload = null;
+    try {
+      const response = await fetchImpl(url, {
+        headers: { "x-api-key": key },
+        signal: AbortSignal.timeout(15e3)
+      });
+      if (response.ok) payload = asRecord6(await response.json());
+      else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
+    } catch (error) {
+      const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
+      recordCall("twitterapi", "social-search", 0, reason, "failed");
+    }
+    if (!payload) {
+      complete = false;
+      incompleteReason = "provider_error";
+      break;
+    }
+    successfulRequests += 1;
+    const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
+    billedRows += rows.length;
+    recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
+    for (const row of rows) {
+      const post = twitterApiIoPost(row);
+      if (post && posts.size < maxPosts) posts.set(post.id, post);
+    }
+    const hasNext = payload.has_next_page === true;
+    const nextCursor = typeof payload.next_cursor === "string" ? payload.next_cursor : "";
+    if (posts.size >= maxPosts) {
+      if (hasNext) {
         complete = false;
-        incompleteReason = "time_budget";
-        break;
+        incompleteReason = "post_limit";
       }
-      if (requests >= TWITTERAPI_IO_MAX_REQUESTS) {
-        complete = false;
-        incompleteReason = "pagination_incomplete";
-        break;
-      }
-      const url = new URL(TWITTERAPI_IO);
-      url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(sliceStart / 1e3)} until_time:${Math.ceil(sliceEnd / 1e3)}`);
-      url.searchParams.set("queryType", "Latest");
-      if (cursor) url.searchParams.set("cursor", cursor);
-      requests += 1;
-      let payload = null;
-      try {
-        const response = await fetchImpl(url, {
-          headers: { "x-api-key": key },
-          signal: AbortSignal.timeout(15e3)
-        });
-        if (response.ok) payload = asRecord6(await response.json());
-        else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
-      } catch (error) {
-        const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
-        recordCall("twitterapi", "social-search", 0, reason, "failed");
-      }
-      if (!payload) {
-        complete = false;
-        incompleteReason = "provider_error";
-        break;
-      }
-      successfulRequests += 1;
-      const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
-      billedRows += rows.length;
-      recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
-      for (const row of rows) {
-        const post = twitterApiIoPost(row);
-        if (post && posts.size < maxPosts) posts.set(post.id, post);
-      }
-      const hasNext = payload.has_next_page === true;
-      const nextCursor = typeof payload.next_cursor === "string" ? payload.next_cursor : "";
-      if (posts.size >= maxPosts) {
-        if (hasNext || sliceStart > start.getTime()) {
-          complete = false;
-          incompleteReason = "post_limit";
-        }
-        break;
-      }
-      if (!hasNext) break;
-      if (!nextCursor || seenCursors.has(nextCursor)) {
-        complete = false;
-        incompleteReason = "pagination_incomplete";
-        break;
-      }
-      seenCursors.add(nextCursor);
-      cursor = nextCursor;
-    } while (cursor);
-    if (incompleteReason === "time_budget") break;
-    if (incompleteReason === "pagination_incomplete" && requests >= TWITTERAPI_IO_MAX_REQUESTS) break;
-  }
+      break;
+    }
+    if (!hasNext) break;
+    if (!nextCursor || seenCursors.has(nextCursor)) {
+      complete = false;
+      incompleteReason = "pagination_incomplete";
+      break;
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  } while (cursor);
   const values = [...posts.values()];
   if (posts.size >= maxPosts && !incompleteReason) {
     complete = false;
@@ -36677,7 +36671,11 @@ async function runTokenAudit(input, emit, opts) {
   else if (pc24 >= 300 && liquidityUsd < 1e5) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity. This is a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
   if (!opts?.skipSim) {
     if (cg && !cg.listed) {
-      findings.push({ claim: "Not listed on CoinGecko. No independent market-data corroboration is available.", tone: "warn", source: "coingecko" });
+      findings.push({
+        claim: "No CoinGecko asset was matched. DEX market and trading data are still on record, but a global market-cap rank is not available.",
+        tone: "warn",
+        source: "coingecko + dexscreener"
+      });
     } else if (cg) {
       findings.push({ claim: `Corroborated on CoinGecko${cg.rank ? ` (rank #${cg.rank})` : ""}, ${cg.cexCount} centralized market${cg.cexCount === 1 ? "" : "s"}.`, tone: "good", source: "coingecko" });
       if (cg.mcapUsd && fdv && fdv > cg.mcapUsd * 3) {

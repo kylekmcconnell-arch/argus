@@ -91,6 +91,7 @@ describe("SocialActivityPanel", () => {
       ...snapshot,
       state: "partial",
       activityScore: null,
+      top10AccountSharePct: null,
       collection: {
         ...snapshot.collection,
         maxPosts: 200,
@@ -136,14 +137,23 @@ describe("SocialActivityPanel", () => {
       ...snapshot,
       state: "partial",
       activityScore: null,
+      top10AccountSharePct: null,
       collection: {
         ...snapshot.collection,
         postReads: 80,
         incompleteReason: "time_budget",
       },
+      windows: {
+        ...snapshot.windows,
+        last7Days: { ...snapshot.windows.last7Days, authorCoverageComplete: false },
+      },
     }} />));
     expect(container.textContent).toContain("leave time for required checks");
     expect(container.textContent).toContain("activity score stays withheld");
+    expect(container.textContent).toContain("Full seven-day author coverage is required");
+    expect(container.textContent).toContain("Not calculated");
+    expect(container.textContent).toContain("because the author search is incomplete");
+    expect(container.textContent).not.toContain("Unknownfrom the 10 most active accounts");
   });
 
   it("renders mentioner people-cards with follower counts and tweet links, without an influence score", () => {

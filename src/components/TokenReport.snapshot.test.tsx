@@ -178,6 +178,26 @@ afterEach(() => {
 });
 
 describe("token report supplemental evidence boundary", () => {
+  it("keeps a complete six-check token report complete when project graph and creator follow-ups are open", () => {
+    render(dossier({
+      versionContext: {
+        ...versionContext,
+        checks: [
+          ...versionContext.checks.filter((check) => check.checkId !== "trust-graph-connections"),
+          { checkId: "trust-graph-connections", label: "Trust-graph reconciliation", status: "unknown", decisionCritical: true },
+          { checkId: "deployer-trail-evm", label: "Creator wallet details", status: "unknown", decisionCritical: true },
+        ],
+      },
+    }));
+
+    const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
+    expect(decisionCanvas?.textContent).toContain("6/6 token safety checks complete");
+    expect(decisionCanvas?.textContent).not.toContain("provisional");
+    expect(decisionCanvas?.textContent).toContain("Optional follow-up research");
+    expect(decisionCanvas?.textContent).toContain("Optional follow-up: creator wallet details");
+    expect(decisionCanvas?.textContent).not.toContain("Required checks still open");
+  });
+
   it.each([
     ["QUTRON", "Qutron"],
     ["PROLOGUE", "Prologue"],
@@ -195,7 +215,8 @@ describe("token report supplemental evidence boundary", () => {
     const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
     expect(decisionCanvas?.textContent).toContain("88");
     expect(decisionCanvas?.textContent).toContain("/ 100");
-    expect(decisionCanvas?.textContent).toContain("7/7 token safety checks complete");
+    expect(decisionCanvas?.textContent).toContain("6/6 token safety checks complete");
+    expect(decisionCanvas?.textContent).toContain("Token safety score");
     expect(container.querySelector('[aria-label="Safety check status"]')).toBeNull();
   });
 

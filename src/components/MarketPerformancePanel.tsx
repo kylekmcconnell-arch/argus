@@ -4,6 +4,7 @@ import type { ProjectTokenSnapshot } from "../data/evidence";
 import { coingeckoToken, type CgInfo } from "../token/sources";
 import type { TokenDossier } from "../token/audit";
 import type { PriceHistory } from "../lib/priceHistory";
+import { marketSizeBand } from "../lib/marketPosition";
 import { TokenSparkline } from "./TokenSparkline";
 
 interface MarketPerformancePanelProps {
@@ -102,7 +103,6 @@ export function MarketPerformancePanel({
   const address = projectToken?.address ?? token?.address ?? "";
   const chain = projectToken?.chain ?? token?.chain ?? "";
   const symbol = projectToken?.symbol ?? token?.symbol ?? "TOKEN";
-  const hasCoinGeckoRankContext = Boolean(projectToken?.coingeckoId || token?.cg);
   const headingId = `market-performance-${address.replace(/[^a-zA-Z0-9]/g, "").slice(0, 16) || "token"}`;
   const pairAddress = projectToken?.pairAddress ?? projectToken?.history?.poolAddress ?? token?.pairAddress;
   const history = projectHistory(projectToken) ?? token?.priceHistory;
@@ -152,7 +152,8 @@ export function MarketPerformancePanel({
   const liquidity = projectToken?.liquidityUsd ?? token?.liquidityUsd;
   const currentPrice = projectToken?.priceUsd ?? token?.priceUsd;
   const rank = projectToken?.rank ?? token?.cg?.rank ?? liveMarket?.rank;
-  const showRank = finite(rank) || hasCoinGeckoRankContext;
+  const sizeBand = finite(rank) ? null : marketSizeBand(marketCap);
+  const showMarketPosition = finite(rank) || sizeBand !== null;
   // The close series cannot see a candle that ran and gave it back, so prefer
   // the fall from the reported in-window high when the source carried one. The
   // label always names which reading it is: "peak" reads as a record, and this
@@ -266,7 +267,7 @@ export function MarketPerformancePanel({
         </div>
       </header>
 
-      <dl className={`grid gap-px bg-line sm:grid-cols-2 ${showRank ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+      <dl className={`grid gap-px bg-line sm:grid-cols-2 ${showMarketPosition ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
         <div className="bg-panel px-4 py-3.5">
           <dt className="stat-label">{marketCapIsDexValuation ? "DEX valuation" : "Market cap"}</dt>
           <dd className="mono mt-1 text-[22px] font-semibold leading-none text-ink tabular-nums">{money(marketCap)}</dd>
@@ -303,17 +304,17 @@ export function MarketPerformancePanel({
             {history ? "saved price history" : "price when scanned"}
           </dd>
         </div>
-        {showRank && (
+        {showMarketPosition && (
           <div className="bg-panel px-4 py-3.5">
-            <dt className="stat-label">Market rank</dt>
+            <dt className="stat-label">{finite(rank) ? "Market rank" : "Market size band"}</dt>
             <dd className="mono mt-1 text-[22px] font-semibold leading-none text-ink tabular-nums">
-              {finite(rank)
-                ? `#${rank.toLocaleString()}`
-                : token?.cg?.listed === false
-                  ? "Not listed"
-                  : "Not ranked"}
+              {finite(rank) ? `#${rank.toLocaleString()}` : sizeBand}
             </dd>
-            <dd className="mt-1 text-[10.5px] text-ink-faint">CoinGecko global rank</dd>
+            <dd className="mt-1 text-[10.5px] text-ink-faint">
+              {finite(rank)
+                ? "CoinGecko global market-cap rank"
+                : `${marketCapIsDexValuation ? "Saved DEX valuation" : "Saved market cap"} · not a global rank`}
+            </dd>
           </div>
         )}
       </dl>

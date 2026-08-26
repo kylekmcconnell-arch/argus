@@ -127,7 +127,7 @@ describe("social activity collector", () => {
     expect(snapshot.state).toBe("complete");
     expect(snapshot.windows.last24Hours).toMatchObject({ postCount: 0, uniqueAccounts: 0, authorCoverageComplete: true });
     expect(snapshot.activityScore).toBeNull();
-    expect(fetchImpl).toHaveBeenCalledTimes(28);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("follows twitterapi.io cursors before moving to the next time slice", async () => {
@@ -171,7 +171,7 @@ describe("social activity collector", () => {
 
     expect(snapshot.state).toBe("complete");
     expect(snapshot.collection.incompleteReason).toBeUndefined();
-    expect(snapshot.collection.searchRequests).toBe(29);
+    expect(snapshot.collection.searchRequests).toBe(2);
     expect(snapshot.windows.last24Hours).toMatchObject({
       postCount: 2,
       uniqueAccounts: 2,
@@ -370,6 +370,7 @@ describe("social activity collector", () => {
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
     let pages = 0;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      void input;
       pages += 1;
       nowMs += 30_000;
       return response({

@@ -117,9 +117,9 @@ describe("Recent report controls", () => {
     expect(activeRail?.className.split(/\s+/)).toEqual(expect.arrayContaining(["inset-y-1", "left-0", "w-[2px]", "bg-on-brand/75"]));
 
     const sidebarLink = [...container.querySelectorAll<HTMLAnchorElement>("aside a")]
-      .find((link) => link.textContent?.includes("@gakonst") && link.textContent.includes("handle"));
+      .find((link) => link.textContent?.includes("@gakonst"));
     expect(sidebarLink).toBeDefined();
-    expect(sidebarLink?.textContent).toContain("handle · 83 · checks open");
+    expect(sidebarLink?.textContent).toContain("person diligence · 83 · checks open");
     expect(sidebarLink?.getAttribute("href")).toBe("?s=gakonst&kind=person");
     await act(async () => sidebarLink?.click());
     expect(onOpenRecent).toHaveBeenLastCalledWith("gakonst", "person");

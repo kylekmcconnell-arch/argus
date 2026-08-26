@@ -180,6 +180,60 @@ describe("investigation exact sharing", () => {
     expect(frames.every((frame) => !frame.className.includes("max-w-"))).toBe(true);
   });
 
+  it("uses social activity saved on the embedded project account when the token copy is absent", () => {
+    render(investigation({
+      projectX: "@fablesfi",
+      projectAccount: {
+        handle: "@fablesfi",
+        display_name: "Fables",
+        avatar: "",
+        bio: "A project account",
+        followers: "0",
+        joined: "",
+        identity_note: "",
+        headline: "Project account",
+        live: true,
+        notableFollowers: [],
+        contradictions: [],
+        webTeam: [],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 70,
+          identity_confidence: "Confirmed",
+          roles: ["PROJECT"],
+        },
+        evidence: {
+          ventures: [], testimonials: [], advised: [], associates: [], wallets: [], promotions: [],
+        },
+        graph: { nodes: [], edges: [] },
+        socialActivity: {
+          schemaVersion: 1,
+          provider: "twitterapi-io",
+          state: "complete",
+          capturedAt: "2026-08-25T16:30:00.000Z",
+          sourceUrl: "https://x.com/search?q=fablesfi",
+          queryBasis: { handle: "@fablesfi", ticker: "$PROLOGUE", query: "(@fablesfi OR $PROLOGUE) -is:retweet", excludesReposts: true },
+          windows: {
+            last24Hours: { start: "2026-08-24T16:30:00.000Z", end: "2026-08-25T16:30:00.000Z", postCount: 12, uniqueAccounts: 8, inspectedPosts: 12, authorCoverageComplete: true },
+            previous24Hours: { start: "2026-08-23T16:30:00.000Z", end: "2026-08-24T16:30:00.000Z", postCount: 8, uniqueAccounts: 6, inspectedPosts: 8, authorCoverageComplete: true },
+            last7Days: { start: "2026-08-18T16:30:00.000Z", end: "2026-08-25T16:30:00.000Z", postCount: 50, uniqueAccounts: 30, inspectedPosts: 50, authorCoverageComplete: true },
+          },
+          hourlyPostCounts: [],
+          top10AccountSharePct: 40,
+          activeDays: 7,
+          activityScore: 55,
+          scoreVersion: "social-activity-v1",
+          collection: { countsRequestCompleted: true, searchRequests: 3, postReads: 50, maxPosts: 5_000, estimatedUsd: 0.0075 },
+          note: "Public X posts matched to the project account.",
+        },
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+    }));
+
+    expect(container.querySelector('nav[aria-label="Report guide"] a[href="#social-activity"]')).not.toBeNull();
+    expect(container.querySelector("#social-activity")?.textContent).toContain("Social activity");
+    expect(container.querySelector("#social-activity")?.textContent).toContain("$PROLOGUE");
+  });
+
   it("separates a positive risk signal from a blocked scan instead of presenting a contradictory INCOMPLETE verdict", () => {
     const recorded = [
       "contract-safety",

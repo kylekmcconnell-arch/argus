@@ -88,11 +88,12 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain("score-ring-verdict");
   });
 
-  it("labels an early score when required checks remain open", () => {
+  it("keeps the score rubric explicit when required checks remain open", () => {
     const html = renderToStaticMarkup(
       <InvestigationDecisionCanvas
         verdictLabel="Review with gaps"
         score={20}
+        scoreLabel="Token safety score"
         scoreIsProvisional
         favorable={false}
         verdictTone="caution"
@@ -107,8 +108,9 @@ describe("InvestigationDecisionCanvas public states", () => {
       />,
     );
 
-    expect(html).toContain("ARGUS risk score 20 out of 100");
-    expect(html).toContain("Early risk score");
+    expect(html).toContain("Token safety score 20 out of 100");
+    expect(html).toContain("Token safety score");
+    expect(html).not.toContain("Early risk score");
     expect(html).toContain("5/7 token safety checks complete · provisional");
     expect(html).toContain("Token safety checks");
     expect(html).toContain("What is still open");

@@ -12,7 +12,7 @@ import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
-import { tokenChecks } from "../lib/scanChecklist";
+import { decisionCriticalChecks, tokenChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness, type DecisionReadiness } from "../lib/decisionReadiness";
 import { applyReportCheckContract, hasExplicitReportCheckContract } from "../lib/reportCheckContract";
 import { publicCaseLabel } from "../lib/caseLabel";
@@ -300,6 +300,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   };
   const recordedChecks = checks.filter((check) => ["confirmed", "reported", "finding", "checked-empty"].includes(check.status));
   const gapChecks = checks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
+  const governingChecks = new Set(decisionCriticalChecks(checks));
+  const requiredGapChecks = gapChecks.filter((check) => governingChecks.has(check));
+  const supplementalGapChecks = gapChecks.filter((check) => !governingChecks.has(check));
   const supportingFindings = d.findings.filter((finding) => finding.tone === "good");
   const limitingFindings = d.findings.filter((finding) => finding.tone !== "good");
   // Checked-empty rows are coverage, never support: a completed no-result
@@ -318,10 +321,16 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       .map((check) => ({ label: check.label, detail: check.note })),
     ...(readiness.status !== "ready" ? [{ label: readiness.title, detail: readiness.guidance }] : []),
   ].slice(0, 6);
-  const nextStepItems = gapChecks.slice(0, 6).map((check) => ({
-    label: `Resolve ${check.label.toLowerCase()}`,
-    detail: check.note,
-  }));
+  const nextStepItems = [
+    ...requiredGapChecks.map((check) => ({
+      label: `Finish required check: ${check.label.toLowerCase()}`,
+      detail: check.note,
+    })),
+    ...supplementalGapChecks.map((check) => ({
+      label: `Optional follow-up: ${check.label.toLowerCase()}`,
+      detail: check.note,
+    })),
+  ].slice(0, 6);
   const verifiedItems = recordedChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
   const capturedAt = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
@@ -467,6 +476,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         <InvestigationDecisionCanvas
           verdictLabel={presentationMeta.label}
           score={d.score}
+          scoreLabel="Token safety score"
+          scoreContext="Contract, tradeability, liquidity, holders, market data and sanctions."
           scoreIsProvisional={readiness.status !== "ready"}
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
@@ -482,6 +493,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           successful={readiness.successful}
           applicable={readiness.applicable}
           checkScopeLabel="Token safety checks"
+          openItemsLabel={requiredGapChecks.length > 0
+            ? "Required checks still open"
+            : supplementalGapChecks.length > 0
+              ? "Optional follow-up research"
+              : "What is still open"}
           capturedAt={capturedAt}
           composition={compositionRows.length > 0 ? compositionRows : undefined}
         />
