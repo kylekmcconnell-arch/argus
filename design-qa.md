@@ -17,6 +17,7 @@
 - Combined comparisons:
   - `.codex-audit/design-qa/comparison-opening.jpg`
   - `.codex-audit/design-qa/comparison-composition.jpg`
+  - `.codex-audit/design-qa/comparison-credible.png`
 
 **State**
 
@@ -32,6 +33,8 @@
 - Color usage follows the existing semantic tokens. The green accent distinguishes “The state of the house” from the subject name without creating a new visual language.
 - Image quality is preserved. The people section renders the saved real profile image (one image for the one named EARN contributor); no placeholder art was introduced.
 - Copy and content remain evidence-bound. The opening explicitly says when the saved report lacks a source-backed product explanation. Social activity, notable mentions, and the unverified accusation stage remain present and clearly separated from scored findings.
+- The decision-evidence cards now reserve a separate line for support/source metadata and use one readable card column inside each half of the decision brief. The source/title collision shown in the Aug 26 reference is gone at the tested 1280 × 900 constrained viewport.
+- The detached desktop status rail is absent from the canonical report. This removes the contradictory `Caution` card shown alongside `7/7 checks finished` and the duplicate `Check next` card; unresolved questions remain in the full-width `What to check next` section inside the decision brief.
 
 **Primary interactions tested**
 
@@ -59,6 +62,7 @@
 
 - Initial rendered comparison: no post-render P0/P1/P2 mismatch found. The prior implementation issues—duplicated decision narratives, out-of-order navigation, repeated score explanations, and expanded evidence density—were corrected before this blocking comparison.
 - Post-fix evidence: `comparison-opening.jpg`, `comparison-composition.jpg`, and the measured no-overflow browser state.
+- Aug 26 overlap correction: `comparison-credible.png` places the reported overlap beside the production correction. Production DOM measurements confirm a single 372.9 px card column in `What looks credible`, no `.report-experience-rail`, and no browser console warnings or errors.
 
 **Follow-up polish**
 
