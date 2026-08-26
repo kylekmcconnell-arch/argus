@@ -47,8 +47,10 @@ explicit instruction in the task at hand:
    chapters) stays ALWAYS visible in the reading flow. Never collapse it into
    a `<details>`/appendix, remove its expanding rows, or strip its
    "Read the evidence" and "Challenge this" links.
-3. The dossier-beats layout (`DossierReport`) stays off the report surfaces;
-   it is preserved only as the standalone sharing format.
+3. The dossier-beats layout (`DossierReport`) renders only as Style 2, the
+   reader's explicit choice via the style buttons or `?reportStyle=2`. It is
+   never the default report layer, and Style 1 (the Auric File) remains the
+   default everywhere.
 
 A redesign that conflicts with these stops before shipping and opens an issue
 labeled `needs-routing` instead.

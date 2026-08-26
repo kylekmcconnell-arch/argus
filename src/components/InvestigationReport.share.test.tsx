@@ -48,6 +48,7 @@ vi.mock("./NamesakeCheck", () => ({ NamesakeCheck: () => { harness.livePanel("na
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => null }));
 vi.mock("./RingAlert", () => ({ RingAlert: () => { harness.livePanel("ring-alert"); return null; } }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => null }));
+vi.mock("./DossierReport", () => ({ DossierReport: () => <div data-panel="dossier-story" /> }));
 vi.mock("./SnapshotEvidenceControl", () => ({
   LiveSupplementalNotice: () => null,
   SnapshotEvidenceControl: () => null,
@@ -999,7 +1000,7 @@ describe("investigation exact sharing", () => {
     expect(harness.clipboard).toHaveBeenCalledWith("http://localhost:3000/?share=opaque");
   });
 
-  it("switches between the full file and the brief with the two style buttons", () => {
+  it("switches between Style 1 and Style 2 with the two buttons", () => {
     render(investigation({
       token: {
         ...token(),
@@ -1010,22 +1011,27 @@ describe("investigation exact sharing", () => {
       },
     }));
 
-    // Full file is the default: the composition is in the reading flow.
+    // Style 1 (the Auric file) is the default: composition in the flow, no
+    // dossier story mounted.
     expect(container.querySelector("#composition")).not.toBeNull();
-    const briefButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Brief");
-    const fullButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Full file");
-    expect(briefButton).toBeDefined();
-    expect(fullButton).toBeDefined();
-    expect(fullButton?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector('[data-panel="dossier-story"]')).toBeNull();
+    const styleTwo = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Style 2");
+    const styleOne = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Style 1");
+    expect(styleTwo).toBeDefined();
+    expect(styleOne).toBeDefined();
+    expect(styleOne?.getAttribute("aria-pressed")).toBe("true");
 
-    act(() => briefButton?.click());
+    act(() => styleTwo?.click());
+    // Style 2 is the dossier story: completely different reading layer.
     expect(container.querySelector("#composition")).toBeNull();
-    expect(briefButton?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector('[data-panel="dossier-story"]')).not.toBeNull();
+    expect(styleTwo?.getAttribute("aria-pressed")).toBe("true");
 
-    act(() => fullButton?.click());
+    act(() => styleOne?.click());
     expect(container.querySelector("#composition")).not.toBeNull();
+    expect(container.querySelector('[data-panel="dossier-story"]')).toBeNull();
   });
 
   it("copy tldr mints a share link and pastes it under the verdict lines", async () => {

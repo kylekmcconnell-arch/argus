@@ -61,6 +61,9 @@ import { ScoreComposition } from "./ScoreComposition";
 import { DimensionChapters } from "./DimensionChapters";
 import { personDimensionChapters } from "../lib/dimensionChapters";
 import { DossierReport } from "./DossierReport";
+import { ReportActionsRow } from "./ReportActionsRow";
+import { exportReportPdf } from "../lib/reportExport";
+import { initialReportStyle, persistReportStyle, type ReportStyle } from "../lib/reportStyle";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
 import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
@@ -2018,6 +2021,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     && (explicitCurrentOverlay || !hasFrozenTrustGraphOutcome);
   const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
   const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
+  // Style 1 (Auric file, default) vs Style 2 (dossier story), shareable via
+  // ?reportStyle=1|2 and remembered per browser.
+  const [readingStyle, setReadingStyle] = useState<ReportStyle>(initialReportStyle);
+  const chooseReadingStyle = (style: ReportStyle) => {
+    setReadingStyle(style);
+    persistReportStyle(style);
+  };
   const canShare = !embeddedFacet && !shareView && Boolean(
     f.versionContext?.reportVersionId
     || (f.persistence?.state === "persisted" && f.persistence.reportVersionId),
@@ -3382,6 +3392,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           />
         )}
 
+        <ReportActionsRow
+          canShare={false}
+          shareState="idle"
+          onShare={() => {}}
+          onExportPdf={() => exportReportPdf(f)}
+          readingStyle={readingStyle}
+          onReadingStyle={chooseReadingStyle}
+        />
+
         <ReportExperienceLayout
           items={reportNavItems}
           status={{
@@ -3392,8 +3411,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           }}
           nextStep={verificationNext[0]?.title}
         >
-        <DossierReport payload={f as unknown as Record<string, unknown>} />
-        {f.projectStrengthBands && (
+        {readingStyle === "style2" && (
+          <DossierReport payload={f as unknown as Record<string, unknown>} />
+        )}
+        {readingStyle === "style1" && f.projectStrengthBands && (
           <DimensionChapters
             chapters={personDimensionChapters(f.projectStrengthBands)}
             checksHref="#scan-methodology"

@@ -5,12 +5,13 @@
    share view only Export PDF remains. Hidden in print so the PDF stays a
    clean document. */
 
-export type ShareState = "idle" | "creating" | "copied" | "error";
-export type ReadingStyle = "full" | "brief";
+import type { ReportStyle } from "../lib/reportStyle";
 
-const STYLE_OPTIONS: { value: ReadingStyle; label: string; title: string }[] = [
-  { value: "full", label: "Full file", title: "The complete file: composition, chapters, and every evidence section in the reading flow" },
-  { value: "brief", label: "Brief", title: "The decision brief only; the composition and chapters stay one click away" },
+export type ShareState = "idle" | "creating" | "copied" | "error";
+
+const STYLE_OPTIONS: { value: ReportStyle; label: string; title: string }[] = [
+  { value: "style1", label: "Style 1", title: "The Auric file: composition, chapters, and every evidence section in the reading flow" },
+  { value: "style2", label: "Style 2", title: "The dossier story: the narrative reading experience" },
 ];
 
 export function ReportActionsRow({ canShare, shareState, onShare, onExportPdf, readingStyle, onReadingStyle }: {
@@ -19,8 +20,8 @@ export function ReportActionsRow({ canShare, shareState, onShare, onExportPdf, r
   onShare: () => void;
   onExportPdf: () => void;
   /** When provided, the two style buttons render at the left of the row. */
-  readingStyle?: ReadingStyle;
-  onReadingStyle?: (style: ReadingStyle) => void;
+  readingStyle?: ReportStyle;
+  onReadingStyle?: (style: ReportStyle) => void;
 }) {
   return (
     <div className={`af-doc mt-5 flex flex-wrap gap-2 print:hidden ${readingStyle && onReadingStyle ? "justify-between" : "justify-end"}`} aria-label="Report actions">
