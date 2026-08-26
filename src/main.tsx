@@ -8,6 +8,7 @@ import { SessionExpiryNotice } from './components/SessionExpiryNotice.tsx'
 import { FeedbackButton } from './components/FeedbackButton.tsx'
 import { installSessionExpiryWatch } from './lib/sessionExpiry.ts'
 import { installPrintTheme } from './lib/printTheme.ts'
+import { ReportLaneProvider } from './reports/shared/ReportLaneContext.tsx'
 
 // Development-only visual harness. It is lazy so the fixture never rejoins the production report chunk.
 // eslint-disable-next-line react-refresh/only-export-components
@@ -70,7 +71,8 @@ const JoinPage = lazy(() => import('./components/PublicGrowthPages.tsx').then((m
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AppErrorBoundary>
+    <ReportLaneProvider>
+      <AppErrorBoundary>
       {showArgusEyePreview ? (
         <Suspense fallback={null}><ArgusEyePreview /></Suspense>
       ) : showProvenancePreview ? (
@@ -116,6 +118,7 @@ createRoot(document.getElementById('root')!).render(
           <App />
         </AuthGate>
       )}
-    </AppErrorBoundary>
+      </AppErrorBoundary>
+    </ReportLaneProvider>
   </StrictMode>,
 )
