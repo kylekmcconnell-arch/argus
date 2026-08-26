@@ -7415,9 +7415,12 @@ import { createHash } from "node:crypto";
 // server/cost.ts
 import { AsyncLocalStorage } from "node:async_hooks";
 var PRICE = {
-  grokIn: 0.2 / 1e6,
-  grokOut: 0.5 / 1e6,
-  grokSource: 25 / 1e3,
+  // Fallback only. Successful xAI responses now return their exact billed
+  // cost in usage.cost_in_usd_ticks, which always takes precedence. Grok 4.3
+  // is the current redirect target for retired grok-4-fast model slugs.
+  grokIn: 1.25 / 1e6,
+  grokOut: 2.5 / 1e6,
+  grokToolCall: 5 / 1e3,
   claudeIn: 3 / 1e6,
   claudeOut: 15 / 1e6,
   claudeWebSearch: 10 / 1e3,
@@ -7479,8 +7482,13 @@ function recordTwitterapi(op, status = "succeeded", meta) {
   recordCall("twitterapi", op, PRICE.twitterapiCall, meta, status);
 }
 function grokSpendUsd() {
-  const { grok } = currentState();
-  return grok.in * PRICE.grokIn + grok.out * PRICE.grokOut + grok.sources * PRICE.grokSource;
+  const { ledger } = currentState();
+  return [...ledger.values()].filter((line) => line.provider === "grok").reduce((total, line) => total + line.usd, 0);
+}
+var XAI_TICKS_PER_USD = 1e10;
+function xaiCostUsd(value) {
+  const ticks = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  return Number.isFinite(ticks) && ticks >= 0 ? ticks / XAI_TICKS_PER_USD : void 0;
 }
 function addGrokUsage(u, toolCalls, op = "live-search", status = "succeeded", outcomeMeta) {
   const { grok } = currentState();
@@ -7489,6 +7497,9 @@ function addGrokUsage(u, toolCalls, op = "live-search", status = "succeeded", ou
   const reportedSources = typeof u?.num_sources_used === "number" ? u.num_sources_used : 0;
   const impliedSources = (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
   const sources = Math.max(reportedSources, impliedSources);
+  const billableToolCalls = typeof u?.num_server_side_tools_used === "number" ? Math.max(0, u.num_server_side_tools_used) : Math.max(0, toolCalls ?? 0);
+  const exactUsd = xaiCostUsd(u?.cost_in_usd_ticks);
+  const usd3 = exactUsd ?? tin * PRICE.grokIn + tout * PRICE.grokOut + billableToolCalls * PRICE.grokToolCall;
   grok.calls += 1;
   grok.in += tin;
   grok.out += tout;
@@ -7496,8 +7507,14 @@ function addGrokUsage(u, toolCalls, op = "live-search", status = "succeeded", ou
   recordCall(
     "grok",
     op,
-    tin * PRICE.grokIn + tout * PRICE.grokOut + sources * PRICE.grokSource,
-    [`${tin + tout} tok \xB7 ~${sources} sources`, outcomeMeta].filter(Boolean).join(" \xB7 "),
+    usd3,
+    [
+      `${tin + tout} tok`,
+      sources ? `~${sources} sources` : "",
+      billableToolCalls ? `${billableToolCalls} billable tool${billableToolCalls === 1 ? "" : "s"}` : "",
+      exactUsd !== void 0 ? "exact xAI cost" : "estimated xAI cost",
+      outcomeMeta
+    ].filter(Boolean).join(" \xB7 "),
     status
   );
 }
@@ -7816,7 +7833,9 @@ Return exactly one ${tool.name} object. ${tool.description}` },
   const usage = {
     input_tokens: data.usage?.prompt_tokens,
     output_tokens: data.usage?.completion_tokens,
-    num_sources_used: data.usage?.num_sources_used
+    num_sources_used: data.usage?.num_sources_used,
+    num_server_side_tools_used: data.usage?.num_server_side_tools_used,
+    cost_in_usd_ticks: data.usage?.cost_in_usd_ticks
   };
   const valid = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
   addGrokUsage(usage, 0, tool.name, valid ? "succeeded" : "partial", valid ? void 0 : "invalid_structured_output");
@@ -7827,6 +7846,7 @@ Return exactly one ${tool.name} object. ${tool.description}` },
     requestId,
     inputTokens: usage.input_tokens ?? null,
     outputTokens: usage.output_tokens ?? null,
+    costTicks: usage.cost_in_usd_ticks ?? null,
     elapsedMs: Date.now() - startedAt,
     ...valid ? {} : { failure: "invalid_structured_output" }
   }));
@@ -7968,7 +7988,7 @@ var PROJECT_SCORING_POLICY = [
   "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
   "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
-  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis.",
+  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis. EXCEPTION: when the official profile biography in the packet explicitly declares the project has no token and no canonical token is bound, there is no token-conduct risk surface to assess and the null search result CONFIRMS the declaration. Score P3 at the top of its allowed band as clean conduct, and write the rationale as: the project explicitly declares itself token-free, so token conduct criteria are waived until a token launches. Never describe a declared-token-free project as lacking demonstrated conduct history, and never score it low for not having a token.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
   "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end as a null result on this axis only, never counter-evidence against any other axis.",
   "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
@@ -8772,6 +8792,17 @@ var sourceArtifactPriority = (value) => {
   return 6;
 };
 var retainSourceArtifacts = (source2, limit) => source2.map((value, index) => ({ value, index, priority: sourceArtifactPriority(value) })).sort((left, right) => left.priority - right.priority || left.index - right.index).slice(0, limit).map(({ value }) => value);
+var NO_TOKEN_DECLARATION = new RegExp([
+  String.raw`\bno (?:official )?(?:token|coin)s?\b(?!\s*(?:needed|required|gate|gating|sale))`,
+  String.raw`\b(?:do(?:es)? not|don'?t|doesn'?t) have an? (?:official )?(?:token|coin)\b`,
+  String.raw`\bthere is no (?:official )?(?:token|coin)\b`,
+  String.raw`\btoken:?\s*none\b`,
+  String.raw`\btoken-?less\b`,
+  String.raw`\bno (?:token|coin) (?:has been |was )?(?:launched|issued|released|deployed)\b`,
+  String.raw`\bhave(?: not|n'?t) (?:launched|issued|released) an? (?:token|coin)\b`,
+  String.raw`\bnever launch(?:ed|ing)? an? (?:token|coin)\b`,
+  String.raw`\b(?:any|all|every) (?:token|coin)s? (?:claiming|impersonat\w+|using|named|bearing)\b[\s\S]{0,60}\b(?:scams?|fake|not ours|unofficial)\b`
+].join("|"), "i");
 var PROJECT_EARLY_STAGE = /\b(?:alpha|beta|testnet|prototype|demo|pilot|coming soon|pre-?launch|waitlist)\b/i;
 var PROJECT_MATURE_STAGE = /\b(?:live|mainnet|production|in production|operational|operating)\b/i;
 var TOKEN_MARKET_ONLY_TRACTION = /\b(?:token|trading volume|volume|market cap|liquidity|price|fdv)\b/i;
@@ -8946,16 +8977,19 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   ], artifactIds(p2Anchors), p2FloorTier);
   const tokenDisclosures = [...tokenDisclosureFacts];
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0].filter(Boolean).length;
-  const p3CeilingTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditExceptionalCeiling ? "exceptional" : moderateMarket ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
-  const p3FloorTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
-  const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 ? assessmentArtifactFor("P3_token_conduct", "project-token-identity") : null;
+  const p3NullSearch = assessmentArtifactFor("P3_token_conduct", "project-token-identity");
+  const declaredTokenless = !token && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 && typeof profile?.bio === "string" && NO_TOKEN_DECLARATION.test(String(profile.bio));
+  const p3CeilingTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditExceptionalCeiling ? "exceptional" : moderateMarket ? "solid" : "emerging" : declaredTokenless ? "exceptional" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
+  const p3FloorTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : declaredTokenless ? p3NullSearch ? "solid" : "none" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
+  const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 ? p3NullSearch : null;
   let p3FinalTier = p3Assessment ? "assessed_null" : p3CeilingTier;
   let p3FinalFloorTier = p3Assessment ? "assessed_null" : p3FloorTier;
   if (severeUnrecoveredProtocolIncident && (p3FinalTier === "solid" || p3FinalTier === "exceptional")) p3FinalTier = "emerging";
   if (severeUnrecoveredProtocolIncident && (p3FinalFloorTier === "solid" || p3FinalFloorTier === "exceptional")) p3FinalFloorTier = "emerging";
   setBand("P3_token_conduct", p3FinalTier, [
     ...verifiedToken ? ["canonical token verified"] : [],
-    ...!token && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : [],
+    ...declaredTokenless ? ["official profile explicitly declares the project has no token; token conduct criteria waived until a token launches"] : [],
+    ...!token && !declaredTokenless && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : [],
     ...p3Assessment ? ["completed token-identity assessment bound no canonical token"] : [],
     ...moderateMarket ? ["measured market activity"] : [],
     ...governanceFacts.length ? ["verified token governance"] : [],
@@ -8964,7 +8998,10 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...severeUnrecoveredProtocolIncident ? ["material protocol security incident without a recorded full recovery caps token and control evidence at emerging"] : []
   ], [
     ...artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
-    ...p3Assessment ? [p3Assessment.artifactId] : []
+    ...p3Assessment ? [p3Assessment.artifactId] : [],
+    // The waived band anchors on the completed search that corroborates the
+    // declaration; without it the anchor fallback in setBand still applies.
+    ...declaredTokenless && p3NullSearch ? [p3NullSearch.artifactId] : []
   ], p3FinalFloorTier);
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
   let p4FloorTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || advisorTeam.length ? "emerging" : "none";
@@ -11309,6 +11346,27 @@ async function cacheSet(key, text2) {
   }
 }
 
+// src/lib/xAccountState.ts
+var SUSPENDED = /\bAccount suspended\b/i;
+var DOES_NOT_EXIST = /\b(?:This account (?:doesn['’]t|does not) exist|Account does not exist)\b/i;
+function classifyPublicXAccountPage(html) {
+  if (SUSPENDED.test(html)) return "suspended";
+  if (DOES_NOT_EXIST.test(html)) return "unavailable";
+  return "temporarily_unavailable";
+}
+function xAccountIdentityEstablished(profile) {
+  const followers = profile.followers;
+  const hasFollowers = followers != null && String(followers).trim() !== "" && String(followers).trim() !== "N/A";
+  return Boolean(
+    profile.identity_binding || hasFollowers || profile.website || profile.profile_collection_state === "resolved" || profile.display_name && profile.display_name.trim() && profile.display_name !== "N/A"
+  );
+}
+function shouldAnnounceOfficialXAccountStatus(input) {
+  if (input.accountStatus === "suspended") return true;
+  if (input.accountStatus === "unavailable" && !input.identityEstablished) return true;
+  return false;
+}
+
 // server/adapters/notableAccounts.ts
 var NOTABLE_ACCOUNTS = [
   // ── Venture funds / firm accounts ─────────────────────────────────────────
@@ -12299,7 +12357,9 @@ async function callGrokExtract(system, user, maxTokens, op) {
   addGrokUsage(
     {
       input_tokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0,
-      output_tokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0
+      output_tokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0,
+      num_server_side_tools_used: typeof usage.num_server_side_tools_used === "number" ? usage.num_server_side_tools_used : void 0,
+      cost_in_usd_ticks: typeof usage.cost_in_usd_ticks === "number" || typeof usage.cost_in_usd_ticks === "string" ? usage.cost_in_usd_ticks : void 0
     },
     0,
     op,
@@ -12522,6 +12582,7 @@ function captureTimestamp() {
 var TWITTERAPI = "https://api.twitterapi.io";
 var asRecord2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 var optionalNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : void 0;
+var optionalCostTicks = (value) => typeof value === "number" && Number.isFinite(value) ? value : typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value.trim()) ? value.trim() : void 0;
 var twitterProviderFailure = (payload) => {
   const status = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
   if (["error", "failed", "failure"].includes(status)) return `provider_status_${status}`;
@@ -12533,6 +12594,7 @@ var GROK_AUDIT_SPEND_CEILING_USD = Number(env("ARGUS_GROK_AUDIT_CEILING_USD") ||
 async function grokSearch(system, user, opts) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
+  const requestedTools = opts?.tools?.length ? [...new Set(opts.tools)] : ["web_search", "x_search"];
   if (opts?.cacheKey && !opts.bypassCache) {
     const hit = await cacheGet(opts.cacheKey);
     if (hit) return hit;
@@ -12553,7 +12615,7 @@ async function grokSearch(system, user, opts) {
         body: JSON.stringify({
           model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
           input: [{ role: "system", content: system }, { role: "user", content: user }],
-          tools: [{ type: "web_search" }, { type: "x_search" }],
+          tools: requestedTools.map((type) => ({ type })),
           ...withCap ? { max_tool_calls: opts?.maxToolCalls ?? 3 } : {}
         }),
         signal: AbortSignal.timeout(45e3)
@@ -12579,11 +12641,19 @@ async function grokSearch(system, user, opts) {
     const usage = {
       input_tokens: optionalNumber(usageRecord.input_tokens),
       output_tokens: optionalNumber(usageRecord.output_tokens),
-      num_sources_used: optionalNumber(usageRecord.num_sources_used)
+      num_sources_used: optionalNumber(usageRecord.num_sources_used),
+      num_server_side_tools_used: optionalNumber(usageRecord.num_server_side_tools_used),
+      cost_in_usd_ticks: optionalCostTicks(usageRecord.cost_in_usd_ticks)
     };
     const nestedText = output.flatMap((item) => Array.isArray(item.content) ? item.content.map(asRecord2) : []).map((content) => typeof content.text === "string" ? content.text : "").join(" ");
     const text2 = typeof d.output_text === "string" ? d.output_text : nestedText;
-    console.log("[grok-usage]", JSON.stringify({ in: usage.input_tokens, out: usage.output_tokens, toolCalls }));
+    console.log("[grok-usage]", JSON.stringify({
+      in: usage.input_tokens,
+      out: usage.output_tokens,
+      toolCalls,
+      billableToolCalls: usage.num_server_side_tools_used,
+      costTicks: usage.cost_in_usd_ticks
+    }));
     addGrokUsage(
       usage,
       toolCalls,
@@ -12673,7 +12743,7 @@ async function generalWebSearch(system, user, opts) {
     if (viaGrounded || !groundedUnavailable && !providerFallbacksEnabled()) return viaGrounded;
   }
   if (env("XAI_API_KEY")) {
-    const viaGrok = await grokSearch(system, user, opts);
+    const viaGrok = await grokSearch(system, user, { ...opts, tools: ["web_search"] });
     if (viaGrok || !providerFallbacksEnabled() || !env("ANTHROPIC_API_KEY")) return viaGrok;
   }
   if (env("ANTHROPIC_API_KEY") && providerFallbacksEnabled()) {
@@ -12728,27 +12798,33 @@ async function publicXAccountState(handle, fetcher = fetch) {
     });
   } catch {
     recordCall("x-public", "account-state", 0, `${u} \xB7 transport_error`, "failed");
-    return null;
+    return {
+      handle: `@${u}`,
+      accountStatus: "temporarily_unavailable",
+      statusSourceUrl,
+      statusCapturedAt: captureTimestamp()
+    };
   }
-  if (!response.ok) {
-    recordCall("x-public", "account-state", 0, `${u} \xB7 http_${response.status}`, "failed");
-    return null;
-  }
-  let html;
+  let html = "";
   try {
     html = await response.text();
   } catch {
     recordCall("x-public", "account-state", 0, `${u} \xB7 unreadable`, "failed");
-    return null;
+    return {
+      handle: `@${u}`,
+      accountStatus: "temporarily_unavailable",
+      statusSourceUrl,
+      statusCapturedAt: captureTimestamp()
+    };
   }
-  const suspended = /\bAccount suspended\b/i.test(html) || /unavailable_reason\s*[:=]\s*["']Suspended["']/i.test(html) || /unavailable_reason\\?["']?\s*:\s*\\?["']Suspended\\?["']/i.test(html);
-  const unavailable = suspended || /\bThis account (?:doesn['’]t|does not) exist\b/i.test(html) || /unavailable_reason\s*[:=]\s*["'](?:NotFound|Unavailable|Deactivated)["']/i.test(html);
-  if (!unavailable) {
-    recordCall("x-public", "account-state", 0, `${u} \xB7 no_terminal_state`, "succeeded");
-    return null;
-  }
-  const accountStatus = suspended ? "suspended" : "unavailable";
-  recordCall("x-public", "account-state", 0, `${u} \xB7 ${accountStatus}`, "succeeded");
+  const accountStatus = classifyPublicXAccountPage(html);
+  recordCall(
+    "x-public",
+    "account-state",
+    0,
+    `${u} \xB7 ${accountStatus}${response.ok ? "" : ` \xB7 http_${response.status}`}`,
+    accountStatus === "temporarily_unavailable" ? "partial" : "succeeded"
+  );
   return {
     handle: `@${u}`,
     accountStatus,
@@ -14348,19 +14424,35 @@ var xAdapter = {
       }
       ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle}, ${fmtFollowers(prof.followers)} followers`, source: "twitterapi.io", tone: "neutral" });
     } else if (prof) {
-      ctx.evidence.profile.profile_collection_state = "unavailable";
-      ctx.evidence.profile.profile_provider = "twitterapi";
-      ctx.evidence.profile.profile_captured_at = void 0;
+      const identityEstablished = xAccountIdentityEstablished(ctx.evidence.profile) || Boolean(haveProfile);
       ctx.evidence.profile.x_account_status = prof.accountStatus;
       ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
       ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
-      ctx.emit({
-        phase: "P0 \xB7 Intake",
-        label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
-        detail: prof.accountStatus === "suspended" ? `${prof.handle} currently renders X's terminal Account suspended state. Identity discovery continues through the official site and other public records.` : `${prof.handle} currently has no live public X profile. Identity discovery continues through the official site and other public records.`,
-        source: "x.com",
-        tone: "warn"
-      });
+      if (!identityEstablished && prof.accountStatus !== "temporarily_unavailable") {
+        ctx.evidence.profile.profile_collection_state = "unavailable";
+        ctx.evidence.profile.profile_provider = "twitterapi";
+        ctx.evidence.profile.profile_captured_at = void 0;
+      }
+      if (shouldAnnounceOfficialXAccountStatus({
+        accountStatus: prof.accountStatus,
+        identityEstablished
+      })) {
+        ctx.emit({
+          phase: "P0 \xB7 Intake",
+          label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
+          detail: prof.accountStatus === "suspended" ? `${prof.handle} currently renders X's terminal Account suspended state. Identity discovery continues through the official site and other public records.` : `${prof.handle} currently has no live public X profile. Identity discovery continues through the official site and other public records.`,
+          source: "x.com",
+          tone: "warn"
+        });
+      } else if (prof.accountStatus === "temporarily_unavailable") {
+        ctx.emit({
+          phase: "P0 \xB7 Intake",
+          label: "X profile probe temporarily unavailable",
+          detail: `${prof.handle}: X did not return an explicit Account suspended or account does not exist page. The probe is temporarily unavailable; identity already established elsewhere is left in place.`,
+          source: "x.com",
+          tone: "neutral"
+        });
+      }
     }
     if (!ctx.evidence.recentActivity.length) {
       const posts = await getRecentPosts(ctx.handle);
@@ -17215,7 +17307,12 @@ async function classifyImage(image) {
           })();
           const parsed2 = validateVisionInput(parsedRaw);
           addGrokUsage(
-            { input_tokens: body2.usage?.prompt_tokens, output_tokens: body2.usage?.completion_tokens },
+            {
+              input_tokens: body2.usage?.prompt_tokens,
+              output_tokens: body2.usage?.completion_tokens,
+              num_server_side_tools_used: body2.usage?.num_server_side_tools_used,
+              cost_in_usd_ticks: body2.usage?.cost_in_usd_ticks
+            },
             0,
             "profile-photo-integrity",
             parsed2 ? "succeeded" : "partial",
@@ -18075,6 +18172,7 @@ async function orientSubjectWithGrok(evidence, options) {
   const search = options?.search ?? grokSearch;
   const text2 = await search(ORIENTATION_SYSTEM, liveSearchUser(packet), {
     maxToolCalls: ORIENTATION_MAX_TOOL_CALLS,
+    tools: ["web_search", "x_search"],
     cacheKey: `subject-orientation:${normalizeHandle2(packet.handle)}`
   });
   if (!text2) return null;
@@ -21438,6 +21536,7 @@ async function discoverGrokBasicFactLeadsDetailed(ctx, questions, phase, options
       discoveryPrompt(ctx, batchQuestions, phase),
       {
         maxToolCalls: phase === "repair" ? REPAIR_SEARCH_USES : PRIMARY_SEARCH_USES_PER_BATCH,
+        tools: ["web_search"],
         cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grok:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}`,
         bypassCache: options.bypassCache,
         claimProviderCall: () => {
@@ -32389,19 +32488,35 @@ async function resolveProfile(ctx) {
     }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} \xB7 ${ctx.evidence.profile.followers} followers \xB7 joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   } else if (prof) {
-    ctx.evidence.profile.profile_collection_state = "unavailable";
-    ctx.evidence.profile.profile_provider = "twitterapi";
-    ctx.evidence.profile.profile_captured_at = void 0;
+    const identityEstablished = xAccountIdentityEstablished(ctx.evidence.profile);
     ctx.evidence.profile.x_account_status = prof.accountStatus;
     ctx.evidence.profile.x_account_status_source_url = prof.statusSourceUrl;
     ctx.evidence.profile.x_account_status_captured_at = prof.statusCapturedAt;
-    ctx.emit({
-      phase: "P0 \xB7 Intake",
-      label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
-      detail: prof.accountStatus === "suspended" ? `${prof.handle} currently renders X's terminal Account suspended state. Continuing through the verified official site and public records.` : `${prof.handle} currently has no live public X profile. Continuing through the verified official site and public records.`,
-      source: "x.com",
-      tone: "warn"
-    });
+    if (!identityEstablished && prof.accountStatus !== "temporarily_unavailable") {
+      ctx.evidence.profile.profile_collection_state = "unavailable";
+      ctx.evidence.profile.profile_provider = "twitterapi";
+      ctx.evidence.profile.profile_captured_at = void 0;
+    }
+    if (shouldAnnounceOfficialXAccountStatus({
+      accountStatus: prof.accountStatus,
+      identityEstablished
+    })) {
+      ctx.emit({
+        phase: "P0 \xB7 Intake",
+        label: prof.accountStatus === "suspended" ? "Official X account suspended" : "Official X account unavailable",
+        detail: prof.accountStatus === "suspended" ? `${prof.handle} currently renders X's terminal Account suspended state. Continuing through the verified official site and public records.` : `${prof.handle} currently has no live public X profile. Continuing through the verified official site and public records.`,
+        source: "x.com",
+        tone: "warn"
+      });
+    } else if (prof.accountStatus === "temporarily_unavailable") {
+      ctx.emit({
+        phase: "P0 \xB7 Intake",
+        label: "X profile probe temporarily unavailable",
+        detail: `${prof.handle}: X did not return an explicit Account suspended or account does not exist page. The probe is temporarily unavailable; identity already established elsewhere is left in place.`,
+        source: "x.com",
+        tone: "neutral"
+      });
+    }
   } else {
     ctx.evidence.profile.profile_collection_state = "unavailable";
     ctx.evidence.profile.profile_provider = "twitterapi";
