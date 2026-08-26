@@ -3035,6 +3035,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       </header>
 
       <div className="report-frame">
+        {/* the document's own actions, first thing on the page: switch the
+            reading style, save the PDF */}
+        <ReportActionsRow
+          canShare={false}
+          shareState="idle"
+          onShare={() => {}}
+          onExportPdf={() => exportReportPdf(f)}
+          readingStyle={readingStyle}
+          onReadingStyle={chooseReadingStyle}
+        />
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -3391,15 +3401,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             challengeAnchor={shareView ? null : "#ask-report"}
           />
         )}
-
-        <ReportActionsRow
-          canShare={false}
-          shareState="idle"
-          onShare={() => {}}
-          onExportPdf={() => exportReportPdf(f)}
-          readingStyle={readingStyle}
-          onReadingStyle={chooseReadingStyle}
-        />
 
         <ReportExperienceLayout
           items={reportNavItems}

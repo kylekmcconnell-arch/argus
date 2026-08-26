@@ -1488,6 +1488,16 @@ export function InvestigationReport({
       )}
 
       <div className="report-frame">
+        {/* the document's own actions, first thing on the page: switch the
+            reading style, share the read-only file, save the PDF */}
+        <ReportActionsRow
+          canShare={canShare}
+          shareState={shareState}
+          onShare={() => void share()}
+          onExportPdf={() => printReportPdf(inv.token.name || inv.token.symbol)}
+          readingStyle={readingStyle}
+          onReadingStyle={chooseReadingStyle}
+        />
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -1555,16 +1565,6 @@ export function InvestigationReport({
             contractAddress={token.address}
             chain={token.chain}
             links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
-          />
-
-          {/* the document's own actions: share the read-only file, save the PDF */}
-          <ReportActionsRow
-            canShare={canShare}
-            shareState={shareState}
-            onShare={() => void share()}
-            onExportPdf={() => printReportPdf(inv.token.name || inv.token.symbol)}
-            readingStyle={readingStyle}
-            onReadingStyle={chooseReadingStyle}
           />
 
           {/* Legacy editorial/score heroes are quarantined. The shared decision
