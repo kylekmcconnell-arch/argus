@@ -28,7 +28,9 @@ vi.mock("./LinkEntity", () => ({ LinkEntity: () => { harness.livePanel("link-ent
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => <div>service-ready</div> }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: (props: Record<string, unknown>) => { harness.trustGraph(props); return null; } }));
 vi.mock("./ArgusEyeAssistant", () => ({ ArgusEyeAssistant: (props: Record<string, unknown>) => { harness.askReport(props); return null; } }));
-vi.mock("./Avatar", () => ({ Avatar: () => null }));
+vi.mock("./Avatar", () => ({
+  Avatar: ({ src }: { src: string | null }) => src ? <img src={src} alt="" /> : null,
+}));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
 
 import { Report } from "./Report";
@@ -222,7 +224,7 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain("SuperGemma");
-    expect(container.textContent).toContain("What this report means");
+    expect(container.textContent).toContain("The state of the house");
     expect(container.querySelector('a[href="https://supergemma.example"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://x.com/0xsupergemma"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Report result and check status"]')?.classList.contains("hidden")).toBe(true);
@@ -406,7 +408,7 @@ describe("private person report evidence boundary", () => {
     expect(result?.className).toBe("hidden");
     expect(result?.getAttribute("aria-hidden")).toBe("true");
     const decisionCanvas = container.querySelector("#report-summary");
-    expect(decisionCanvas?.textContent).toContain("What this report means");
+    expect(decisionCanvas?.textContent).toContain("The state of the house");
     expect(decisionCanvas?.textContent).toContain("Required report checks");
 
     const toolbar = container.querySelector("header.sticky");
@@ -598,6 +600,7 @@ describe("private person report evidence boundary", () => {
         name: "Ada Example",
         handle: "@ada_example",
         role: "Chief Technology Officer",
+        avatarUrl: "https://pbs.twimg.com/profile_images/1/ada.jpg",
         linkedin: "linkedin.com/in/ada-example",
         evidence: "Named on the saved official team page.",
         source: "official team page",
@@ -645,6 +648,7 @@ describe("private person report evidence boundary", () => {
     expect(container.textContent).not.toContain("Probable");
     expect(container.querySelector(".team-person-card")?.textContent).toContain("Ada Example");
     expect(container.querySelector(".team-person-card")?.textContent).toContain("Chief Technology Officer");
+    expect(container.querySelector('img[src="https://pbs.twimg.com/profile_images/1/ada.jpg"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("Open role source");
     expect(container.querySelector('a[href="https://github.com/ada-example"]')?.textContent).toContain("GitHub");
     expect(container.querySelector('a[href="https://x.com/ada_example"]')?.textContent).toContain("profile link proof");
@@ -1794,7 +1798,7 @@ describe("decision-safe person report presentation", () => {
     expect(decisionResult?.getAttribute("aria-hidden")).toBe("true");
     const decisionCanvas = container.querySelector("#report-summary");
     expect(decisionCanvas?.textContent).toContain("INCOMPLETE");
-    expect(decisionCanvas?.textContent).toContain("What this report means");
+    expect(decisionCanvas?.textContent).toContain("The state of the house");
     expect(decisionCanvas?.textContent).not.toContain("EARLY SCORE");
     const preliminarySignal = [...container.querySelectorAll<HTMLElement>(".chip")]
       .find((chip) => chip.textContent?.includes("EARLY SCORE"));

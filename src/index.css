@@ -520,6 +520,143 @@
   display: grid;
   justify-items: center;
 }
+
+/* Style 2 is the canonical reading file. It deliberately keeps every live
+   report component and changes only hierarchy, measure and legibility. */
+.report-style-2 {
+  max-width: 1500px;
+  margin-inline: auto;
+  padding-bottom: clamp(56px, 7vw, 96px);
+}
+.report-style-2 .text-ink-dim {
+  color: color-mix(in oklab, var(--color-ink) 82%, var(--color-panel));
+}
+.report-style-2 .text-ink-faint {
+  color: color-mix(in oklab, var(--color-ink) 66%, var(--color-panel));
+}
+.report-style-2 .decision-brief-heading {
+  grid-template-columns: minmax(0, 1fr) 280px;
+  min-height: clamp(430px, 48vw, 590px);
+  gap: clamp(24px, 4vw, 64px);
+  align-items: center;
+  border-bottom: 1px solid var(--color-line);
+  padding-block: clamp(44px, 6vw, 84px);
+}
+.report-style-2 .decision-brief-heading > :first-child {
+  grid-column: 1;
+  max-width: 880px;
+  padding-inline-start: clamp(18px, 2.2vw, 34px);
+}
+.report-style-2 .decision-state-title {
+  max-width: none;
+  margin-top: 16px;
+  font-size: clamp(2.5rem, 3.6vw, 5.2rem);
+  font-weight: 400;
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.report-style-2 .decision-state-title > span {
+  display: block;
+}
+.report-style-2 .decision-state-accent {
+  color: color-mix(in oklab, var(--color-signal) 62%, var(--color-ink));
+  white-space: nowrap;
+}
+.report-style-2 .decision-subject-summary {
+  max-width: 66ch;
+  font-size: clamp(16px, 1.25vw, 18px);
+  line-height: 1.62;
+}
+.report-style-2 .decision-why {
+  max-width: 68ch;
+  font-size: clamp(15.5px, 1.2vw, 17px);
+  line-height: 1.65;
+}
+.report-style-2 .decision-score-lockup {
+  grid-column: 2;
+  min-width: 280px;
+  padding-inline: 0;
+}
+.report-style-2 .score-composition {
+  margin-top: 24px;
+  border-radius: 14px;
+}
+.report-style-2 .score-composition-header {
+  padding: 18px 22px 10px;
+}
+.report-style-2 .score-composition-trigger {
+  padding: 18px 22px;
+}
+.report-style-2 .score-composition-label {
+  font-size: 16px;
+  font-weight: 600;
+}
+.report-style-2 .score-composition-weight {
+  font-size: 11px;
+}
+.report-style-2 .score-composition-value {
+  font-size: 13px;
+}
+.report-style-2 .score-composition-detail {
+  padding-inline: 22px;
+  padding-bottom: 18px;
+}
+.report-style-2 .score-composition-detail > p:first-child {
+  font-size: 15px;
+  line-height: 1.65;
+}
+.report-style-2 .dossier-report .dossier-block {
+  max-width: 1020px;
+  margin-inline: auto;
+  padding-block: clamp(44px, 5.5vw, 70px);
+  border-bottom: 1px solid var(--color-line);
+}
+.report-style-2 .dossier-report .story-chapter-title {
+  max-width: 24ch;
+  font-size: clamp(2rem, 3.5vw, 3.45rem);
+  line-height: 1.06;
+}
+.report-style-2 .dossier-report .team-narrative {
+  max-width: 64ch;
+  font-size: 16px;
+  line-height: 1.68;
+}
+.report-style-2 .dossier-report .team-member-avatar {
+  width: 48px;
+  height: 48px;
+}
+.report-style-2 .dossier-report .panel-inset p:not(.mono) {
+  font-size: 13px;
+  line-height: 1.5;
+}
+@media (max-width: 1023px) {
+  .report-style-2 .decision-brief-heading {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .report-style-2 .decision-score-lockup {
+    grid-column: 1;
+    min-width: 0;
+    border-top: 1px solid var(--color-line);
+    padding-top: 28px;
+  }
+}
+@media (max-width: 639px) {
+  .report-style-2 .decision-brief-heading {
+    gap: 28px;
+    padding-block: 34px;
+  }
+  .report-style-2 .decision-state-title {
+    font-size: clamp(2.25rem, 12vw, 3.5rem);
+  }
+  .report-style-2 .decision-state-accent {
+    white-space: normal;
+  }
+  .report-style-2 .score-composition-trigger {
+    padding-inline: 16px;
+  }
+}
 .score-ring-verdict {
   opacity: 1;
 }
@@ -1933,9 +2070,29 @@ h1.display-sm {
 }
 .public-access-eye { display: flex; flex-direction: column; align-items: center; justify-content: center; }
 
-/* Live evidence command deck — option 1. Every number and stage is derived
-   from observed trace events; no simulated progress, providers, or ETA. */
-.research-workspace { position: relative; min-height: 100%; padding: clamp(1.25rem, 3vw, 3.5rem); }
+/* Live evidence command deck. The interior is a deliberate dark terminal:
+   every stage and number is derived from observed trace events, while the ETA
+   is a plainly labelled estimate based on the documented route envelope. */
+.research-workspace {
+  --color-panel: #07100d;
+  --color-panel-2: #0b1712;
+  --color-ink: #e7f8ef;
+  --color-ink-dim: #b4cfc1;
+  --color-ink-faint: #789989;
+  --color-line: rgb(98 153 125 / 0.2);
+  --color-line-2: rgb(105 181 141 / 0.32);
+  --color-control-line: rgb(105 181 141 / 0.38);
+  --color-brand: #52f5a5;
+  --color-brand-dim: #2acb82;
+  --color-signal: #52f5a5;
+  --color-signal-lift: #85f7bd;
+  --color-pass: #52f5a5;
+  position: relative;
+  min-height: 100%;
+  padding: clamp(1.25rem, 3vw, 3.5rem);
+  background: #030806;
+  color: var(--color-ink);
+}
 .research-workspace-inner { width: 100%; max-width: 1440px; margin-inline: auto; }
 .research-command-deck {
   display: grid;
@@ -1944,18 +2101,22 @@ h1.display-sm {
   border: 1px solid var(--color-line-2);
   border-radius: var(--radius-lg);
   background: var(--color-panel);
-  box-shadow: var(--shadow);
+  box-shadow: 0 30px 90px -46px rgb(0 0 0 / 0.9), inset 0 1px 0 rgb(123 255 187 / 0.04);
 }
 .research-command-main { display: flex; min-height: 500px; flex-direction: column; padding: clamp(1.6rem, 3vw, 3rem); }
 .research-live-label { display: flex; align-items: center; gap: .55rem; font-family: var(--font-mono); font-size: 10px; letter-spacing: .13em; color: var(--color-brand); }
 .research-live-dot { width: 7px; height: 7px; border-radius: 99px; background: var(--color-brand); box-shadow: 0 0 0 5px color-mix(in oklab, var(--color-brand) 10%, transparent); }
 .research-live-dot.is-idle { background: var(--color-derived); box-shadow: none; }
 .research-command-title { max-width: 850px; margin-top: 1rem; font-family: var(--font-sans); font-size: clamp(2rem, 4vw, 4.1rem); font-weight: 620; letter-spacing: -.05em; line-height: 1; color: var(--color-ink); }
-.research-command-subtitle { max-width: 700px; margin-top: .85rem; font-size: 13px; line-height: 1.6; color: var(--color-ink-dim); }
+.research-command-subtitle { max-width: 700px; margin-top: .85rem; font-size: 14.5px; line-height: 1.65; color: var(--color-ink-dim); }
+.research-eta { display: flex; max-width: 700px; flex-wrap: wrap; align-items: baseline; gap: .45rem 1rem; margin-top: 1.25rem; border-top: 1px solid var(--color-line); border-bottom: 1px solid var(--color-line); padding: .75rem 0; font-family: var(--font-mono); }
+.research-eta span { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--color-ink-faint); }
+.research-eta strong { font-size: 13px; font-weight: 600; color: var(--color-brand); }
+.research-eta small { width: 100%; font-size: 10px; color: var(--color-ink-faint); }
 .research-observation { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: clamp(1.5rem, 3vw, 3rem); align-items: center; margin-block: auto; padding-block: 2.5rem; }
 .research-eye-stage { display: flex; min-height: 190px; align-items: center; justify-content: center; border-right: 1px solid var(--color-line); }
 .research-observation-title { margin-top: .5rem; font-size: clamp(1.35rem, 2vw, 2.1rem); font-weight: 610; letter-spacing: -.03em; line-height: 1.12; color: var(--color-ink); }
-.research-observation-detail { max-width: 700px; margin-top: .7rem; font-size: 13.5px; line-height: 1.6; color: var(--color-ink-dim); }
+.research-observation-detail { max-width: 700px; margin-top: .7rem; font-size: 14.5px; line-height: 1.65; color: var(--color-ink-dim); }
 .research-observation-source { margin-top: 1rem; font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; color: var(--color-ink-faint); }
 .research-command-footer { display: flex; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--color-line); padding-top: 1.1rem; font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; color: var(--color-ink-faint); }
 .research-background-note { color: var(--color-brand); }
@@ -1969,13 +2130,13 @@ h1.display-sm {
 .research-stage-icon { display: inline-flex; }
 .research-stage-item.is-active .research-stage-icon, .research-stage-item.is-active .research-stage-state { color: var(--color-brand); }
 .research-stage-item.is-observed .research-stage-icon { color: var(--color-pass); }
-.research-stage-label { font-size: 12.5px; font-weight: 560; }
+.research-stage-label { font-size: 13.5px; font-weight: 560; }
 .research-proof-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; margin-top: auto; padding-top: 1.5rem; }
 .research-proof-stats div { border-left: 1px solid var(--color-line); padding-left: .65rem; }
 .research-proof-stats dt { font-family: var(--font-mono); font-size: 8px; line-height: 1.25; letter-spacing: .05em; text-transform: uppercase; color: var(--color-ink-faint); }
 .research-proof-stats dd { margin-top: .3rem; font-size: 18px; font-weight: 620; color: var(--color-ink); }
 .research-sources { display: flex; min-height: 28px; flex-wrap: wrap; gap: .35rem; margin-top: 1rem; }
-.research-ledger { margin-top: 1rem; overflow: hidden; border: 1px solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-panel); box-shadow: var(--shadow); }
+.research-ledger { margin-top: 1rem; overflow: hidden; border: 1px solid var(--color-line); border-radius: var(--radius-lg); background: var(--color-panel); box-shadow: 0 30px 90px -46px rgb(0 0 0 / 0.9); }
 .research-ledger-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.35rem 1.5rem; border-bottom: 1px solid var(--color-line); }
 .research-ledger-columns, .research-ledger-row { display: grid; grid-template-columns: 80px minmax(130px, .7fr) minmax(300px, 2fr) 100px; gap: 1rem; align-items: center; }
 .research-ledger-columns { padding: .65rem 1.5rem; background: var(--color-panel-2); font-family: var(--font-mono); font-size: 9px; letter-spacing: .09em; text-transform: uppercase; color: var(--color-ink-faint); }

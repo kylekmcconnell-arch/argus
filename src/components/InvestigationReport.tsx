@@ -8,7 +8,7 @@ import {
   type WebPerson,
 } from "../lib/investigation";
 import { Avatar } from "./Avatar";
-import { xAvatar, personAvatar } from "../lib/avatars";
+import { personAvatar, trustedOfficialXAvatarUrl, xAvatar } from "../lib/avatars";
 import { OnChainForensics } from "./OnChainForensics";
 import { deployerRoleLabel } from "../token/audit";
 import { ProjectResearch } from "./ProjectResearch";
@@ -84,7 +84,7 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { SocialActivityPanel } from "./SocialActivityPanel";
-import { EarnReportStyle2 } from "./EarnReportStyle2";
+import { ReportStyleControl, useReportStyle } from "./ReportStyleControl";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import { visibleInvestigativeLeads } from "../lib/subjectLeads";
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
@@ -110,8 +110,6 @@ import type { DecisionLensId } from "../intelligence/types";
 // This is not a runtime/user flag and must remain false until the legacy hero
 // code is deleted after the stabilization release.
 const LEGACY_REPORT_HERO_ENABLED = false;
-
-const EARN_TOKEN_ADDRESS = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -746,10 +744,7 @@ export function InvestigationReport({
   const arkhamEnabled = arkhamProviderEnabled();
   const [spent, setSpent] = useState(0);
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
-  const [earnReportStyle, setEarnReportStyle] = useState<1 | 2>(() => {
-    if (typeof window === "undefined") return 1;
-    return new URLSearchParams(window.location.search).get("reportStyle") === "2" ? 2 : 1;
-  });
+  const [reportStyle, chooseReportStyle] = useReportStyle();
   const [watched, setWatched] = useState(() => isWatched(inv.token.address));
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const versionContext = inv.versionContext;
@@ -784,15 +779,6 @@ export function InvestigationReport({
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
   const { token, projectX, siteUrl, recon, projectAccount, founders, deployerTrail } = inv;
-  const isEarnToken = token.address.trim().toLowerCase() === EARN_TOKEN_ADDRESS;
-  const chooseEarnReportStyle = (style: 1 | 2) => {
-    setEarnReportStyle(style);
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (style === 2) url.searchParams.set("reportStyle", "2");
-    else url.searchParams.delete("reportStyle");
-    window.history.replaceState(window.history.state, "", url);
-  };
   // Social conversation is project-level evidence. Older investigation saves
   // often persisted it on the embedded project-account dossier while the
   // report looked only at token.socialActivity, which is why Prologue had no
@@ -1010,8 +996,8 @@ export function InvestigationReport({
   // Unified team: members named in the project's X content (associates) merged
   // with people dug up via the web/LinkedIn search, deduped by handle so a
   // pseudonymous handle gets enriched with its real name + LinkedIn.
-  const teamUnified: { name: string; handle?: string; role: string; linkedin?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
-    type TeamRow = { name: string; handle?: string; role: string; linkedin?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
+  const teamUnified: { name: string; handle?: string; role: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
+    type TeamRow = { name: string; handle?: string; role: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
     const map = new Map<string, TeamRow>();
     const findExisting = (person: { name: string; handle?: string; linkedin?: string }) => {
       return [...map.entries()].find(([, row]) => sameTeamIdentity(row, person));
@@ -1028,6 +1014,7 @@ export function InvestigationReport({
         name: humanTeamName(row, person),
         handle: row.handle ?? person.handle,
         linkedin: row.linkedin ?? person.linkedin,
+        avatarUrl: row.avatarUrl ?? person.avatarUrl,
         role: !row.role || /^team$/i.test(row.role) ? person.role : row.role,
         sourceUrl: row.sourceUrl ?? person.sourceUrl,
         evidence: row.evidence ?? person.evidence,
@@ -1041,6 +1028,7 @@ export function InvestigationReport({
         handle: p.handle,
         role: p.role,
         linkedin: p.linkedin,
+        avatarUrl: p.avatarUrl,
         sourceUrl: p.sourceUrl,
         evidence: p.evidence,
         developerProfiles: p.developerProfiles,
@@ -1061,8 +1049,8 @@ export function InvestigationReport({
   })();
   // Confirmed team groups contain only grounded project-team artifacts or a
   // direct supplemental team attribution. First-party names render separately.
-  const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
-    type TeamPerson = { name: string; handle?: string; role?: string; linkedin?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
+  const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
+    type TeamPerson = { name: string; handle?: string; role?: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
     const people: TeamPerson[] = [];
     const add = (person: TeamPerson) => {
       const existing = people.find((candidate) => sameTeamIdentity(candidate, person));
@@ -1073,6 +1061,7 @@ export function InvestigationReport({
       existing.name = humanTeamName(existing, person);
       existing.handle ??= person.handle;
       existing.linkedin ??= person.linkedin;
+      existing.avatarUrl ??= person.avatarUrl;
       existing.role = !existing.role || /^team$/i.test(existing.role) ? person.role : existing.role;
       existing.sourceUrl ??= person.sourceUrl;
       existing.evidence ??= person.evidence;
@@ -1080,7 +1069,7 @@ export function InvestigationReport({
       existing.source = mergeTeamSources(existing.source, person.source);
     };
     for (const m of teamUnified) {
-      add({ name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, sourceUrl: m.sourceUrl, evidence: m.evidence, developerProfiles: m.developerProfiles, source: m.source });
+      add({ name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, avatarUrl: m.avatarUrl, sourceUrl: m.sourceUrl, evidence: m.evidence, developerProfiles: m.developerProfiles, source: m.source });
     }
     return people;
   })();
@@ -1429,26 +1418,9 @@ export function InvestigationReport({
             <span className="sm:hidden">{versionContext ? `v${versionContext.version}` : "live"}</span>
             <span className="hidden sm:inline">{versionContext ? `saved report v${versionContext.version}` : "new scan"}</span>
           </span>
-          {isEarnToken && (
-            <div className="ml-1 hidden min-h-9 shrink-0 items-center rounded-full border border-line bg-panel p-0.5 sm:flex" aria-label="Report style">
-              <button
-                type="button"
-                aria-pressed={earnReportStyle === 1}
-                onClick={() => chooseEarnReportStyle(1)}
-                className={`min-h-8 rounded-full px-3 text-[10.5px] font-medium transition ${earnReportStyle === 1 ? "bg-ink text-void" : "text-ink-dim hover:bg-panel-2 hover:text-ink"}`}
-              >
-                Style 1
-              </button>
-              <button
-                type="button"
-                aria-pressed={earnReportStyle === 2}
-                onClick={() => chooseEarnReportStyle(2)}
-                className={`min-h-8 rounded-full px-3 text-[10.5px] font-medium transition ${earnReportStyle === 2 ? "bg-ink text-void" : "text-ink-dim hover:bg-panel-2 hover:text-ink"}`}
-              >
-                Style 2
-              </button>
-            </div>
-          )}
+          <div className="hidden sm:block">
+            <ReportStyleControl style={reportStyle} onChange={chooseReportStyle} />
+          </div>
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {onOpenBrief && (
               <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact investigation case" className="btn-primary btn-brand flex min-h-11 shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium">
@@ -1488,26 +1460,9 @@ export function InvestigationReport({
                   <span className="sr-only">More report actions</span>
                 </summary>
                 <div className="absolute right-0 top-[calc(100%+0.4rem)] z-20 min-w-52 overflow-hidden rounded-lg border border-line bg-panel py-1 soft-shadow">
-                  {isEarnToken && (
-                    <div className="mx-1 mb-1 grid grid-cols-2 gap-1 border-b border-line p-1 pb-2" aria-label="Report style">
-                      <button
-                        type="button"
-                        aria-pressed={earnReportStyle === 1}
-                        onClick={() => chooseEarnReportStyle(1)}
-                        className={`min-h-10 rounded-md text-[11.5px] font-medium transition ${earnReportStyle === 1 ? "bg-ink text-void" : "bg-panel-2 text-ink-dim"}`}
-                      >
-                        Style 1
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={earnReportStyle === 2}
-                        onClick={() => chooseEarnReportStyle(2)}
-                        className={`min-h-10 rounded-md text-[11.5px] font-medium transition ${earnReportStyle === 2 ? "bg-ink text-void" : "bg-panel-2 text-ink-dim"}`}
-                      >
-                        Style 2
-                      </button>
-                    </div>
-                  )}
+                  <div className="mx-1 mb-1 border-b border-line p-1 pb-2">
+                    <ReportStyleControl compact style={reportStyle} onChange={chooseReportStyle} />
+                  </div>
                   <a href="#investigation-challenge" className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
                     <ShieldWarning size={16} weight="duotone" aria-hidden="true" />
                     Challenge report
@@ -1541,12 +1496,7 @@ export function InvestigationReport({
         </div>
       )}
 
-      {isEarnToken && earnReportStyle === 2 ? (
-        <div className="report-frame">
-          <EarnReportStyle2 />
-        </div>
-      ) : (
-      <div className="report-frame">
+      <div className={`report-frame report-style-${reportStyle}`} data-report-style={reportStyle}>
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -1633,6 +1583,9 @@ export function InvestigationReport({
           )}
 
           <InvestigationDecisionCanvas
+            presentationStyle={reportStyle}
+            subjectName={projectAccount?.display_name || projectAccount?.handle || token.name || `$${token.symbol}`}
+            subjectSummary={projectAccount?.bio || token.cg?.description}
             verdictLabel={readiness.status === "ready" ? observedTokenMeta.label : readinessLabel}
             score={token.score}
             scoreLabel="Token safety score"
@@ -1829,7 +1782,7 @@ export function InvestigationReport({
               Two recorded scores stay two honest strips, never blended. The
               full ledger is progressively disclosed after the decision brief. */}
           {token.axes?.length > 0 && (
-            <details id="composition" className="evidence-appendix af-doc group mt-8 scroll-mt-28">
+          <details id="composition" open={reportStyle === 2 ? true : undefined} className="evidence-appendix af-doc group mt-8 scroll-mt-28">
               <summary className="evidence-appendix-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                 <div>
                   <p className="af-sec-label">Evidence ledger</p>
@@ -2258,7 +2211,7 @@ export function InvestigationReport({
                             return (
                             <div key={m.handle ?? m.name} className="team-person-card">
                               <span className="team-person-main">
-                                <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={40} rounded="rounded-full" letterClass="text-[13px]" />
+                                <Avatar src={trustedOfficialXAvatarUrl(m.avatarUrl) ?? personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={48} rounded="rounded-full" letterClass="text-[13px]" />
                                 <span className="text-[15.5px] font-medium text-ink">{m.name}</span>
                                 {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11.5px] text-ink-faint">{m.handle}</span>}
                                 {m.role && <span className="chip tint-signal normal-case tracking-normal">{formatRoleLabel(m.role)}</span>}
@@ -2639,7 +2592,6 @@ export function InvestigationReport({
         </div>
         </ReportExperienceLayout>
       </div>
-      )}
       {!shareView && <ArgusEyeAssistant inv={inv} reportVersionId={frozenReportVersionId} />}
     </div>
   );

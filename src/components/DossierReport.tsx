@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GithubLogo, LinkedinLogo, LinkSimple, XLogo } from "@phosphor-icons/react";
 import { ProvenanceTag } from "./ProvenanceTag";
-import { buildDossier, type Dossier, type DossierFigure, type DossierSourceRow, type StrengthBand, type KeyMeasure } from "../lib/dossierModel";
+import { buildDossier, type Dossier, type DossierFigure, type DossierSourceRow, type StrengthBand, type KeyMeasure, type TeamMember } from "../lib/dossierModel";
 import { publicCheckStatus } from "../lib/plainLanguage";
 
 const TINT: Record<string, string> = {
@@ -354,6 +354,22 @@ function Stat({ n, k }: { n: string; k: string }) {
   );
 }
 
+function teamNarrative(team: TeamMember[]): string {
+  const named = team.filter((member) => member.firstParty);
+  const confirmed = team.filter((member) => member.independentlyConfirmed);
+  const profiled = team.filter((member) => member.profiles.length > 0);
+  const namedCopy = named.length === 0
+    ? "The subject did not name a team member in the saved evidence."
+    : `${named.length} ${named.length === 1 ? "person is" : "people are"} named by the subject itself.`;
+  const confirmedCopy = confirmed.length === 0
+    ? "None is independently confirmed yet."
+    : `${confirmed.length} ${confirmed.length === 1 ? "identity is" : "identities are"} independently confirmed.`;
+  const profileCopy = profiled.length === 0
+    ? "No identity-bound public profile was preserved."
+    : `${profiled.length} ${profiled.length === 1 ? "person has" : "people have"} an identity-bound public profile in the file.`;
+  return `${namedCopy} ${confirmedCopy} ${profileCopy}`;
+}
+
 
 /** Recorded documents, weighted by how many dossier figures cite them. */
 function SourcesTable({ rows }: { rows: DossierSourceRow[] }) {
@@ -603,18 +619,21 @@ export function DossierReport({
 
               {b.id === "team" && d.team.length > 0 && (
                 <div className="mt-6 max-w-[56ch]">
-                  <p className="mono mb-2 text-[10px] uppercase tracking-[0.12em] text-ink-faint">
+                  <p className="team-narrative text-[14px] leading-relaxed text-ink-dim">
+                    {teamNarrative(d.team)}
+                  </p>
+                  <p className="mono mb-2 mt-4 text-[10px] uppercase tracking-[0.12em] text-ink-faint">
                     {d.team.filter((m) => m.firstParty).length} named by the subject · {d.team.filter((m) => !m.firstParty).length} found only by search
                   </p>
                   <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     {d.team.map((m) => (
                       <div key={m.name} className={`panel-inset flex items-start gap-2.5 px-3 py-2.5 ${m.firstParty ? "border-l-2 border-sourced" : "border-l-2 border-unverifiable/50"}`}>
                         {m.avatarUrl ? (
-                          <img src={m.avatarUrl} alt="" width={32} height={32}
-                            className="h-8 w-8 shrink-0 rounded-full border border-line object-cover" />
+                          <img src={m.avatarUrl} alt="" width={40} height={40}
+                            className="team-member-avatar h-10 w-10 shrink-0 rounded-full border border-line object-cover" />
                         ) : (
                           <span aria-hidden="true"
-                            className={`mono flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[11px] ${m.firstParty ? "border-sourced/40 text-sourced" : "border-unverifiable/40 text-unverifiable"}`}>
+                            className={`team-member-avatar mono flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-[11px] ${m.firstParty ? "border-sourced/40 text-sourced" : "border-unverifiable/40 text-unverifiable"}`}>
                             {m.name.replace(/^@/, "").charAt(0).toUpperCase()}
                           </span>
                         )}

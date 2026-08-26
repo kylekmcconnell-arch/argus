@@ -20,7 +20,9 @@ vi.mock("../lib/useArkhamLabels", () => ({ useArkhamLabels: harness.arkham }));
 vi.mock("../graph/store", () => ({ getContributions: () => [], investigationContribution: () => harness.graph }));
 vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
 
-vi.mock("./Avatar", () => ({ Avatar: () => null }));
+vi.mock("./Avatar", () => ({
+  Avatar: ({ src }: { src: string | null }) => src ? <img src={src} alt="" /> : null,
+}));
 vi.mock("./OnChainForensics", () => ({ OnChainForensics: (props: Record<string, unknown>) => { harness.livePanel("on-chain", props); return null; } }));
 vi.mock("./ProjectResearch", () => ({ ProjectResearch: () => { harness.livePanel("project-research"); return null; } }));
 vi.mock("./ProjectLinks", () => ({ ProjectLinks: () => null }));
@@ -48,7 +50,6 @@ vi.mock("./NamesakeCheck", () => ({ NamesakeCheck: () => { harness.livePanel("na
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => null }));
 vi.mock("./RingAlert", () => ({ RingAlert: () => { harness.livePanel("ring-alert"); return null; } }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => null }));
-vi.mock("./EarnReportStyle2", () => ({ EarnReportStyle2: () => <div data-panel="earn-report-style-2">EARN unified decision memo</div> }));
 vi.mock("./SnapshotEvidenceControl", () => ({
   LiveSupplementalNotice: () => null,
   SnapshotEvidenceControl: () => null,
@@ -149,37 +150,29 @@ afterEach(async () => {
 });
 
 describe("investigation exact sharing", () => {
-  it("offers both report styles only for the canonical EARN token and preserves the choice in the URL", () => {
-    const earnAddress = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
-    render(investigation({
-      rootRef: earnAddress,
-      token: { ...token(), address: earnAddress, symbol: "EARN", name: "EARN" },
-    }));
+  it("defaults every investigation to Style 2 and preserves the canonical report when styles change", () => {
+    render(investigation());
 
     const desktopStyleControl = container.querySelector<HTMLElement>('header [aria-label="Report style"]');
     const buttons = [...(desktopStyleControl?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
     expect(buttons.map((button) => button.textContent?.trim())).toEqual(["Style 1", "Style 2"]);
-    expect(buttons[0]?.getAttribute("aria-pressed")).toBe("true");
-    expect(container.querySelector('[data-panel="earn-report-style-2"]')).toBeNull();
+    expect(buttons[1]?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.textContent).toContain("The state of the house");
 
-    act(() => buttons[1]?.click());
+    act(() => buttons[0]?.click());
 
-    expect(window.location.search).toContain("reportStyle=2");
-    expect(container.querySelector('[data-panel="earn-report-style-2"]')?.textContent).toContain("EARN unified decision memo");
+    expect(window.location.search).toContain("reportStyle=1");
+    expect(container.querySelector(".report-frame.report-style-1")).not.toBeNull();
+    expect(container.textContent).toContain("What this report means");
   });
 
-  it("opens an EARN token Style 2 deep link directly without exposing the selector on other tokens", () => {
-    const earnAddress = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
-    window.history.replaceState(null, "", "/?s=%24EARN&kind=token&reportStyle=2");
-    render(investigation({
-      rootRef: earnAddress,
-      token: { ...token(), address: earnAddress, symbol: "EARN", name: "EARN" },
-    }));
-    expect(container.querySelector('[data-panel="earn-report-style-2"]')).not.toBeNull();
-
+  it("opens an explicit Style 1 deep link and exposes both styles on non-EARN reports", () => {
+    window.history.replaceState(null, "", "/?s=%24ARG&kind=token&reportStyle=1");
     render(investigation());
-    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
-    expect(container.querySelector('[data-panel="earn-report-style-2"]')).toBeNull();
+    expect(container.querySelector('header [aria-label="Report style"]')).not.toBeNull();
+    expect(container.querySelector(".report-frame.report-style-1")).not.toBeNull();
+    expect(container.textContent).toContain("What this report means");
   });
 
   it("keeps the header case label stable across saved versions of the same case", () => {
@@ -728,6 +721,7 @@ describe("investigation exact sharing", () => {
             name: "Erik Voorhees",
             handle: "@erikvoorhees",
             role: "Founder & CEO",
+            avatarUrl: "https://pbs.twimg.com/profile_images/1/erik.jpg",
             source: "official team page",
             sourceUrl: "https://venice.ai/about",
             provider: "team-page",
@@ -781,6 +775,7 @@ describe("investigation exact sharing", () => {
     expect(container.querySelector('[aria-label="Team evidence summary"]')?.textContent).toContain("2source-grounded identities");
     expect(container.querySelector('[aria-label="Team evidence summary"]')?.textContent).toContain("2confirmed founders");
     expect(container.querySelectorAll(".team-person-card")).toHaveLength(2);
+    expect(container.querySelector('img[src="https://pbs.twimg.com/profile_images/1/erik.jpg"]')).not.toBeNull();
     expect(container.textContent).toContain("Founders (2)");
     // The handle-only "@twistartups · CEO" row (a media account bound to a
     // project-owned role by the post scan) must not render as team at all.
@@ -812,7 +807,7 @@ describe("investigation exact sharing", () => {
     const chapterLabels = [...container.querySelectorAll<HTMLElement>(".story-chapter .report-section-heading > div > .eyebrow")]
       .map((label) => label.textContent);
     expect(chapterLabels).toEqual([
-      "01 · Decision brief",
+      "01 · State of the house",
       "02 · Why",
       "03 · Market",
       "04 · People",

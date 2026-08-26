@@ -50,7 +50,6 @@ vi.mock("./MethodologyChecklist", () => ({
   MethodologyChecklist: ({ id }: { id?: string }) => <div id={id} data-panel="methodology" />,
 }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => <span /> }));
-vi.mock("./EarnReportStyle2", () => ({ EarnReportStyle2: () => <div data-panel="earn-report-style-2">EARN unified decision memo</div> }));
 
 import { TokenReport } from "./TokenReport";
 
@@ -180,30 +179,29 @@ afterEach(() => {
 });
 
 describe("token report supplemental evidence boundary", () => {
-  it("offers both report styles on the canonical EARN token and persists Style 2 in the URL", () => {
-    const earnAddress = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
-    render(dossier({ address: earnAddress, symbol: "EARN", name: "EARN" }));
+  it("defaults every token report to Style 2 and keeps the canonical data when styles change", () => {
+    render(dossier());
 
     const styleControl = container.querySelector<HTMLElement>('header [aria-label="Report style"]');
     const buttons = [...(styleControl?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
     expect(buttons.map((button) => button.textContent?.trim())).toEqual(["Style 1", "Style 2"]);
-    expect(buttons[0]?.getAttribute("aria-pressed")).toBe("true");
+    expect(buttons[1]?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.textContent).toContain("The state of the house");
 
-    act(() => buttons[1]?.click());
+    act(() => buttons[0]?.click());
 
-    expect(window.location.search).toContain("reportStyle=2");
-    expect(container.querySelector('[data-panel="earn-report-style-2"]')?.textContent).toContain("EARN unified decision memo");
+    expect(window.location.search).toContain("reportStyle=1");
+    expect(container.querySelector(".report-frame.report-style-1")).not.toBeNull();
+    expect(container.textContent).toContain("What this report means");
   });
 
-  it("opens the EARN Style 2 deep link directly and leaves other token reports unchanged", () => {
-    const earnAddress = "0xa3b6aee90017b72c0812dc1e013de70eb2917ba3";
-    window.history.replaceState(null, "", "/?s=%24EARN&kind=token&reportStyle=2");
-    render(dossier({ address: earnAddress, symbol: "EARN", name: "EARN" }));
-    expect(container.querySelector('[data-panel="earn-report-style-2"]')).not.toBeNull();
-
+  it("opens an explicit Style 1 deep link and exposes both styles on non-EARN reports", () => {
+    window.history.replaceState(null, "", "/?s=%24ARG&kind=token&reportStyle=1");
     render(dossier());
-    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
-    expect(container.querySelector('[data-panel="earn-report-style-2"]')).toBeNull();
+    expect(container.querySelector('header [aria-label="Report style"]')).not.toBeNull();
+    expect(container.querySelector(".report-frame.report-style-1")).not.toBeNull();
+    expect(container.textContent).toContain("What this report means");
   });
 
   it("keeps a complete six-check token report complete when project graph and creator follow-ups are open", () => {
@@ -238,7 +236,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain(`$${symbol}`);
-    expect(container.textContent).toContain("What this report means");
+    expect(container.textContent).toContain("The state of the house");
     expect(container.querySelector('a[href^="https://dexscreener.com/search?q="]')?.textContent).toBe("Dexscreener");
     const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
     expect(decisionCanvas?.textContent).toContain("88");

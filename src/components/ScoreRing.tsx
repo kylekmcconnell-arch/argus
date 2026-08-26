@@ -209,6 +209,7 @@ export function ScoreRing({
   bands = false,
   color,
   composition,
+  fallbackLabel = "Saved score",
   children,
 }: {
   score: number | null;
@@ -219,6 +220,8 @@ export function ScoreRing({
   color?: string;
   /** Real ScoreComposition rows. Each row.score is an arc segment out of 100. */
   composition?: ScoreRingCompositionRow[] | undefined;
+  /** What the single fallback arc represents when dimension rows were not saved. */
+  fallbackLabel?: string;
   /** Hero lockup copy whose `.score-ring-verdict` waits for the numeral. */
   children?: ReactNode;
 }) {
@@ -377,8 +380,8 @@ export function ScoreRing({
       </svg>
       {hero && motion.phase === "track" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center" data-score-ring-stage="composition">
-          <span className="mono text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Building score</span>
-          <span className="mt-1 text-[13px] font-medium text-ink-dim">Score composition</span>
+          <span className="mono text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-faint">{showPieces ? "Building score" : "Preparing score"}</span>
+          <span className="mt-1 max-w-[13rem] text-[13px] font-medium leading-tight text-ink-dim">{showPieces ? "Score composition" : fallbackLabel}</span>
         </div>
       )}
       {hero && activePiece && (
@@ -386,6 +389,13 @@ export function ScoreRing({
           <span className="mono text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Adding dimension</span>
           <span className="mt-1 max-w-[14rem] text-[14px] font-semibold leading-tight text-ink">{activePiece.label}</span>
           <span className="mono mt-1 text-[10px] text-ink-dim">+{activePiecePoints} / {activePiece.score} pts</span>
+        </div>
+      )}
+      {hero && !showPieces && motion.phase === "pieces" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-10 text-center" data-score-ring-active-label="score">
+          <span className="mono text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Filling score</span>
+          <span className="mt-1 max-w-[13rem] text-[14px] font-semibold leading-tight text-ink">{fallbackLabel}</span>
+          <span className="mono mt-1 text-[10px] text-ink-dim">{Math.round((score ?? 0) * motion.scoreArc)} / {score ?? 0} pts</span>
         </div>
       )}
       <div

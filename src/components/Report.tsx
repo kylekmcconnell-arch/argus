@@ -42,7 +42,7 @@ import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
 import { ProjectLinks } from "./ProjectLinks";
-import { xAvatar, personAvatar } from "../lib/avatars";
+import { personAvatar, trustedOfficialXAvatarUrl, xAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletBindingLabel, walletScreenView, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
@@ -59,7 +59,7 @@ import { reportIdentity } from "../lib/caseLabel";
 import { AddInfo } from "./AddInfo";
 import { ScoreComposition } from "./ScoreComposition";
 import { DimensionChapters } from "./DimensionChapters";
-import { personDimensionChapters } from "../lib/dimensionChapters";
+import { compositionHeadline, personDimensionChapters } from "../lib/dimensionChapters";
 import { DossierReport } from "./DossierReport";
 import { ScoreRing } from "./ScoreRing";
 import { LinkEntity } from "./LinkEntity";
@@ -112,7 +112,7 @@ import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
 import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
 import { SocialActivityPanel } from "./SocialActivityPanel";
-import { EarnReportStyle2 } from "./EarnReportStyle2";
+import { ReportStyleControl, useReportStyle } from "./ReportStyleControl";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import {
   SUBJECT_LEAD_RELATIONSHIP,
@@ -1598,21 +1598,9 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
 
 export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
-  const [earnReportStyle, setEarnReportStyle] = useState<1 | 2>(() => {
-    if (typeof window === "undefined") return 1;
-    return new URLSearchParams(window.location.search).get("reportStyle") === "2" ? 2 : 1;
-  });
+  const [reportStyle, chooseReportStyle] = useReportStyle();
   const { role } = useArgusAuth();
   const f = dossier;
-  const isEarnOnHood = f.handle.replace(/^@/, "").trim().toLowerCase() === "earnonhood";
-  const chooseEarnReportStyle = (style: 1 | 2) => {
-    setEarnReportStyle(style);
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (style === 2) url.searchParams.set("reportStyle", "2");
-    else url.searchParams.delete("reportStyle");
-    window.history.replaceState(window.history.state, "", url);
-  };
   const hasTerminalXState = f.x_account_status === "suspended" || f.x_account_status === "unavailable";
   const { report, graph, founderSummary, evidence } = dossier;
   const fundScaleProfile = {
@@ -1812,6 +1800,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       || fact === firstFundingFact)
       .map((fact) => fact === firstFundingFact ? consolidatedFundingFact : fact)
     : publicationBasicFacts;
+  const openingProductFact = basicFacts.find((fact) =>
+    canonicalBasicFactPredicate(fact.predicate) === "product"
+    && (fact.status === "verified" || fact.status === "corroborated")
+    && typeof fact.value === "string"
+    && fact.value.trim().length > 0);
+  const openingSubjectSummary = openingProductFact && typeof openingProductFact.value === "string"
+    ? `What it does: ${openingProductFact.value.trim()}.`
+    : f.bio;
   const basicFactResearchAttempted = basicFacts.length > 0
     || basicFactLeads.length > 0
     || (f.basicFactQuestionLedger?.length ?? 0) > 0;
@@ -2921,26 +2917,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               {versionContext ? `VERSION ${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
             </span>
           )}
-          {isEarnOnHood && (
-            <div className="ml-1 hidden min-h-9 shrink-0 items-center rounded-full border border-line bg-panel p-0.5 sm:flex" aria-label="Report style">
-              <button
-                type="button"
-                aria-pressed={earnReportStyle === 1}
-                onClick={() => chooseEarnReportStyle(1)}
-                className={`min-h-8 rounded-full px-3 text-[10.5px] font-medium transition ${earnReportStyle === 1 ? "bg-ink text-void" : "text-ink-dim hover:bg-panel-2 hover:text-ink"}`}
-              >
-                Style 1
-              </button>
-              <button
-                type="button"
-                aria-pressed={earnReportStyle === 2}
-                onClick={() => chooseEarnReportStyle(2)}
-                className={`min-h-8 rounded-full px-3 text-[10.5px] font-medium transition ${earnReportStyle === 2 ? "bg-ink text-void" : "text-ink-dim hover:bg-panel-2 hover:text-ink"}`}
-              >
-                Style 2
-              </button>
-            </div>
-          )}
+          <div className="hidden sm:block">
+            <ReportStyleControl style={reportStyle} onChange={chooseReportStyle} />
+          </div>
           <div className="ml-auto flex min-w-0 items-center gap-2">
             {onOpenBrief && (
               <button
@@ -3014,26 +2993,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <span className="sr-only">More report actions</span>
               </summary>
               <div className="panel absolute right-0 top-full z-30 mt-1.5 w-56 p-1.5 shadow-xl">
-                {isEarnOnHood && (
-                  <div className="mb-1 grid grid-cols-2 gap-1 border-b border-line p-1 pb-2" aria-label="Report style">
-                    <button
-                      type="button"
-                      aria-pressed={earnReportStyle === 1}
-                      onClick={() => chooseEarnReportStyle(1)}
-                      className={`min-h-10 rounded-md text-[11.5px] font-medium transition ${earnReportStyle === 1 ? "bg-ink text-void" : "bg-panel-2 text-ink-dim"}`}
-                    >
-                      Style 1
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={earnReportStyle === 2}
-                      onClick={() => chooseEarnReportStyle(2)}
-                      className={`min-h-10 rounded-md text-[11.5px] font-medium transition ${earnReportStyle === 2 ? "bg-ink text-void" : "bg-panel-2 text-ink-dim"}`}
-                    >
-                      Style 2
-                    </button>
-                  </div>
-                )}
+                <div className="mb-1 border-b border-line pb-2">
+                  <ReportStyleControl compact style={reportStyle} onChange={chooseReportStyle} />
+                </div>
                 {onRescan && (
                   <button type="button" onClick={onRescan} className="flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[12.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
                     <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
@@ -3078,12 +3040,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         </div>
       </header>
 
-      {isEarnOnHood && earnReportStyle === 2 ? (
-        <div className="report-frame">
-          <EarnReportStyle2 />
-        </div>
-      ) : (
-      <div className="report-frame">
+      <div className={`report-frame report-style-${reportStyle}`} data-report-style={reportStyle}>
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -3402,6 +3359,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         </section>
 
         <InvestigationDecisionCanvas
+          presentationStyle={reportStyle}
+          subjectName={f.display_name || f.handle}
+          subjectSummary={openingSubjectSummary}
           verdictLabel={m.label}
           score={presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null}
           scoreLabel={roles.includes(SubjectClass.PROJECT) ? "Project diligence score" : "Person diligence score"}
@@ -3437,12 +3397,21 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             readable rows — expand for the why, jump to the evidence, or
             challenge the score */}
         {presentation.primaryScore && governingAxes.length > 0 && (
-          <ScoreComposition
-            rows={compositionRows}
-            totalScore={report.governing_score}
-            capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
-            challengeAnchor={shareView ? null : "#ask-report"}
-          />
+          <section id="composition" className={reportStyle === 2 ? "af-doc mt-10 scroll-mt-28" : ""}>
+            {reportStyle === 2 && (
+              <>
+                <p className="af-sec-label">The composition</p>
+                <h2 className="af-h2 mt-3">{compositionHeadline(compositionRows.length)}</h2>
+                <p className="af-prose">Each row is a section of this file. The weight is how much it counts; the points are what it drove into the result. Open a row for the short version, or go straight to the evidence.</p>
+              </>
+            )}
+            <ScoreComposition
+              rows={compositionRows}
+              totalScore={report.governing_score}
+              capNote={report.cap_applied ? `limited to ${report.governing_score} · ${capLabel(report.cap_applied)}` : null}
+              challengeAnchor={shareView ? null : "#ask-report"}
+            />
+          </section>
         )}
 
         <ReportExperienceLayout
@@ -3789,7 +3758,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 return (
                 <article key={`${p.name}:${p.handle ?? ""}:${i}`} className="team-person-card">
                     <span className="team-person-main">
-                      <Avatar src={personAvatar(p.handle, p.linkedin)} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={40} rounded="rounded-full" letterClass="text-[13px]" />
+                      <Avatar src={trustedOfficialXAvatarUrl(p.avatarUrl) ?? personAvatar(p.handle, p.linkedin)} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={48} rounded="rounded-full" letterClass="text-[13px]" />
                       <span className="text-[15.5px] font-medium text-ink">{p.name}</span>
                       {p.handle && <span className="mono text-[11.5px] text-ink-faint">{p.handle}</span>}
                       <span className="chip tint-signal shrink-0 normal-case tracking-normal">{formatRoleLabel(p.role)}</span>
@@ -4683,7 +4652,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         </div>
         </ReportExperienceLayout>
       </div>
-      )}
     </div>
   );
 }

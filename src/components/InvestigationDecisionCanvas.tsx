@@ -221,6 +221,9 @@ function DecisionLedgerList({
 }
 
 export function InvestigationDecisionCanvas({
+  presentationStyle = 1,
+  subjectName,
+  subjectSummary,
   verdictLabel,
   score,
   scoreLabel = "ARGUS risk score",
@@ -250,6 +253,12 @@ export function InvestigationDecisionCanvas({
   openItemsLabel = "What is still open",
   composition,
 }: {
+  /** Style 2 is the narrative reading view; Style 1 keeps the compact brief. */
+  presentationStyle?: 1 | 2;
+  /** Human-readable subject used by the Style 2 state-of-the-house opening. */
+  subjectName?: string | undefined;
+  /** Saved first-party or registry description of what the subject actually does. */
+  subjectSummary?: string | null | undefined;
   verdictLabel: string;
   /** Saved ARGUS risk score. Null means the scoring contract withheld it. */
   score: number | null;
@@ -303,16 +312,42 @@ export function InvestigationDecisionCanvas({
       : verdictTone === "caution"
         ? "var(--color-caution)"
         : "var(--color-ink)";
+  const cleanSubject = (subjectName ?? "").replace(/[.\s]+$/, "").trim();
+  const cleanSummary = (subjectSummary ?? "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const summary = cleanSummary.length > 360 ? `${cleanSummary.slice(0, 357).trimEnd()}…` : cleanSummary;
+  const primaryWhy = favorable ? supports[0] : concerns[0];
+  const counterWhy = favorable ? concerns[0] : supports[0];
+  const whyParts = argument
+    ? [argument.forLine, argument.againstLine, argument.moveLine].filter((value): value is string => Boolean(value))
+    : [primaryWhy?.label, counterWhy?.label].filter((value): value is string => Boolean(value));
+  const whyCopy = whyParts.map(plainDecisionText).join(" ");
 
   return (
     <section id="report-summary" data-canonical-decision-brief="true" className="story-chapter report-section mt-6 scroll-mt-28">
       <header className="report-section-heading decision-brief-heading">
         <div>
-          <p className="eyebrow text-signal-lift">01 · Decision brief</p>
-          <h2 className="story-chapter-title mt-1 font-semibold tracking-tight text-ink">What this report means</h2>
-          <p className="story-chapter-description mt-2 max-w-2xl leading-relaxed text-ink-dim">
-            The strongest evidence, the main risks, and what to check next.
-          </p>
+          <p className="eyebrow text-signal-lift">{presentationStyle === 2 ? "01 · State of the house" : "01 · Decision brief"}</p>
+          <h2 className="story-chapter-title decision-state-title mt-1 text-ink">
+            {presentationStyle === 2
+              ? <>{cleanSubject && <span>{cleanSubject}. </span>}<span className="decision-state-accent">The state of the house.</span></>
+              : "What this report means"}
+          </h2>
+          {presentationStyle === 2 ? (
+            <>
+              <p className="story-chapter-description decision-subject-summary mt-4 max-w-3xl leading-relaxed text-ink-dim">
+                {summary || "ARGUS assembled the available product, people, market, social, and risk evidence into one decision file."}
+              </p>
+              {whyCopy && (
+                <p className="decision-why mt-5 max-w-3xl text-ink-dim">
+                  <strong className="font-semibold text-ink">Why {score ?? verdictLabel}:</strong> {whyCopy}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="story-chapter-description mt-2 max-w-2xl leading-relaxed text-ink-dim">
+              The strongest evidence, the main risks, and what to check next.
+            </p>
+          )}
         </div>
         <div
           className="decision-score-lockup shrink-0"
@@ -330,6 +365,7 @@ export function InvestigationDecisionCanvas({
             size={HERO_SCORE_RING_SIZE}
             bands={score != null}
             composition={composition}
+            fallbackLabel={scoreLabel}
           >
             <div className="decision-score-copy">
               <p className={`score-ring-verdict mono text-[11px] font-semibold uppercase tracking-[0.1em] ${verdictClass}`}>{verdictLabel}</p>
