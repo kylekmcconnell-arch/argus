@@ -2535,12 +2535,12 @@ export function scanPostsForRoles(posts: string[], projectName?: string, subject
       const role = match[1].toLowerCase().replace(/^our\s+/, "");
       const gap = match[0].slice(match[1].length, match[0].length - match[2].length - 1);
       if (!connectorAllowed(gap, AFTER_ROLE_CONNECTORS)) continue;
-      // Official posts are the owner: founder/co-founder next to a handle
-      // does not need "our" or the display name. CEO/CTO still do. Guest
-      // "@x Co-Founder of @other" is the before-pattern (kept owned-check)
-      // plus (?!\s+of\b) on this arm.
-      const founderOwned = /^(?:co-)?founders?$/i.test(role);
-      if (!founderOwned && !roleIsProjectOwned(p, match.index ?? 0, match[0].length, role)) continue;
+      // Role proximity alone is not ownership. Official accounts routinely
+      // mention guests, partner founders, NFT projects and collaborators. The
+      // clause must say "our founder", "Project founder", or "founder at/for
+      // Project" before this deterministic lane can promote the handle into
+      // the audited project's team. Broader mentions remain discovery leads.
+      if (!roleIsProjectOwned(p, match.index ?? 0, match[0].length, role)) continue;
       const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
       const handles = [match[2]];
       if (isPluralFounderRole(role)) {

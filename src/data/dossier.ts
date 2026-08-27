@@ -304,7 +304,8 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     return Boolean(row.handle) && compact(name) === compact((row.handle ?? "").replace(/^@/, ""));
   };
   const identityGrounded = (row: WebTeamMember) =>
-    meaningfulTeamValue(row.name)
+    row.kind !== "org"
+    && meaningfulTeamValue(row.name)
     && isPlausiblePersonRosterName(row.name)
     && meaningfulTeamValue(row.role)
     && row.evidence_origin !== "model_lead"
@@ -325,6 +326,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
+    if (member.kind === "org") return [];
     if (!meaningfulTeamValue(member.name) || !isPlausiblePersonRosterName(member.name) || !meaningfulTeamValue(member.role)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     // Only an unproven identity LINK makes a verified person a candidate

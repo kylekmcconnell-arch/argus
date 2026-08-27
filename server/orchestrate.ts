@@ -4996,7 +4996,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
     // so identity/founder scoring reflects the team we actually found.
-    team: (evidence.webTeam ?? []).map((p) => ({
+    team: (evidence.webTeam ?? []).filter((p) => p.kind !== "org").map((p) => ({
       name: p.name,
       handle: p.identity_link_evidence_origin === "model_lead" ? undefined : p.handle,
       role: p.role,

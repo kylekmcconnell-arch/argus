@@ -89,7 +89,7 @@ describe("official corpus names handles as team or linked orgs", () => {
 
   it("binds co-founders named only by @handle on the official account", () => {
     const team = officialXNamedTeam([
-      "Proud to introduce co-founders @alice and @bob.",
+      "Proud to introduce our co-founders @alice and @bob.",
     ], "ExampleProject", "@exampleproj");
     expect(team.map((m) => m.handle).sort()).toEqual(["@alice", "@bob"]);
     expect(team.every((m) => m.handleProvenance === "subject_first_party")).toBe(true);
@@ -98,8 +98,9 @@ describe("official corpus names handles as team or linked orgs", () => {
     expect(team.every((m) => m.name === m.handle)).toBe(true);
   });
 
-  it("binds from official posts without Serper or a project display name", () => {
-    const team = officialXNamedTeam(["Meet co-founder @alice."], undefined, "@exampleproj");
+  it("requires the post to assign the role to the audited project", () => {
+    expect(officialXNamedTeam(["Meet co-founder @alice."], undefined, "@exampleproj")).toEqual([]);
+    const team = officialXNamedTeam(["Meet our co-founder @alice."], undefined, "@exampleproj");
     expect(team).toEqual([
       expect.objectContaining({
         handle: "@alice",
@@ -109,6 +110,12 @@ describe("official corpus names handles as team or linked orgs", () => {
         provider: "twitterapi",
       }),
     ]);
+  });
+
+  it("does not turn an NFT project mentioned beside founder language into a person", () => {
+    expect(officialXNamedTeam([
+      "Meet founder @womenofsatoshi, an NFT project joining this week's community event.",
+    ], "Fedi", "@fedibtc")).toEqual([]);
   });
 
   it("binds an incubator/team-behind/backed-by handle as an org, not a person", () => {

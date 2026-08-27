@@ -6885,7 +6885,7 @@ function assembleDossier(ev, live) {
     const compact3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
     return Boolean(row.handle) && compact3(name) === compact3((row.handle ?? "").replace(/^@/, ""));
   };
-  const identityGrounded = (row) => meaningfulTeamValue(row.name) && isPlausiblePersonRosterName(row.name) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
+  const identityGrounded = (row) => row.kind !== "org" && meaningfulTeamValue(row.name) && isPlausiblePersonRosterName(row.name) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
   // often use @handle as the display name until enrichment fills it.
   (row.handleProvenance === "subject_first_party" && Boolean(row.handle) || !teamNameIsOwnHandle(row));
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
@@ -6894,6 +6894,7 @@ function assembleDossier(ev, live) {
     ...member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}
   }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
+    if (member.kind === "org") return [];
     if (!meaningfulTeamValue(member.name) || !isPlausiblePersonRosterName(member.name) || !meaningfulTeamValue(member.role)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     if (member.identity_link_evidence_origin !== "model_lead") return [];
@@ -14407,8 +14408,7 @@ function scanPostsForRoles(posts, projectName2, subjectHandle) {
       const role = match[1].toLowerCase().replace(/^our\s+/, "");
       const gap = match[0].slice(match[1].length, match[0].length - match[2].length - 1);
       if (!connectorAllowed(gap, AFTER_ROLE_CONNECTORS)) continue;
-      const founderOwned = /^(?:co-)?founders?$/i.test(role);
-      if (!founderOwned && !roleIsProjectOwned(p, match.index ?? 0, match[0].length, role)) continue;
+      if (!roleIsProjectOwned(p, match.index ?? 0, match[0].length, role)) continue;
       const kind = /advisor/i.test(role) ? "advisor" : "team";
       const handles = [match[2]];
       if (isPluralFounderRole(role)) {
@@ -18194,29 +18194,65 @@ async function collectProfilePhoto(ctx) {
 
 // server/adapters/teamEnrichment.ts
 var MAX_ENRICHED_MEMBERS = 15;
-async function enrichOne(member) {
+var ORGANIZATION_NAME2 = /\b(?:dao|foundation|collective|company|studio|studios|network|media|magazine|protocol|community)\b/i;
+var ORGANIZATION_BIO = /\b(?:nft\s+(?:project|collection|community)|digital\s+collectibles?|official\s+(?:account|community)|community[- ](?:led|owned)\s+(?:project|platform)|we\s+(?:build|are|create|represent)|our\s+(?:community|project|mission|platform|collection))\b/i;
+var COLLECTIVE_NAME = /^(?:women|men|builders|artists|developers|friends|fans|community)\s+(?:of|for)\b/i;
+function teamProfileEntityType(profile) {
+  const name = String(profile.name ?? "").replace(/\s+/g, " ").trim();
+  const bio = String(profile.bio ?? "").replace(/\s+/g, " ").trim();
+  return COLLECTIVE_NAME.test(name) || ORGANIZATION_NAME2.test(name) || ORGANIZATION_BIO.test(bio) ? "organization" : "unknown";
+}
+function preserveRelatedOrganization(ctx, member, profile) {
+  member.kind = "org";
+  member.name = profile.name?.trim() || member.name;
+  member.biography = profile.bio?.trim() || member.biography;
+  const originalRole = member.role;
+  member.role = "related organization";
+  member.evidence = `${member.evidence ?? "The official account mentioned this handle."} The handle's own profile describes an organization, so ARGUS excluded it from the team roster.`;
+  const handle = member.handle;
+  const key = handle.replace(/^@/, "").toLowerCase();
+  if (!ctx.evidence.associates.some((associate) => associate.associate_handle.replace(/^@/, "").toLowerCase() === key)) {
+    ctx.evidence.associates.push({
+      associate_handle: handle,
+      relation: "official-post mention",
+      notes: `Mentioned beside the role "${originalRole}", but ${handle}'s own profile identifies an organization rather than a person. Preserved as related context; not team evidence.`,
+      evidence_url: member.sourceUrl ?? profile.statusSourceUrl,
+      provider: "twitterapi",
+      evidence_origin: "deterministic",
+      artifact_verified: true
+    });
+  }
+}
+async function enrichOne(ctx, member) {
   const profile = await getProfile2(member.handle);
   if (!profile) return false;
   member.accountStatus = profile.accountStatus;
   member.followers = profile.followers;
   member.enrichmentProvider = "twitterapi";
   member.enrichmentSourceUrl = profile.statusSourceUrl;
-  if (!profile.image) return true;
+  if (teamProfileEntityType(profile) === "organization") {
+    preserveRelatedOrganization(ctx, member, profile);
+    return "organization";
+  }
+  if (!profile.image) return "person";
   const image = await fetchTrustedProfileImage(profile.image);
-  if (!image) return true;
+  if (!image) return "person";
   member.avatarUrl = image.url;
   member.avatarContentHash = image.contentHash;
   member.avatarCapturedAt = profile.statusCapturedAt;
-  return true;
+  return "person";
 }
 async function enrichFirstPartyTeamAvatars(ctx) {
   const webTeam = ctx.evidence.webTeam ?? [];
   const targets = webTeam.filter((member) => member.handle && member.handleProvenance === "subject_first_party" && !member.avatarUrl).slice(0, MAX_ENRICHED_MEMBERS);
   if (!targets.length) return;
   let enriched = 0;
+  let reclassified = 0;
   for (const member of targets) {
     try {
-      if (await enrichOne(member)) enriched++;
+      const result = await enrichOne(ctx, member);
+      if (result === "person") enriched++;
+      if (result === "organization") reclassified++;
     } catch (error) {
       ctx.emit({
         phase: "P1 \xB7 Team",
@@ -18234,6 +18270,15 @@ async function enrichFirstPartyTeamAvatars(ctx) {
       detail: `Enriched ${enriched} of ${targets.length} team handle${targets.length === 1 ? "" : "s"} the subject account itself bound (its own posts, following, or amplification) with a profile photo, follower count, and account status.`,
       source: "twitterapi.io",
       tone: "good"
+    });
+  }
+  if (reclassified) {
+    ctx.emit({
+      phase: "P1 \xB7 Team",
+      label: "Organizations separated from people",
+      detail: `Moved ${reclassified} organization account${reclassified === 1 ? "" : "s"} out of the team roster and into related-organization evidence after checking the handle's own profile.`,
+      source: "twitterapi.io",
+      tone: "neutral"
     });
   }
 }
@@ -36367,7 +36412,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
     // so identity/founder scoring reflects the team we actually found.
-    team: (evidence.webTeam ?? []).map((p) => ({
+    team: (evidence.webTeam ?? []).filter((p) => p.kind !== "org").map((p) => ({
       name: p.name,
       handle: p.identity_link_evidence_origin === "model_lead" ? void 0 : p.handle,
       role: p.role,
