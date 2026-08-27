@@ -64,6 +64,21 @@ describe("Kyle intelligence report opening", () => {
     expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
   });
 
+  it("uses verified support depth before score saturation when naming the strongest evidence", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      favorable
+      concerns={[]}
+      composition={[
+        { axis: "team", label: "Team & leadership", score: 15, weight: 16, rationale: "The roster is deeply sourced.", supportCount: 12 },
+        { axis: "product", label: "Product & execution", score: 20, weight: 20, rationale: "The product is live.", supportCount: 2 },
+      ]}
+    />));
+
+    expect(container.textContent).toContain("Team and leadership is the strongest verified part of the case.");
+    expect(container.textContent).not.toContain("Product and execution is the strongest verified part of the case.");
+  });
+
   it("leads with the verdict and separates evidence gaps from adverse evidence", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
 

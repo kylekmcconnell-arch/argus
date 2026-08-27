@@ -132,7 +132,11 @@ function verdictHeadline(
 ): string {
   const strongest = [...rows]
     .filter((row) => row.weight > 0 && row.score / row.weight >= 0.65)
-    .sort((left, right) => (right.score / right.weight) - (left.score / left.weight))[0];
+    .sort((left, right) => {
+      const supportDifference = (right.supportCount ?? 0) - (left.supportCount ?? 0);
+      if (supportDifference !== 0) return supportDifference;
+      return (right.score / right.weight) - (left.score / left.weight);
+    })[0];
   const lead = strongest ? `${strongest.label} leads the evidence.` : "The available evidence establishes a starting position.";
   if (favorable && unresolvedCount === 0 && adverseCount === 0) return `${lead} No decision-critical gap is recorded.`;
   if (adverseCount > 0) return `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`;
