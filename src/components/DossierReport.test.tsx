@@ -194,6 +194,24 @@ describe("DossierReport", () => {
     expect(container.querySelector('img[src="https://pbs.twimg.com/x.jpg"]')).not.toBeNull();
   });
 
+  it("renders a portrait captured from a verified official team page", () => {
+    const payload = livePayload();
+    (payload.webTeamLeads as Array<Record<string, unknown>>).push({
+      name: "Sean Carey",
+      role: "Advisor",
+      source: "https://www.anyone.io/about-us",
+      sourceUrl: "https://www.anyone.io/about-us",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      officialPortraitUrl: "https://cdn.prod.website-files.com/anyone/advisor-1.png",
+      officialPortraitSourceUrl: "https://www.anyone.io/about-us",
+      officialPortraitCapturedAt: "2026-08-26T22:00:00.000Z",
+    });
+    render(payload);
+
+    expect(container.querySelector('img[src="https://cdn.prod.website-files.com/anyone/advisor-1.png"]')).not.toBeNull();
+  });
+
   it("links team members to saved identity-bound social profiles without guessing", () => {
     render(livePayload());
     expect(container.querySelector('a[href="https://x.com/firstparty"]')).not.toBeNull();

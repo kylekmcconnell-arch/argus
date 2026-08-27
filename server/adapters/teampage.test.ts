@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { recordCall } from "../cost";
-import { bindProfileAnchor, profileAnchors, teamDocumentUrlsFromIndex, teamMemberIsDirectlySupported } from "./teampage";
+import {
+  bindOfficialPortrait,
+  bindProfileAnchor,
+  officialPortraitAnchors,
+  profileAnchors,
+  teamDocumentUrlsFromIndex,
+  teamMemberIsDirectlySupported,
+} from "./teampage";
 
 const structuredMock = vi.hoisted(() => vi.fn());
 
@@ -13,6 +20,72 @@ afterEach(() => {
 });
 
 describe("official project team document discovery", () => {
+  it("binds ANYONE-style first-party team and advisor portraits to the adjacent named person", async () => {
+    const sourceUrl = "https://anyone.io/about-us";
+    const html = `
+      <html><body>
+        <section><h2>Our Team</h2>
+          <article class="team-card">
+            <img class="team-image" src="https://cdn.prod.website-files.com/anyone/anna-beesoon.JPG" srcset="${"https://cdn.prod.website-files.com/anyone/anna-beesoon.JPG 1704w, ".repeat(12)}">
+            <h3>Anna Beesoon</h3><p>Director of The Foundation for Anyone.</p>
+          </article>
+        </section>
+        <section><h2>Our Advisors</h2>
+          <article class="team-card">
+            <img class="team-image" src="https://cdn.prod.website-files.com/anyone/advisor-1.png">
+            <h3>Sean Carey</h3><p>Co-founder, Helium Systems.</p>
+          </article>
+        </section>
+        ${"Anyone Protocol team and advisor evidence. ".repeat(12)}
+      </body></html>
+    `;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === sourceUrl) {
+        return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
+    }));
+    structuredMock.mockResolvedValue({
+      people: [
+        { name: "Anna Beesoon", role: "Director", source_url: sourceUrl },
+        { name: "Sean Carey", role: "Co-founder", source_url: sourceUrl },
+      ],
+    });
+
+    const { fetchTeamPage } = await import("./teampage");
+    const team = await fetchTeamPage("anyone.io", "Anyone");
+
+    expect(team).toEqual([
+      expect.objectContaining({
+        name: "Anna Beesoon",
+        officialPortraitUrl: "https://cdn.prod.website-files.com/anyone/anna-beesoon.JPG",
+        officialPortraitSourceUrl: sourceUrl,
+        officialPortraitCapturedAt: expect.any(String),
+      }),
+      expect.objectContaining({
+        name: "Sean Carey",
+        officialPortraitUrl: "https://cdn.prod.website-files.com/anyone/advisor-1.png",
+        officialPortraitSourceUrl: sourceUrl,
+        officialPortraitCapturedAt: expect.any(String),
+      }),
+    ]);
+  });
+
+  it("ignores decorative images and rejects a portrait that is not adjacent to the named person", () => {
+    const html = `
+      <img class="brand-logo" src="https://example.org/logo.png">
+      <img class="team-image" src="https://cdn.example.org/alice.png">
+      <h3>Alice Example</h3><p>Founder</p>
+      ${"unrelated page copy ".repeat(180)}
+      <h3>Bob Example</h3><p>Advisor</p>
+    `;
+    const portraits = officialPortraitAnchors(html, "https://example.org/team");
+    expect(portraits).toHaveLength(1);
+    expect(bindOfficialPortrait("Alice Example", html, portraits)).toBe("https://cdn.example.org/alice.png");
+    expect(bindOfficialPortrait("Bob Example", html, portraits)).toBeUndefined();
+  });
+
   it("finds founder-bearing official docs while rejecting unrelated hosts", () => {
     const index = `
       - [Tokenomics](https://docs.jup.ag/user-docs/more/jup-token/tokenomics)

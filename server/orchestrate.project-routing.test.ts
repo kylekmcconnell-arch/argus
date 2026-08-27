@@ -227,6 +227,42 @@ describe("provider-backed project routing", () => {
     ]);
   });
 
+  it("keeps a verified official-site portrait when the X-bound identity row wins the merge", () => {
+    const merged = coalesceTeamMembersByHandle([
+      {
+        name: "Sean Carey",
+        handle: "@seancarey",
+        role: "advisor",
+        source: "Official project account",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "twitterapi",
+        identity_link_evidence_origin: "deterministic",
+        handleProvenance: "subject_first_party",
+      },
+      {
+        name: "Sean Carey",
+        role: "advisor",
+        source: "https://www.anyone.io/about-us",
+        sourceUrl: "https://www.anyone.io/about-us",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "team-page",
+        identity_link_evidence_origin: "deterministic",
+        officialPortraitUrl: "https://cdn.prod.website-files.com/anyone/advisor-1.png",
+        officialPortraitSourceUrl: "https://www.anyone.io/about-us",
+        officialPortraitCapturedAt: "2026-08-26T22:00:00.000Z",
+      },
+    ]);
+
+    expect(merged[0]).toEqual(expect.objectContaining({
+      handle: "@seancarey",
+      handleProvenance: "subject_first_party",
+      officialPortraitUrl: "https://cdn.prod.website-files.com/anyone/advisor-1.png",
+      officialPortraitSourceUrl: "https://www.anyone.io/about-us",
+    }));
+  });
+
   it("does not merge a similar search label across different project roles", () => {
     expect(coalesceTeamMembersByHandle([
       { name: "Jun Song Independent", role: "researcher", evidence_origin: "model_lead" },

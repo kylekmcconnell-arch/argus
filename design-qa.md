@@ -55,6 +55,58 @@ final result: passed
 
 ---
 
+# Official team portrait QA
+
+## Artifacts
+
+- Source visual truth, advisors: `/Users/kyle/Downloads/Screenshot 2026-08-26 at 10.25.56 PM.png`
+- Source visual truth, core team: `/Users/kyle/Downloads/Screenshot 2026-08-26 at 10.25.47 PM.png`
+- Rendered implementation: `/tmp/argus-team-portraits.16YLkY/artifacts/team-portrait-qa/implementation-light-clean.png`
+- Combined comparison: `/tmp/argus-team-portraits.16YLkY/artifacts/team-portrait-qa/source-vs-implementation.png`
+- Source pixels: 1318 x 765
+- Implementation capture: 1280 x 870 pixels
+- Comparison normalization: source scaled to 1280 x 742; implementation cropped to its first 742 pixels; both placed on one 2560 x 742 canvas
+- State: light-theme ANYONE advisor roster using the ten portraits and roles published on the official team page
+
+## Full-view comparison evidence
+
+The source uses large portrait-led cards because it is the project's team page. ARGUS intentionally preserves its denser two-column evidence-card hierarchy so the people section remains part of a readable diligence report rather than becoming a site clone. The requested fidelity surface is the official portrait and its correct identity binding, not the source page's promotional layout.
+
+## Focused region comparison evidence
+
+All ten official advisor portraits load in the implementation and map to the same names shown by the source: Sean Carey, Slava Kreynin, Sergey Ilin, Nik Hawks, Max Gold, Theodore Agranat, Sadaf Jadran, Austin Seiberlich, Benjamin Erhart, and Matthew Paik. Initial-only placeholders are gone for these verified rows. Each card retains its role and first-party role-proof link.
+
+## Fidelity surfaces
+
+- Fonts and typography: existing ARGUS report typography remains unchanged and legible; names, roles, and evidence controls preserve their hierarchy.
+- Spacing and layout rhythm: compact two-column cards use a 56-pixel square portrait with rounded corners, consistent gaps, and no overlap or horizontal overflow.
+- Colors and visual tokens: the official cyan portrait artwork is preserved against the neutral report panels and ARGUS light-theme tokens.
+- Image quality and asset fidelity: exact first-party image assets are used. No generated faces, search-result avatars, placeholder art, or improvised div illustrations are introduced.
+- Copy and content: names and roles match the official page, and the report preserves the source link that establishes each team relationship.
+
+## Findings
+
+- No actionable P0, P1, or P2 differences remain for the requested official-team-portrait scope.
+- P3: ARGUS intentionally crops the source's full-height illustrations into compact evidence portraits so the team roster remains scannable inside the report.
+
+## Comparison history
+
+- Initial source finding: the official site published portrait art for the roster, while the saved report reduced many people to letter placeholders.
+- Root cause fixed: the team-page adapter previously extracted names, roles, and profile links but discarded portrait image provenance during normalization.
+- Post-fix evidence: the fetched first-party HTML yields twenty portrait anchors across the core team and advisors; exact name binding passed for all twenty; browser console warnings/errors were empty.
+
+## Primary interactions tested
+
+- official portrait extraction from fetched first-party team-page HTML
+- deterministic name-to-image binding across Webflow `srcset` markup
+- independently verified team rows retain their portrait through report normalization
+- unverified model/search leads cannot acquire an official portrait
+- official image display falls back safely to a trusted X avatar or initial when absent
+
+final result: passed
+
+---
+
 # Dexscreener report-link visual QA
 
 ## Artifacts

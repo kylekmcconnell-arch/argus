@@ -1410,7 +1410,20 @@ export async function discoverAffiliations(handle: string, name?: string, oldHan
 // posts (team intros, "meet the team", role announcements like "welcome @x as
 // our CTO") and in posts that tag them, long before any of it reaches a website.
 // This mines that content for team members the site/bio never listed.
-export interface TeamMember { name: string; handle?: string; role: string; evidence?: string; kind: "team" | "advisor"; linkedin?: string; source?: string; sourceUrl?: string; projects?: { name: string; role?: string }[] }
+export interface TeamMember {
+  name: string;
+  handle?: string;
+  role: string;
+  evidence?: string;
+  kind: "team" | "advisor";
+  linkedin?: string;
+  source?: string;
+  sourceUrl?: string;
+  projects?: { name: string; role?: string }[];
+  officialPortraitUrl?: string;
+  officialPortraitSourceUrl?: string;
+  officialPortraitCapturedAt?: string;
+}
 
 export type LinkedOrgRole = "incubator" | "team-behind" | "backed-by" | "fund" | "vc";
 

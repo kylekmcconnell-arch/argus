@@ -14685,6 +14685,75 @@ async function discoverTeamDocumentUrls(domain) {
   }));
   return [...new Set(bodies.flatMap((body) => teamDocumentUrlsFromIndex(d, body)))];
 }
+var PORTRAIT_IMAGE_HINT = /(?:team[-_ ]?(?:image|photo)|avatar|headshot|portrait|profile[-_ ]?(?:image|photo)|person[-_ ]?(?:image|photo)|member[-_ ]?(?:image|photo)|advisor[-_ ]?(?:image|photo)|founder[-_ ]?(?:image|photo))/i;
+var PORTRAIT_FILE = /\.(?:avif|jpe?g|png|webp)(?:$|[?#])/i;
+var htmlAttribute = (tag2, name) => {
+  const match = tag2.match(new RegExp(`\\b${name}\\s*=\\s*(?:["']([^"']*)["']|([^\\s>]+))`, "i"));
+  return (match?.[1] ?? match?.[2] ?? "").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").trim();
+};
+var srcsetCandidate = (value) => {
+  const candidates = value.split(",").map((part) => part.trim().split(/\s+/)[0]).filter(Boolean);
+  return candidates[candidates.length - 1] ?? "";
+};
+function officialPortraitAnchors(html, pageUrl) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
+    const tag2 = match[0];
+    const label = [htmlAttribute(tag2, "alt"), htmlAttribute(tag2, "title")].filter(Boolean).join(" ");
+    const hintCorpus = [
+      htmlAttribute(tag2, "class"),
+      htmlAttribute(tag2, "id"),
+      label,
+      htmlAttribute(tag2, "data-name"),
+      htmlAttribute(tag2, "data-testid")
+    ].join(" ");
+    const raw = htmlAttribute(tag2, "data-src") || htmlAttribute(tag2, "data-lazy-src") || htmlAttribute(tag2, "src") || srcsetCandidate(htmlAttribute(tag2, "srcset"));
+    if (!raw || !PORTRAIT_IMAGE_HINT.test(hintCorpus) && !PORTRAIT_IMAGE_HINT.test(raw)) continue;
+    try {
+      const url = new URL(raw, pageUrl);
+      const host = url.hostname.toLowerCase();
+      if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || !host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || !PORTRAIT_FILE.test(url.pathname)) continue;
+      url.hash = "";
+      const normalized4 = url.toString();
+      if (seen.has(normalized4)) continue;
+      seen.add(normalized4);
+      out.push({ url: normalized4, index: match.index ?? 0, label });
+    } catch {
+    }
+    if (out.length >= 80) break;
+  }
+  return out;
+}
+function bindOfficialPortrait(name, html, portraits) {
+  if (!portraits.length) return void 0;
+  const lower = html.toLowerCase();
+  const normalizedName = name.trim().toLowerCase();
+  const tokens = nameTokens(name);
+  let namePosition = normalizedName ? lower.indexOf(normalizedName) : -1;
+  if (namePosition < 0 && tokens.length) namePosition = lower.indexOf(tokens[0]);
+  if (namePosition < 0) return void 0;
+  const ranked = portraits.map((portrait) => {
+    const labelTokens = nameTokens(portrait.label);
+    const filenameTokens = nameTokens(new URL(portrait.url).pathname.split("/").pop() ?? "");
+    const labelMatch = tokens.length > 0 && tokens.every((token) => labelTokens.includes(token));
+    const filenameMatch = tokens.length > 1 && tokens.every((token) => filenameTokens.includes(token));
+    const distance = Math.abs(portrait.index - namePosition);
+    return {
+      portrait,
+      distance,
+      beforeName: portrait.index <= namePosition,
+      score: distance - (labelMatch ? 3e3 : 0) - (filenameMatch ? 1200 : 0),
+      strong: labelMatch || filenameMatch
+    };
+  }).sort((a, b) => a.score - b.score);
+  const strong = ranked.find((candidate) => candidate.strong);
+  if (strong) return strong.portrait.url;
+  const preceding = ranked.filter((candidate) => candidate.beforeName && candidate.distance <= 2400).sort((a, b) => a.distance - b.distance)[0];
+  if (preceding) return preceding.portrait.url;
+  const following = ranked.filter((candidate) => !candidate.beforeName && candidate.distance <= 1e3).sort((a, b) => a.distance - b.distance)[0];
+  return following?.portrait.url;
+}
 var PROFILE_ANCHOR = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]{0,200}?)<\/a>/gi;
 function profileAnchors(html) {
   const out = [];
@@ -14851,7 +14920,15 @@ function recoveredTeamPage(recovered, url, expectedApex, purpose, failureMeta2) 
     return null;
   }
   recordCall("site-fetch", op, 0, `reader_recovery_after_${failureMeta2}`, "succeeded");
-  return { url: recovered.url || url, text: text2, html: recovered.text, anchors: profileAnchors(recovered.text) };
+  const sourceUrl2 = recovered.url || url;
+  return {
+    url: sourceUrl2,
+    text: text2,
+    html: recovered.text,
+    anchors: profileAnchors(recovered.text),
+    portraits: officialPortraitAnchors(recovered.text, sourceUrl2),
+    capturedAt: recovered.capturedAt
+  };
 }
 async function fetchPage(url, expectedApex, purpose = "roster", recoverOfficialText = fetchPublicTextWithRecovery, allowRecovery = false) {
   const op = purpose === "credits" ? "site-credits" : "team-page";
@@ -14914,7 +14991,14 @@ async function fetchPage(url, expectedApex, purpose = "roster", recoverOfficialT
     return null;
   }
   recordCall("site-fetch", op, 0, void 0, "succeeded");
-  return { url: finalUrl, text: text2, html: raw, anchors: profileAnchors(raw) };
+  return {
+    url: finalUrl,
+    text: text2,
+    html: raw,
+    anchors: profileAnchors(raw),
+    portraits: officialPortraitAnchors(raw, finalUrl),
+    capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
 }
 var roleEvidencePattern = (role) => {
   if (/founder/i.test(role)) return /\b(?:co-?founders?|founders?|started|founded)\b/i;
@@ -15001,6 +15085,7 @@ ${corpus}`,
     const sourcePage = selectedPages.find((page) => canonicalSourceUrl(page.url) === claimedSource);
     const linkedin = modelLinkedin ?? (sourcePage?.html && sourcePage.anchors ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "linkedin") : void 0);
     const boundHandle = handle ?? (sourcePage?.html && sourcePage.anchors ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "x") : void 0);
+    const officialPortraitUrl = sourcePage?.html && sourcePage.portraits ? bindOfficialPortrait(displayName, sourcePage.html, sourcePage.portraits) : void 0;
     if (!sourcePage || !teamMemberIsDirectlySupported(
       sourcePage.text,
       displayName,
@@ -15016,7 +15101,12 @@ ${corpus}`,
       linkedin,
       evidence: `direct role statement on ${sourcePage.url}`,
       source: sourcePage.url,
-      sourceUrl: sourcePage.url
+      sourceUrl: sourcePage.url,
+      ...officialPortraitUrl ? {
+        officialPortraitUrl,
+        officialPortraitSourceUrl: sourcePage.url,
+        officialPortraitCapturedAt: sourcePage.capturedAt ?? (/* @__PURE__ */ new Date()).toISOString()
+      } : {}
     }];
   });
 }
@@ -32496,6 +32586,11 @@ function coalesceTeamMembersByHandle(members) {
     }
     if (!merged.handle && secondary.handle) merged.handle = secondary.handle;
     if (!merged.linkedin && secondary.linkedin) merged.linkedin = secondary.linkedin;
+    if (!merged.officialPortraitUrl && secondary.officialPortraitUrl) {
+      merged.officialPortraitUrl = secondary.officialPortraitUrl;
+      merged.officialPortraitSourceUrl = secondary.officialPortraitSourceUrl;
+      merged.officialPortraitCapturedAt = secondary.officialPortraitCapturedAt;
+    }
     if ((!merged.projects || !merged.projects.length) && secondary.projects?.length) {
       merged.projects = secondary.projects;
       merged.projects_evidence_origin = secondary.projects_evidence_origin;
@@ -33225,6 +33320,11 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         existing.projects = t.projects;
         existing.projects_evidence_origin = t.projects_evidence_origin;
       }
+      if (!existing.officialPortraitUrl && t.officialPortraitUrl) {
+        existing.officialPortraitUrl = t.officialPortraitUrl;
+        existing.officialPortraitSourceUrl = t.officialPortraitSourceUrl;
+        existing.officialPortraitCapturedAt = t.officialPortraitCapturedAt;
+      }
       if (t.artifact_verified === true && existing.artifact_verified !== true) {
         existing.role = t.role;
         existing.evidence_origin = "deterministic";
@@ -33251,6 +33351,9 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       evidence: t.evidence,
       source: t.source ?? "X content",
       sourceUrl: t.sourceUrl,
+      officialPortraitUrl: t.officialPortraitUrl,
+      officialPortraitSourceUrl: t.officialPortraitSourceUrl,
+      officialPortraitCapturedAt: t.officialPortraitCapturedAt,
       projects: t.projects,
       evidence_origin: t.evidence_origin,
       artifact_verified: t.artifact_verified,
