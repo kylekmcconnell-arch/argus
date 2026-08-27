@@ -1,4 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Atom,
+  BookOpen,
+  CheckCircle,
+  Circle,
+  Eye,
+  MagnifyingGlass,
+  Pulse,
+  ShieldCheck,
+  Stack,
+} from "@phosphor-icons/react";
 import type { TraceStep } from "../data/evidence";
 import type { InvestigationProgressKind } from "../lib/investigationProgress";
 import { publicPhaseLabel } from "../lib/plainLanguage";
@@ -17,6 +28,23 @@ function scrollToLatest(node: HTMLElement): void {
   node.scrollTo({ top: node.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
 }
 
+function formatElapsed(totalMilliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(totalMilliseconds / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function sourceIcon(step: TraceStep): ReactNode {
+  const value = `${step.source ?? ""} ${step.phase} ${step.label}`.toLowerCase();
+  if (/burn|supply|token/.test(value)) return <Atom size={22} weight="duotone" aria-hidden="true" />;
+  if (/code|contract|function/.test(value)) return <Stack size={22} weight="duotone" aria-hidden="true" />;
+  if (/knowledge|fact|reuse/.test(value)) return <BookOpen size={22} weight="duotone" aria-hidden="true" />;
+  if (/verdict|score|safe|risk/.test(value)) return <ShieldCheck size={22} weight="duotone" aria-hidden="true" />;
+  return <MagnifyingGlass size={22} weight="duotone" aria-hidden="true" />;
+}
+
 export function AuditConsole({ handle, subtitle, steps, working, mode, kind = "person", hop, startedAt }: {
   handle: string; subtitle: string; steps: TraceStep[]; working: boolean; mode: "live" | "curated";
   kind?: InvestigationProgressKind; hop?: string; startedAt?: number;
@@ -25,6 +53,14 @@ export function AuditConsole({ handle, subtitle, steps, working, mode, kind = "p
   const pinnedRef = useRef(true);
   const lastGapRef = useRef(0);
   const [missedLines, setMissedLines] = useState(false);
+  const mountedAtRef = useRef(Date.now());
+  const [clock, setClock] = useState(Date.now());
+
+  useEffect(() => {
+    if (!working) return;
+    const timer = window.setInterval(() => setClock(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [working]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -66,6 +102,8 @@ export function AuditConsole({ handle, subtitle, steps, working, mode, kind = "p
   };
 
   const latest = steps.at(-1) ?? null;
+  const effectiveStartedAt = startedAt && Number.isFinite(startedAt) ? startedAt : mountedAtRef.current;
+  const elapsed = formatElapsed(clock - effectiveStartedAt);
   const liveAnnouncement = latest ? `${publicPhaseLabel(latest.phase)}: ${latest.label}. ${latest.detail}`
     : kind === "resolution" ? "Finding the right project or person."
       : working ? "Waiting for the first result." : "No results came back.";
@@ -80,23 +118,28 @@ export function AuditConsole({ handle, subtitle, steps, working, mode, kind = "p
 
           <section className="research-ledger" aria-labelledby="research-ledger-title">
             <div className="research-ledger-header">
-              <div><div className="eyebrow">Evidence ledger</div><h2 id="research-ledger-title" className="display-sm mt-1 text-[20px] text-ink">What ARGUS is finding</h2></div>
-              <span className={`chip ${mode === "live" ? "tint-signal" : ""}`}>
+              <div className="research-ledger-heading">
+                <div><div className="eyebrow">Evidence ledger</div><h2 id="research-ledger-title" className="display-sm mt-1 text-[20px] text-ink">What ARGUS is finding</h2></div>
+                {mode === "live" && <div className="research-ledger-live"><Circle size={8} weight="fill" aria-hidden="true" />LIVE <time>{elapsed}</time><small>elapsed</small></div>}
+              </div>
+              <span className={`research-ledger-check ${mode === "live" ? "is-live" : ""}`}>
                 {kind === "resolution" ? "Finding the right match" : mode === "live" ? "Live check" : "Saved check"}
+                {mode === "live" && <Pulse size={20} weight="bold" aria-hidden="true" />}
               </span>
             </div>
-            <div className="research-ledger-columns" aria-hidden="true"><span>Order</span><span>Source</span><span>Finding</span><span>Status</span></div>
+            <div className="research-ledger-columns" aria-hidden="true"><span>Run</span><span>Source</span><span>Execution trace</span><span>Finding</span><span>Status</span></div>
 
             <div className="relative">
               <div ref={scrollRef} onScroll={handleScroll} className={`thin-scroll research-ledger-scroll ${kind === "resolution" ? "is-resolution" : ""}`} aria-label="Live check updates">
                 {steps.map((step, index) => {
                   const tone = TONE[step.tone];
                   return (
-                    <article key={index} className={`research-ledger-row ${index === steps.length - 1 ? "rise-in" : ""}`}>
+                    <article key={index} data-tone={step.tone} className={`research-ledger-row ${index === steps.length - 1 ? "rise-in is-current" : ""}`}>
                       <div className="research-ledger-order"><span className={`research-ledger-dot ${tone.dot}`} />{String(index + 1).padStart(2, "0")}</div>
-                      <div className="research-ledger-source">{step.source || publicPhaseLabel(step.phase)}</div>
+                      <div className="research-ledger-source"><span>{sourceIcon(step)}</span><span>{step.source || publicPhaseLabel(step.phase)}</span></div>
+                      <div className="research-ledger-trace"><Pulse size={116} weight="regular" aria-hidden="true" /></div>
                       <div className="min-w-0"><h3>{step.label}</h3><p>{step.detail}</p></div>
-                      <div><span className={`research-ledger-status ${tone.className}`}>{tone.label}</span></div>
+                      <div><span className={`research-ledger-status ${tone.className}`}>{tone.label}{tone.label === "confirmed" ? <CheckCircle size={17} weight="bold" aria-hidden="true" /> : <Eye size={17} weight="bold" aria-hidden="true" />}</span></div>
                     </article>
                   );
                 })}

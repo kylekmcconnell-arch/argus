@@ -124,6 +124,9 @@ describe("AuditConsole", () => {
     expect(container?.textContent).not.toContain("P0 · Intake");
     expect(status?.contains(announcement ?? null)).toBe(false);
     expect(container?.textContent).not.toMatch(/\b\d+%/);
+    expect(container?.textContent).toContain("Execution trace");
+    expect(container?.querySelector(".research-ledger-live time")).not.toBeNull();
+    expect(container?.querySelector(".research-ledger-check.is-live")).not.toBeNull();
   });
 
   it("uses non-animated auto-scroll when reduced motion is requested", async () => {

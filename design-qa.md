@@ -55,6 +55,60 @@ final result: passed
 
 ---
 
+# Persistent terminal evidence ledger — design QA
+
+## Artifacts
+
+- Source visual truth: `/var/folders/h7/6njc4p9d12s5cjfrwk2sr2080000gn/T/codex-clipboard-95a1c65d-939a-4017-9f4c-9f4241e35a9d.png`
+- Light-mode implementation: `artifacts/evidence-ledger-light-mode-final.jpg`
+- Responsive light-mode implementation: `artifacts/evidence-ledger-light-mode-responsive.jpg`
+- Combined comparison: `artifacts/evidence-ledger-reference-vs-light.jpg`
+- Source pixels: 1926 × 816
+- Desktop browser state: 1280 × 720 CSS px at device density 1; the Codex panel exposed a 969 × 720 screenshot crop
+- Responsive browser state: 760 × 900 CSS px at device density 1
+- State: light application theme, live project investigation, four saved trace events
+
+## Full-view comparison evidence
+
+The light ARGUS workspace remains a white editorial surface while the evidence ledger becomes a bounded dark execution chamber. The implementation preserves the selected reference's near-black green surface, mint live indicators, mono metadata, explicit execution-trace column, semantic status colors and compact ruled rows without changing the surrounding application theme.
+
+The source contains six example findings while the live fixture contains four real trace events. That content difference is intentional; component hierarchy and density remain consistent with the amount of saved evidence rather than adding placeholder rows.
+
+## Focused region comparison evidence
+
+The combined comparison verifies the persistent dark surface, live elapsed clock, trace lane, source icons, highlighted current row and confirmed/review/observed status hierarchy. Browser geometry confirmed the desktop ledger has no internal horizontal overflow and each row settles near 85 CSS pixels. At 760 px, the trace column collapses while source, finding and status remain visible and the document has no horizontal overflow.
+
+## Fidelity surfaces
+
+- Fonts and typography: existing ARGUS sans and mono families remain in use. Headline, source metadata, elapsed time and statuses preserve the reference hierarchy with readable light-on-dark contrast.
+- Spacing and layout rhythm: the desktop five-column grid, ruled rows, compact header and terminal footer match the reference structure. The responsive state removes only the decorative trace lane and stacks finding copy without clipping.
+- Colors and visual tokens: the ledger owns a local near-black, muted mint and semantic amber/red palette in both application themes. The surrounding light report does not inherit these terminal tokens.
+- Image quality and asset fidelity: the section contains no raster imagery. Source and status marks use the existing Phosphor icon library rather than improvised graphics.
+- Copy and content: all live evidence text, source names and statuses come from the actual trace. The added clock and column labels describe the running system without inventing findings.
+- Accessibility and behavior: the live region semantics remain unchanged, elapsed time is represented with a `time` element, reduced-motion scrolling behavior remains covered, and the narrow layout has no horizontal overflow.
+
+## Comparison history
+
+1. Initial implementation: the pulse icon reserved a square 116 px box, making rows too tall and pushing earlier findings out of the visible ledger.
+   - Fix: constrained the icon to a 116 × 24 px trace lane.
+   - Post-fix evidence: desktop rows measure roughly 85 px and all four fixture events fit with the live tail.
+2. Responsive verification: the five-column desktop grid would be too dense below 760 px.
+   - Fix: hide only the execution trace, retain source/finding/status, and stack the header clock below the title.
+   - Post-fix evidence: `artifacts/evidence-ledger-light-mode-responsive.jpg`; browser geometry reports no document or ledger overflow.
+
+## Primary interactions tested
+
+- live elapsed clock updates
+- live/saved status treatment
+- automatic tail-follow behavior and jump-to-latest behavior through the existing test suite
+- reduced-motion scrolling
+- desktop and 760 px light-mode rendering
+- browser console checked with no warnings or errors
+
+final result: passed
+
+---
+
 # Design QA — Rabbit-hole research CTAs
 
 ## Verification target
