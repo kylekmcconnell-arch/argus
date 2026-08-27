@@ -437,7 +437,7 @@ export function KyleIntelligenceDecisionCanvas({
                     <small>{band} evidence</small>
                   </span>
                   <span className="kyle-composition-points mono"><strong>{Math.round(row.score)}</strong> / {row.weight}</span>
-                  <span className="kyle-composition-open mono">{open > 0 ? `${Math.round(open)} pts not earned` : "fully earned"}</span>
+                  <span className="kyle-composition-open mono">{open > 0 ? `${Math.round(open)} ${Math.round(open) === 1 ? "pt" : "pts"} not earned` : "fully earned"}</span>
                   <ArrowDown size={15} weight="bold" aria-hidden="true" />
                 </summary>
                 <div className="kyle-composition-detail">
