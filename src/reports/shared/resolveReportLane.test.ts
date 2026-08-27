@@ -24,7 +24,7 @@ describe("report lane resolution", () => {
 
   it("supports an explicit preview environment lane", () => {
     expect(resolveReportLane({ hostname: "preview.vercel.app", search: "", envLane: "enigma" })).toMatchObject({
-      definition: { id: "enigma", owner: "@Enigma-Fund", navigation: "guide" },
+      definition: { id: "enigma", owner: "@Enigma-Fund", navigation: "sticky" },
       staging: true,
     });
   });
