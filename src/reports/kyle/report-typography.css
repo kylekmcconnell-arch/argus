@@ -1,0 +1,157 @@
+/* Report-only readability layer.
+   Keep application chrome compact, while the saved decision file uses a
+   comfortable reading scale and stronger secondary-text contrast. */
+[data-report-lane="kyle"] .report-frame.report-style-2 {
+  --color-ink-dim: #c5c5ca;
+  --color-ink-faint: #adaeb4;
+  font-size: 16px;
+}
+
+:root[data-theme="light"][data-report-lane="kyle"] .report-frame.report-style-2 {
+  --color-ink-dim: #4f5056;
+  --color-ink-faint: #5d5e65;
+}
+
+/* Raise Tailwind's compact report utilities onto a legible floor without
+   changing headings, score numerals, or the surrounding workspace UI. */
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[8px\],
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[8\.5px\],
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[9px\] {
+  font-size: 11px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[9\.5px\],
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[10px\] {
+  font-size: 11.5px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[10\.5px\] {
+  font-size: 12px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[11px\] {
+  font-size: 12.5px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[11\.5px\],
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[12px\] {
+  font-size: 13.5px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[12\.5px\],
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[13px\] {
+  font-size: 14.5px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[13\.5px\],
+[data-report-lane="kyle"] .report-frame.report-style-2 .text-\[14px\] {
+  font-size: 15.5px;
+}
+
+/* Shared score, identity, and people surfaces use authored CSS rather than
+   utility sizes, so they receive the same readable scale explicitly. */
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-scores-kicker,
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-score-label,
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-score-number span,
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-score-verdict,
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-score-active,
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-score-checks {
+  font-size: 11.5px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-score-legend li,
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-score-legend strong {
+  font-size: 12.5px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-score-context,
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-score-unavailable,
+[data-report-lane="kyle"] .report-frame.report-style-2 .decision-dual-scores-explainer {
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .project-identity-label {
+  font-size: 11.5px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .project-identity-primary-copy small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .project-identity-resource {
+  font-size: 12.5px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .project-identity-chain,
+[data-report-lane="kyle"] .report-frame.report-style-2 .project-identity-contract-button,
+[data-report-lane="kyle"] .report-frame.report-style-2 .team-diligence-stat small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .team-person-evidence {
+  font-size: 13px;
+}
+
+/* Kyle's editorial canvas previously compressed nearly every annotation into
+   9–12px type. Preserve its hierarchy, but remove the sub-legible tiers. */
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-overline,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-claim-label,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-investigation-meta,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-verdict-facts span,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-score-ring-label,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-verdict-word,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-check-state,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-composition-summary,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-brief-kicker,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-brief-index,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-evidence-ladder article > span,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-decision-lock dt,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-counter-thesis dt,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-watch-next li > span,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-dimensions span,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-signal-row > div > span,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-people-disclosure > summary > span:last-child {
+  font-size: 11.5px;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-score-context,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-knowledge-item small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-composition-name small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-composition-points,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-composition-open,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-composition-detail > div span,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-composition-detail > div a,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-brief-column li small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-evidence-ladder small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-context-disclosure li span,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-decision-lock dd,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-decision-lock a,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-counter-thesis dd,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-counter-thesis a,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-watch-next li p,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-watch-next li a,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-quiet-state p,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-frozen-report small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-evidence-room-gateway > div:first-child > p:last-child,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-dimensions small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-signal-row li small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-signal-row blockquote footer,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-signal-row blockquote a,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-method-note,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-github-synthesis small,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-people-disclosure > summary small {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-verdict-facts strong,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-composition-detail > p:not(.kyle-claim-label),
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-brief-column li strong,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-beneath-headlines-body > p:not(.kyle-claim-label),
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-decision-lock > div > p:last-child,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-watch-next h3,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-company-snapshot > div:first-child > p:last-child,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-dimensions strong,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-signal-row li strong,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-social-signal-row > div > p,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-github-synthesis > p:not(.kyle-overline),
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-github-synthesis strong,
+[data-report-lane="kyle"] .report-frame.report-style-2 .kyle-people-disclosure > summary strong {
+  font-size: 15.5px;
+  line-height: 1.55;
+}

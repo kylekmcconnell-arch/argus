@@ -1,5 +1,6 @@
 import type { ReportLaneDefinition } from "../shared/reportLaneTypes";
 import "./report-lane.css";
+import "./report-typography.css";
 
 /**
  * Kyle-owned report presentation.
