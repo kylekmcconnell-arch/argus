@@ -81,13 +81,21 @@ describe("Kyle intelligence report opening", () => {
         score: 82,
         verdictLabel: "Pass",
         context: "Contract, tradeability, liquidity, holders, market data and sanctions.",
+        composition: [
+          { axis: "T1", label: "Liquidity & lock", score: 20, weight: 24, rationale: "Liquidity was measured." },
+          { axis: "T2", label: "Contract controls", score: 18, weight: 22, rationale: "Contract controls were checked." },
+        ],
       }}
     />));
 
     expect(container.querySelector(".kyle-investigation-meta")?.textContent).toContain("Project diligence score");
-    expect(container.querySelector(".kyle-verdict-score")?.textContent).toContain("55");
-    const tokenScore = container.querySelector(".kyle-secondary-score");
+    const scoreRings = container.querySelectorAll(".kyle-score-ring-card [data-score-ring-entrance]");
+    expect(scoreRings).toHaveLength(2);
+    expect(container.querySelector('[data-score-kind="primary"]')?.textContent).toContain("55");
+    const tokenScore = container.querySelector('[data-score-kind="secondary"]');
     expect(tokenScore?.textContent).toContain("Token safety score");
-    expect(tokenScore?.textContent).toContain("82/100");
+    expect(tokenScore?.textContent).toContain("82");
+    expect(tokenScore?.querySelector('[data-composition-piece="T1"]')).not.toBeNull();
+    expect(tokenScore?.querySelector('[data-composition-piece="T2"]')).not.toBeNull();
   });
 });

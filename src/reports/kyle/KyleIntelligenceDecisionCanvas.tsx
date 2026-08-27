@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   ArrowDown,
   ArrowRight,
@@ -11,6 +11,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import type { CompositionRow } from "../../components/ScoreComposition";
+import { ScoreRing } from "../../components/ScoreRing";
 import { DecisionLensSelector } from "../../components/InvestigatorBrief";
 import type { DecisionLensId } from "../../intelligence/types";
 import type { TokenDecisionBoundary } from "../../lib/decisionBoundary";
@@ -27,6 +28,11 @@ export interface KyleSecondaryScore {
   score: number | null;
   verdictLabel: string;
   context?: string | undefined;
+  composition?: CompositionRow[] | undefined;
+  scoreIsProvisional?: boolean | undefined;
+  successful?: number | undefined;
+  applicable?: number | undefined;
+  checkScopeLabel?: string | undefined;
 }
 
 export interface KyleIntelligenceDecisionCanvasProps {
@@ -60,12 +66,6 @@ export interface KyleIntelligenceDecisionCanvasProps {
   checkScopeLabel: string;
   composition?: CompositionRow[];
   secondaryScore?: KyleSecondaryScore | null | undefined;
-}
-
-function reducedMotion(): boolean {
-  return typeof window === "undefined"
-    || typeof window.matchMedia !== "function"
-    || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 function sentence(value: string | null | undefined): string {
@@ -184,70 +184,68 @@ function BriefColumn({
 }
 
 function AnimatedVerdictScore({
+  kind,
+  label,
   score,
   verdictLabel,
   rows,
-  scoreIsProvisional,
+  scoreIsProvisional = false,
   successful,
   applicable,
   checkScopeLabel,
+  context,
+  size,
 }: {
+  kind: "primary" | "secondary";
+  label: string;
   score: number | null;
   verdictLabel: string;
   rows: CompositionRow[];
-  scoreIsProvisional: boolean;
-  successful: number;
-  applicable: number;
-  checkScopeLabel: string;
+  scoreIsProvisional?: boolean;
+  successful?: number;
+  applicable?: number;
+  checkScopeLabel?: string;
+  context?: string | undefined;
+  size: number;
 }) {
   const buildRows = rows.filter((row) => row.score > 0);
-  const buildRowCount = buildRows.length;
-  const [activeCount, setActiveCount] = useState(() => reducedMotion() ? buildRows.length : 0);
-
-  useEffect(() => {
-    if (reducedMotion() || buildRowCount === 0) return;
-    const timers = Array.from({ length: buildRowCount }, (_, index) => window.setTimeout(() => setActiveCount(index + 1), 420 + index * 520));
-    return () => timers.forEach(window.clearTimeout);
-  }, [buildRowCount]);
-
-  const builtPoints = buildRows.slice(0, activeCount).reduce((sum, row) => sum + row.score, 0);
-  const displayedScore = score == null ? null : activeCount >= buildRows.length ? score : Math.min(score, Math.round(builtPoints));
-  const activeRow = activeCount > 0 && activeCount <= buildRows.length ? buildRows[activeCount - 1] : null;
-  const circumference = 2 * Math.PI * 74;
-  const progress = displayedScore == null ? 0 : Math.max(0, Math.min(100, displayedScore));
   const tone = scoreTone(score);
+  const ringColor = tone === "positive"
+    ? "var(--kyle-editorial-green)"
+    : tone === "negative"
+      ? "var(--kyle-editorial-red)"
+      : tone === "caution"
+        ? "var(--kyle-editorial-amber)"
+        : "var(--color-ink-faint)";
+  const checksCopy = typeof applicable === "number"
+    ? applicable === 0
+      ? "No checks saved"
+      : `${successful ?? 0}/${applicable} ${(checkScopeLabel ?? "checks").toLowerCase()} complete${scoreIsProvisional ? " · provisional" : ""}`
+    : null;
 
   return (
-    <div className={`kyle-verdict-score kyle-tone-${tone}`} aria-label={score == null ? "Score withheld" : `${score} out of 100`}>
-      <div className="kyle-score-ring">
-        <svg viewBox="0 0 168 168" role="img" aria-hidden="true">
-          <circle className="kyle-score-ring-track" cx="84" cy="84" r="74" />
-          <circle
-            className="kyle-score-ring-progress"
-            cx="84"
-            cy="84"
-            r="74"
-            strokeDasharray={circumference}
-            strokeDashoffset={circumference * (1 - progress / 100)}
-          />
-        </svg>
-        <div className="kyle-score-ring-copy">
-          <strong>{displayedScore ?? "N/A"}</strong>
-          <span>{score == null ? "withheld" : "of 100"}</span>
+    <article
+      className={`kyle-verdict-score kyle-score-ring-card kyle-score-ring-card--${kind} kyle-tone-${tone}`}
+      data-score-kind={kind}
+      aria-label={score == null ? `${label} withheld` : `${label} ${score} out of 100`}
+    >
+      <p className="kyle-score-ring-label mono">{label}</p>
+      <ScoreRing
+        score={score}
+        verdict={verdictLabel}
+        color={ringColor}
+        size={size}
+        bands={score != null}
+        composition={buildRows}
+        fallbackLabel={label}
+      >
+        <div className="kyle-score-status">
+          <p className="kyle-verdict-word score-ring-verdict mono">{score == null ? "Not measured" : verdictLabel}</p>
+          {context && <p className="kyle-score-context">{context}</p>}
+          {checksCopy && <p className="kyle-check-state mono">{checksCopy}</p>}
         </div>
-      </div>
-      <div className="kyle-score-status">
-        <p className="kyle-verdict-word mono">{verdictLabel}</p>
-        <p className="kyle-score-build mono" aria-live="polite">
-          {activeRow ? <><span>Adding {activeRow.label}</span><strong>+{Math.round(activeRow.score)} pts</strong></> : <span>Evidence-built verdict</span>}
-        </p>
-        <p className="kyle-check-state mono">
-          {applicable === 0
-            ? "No checks saved"
-            : `${successful}/${applicable} ${checkScopeLabel.toLowerCase()} complete${scoreIsProvisional ? " · provisional" : ""}`}
-        </p>
-      </div>
-    </div>
+      </ScoreRing>
+    </article>
   );
 }
 
@@ -325,8 +323,10 @@ export function KyleIntelligenceDecisionCanvas({
             </div>
           </div>
         </div>
-        <div className="kyle-verdict-visual">
+        <div className={`kyle-verdict-visual${secondaryScore ? " kyle-verdict-visual--dual" : ""}`}>
           <AnimatedVerdictScore
+            kind="primary"
+            label={scoreLabel}
             score={score}
             verdictLabel={verdictLabel}
             rows={composition}
@@ -334,14 +334,23 @@ export function KyleIntelligenceDecisionCanvas({
             successful={successful}
             applicable={applicable}
             checkScopeLabel={checkScopeLabel}
+            context={scoreContext}
+            size={252}
           />
           {secondaryScore && (
-            <div className="kyle-secondary-score">
-              <span className="mono">{secondaryScore.label}</span>
-              <strong>{secondaryScore.score ?? "N/A"}<small>{secondaryScore.score == null ? "" : "/100"}</small></strong>
-              <em>{secondaryScore.verdictLabel}</em>
-              {secondaryScore.context && <p>{secondaryScore.context}</p>}
-            </div>
+            <AnimatedVerdictScore
+              kind="secondary"
+              label={secondaryScore.label}
+              score={secondaryScore.score}
+              verdictLabel={secondaryScore.verdictLabel}
+              rows={secondaryScore.composition ?? []}
+              scoreIsProvisional={secondaryScore.scoreIsProvisional}
+              successful={secondaryScore.successful}
+              applicable={secondaryScore.applicable}
+              checkScopeLabel={secondaryScore.checkScopeLabel}
+              context={secondaryScore.context}
+              size={208}
+            />
           )}
         </div>
       </header>

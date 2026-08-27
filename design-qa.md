@@ -52,7 +52,6 @@ The loading sequence was also observed before the memo appeared. It named the ac
 - browser console checked with no warnings or errors
 
 final result: passed
-
 ---
 
 # Team role title containment QA
@@ -103,7 +102,7 @@ Browser geometry measured the first card's right edge at 544 CSS pixels and the 
 - horizontal overflow and card-boundary containment
 
 final result: passed
-
+<!-- QA complete -->
 ---
 
 # Official team portrait QA
@@ -206,5 +205,44 @@ The source crop showed a generic chart glyph with gray duotone shading. The revi
 - Dexscreener anchor remains contract-specific and accessible by its text label
 - light and dark theme rendering
 - hover/focus styling remains defined through shared theme tokens
+
+final result: passed
+
+---
+
+# Dual score ring design QA
+
+## Artifacts
+
+- Source visual truth: `/tmp/argus-score-rings.64joov/.design-qa/enigma-score-reference.png`
+- Rendered implementation: `/tmp/argus-score-rings.64joov/.design-qa/kyle-dual-rings-active.png`
+- Completed state: `/tmp/argus-score-rings.64joov/.design-qa/kyle-dual-rings-final.png`
+- Combined comparison: `/tmp/argus-score-rings.64joov/.design-qa/reference-vs-kyle-active.jpg`
+- Viewport: 1280 × 720 CSS px at device density 1
+- Source and implementation pixels: 1280 × 720 each; no scaling applied
+- State: both score compositions actively adding their first dimension, with final saved-score state captured separately
+
+## Comparison evidence
+
+The Enigma reference establishes the behavior to preserve: two distinct scores, a visible composition for each, and a live `Adding …` label with points. The Kyle implementation preserves all three inside the existing editorial ring idiom. Project diligence remains dominant; token safety is smaller but still complete. The combined full-view capture is readable at native dimensions, so no additional detail crop was needed.
+
+Browser DOM evidence independently confirmed the live labels and totals: `Team & leadership · +15 / 15 pts` and `Onchain health · +12 / 12 pts`, followed by final saved scores `55` and `84` with their verdicts and check coverage.
+
+## Fidelity surfaces
+
+- Typography: ring labels, active dimension names, saved numerals, verdicts, and check-state copy preserve Kyle's editorial serif/mono hierarchy and remain legible at both sizes.
+- Spacing and layout: the 252 px project ring and 208 px token ring fit the hero grid without overlap. Existing breakpoints stack the hero below 1120 px and the rings below 580 px.
+- Colors and tokens: both rings use existing score bands and real composition-segment colors; no new palette was introduced.
+- Image quality and assets: no image asset is part of this component; it reuses the canonical score-ring component.
+- Copy and content: each animation names the dimension currently being added and its point contribution before settling on the frozen saved score, verdict, context, and check coverage.
+- Behavior and accessibility: both rings use real saved composition rows, retain accessible score labels, respect reduced motion, and produced no browser console errors.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+## Comparison history
+
+The initial normalized comparison found no actionable P0/P1/P2 mismatch, so no correction loop was required.
 
 final result: passed

@@ -123,6 +123,23 @@ export function KyleIntelligencePreview() {
             { axis: "transparency", label: "Transparency & integrity", score: 7, weight: 12, rationale: "Corporate identity and official surfaces are attributable, with several third-party questions still open.", supportCount: 2, questionCount: 1 },
             { axis: "token", label: "Token design & conduct", score: 3, weight: 20, rationale: "No canonical project token was established in this saved report.", supportCount: 1 },
           ]}
+          secondaryScore={{
+            label: "Token safety score",
+            score: 84,
+            verdictLabel: "Pass",
+            context: "Contract, tradeability, liquidity, holders, market data and sanctions.",
+            successful: 7,
+            applicable: 7,
+            checkScopeLabel: "Token safety checks",
+            composition: [
+              { axis: "onchain", label: "Onchain health", score: 12, weight: 14, rationale: "The saved contract checks found no critical control issue.", supportCount: 3 },
+              { axis: "holders", label: "The holders", score: 10, weight: 14, rationale: "Holder evidence met the saved safety threshold.", supportCount: 2 },
+              { axis: "token", label: "The token", score: 12, weight: 14, rationale: "Token mechanics and transfer behavior were measurable.", supportCount: 3 },
+              { axis: "code", label: "Code & security", score: 19, weight: 24, rationale: "Automated contract checks were completed without a critical finding.", supportCount: 4 },
+              { axis: "liquidity", label: "The liquidity", score: 18, weight: 20, rationale: "The saved market showed a measurable liquidity surface.", supportCount: 2 },
+              { axis: "maturity", label: "Maturity & presence", score: 13, weight: 14, rationale: "The token and project surfaces were consistently linked.", supportCount: 3 },
+            ],
+          }}
         />
         <div data-report-experience-shell="true" className="space-y-10 py-16">
           <section id="dossier-product" className="story-chapter report-section scroll-mt-28" aria-labelledby="preview-product-title">
