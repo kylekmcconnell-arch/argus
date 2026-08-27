@@ -90,6 +90,44 @@ describe("DossierReport", () => {
     expect(container.querySelector("#dossier-sources")).toBeNull();
   });
 
+  it("turns a source-backed product narrative into distinct product surfaces", () => {
+    const payload = livePayload();
+    payload.display_name = "Fedi";
+    payload.handle = "@fedibtc";
+    payload.website = "https://fedi.xyz";
+    payload.basicFacts = [{
+      predicate: "product",
+      value: "Bitcoin wallet",
+      status: "verified",
+      sources: [{
+        url: "https://fedi.xyz/product",
+        excerpt: "Fedi is a privacy-first Bitcoin wallet.",
+        relation: "supports",
+        artifactVerified: true,
+        sourceClass: "first_party",
+      }],
+    }];
+
+    act(() => {
+      root.render(
+        <DossierReport
+          payload={payload}
+          includeBeats={["product"]}
+          includeSources={false}
+          subjectSummary="Fedi is the privacy-first Bitcoin application built on Fedimint that provides multispend group accounts, community custody, integrated chat spaces, and a mini-app catalog so communities can coordinate payments and local tools."
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Four product surfaces. Here’s what each one does.");
+    expect(container.textContent).toContain("Multispend accounts");
+    expect(container.textContent).toContain("Community custody");
+    expect(container.textContent).toContain("Integrated chat");
+    expect(container.textContent).toContain("Mini-app catalog");
+    expect(container.textContent).not.toContain("4 products are on file");
+    expect(container.querySelectorAll(".product-portfolio-card")).toHaveLength(4);
+  });
+
   it("renders buildDossier of the live payload, never the dynex fixture", () => {
     render(livePayload());
     expect(container.textContent).toContain("@clutchmarkets");

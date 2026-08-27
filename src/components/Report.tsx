@@ -3530,6 +3530,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
               payload={f as unknown as Record<string, unknown>}
               includeBeats={roles.includes(SubjectClass.PROJECT) ? ["product"] : undefined}
               includeSources={false}
+              subjectSummary={openingSubjectSummary}
             />
 
             <section id="identity-evidence" className="canonical-people-section story-chapter report-section scroll-mt-28" aria-labelledby="report-team-heading">
@@ -3688,7 +3689,12 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           </>
         )}
 
-        {reportStyle !== 2 && <DossierReport payload={f as unknown as Record<string, unknown>} />}
+        {reportStyle !== 2 && (
+          <DossierReport
+            payload={f as unknown as Record<string, unknown>}
+            subjectSummary={openingSubjectSummary}
+          />
+        )}
         {f.projectStrengthBands && (
           reportStyle === 2 ? (
             <details className="canonical-evidence-disclosure panel mt-7 scroll-mt-28">

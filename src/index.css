@@ -802,6 +802,104 @@
   font-size: 13px;
   line-height: 1.5;
 }
+.product-portfolio {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+  max-width: 880px;
+  margin-top: 30px;
+}
+.product-portfolio-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 226px;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 22px;
+  border: 1px solid var(--color-line);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--color-signal) 13%, transparent) 0, transparent 38%),
+    linear-gradient(145deg, color-mix(in srgb, var(--color-panel) 96%, white) 0%, var(--color-panel) 100%);
+  box-shadow: 0 14px 34px color-mix(in srgb, var(--color-ink) 7%, transparent);
+}
+.product-portfolio-card::after {
+  position: absolute;
+  right: -48px;
+  bottom: -62px;
+  width: 150px;
+  height: 150px;
+  border: 1px solid color-mix(in srgb, var(--color-signal) 15%, transparent);
+  border-radius: 999px;
+  content: "";
+  pointer-events: none;
+}
+.product-portfolio-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.product-portfolio-number {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: .14em;
+  color: var(--color-ink-faint);
+}
+.product-portfolio-icon {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--color-signal) 22%, var(--color-line));
+  border-radius: 13px;
+  color: var(--color-sourced);
+  background: color-mix(in srgb, var(--color-signal) 9%, var(--color-panel));
+}
+.product-portfolio-card h3 {
+  position: relative;
+  z-index: 1;
+  margin-top: 22px;
+  font-size: clamp(1.25rem, 2vw, 1.55rem);
+  font-weight: 620;
+  line-height: 1.12;
+  color: var(--color-ink);
+}
+.product-portfolio-card p {
+  position: relative;
+  z-index: 1;
+  max-width: 38ch;
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.58;
+  color: var(--color-ink-dim);
+}
+.product-portfolio-source {
+  position: relative;
+  z-index: 1;
+  width: fit-content;
+  margin-top: auto;
+  padding-top: 20px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  color: var(--color-sourced);
+  text-decoration: none;
+}
+a.product-portfolio-source:hover,
+a.product-portfolio-source:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+@media (max-width: 720px) {
+  .product-portfolio { grid-template-columns: 1fr; }
+  .product-portfolio-card { min-height: 205px; }
+}
+@media (min-width: 721px) and (max-width: 1100px) {
+  .product-portfolio { grid-template-columns: 1fr; }
+}
 .report-style-2 .canonical-decision-brief,
 .report-style-2 .canonical-people-section {
   max-width: 1020px;

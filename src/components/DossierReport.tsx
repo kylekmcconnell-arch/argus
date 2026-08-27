@@ -10,7 +10,10 @@
 // - First-party named team is not independently corroborated.
 // - Provenance colours are source-of-truth, not pass/fail.
 import { useEffect, useRef, useState } from "react";
-import { GithubLogo, LinkedinLogo, LinkSimple, XLogo } from "@phosphor-icons/react";
+import {
+  ChatCircleDots, GithubLogo, GridFour, LinkedinLogo, LinkSimple,
+  UsersThree, Wallet, XLogo,
+} from "@phosphor-icons/react";
 import { ProvenanceTag } from "./ProvenanceTag";
 import { buildDossier, type Dossier, type DossierFigure, type DossierSourceRow, type StrengthBand, type KeyMeasure, type TeamMember } from "../lib/dossierModel";
 import { trustedOfficialTeamPortraitUrl } from "../lib/avatars";
@@ -51,6 +54,133 @@ function figureTint(figure: DossierFigure): string {
 function hostOf(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, ""); }
   catch { return ""; }
+}
+
+type ProductCard = {
+  title: string;
+  description: string;
+  sourceUrl: string | null;
+  sourceLabel: string | null;
+  kind: "wallet" | "multispend" | "custody" | "chat" | "apps" | "product";
+};
+
+function productKind(value: string): ProductCard["kind"] {
+  if (/wallet|bitcoin application/i.test(value)) return "wallet";
+  if (/multispend|group account/i.test(value)) return "multispend";
+  if (/custody|federation/i.test(value)) return "custody";
+  if (/chat|messag/i.test(value)) return "chat";
+  if (/mini[- ]?app|catalog|marketplace/i.test(value)) return "apps";
+  return "product";
+}
+
+function productTitle(value: string, subjectName: string): string {
+  const kind = productKind(value);
+  if (kind === "wallet") return `${subjectName} wallet`;
+  if (kind === "multispend") return "Multispend accounts";
+  if (kind === "custody") return "Community custody";
+  if (kind === "chat") return "Integrated chat";
+  if (kind === "apps") return "Mini-app catalog";
+  const cleaned = value.replace(/^(?:a|an|the|integrated)\s+/i, "").trim();
+  return cleaned.length > 44 ? `${cleaned.slice(0, 43).trim()}…` : cleaned.replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function productDescription(value: string, subjectName: string, summary: string): string {
+  const kind = productKind(value);
+  if (kind === "wallet") return "A privacy-first Bitcoin application for payments, balances and everyday access.";
+  if (kind === "multispend") return "Shared accounts for groups coordinating savings and payments together.";
+  if (kind === "custody") return summary.toLowerCase().includes("fedimint")
+    ? "Community-based custody built on the Fedimint protocol instead of a centralized exchange."
+    : "A community-based way to coordinate custody instead of relying on one central operator.";
+  if (kind === "chat") return "Messaging built into the same private space where a community coordinates money.";
+  if (kind === "apps") return "A catalog of local tools and services that communities can use inside the application.";
+  return `${subjectName} describes this product surface as ${value.replace(/[.]+$/, "").toLowerCase()}.`;
+}
+
+function productListFromSummary(summary: string): string[] {
+  const list = summary.match(/\b(?:provides|offers|includes|featuring)\s+(.+?)(?=\s+(?:so|for)\s+[^,]+|[.;]|$)/i)?.[1] ?? "";
+  return list
+    .replace(/,?\s+and\s+/gi, ", ")
+    .split(",")
+    .map((value) => value.replace(/^(?:a|an|the)\s+/i, "").trim())
+    .filter((value) => value.length >= 3 && value.length <= 80);
+}
+
+function productCards(figures: DossierFigure[], summary: string | null | undefined, subjectName: string): ProductCard[] {
+  const narrative = (summary ?? "").replace(/\s+/g, " ").trim();
+  const fromNarrative = productListFromSummary(narrative);
+  const rawValues = figures
+    .filter((figure) => figure.label === "product" && !figure.unboundNote && !figure.locked)
+    .map((figure) => figure.value.replace(/\s+/g, " ").trim())
+    .filter((value) => value && !/^https?:\/\//i.test(value) && !/^[a-z0-9-]+\.[a-z]{2,}$/i.test(value) && value.length <= 100);
+  const candidates = fromNarrative.length >= 2 ? fromNarrative : rawValues;
+  const seen = new Set<string>();
+  return candidates.flatMap((value): ProductCard[] => {
+    const kind = productKind(value);
+    const key = kind === "product" ? value.toLowerCase() : kind;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    const valueLower = value.toLowerCase();
+    const matchingFigure = figures.find((figure) => {
+      const figureValue = figure.value.toLowerCase();
+      return figureValue.length >= 4
+        && (valueLower.includes(figureValue) || figureValue.includes(valueLower));
+    }) ?? null;
+    const source = matchingFigure?.receipt?.sources[0] ?? (matchingFigure?.receipt ? {
+      url: matchingFigure.receipt.url,
+      sourceLabel: matchingFigure.receipt.sourceLabel,
+    } : null);
+    return [{
+      title: productTitle(value, subjectName),
+      description: productDescription(value, subjectName, narrative),
+      sourceUrl: source?.url ?? null,
+      sourceLabel: source?.sourceLabel ?? null,
+      kind,
+    }];
+  }).slice(0, 6);
+}
+
+const PRODUCT_ICONS = {
+  wallet: Wallet,
+  multispend: UsersThree,
+  custody: UsersThree,
+  chat: ChatCircleDots,
+  apps: GridFour,
+  product: GridFour,
+};
+
+function ProductPortfolio({ cards, subjectName }: { cards: ProductCard[]; subjectName: string }) {
+  if (!cards.length) return null;
+  return (
+    <div className="product-portfolio" aria-label={`${subjectName} products`}>
+      {cards.map((card, index) => {
+        const Icon = PRODUCT_ICONS[card.kind];
+        return (
+          <article key={`${card.kind}:${card.title}`} className="product-portfolio-card">
+            <div className="product-portfolio-topline">
+              <span className="product-portfolio-number">{String(index + 1).padStart(2, "0")}</span>
+              <span className="product-portfolio-icon"><Icon size={21} weight="duotone" aria-hidden="true" /></span>
+            </div>
+            <h3>{card.title}</h3>
+            <p>{card.description}</p>
+            {card.sourceUrl ? (
+              <a href={card.sourceUrl} target="_blank" rel="noreferrer" className="product-portfolio-source">
+                Source · {card.sourceLabel || hostOf(card.sourceUrl)} ↗
+              </a>
+            ) : (
+              <span className="product-portfolio-source">From the saved product narrative</span>
+            )}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+const NUMBER_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six"];
+
+function productPortfolioHeading(count: number): string {
+  const countLabel = NUMBER_WORDS[count] ?? String(count);
+  return `${countLabel} product ${count === 1 ? "surface" : "surfaces"}. Here’s what ${count === 1 ? "it does" : "each one does"}.`;
 }
 
 const TEAM_PROFILE_ICONS = {
@@ -463,6 +593,7 @@ export function DossierReport({
   id = "dossier",
   includeBeats,
   includeSources = true,
+  subjectSummary,
 }: {
   /** Live report payload. Must never be the dynex design fixture in production. */
   payload: Record<string, unknown>;
@@ -473,6 +604,8 @@ export function DossierReport({
   includeBeats?: string[];
   /** Lets the canonical report keep the source ledger in one appendix. */
   includeSources?: boolean;
+  /** Source-backed product narrative used to turn raw mentions into distinct product surfaces. */
+  subjectSummary?: string | null;
 }) {
   const d = buildDossier(payload);
   const beats = includeBeats?.length
@@ -525,6 +658,11 @@ export function DossierReport({
   const upto = staticLayout ? 0 : Math.max(0, beats.findIndex((b) => b.id === cur));
   const perimeter = beats.find((b) => b.id === "perimeter");
   const subjectHeading = beats.find((b) => b.id === "subject")?.heading ?? null;
+  const productPortfolio = productCards(
+    beats.find((beat) => beat.id === "product")?.figures ?? [],
+    subjectSummary,
+    d.subject.name,
+  );
   const beatMinH = theatrical ? "min-h-[82vh]" : "";
 
   return (
@@ -567,8 +705,14 @@ export function DossierReport({
               <h2 className={theatrical
                 ? "display mt-3 max-w-[20ch] text-[32px] leading-[1.14] text-ink"
                 : "story-chapter-title mt-3 max-w-[28ch] text-ink"}>
-                {b.heading}
+                {b.id === "product" && productPortfolio.length > 0
+                  ? productPortfolioHeading(productPortfolio.length)
+                  : b.heading}
               </h2>
+
+              {b.id === "product" && (
+                <ProductPortfolio cards={productPortfolio} subjectName={d.subject.name} />
+              )}
 
               {b.id === "subject" && (
                 <div className="mt-6 flex max-w-[54ch] items-start gap-5">
