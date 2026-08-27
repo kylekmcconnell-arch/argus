@@ -10,8 +10,10 @@ import "./report-lane.css";
 export const kyleReportLane = {
   id: "kyle",
   label: "Kyle Report",
+  shortLabel: "Kyle",
   owner: "@kylekmcconnell-arch",
   description: "Narrative decision memo with a sticky contents bar and separate project and token scores.",
   navigation: "sticky",
   presentationStyle: 2,
+  dataContract: "shared-saved-report-v1",
 } satisfies ReportLaneDefinition;

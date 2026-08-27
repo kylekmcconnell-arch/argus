@@ -11,8 +11,10 @@ import "./report-lane.css";
 export const enigmaReportLane = {
   id: "enigma",
   label: "Enigma Report",
+  shortLabel: "Enigma",
   owner: "@Enigma-Fund",
-  description: "Independent forensic report canvas with guide navigation.",
-  navigation: "guide",
+  description: "Narrative decision memo with a sticky contents bar and separate project and token scores.",
+  navigation: "sticky",
   presentationStyle: 2,
+  dataContract: "shared-saved-report-v1",
 } satisfies ReportLaneDefinition;

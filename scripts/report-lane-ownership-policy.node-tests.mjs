@@ -28,17 +28,17 @@ test("Enigma can edit only the Enigma report lane", () => {
   }).ok, false);
 });
 
-test("each staging branch rejects the other owner", () => {
+test("short-lived main branches are not coupled to a staging hostname", () => {
   assert.equal(evaluateReportLaneOwnership({
     actor: "Enigma-Fund",
-    baseRef: "codex/staging-kyle-reports",
+    baseRef: "main",
     files: ["README.md"],
-  }).ok, false);
+  }).ok, true);
   assert.equal(evaluateReportLaneOwnership({
     actor: "kylekmcconnell-arch",
-    baseRef: "codex/staging-enigma",
+    baseRef: "main",
     files: ["README.md"],
-  }).ok, false);
+  }).ok, true);
 });
 
 test("shared report changes need the other owner's approval", () => {
@@ -55,6 +55,20 @@ test("shared report changes need the other owner's approval", () => {
   }).ok, true);
 });
 
+test("Production promotion needs the other owner's approval", () => {
+  assert.equal(evaluateReportLaneOwnership({
+    actor: "kylekmcconnell-arch",
+    baseRef: "main",
+    files: ["src/reports/production/reportLane.ts"],
+  }).ok, false);
+  assert.equal(evaluateReportLaneOwnership({
+    actor: "kylekmcconnell-arch",
+    baseRef: "main",
+    files: ["src/reports/production/reportLane.ts"],
+    approvals: ["Enigma-Fund"],
+  }).ok, true);
+});
+
 test("only Kyle can change the enforcement policy", () => {
   assert.equal(evaluateReportLaneOwnership({
     actor: "Enigma-Fund",
@@ -63,15 +77,10 @@ test("only Kyle can change the enforcement policy", () => {
   }).ok, false);
 });
 
-test("Kyle can repair only enforcement files on either staging branch", () => {
+test("Kyle can repair enforcement files on main", () => {
   assert.equal(evaluateReportLaneOwnership({
     actor: "kylekmcconnell-arch",
-    baseRef: "codex/staging-enigma",
+    baseRef: "main",
     files: ["scripts/report-lane-ownership-policy.mjs"],
   }).ok, true);
-  assert.equal(evaluateReportLaneOwnership({
-    actor: "kylekmcconnell-arch",
-    baseRef: "codex/staging-enigma",
-    files: ["scripts/report-lane-ownership-policy.mjs", "README.md"],
-  }).ok, false);
 });

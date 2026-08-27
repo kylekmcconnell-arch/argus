@@ -4,6 +4,7 @@ import { Sidebar, type NavTarget } from "./Sidebar";
 import { ArgusMark } from "./ArgusMark";
 import { EarlyAccessHub } from "./EarlyAccessHub";
 import type { ReportKind } from "../lib/reports";
+import { ReportLaneSelector } from "../reports/shared/ReportLaneSelector";
 
 // Persistent shell: left rail + scrolling main. On mobile the rail becomes a
 // drawer. Provider coverage belongs to each frozen report's recorded checks;
@@ -83,6 +84,7 @@ export function AppShell({
       <EarlyAccessHub triggerRoot={creditTriggerRoot} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
+        <ReportLaneSelector />
         {/* mobile top bar */}
         <div className="app-mobile-header flex min-h-14 items-center gap-3 border-b border-line bg-sidebar px-4 lg:hidden">
           <button

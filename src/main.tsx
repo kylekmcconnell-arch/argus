@@ -1,11 +1,9 @@
 import { lazy, StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.tsx'
 import { AuthGate } from './auth.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary.tsx'
-import { SessionExpiryNotice } from './components/SessionExpiryNotice.tsx'
-import { FeedbackButton } from './components/FeedbackButton.tsx'
+import { AuthenticatedWorkspace } from './components/AuthenticatedWorkspace.tsx'
 import { installSessionExpiryWatch } from './lib/sessionExpiry.ts'
 import { installPrintTheme } from './lib/printTheme.ts'
 import { ReportLaneProvider } from './reports/shared/ReportLaneContext.tsx'
@@ -53,6 +51,10 @@ installSessionExpiryWatch(window)
 // Export-PDF prints the light (website-default) theme regardless of the
 // on-screen choice, restoring it after the print pass.
 installPrintTheme(window)
+
+// Public and shared links always start from the approved renderer. The
+// authenticated owner provider may temporarily override this presentation.
+document.documentElement.dataset.reportLane = 'production'
 
 const designPreview = import.meta.env.DEV
   ? new URLSearchParams(window.location.search).get('design-preview')
@@ -121,9 +123,7 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><JoinPage /></Suspense>
       ) : (
         <AuthGate>
-          <SessionExpiryNotice />
-          <FeedbackButton />
-          <App />
+          <AuthenticatedWorkspace />
         </AuthGate>
       )}
       </AppErrorBoundary>

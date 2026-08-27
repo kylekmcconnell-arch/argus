@@ -1,37 +1,37 @@
-import { enigmaReportLane } from "../enigma/reportLane";
-import { kyleReportLane } from "../kyle/reportLane";
-import type { ReportLaneDefinition, ReportLaneId, ResolvedReportLane } from "./reportLaneTypes";
+import { reportLaneDefinition } from "./reportLaneRegistry";
+import type { ReportLaneId, ResolvedReportLane } from "./reportLaneTypes";
 
-const definitions: Record<ReportLaneId, ReportLaneDefinition> = {
-  kyle: kyleReportLane,
-  enigma: enigmaReportLane,
-};
+export const REPORT_VIEW_QUERY_KEY = "reportView";
+export const REPORT_VIEW_STORAGE_KEY = "argus-owner-report-view-v1";
 
-const normalizedLane = (value: string | null | undefined): ReportLaneId | null => {
+export function normalizedReportLane(value: string | null | undefined): ReportLaneId | null {
   const normalized = String(value ?? "").trim().toLowerCase();
-  return normalized === "kyle" || normalized === "enigma" ? normalized : null;
-};
+  return normalized === "production" || normalized === "kyle" || normalized === "enigma"
+    ? normalized
+    : null;
+}
 
-const stagingLaneForHost = (hostname: string): ReportLaneId | null => {
-  const host = hostname.trim().toLowerCase();
-  if (host.includes("staging-kyle-reports")) return "kyle";
-  if (host.includes("staging-enigma")) return "enigma";
-  return null;
-};
+export function queryReportLane(search: string | null | undefined): ReportLaneId | null {
+  try {
+    return normalizedReportLane(new URLSearchParams(search ?? "").get(REPORT_VIEW_QUERY_KEY));
+  } catch {
+    return null;
+  }
+}
 
 export function resolveReportLane(input: {
-  hostname: string;
   search?: string;
-  envLane?: string;
-  development?: boolean;
+  storedLane?: string | null;
+  canSelect?: boolean;
 }): ResolvedReportLane {
-  const hostLane = stagingLaneForHost(input.hostname);
-  const envLane = normalizedLane(input.envLane);
-  const staging = Boolean(hostLane || input.development || envLane);
-  const id = envLane ?? hostLane ?? "kyle";
+  const selectable = input.canSelect === true;
+  const requested = selectable ? queryReportLane(input.search) : null;
+  const stored = selectable ? normalizedReportLane(input.storedLane) : null;
+  const id = requested ?? stored ?? "production";
 
   return {
-    definition: definitions[id],
-    staging,
+    definition: reportLaneDefinition(id),
+    selectable,
+    source: requested ? "query" : stored ? "stored" : "default",
   };
 }

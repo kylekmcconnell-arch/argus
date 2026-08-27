@@ -1,21 +1,25 @@
-# Independent report lanes
+# Report presentation lanes
 
-ARGUS has two independently owned report presentations over one shared evidence and scoring engine.
+ARGUS serves three report presentations from the production origin over one shared evidence and scoring engine.
 
 ## Ownership
 
+- Production Report: `src/reports/production/**`, jointly reviewed and public by default
 - Kyle Report: `src/reports/kyle/**`, owned by `@kylekmcconnell-arch`
 - Enigma Report: `src/reports/enigma/**`, owned by `@Enigma-Fund`
 - Shared report contracts and core renderers: jointly reviewed
 
-Both owners can read and run both reports. The ownership boundary controls who may merge presentation changes.
+Both active ARGUS owners can read and run every presentation. The ownership boundary controls who may merge presentation changes.
 
-## Permanent staging environments
+## One production origin
 
-- Kyle: https://argus-git-codex-staging-kyle-reports-kyle-mcconnells-projects.vercel.app
-- Enigma: https://argus-git-codex-staging-enigma-kyle-mcconnells-projects.vercel.app
+- Canonical application: https://argus-one-flax.vercel.app
+- Public, shared-link, analyst, and viewer sessions always use Production.
+- Active owners see a `Production / Kyle / Enigma` selector in the authenticated workspace.
+- An owner selection uses `reportView` in the URL and local storage so it is linkable and survives navigation.
+- The authorization check wins over the URL. A non-owner who receives an internal view link is returned to Production and the parameter is removed.
 
-Each stable staging hostname selects its matching report lane. Both owners can open both URLs, but each renderer is built from its own protected branch. There is no public style selector and no query-string override; inspect the other renderer by opening its staging URL.
+The selector changes only the presentation definition. It does not create or select a different report version.
 
 ## Shared truth boundary
 
@@ -30,18 +34,17 @@ The following stay shared so the same saved report cannot produce conflicting fa
 
 Layout, narrative order, typography, styling, and report-specific composition belong in the owner lane.
 
-## Enforcement
+All three presentations currently use the synchronized narrative report baseline: sticky contents navigation, readable report typography, and separate project-diligence and token-safety scores. They diverge only through future changes made inside their owned directories.
 
-Both staging branches are protected: direct and force pushes are disabled, administrators are included, conversations must be resolved, and a pull request needs one approval from someone other than its last pusher. That review gate prevents either owner from changing the other report without the other person seeing and approving it.
+## Enforcement
 
 `CODEOWNERS` records the presentation boundary. The `report-lane-ownership` policy and its Node tests additionally enforce:
 
 1. Only Kyle may change the Kyle report directory.
 2. Only Enigma may change the Enigma report directory.
-3. Shared report files require approval from the other owner.
+3. Production and shared report files require approval from the other owner.
 4. Only Kyle may change the ownership policy.
-5. The Kyle and Enigma staging branches reject changes authored by the other owner, except policy-only maintenance by the repository owner.
 
-GitHub activates `pull_request_target` workflows only from the default branch. The automated ownership check is therefore staged but is not a required status check yet; it can replace the human approval gate after the workflow itself is explicitly approved into `main`.
+The policy runs against pull requests into protected `main`. Kyle and Enigma work on short-lived branches, see each other's presentation in the production selector after merge, and cannot modify the other owner's directory.
 
-Production remains unchanged until an immutable report-lane commit is explicitly approved for promotion.
+Promotion is an explicit reviewed change into `src/reports/production/**`. A selection in the browser cannot promote a renderer and cannot change saved evidence or scoring.
