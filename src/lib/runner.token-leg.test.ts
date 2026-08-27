@@ -78,4 +78,59 @@ describe("project report token-safety leg", () => {
     expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("canonical $ANYONE project token");
     expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("PASS · 18/100 risk");
   });
+
+  it("does not mark the report done until the token-enriched version is durably saved", async () => {
+    const dossier = anyoneDossier();
+    const tokenSafety = {
+      symbol: "ANYONE",
+      call: { verdict: "PASS", risk: 18 },
+      dossier: { score: 82, verdict: "PASS", axes: [] },
+    } as unknown as ThreatScan;
+    let releaseSave: (() => void) | undefined;
+    const saveFinished = new Promise<void>((resolve) => { releaseSave = resolve; });
+    setOnComplete(() => saveFinished);
+    mocks.threatScan.mockResolvedValue(tokenSafety);
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onDone: (value: Dossier) => void },
+    ) => {
+      handlers.onDone(dossier);
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    await vi.waitFor(() => expect(mocks.threatScan).toHaveBeenCalledOnce());
+    expect(getRun("@AnyoneFDN")?.status).toBe("running");
+    expect(getRun("@AnyoneFDN")?.pct).toBeLessThan(100);
+
+    releaseSave?.();
+    await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("done"));
+    expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
+  });
+
+  it("surfaces a final persistence failure instead of publishing the project-only version", async () => {
+    const dossier = anyoneDossier();
+    mocks.threatScan.mockResolvedValue({
+      symbol: "ANYONE",
+      call: { verdict: "PASS", risk: 18 },
+      dossier: { score: 82, verdict: "PASS", axes: [] },
+    } as unknown as ThreatScan);
+    setOnComplete(async () => {
+      throw new Error("The combined project and token report could not be saved.");
+    });
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onDone: (value: Dossier) => void },
+    ) => {
+      handlers.onDone(dossier);
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("error"));
+    expect(getRun("@AnyoneFDN")?.error).toContain("combined project and token report");
+    expect(getRun("@AnyoneFDN")?.dossier).toBeUndefined();
+  });
 });

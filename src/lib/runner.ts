@@ -40,7 +40,7 @@ type Listener = () => void;
 const runs = new Map<string, BgRun>();
 const aborts = new Map<string, () => void>();
 const listeners = new Set<Listener>();
-let onComplete: ((d: Dossier, priv: boolean) => void) | null = null;
+let onComplete: ((d: Dossier, priv: boolean) => void | Promise<void>) | null = null;
 
 const norm = (h: string) => h.trim().toLowerCase().replace(/^@/, "");
 function emit() { for (const l of listeners) l(); }
@@ -49,7 +49,7 @@ function emit() { for (const l of listeners) l(); }
 // It must NOT change the view — a backgrounded audit finishing should not yank
 // the user out of whatever they're doing. Gets the run's private flag so it can
 // skip everything that would leave a trace.
-export function setOnComplete(fn: (d: Dossier, priv: boolean) => void) { onComplete = fn; }
+export function setOnComplete(fn: (d: Dossier, priv: boolean) => void | Promise<void>) { onComplete = fn; }
 
 export function subscribeRuns(cb: Listener): () => void {
   listeners.add(cb);
@@ -167,12 +167,32 @@ export function startPersonAudit(
     }
     if (threatNote) d.threatNote = threatNote;
     if (runs.get(key) !== run) return; // cancelled / purged while the token leg ran
+
+    // A scan is not complete until its final, token-enriched payload is durable.
+    // Previously we emitted `done` first and only then queued the combined save.
+    // Opening the report, refreshing, or receiving a deployment in that window
+    // abandoned the save and left the active immutable version with an N/A token
+    // score even though the token leg had run. Keep the run live while the owner
+    // persists it, and surface a real failure rather than publishing the earlier
+    // project-only snapshot as a completed report.
+    try {
+      await onComplete?.(d, !!run.priv);
+    } catch (error) {
+      run.status = "error";
+      run.error = error instanceof Error
+        ? error.message
+        : "The combined project and token report could not be saved.";
+      aborts.delete(key);
+      emit();
+      return;
+    }
+
+    if (runs.get(key) !== run) return;
     run.status = "done";
     run.dossier = d;
     run.pct = 100;
     aborts.delete(key);
     emit();
-    onComplete?.(d, !!run.priv); // log + persist + graph (skipped entirely when private)
   };
 
   const abort = streamAudit(key, priv, {

@@ -369,7 +369,7 @@ export default function App() {
     kind: "person" | "token" | "investigation",
     ref: string,
     work: () => Promise<void>,
-  ) => {
+  ): Promise<void> => {
     const key = `${kind}:${normalizeSubjectRef(ref)}`;
     const previous = reportPersistenceQueues.current.get(key) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(work);
@@ -380,6 +380,7 @@ export default function App() {
       }
     };
     void next.then(clear, clear);
+    return next;
   }, []);
   const safeAuditRequestRef = useRef(0);
   // URL boot may re-run when onOpenRecent / onSafeAuditMode identities change.
@@ -807,7 +808,7 @@ export default function App() {
   // this session, then publish it to audit and graph surfaces only when the
   // server returned an exact immutable version binding. This is view-independent
   // and never pulls the user away from their current screen.
-  const logPerson = useCallback((d: Dossier, priv = false) => {
+  const logPerson = useCallback(async (d: Dossier, priv = false) => {
     if (priv) return; // private: current view only — nothing is cached or leaves
     const persistedVersionId = d.persistence?.state === "persisted"
       && typeof d.persistence.reportVersionId === "string"
@@ -819,7 +820,11 @@ export default function App() {
     // enter the shared graph without an exact immutable version binding.
     if (!persistedVersionId) {
       cacheResult(resultCache.current, d.handle, { kind: "person", dossier: d });
-      return;
+      throw new Error(
+        d.persistence?.reason
+          ? `The project report could not be saved: ${d.persistence.reason}`
+          : "The project report finished without an immutable saved-version receipt.",
+      );
     }
 
     // The server first saves the project/person evidence so a background scan
@@ -840,7 +845,7 @@ export default function App() {
     };
     cacheResult(resultCache.current, d.handle, { kind: "person", dossier: pending });
 
-    enqueueReportPersistence("person", d.handle, async () => {
+    await enqueueReportPersistence("person", d.handle, async () => {
       const persisted = await syncReport(
         "person",
         d.handle,
@@ -871,6 +876,12 @@ export default function App() {
               reason: persisted.reason,
             },
           };
+
+      if (persisted.state !== "persisted") {
+        throw new Error(
+          `The combined project and token report could not be saved: ${persisted.reason}`,
+        );
+      }
 
       if (!settleCachedScan(
         resultCache.current,
