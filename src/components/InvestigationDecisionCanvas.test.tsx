@@ -88,11 +88,112 @@ describe("InvestigationDecisionCanvas public states", () => {
     expect(html).toContain("score-ring-verdict");
   });
 
-  it("labels an early score when required checks remain open", () => {
+  it("restores the two independently labeled scores in Style 2", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        presentationStyle={2}
+        subjectName="EARN on Hood"
+        subjectSummary="A live yield product with a separately assessed token."
+        verdictLabel="Caution"
+        score={54}
+        scoreLabel="Project diligence score"
+        composition={[
+          { axis: "P1", label: "Team and leadership", score: 9, weight: 16, rationale: "Partial team disclosure." },
+          { axis: "P2", label: "Product and execution", score: 13, weight: 24, rationale: "Live product surface." },
+        ]}
+        secondaryScore={{
+          label: "Token safety score",
+          score: 79,
+          verdictLabel: "Pass",
+          composition: [
+            { axis: "T1", label: "Liquidity", score: 18, weight: 24, rationale: "Usable pool." },
+            { axis: "T2", label: "Contract safety", score: 16, weight: 26, rationale: "No critical flag." },
+          ],
+        }}
+        favorable={false}
+        verdictTone="caution"
+        supports={[]}
+        concerns={[]}
+        nextSteps={[]}
+        verified={[]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain('data-report-score="dual"');
+    expect(html).toContain("Project diligence score 54 out of 100");
+    expect(html).toContain("Token safety score 79 out of 100");
+    expect(html).toContain("Adding Product and execution");
+    expect(html).toContain("Adding Contract safety");
+    expect(html).toContain("These scores answer different questions");
+    expect(html).not.toContain('<svg width="280" height="280"');
+  });
+
+  it("uses the Grok report headline as the narrative spine instead of disconnected score fragments", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        presentationStyle={2}
+        subjectName="EARN"
+        subjectSummary="EARN turns tokenized stocks into onchain yield strategies for users seeking real-world-asset exposure."
+        reportSummary="The live product and observable token activity are credible, while limited team and assurance evidence cap the result."
+        verdictLabel="Caution"
+        score={52}
+        favorable={false}
+        verdictTone="caution"
+        argument={{
+          forLine: "Token design and conduct.",
+          againstLine: "No outside backers or partners are verified.",
+          moveLine: "Independent audits and a fuller operator record would materially strengthen the assessment.",
+        }}
+        supports={[]}
+        concerns={[]}
+        nextSteps={[]}
+        verified={[]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain("The live product and observable token activity are credible");
+    expect(html).toContain("Independent audits and a fuller operator record");
+    expect(html).not.toContain("Token design and conduct. No outside backers");
+  });
+
+  it("keeps Style 1 on the single canonical score even when a linked score exists", () => {
+    const html = renderToStaticMarkup(
+      <InvestigationDecisionCanvas
+        presentationStyle={1}
+        verdictLabel="Caution"
+        score={54}
+        scoreLabel="Project diligence score"
+        secondaryScore={{ label: "Token safety score", score: 79, verdictLabel: "Pass" }}
+        favorable={false}
+        verdictTone="caution"
+        supports={[]}
+        concerns={[]}
+        nextSteps={[]}
+        verified={[]}
+        coveragePercent={100}
+        successful={7}
+        applicable={7}
+      />,
+    );
+
+    expect(html).toContain('data-report-score="prominent"');
+    expect(html).toContain("Project diligence score 54 out of 100");
+    expect(html).not.toContain('data-report-score="dual"');
+    expect(html).not.toContain("Token safety score 79 out of 100");
+  });
+
+  it("keeps the score rubric explicit when required checks remain open", () => {
     const html = renderToStaticMarkup(
       <InvestigationDecisionCanvas
         verdictLabel="Review with gaps"
         score={20}
+        scoreLabel="Token safety score"
         scoreIsProvisional
         favorable={false}
         verdictTone="caution"
@@ -107,8 +208,9 @@ describe("InvestigationDecisionCanvas public states", () => {
       />,
     );
 
-    expect(html).toContain("ARGUS risk score 20 out of 100");
-    expect(html).toContain("Early risk score");
+    expect(html).toContain("Token safety score 20 out of 100");
+    expect(html).toContain("Token safety score");
+    expect(html).not.toContain("Early risk score");
     expect(html).toContain("5/7 token safety checks complete · provisional");
     expect(html).toContain("Token safety checks");
     expect(html).toContain("What is still open");

@@ -122,6 +122,8 @@ export interface Dossier {
   avatar_url?: string;
   bio: string;
   website?: string;
+  /** Grok's bound-source explanation of what this exact subject is and does. */
+  subjectOrientation?: CollectedEvidence["subjectOrientation"];
   profile_collection_state?: CollectedEvidence["profile"]["profile_collection_state"];
   profile_provider?: string;
   profile_captured_at?: string;
@@ -498,6 +500,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     avatar_url: ev.profile.avatar_url,
     bio: ev.profile.bio,
     website: ev.profile.website,
+    ...(ev.subjectOrientation ? { subjectOrientation: structuredClone(ev.subjectOrientation) } : {}),
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,

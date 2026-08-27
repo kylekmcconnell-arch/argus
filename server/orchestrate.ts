@@ -29,7 +29,7 @@ import {
   scanContradictions,
 } from "./agent";
 import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cost";
-import { tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
+import { declaredTokenFromBio, tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
 import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
@@ -1853,10 +1853,39 @@ export function axisCatalog(roles: SubjectClass[]) {
 
 const siteSubstanceExcerptByEvidence = new WeakMap<CollectedEvidence, string>();
 
+export function shouldCollectSubjectOrientation(
+  resolvedRoles: SubjectClass[],
+  evidence?: CollectedEvidence,
+): boolean {
+  if (resolvedRoles.length === 0 || resolvedRoles.includes(SubjectClass.PROJECT)) return true;
+  // Run an entity-type consistency check on every weak MEMBER-only route that
+  // also carries a provider-resolved official site. Context words such as
+  // "community" or "contributor" can describe a product's users/features;
+  // they are not enough to prevent the bound product-orientation pass. Strong
+  // personal identity evidence keeps an actual employee on the person lane.
+  if (
+    evidence
+    && resolvedRoles.length === 1
+    && resolvedRoles[0] === SubjectClass.MEMBER
+    && evidence.profile.profile_collection_state === "resolved"
+    && evidence.profile.profile_provider === "twitterapi"
+    && canonicalOfficialWebsite(evidence.profile.website) !== null
+    && !evidence.profile.identity_binding
+    && !evidence.profile.resolved_name?.trim()
+  ) return true;
+  return false;
+}
+
 async function maybeOrientSubject(ctx: CollectContext, siteExcerpt?: string): Promise<void> {
   const prior = ctx.evidence.subjectOrientation;
   if (prior && prior.kind !== "UNKNOWN") return;
-  if (providerBackedRoles(ctx.evidence).length > 0) return;
+  // Deterministic routing answers which methodology to run, but it does not
+  // answer the reader's first question: what does this product actually do?
+  // Keep enriching verified PROJECT subjects with a bound first-party Grok
+  // orientation. Other already-resolved subject types do not need this extra
+  // product-narrative pass.
+  const resolvedRoles = providerBackedRoles(ctx.evidence);
+  if (!shouldCollectSubjectOrientation(resolvedRoles, ctx.evidence)) return;
   const excerpt = (siteExcerpt ?? siteSubstanceExcerptByEvidence.get(ctx.evidence) ?? "").trim() || undefined;
   const orientation = await orientSubjectWithGrok(ctx.evidence, { siteExcerpt: excerpt });
   if (!orientation) return;
@@ -1886,7 +1915,19 @@ async function maybeOrientSubject(ctx: CollectContext, siteExcerpt?: string): Pr
 export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[] {
   const roles = new Set<SubjectClass>();
   let bioPrimaryProjectVerified = false;
+  let verifiedOfficialProjectProfile = false;
   let investorBeyondBio = false;
+  // A contract explicitly labelled in the provider-frozen official X bio is a
+  // first-party organization signal. It is stronger than generic role words:
+  // a brand account saying "Venture Capital ... CA: <mint>" is naming the
+  // product/token it operates, not proving that the account is a fund whose
+  // portfolio, legal entity and OFAC record should govern the whole report.
+  // Bare addresses do not qualify here because a person may publish a wallet.
+  const profileDeclaredToken = evidence.profile.profile_collection_state === "resolved"
+    && evidence.profile.profile_provider === "twitterapi"
+    && Number.isFinite(Date.parse(evidence.profile.profile_captured_at ?? ""))
+    ? declaredTokenFromBio(evidence.profile.bio)
+    : null;
   // Unique-id: a PROJECT-bound handle is the brand/protocol account. Display
   // name never binds a person. Founder facts describe some OTHER handle.
   const projectBound = projectOrientationBound(evidence);
@@ -1910,7 +1951,8 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);
     const projectProfileVerified = evidence.profile.profile_provider === "twitterapi"
       && Number.isFinite(providerCapturedAt)
-      && officialSite !== null;
+      && (officialSite !== null || profileDeclaredToken !== null);
+    verifiedOfficialProjectProfile = projectProfileVerified;
     // Strict margin required: on a PROJECT/INVESTOR tie the fund lens keeps
     // governing, so a real fund with product-ish vocabulary never flips.
     bioPrimaryProjectVerified = projectProfileVerified
@@ -1922,6 +1964,31 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
       if (role === SubjectClass.FOUNDER && projectBound) return;
       if (role !== SubjectClass.PROJECT || projectProfileVerified) roles.add(role);
     });
+    // A verified brand profile can mention the community it serves without
+    // becoming one person inside that community. Once PROJECT is the primary
+    // classification, discard the weak MEMBER vocabulary from the governing
+    // methodology set.
+    if (bioPrimaryProjectVerified) roles.delete(SubjectClass.MEMBER);
+    if (profileDeclaredToken) roles.add(SubjectClass.PROJECT);
+  }
+  // Vision is supporting evidence, never a unique-id by itself. When the exact
+  // provider-resolved handle also owns a live official site, however, a
+  // confidently classified logo contradicts a lone MEMBER route and confirms
+  // that the audited entity is the brand rather than one employee. This runs
+  // on every role refresh, including the final refresh after the photo screen.
+  const organizationAvatar = evidence.profileAuthenticity?.classification === "logo_or_cartoon"
+    && (evidence.profileAuthenticity.confidence ?? 0) >= 0.7;
+  if (
+    roles.size === 1
+    && roles.has(SubjectClass.MEMBER)
+    && verifiedOfficialProjectProfile
+    && evidence.profile.site_substance_status === "live"
+    && organizationAvatar
+    && !evidence.profile.identity_binding
+    && !evidence.profile.resolved_name?.trim()
+  ) {
+    roles.delete(SubjectClass.MEMBER);
+    roles.add(SubjectClass.PROJECT);
   }
   for (const venture of evidence.ventures) {
     if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;
@@ -1994,10 +2061,10 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // that merely talks about capital; when no venture record verified the
   // investing (vocabulary was the only investor evidence), the fund
   // methodology is the wrong lens and would starve the scan into INCOMPLETE.
-  if (roles.has(SubjectClass.INVESTOR) && !evidence.projectToken?.verified) {
-    if (bioPrimaryProjectVerified && !investorBeyondBio) {
+  if (roles.has(SubjectClass.INVESTOR)) {
+    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null) && !investorBeyondBio) {
       roles.delete(SubjectClass.INVESTOR);
-    } else {
+    } else if (!evidence.projectToken?.verified) {
       roles.delete(SubjectClass.PROJECT);
     }
   }
@@ -2035,6 +2102,10 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   // Other bio-classified methodologies (KOL / INVESTOR) still govern.
   if (projectBound || canonicalTokenProjectBound) {
     roles.delete(SubjectClass.FOUNDER);
+    // A handle+domain-bound PROJECT orientation is stronger entity evidence
+    // than generic membership vocabulary. Preserve KOL/investor/advisor/agency
+    // safeguards, but do not let MEMBER keep a product brand on a person rubric.
+    roles.delete(SubjectClass.MEMBER);
     const other = [...roles].filter((role) => role !== SubjectClass.PROJECT);
     if (other.length === 0) roles.add(SubjectClass.PROJECT);
   }

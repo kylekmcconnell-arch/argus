@@ -78,19 +78,19 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
   const questions = row.questionCount ?? 0;
   const detailId = `composition-detail-${row.axis}`;
   return (
-    <div>
+    <div className="score-composition-row">
       <button
         type="button"
         aria-expanded={open}
         aria-controls={detailId}
         onClick={() => setOpen((o) => !o)}
-        className="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3 text-left transition hover:bg-panel-2/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal"
+        className="score-composition-trigger grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-4 py-3 text-left transition hover:bg-panel-2/50 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal"
       >
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
             <span className="flex items-baseline gap-2">
-              <span className="text-[13.5px] font-medium text-ink">{row.label}</span>
-              <span className="mono text-[10px] uppercase tracking-wide text-ink-faint max-sm:hidden">
+              <span className="score-composition-label text-[13.5px] font-medium text-ink">{row.label}</span>
+              <span className="score-composition-weight mono text-[10px] uppercase tracking-wide text-ink-faint max-sm:hidden">
                 {row.sublabel ?? `${row.weight}% weight`}
               </span>
             </span>
@@ -104,7 +104,7 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
               /* The Auric File presentation: the normalized score reads at a
                  glance in the band color; "drove" states the actual points
                  this dimension put into the total. */
-              <span className="mono text-[12px] tabular text-ink-faint">
+              <span className="score-composition-value mono text-[12px] tabular text-ink-faint">
                 <span className="text-[15px] font-semibold" style={{ color }}>{Math.round(ratio * 100)}</span>
                 {" /100"}
                 <span className="ml-2">drove {row.score} pts</span>
@@ -130,7 +130,7 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
         style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
       >
         <div className="overflow-hidden">
-          <div className="px-4 pb-3.5 pt-0.5">
+          <div className="score-composition-detail px-4 pb-3.5 pt-0.5">
             {row.rationale && (
               <p className="max-w-[68ch] text-[13.5px] leading-relaxed text-ink">{row.rationale}</p>
             )}
@@ -187,8 +187,8 @@ export function ScoreComposition({ rows, totalScore, capNote, challengeAnchor = 
 }) {
   if (rows.length === 0) return null;
   return (
-    <section className="panel mt-4 overflow-hidden" aria-label={heading}>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 pb-1 pt-3.5">
+    <section className="score-composition panel mt-4 overflow-hidden" aria-label={heading}>
+      <div className="score-composition-header flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 pb-1 pt-3.5">
         <h2 className="eyebrow">{heading}</h2>
         {summary !== null && (
           summary !== undefined ? (

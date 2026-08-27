@@ -9,6 +9,13 @@ const RUNTIME_MODULES = [
   "./funder.ts",
   "./cluster.ts",
   "./evm-cluster.ts",
+  "./pfp-check.ts",
+  "./code-review.ts",
+  "./ocr-clue.ts",
+  "./augment.ts",
+  "./reclassify.ts",
+  "./ask.ts",
+  "./behindledger.ts",
   "../server/adapters/gmgn.ts",
 ];
 

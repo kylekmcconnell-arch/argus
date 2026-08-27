@@ -1,0 +1,6 @@
+/* Kyle-owned report presentation overrides belong here.
+   Scope every selector to [data-report-lane="kyle"]. */
+
+[data-report-lane="kyle"] {
+  --report-lane-accent: var(--signal);
+}

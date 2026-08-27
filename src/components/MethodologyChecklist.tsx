@@ -58,18 +58,23 @@ export function MethodologyChecklist({
     {
       label: "Required safety checks",
       description: "These checks must finish before the report is ready.",
-      checks: checks.filter((check) => check.checkId && NEVER_WAIVE_CHECK_IDS.has(check.checkId)),
+      checks: checks.filter((check) => governingSet.has(check)
+        && check.checkId
+        && NEVER_WAIVE_CHECK_IDS.has(check.checkId)),
     },
     {
       label: "Main risk checks",
       description: "Contract, market, holder, and team checks.",
-      checks: checks.filter((check) => check.checkId && CORE_TOKEN_CHECK_IDS.has(check.checkId)),
+      checks: checks.filter((check) => governingSet.has(check)
+        && check.checkId
+        && CORE_TOKEN_CHECK_IDS.has(check.checkId)),
     },
     {
       label: "Extra research",
       description: "Useful context that does not block the report.",
       checks: checks.filter((check) =>
-        !check.checkId
+        !governingSet.has(check)
+        || !check.checkId
         || (!NEVER_WAIVE_CHECK_IDS.has(check.checkId) && !CORE_TOKEN_CHECK_IDS.has(check.checkId))),
     },
   ].filter((group) => group.checks.length > 0);

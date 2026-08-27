@@ -228,10 +228,11 @@ export interface TraceStep {
  * its capital and product surface, not a KOL-style call.
  *
  * The collector may freeze this record only when a market registry's official
- * X handle matches the audited account or its official homepage matches the
- * provider-returned profile website. A name or ticker match alone is never
- * enough. CoinGecko is preferred when available; identity-bound DEX records
- * cover new or chain-native assets that have not reached CoinGecko yet.
+ * X handle matches the audited account, its official homepage matches the
+ * provider-returned profile website, or the provider-frozen official X bio
+ * explicitly declares the exact contract. A name or ticker match alone is
+ * never enough. CoinGecko is preferred when available; identity-bound DEX
+ * records cover new or chain-native assets that have not reached CoinGecko yet.
  */
 export interface ProjectTokenSnapshot {
   verified: true;
@@ -269,7 +270,7 @@ export interface ProjectTokenSnapshot {
     liquidity?: ProjectTokenProducerSource;
     history?: ProjectTokenProducerSource;
   };
-  providers?: Array<"coingecko" | "dexscreener" | "geckoterminal">;
+  providers?: Array<"twitterapi" | "coingecko" | "dexscreener" | "geckoterminal">;
   priceUsd?: number;
   marketCapUsd?: number;
   fdvUsd?: number;
@@ -304,7 +305,7 @@ export interface ProjectTokenSnapshot {
 }
 
 export interface ProjectTokenProducerSource {
-  provider: "official_site" | "coingecko" | "dexscreener" | "geckoterminal";
+  provider: "official_site" | "twitterapi" | "coingecko" | "dexscreener" | "geckoterminal";
   sourceUrl: string;
   /** Time ARGUS observed the exact provider response. */
   capturedAt: string;

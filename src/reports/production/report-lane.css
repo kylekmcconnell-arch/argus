@@ -1,0 +1,6 @@
+/* Public report presentation overrides belong here.
+   Promotion into this lane is jointly reviewed. */
+
+[data-report-lane="production"] {
+  --report-lane-accent: var(--signal);
+}

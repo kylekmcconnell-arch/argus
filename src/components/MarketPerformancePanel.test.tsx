@@ -16,6 +16,7 @@ vi.mock("./TokenSparkline", () => ({
   },
 }));
 
+import { marketCapPosition, marketSizeBand } from "../lib/marketPosition";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 
 const address = "0x4444444444444444444444444444444444444444";
@@ -146,7 +147,7 @@ describe("MarketPerformancePanel", () => {
     expect(container.textContent).toContain("OFFICIAL TOKEN");
     expect(container.textContent).toContain("Market size");
     expect(container.textContent).toContain("Values shown are from the time of this scan");
-    expect(container.textContent).toContain("CoinGecko global rank");
+    expect(container.textContent).toContain("CoinGecko global market-cap rank");
     expect(harness.sparkline).toHaveBeenCalledWith(expect.objectContaining({
       address,
       pairAddress: "project-pool",
@@ -157,7 +158,7 @@ describe("MarketPerformancePanel", () => {
     }));
   });
 
-  it("omits rank when a DEX-native token has no rank source", () => {
+  it("uses an approximate market-cap percentile when a DEX-native token has no global rank", () => {
     act(() => root.render(
       <MarketPerformancePanel
         projectToken={projectToken({
@@ -172,8 +173,24 @@ describe("MarketPerformancePanel", () => {
     ));
 
     expect(container.textContent).not.toContain("Market rank");
-    expect(container.textContent).not.toContain("Not available");
-    expect(container.textContent).not.toContain("CoinGecko global rank");
+    expect(container.textContent).toContain("Market position");
+    expect(container.textContent).toContain("Top ~2%");
+    expect(container.textContent).toContain("Approximate market-cap position from the saved market cap");
+    expect(container.textContent).not.toContain("Not listed");
+  });
+
+  it("keeps market-size fallback thresholds explicit", () => {
+    expect(marketSizeBand(99_999)).toBe("Under $100K");
+    expect(marketSizeBand(1_370_000)).toBe("$1M–$10M");
+    expect(marketSizeBand(1_000_000_000)).toBe("$1B+");
+    expect(marketSizeBand(null)).toBeNull();
+  });
+
+  it("keeps broad percentile thresholds deterministic", () => {
+    expect(marketCapPosition(1_530_000)?.label).toBe("Top ~20%");
+    expect(marketCapPosition(610_000_000)?.label).toBe("Top ~2%");
+    expect(marketCapPosition(80_000)?.label).toBe("Lower half");
+    expect(marketCapPosition(null)).toBeNull();
   });
 
   it("rejects a mismatched project token instead of lending its market record to the subject", () => {

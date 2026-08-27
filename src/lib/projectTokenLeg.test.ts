@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tokenFromBio, tokenFromPromotions } from "./projectTokenLeg";
+import { declaredTokenFromBio, tokenFromBio, tokenFromPromotions } from "./projectTokenLeg";
 
 const EVM = "0x6982508145454Ce325dDbE47a25d4ec3d2311933"; // $PEPE
 const SOL = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"; // $BONK
@@ -27,6 +27,28 @@ describe("tokenFromBio", () => {
     // base58 run embedded in a longer non-base58 token (0/O/l break it apart
     // but the fragments stay under 32 chars).
     expect(tokenFromBio("x".repeat(20) + "0" + "x".repeat(20))).toBeNull();
+  });
+});
+
+describe("declaredTokenFromBio", () => {
+  it("promotes a uniquely labelled official contract into routing evidence", () => {
+    expect(declaredTokenFromBio(`Strategic reserve. CA: ${SOL}`)).toMatchObject({
+      address: SOL,
+      via: "solana",
+    });
+    expect(declaredTokenFromBio(`Token contract = ${EVM}`)).toMatchObject({
+      address: EVM,
+      via: "evm",
+    });
+  });
+
+  it("does not turn a bare wallet-like address into project methodology", () => {
+    expect(declaredTokenFromBio(`Donations: ${EVM}`)).toBeNull();
+    expect(declaredTokenFromBio(`Built on Solana. ${SOL}`)).toBeNull();
+  });
+
+  it("refuses to choose between multiple declared contracts", () => {
+    expect(declaredTokenFromBio(`CA: ${SOL} contract: ${EVM}`)).toBeNull();
   });
 });
 

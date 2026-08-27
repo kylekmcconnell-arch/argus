@@ -2599,6 +2599,88 @@ describe("analyst verdict integrity", () => {
     });
   });
 
+  it("treats an exact contract published in the official X bio as bounded transparency evidence", () => {
+    const axes: AnalystAxis[] = [{
+      axis: "P6_transparency_integrity",
+      weight: 12,
+      role: SubjectClass.PROJECT,
+    }];
+    const bioDeclared = buildScoringEvidencePacket({
+      projectToken: {
+        verified: true,
+        verification: "official_x",
+        name: "Strategic Super Reserve",
+        symbol: "SSR",
+        rank: null,
+        address: "BpdHpqznEgYPXZNrJVRZvBhdWoafYLVVuLxTQo34pump",
+        chain: "solana",
+        sourceUrl: "https://x.com/strategicsuperr",
+        capturedAt: "2026-08-26T12:00:00.000Z",
+        producerSources: {
+          identity: {
+            provider: "twitterapi",
+            sourceUrl: "https://x.com/strategicsuperr",
+            capturedAt: "2026-08-26T12:00:00.000Z",
+          },
+          market: {
+            provider: "dexscreener",
+            sourceUrl: "https://dexscreener.com/solana/example",
+            capturedAt: "2026-08-26T12:00:01.000Z",
+          },
+        },
+        providers: ["twitterapi", "dexscreener"],
+        liquidityUsd: 68_439,
+      },
+    }, axes);
+    const [artifact] = extractScoringEvidenceCatalog(bioDeclared);
+
+    expect(artifact).toMatchObject({
+      section: "projectToken",
+      provider: "twitterapi",
+      verification: "verified",
+      eligibleAxes: ["P6_transparency_integrity"],
+    });
+    expect(deriveProjectStrengthBands(bioDeclared, axes).P6_transparency_integrity).toMatchObject({
+      tier: "emerging",
+      minScore: 5,
+      maxScore: 8,
+    });
+    expect(inspectAnalystScoringPreflight(axes, bioDeclared)).toMatchObject({
+      state: "ready",
+      missingSubstantiveAxes: [],
+    });
+
+    const registryLinked = buildScoringEvidencePacket({
+      projectToken: {
+        verified: true,
+        verification: "official_x",
+        name: "Registry Linked Token",
+        symbol: "RLT",
+        rank: 400,
+        address: "0x1111111111111111111111111111111111111111",
+        chain: "ethereum",
+        sourceUrl: "https://www.coingecko.com/en/coins/registry-linked-token",
+        capturedAt: "2026-08-26T12:00:00.000Z",
+        producerSources: {
+          identity: {
+            provider: "coingecko",
+            sourceUrl: "https://www.coingecko.com/en/coins/registry-linked-token",
+            capturedAt: "2026-08-26T12:00:00.000Z",
+          },
+        },
+        providers: ["coingecko"],
+      },
+    }, axes);
+
+    expect(extractScoringEvidenceCatalog(registryLinked)
+      .some((candidate) => candidate.section === "projectToken")).toBe(false);
+    expect(deriveProjectStrengthBands(registryLinked, axes).P6_transparency_integrity.tier).toBe("none");
+    expect(inspectAnalystScoringPreflight(axes, registryLinked)).toMatchObject({
+      state: "insufficient_evidence",
+      missingSubstantiveAxes: ["P6_transparency_integrity"],
+    });
+  });
+
   it("routes explicit project advisor, token, and governance evidence to their own axes", () => {
     const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
       .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));

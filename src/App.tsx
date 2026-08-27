@@ -45,6 +45,7 @@ import { fetchReconWebTeam } from "./lib/reconSupplements";
 import { recentReportKind } from "./lib/recentReportRoute";
 import { consumeStaleChunkReloadNotice } from "./components/AppErrorBoundary";
 import { finishScanReceipt } from "./lib/scanReceipts";
+import { normalizedReportLane, REPORT_VIEW_QUERY_KEY } from "./reports/shared/resolveReportLane";
 
 // Product areas load on demand. The home/search shell stays immediate while
 // heavyweight reports, graph views, recon, and admin tooling become cached
@@ -180,7 +181,10 @@ const clearCachedRef = (cache: Map<string, Cached>, ref: string) => {
 
 function clearUrlQuery(): void {
   if (typeof window !== "undefined" && window.location.search) {
-    window.history.replaceState({}, "", window.location.pathname);
+    const parameters = new URLSearchParams(window.location.search);
+    const reportView = normalizedReportLane(parameters.get(REPORT_VIEW_QUERY_KEY));
+    const nextSearch = reportView ? `?${REPORT_VIEW_QUERY_KEY}=${encodeURIComponent(reportView)}` : "";
+    window.history.replaceState({}, "", `${window.location.pathname}${nextSearch}${window.location.hash}`);
   }
 }
 

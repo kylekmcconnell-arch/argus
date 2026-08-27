@@ -928,7 +928,11 @@ async function runTokenAudit(
   // CoinGecko-derived corroboration findings (cg was fetched above).
   if (!opts?.skipSim) {
     if (cg && !cg.listed) {
-      findings.push({ claim: "Not listed on CoinGecko. No independent market-data corroboration is available.", tone: "warn", source: "coingecko" });
+      findings.push({
+        claim: "No CoinGecko asset was matched. DEX market and trading data are still on record, but a global market-cap rank is not available.",
+        tone: "warn",
+        source: "coingecko + dexscreener",
+      });
     } else if (cg) {
       findings.push({ claim: `Corroborated on CoinGecko${cg.rank ? ` (rank #${cg.rank})` : ""}, ${cg.cexCount} centralized market${cg.cexCount === 1 ? "" : "s"}.`, tone: "good", source: "coingecko" });
       if (cg.mcapUsd && fdv && fdv > cg.mcapUsd * 3) {

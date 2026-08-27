@@ -82,6 +82,51 @@ export function ReportCanvasSectionNav({
   );
 }
 
+function useActiveReportSection(items: ReportCanvasNavItem[], enabled = true): `#${string}` {
+  const itemKey = useMemo(() => items.map((item) => item.href).join("|"), [items]);
+  const initialHref = items[0]?.href ?? "#report-summary";
+  const [activeHref, setActiveHref] = useState<`#${string}`>(initialHref);
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (typeof IntersectionObserver !== "function") return;
+    const currentItems = itemKey.split("|").filter(Boolean) as `#${string}`[];
+    const targets = currentItems
+      .map((href) => ({ href, element: document.getElementById(href.slice(1)) }))
+      .filter((entry): entry is { href: `#${string}`; element: HTMLElement } => Boolean(entry.element));
+    if (!targets.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      const match = visible && targets.find((target) => target.element === visible.target);
+      if (match) setActiveHref(match.href);
+    }, { rootMargin: "-18% 0px -68% 0px", threshold: [0, 0.01] });
+    targets.forEach((target) => observer.observe(target.element));
+    return () => observer.disconnect();
+  }, [enabled, itemKey]);
+
+  return activeHref;
+}
+
+/** Sticky, scroll-aware contents bar used immediately before the report story. */
+export function ReportStickyTableOfContents({
+  items,
+  stickyOffsetClass = "top-[65px]",
+  label = "Report table of contents",
+}: {
+  items: ReportCanvasNavItem[];
+  stickyOffsetClass?: string;
+  label?: string;
+}) {
+  const activeHref = useActiveReportSection(items);
+  return (
+    <div data-report-sticky-toc="true" className={`sticky ${stickyOffsetClass} z-20 mt-5`}>
+      <ReportCanvasSectionNav items={items} sticky={false} label={label} activeHref={activeHref} />
+    </div>
+  );
+}
+
 export interface ReportExperienceStatus {
   label: string;
   detail: string;
@@ -101,47 +146,32 @@ export function ReportExperienceLayout({
   children,
   label = "Report guide",
   mobileOffsetClass = "top-[65px]",
+  showGuideNavigation = true,
 }: {
   items: ReportCanvasNavItem[];
-  status: ReportExperienceStatus;
+  status?: ReportExperienceStatus;
   nextStep?: string | null;
   nextStepHref?: `#${string}`;
   children: ReactNode;
   label?: string;
   mobileOffsetClass?: string;
+  showGuideNavigation?: boolean;
 }) {
-  const itemKey = useMemo(() => items.map((item) => item.href).join("|"), [items]);
-  const initialHref = items[0]?.href ?? "#report-summary";
-  const [activeHref, setActiveHref] = useState<`#${string}`>(initialHref);
-
-  useEffect(() => {
-    if (typeof IntersectionObserver !== "function") return;
-    const currentItems = itemKey.split("|").filter(Boolean) as `#${string}`[];
-    const targets = currentItems
-      .map((href) => ({ href, element: document.getElementById(href.slice(1)) }))
-      .filter((entry): entry is { href: `#${string}`; element: HTMLElement } => Boolean(entry.element));
-    if (!targets.length) return;
-    const observer = new IntersectionObserver((entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-      const match = visible && targets.find((target) => target.element === visible.target);
-      if (match) setActiveHref(match.href);
-    }, { rootMargin: "-18% 0px -68% 0px", threshold: [0, 0.01] });
-    targets.forEach((target) => observer.observe(target.element));
-    return () => observer.disconnect();
-  }, [itemKey]);
+  const activeHref = useActiveReportSection(items, showGuideNavigation);
+  const showDesktopRail = showGuideNavigation || Boolean(status) || Boolean(nextStep);
 
   return (
     <div data-report-experience-shell="true" className="mt-5">
-      <div className={`sticky ${mobileOffsetClass} z-20 xl:hidden`}>
-        <ReportCanvasSectionNav items={items} sticky={false} label={label} activeHref={activeHref} />
-      </div>
-      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_248px]">
+      {showGuideNavigation && (
+        <div className={`sticky ${mobileOffsetClass} z-20 xl:hidden`}>
+          <ReportCanvasSectionNav items={items} sticky={false} label={label} activeHref={activeHref} />
+        </div>
+      )}
+      <div className={`grid min-w-0 gap-6 ${showDesktopRail ? "xl:grid-cols-[minmax(0,1fr)_248px]" : "grid-cols-1"}`}>
         <div className="min-w-0">{children}</div>
-        <aside className="report-experience-rail hidden xl:block" aria-label={label}>
+        {showDesktopRail && <aside className="report-experience-rail hidden xl:block" aria-label={label}>
           <div className="sticky top-[76px] space-y-3">
-            <section className="panel overflow-hidden">
+            {showGuideNavigation && <section className="panel overflow-hidden">
               <div className="border-b border-line/60 px-4 py-3">
                 <p className="eyebrow">Report guide</p>
                 <p className="mt-1 text-[12.5px] leading-snug text-ink-dim">Follow the investigation from the decision to its evidence.</p>
@@ -164,9 +194,9 @@ export function ReportExperienceLayout({
                   ))}
                 </ol>
               </nav>
-            </section>
+            </section>}
 
-            <section className={`panel overflow-hidden ${TONE_CLASS[status.tone]}`} aria-label="Report status">
+            {status && <section className={`panel overflow-hidden ${TONE_CLASS[status.tone]}`} aria-label="Report status">
               <div className="flex items-start gap-2.5 px-4 py-3.5">
                 <ToneIcon tone={status.tone} size={17} />
                 <div className="min-w-0">
@@ -175,7 +205,7 @@ export function ReportExperienceLayout({
                   {status.meta && <p className="mono mt-2 text-[10px] uppercase tracking-[0.08em] text-ink-faint">{status.meta}</p>}
                 </div>
               </div>
-            </section>
+            </section>}
 
             {nextStep && (
               <a href={nextStepHref} className="panel block px-4 py-3.5 transition hover:border-control-line">
@@ -184,7 +214,7 @@ export function ReportExperienceLayout({
               </a>
             )}
           </div>
-        </aside>
+        </aside>}
       </div>
     </div>
   );
@@ -207,6 +237,7 @@ export function ReportCanvasNarrativeSection({
   tone,
   items,
   emptyCopy,
+  singleColumn = false,
 }: {
   id?: string;
   title: string;
@@ -214,6 +245,7 @@ export function ReportCanvasNarrativeSection({
   tone: ReportCanvasTone;
   items: ReportCanvasNarrativeItem[];
   emptyCopy: string;
+  singleColumn?: boolean;
 }) {
   return (
     <section id={id} className="scroll-mt-28 border-b border-line/60 py-5 last:border-b-0" aria-labelledby={id ? `${id}-title` : undefined}>
@@ -230,18 +262,16 @@ export function ReportCanvasNarrativeSection({
       </div>
 
       {items.length ? (
-        <ul className="mt-3 grid gap-1.5 pl-0 sm:pl-11 md:grid-cols-2" aria-label={title}>
+        <ul className={`mt-3 grid gap-1.5 pl-0 sm:pl-11 ${singleColumn ? "grid-cols-1" : "md:grid-cols-2"}`} aria-label={title}>
           {items.map((item) => {
             const body = (
               <>
-                <div className="flex items-start justify-between gap-2">
-                  <p className="min-w-0 text-[12.5px] font-medium leading-snug text-ink">{item.title}</p>
-                  {item.meta && (
-                    <span className={`mono shrink-0 text-[10px] uppercase tracking-[0.08em] tabular-nums ${item.meta.startsWith("Limited") ? "text-caution" : "text-ink-faint"}`}>
-                      {item.meta}
-                    </span>
-                  )}
-                </div>
+                {item.meta && (
+                  <p className={`mono mb-1.5 text-[10px] uppercase tracking-[0.08em] tabular-nums ${item.meta.startsWith("Limited") ? "text-caution" : "text-ink-faint"}`}>
+                    {item.meta}
+                  </p>
+                )}
+                <p className="text-[12.5px] font-medium leading-snug text-ink">{item.title}</p>
                 {item.detail && (
                   <ExpandableText
                     text={item.detail}

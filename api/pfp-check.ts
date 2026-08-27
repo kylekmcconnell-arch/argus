@@ -6,7 +6,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { attachPanelCost, claudeUsd, grokUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
-import { claudeToolInput, claudeVision, grokUsageFromChat, grokVision, parseJsonObject, providerFallbacksEnabled } from "./_llm";
+import { claudeToolInput, claudeVision, grokUsageFromChat, grokVision, parseJsonObject, providerFallbacksEnabled } from "./_llm.js";
 
 export const config = { maxDuration: 45 };
 

@@ -20,12 +20,13 @@ import {
 describe("scoreRingCompositionPieces", () => {
   it("uses each row.score out of 100 and does not invent equal slices", () => {
     const pieces = scoreRingCompositionPieces([
-      { axis: "a", score: 14, weight: 25 },
-      { axis: "b", score: 17, weight: 20 },
+      { axis: "a", label: "Team and leadership", score: 14, weight: 25 },
+      { axis: "b", label: "Product and execution", score: 17, weight: 20 },
       { axis: "c", score: 8, weight: 20 },
     ]);
 
     expect(pieces.map((piece) => piece.score)).toEqual([14, 17, 8]);
+    expect(pieces.map((piece) => piece.label)).toEqual(["Team and leadership", "Product and execution", "c"]);
     expect(pieces.map((piece) => piece.to - piece.from)).toEqual([14, 17, 8]);
     expect(pieces[0]?.from).toBe(0);
     expect(pieces[1]?.from).toBe(14);
@@ -206,7 +207,7 @@ describe("ScoreRing", () => {
   it("starts the hero entrance once the ring enters view", () => {
     act(() => {
       root.render(
-        <ScoreRing score={52} verdict="CAUTION" size={HERO_SCORE_RING_SIZE} bands />,
+        <ScoreRing score={52} verdict="CAUTION" size={HERO_SCORE_RING_SIZE} bands fallbackLabel="Token safety score" />,
       );
     });
 
@@ -217,6 +218,38 @@ describe("ScoreRing", () => {
     act(() => observers[0]?.trigger(true));
     act(() => { frames[0]?.(20); });
     expect(container.querySelector("[data-score-ring-entrance]")?.getAttribute("data-score-ring-entrance")).toBe("track");
+    expect(container.textContent).toContain("Token safety score");
+
+    act(() => { frames[1]?.(520); });
+    expect(container.querySelector('[data-score-ring-active-label="score"]')).not.toBeNull();
+    expect(container.textContent).toContain("Filling score");
+    expect(container.textContent).toContain("Token safety score");
+  });
+
+  it("names the dimension and points while each composition segment fills", () => {
+    act(() => {
+      root.render(
+        <ScoreRing
+          score={52}
+          verdict="CAUTION"
+          size={HERO_SCORE_RING_SIZE}
+          bands
+          composition={[
+            { axis: "team", label: "Team and leadership", score: 14, weight: 20 },
+            { axis: "product", label: "Product and execution", score: 17, weight: 25 },
+          ]}
+        />,
+      );
+    });
+
+    act(() => observers[0]?.trigger(true));
+    act(() => { frames[0]?.(20); });
+    expect(container.textContent).toContain("Score composition");
+
+    act(() => { frames[1]?.(520); });
+    expect(container.querySelector('[data-score-ring-active-label="team"]')).not.toBeNull();
+    expect(container.textContent).toContain("Team and leadership");
+    expect(container.textContent).toContain("/ 14 pts");
   });
 
   it("shows the final hero state in static markup", () => {

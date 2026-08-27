@@ -19,18 +19,17 @@ const DAY_MS = 24 * HOUR_MS;
 const POST_READ_USD = 0.005;
 const COUNTS_REQUEST_USD = 0.005;
 const TWITTERAPI_IO_POST_USD = 0.00015;
-const TWITTERAPI_IO_SLICE_MS = 6 * HOUR_MS;
 const TWITTERAPI_IO_PAGE_SIZE = 20;
 const SOCIAL_ACTIVITY_MIN_POSTS = 10;
 const SOCIAL_ACTIVITY_MAX_POSTS = 5_000;
 // twitterapi.io returns up to 20 tweets per request. The previous cap of 100
 // stopped a busy 7-day search around ~2,000 posts with pagination_incomplete.
 // Size the budget from the post ceiling so that cap is actually reachable:
-// half the billed rows may be client-filtered reposts, plus one probe per
-// 6-hour slice in the 7-day window.
+// half the billed rows may be client-filtered reposts. The provider supports a
+// cursor-paginated date range directly, so do not spend 28 baseline requests
+// probing six-hour slices before pagination even begins.
 const TWITTERAPI_IO_MAX_REQUESTS =
-  Math.ceil(SOCIAL_ACTIVITY_MAX_POSTS / (TWITTERAPI_IO_PAGE_SIZE / 2))
-  + Math.ceil((7 * DAY_MS) / TWITTERAPI_IO_SLICE_MS);
+  Math.ceil(SOCIAL_ACTIVITY_MAX_POSTS / (TWITTERAPI_IO_PAGE_SIZE / 2));
 
 type JsonRecord = Record<string, unknown>;
 const asRecord = (value: unknown): JsonRecord =>
@@ -505,76 +504,69 @@ async function collectTwitterApiIo(
   let billedRows = 0;
   let complete = true;
   let incompleteReason: SocialActivityIncompleteReason | undefined;
+  let cursor = "";
+  const seenCursors = new Set<string>();
 
-  for (let sliceEnd = end.getTime(); sliceEnd > start.getTime() && posts.size < maxPosts; sliceEnd -= TWITTERAPI_IO_SLICE_MS) {
-    const sliceStart = Math.max(start.getTime(), sliceEnd - TWITTERAPI_IO_SLICE_MS);
-    let cursor = "";
-    const seenCursors = new Set<string>();
+  do {
+    if (pastDeadline(deadlineAt)) {
+      complete = false;
+      incompleteReason = "time_budget";
+      break;
+    }
+    if (requests >= TWITTERAPI_IO_MAX_REQUESTS) {
+      complete = false;
+      incompleteReason = "pagination_incomplete";
+      break;
+    }
+    const url = new URL(TWITTERAPI_IO);
+    url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(start.getTime() / 1000)} until_time:${Math.ceil(end.getTime() / 1000)}`);
+    url.searchParams.set("queryType", "Latest");
+    if (cursor) url.searchParams.set("cursor", cursor);
+    requests += 1;
+    let payload: JsonRecord | null = null;
+    try {
+      const response = await fetchImpl(url, {
+        headers: { "x-api-key": key },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (response.ok) payload = asRecord(await response.json());
+      else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
+    } catch (error) {
+      const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
+      recordCall("twitterapi", "social-search", 0, reason, "failed");
+    }
+    if (!payload) {
+      complete = false;
+      incompleteReason = "provider_error";
+      break;
+    }
+    successfulRequests += 1;
+    const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
+    billedRows += rows.length;
+    recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
+    for (const row of rows) {
+      const post = twitterApiIoPost(row);
+      if (post && posts.size < maxPosts) posts.set(post.id, post);
+    }
 
-    do {
-      if (pastDeadline(deadlineAt)) {
+    const hasNext = payload.has_next_page === true;
+    const nextCursor = typeof payload.next_cursor === "string" ? payload.next_cursor : "";
+    if (posts.size >= maxPosts) {
+      if (hasNext) {
         complete = false;
-        incompleteReason = "time_budget";
-        break;
+        incompleteReason = "post_limit";
       }
-      if (requests >= TWITTERAPI_IO_MAX_REQUESTS) {
-        complete = false;
-        incompleteReason = "pagination_incomplete";
-        break;
-      }
-      const url = new URL(TWITTERAPI_IO);
-      url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(sliceStart / 1000)} until_time:${Math.ceil(sliceEnd / 1000)}`);
-      url.searchParams.set("queryType", "Latest");
-      if (cursor) url.searchParams.set("cursor", cursor);
-      requests += 1;
-      let payload: JsonRecord | null = null;
-      try {
-        const response = await fetchImpl(url, {
-          headers: { "x-api-key": key },
-          signal: AbortSignal.timeout(15_000),
-        });
-        if (response.ok) payload = asRecord(await response.json());
-        else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
-      } catch (error) {
-        const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
-        recordCall("twitterapi", "social-search", 0, reason, "failed");
-      }
-      if (!payload) {
-        complete = false;
-        incompleteReason = "provider_error";
-        break;
-      }
-      successfulRequests += 1;
-      const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
-      billedRows += rows.length;
-      recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
-      for (const row of rows) {
-        const post = twitterApiIoPost(row);
-        if (post && posts.size < maxPosts) posts.set(post.id, post);
-      }
-
-      const hasNext = payload.has_next_page === true;
-      const nextCursor = typeof payload.next_cursor === "string" ? payload.next_cursor : "";
-      if (posts.size >= maxPosts) {
-        if (hasNext || sliceStart > start.getTime()) {
-          complete = false;
-          incompleteReason = "post_limit";
-        }
-        break;
-      }
-      if (!hasNext) break;
-      if (!nextCursor || seenCursors.has(nextCursor)) {
-        complete = false;
-        incompleteReason = "pagination_incomplete";
-        break;
-      }
-      seenCursors.add(nextCursor);
-      cursor = nextCursor;
-    } while (cursor);
-
-    if (incompleteReason === "time_budget") break;
-    if (incompleteReason === "pagination_incomplete" && requests >= TWITTERAPI_IO_MAX_REQUESTS) break;
-  }
+      break;
+    }
+    if (!hasNext) break;
+    if (!nextCursor || seenCursors.has(nextCursor)) {
+      complete = false;
+      incompleteReason = "pagination_incomplete";
+      break;
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  } while (cursor);
 
   const values = [...posts.values()];
   if (posts.size >= maxPosts && !incompleteReason) {

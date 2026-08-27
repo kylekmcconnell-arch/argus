@@ -432,6 +432,14 @@ var PATTERNS = {
     /\b(?:prediction|betting|forecasting) market\b/i,
     /\b(?:decentralized )?exchange\b/i,
     /\bmarketplace\b/i,
+    // Product-category nouns describe what a brand ships. Keep them specific
+    // enough that a person's incidental "wallet" mention is not sufficient;
+    // providerBackedRoles still requires a provider-resolved official site
+    // before PROJECT can govern.
+    /\b(?:bitcoin|crypto|digital asset|self-custodial|non-custodial|privacy-first|multisig|mobile|hardware) wallet\b/i,
+    /\b(?:mobile|web|desktop|consumer|payments?|trading|social|chat|crypto|bitcoin|defi) app\b/i,
+    /\b(?:an?|the) (?:privacy-first |self-custodial |non-custodial )?wallet (?:for|that|with)\b/i,
+    /\bapp (?:for|that)\b/i,
     // "Product" is a useful brand-account signal, but not when it is plainly a
     // person's job title. Server routing additionally requires the resolved X
     // profile to link a credible official site before PROJECT can govern.
@@ -490,7 +498,9 @@ var PATTERNS = {
     /\bambassador\b/i,
     /\bmod\b/i,
     /\bmoderator\b/i,
-    /\bcommunity\b/i,
+    /\bcommunity (?:manager|lead|moderator|mod|ambassador|contributor|member)\b/i,
+    /\bteam member\b/i,
+    /\bmember (?:of|at)\b/i,
     /\bcontributor\b/i
   ]
 };
@@ -6930,6 +6940,7 @@ function assembleDossier(ev, live) {
     avatar_url: ev.profile.avatar_url,
     bio: ev.profile.bio,
     website: ev.profile.website,
+    ...ev.subjectOrientation ? { subjectOrientation: structuredClone(ev.subjectOrientation) } : {},
     profile_collection_state: ev.profile.profile_collection_state,
     profile_provider: ev.profile.profile_provider,
     profile_captured_at: ev.profile.profile_captured_at,
@@ -8857,6 +8868,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const productActivity = recentActivity.filter((row) => PROJECT_PRODUCT_ACTIVITY.test(String(row.text ?? row.value ?? row.claim ?? row.title ?? "")));
   const token = packet.projectToken && typeof packet.projectToken === "object" && !Array.isArray(packet.projectToken) ? packet.projectToken : void 0;
   const verifiedToken = token?.verified === true && (token.verification === "official_x" || token.verification === "official_domain");
+  const explicitOfficialBioContract = verifiedToken && token?.verification === "official_x" && token.producerSources && typeof token.producerSources === "object" && !Array.isArray(token.producerSources) && token.producerSources.identity && typeof token.producerSources.identity === "object" && !Array.isArray(token.producerSources.identity) && token.producerSources.identity.provider === "twitterapi";
   const rank = typeof token?.rank === "number" ? token.rank : Number.POSITIVE_INFINITY;
   const marketCap = typeof token?.marketCapUsd === "number" ? token.marketCapUsd : 0;
   const volume = typeof token?.volume24hUsd === "number" ? token.volume24hUsd : 0;
@@ -9056,18 +9068,24 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...token ? [token] : []
   ]), p5FloorTier);
   const disclosureBase = [...legalFacts, ...officialFacts, ...repositoryFacts];
-  let p6FloorTier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
+  let p6FloorTier = disclosureBase.length || governanceFacts.length || auditFacts.length || explicitOfficialBioContract ? "emerging" : "none";
   if ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0 || legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0) p6FloorTier = "solid";
   if (governanceFacts.length && auditFacts.length && (legalFacts.length || repositoryFacts.length)) p6FloorTier = "exceptional";
-  let p6Tier = disclosureBase.length || governanceFacts.length || auditExceptionalCeiling ? "emerging" : "none";
+  let p6Tier = disclosureBase.length || governanceFacts.length || auditExceptionalCeiling || explicitOfficialBioContract ? "emerging" : "none";
   if ((governanceFacts.length > 0 || auditExceptionalCeiling) && disclosureBase.length > 0 || legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0) p6Tier = "solid";
   if (governanceFacts.length && auditExceptionalCeiling && (legalFacts.length || repositoryFacts.length)) p6Tier = "exceptional";
   setBand("P6_transparency_integrity", p6Tier, [
     ...legalFacts.length ? ["verified legal operator"] : [],
     ...repositoryFacts.length ? ["public repository disclosure"] : [],
     ...governanceFacts.length ? ["verified governance disclosure"] : [],
+    ...explicitOfficialBioContract ? ["official X bio disclosed the exact canonical token contract"] : [],
     ...auditFacts.length ? ["verified audit disclosure"] : auditLeadCount >= 2 ? [`${auditLeadCount} registry-matched auditor leads from bounded audit discovery sources`] : []
-  ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]), p6FloorTier);
+  ], artifactIds([
+    ...disclosureBase,
+    ...governanceFacts,
+    ...auditFacts,
+    ...explicitOfficialBioContract && token ? [token] : []
+  ]), p6FloorTier);
   return bands;
 }
 var INVESTOR_POSITIVE_OUTCOME = /\b(?:exit(?:ed|s)?|ipo|acquir(?:ed|er|es|ing|quisition)|realized|return(?:ed|s)?|multiple|profitable|distribution)\b/i;
@@ -9833,8 +9851,10 @@ var eligibleAxesFor = (section, value, axisCatalog2, sourceArtifactPeers = [], s
     ...trustedProjectProfileDaysSincePost(value) !== null ? ["P5_traction_and_liveness"] : []
   ] : [];
   const ventureTokenAxes = section === "ventureToken" ? value.verified === true && (value.verification === "official_x" || value.verification === "official_domain") ? ["F2_track_record", "F4_build_substance"] : [] : [];
+  const explicitOfficialBioContract = section === "projectToken" && value.verified === true && value.verification === "official_x" && value.producerSources && typeof value.producerSources === "object" && !Array.isArray(value.producerSources) && value.producerSources.identity && typeof value.producerSources.identity === "object" && !Array.isArray(value.producerSources.identity) && value.producerSources.identity.provider === "twitterapi";
   const projectTokenAxes = section === "projectToken" ? [
     "P3_token_conduct",
+    ...explicitOfficialBioContract ? ["P6_transparency_integrity"] : [],
     ...[value.marketCapUsd, value.volume24hUsd, value.liquidityUsd].some((metric) => typeof metric === "number" && Number.isFinite(metric) && metric > 0) ? ["P5_traction_and_liveness"] : []
   ] : [];
   const teamAxes = section === "team" ? SECTION_AXIS_ELIGIBILITY.team.filter((axis) => axis !== "P2_product_substance" && (axis !== "P4_backing_and_partners" || PROJECT_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? "") && !PROJECT_NON_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? ""))) : [];
@@ -10010,7 +10030,11 @@ var providerFor = (section, payload) => {
   }
   if (section === "ventureToken") return "coingecko";
   if (section === "projectToken") {
-    const observed = Array.isArray(payload.providers) ? payload.providers.filter((value) => value === "coingecko" || value === "dexscreener" || value === "geckoterminal") : [];
+    const producerSources = payload.producerSources && typeof payload.producerSources === "object" && !Array.isArray(payload.producerSources) ? payload.producerSources : void 0;
+    const identity = producerSources?.identity && typeof producerSources.identity === "object" && !Array.isArray(producerSources.identity) ? producerSources.identity : void 0;
+    const identityProvider = identity ? recordText(identity, ["provider"], 100) : void 0;
+    if (identityProvider) return identityProvider;
+    const observed = Array.isArray(payload.providers) ? payload.providers.filter((value) => value === "twitterapi" || value === "coingecko" || value === "dexscreener" || value === "geckoterminal") : [];
     return observed.length ? [...new Set(observed)].join("/") : "coingecko";
   }
   const attributed = recordText(payload, ["source_author", "source"], 100);
@@ -10746,6 +10770,24 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
 // src/lib/projectTokenLeg.ts
 var EVM_CA = /0x[a-fA-F0-9]{40}/;
 var SOL_WORD = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/;
+var DECLARED_CA = /(?:^|[^A-Za-z0-9])(?:ca|c\.a\.|contract(?:\s+address)?|token\s+contract|mint(?:\s+address)?)\s*[:=]\s*(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/gi;
+function declaredTokenFromBio(bio) {
+  const candidates = [...(bio ?? "").matchAll(DECLARED_CA)].flatMap((match) => {
+    const address = match[1] ?? "";
+    if (/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return [{ address, via: "evm", source: "the contract explicitly declared in the subject's own bio" }];
+    }
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
+      return [{ address, via: "solana", source: "the contract explicitly declared in the subject's own bio" }];
+    }
+    return [];
+  });
+  const unique2 = [...new Map(candidates.map((candidate) => [
+    candidate.via === "evm" ? candidate.address.toLowerCase() : candidate.address,
+    candidate
+  ])).values()];
+  return unique2.length === 1 ? unique2[0] : null;
+}
 function tokenFromBio(bio) {
   const b = bio ?? "";
   const evm = b.match(EVM_CA)?.[0];
@@ -14336,8 +14378,8 @@ async function searchAdverseSignals(handle, kind, context, ticker) {
   const h = handle.replace(/^@/, "");
   const targetEntityKey = `@${h.toLowerCase()}`;
   const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}` : `the person behind X account @${h}`;
-  const system = `You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, or general community complaints/FUD. Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. Reply with ONLY compact JSON: {"signals":[{"category":"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud","claim":"","source":"","source_url":""}]}. Never use em dashes.`;
-  const text2 = await generalWebSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}` });
+  const system = `You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, stolen technology or intellectual property, insider dumping, unpaid obligations, misleading partnerships, or material community complaints/FUD. Search X, Reddit, Trustpilot and other review sites, scam-report sites, technical forums, and news. Run exact-handle, display-name, domain, and token-ticker variants with terms such as scam, rug, fraud, stolen, copied, exploit, drain, dump, complaint, lawsuit, warning, and beware. Search both quoted and unquoted variants. Prefer the original post, complaint, filing, or article over a social mirror or search-result page. Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. Reply with ONLY compact JSON: {"signals":[{"category":"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud","claim":"","source":"","source_url":""}]}. Never use em dashes.`;
+  const text2 = await generalWebSearch(system, `Subject: ${subject}. Surface direct source URLs that may contain complaints or accusations involving rug, slow rug, liquidity pull, wallet drains, exit scam, stolen technology, insider dumping, misleading claims, or other material misconduct. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}:v2` });
   if (!text2) return ADVERSE_NOT_ANSWERED;
   const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return ADVERSE_NOT_ANSWERED;
@@ -17788,7 +17830,7 @@ function analyzeCadence(posts, now) {
 var RECENT_ACTIVITY_CAP = 24;
 var RECENT_ACTIVITY_ITEM_CHARS = 500;
 var SELF_POST_SAMPLE_CHARS = 6e3;
-var WHAT_MAX_CHARS = 240;
+var WHAT_MAX_CHARS = 360;
 var QUOTE_MAX_CHARS = 280;
 var MENTIONED_HANDLE_CAP = 8;
 var ORIENTATION_TIMEOUT_MS = 45e3;
@@ -17853,7 +17895,14 @@ var ORIENTATION_SYSTEM = [
   "You MAY x_search that exact @handle and fetch the official site host from the packet.",
   "Do not open-web fish other domains or invent handles.",
   "Answer: What is this? Who is it for? Is it a product/protocol/company brand (PROJECT), a person who founds or builds (FOUNDER), a capital allocator (INVESTOR), or unknown (UNKNOWN)?",
-  'One-sentence what from the packet plus live X of THIS handle. audience is who it is for, or "".',
+  "Write what as polished report-opening copy, not a transcript of the X bio: one or two compact sentences in plain English from the packet, official site, and live X of THIS handle.",
+  "Write with category fluency for a reader who already understands the field: identify the entity in the vocabulary its users would use, the core job it performs, and why someone uses it. Think of explaining the Yankees to a baseball fan as an MLB team with a competitive role and fan experience, not as an official website or social account.",
+  "First decide whether the bound subject is an organization/product brand or an individual. Words describing users or features, such as community, chat, fans, members, or contributors, do not make a brand account a person.",
+  "Lead with the product or protocol function. Then state its intended user, network, mechanism, or token role only when the bound artifacts support it.",
+  "For a PROJECT, what must explain a concrete user action or product mechanism such as trading, lending, borrowing, staking, supplying liquidity, using a vault, or operating software. Merely saying that a project has an official site, exists on a chain, or is linked to a token is not a product explanation.",
+  "When the official site contains a multi-product application, summarize the actual first-party product suite rather than describing site ownership or repeating the homepage slogan.",
+  "Never copy slogans, emoji separators, @handles, URLs, or contract addresses into what. Do not discuss the ARGUS score or make an investment recommendation in what.",
+  'audience is who it is for, or "".',
   "Quote @handles only when they appear in the packet artifacts or in live x_search of THIS subject. Never from a display name alone.",
   "Do not invent a token, contract address, or legal name.",
   "Do not treat display name as identity. The bind keys are the twitterapi handle and the official website host in the packet.",
@@ -28538,6 +28587,94 @@ function historyCoverageNote(history) {
   const volume = history.volume ? `, with reported volume ${history.volume.changePct >= 0 ? "up" : "down"} ${Math.abs(history.volume.changePct).toFixed(0)}% against the prior ${history.volume.prior.candles} ${unit}s${history.volume.isFloor ? " (a floor: not every candle reported volume)" : ""}` : "";
   return ` and ${history.points.length} frozen ${history.timeframe} price points${span}${volume}`;
 }
+async function collectProfileDeclaredToken(ctx, candidate) {
+  const rows = await dexPairs(candidate.address);
+  if (!rows) {
+    return {
+      state: "failed",
+      attempts: 1,
+      detail: "The official X bio declared a contract, but DexScreener could not be read."
+    };
+  }
+  const matching = rows.filter((row) => {
+    const base2 = isRecord4(row.baseToken) ? row.baseToken : {};
+    return sameAddress(cleanText2(base2.address), candidate.address);
+  });
+  if (!matching.length) {
+    return {
+      state: "empty",
+      attempts: 1,
+      detail: "The official X bio declared a contract, but DexScreener returned no market for that exact address."
+    };
+  }
+  const best = [...matching].sort((left, right) => {
+    const leftLiquidity = isRecord4(left.liquidity) ? finiteNumber2(left.liquidity.usd) ?? 0 : 0;
+    const rightLiquidity = isRecord4(right.liquidity) ? finiteNumber2(right.liquidity.usd) ?? 0 : 0;
+    return rightLiquidity - leftLiquidity;
+  })[0];
+  const base = isRecord4(best.baseToken) ? best.baseToken : {};
+  const info = isRecord4(best.info) ? best.info : {};
+  const name = cleanText2(base.name) || cleanText2(ctx.evidence.profile.display_name);
+  const symbol = cleanText2(base.symbol).toUpperCase();
+  const chain = cleanText2(best.chainId).toLowerCase();
+  const pairAddress = cleanText2(best.pairAddress);
+  if (!name || !symbol || !chain || !pairAddress) {
+    return {
+      state: "failed",
+      attempts: 1,
+      detail: "DexScreener returned the declared contract without complete token or pool identity."
+    };
+  }
+  const capturedAt = captureTimestamp();
+  const identityCapturedAt = ctx.evidence.profile.profile_captured_at ?? capturedAt;
+  const officialX = `@${normalizeHandle3(ctx.handle)}`;
+  const identitySourceUrl = `https://x.com/${normalizeHandle3(ctx.handle)}`;
+  const marketSourceUrl = cleanText2(best.url) || `${DEXSCREENER}/${encodeURIComponent(candidate.address)}`;
+  const priceUsd = finiteNumber2(best.priceUsd);
+  const marketCapUsd = finiteNumber2(best.marketCap);
+  const fdvUsd = finiteNumber2(best.fdv);
+  const volume24hUsd = isRecord4(best.volume) ? finiteNumber2(best.volume.h24) : void 0;
+  const liquidityUsd = isRecord4(best.liquidity) ? finiteNumber2(best.liquidity.usd) : void 0;
+  const hasMarketRead = priceUsd !== void 0 || marketCapUsd !== void 0 || fdvUsd !== void 0 || volume24hUsd !== void 0;
+  const historyResult = await tokenHistory(chain, pairAddress);
+  const history = historyResult.history;
+  return {
+    state: "matched",
+    attempts: 1 + historyResult.attempts,
+    detail: `verified $${symbol} from the exact contract explicitly declared by ${officialX}`,
+    snapshot: {
+      verified: true,
+      verification: "official_x",
+      name,
+      symbol,
+      rank: null,
+      address: candidate.address,
+      chain,
+      officialX,
+      sourceUrl: identitySourceUrl,
+      capturedAt: identityCapturedAt,
+      producerSources: {
+        identity: {
+          provider: "twitterapi",
+          sourceUrl: identitySourceUrl,
+          capturedAt: identityCapturedAt
+        },
+        ...hasMarketRead ? { market: { provider: "dexscreener", sourceUrl: marketSourceUrl, capturedAt } } : {},
+        ...liquidityUsd !== void 0 ? { liquidity: { provider: "dexscreener", sourceUrl: marketSourceUrl, capturedAt } } : {},
+        ...history?.sourceUrl && history.capturedAt ? { history: { provider: "geckoterminal", sourceUrl: history.sourceUrl, capturedAt: history.capturedAt } } : {}
+      },
+      providers: ["twitterapi", "dexscreener", ...history ? ["geckoterminal"] : []],
+      ...priceUsd !== void 0 ? { priceUsd } : {},
+      ...marketCapUsd !== void 0 ? { marketCapUsd } : {},
+      ...fdvUsd !== void 0 ? { fdvUsd } : {},
+      ...volume24hUsd !== void 0 ? { volume24hUsd } : {},
+      ...liquidityUsd !== void 0 ? { liquidityUsd } : {},
+      pairAddress,
+      ...history ? { history } : {},
+      ...cleanText2(info.imageUrl) ? { imageUrl: cleanText2(info.imageUrl) } : {}
+    }
+  };
+}
 async function collectProjectTokenIdentity(ctx, dependencies = {}) {
   const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
   const registryQueries = projectRegistrySearchQueries(
@@ -28545,7 +28682,68 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     ctx.evidence.subjectOrientation?.launchedProducts
   );
   const seeded = parseSeededContract(ctx);
-  if (!registryQueries.length && !seeded) return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
+  const profileDeclaredToken = ctx.evidence.profile.profile_collection_state === "resolved" && ctx.evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? "")) ? declaredTokenFromBio(ctx.evidence.profile.bio) : null;
+  if (!registryQueries.length && !seeded && !profileDeclaredToken) {
+    return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
+  }
+  if (profileDeclaredToken) {
+    const declared = await collectProfileDeclaredToken(ctx, profileDeclaredToken);
+    if (declared.state === "matched" && declared.snapshot) {
+      const snapshot2 = declared.snapshot;
+      ctx.evidence.projectToken = snapshot2;
+      ctx.recordCheck?.({
+        id: "project-token-identity",
+        status: "confirmed",
+        note: `$${snapshot2.symbol} is the exact ${snapshot2.chain} contract explicitly declared in the provider-frozen official X bio`,
+        provider: "twitterapi/dexscreener",
+        sourceCount: 2
+      });
+      ctx.recordCheck?.({
+        id: "project-product-substance",
+        status: "confirmed",
+        note: `$${snapshot2.symbol} is a live token-native product: the official X bio declares the exact ${snapshot2.chain} contract and DexScreener resolves an exact-address market${snapshot2.liquidityUsd !== void 0 ? ` with $${Math.round(snapshot2.liquidityUsd).toLocaleString()} liquidity` : ""}`,
+        provider: "twitterapi/dexscreener",
+        sourceCount: 2
+      });
+      if ((snapshot2.liquidityUsd ?? 0) >= MIN_POOL_LIQUIDITY_USD) {
+        ctx.recordCheck?.({
+          id: "project-traction-liveness",
+          status: "confirmed",
+          note: `$${snapshot2.symbol} has an exact-address DEX pool with $${Math.round(snapshot2.liquidityUsd ?? 0).toLocaleString()} liquidity${historyCoverageNote(snapshot2.history)}`,
+          provider: snapshot2.history ? "dexscreener/geckoterminal" : "dexscreener",
+          sourceCount: snapshot2.history ? 2 : 1
+        });
+      }
+      ctx.emit({
+        phase: "P0 \xB7 Routing",
+        label: `Official bio contract resolved \xB7 $${snapshot2.symbol}`,
+        detail: `${snapshot2.address} was explicitly declared by @${normalizeHandle3(ctx.handle)} and resolved to an exact ${snapshot2.chain} market. Project methodology is now bound to that contract.`,
+        source: "twitterapi / dexscreener",
+        tone: "good"
+      });
+      return { state: "executed", detail: declared.detail, attempts: declared.attempts };
+    }
+    const providerUnavailable = declared.state === "failed";
+    ctx.recordCheck?.({
+      id: "project-token-identity",
+      status: providerUnavailable ? "unavailable" : "finding",
+      note: declared.detail,
+      provider: "twitterapi/dexscreener",
+      sourceCount: 1
+    });
+    ctx.emit({
+      phase: "P0 \xB7 Routing",
+      label: providerUnavailable ? "Official bio contract could not be checked" : "Official bio contract has no resolved market",
+      detail: declared.detail,
+      source: "twitterapi / dexscreener",
+      tone: "warn"
+    });
+    return {
+      state: providerUnavailable ? "partial" : "executed",
+      detail: declared.detail,
+      attempts: declared.attempts
+    };
+  }
   const registryHomepages = [];
   let selected = null;
   let search = null;
@@ -31617,11 +31815,10 @@ var DAY_MS4 = 24 * HOUR_MS;
 var POST_READ_USD = 5e-3;
 var COUNTS_REQUEST_USD = 5e-3;
 var TWITTERAPI_IO_POST_USD = 15e-5;
-var TWITTERAPI_IO_SLICE_MS = 6 * HOUR_MS;
 var TWITTERAPI_IO_PAGE_SIZE = 20;
 var SOCIAL_ACTIVITY_MIN_POSTS = 10;
 var SOCIAL_ACTIVITY_MAX_POSTS = 5e3;
-var TWITTERAPI_IO_MAX_REQUESTS = Math.ceil(SOCIAL_ACTIVITY_MAX_POSTS / (TWITTERAPI_IO_PAGE_SIZE / 2)) + Math.ceil(7 * DAY_MS4 / TWITTERAPI_IO_SLICE_MS);
+var TWITTERAPI_IO_MAX_REQUESTS = Math.ceil(SOCIAL_ACTIVITY_MAX_POSTS / (TWITTERAPI_IO_PAGE_SIZE / 2));
 var asRecord6 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 function normalizedHandle3(value) {
   const handle = value.trim().replace(/^@/, "");
@@ -31953,72 +32150,67 @@ async function collectTwitterApiIo(fetchImpl, key, query, start, end, maxPosts, 
   let billedRows = 0;
   let complete = true;
   let incompleteReason;
-  for (let sliceEnd = end.getTime(); sliceEnd > start.getTime() && posts.size < maxPosts; sliceEnd -= TWITTERAPI_IO_SLICE_MS) {
-    const sliceStart = Math.max(start.getTime(), sliceEnd - TWITTERAPI_IO_SLICE_MS);
-    let cursor = "";
-    const seenCursors = /* @__PURE__ */ new Set();
-    do {
-      if (pastDeadline(deadlineAt)) {
+  let cursor = "";
+  const seenCursors = /* @__PURE__ */ new Set();
+  do {
+    if (pastDeadline(deadlineAt)) {
+      complete = false;
+      incompleteReason = "time_budget";
+      break;
+    }
+    if (requests >= TWITTERAPI_IO_MAX_REQUESTS) {
+      complete = false;
+      incompleteReason = "pagination_incomplete";
+      break;
+    }
+    const url = new URL(TWITTERAPI_IO);
+    url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(start.getTime() / 1e3)} until_time:${Math.ceil(end.getTime() / 1e3)}`);
+    url.searchParams.set("queryType", "Latest");
+    if (cursor) url.searchParams.set("cursor", cursor);
+    requests += 1;
+    let payload = null;
+    try {
+      const response = await fetchImpl(url, {
+        headers: { "x-api-key": key },
+        signal: AbortSignal.timeout(15e3)
+      });
+      if (response.ok) payload = asRecord6(await response.json());
+      else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
+    } catch (error) {
+      const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
+      recordCall("twitterapi", "social-search", 0, reason, "failed");
+    }
+    if (!payload) {
+      complete = false;
+      incompleteReason = "provider_error";
+      break;
+    }
+    successfulRequests += 1;
+    const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
+    billedRows += rows.length;
+    recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
+    for (const row of rows) {
+      const post = twitterApiIoPost(row);
+      if (post && posts.size < maxPosts) posts.set(post.id, post);
+    }
+    const hasNext = payload.has_next_page === true;
+    const nextCursor = typeof payload.next_cursor === "string" ? payload.next_cursor : "";
+    if (posts.size >= maxPosts) {
+      if (hasNext) {
         complete = false;
-        incompleteReason = "time_budget";
-        break;
+        incompleteReason = "post_limit";
       }
-      if (requests >= TWITTERAPI_IO_MAX_REQUESTS) {
-        complete = false;
-        incompleteReason = "pagination_incomplete";
-        break;
-      }
-      const url = new URL(TWITTERAPI_IO);
-      url.searchParams.set("query", `${query.replace(/\s+-is:retweet$/, "")} since_time:${Math.floor(sliceStart / 1e3)} until_time:${Math.ceil(sliceEnd / 1e3)}`);
-      url.searchParams.set("queryType", "Latest");
-      if (cursor) url.searchParams.set("cursor", cursor);
-      requests += 1;
-      let payload = null;
-      try {
-        const response = await fetchImpl(url, {
-          headers: { "x-api-key": key },
-          signal: AbortSignal.timeout(15e3)
-        });
-        if (response.ok) payload = asRecord6(await response.json());
-        else recordCall("twitterapi", "social-search", 0, `http_${response.status}`, "failed");
-      } catch (error) {
-        const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_json_error";
-        recordCall("twitterapi", "social-search", 0, reason, "failed");
-      }
-      if (!payload) {
-        complete = false;
-        incompleteReason = "provider_error";
-        break;
-      }
-      successfulRequests += 1;
-      const rows = Array.isArray(payload.tweets) ? payload.tweets : [];
-      billedRows += rows.length;
-      recordCall("twitterapi", "social-post-read", rows.length * TWITTERAPI_IO_POST_USD, `${rows.length} public posts`, "succeeded");
-      for (const row of rows) {
-        const post = twitterApiIoPost(row);
-        if (post && posts.size < maxPosts) posts.set(post.id, post);
-      }
-      const hasNext = payload.has_next_page === true;
-      const nextCursor = typeof payload.next_cursor === "string" ? payload.next_cursor : "";
-      if (posts.size >= maxPosts) {
-        if (hasNext || sliceStart > start.getTime()) {
-          complete = false;
-          incompleteReason = "post_limit";
-        }
-        break;
-      }
-      if (!hasNext) break;
-      if (!nextCursor || seenCursors.has(nextCursor)) {
-        complete = false;
-        incompleteReason = "pagination_incomplete";
-        break;
-      }
-      seenCursors.add(nextCursor);
-      cursor = nextCursor;
-    } while (cursor);
-    if (incompleteReason === "time_budget") break;
-    if (incompleteReason === "pagination_incomplete" && requests >= TWITTERAPI_IO_MAX_REQUESTS) break;
-  }
+      break;
+    }
+    if (!hasNext) break;
+    if (!nextCursor || seenCursors.has(nextCursor)) {
+      complete = false;
+      incompleteReason = "pagination_incomplete";
+      break;
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  } while (cursor);
   const values = [...posts.values()];
   if (posts.size >= maxPosts && !incompleteReason) {
     complete = false;
@@ -33378,10 +33570,16 @@ function axisCatalog(roles) {
   return out;
 }
 var siteSubstanceExcerptByEvidence = /* @__PURE__ */ new WeakMap();
+function shouldCollectSubjectOrientation(resolvedRoles, evidence) {
+  if (resolvedRoles.length === 0 || resolvedRoles.includes("PROJECT" /* PROJECT */)) return true;
+  if (evidence && resolvedRoles.length === 1 && resolvedRoles[0] === "MEMBER" /* MEMBER */ && evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && canonicalOfficialWebsite(evidence.profile.website) !== null && !evidence.profile.identity_binding && !evidence.profile.resolved_name?.trim()) return true;
+  return false;
+}
 async function maybeOrientSubject(ctx, siteExcerpt) {
   const prior = ctx.evidence.subjectOrientation;
   if (prior && prior.kind !== "UNKNOWN") return;
-  if (providerBackedRoles(ctx.evidence).length > 0) return;
+  const resolvedRoles = providerBackedRoles(ctx.evidence);
+  if (!shouldCollectSubjectOrientation(resolvedRoles, ctx.evidence)) return;
   const excerpt = (siteExcerpt ?? siteSubstanceExcerptByEvidence.get(ctx.evidence) ?? "").trim() || void 0;
   const orientation = await orientSubjectWithGrok(ctx.evidence, { siteExcerpt: excerpt });
   if (!orientation) return;
@@ -33403,7 +33601,9 @@ async function maybeOrientSubject(ctx, siteExcerpt) {
 function providerBackedRoles(evidence) {
   const roles = /* @__PURE__ */ new Set();
   let bioPrimaryProjectVerified = false;
+  let verifiedOfficialProjectProfile = false;
   let investorBeyondBio = false;
+  const profileDeclaredToken = evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(evidence.profile.profile_captured_at ?? "")) ? declaredTokenFromBio(evidence.profile.bio) : null;
   const projectBound = projectOrientationBound(evidence);
   const canonicalTokenProjectBound = evidence.projectToken?.verified === true && Boolean(evidence.projectToken.officialX) && handlesMatch(evidence.projectToken.officialX ?? "", evidence.profile.handle) && !evidence.profile.resolved_name?.trim();
   const selfDescription = evidence.profile.bio.trim() || (evidence.profile.self_post_sample ?? "").trim();
@@ -33412,12 +33612,20 @@ function providerBackedRoles(evidence) {
     const profileRoles = classification.applicable_classes;
     const providerCapturedAt = Date.parse(evidence.profile.profile_captured_at ?? "");
     const officialSite = canonicalOfficialWebsite(evidence.profile.website);
-    const projectProfileVerified = evidence.profile.profile_provider === "twitterapi" && Number.isFinite(providerCapturedAt) && officialSite !== null;
+    const projectProfileVerified = evidence.profile.profile_provider === "twitterapi" && Number.isFinite(providerCapturedAt) && (officialSite !== null || profileDeclaredToken !== null);
+    verifiedOfficialProjectProfile = projectProfileVerified;
     bioPrimaryProjectVerified = projectProfileVerified && classification.subject_class === "PROJECT" /* PROJECT */ && classification.scores["PROJECT" /* PROJECT */] > classification.scores["INVESTOR" /* INVESTOR */];
     profileRoles.forEach((role) => {
       if (role === "FOUNDER" /* FOUNDER */ && projectBound) return;
       if (role !== "PROJECT" /* PROJECT */ || projectProfileVerified) roles.add(role);
     });
+    if (bioPrimaryProjectVerified) roles.delete("MEMBER" /* MEMBER */);
+    if (profileDeclaredToken) roles.add("PROJECT" /* PROJECT */);
+  }
+  const organizationAvatar = evidence.profileAuthenticity?.classification === "logo_or_cartoon" && (evidence.profileAuthenticity.confidence ?? 0) >= 0.7;
+  if (roles.size === 1 && roles.has("MEMBER" /* MEMBER */) && verifiedOfficialProjectProfile && evidence.profile.site_substance_status === "live" && organizationAvatar && !evidence.profile.identity_binding && !evidence.profile.resolved_name?.trim()) {
+    roles.delete("MEMBER" /* MEMBER */);
+    roles.add("PROJECT" /* PROJECT */);
   }
   for (const venture of evidence.ventures) {
     if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;
@@ -33456,10 +33664,10 @@ function providerBackedRoles(evidence) {
   if (evidence.projectToken?.verified === true) {
     roles.add("PROJECT" /* PROJECT */);
   }
-  if (roles.has("INVESTOR" /* INVESTOR */) && !evidence.projectToken?.verified) {
-    if (bioPrimaryProjectVerified && !investorBeyondBio) {
+  if (roles.has("INVESTOR" /* INVESTOR */)) {
+    if ((bioPrimaryProjectVerified || profileDeclaredToken !== null) && !investorBeyondBio) {
       roles.delete("INVESTOR" /* INVESTOR */);
-    } else {
+    } else if (!evidence.projectToken?.verified) {
       roles.delete("PROJECT" /* PROJECT */);
     }
   }
@@ -33478,6 +33686,7 @@ function providerBackedRoles(evidence) {
   }
   if (projectBound || canonicalTokenProjectBound) {
     roles.delete("FOUNDER" /* FOUNDER */);
+    roles.delete("MEMBER" /* MEMBER */);
     const other = [...roles].filter((role) => role !== "PROJECT" /* PROJECT */);
     if (other.length === 0) roles.add("PROJECT" /* PROJECT */);
   }
@@ -36836,7 +37045,11 @@ async function runTokenAudit(input, emit, opts) {
   else if (pc24 >= 300 && liquidityUsd < 1e5) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity. This is a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
   if (!opts?.skipSim) {
     if (cg && !cg.listed) {
-      findings.push({ claim: "Not listed on CoinGecko. No independent market-data corroboration is available.", tone: "warn", source: "coingecko" });
+      findings.push({
+        claim: "No CoinGecko asset was matched. DEX market and trading data are still on record, but a global market-cap rank is not available.",
+        tone: "warn",
+        source: "coingecko + dexscreener"
+      });
     } else if (cg) {
       findings.push({ claim: `Corroborated on CoinGecko${cg.rank ? ` (rank #${cg.rank})` : ""}, ${cg.cexCount} centralized market${cg.cexCount === 1 ? "" : "s"}.`, tone: "good", source: "coingecko" });
       if (cg.mcapUsd && fdv && fdv > cg.mcapUsd * 3) {

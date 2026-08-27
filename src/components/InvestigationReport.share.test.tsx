@@ -20,7 +20,9 @@ vi.mock("../lib/useArkhamLabels", () => ({ useArkhamLabels: harness.arkham }));
 vi.mock("../graph/store", () => ({ getContributions: () => [], investigationContribution: () => harness.graph }));
 vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
 
-vi.mock("./Avatar", () => ({ Avatar: () => null }));
+vi.mock("./Avatar", () => ({
+  Avatar: ({ src }: { src: string | null }) => src ? <img src={src} alt="" /> : null,
+}));
 vi.mock("./OnChainForensics", () => ({ OnChainForensics: (props: Record<string, unknown>) => { harness.livePanel("on-chain", props); return null; } }));
 vi.mock("./ProjectResearch", () => ({ ProjectResearch: () => { harness.livePanel("project-research"); return null; } }));
 vi.mock("./ProjectLinks", () => ({ ProjectLinks: () => null }));
@@ -125,6 +127,7 @@ function render(inv: Investigation, onReAudit?: () => void, onOpenBrief?: () => 
 
 beforeEach(() => {
   vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "true");
+  window.history.replaceState(null, "", "/");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -147,6 +150,22 @@ afterEach(async () => {
 });
 
 describe("investigation exact sharing", () => {
+  it("renders only the canonical Style 2 investigation without a style selector", () => {
+    render(investigation());
+
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
+    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.textContent).toContain("The state of the house");
+  });
+
+  it("ignores a legacy Style 1 deep link and keeps the canonical investigation", () => {
+    window.history.replaceState(null, "", "/?s=%24ARG&kind=token&reportStyle=1");
+    render(investigation());
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
+    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.textContent).toContain("The state of the house");
+  });
+
   it("keeps the header case label stable across saved versions of the same case", () => {
     const caseId = "aaf133f8-7a13-4df0-ae17-000000000008";
     const context = (version: number) => ({
@@ -178,6 +197,60 @@ describe("investigation exact sharing", () => {
     const frames = [...container.querySelectorAll<HTMLElement>(".report-frame")];
     expect(frames).toHaveLength(2);
     expect(frames.every((frame) => !frame.className.includes("max-w-"))).toBe(true);
+  });
+
+  it("uses social activity saved on the embedded project account when the token copy is absent", () => {
+    render(investigation({
+      projectX: "@fablesfi",
+      projectAccount: {
+        handle: "@fablesfi",
+        display_name: "Fables",
+        avatar: "",
+        bio: "A project account",
+        followers: "0",
+        joined: "",
+        identity_note: "",
+        headline: "Project account",
+        live: true,
+        notableFollowers: [],
+        contradictions: [],
+        webTeam: [],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 70,
+          identity_confidence: "Confirmed",
+          roles: ["PROJECT"],
+        },
+        evidence: {
+          ventures: [], testimonials: [], advised: [], associates: [], wallets: [], promotions: [],
+        },
+        graph: { nodes: [], edges: [] },
+        socialActivity: {
+          schemaVersion: 1,
+          provider: "twitterapi-io",
+          state: "complete",
+          capturedAt: "2026-08-25T16:30:00.000Z",
+          sourceUrl: "https://x.com/search?q=fablesfi",
+          queryBasis: { handle: "@fablesfi", ticker: "$PROLOGUE", query: "(@fablesfi OR $PROLOGUE) -is:retweet", excludesReposts: true },
+          windows: {
+            last24Hours: { start: "2026-08-24T16:30:00.000Z", end: "2026-08-25T16:30:00.000Z", postCount: 12, uniqueAccounts: 8, inspectedPosts: 12, authorCoverageComplete: true },
+            previous24Hours: { start: "2026-08-23T16:30:00.000Z", end: "2026-08-24T16:30:00.000Z", postCount: 8, uniqueAccounts: 6, inspectedPosts: 8, authorCoverageComplete: true },
+            last7Days: { start: "2026-08-18T16:30:00.000Z", end: "2026-08-25T16:30:00.000Z", postCount: 50, uniqueAccounts: 30, inspectedPosts: 50, authorCoverageComplete: true },
+          },
+          hourlyPostCounts: [],
+          top10AccountSharePct: 40,
+          activeDays: 7,
+          activityScore: 55,
+          scoreVersion: "social-activity-v1",
+          collection: { countsRequestCompleted: true, searchRequests: 3, postReads: 50, maxPosts: 5_000, estimatedUsd: 0.0075 },
+          note: "Public X posts matched to the project account.",
+        },
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+    }));
+
+    expect(container.querySelector('nav[aria-label="Report table of contents"] a[href="#social-activity"]')).not.toBeNull();
+    expect(container.querySelector("#social-activity")?.textContent).toContain("Social activity");
+    expect(container.querySelector("#social-activity")?.textContent).toContain("$PROLOGUE");
   });
 
   it("separates a positive risk signal from a blocked scan instead of presenting a contradictory INCOMPLETE verdict", () => {
@@ -237,7 +310,8 @@ describe("investigation exact sharing", () => {
     const statusCard = container.querySelector<HTMLElement>('[aria-label="Report status"]');
     const scoreCard = container.querySelector<HTMLElement>('[aria-label="Score while checks are open"]');
     const marketCard = container.querySelector<HTMLElement>('[aria-label="Market size"]');
-    expect(statusCard?.closest("aside")?.getAttribute("aria-label")).toBe("Report guide");
+    expect(statusCard).toBeNull();
+    expect(container.querySelector('aside[aria-label="Report guide"]')).toBeNull();
     expect(scoreCard).toBeNull();
     expect(marketCard).toBeNull();
 
@@ -639,6 +713,7 @@ describe("investigation exact sharing", () => {
             name: "Erik Voorhees",
             handle: "@erikvoorhees",
             role: "Founder & CEO",
+            avatarUrl: "https://pbs.twimg.com/profile_images/1/erik.jpg",
             source: "official team page",
             sourceUrl: "https://venice.ai/about",
             provider: "team-page",
@@ -692,6 +767,7 @@ describe("investigation exact sharing", () => {
     expect(container.querySelector('[aria-label="Team evidence summary"]')?.textContent).toContain("2source-grounded identities");
     expect(container.querySelector('[aria-label="Team evidence summary"]')?.textContent).toContain("2confirmed founders");
     expect(container.querySelectorAll(".team-person-card")).toHaveLength(2);
+    expect(container.querySelector('img[src="https://pbs.twimg.com/profile_images/1/erik.jpg"]')).not.toBeNull();
     expect(container.textContent).toContain("Founders (2)");
     // The handle-only "@twistartups · CEO" row (a media account bound to a
     // project-owned role by the post scan) must not render as team at all.
@@ -723,7 +799,7 @@ describe("investigation exact sharing", () => {
     const chapterLabels = [...container.querySelectorAll<HTMLElement>(".story-chapter .report-section-heading > div > .eyebrow")]
       .map((label) => label.textContent);
     expect(chapterLabels).toEqual([
-      "01 · Decision brief",
+      "01 · State of the house",
       "02 · Why",
       "03 · Market",
       "04 · People",
@@ -762,7 +838,7 @@ describe("investigation exact sharing", () => {
       reportVersionId,
     }));
 
-    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report guide"]');
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report table of contents"]');
     expect(nav).not.toBeNull();
     const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
       .map((link) => link.getAttribute("href"));

@@ -35,6 +35,14 @@ const PATTERNS: Record<SubjectClass, RegExp[]> = {
     /\bprotocol\b/i, /\bnetwork\b/i, /\bdApp\b/i, /\becosystem\b/i, /\bDAO\b/i,
     /\b(?:prediction|betting|forecasting) market\b/i, /\b(?:decentralized )?exchange\b/i,
     /\bmarketplace\b/i,
+    // Product-category nouns describe what a brand ships. Keep them specific
+    // enough that a person's incidental "wallet" mention is not sufficient;
+    // providerBackedRoles still requires a provider-resolved official site
+    // before PROJECT can govern.
+    /\b(?:bitcoin|crypto|digital asset|self-custodial|non-custodial|privacy-first|multisig|mobile|hardware) wallet\b/i,
+    /\b(?:mobile|web|desktop|consumer|payments?|trading|social|chat|crypto|bitcoin|defi) app\b/i,
+    /\b(?:an?|the) (?:privacy-first |self-custodial |non-custodial )?wallet (?:for|that|with)\b/i,
+    /\bapp (?:for|that)\b/i,
     // "Product" is a useful brand-account signal, but not when it is plainly a
     // person's job title. Server routing additionally requires the resolved X
     // profile to link a credible official site before PROJECT can govern.
@@ -66,8 +74,9 @@ const PATTERNS: Record<SubjectClass, RegExp[]> = {
     /\bdegen\b/i, /\bsignals?\b/i, /\bshill\b/i, /\bcaller\b/i,
   ],
   [SubjectClass.MEMBER]: [
-    /\bambassador\b/i, /\bmod\b/i, /\bmoderator\b/i, /\bcommunity\b/i,
-    /\bcontributor\b/i,
+    /\bambassador\b/i, /\bmod\b/i, /\bmoderator\b/i,
+    /\bcommunity (?:manager|lead|moderator|mod|ambassador|contributor|member)\b/i,
+    /\bteam member\b/i, /\bmember (?:of|at)\b/i, /\bcontributor\b/i,
   ],
 };
 
