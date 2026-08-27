@@ -15,6 +15,7 @@ import { ScoreRing } from "../../components/ScoreRing";
 import type { DecisionLensId } from "../../intelligence/types";
 import type { TokenDecisionBoundary } from "../../lib/decisionBoundary";
 import type { DecisionDiscovery, VerdictArgument } from "../../lib/reportInsights";
+import { neutralizeProductCopy } from "../../lib/productLanguage";
 import "./kyle-intelligence-report.css";
 
 export interface KyleDecisionItem {
@@ -431,7 +432,7 @@ export function KyleIntelligenceDecisionCanvas({
   const strongestSupport = supports[0] ?? verified[0];
   const topNextStep = nextSteps[0];
   const thesis = sentence(reportSummary) || sentence(argument?.againstLine) || sentence(mainConcern?.label) || "ARGUS assembled the available evidence into a decision-ready view.";
-  const summary = sentence(subjectSummary);
+  const summary = sentence(neutralizeProductCopy(subjectSummary ?? ""));
   const headline = verdictHeadline(composition, favorable, adverseCount, unresolvedCount);
   const coverage = coverageLabel(coveragePercent);
 

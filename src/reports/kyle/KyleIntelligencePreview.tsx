@@ -119,7 +119,7 @@ export function KyleIntelligencePreview() {
         <ReportStickyTableOfContents items={previewNavItems} />
         <KyleIntelligenceDecisionCanvas
           subjectName="Fedi"
-          subjectSummary="Fedi is a privacy-first Bitcoin wallet with chat, community custody, multispend accounts, and mini-app spaces designed for communities coordinating payments and local financial tools."
+          subjectSummary="Fedi is a Bitcoin wallet application that combines payments, shared accounts, community custody, messaging, and an in-app tool catalog."
           reportSummary="Fedi clears ARGUS’s basic legitimacy tests, with named leadership, an active product, recent development activity and documented funding. Its result is governed primarily by limited independent validation around security, traction and partnerships, not by a major adverse event established in the current evidence."
           verdictLabel="Caution"
           score={55}
@@ -191,10 +191,10 @@ export function KyleIntelligencePreview() {
         <div data-report-experience-shell="true" className="space-y-10 py-16">
           <section id="dossier-product" className="story-chapter report-section scroll-mt-28" aria-labelledby="preview-product-title">
             <p className="eyebrow text-signal-lift">Web &amp; product</p>
-            <h2 id="preview-product-title" className="story-chapter-title mt-2 text-ink">A live Bitcoin wallet built around private community coordination.</h2>
-            <p className="story-chapter-description mt-3 max-w-3xl text-ink-dim">ARGUS keeps the official website, product surfaces, legal entity, funding record, and development evidence together here. The editorial conclusion sits above the same underlying checks and source links.</p>
+            <h2 id="preview-product-title" className="story-chapter-title mt-2 text-ink">What the product is and how it works.</h2>
+            <p className="story-chapter-description mt-3 max-w-3xl text-ink-dim">This section separates the product’s observable functions from first-party claims, company evidence, and development activity.</p>
             <div className="mt-5 grid gap-3 md:grid-cols-3">
-              <div className="panel p-4"><p className="eyebrow">Product</p><strong className="mt-2 block text-ink">Wallet, chat and community spaces</strong><p className="mt-2 text-[13px] leading-relaxed text-ink-dim">Community custody, multispend accounts and mini-app spaces are described on the live product surface.</p></div>
+              <div className="panel p-4"><p className="eyebrow">Product</p><strong className="mt-2 block text-ink">Bitcoin wallet and community tools</strong><p className="mt-2 text-[13px] leading-relaxed text-ink-dim">The application combines payments, shared accounts, community custody, messaging, and an in-app tool catalog.</p></div>
               <div className="panel p-4"><p className="eyebrow">Company</p><strong className="mt-2 block text-ink">Fedi, Inc.</strong><p className="mt-2 text-[13px] leading-relaxed text-ink-dim">A source-backed legal entity and a documented $17M Series A remain in the complete record.</p></div>
               <div className="panel p-4"><p className="eyebrow">Development</p><strong className="mt-2 block text-ink">Active original work</strong><p className="mt-2 text-[13px] leading-relaxed text-ink-dim">Recent repositories establish maintenance more clearly than ecosystem adoption.</p></div>
             </div>

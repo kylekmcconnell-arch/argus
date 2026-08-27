@@ -64,6 +64,7 @@ import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
 import { useReportLane } from "../reports/shared/ReportLaneContext";
+import { neutralizeProductCopy } from "../lib/productLanguage";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -143,6 +144,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 }
 
 export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief, shareView = false }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
+  const neutralProjectDescription = neutralizeProductCopy(d.cg?.description ?? "");
   const reportLane = useReportLane();
   const isEarn = isCanonicalEarnToken(d.chain, d.address);
   const arkhamEnabled = arkhamProviderEnabled();
@@ -478,10 +480,10 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           />
         </section>
 
-        {/* what the project actually does — CoinGecko's own blurb */}
-        {d.cg?.description && (
+        {/* Neutralized external description: product function, not promotional copy. */}
+        {neutralProjectDescription && (
           <ExpandableText
-            text={d.cg.description}
+            text={neutralProjectDescription}
             className="mt-3 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim"
           />
         )}
@@ -490,7 +492,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         <InvestigationDecisionCanvas
           presentationStyle={reportStyle}
           subjectName={d.name || `$${d.symbol}`}
-          subjectSummary={d.cg?.description}
+          subjectSummary={neutralProjectDescription}
           reportSummary={d.headline}
           verdictLabel={presentationMeta.label}
           score={d.score}

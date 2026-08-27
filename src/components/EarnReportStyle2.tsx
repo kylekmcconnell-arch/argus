@@ -425,7 +425,7 @@ export function EarnReportStyle2() {
               <p className="earn-v2-kicker">Overall verdict</p>
               <h2>Promising,<br />with material gaps</h2>
               <p className="earn-v2-verdict__summary">
-                EARN on Hood shows a live product surface, active market participation and meaningful public attention. The token clears the saved safety baseline, but team transparency, independent validation and economic durability are not yet strong enough for conviction.
+                EARN on Hood provides onchain strategies tied to tokenized stocks. The saved report observed market participation and public attention, while team transparency, independent validation and economic durability remain material gaps.
               </p>
               <div className="earn-v2-recommendation">
                 <span><ArrowRightIcon size={20} aria-hidden /></span>
@@ -445,8 +445,8 @@ export function EarnReportStyle2() {
           <section className="earn-v2-story-grid" aria-label="Decision narrative">
             <article className="earn-v2-story earn-v2-story--positive">
               <span>01</span><p className="earn-v2-kicker">Why it earns attention</p>
-              <h3>A real product surface and sustained public interest create an early signal worth investigating.</h3>
-              <p>Official channels, DEX activity and recurring public mentions support the existence of a functioning project rather than a purely promotional token.</p>
+              <h3>The product is live and the market is active, but neither establishes quality on its own.</h3>
+              <p>The official site describes tokenized-stock yield strategies. Saved DEX activity and public mentions show that the project has market attention; they do not establish adoption, durability or safety.</p>
               <SourceTag>Product site · DEX · X activity</SourceTag>
             </article>
             <article className="earn-v2-story earn-v2-story--caution">
@@ -504,7 +504,7 @@ export function EarnReportStyle2() {
               <div className="earn-v2-web-identity">
                 <div className="earn-v2-web-identity__title">
                   <img src="https://www.google.com/s2/favicons?sz=128&domain=earnonhood.com" alt="" />
-                  <div><span>Official project surface</span><h3>earnonhood.com</h3><p>“Earn real yield on stocks, powered by agent strategies.”</p></div>
+                  <div><span>First-party product site</span><h3>earnonhood.com</h3><p>Provides onchain yield strategies tied to tokenized stocks and describes automated strategy management.</p></div>
                 </div>
                 <div className="earn-v2-web-actions">
                   <a href="https://earnonhood.com/" target="_blank" rel="noreferrer"><GlobeIcon size={16} aria-hidden />Open website</a>
@@ -522,7 +522,7 @@ export function EarnReportStyle2() {
             <div className="earn-v2-web-grid">
               <article>
                 <p className="earn-v2-kicker">What the website establishes</p>
-                <h3>A live first-party product surface exists.</h3>
+                <h3>The site describes three product components.</h3>
                 <ul>
                   <li><CheckCircleIcon size={17} weight="fill" aria-hidden /><span><strong>Yield vaults</strong><small>Described on the official project surface.</small></span></li>
                   <li><CheckCircleIcon size={17} weight="fill" aria-hidden /><span><strong>Omnipool</strong><small>Presented as part of the Robinhood Chain product.</small></span></li>

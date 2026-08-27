@@ -19,6 +19,7 @@ import { buildDossier, type Dossier, type DossierFigure, type DossierSourceRow, 
 import { trustedOfficialTeamPortraitUrl } from "../lib/avatars";
 import { Avatar } from "./Avatar";
 import { publicCheckStatus } from "../lib/plainLanguage";
+import { neutralizeProductCopy } from "../lib/productLanguage";
 
 const TINT: Record<string, string> = {
   sourced: "text-sourced", derived: "text-derived", unestablished: "text-unverifiable",
@@ -80,20 +81,26 @@ function productTitle(value: string, subjectName: string): string {
   if (kind === "custody") return "Community custody";
   if (kind === "chat") return "Integrated chat";
   if (kind === "apps") return "Mini-app catalog";
-  const cleaned = value.replace(/^(?:a|an|the|integrated)\s+/i, "").trim();
+  if (/privacy for any app/i.test(value)) return "Privacy application layer";
+  const cleaned = neutralizeProductCopy(value)
+    .split(/[.!?]/)[0]
+    .replace(/^(?:a|an|the|integrated)\s+/i, "")
+    .trim();
+  if (!cleaned) return `${subjectName} product`;
   return cleaned.length > 44 ? `${cleaned.slice(0, 43).trim()}…` : cleaned.replace(/^./, (letter) => letter.toUpperCase());
 }
 
 function productDescription(value: string, subjectName: string, summary: string): string {
   const kind = productKind(value);
-  if (kind === "wallet") return "A privacy-first Bitcoin application for payments, balances and everyday access.";
-  if (kind === "multispend") return "Shared accounts for groups coordinating savings and payments together.";
+  if (kind === "wallet") return "A Bitcoin wallet interface for holding funds, sending payments and viewing balances.";
+  if (kind === "multispend") return "A shared-account feature that lets multiple participants coordinate approvals and payments.";
   if (kind === "custody") return summary.toLowerCase().includes("fedimint")
-    ? "Community-based custody built on the Fedimint protocol instead of a centralized exchange."
-    : "A community-based way to coordinate custody instead of relying on one central operator.";
-  if (kind === "chat") return "Messaging built into the same private space where a community coordinates money.";
-  if (kind === "apps") return "A catalog of local tools and services that communities can use inside the application.";
-  return `${subjectName} describes this product surface as ${value.replace(/[.]+$/, "").toLowerCase()}.`;
+    ? "A community custody model built on Fedimint, with control shared by federation operators."
+    : "A custody model that distributes control across a community rather than assigning it to one operator.";
+  if (kind === "chat") return "A messaging feature integrated into the same application as the financial tools.";
+  if (kind === "apps") return "An in-app catalog that exposes community or third-party tools from within the application.";
+  const neutral = neutralizeProductCopy(value);
+  return neutral || `The saved evidence names a ${subjectName} product but does not explain how it works.`;
 }
 
 function productListFromSummary(summary: string): string[] {
@@ -151,23 +158,23 @@ const PRODUCT_ICONS = {
 function ProductPortfolio({ cards, subjectName }: { cards: ProductCard[]; subjectName: string }) {
   if (!cards.length) return null;
   return (
-    <div className="product-portfolio" aria-label={`${subjectName} products`}>
+    <div className="product-portfolio" aria-label={`${subjectName} product capabilities`}>
       {cards.map((card, index) => {
         const Icon = PRODUCT_ICONS[card.kind];
         return (
           <article key={`${card.kind}:${card.title}`} className="product-portfolio-card">
             <div className="product-portfolio-topline">
-              <span className="product-portfolio-number">{String(index + 1).padStart(2, "0")}</span>
+              <span className="product-portfolio-number">Capability {String(index + 1).padStart(2, "0")}</span>
               <span className="product-portfolio-icon"><Icon size={21} weight="duotone" aria-hidden="true" /></span>
             </div>
             <h3>{card.title}</h3>
             <p>{card.description}</p>
             {card.sourceUrl ? (
               <a href={card.sourceUrl} target="_blank" rel="noreferrer" className="product-portfolio-source">
-                Source · {card.sourceLabel || hostOf(card.sourceUrl)} ↗
+                Product description source · {card.sourceLabel || hostOf(card.sourceUrl)} ↗
               </a>
             ) : (
-              <span className="product-portfolio-source">From the saved product narrative</span>
+              <span className="product-portfolio-source">Derived from saved product evidence</span>
             )}
           </article>
         );
@@ -176,11 +183,8 @@ function ProductPortfolio({ cards, subjectName }: { cards: ProductCard[]; subjec
   );
 }
 
-const NUMBER_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six"];
-
-function productPortfolioHeading(count: number): string {
-  const countLabel = NUMBER_WORDS[count] ?? String(count);
-  return `${countLabel} product ${count === 1 ? "surface" : "surfaces"}. Here’s what ${count === 1 ? "it does" : "each one does"}.`;
+function productPortfolioHeading(_count: number): string {
+  return "What the product is and how it works.";
 }
 
 const TEAM_PROFILE_ICONS = {
@@ -604,7 +608,7 @@ export function DossierReport({
   includeBeats?: string[];
   /** Lets the canonical report keep the source ledger in one appendix. */
   includeSources?: boolean;
-  /** Source-backed product narrative used to turn raw mentions into distinct product surfaces. */
+  /** Source-backed product narrative used to identify distinct product capabilities. */
   subjectSummary?: string | null;
 }) {
   const d = buildDossier(payload);
