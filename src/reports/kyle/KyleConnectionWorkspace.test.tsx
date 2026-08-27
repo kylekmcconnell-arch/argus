@@ -21,6 +21,23 @@ const dossier = {
     source: "https://www.anyone.io/team",
     sourceUrl: "https://www.anyone.io/team",
     artifact_verified: true,
+  }, {
+    name: "Anon Morpho",
+    role: "Strategic and Marketing Lead",
+    source: "https://www.anyone.io/team",
+    sourceUrl: "https://www.anyone.io/team",
+    officialPortraitUrl: "https://images.anyone.io/team/anon-morpho.png",
+    officialPortraitSourceUrl: "https://www.anyone.io/team",
+    artifact_verified: true,
+  }],
+  organizationRelationships: [{
+    name: "Enigma Fund",
+    handle: "@EnigmaFund",
+    role: "Strategic advisor",
+    kind: "org",
+    source: "https://x.com/anyonefdn/status/1",
+    sourceUrl: "https://x.com/anyonefdn/status/1",
+    artifact_verified: true,
   }],
   projectToken: {
     verified: true,
@@ -38,6 +55,7 @@ const dossier = {
 const nodes = [
   { type: "Company", key: "@anyonefdn", label: "ANyONe Protocol", subject: true },
   { type: "Person", key: "@sergeyilin", label: "Sergey Ilin", role: "Operations Lead" },
+  { type: "Person", key: "Anon Morpho", label: "Anon Morpho", role: "Strategic and Marketing Lead" },
   { type: "Company", key: "EnigmaLand", label: "EnigmaLand" },
   { type: "Identity", subtype: "Wallet", key: "wallet:solana:9x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a", chain: "solana" },
   { type: "Person", key: "Bloxroute. Senior", label: "Bloxroute. Senior", role: "Senior Lead" },
@@ -69,12 +87,17 @@ describe("KyleConnectionWorkspace", () => {
     const root = createRoot(container);
     await act(async () => root.render(<KyleConnectionWorkspace dossier={dossier} nodes={nodes} edges={edges} connections={[]} />));
 
-    expect(container.textContent).toContain("Team");
+    expect(container.textContent).toContain("Core team");
+    expect(container.textContent).toContain("Advisors & backers");
+    expect(container.textContent).toContain("Enigma Fund");
     expect(container.textContent).toContain("Projects & Organizations");
     expect(container.textContent).toContain("Wallets & Tokens");
     expect(container.textContent).toContain("Sergey Ilin");
     expect(container.textContent).toContain("$ANYONE");
     expect(container.textContent).toContain("4 relationships");
+    expect(container.querySelectorAll('button[aria-label^="Anon Morpho,"]')).toHaveLength(1);
+    expect(container.querySelector('button[aria-label^="Anon Morpho,"] img')?.getAttribute("src")).toBe("https://images.anyone.io/team/anon-morpho.png");
+    expect(container.textContent).not.toContain("Bloxroute. Senior");
 
     await act(async () => root.unmount());
   });
@@ -105,17 +128,14 @@ describe("KyleConnectionWorkspace", () => {
     await act(async () => root.unmount());
   });
 
-  it("withholds paid research from malformed or low-confidence people", async () => {
+  it("suppresses malformed person fragments before they enter the graph or paid research", async () => {
     const onAudit = vi.fn();
     const root = createRoot(container);
     await act(async () => root.render(<KyleConnectionWorkspace dossier={dossier} nodes={nodes} edges={edges} connections={[]} onAudit={onAudit} previewBalance={49_975} />));
 
     const malformed = [...container.querySelectorAll("button")].find((button) => button.getAttribute("aria-label")?.startsWith("Bloxroute. Senior"));
-    await act(async () => malformed?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-
-    expect(container.textContent).toContain("Verify identity first");
-    const selectedResearchButtons = [...container.querySelectorAll(".kyle-connection-drawer-actions button")].filter((button) => button.textContent?.trim() === "Research this");
-    expect(selectedResearchButtons).toHaveLength(0);
+    expect(malformed).toBeUndefined();
+    expect(container.textContent).not.toContain("Bloxroute. Senior");
     expect(onAudit).not.toHaveBeenCalled();
 
     await act(async () => root.unmount());

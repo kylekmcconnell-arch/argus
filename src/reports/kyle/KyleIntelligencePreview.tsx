@@ -64,6 +64,9 @@ const connectionPreviewDossier = {
     { name: "Yurii Kovalchuk", role: "Engineer", source: "https://www.anyone.io/about-us", sourceUrl: "https://www.anyone.io/about-us", artifact_verified: true },
     { name: "Anon Morpho", role: "Strategy & Marketing Lead", source: "https://www.anyone.io/about-us", sourceUrl: "https://www.anyone.io/about-us", artifact_verified: true },
   ],
+  organizationRelationships: [
+    { name: "Enigma Fund", role: "Strategic advisor", handle: "@EnigmaFund", kind: "org", source: "https://x.com/anyonefdn/status/1", sourceUrl: "https://x.com/anyonefdn/status/1", artifact_verified: true },
+  ],
   projectToken: { verified: true, verification: "official_domain", name: "ANyONe Protocol", symbol: "ANYONE", rank: 1007, address: "0xFeAc2Eae96899709a43E252B6B92971D32F9C0F9", chain: "ethereum", sourceUrl: "https://docs.anyone.io/resources/token", capturedAt: "2026-08-27T00:00:00.000Z" },
 } as unknown as Dossier;
 

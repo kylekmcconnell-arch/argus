@@ -206,6 +206,8 @@ export interface Dossier {
   contradictions: Contradiction[];
   /** Independently collected team records that may ground identity context. */
   webTeam: WebTeamMember[];
+  /** Source-backed funds, incubators, advisers, backers, and other linked organizations. */
+  organizationRelationships?: WebTeamMember[];
   /**
    * Whether each named founder / C-level leader still lists this project as a
    * current role. A paid, bounded lookup: without this field the answer was
@@ -328,6 +330,13 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
         : {}),
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));
+  const organizationRelationships = (ev.webTeam ?? [])
+    .filter((member) => member.kind === "org"
+      && meaningfulTeamValue(member.name)
+      && meaningfulTeamValue(member.role)
+      && member.evidence_origin !== "model_lead"
+      && member.artifact_verified === true)
+    .map((member) => ({ ...member }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
     if (member.kind === "org") return [];
     if (!meaningfulTeamValue(member.name) || !isPlausiblePersonRosterName(member.name) || !meaningfulTeamValue(member.role)) return [];
@@ -352,7 +361,19 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   ev.wallets.forEach((w) => { a.addWallet(w); if (governingEligible(w)) graphAudit.addWallet(w); });
   ev.promotions.forEach((p) => { a.addPromotion(p); if (governingEligible(p)) graphAudit.addPromotion(p); });
   ev.clientEngagements.forEach((c) => { a.addClientEngagement(c); if (governingEligible(c)) graphAudit.addClientEngagement(c); });
-  ev.associates.forEach((as) => { a.addAssociate(as); if (governingEligible(as)) graphAudit.addAssociate(as); });
+  const organizationHandles = new Set(organizationRelationships
+    .map((member) => (member.handle ?? "").replace(/^@/, "").toLowerCase())
+    .filter(Boolean));
+  ev.associates.forEach((associate) => {
+    const normalizedHandle = associate.associate_handle.replace(/^@/, "").toLowerCase();
+    const typedAssociate = associate.kind
+      ? associate
+      : organizationHandles.has(normalizedHandle)
+        ? { ...associate, kind: "org" as const }
+        : associate;
+    a.addAssociate(typedAssociate);
+    if (governingEligible(typedAssociate)) graphAudit.addAssociate(typedAssociate);
+  });
   ev.findings.forEach((f) => { a.addFinding(f); if (governingEligible(f)) graphAudit.addFinding(f); });
   ev.axes.forEach((ax) => {
     try {
@@ -544,6 +565,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
     webTeam: groundedWebTeam,
+    ...(organizationRelationships.length ? { organizationRelationships } : {}),
     ...(webTeamLeads.length ? { webTeamLeads } : {}),
     ...(ev.leaderDepartures?.length
       ? { leaderDepartures: ev.leaderDepartures.map((row) => ({ ...row })) }

@@ -4,7 +4,7 @@ import {
   Buildings,
   Coins,
   Fingerprint,
-  Funnel,
+  Handshake,
   IdentificationCard,
   LinkSimple,
   MagnifyingGlass,
@@ -28,16 +28,17 @@ import type { ConnectionWorkspaceProps } from "../shared/reportLaneRendererTypes
 import { KyleResearchSheet, type KyleResearchTarget } from "./KyleResearchSheet";
 import "./kyle-connection-workspace.css";
 
-type Cluster = "team" | "projects" | "assets" | "social";
-type Filter = "all" | "people" | "projects" | "wallets" | "tokens";
+type Cluster = "team" | "advisors" | "projects" | "assets" | "social";
+type Filter = "all" | "people" | "advisors" | "projects" | "wallets" | "tokens";
 type Lens = "identity" | "control" | "money" | "social";
+type EntityKind = "people" | "projects" | "wallets" | "tokens" | "social";
 
 interface WorkspaceEntity {
   id: string;
   label: string;
   detail?: string;
   cluster: Cluster;
-  kind: Exclude<Filter, "all"> | "social";
+  kind: EntityKind;
   image: string | null;
   relation: string;
   direct: boolean;
@@ -54,6 +55,7 @@ interface PlacedEntity extends WorkspaceEntity {
 
 const CLUSTER_COLOR: Record<Cluster, string> = {
   team: "var(--kyle-editorial-green)",
+  advisors: "#a26027",
   projects: "#5272b3",
   assets: "#7657b5",
   social: "#c56d24",
@@ -74,7 +76,7 @@ const EDGE_LABEL: Record<string, string> = {
   WORKED_ON: "worked on",
 };
 
-const ENTITY_KIND_LABEL: Record<WorkspaceEntity["kind"], string> = {
+const ENTITY_KIND_LABEL: Record<EntityKind, string> = {
   people: "PERSON",
   projects: "PROJECT",
   wallets: "WALLET",
@@ -83,11 +85,26 @@ const ENTITY_KIND_LABEL: Record<WorkspaceEntity["kind"], string> = {
 };
 
 const POSITIONS: Record<Cluster, Array<[number, number]>> = {
-  team: [[12, 33], [24, 42], [10, 56], [27, 61], [18, 72], [34, 30]],
-  projects: [[43, 14], [55, 10], [66, 17], [47, 29], [64, 31], [56, 23]],
-  assets: [[78, 31], [90, 39], [76, 52], [88, 61], [78, 69], [93, 53]],
-  social: [[44, 78], [56, 82], [68, 77], [47, 91], [65, 91], [76, 84]],
+  team: [[11, 31], [24, 39], [9, 51], [27, 57], [16, 67], [32, 29], [31, 69], [8, 66]],
+  advisors: [[37, 79], [48, 84], [39, 91], [52, 92], [46, 74], [31, 88]],
+  projects: [[43, 13], [55, 9], [66, 16], [45, 28], [65, 29], [56, 22]],
+  assets: [[79, 29], [91, 37], [77, 49], [89, 58], [79, 67], [94, 50]],
+  social: [[66, 78], [77, 83], [89, 77], [68, 92], [83, 92], [92, 87]],
 };
+
+const ADVISOR_ROLE = /\b(?:advisor|adviser|advisory|board|backer|investor|fund|incubator|venture partner)\b/i;
+
+function normalizedIdentity(value?: string | null): string {
+  return (value ?? "").trim().replace(/^@/, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isAdvisorRelationship(value?: string | null): boolean {
+  return ADVISOR_ROLE.test(value ?? "");
+}
+
+function isMalformedPersonLabel(value: string): boolean {
+  return /[.;:|][\s]|\b(?:senior|lead|manager|advisor|engineer|director|founder|chief|head)\s*$/i.test(value.trim());
+}
 
 const compactAddress = (value: string) => value.length > 15 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 
@@ -131,12 +148,14 @@ function edgeForNode(subjectKey: string, nodeKey: string, edges: PanoptesEdge[])
   };
 }
 
-function classifyNode(node: PanoptesNode): { cluster: Cluster; kind: WorkspaceEntity["kind"] } {
+function classifyNode(node: PanoptesNode, edge?: PanoptesEdge): { cluster: Cluster; kind: WorkspaceEntity["kind"] } {
   const type = String(node.type).toLowerCase();
   const subtype = String(node.subtype ?? "").toLowerCase();
   const key = String(node.key).toLowerCase();
+  const relationship = `${String(node.role ?? "")} ${String(edge?.role ?? "")} ${String(edge?.relation ?? "")} ${String(edge?.type ?? "")}`;
   if (type === "token" || key.startsWith("token:") || key.startsWith("$")) return { cluster: "assets", kind: "tokens" };
   if (subtype === "wallet" || key.startsWith("wallet:") || key.startsWith("holder:") || key.startsWith("funder:")) return { cluster: "assets", kind: "wallets" };
+  if (isAdvisorRelationship(relationship) || String(edge?.type).toUpperCase() === "ADVISED") return { cluster: "advisors", kind: type === "company" ? "projects" : "people" };
   if (type === "company") return { cluster: "projects", kind: "projects" };
   return { cluster: "social", kind: "people" };
 }
@@ -155,12 +174,46 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
   const subject = nodes.find((node) => node.subject);
   const subjectKey = String(subject?.key ?? dossier.handle);
   const entities: WorkspaceEntity[] = [];
-  const seen = new Set<string>();
+  const identityIndex = new Map<string, number>();
+  const entityKeys = (entity: WorkspaceEntity): string[] => {
+    const keys = [canonical(entity.id)];
+    if (entity.kind === "people" || entity.kind === "projects") {
+      const label = normalizedIdentity(entity.label);
+      const query = normalizedIdentity(entity.researchQuery);
+      if (label) keys.push(`${entity.kind}:${label}`);
+      if (query) keys.push(`${entity.kind}:${query}`);
+    }
+    return [...new Set(keys.filter(Boolean))];
+  };
   const add = (entity: WorkspaceEntity) => {
     const id = canonical(entity.id);
-    if (!id || seen.has(id) || id === canonical(subjectKey)) return;
-    seen.add(id);
-    entities.push({ ...entity, id, sources: uniqueSources(entity.sources) });
+    if (!id || id === canonical(subjectKey)) return;
+    const next = { ...entity, id, sources: uniqueSources(entity.sources) };
+    const keys = entityKeys(next);
+    const existingIndex = keys.map((key) => identityIndex.get(key)).find((index) => index !== undefined);
+    if (existingIndex !== undefined) {
+      const existing = entities[existingIndex];
+      const merged = {
+        ...next,
+        ...existing,
+        image: existing.image ?? next.image,
+        detail: existing.detail ?? next.detail,
+        relation: existing.relation || next.relation,
+        direct: existing.direct || next.direct,
+        confidence: existing.confidence === "High" || next.confidence === "High"
+          ? "High" as const
+          : existing.confidence === "Moderate" || next.confidence === "Moderate"
+            ? "Moderate" as const
+            : "Limited" as const,
+        sources: uniqueSources([...existing.sources, ...next.sources]),
+        researchQuery: existing.researchQuery ?? next.researchQuery,
+      };
+      entities[existingIndex] = merged;
+      for (const key of entityKeys(merged)) identityIndex.set(key, existingIndex);
+      return;
+    }
+    const index = entities.push(next) - 1;
+    for (const key of keys) identityIndex.set(key, index);
   };
 
   for (const member of (dossier.webTeam ?? []).slice(0, 8)) {
@@ -172,7 +225,7 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
       id: key,
       label: member.name,
       detail: member.role,
-      cluster: "team",
+      cluster: isAdvisorRelationship(member.role) ? "advisors" : "team",
       kind: "people",
       image: trustedOfficialTeamPortraitUrl(member.officialPortraitUrl, member.officialPortraitSourceUrl)
         ?? trustedOfficialXAvatarUrl(member.avatarUrl)
@@ -189,15 +242,39 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
     });
   }
 
+  for (const organization of dossier.organizationRelationships ?? []) {
+    const key = organization.handle ?? `organization:${organization.name}`;
+    const roleSource = safeUrl(organization.sourceUrl ?? organization.source);
+    const xSource = organization.handle ? `https://x.com/${organization.handle.replace(/^@/, "")}` : null;
+    add({
+      id: key,
+      label: organization.name,
+      detail: organization.role,
+      cluster: isAdvisorRelationship(organization.role) ? "advisors" : "projects",
+      kind: "projects",
+      image: trustedOfficialTeamPortraitUrl(organization.officialPortraitUrl, organization.officialPortraitSourceUrl)
+        ?? trustedOfficialXAvatarUrl(organization.avatarUrl)
+        ?? (organization.handle ? xAvatar(organization.handle) : null),
+      relation: organization.role,
+      direct: true,
+      confidence: "High",
+      sources: [
+        ...(roleSource ? [{ label: "Relationship source", url: roleSource }] : []),
+        ...(xSource ? [{ label: "X profile", url: xSource }] : []),
+      ],
+      researchQuery: organization.handle ?? organization.name,
+    });
+  }
+
   for (const node of nodes.filter((candidate) => !candidate.subject)) {
     const key = String(node.key);
-    const { cluster, kind } = classifyNode(node);
-    if (cluster === "social" && kind === "people" && (dossier.webTeam ?? []).some((member) => canonical(member.handle ?? `person:${member.name}`) === canonical(key))) continue;
     const { edge, parentId } = edgeForNode(subjectKey, key, edges);
+    const { cluster, kind } = classifyNode(node, edge);
     const imageFromNode = safeUrl(typeof node.imageUrl === "string" ? node.imageUrl : typeof node.image === "string" ? node.image : null);
     const nodeChain = typeof node.chain === "string" ? node.chain : key.split(":")[1] ?? "";
     const source = safeUrl(typeof edge?.source_url === "string" ? edge.source_url : null);
     const label = typeof node.label === "string" && node.label.trim() ? node.label.trim() : displayKey(key);
+    if (kind === "people" && isMalformedPersonLabel(label)) continue;
     add({
       id: key,
       label,
@@ -265,12 +342,12 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
     });
   }
 
-  const caps: Record<Cluster, number> = { team: 6, projects: 5, assets: 5, social: 5 };
+  const caps: Record<Cluster, number> = { team: 8, advisors: 6, projects: 6, assets: 6, social: 6 };
   return (Object.keys(caps) as Cluster[]).flatMap((cluster) => entities.filter((entity) => entity.cluster === cluster).slice(0, caps[cluster]));
 }
 
 function positionEntities(entities: WorkspaceEntity[]): PlacedEntity[] {
-  const counts: Record<Cluster, number> = { team: 0, projects: 0, assets: 0, social: 0 };
+  const counts: Record<Cluster, number> = { team: 0, advisors: 0, projects: 0, assets: 0, social: 0 };
   return entities.map((entity) => {
     const index = counts[entity.cluster]++;
     const [x, y] = POSITIONS[entity.cluster][index % POSITIONS[entity.cluster].length];
@@ -279,7 +356,8 @@ function positionEntities(entities: WorkspaceEntity[]): PlacedEntity[] {
 }
 
 function filterMatches(entity: WorkspaceEntity, filter: Filter, lens: Lens | null, query: string): boolean {
-  if (filter !== "all" && entity.kind !== filter) return false;
+  if (filter === "advisors" && entity.cluster !== "advisors") return false;
+  if (filter !== "all" && filter !== "advisors" && entity.kind !== filter) return false;
   if (lens === "money" && entity.cluster !== "assets" && !/fund|invest|back/i.test(entity.relation)) return false;
   if (lens === "social" && entity.cluster !== "social") return false;
   if (lens === "identity" && entity.cluster !== "team" && entity.cluster !== "projects" && entity.kind !== "social") return false;
@@ -303,7 +381,7 @@ function entityValidation(entity: WorkspaceEntity): { eligible: boolean; explana
   if (entity.confidence !== "High" || entity.sources.length === 0) {
     return { eligible: false, explanation: "This lead needs a stronger identity source before ARGUS can charge for research." };
   }
-  if (/[.;:|][\s]|\b(?:senior|lead|manager|advisor|engineer|director|founder|chief|head)\s*$/i.test(entity.label.trim())) {
+  if (isMalformedPersonLabel(entity.label)) {
     return { eligible: false, explanation: "The saved label looks like a role fragment, not a resolved entity." };
   }
   if (entity.kind === "people") {
@@ -398,6 +476,7 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
   const byId = new Map(entities.map((entity) => [entity.id, entity]));
   const connectionCount = edges.length + props.connections.length;
   const recommendations = recommendedEntities(entities, props);
+  const filtersActive = filter !== "all" || lens !== null || Boolean(query.trim());
 
   const reset = () => {
     setFilter("all");
@@ -424,6 +503,7 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
             {([
               ["all", "Everything", ShareNetwork],
               ["people", "People", Users],
+              ["advisors", "Advisors", Handshake],
               ["projects", "Projects", Buildings],
               ["wallets", "Wallets", Wallet],
               ["tokens", "Tokens", Coins],
@@ -443,13 +523,20 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
               <button key={value} type="button" aria-pressed={lens === value} onClick={() => setLens((current) => current === value ? null : value)} className={lens === value ? "is-lens-active" : ""}><Icon size={17} /><span>{label}</span></button>
             ))}
           </div>
+          <div className="kyle-connection-filter-status" role="status" aria-live="polite">
+            <strong>{visible.length} of {entities.length} connections shown</strong>
+            <span>{visible.length === 0
+              ? filtersActive ? "No connections match these filters." : "No connections were found in this investigation."
+              : filtersActive ? "The web is filtered." : "All saved connections are visible."}</span>
+            {filtersActive && <button type="button" onClick={reset}><ArrowsClockwise size={14} />Reset filters</button>}
+          </div>
         </aside>
 
         <div className="kyle-connection-canvas" data-empty={visible.length === 0 ? "true" : "false"}>
           <h2 id="kyle-connection-title" className="sr-only">Connections for {subjectName}</h2>
-          {(["team", "projects", "assets", "social"] as Cluster[]).map((cluster) => {
+          {(["team", "advisors", "projects", "assets", "social"] as Cluster[]).map((cluster) => {
             const count = visible.filter((entity) => entity.cluster === cluster).length;
-            const label = cluster === "team" ? "Team" : cluster === "projects" ? "Projects & Organizations" : cluster === "assets" ? "Wallets & Tokens" : "Social & Backers";
+            const label = cluster === "team" ? "Core team" : cluster === "advisors" ? "Advisors & backers" : cluster === "projects" ? "Projects & Organizations" : cluster === "assets" ? "Wallets & Tokens" : "Social & community";
             return <div key={cluster} className={`kyle-connection-cluster kyle-connection-cluster--${cluster}`}><span style={{ color: CLUSTER_COLOR[cluster] }}>{label} <small>{count}</small></span></div>;
           })}
 
@@ -481,20 +568,19 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
                 aria-pressed={selected?.id === entity.id}
                 aria-label={`${entity.label}, ${entity.relation}`}
               >
-                <span className="kyle-connection-node-image"><Avatar src={entity.image} letter={(entity.label.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={entity.cluster === "team" ? 48 : 44} rounded="rounded-full" letterClass="text-[12px]" /></span>
+                <span className="kyle-connection-node-image"><Avatar src={entity.image} letter={(entity.label.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={entity.cluster === "team" || entity.cluster === "advisors" ? 48 : 44} rounded="rounded-full" letterClass="text-[12px]" /></span>
                 <strong>{entity.label}</strong>
                 {entity.detail && <small>{entity.detail}</small>}
               </button>
             );
           })}
 
-          {visible.length === 0 && <div className="kyle-connection-empty"><Funnel size={26} /><strong>No connection matches this view.</strong><button type="button" onClick={reset}>Reset filters</button></div>}
           <button type="button" className="kyle-connection-reset" onClick={reset}><ArrowsClockwise size={15} />Reset view</button>
 
           {legendOpen && (
             <div className="kyle-connection-legend" role="status">
               <strong>How to read the web</strong>
-              <p>Solid lines are direct saved relationships. Dashed lines are second-hop or cross-report leads. Color groups organize the evidence; they do not affect the score.</p>
+              <p>Green is verified core team. Brown is source-backed advisers and backers. Solid lines are direct saved relationships; dashed lines are second-hop or cross-report leads. Color groups organize the evidence and never change the score.</p>
             </div>
           )}
         </div>

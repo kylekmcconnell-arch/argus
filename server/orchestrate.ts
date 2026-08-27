@@ -1508,6 +1508,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       ctx.evidence.associates.push({
         associate_handle: org.handle,
         relation: org.role,
+        kind: "org",
         notes: org.evidence,
         evidence_url: org.sourceUrl,
         provider: "twitterapi",

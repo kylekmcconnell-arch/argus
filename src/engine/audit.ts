@@ -287,6 +287,8 @@ export interface Promotion extends EvidenceProvenance {
 export interface AssociateInput extends EvidenceProvenance {
   associate_handle: string;
   relation: string;
+  /** Preserve whether a linked handle is a person or an organization. */
+  kind?: "person" | "org";
   in_cabal_kb?: boolean;
   evidence_url?: string;
   notes?: string;
@@ -295,6 +297,8 @@ export interface AssociateInput extends EvidenceProvenance {
 export interface Associate extends EvidenceProvenance {
   associate_key: string;
   relation: string;
+  /** Preserve whether a linked handle is a person or an organization. */
+  kind?: "person" | "org";
   in_cabal_kb?: boolean;
   evidence_url?: string;
   notes?: string;
@@ -872,7 +876,7 @@ export class Audit {
       ...(row.artifact_verified !== undefined ? { artifact_verified: row.artifact_verified } : {}),
     });
     for (const a of this.associates) {
-      nodes.push({ type: "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
+      nodes.push({ type: a.kind === "org" ? "Company" : "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
       edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation, ...receipt(a, a.evidence_url) });
     }
     for (const v of this.ventures) {
