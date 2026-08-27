@@ -382,6 +382,11 @@ export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): 
     }
     if (!merged.handle && secondary.handle) merged.handle = secondary.handle;
     if (!merged.linkedin && secondary.linkedin) merged.linkedin = secondary.linkedin;
+    if (!merged.officialPortraitUrl && secondary.officialPortraitUrl) {
+      merged.officialPortraitUrl = secondary.officialPortraitUrl;
+      merged.officialPortraitSourceUrl = secondary.officialPortraitSourceUrl;
+      merged.officialPortraitCapturedAt = secondary.officialPortraitCapturedAt;
+    }
     if ((!merged.projects || !merged.projects.length) && secondary.projects?.length) {
       merged.projects = secondary.projects;
       merged.projects_evidence_origin = secondary.projects_evidence_origin;
@@ -1371,6 +1376,11 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         existing.projects = t.projects;
         existing.projects_evidence_origin = t.projects_evidence_origin;
       }
+      if (!existing.officialPortraitUrl && t.officialPortraitUrl) {
+        existing.officialPortraitUrl = t.officialPortraitUrl;
+        existing.officialPortraitSourceUrl = t.officialPortraitSourceUrl;
+        existing.officialPortraitCapturedAt = t.officialPortraitCapturedAt;
+      }
       if (t.artifact_verified === true && existing.artifact_verified !== true) {
         // Promote only the facts the deterministic record actually established.
         // Keeping a model-discovered role while merely swapping its provenance
@@ -1418,6 +1428,9 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       evidence: t.evidence,
       source: t.source ?? "X content",
       sourceUrl: t.sourceUrl,
+      officialPortraitUrl: t.officialPortraitUrl,
+      officialPortraitSourceUrl: t.officialPortraitSourceUrl,
+      officialPortraitCapturedAt: t.officialPortraitCapturedAt,
       projects: t.projects,
       evidence_origin: t.evidence_origin,
       artifact_verified: t.artifact_verified,

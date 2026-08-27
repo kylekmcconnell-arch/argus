@@ -33,6 +33,50 @@ export function trustedOfficialXAvatarUrl(raw?: string | null): string | null {
   }
 }
 
+const unsafeImageHost = (host: string): boolean => {
+  const value = host.toLowerCase();
+  return !value
+    || value === "localhost"
+    || value.endsWith(".localhost")
+    || value.endsWith(".local")
+    || value.endsWith(".internal")
+    || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value)
+    || value.includes(":");
+};
+
+/**
+ * A team portrait is renderable only when the saved row also carries the exact
+ * first-party page that supplied it. The URL is still treated as display-only
+ * evidence; it never proves identity or changes a score by itself.
+ */
+export function trustedOfficialTeamPortraitUrl(
+  raw?: string | null,
+  sourcePage?: string | null,
+): string | null {
+  if (!raw || !sourcePage) return null;
+  try {
+    const image = new URL(raw);
+    const source = new URL(sourcePage);
+    if (
+      image.protocol !== "https:"
+      || source.protocol !== "https:"
+      || image.username
+      || image.password
+      || source.username
+      || source.password
+      || (image.port && image.port !== "443")
+      || (source.port && source.port !== "443")
+      || unsafeImageHost(image.hostname)
+      || unsafeImageHost(source.hostname)
+      || !/\.(?:avif|jpe?g|png|webp)$/i.test(image.pathname)
+    ) return null;
+    image.hash = "";
+    return image.toString();
+  } catch {
+    return null;
+  }
+}
+
 // A team member with a LinkedIn but no X handle still has a face: unavatar's
 // linkedin provider resolves the /in/<slug> profile photo. fallback=false makes
 // a miss return 404 so the Avatar cleanly drops to a letter (not a grey blob).

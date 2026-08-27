@@ -13,6 +13,8 @@ import { useEffect, useRef, useState } from "react";
 import { GithubLogo, LinkedinLogo, LinkSimple, XLogo } from "@phosphor-icons/react";
 import { ProvenanceTag } from "./ProvenanceTag";
 import { buildDossier, type Dossier, type DossierFigure, type DossierSourceRow, type StrengthBand, type KeyMeasure, type TeamMember } from "../lib/dossierModel";
+import { trustedOfficialTeamPortraitUrl } from "../lib/avatars";
+import { Avatar } from "./Avatar";
 import { publicCheckStatus } from "../lib/plainLanguage";
 
 const TINT: Record<string, string> = {
@@ -636,15 +638,13 @@ export function DossierReport({
                   <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                     {d.team.map((m) => (
                       <div key={m.name} className={`panel-inset flex items-start gap-2.5 px-3 py-2.5 ${m.firstParty ? "border-l-2 border-sourced" : "border-l-2 border-unverifiable/50"}`}>
-                        {m.avatarUrl ? (
-                          <img src={m.avatarUrl} alt="" width={40} height={40}
-                            className="team-member-avatar h-10 w-10 shrink-0 rounded-full border border-line object-cover" />
-                        ) : (
-                          <span aria-hidden="true"
-                            className={`team-member-avatar mono flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-[11px] ${m.firstParty ? "border-sourced/40 text-sourced" : "border-unverifiable/40 text-unverifiable"}`}>
-                            {m.name.replace(/^@/, "").charAt(0).toUpperCase()}
-                          </span>
-                        )}
+                        <Avatar
+                          src={trustedOfficialTeamPortraitUrl(m.officialPortraitUrl, m.officialPortraitSourceUrl) ?? m.avatarUrl}
+                          letter={m.name.replace(/^@/, "").charAt(0).toUpperCase()}
+                          size={m.officialPortraitUrl ? 52 : 48}
+                          rounded={m.officialPortraitUrl ? "rounded-xl" : "rounded-full"}
+                          letterClass={`mono text-[11px] ${m.firstParty ? "text-sourced" : "text-unverifiable"}`}
+                        />
                         <div className="min-w-0">
                           <p className="truncate text-[13.5px] font-medium text-ink">{m.name}</p>
                           <p className="mt-0.5 text-[11px] leading-snug text-ink-dim">{m.role}</p>

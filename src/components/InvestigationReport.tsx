@@ -8,7 +8,7 @@ import {
   type WebPerson,
 } from "../lib/investigation";
 import { Avatar } from "./Avatar";
-import { personAvatar, trustedOfficialXAvatarUrl, xAvatar } from "../lib/avatars";
+import { personAvatar, trustedOfficialTeamPortraitUrl, trustedOfficialXAvatarUrl, xAvatar } from "../lib/avatars";
 import { OnChainForensics } from "./OnChainForensics";
 import { deployerRoleLabel } from "../token/audit";
 import { ProjectResearch } from "./ProjectResearch";
@@ -1020,8 +1020,8 @@ export function InvestigationReport({
   // Unified team: members named in the project's X content (associates) merged
   // with people dug up via the web/LinkedIn search, deduped by handle so a
   // pseudonymous handle gets enriched with its real name + LinkedIn.
-  const teamUnified: { name: string; handle?: string; role: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
-    type TeamRow = { name: string; handle?: string; role: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
+  const teamUnified: { name: string; handle?: string; role: string; linkedin?: string; avatarUrl?: string; officialPortraitUrl?: string; officialPortraitSourceUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
+    type TeamRow = { name: string; handle?: string; role: string; linkedin?: string; avatarUrl?: string; officialPortraitUrl?: string; officialPortraitSourceUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
     const map = new Map<string, TeamRow>();
     const findExisting = (person: { name: string; handle?: string; linkedin?: string }) => {
       return [...map.entries()].find(([, row]) => sameTeamIdentity(row, person));
@@ -1039,6 +1039,8 @@ export function InvestigationReport({
         handle: row.handle ?? person.handle,
         linkedin: row.linkedin ?? person.linkedin,
         avatarUrl: row.avatarUrl ?? person.avatarUrl,
+        officialPortraitUrl: row.officialPortraitUrl ?? person.officialPortraitUrl,
+        officialPortraitSourceUrl: row.officialPortraitSourceUrl ?? person.officialPortraitSourceUrl,
         role: !row.role || /^team$/i.test(row.role) ? person.role : row.role,
         sourceUrl: row.sourceUrl ?? person.sourceUrl,
         evidence: row.evidence ?? person.evidence,
@@ -1053,6 +1055,8 @@ export function InvestigationReport({
         role: p.role,
         linkedin: p.linkedin,
         avatarUrl: p.avatarUrl,
+        officialPortraitUrl: p.officialPortraitUrl,
+        officialPortraitSourceUrl: p.officialPortraitSourceUrl,
         sourceUrl: p.sourceUrl,
         evidence: p.evidence,
         developerProfiles: p.developerProfiles,
@@ -1073,8 +1077,8 @@ export function InvestigationReport({
   })();
   // Confirmed team groups contain only grounded project-team artifacts or a
   // direct supplemental team attribution. First-party names render separately.
-  const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
-    type TeamPerson = { name: string; handle?: string; role?: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
+  const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; avatarUrl?: string; officialPortraitUrl?: string; officialPortraitSourceUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
+    type TeamPerson = { name: string; handle?: string; role?: string; linkedin?: string; avatarUrl?: string; officialPortraitUrl?: string; officialPortraitSourceUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
     const people: TeamPerson[] = [];
     const add = (person: TeamPerson) => {
       const existing = people.find((candidate) => sameTeamIdentity(candidate, person));
@@ -1086,6 +1090,8 @@ export function InvestigationReport({
       existing.handle ??= person.handle;
       existing.linkedin ??= person.linkedin;
       existing.avatarUrl ??= person.avatarUrl;
+      existing.officialPortraitUrl ??= person.officialPortraitUrl;
+      existing.officialPortraitSourceUrl ??= person.officialPortraitSourceUrl;
       existing.role = !existing.role || /^team$/i.test(existing.role) ? person.role : existing.role;
       existing.sourceUrl ??= person.sourceUrl;
       existing.evidence ??= person.evidence;
@@ -1093,7 +1099,7 @@ export function InvestigationReport({
       existing.source = mergeTeamSources(existing.source, person.source);
     };
     for (const m of teamUnified) {
-      add({ name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, avatarUrl: m.avatarUrl, sourceUrl: m.sourceUrl, evidence: m.evidence, developerProfiles: m.developerProfiles, source: m.source });
+      add({ name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, avatarUrl: m.avatarUrl, officialPortraitUrl: m.officialPortraitUrl, officialPortraitSourceUrl: m.officialPortraitSourceUrl, sourceUrl: m.sourceUrl, evidence: m.evidence, developerProfiles: m.developerProfiles, source: m.source });
     }
     return people;
   })();
@@ -2236,7 +2242,13 @@ export function InvestigationReport({
                             return (
                             <div key={m.handle ?? m.name} className="team-person-card">
                               <span className="team-person-main">
-                                <Avatar src={trustedOfficialXAvatarUrl(m.avatarUrl) ?? personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={48} rounded="rounded-full" letterClass="text-[13px]" />
+                                <Avatar
+                                  src={trustedOfficialTeamPortraitUrl(m.officialPortraitUrl, m.officialPortraitSourceUrl) ?? trustedOfficialXAvatarUrl(m.avatarUrl) ?? personAvatar(m.handle, m.linkedin)}
+                                  letter={initial(m.name)}
+                                  size={m.officialPortraitUrl ? 56 : 48}
+                                  rounded={m.officialPortraitUrl ? "rounded-xl" : "rounded-full"}
+                                  letterClass="text-[13px]"
+                                />
                                 <span className="text-[15.5px] font-medium text-ink">{m.name}</span>
                                 {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11.5px] text-ink-faint">{m.handle}</span>}
                                 {m.role && <span className="chip tint-signal normal-case tracking-normal">{formatRoleLabel(m.role)}</span>}

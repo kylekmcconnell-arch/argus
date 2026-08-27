@@ -141,6 +141,126 @@ export interface ProfileAnchor {
   index: number;
 }
 
+export interface OfficialPortraitAnchor {
+  /** HTTPS image URL stated directly in the fetched first-party page markup. */
+  url: string;
+  /** Character offset of the image tag in the fetched HTML. */
+  index: number;
+  /** Nearby author-supplied label when present. */
+  label: string;
+}
+
+const PORTRAIT_IMAGE_HINT = /(?:team[-_ ]?(?:image|photo)|avatar|headshot|portrait|profile[-_ ]?(?:image|photo)|person[-_ ]?(?:image|photo)|member[-_ ]?(?:image|photo)|advisor[-_ ]?(?:image|photo)|founder[-_ ]?(?:image|photo))/i;
+const PORTRAIT_FILE = /\.(?:avif|jpe?g|png|webp)(?:$|[?#])/i;
+
+const htmlAttribute = (tag: string, name: string): string => {
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:["']([^"']*)["']|([^\\s>]+))`, "i"));
+  return (match?.[1] ?? match?.[2] ?? "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .trim();
+};
+
+const srcsetCandidate = (value: string): string => {
+  const candidates = value.split(",").map((part) => part.trim().split(/\s+/)[0]).filter(Boolean);
+  return candidates[candidates.length - 1] ?? "";
+};
+
+/**
+ * Extract only portrait-like image tags from a fetched first-party page.
+ * The model never supplies these URLs: the exact tag, URL, and offset all come
+ * from the saved page HTML so an arbitrary search image cannot become a face.
+ */
+export function officialPortraitAnchors(html: string, pageUrl: string): OfficialPortraitAnchor[] {
+  const out: OfficialPortraitAnchor[] = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
+    const tag = match[0];
+    const label = [htmlAttribute(tag, "alt"), htmlAttribute(tag, "title")].filter(Boolean).join(" ");
+    const hintCorpus = [
+      htmlAttribute(tag, "class"),
+      htmlAttribute(tag, "id"),
+      label,
+      htmlAttribute(tag, "data-name"),
+      htmlAttribute(tag, "data-testid"),
+    ].join(" ");
+    const raw = htmlAttribute(tag, "data-src")
+      || htmlAttribute(tag, "data-lazy-src")
+      || htmlAttribute(tag, "src")
+      || srcsetCandidate(htmlAttribute(tag, "srcset"));
+    if (!raw || (!PORTRAIT_IMAGE_HINT.test(hintCorpus) && !PORTRAIT_IMAGE_HINT.test(raw))) continue;
+    try {
+      const url = new URL(raw, pageUrl);
+      const host = url.hostname.toLowerCase();
+      if (
+        url.protocol !== "https:"
+        || url.username
+        || url.password
+        || (url.port && url.port !== "443")
+        || !host
+        || host === "localhost"
+        || host.endsWith(".localhost")
+        || host.endsWith(".local")
+        || host.endsWith(".internal")
+        || !PORTRAIT_FILE.test(url.pathname)
+      ) continue;
+      url.hash = "";
+      const normalized = url.toString();
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push({ url: normalized, index: match.index ?? 0, label });
+    } catch {
+      // Malformed image tags remain ordinary page decoration.
+    }
+    if (out.length >= 80) break;
+  }
+  return out;
+}
+
+/** Bind a named roster row to the nearest portrait-like image in the same page. */
+export function bindOfficialPortrait(
+  name: string,
+  html: string,
+  portraits: readonly OfficialPortraitAnchor[],
+): string | undefined {
+  if (!portraits.length) return undefined;
+  const lower = html.toLowerCase();
+  const normalizedName = name.trim().toLowerCase();
+  const tokens = nameTokens(name);
+  let namePosition = normalizedName ? lower.indexOf(normalizedName) : -1;
+  if (namePosition < 0 && tokens.length) namePosition = lower.indexOf(tokens[0]);
+  if (namePosition < 0) return undefined;
+
+  const ranked = portraits.map((portrait) => {
+    const labelTokens = nameTokens(portrait.label);
+    const filenameTokens = nameTokens(new URL(portrait.url).pathname.split("/").pop() ?? "");
+    const labelMatch = tokens.length > 0 && tokens.every((token) => labelTokens.includes(token));
+    const filenameMatch = tokens.length > 1 && tokens.every((token) => filenameTokens.includes(token));
+    const distance = Math.abs(portrait.index - namePosition);
+    return {
+      portrait,
+      distance,
+      beforeName: portrait.index <= namePosition,
+      score: distance - (labelMatch ? 3000 : 0) - (filenameMatch ? 1200 : 0),
+      strong: labelMatch || filenameMatch,
+    };
+  }).sort((a, b) => a.score - b.score);
+  const strong = ranked.find((candidate) => candidate.strong);
+  if (strong) return strong.portrait.url;
+  // Team cards conventionally place the portrait before the name. Prefer the
+  // nearest preceding portrait so the next card's shorter markup cannot steal
+  // the identity (ANYONE's Webflow srcset makes this exact ordering visible).
+  const preceding = ranked
+    .filter((candidate) => candidate.beforeName && candidate.distance <= 2400)
+    .sort((a, b) => a.distance - b.distance)[0];
+  if (preceding) return preceding.portrait.url;
+  const following = ranked
+    .filter((candidate) => !candidate.beforeName && candidate.distance <= 1000)
+    .sort((a, b) => a.distance - b.distance)[0];
+  return following?.portrait.url;
+}
+
 const PROFILE_ANCHOR =
   /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]{0,200}?)<\/a>/gi;
 
@@ -365,7 +485,15 @@ function recoveredTeamPage(
     return null;
   }
   recordCall("site-fetch", op, 0, `reader_recovery_after_${failureMeta}`, "succeeded");
-  return { url: recovered.url || url, text, html: recovered.text, anchors: profileAnchors(recovered.text) };
+  const sourceUrl = recovered.url || url;
+  return {
+    url: sourceUrl,
+    text,
+    html: recovered.text,
+    anchors: profileAnchors(recovered.text),
+    portraits: officialPortraitAnchors(recovered.text, sourceUrl),
+    capturedAt: recovered.capturedAt,
+  };
 }
 
 async function fetchPage(
@@ -443,7 +571,14 @@ async function fetchPage(
     return null;
   }
   recordCall("site-fetch", op, 0, undefined, "succeeded");
-  return { url: finalUrl, text, html: raw, anchors: profileAnchors(raw) };
+  return {
+    url: finalUrl,
+    text,
+    html: raw,
+    anchors: profileAnchors(raw),
+    portraits: officialPortraitAnchors(raw, finalUrl),
+    capturedAt: new Date().toISOString(),
+  };
 }
 
 const roleEvidencePattern = (role: string): RegExp => {
@@ -486,7 +621,14 @@ const canonicalSourceUrl = (value: string): string | null => {
   }
 };
 
-type TeamPage = { url: string; text: string; html?: string; anchors?: ProfileAnchor[] };
+type TeamPage = {
+  url: string;
+  text: string;
+  html?: string;
+  anchors?: ProfileAnchor[];
+  portraits?: OfficialPortraitAnchor[];
+  capturedAt?: string;
+};
 
 const pageScore = (page: TeamPage) =>
   (/\/(?:team|leadership|founders?|people)(?:[/.?#-]|$)/i.test(page.url) ? 100 : 0)
@@ -565,6 +707,9 @@ async function extractTeamFromPages(
         ?? (sourcePage?.html && sourcePage.anchors
           ? bindProfileAnchor(displayName, sourcePage.html, sourcePage.anchors, "x")
           : undefined);
+      const officialPortraitUrl = sourcePage?.html && sourcePage.portraits
+        ? bindOfficialPortrait(displayName, sourcePage.html, sourcePage.portraits)
+        : undefined;
       if (!sourcePage || !teamMemberIsDirectlySupported(
         sourcePage.text,
         displayName,
@@ -581,6 +726,11 @@ async function extractTeamFromPages(
         evidence: `direct role statement on ${sourcePage.url}`,
         source: sourcePage.url,
         sourceUrl: sourcePage.url,
+        ...(officialPortraitUrl ? {
+          officialPortraitUrl,
+          officialPortraitSourceUrl: sourcePage.url,
+          officialPortraitCapturedAt: sourcePage.capturedAt ?? new Date().toISOString(),
+        } : {}),
       }];
     });
 }

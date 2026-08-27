@@ -42,7 +42,7 @@ import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
 import { ProjectLinks } from "./ProjectLinks";
-import { personAvatar, trustedOfficialXAvatarUrl, xAvatar } from "../lib/avatars";
+import { personAvatar, trustedOfficialTeamPortraitUrl, trustedOfficialXAvatarUrl, xAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletBindingLabel, walletScreenView, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
@@ -3569,7 +3569,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     return (
                       <article key={`${person.name}:${person.handle ?? ""}:${index}`} className="team-person-card panel">
                         <span className="team-person-main">
-                          <Avatar src={trustedOfficialXAvatarUrl(person.avatarUrl) ?? personAvatar(person.handle, person.linkedin)} letter={(person.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={52} rounded="rounded-full" letterClass="text-[13px]" />
+                          <Avatar
+                            src={trustedOfficialTeamPortraitUrl(person.officialPortraitUrl, person.officialPortraitSourceUrl) ?? trustedOfficialXAvatarUrl(person.avatarUrl) ?? personAvatar(person.handle, person.linkedin)}
+                            letter={(person.name.replace(/^@/, "")[0] ?? "?").toUpperCase()}
+                            size={person.officialPortraitUrl ? 60 : 52}
+                            rounded={person.officialPortraitUrl ? "rounded-xl" : "rounded-full"}
+                            letterClass="text-[13px]"
+                          />
                           <span className="text-[16px] font-semibold text-ink">{person.name}</span>
                           {person.handle && <span className="mono text-[12px] text-ink-faint">{person.handle}</span>}
                           <span className="chip tint-signal shrink-0 normal-case tracking-normal">{formatRoleLabel(person.role)}</span>
@@ -4118,7 +4124,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 return (
                 <article key={`${p.name}:${p.handle ?? ""}:${i}`} className="team-person-card">
                     <span className="team-person-main">
-                      <Avatar src={trustedOfficialXAvatarUrl(p.avatarUrl) ?? personAvatar(p.handle, p.linkedin)} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={48} rounded="rounded-full" letterClass="text-[13px]" />
+                      <Avatar
+                        src={trustedOfficialTeamPortraitUrl(p.officialPortraitUrl, p.officialPortraitSourceUrl) ?? trustedOfficialXAvatarUrl(p.avatarUrl) ?? personAvatar(p.handle, p.linkedin)}
+                        letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()}
+                        size={p.officialPortraitUrl ? 56 : 48}
+                        rounded={p.officialPortraitUrl ? "rounded-xl" : "rounded-full"}
+                        letterClass="text-[13px]"
+                      />
                       <span className="text-[15.5px] font-medium text-ink">{p.name}</span>
                       {p.handle && <span className="mono text-[11.5px] text-ink-faint">{p.handle}</span>}
                       <span className="chip tint-signal shrink-0 normal-case tracking-normal">{formatRoleLabel(p.role)}</span>

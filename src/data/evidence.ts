@@ -882,6 +882,12 @@ export interface WebTeamMember {
   /** sha256 of the fetched avatar image bytes. */
   avatarContentHash?: string;
   avatarCapturedAt?: string;
+  /** Portrait bound from the same fetched first-party page that states this person's role. */
+  officialPortraitUrl?: string;
+  /** Exact first-party team/about page whose markup contained the portrait. */
+  officialPortraitSourceUrl?: string;
+  /** Time the first-party page containing the portrait was captured. */
+  officialPortraitCapturedAt?: string;
   followers?: number;
   accountStatus?: "active" | "suspended" | "unavailable" | "temporarily_unavailable";
   enrichmentProvider?: string;

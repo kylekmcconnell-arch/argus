@@ -99,6 +99,10 @@ export interface TeamMember {
    */
   avatarUrl: string | null;
   avatarCapturedAt: string | null;
+  /** Portrait copied from the fetched official team/about page markup. */
+  officialPortraitUrl?: string | null;
+  officialPortraitSourceUrl?: string | null;
+  officialPortraitCapturedAt?: string | null;
   /** True only when a fetched artifact independently verified this person. */
   independentlyConfirmed: boolean;
 }
@@ -625,6 +629,7 @@ function collectTeam(payload: Record<string, unknown>): TeamMember[] {
     const name = str(m.name);
     if (!name) continue;
     const firstParty = str(m.handleProvenance) === "subject_first_party";
+    const independentlyConfirmed = m.artifact_verified === true || m.artifactVerified === true;
     const candidate: TeamMember = {
       name,
       role: str(m.role),
@@ -633,7 +638,10 @@ function collectTeam(payload: Record<string, unknown>): TeamMember[] {
       firstParty,
       avatarUrl: firstParty ? str(m.avatarUrl) || null : null,
       avatarCapturedAt: firstParty ? str(m.avatarCapturedAt) || null : null,
-      independentlyConfirmed: m.artifact_verified === true || m.artifactVerified === true,
+      officialPortraitUrl: independentlyConfirmed ? str(m.officialPortraitUrl) || null : null,
+      officialPortraitSourceUrl: independentlyConfirmed ? str(m.officialPortraitSourceUrl) || null : null,
+      officialPortraitCapturedAt: independentlyConfirmed ? str(m.officialPortraitCapturedAt) || null : null,
+      independentlyConfirmed,
     };
     const identityKeys = teamIdentityKeys(candidate);
     const existingIndex = identityKeys
@@ -656,6 +664,9 @@ function collectTeam(payload: Record<string, unknown>): TeamMember[] {
       independentlyConfirmed: preferred.independentlyConfirmed || secondary.independentlyConfirmed,
       avatarUrl: preferred.avatarUrl ?? secondary.avatarUrl,
       avatarCapturedAt: preferred.avatarCapturedAt ?? secondary.avatarCapturedAt,
+      officialPortraitUrl: preferred.officialPortraitUrl ?? secondary.officialPortraitUrl,
+      officialPortraitSourceUrl: preferred.officialPortraitSourceUrl ?? secondary.officialPortraitSourceUrl,
+      officialPortraitCapturedAt: preferred.officialPortraitCapturedAt ?? secondary.officialPortraitCapturedAt,
       profiles: [...new Map(
         [...preferred.profiles, ...secondary.profiles]
           .map((link) => [`${link.provider}:${link.url.toLowerCase()}`, link]),

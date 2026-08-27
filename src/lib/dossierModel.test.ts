@@ -361,6 +361,35 @@ describe("team enrichment boundary", () => {
     expect(m.avatarUrl).toBeNull();
     expect(m.avatarCapturedAt).toBeNull();
   });
+
+  it("keeps a portrait deterministically bound from the verified official team page", () => {
+    const [m] = withTeam([{
+      name: "Sean Carey",
+      role: "Advisor",
+      artifact_verified: true,
+      evidence_origin: "deterministic",
+      officialPortraitUrl: "https://cdn.prod.website-files.com/anyone/advisor-1.png",
+      officialPortraitSourceUrl: "https://www.anyone.io/about-us",
+      officialPortraitCapturedAt: "2026-08-26T22:00:00.000Z",
+    }]).team;
+    expect(m.firstParty).toBe(false);
+    expect(m.independentlyConfirmed).toBe(true);
+    expect(m.officialPortraitUrl).toContain("advisor-1.png");
+    expect(m.officialPortraitSourceUrl).toBe("https://www.anyone.io/about-us");
+  });
+
+  it("refuses an official portrait field on an unverified model lead", () => {
+    const [m] = withTeam([{
+      name: "Namesake Lead",
+      role: "Advisor",
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      officialPortraitUrl: "https://cdn.example.org/namesake.png",
+      officialPortraitSourceUrl: "https://example.org/team",
+    }]).team;
+    expect(m.officialPortraitUrl).toBeNull();
+    expect(m.officialPortraitSourceUrl).toBeNull();
+  });
 });
 
 describe("live report field names", () => {
