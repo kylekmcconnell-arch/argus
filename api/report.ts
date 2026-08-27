@@ -44,6 +44,22 @@ const CLIENT_METHODOLOGY_VERSION: Record<"person" | "token" | "investigation" | 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 type JsonRecord = Record<string, unknown>;
 
+interface ServerPersonVersion {
+  caseId: string;
+  reportVersionId: string;
+  version: number;
+  payload: JsonRecord;
+}
+
+class PersonTokenEnrichmentError extends Error {
+  constructor(
+    readonly code: "person_token_subject_mismatch" | "person_token_overlay_invalid",
+    readonly status: 400 | 409,
+  ) {
+    super(code);
+  }
+}
+
 interface CaseSubject {
   kind: string;
   ref: string;
@@ -586,7 +602,7 @@ async function attachServerVersion(
   auth: AuthContext,
   ref: string,
   payload: JsonRecord,
-): Promise<{ caseId: string; reportVersionId: string; version: number }> {
+): Promise<ServerPersonVersion> {
   const persistence = asRecord(payload.persistence);
   const versionId = typeof persistence.reportVersionId === "string"
     ? persistence.reportVersionId
@@ -636,14 +652,71 @@ async function attachServerVersion(
     ? version.version
     : 0;
   if (!caseId || !persistedVersion) throw new Error("server report is missing its case receipt");
-  await persistProvenance(
-    credentials,
-    { organizationId: auth.organizationId, reportVersionId: versionId, attestationState: "server_collected" },
-    storedPayload,
-    storedPayload.checkRuns,
-  );
-  await activateReportVersion(credentials, auth.organizationId, versionId);
-  return { caseId, reportVersionId: versionId, version: persistedVersion };
+  return {
+    caseId,
+    reportVersionId: versionId,
+    version: persistedVersion,
+    payload: storedPayload,
+  };
+}
+
+function personTokenEnrichment(
+  storedPayload: JsonRecord,
+  submittedPayload: JsonRecord,
+): JsonRecord | null {
+  if (submittedPayload.threat == null) return null;
+
+  const projectToken = asRecord(storedPayload.projectToken);
+  const threat = asRecord(submittedPayload.threat);
+  const tokenDossier = asRecord(threat.dossier);
+  const threatCall = asRecord(threat.call);
+  const canonicalAddress = typeof projectToken.address === "string"
+    && projectToken.verified === true
+    ? normRef(projectToken.address)
+    : "";
+  const threatAddress = typeof threat.address === "string" ? normRef(threat.address) : "";
+  const dossierAddress = typeof tokenDossier.address === "string" ? normRef(tokenDossier.address) : "";
+
+  if (!canonicalAddress || threatAddress !== canonicalAddress || dossierAddress !== canonicalAddress) {
+    throw new PersonTokenEnrichmentError("person_token_subject_mismatch", 409);
+  }
+
+  const score = tokenDossier.score;
+  const risk = threatCall.risk;
+  const verdict = tokenDossier.verdict;
+  const threatVerdict = threatCall.verdict;
+  if (
+    typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 100
+    || typeof risk !== "number" || !Number.isFinite(risk) || risk < 0 || risk > 100
+    || typeof verdict !== "string" || !verdict.trim() || verdict.length > 40
+    || typeof threatVerdict !== "string" || !["SAFE", "CAUTION", "DANGER", "RUG", "UNKNOWN"].includes(threatVerdict)
+    || !Array.isArray(threat.checks)
+    || !Array.isArray(tokenDossier.axes)
+    || !Array.isArray(tokenDossier.socials)
+    || !Object.keys(asRecord(tokenDossier.safety)).length
+    || typeof threat.scannedAt !== "number" || !Number.isFinite(threat.scannedAt) || threat.scannedAt <= 0
+  ) {
+    throw new PersonTokenEnrichmentError("person_token_overlay_invalid", 400);
+  }
+
+  // The browser may submit only the linked token result. Every project/person
+  // field comes from the exact server-collected immutable version above. Drop
+  // its now-stale persistence receipt: read-time versionContext is the durable
+  // receipt for this newly composed version.
+  const {
+    persistence: _stalePersistence,
+    threat: _priorThreat,
+    threatNote: _priorThreatNote,
+    ...trustedProjectPayload
+  } = storedPayload;
+  const threatNote = typeof submittedPayload.threatNote === "string"
+    ? submittedPayload.threatNote.trim().slice(0, 2_000)
+    : "";
+  return {
+    ...trustedProjectPayload,
+    threat: submittedPayload.threat,
+    ...(threatNote ? { threatNote } : {}),
+  };
 }
 
 function projection(kind: string, payload: unknown): { verdict: string | null; score: number | null } {
@@ -925,19 +998,79 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (kind === "person") {
-        const persisted = await attachServerVersion(
+        const serverVersion = await attachServerVersion(
           credentials,
           auth,
           ref,
           asRecord(body.payload),
         );
-        // The server stream already wrote the immutable payload and latest
-        // projection. Client re-posts may only attach check outcomes.
+
+        let enrichedPayload: JsonRecord | null;
+        try {
+          enrichedPayload = personTokenEnrichment(
+            serverVersion.payload,
+            asRecord(body.payload),
+          );
+        } catch (error) {
+          if (error instanceof PersonTokenEnrichmentError) {
+            res.status(error.status).json({ error: error.code });
+            return;
+          }
+          throw error;
+        }
+
+        if (enrichedPayload) {
+          const derived = projection(kind, enrichedPayload);
+          const persisted = await createImmutableVersion(credentials, auth, {
+            organization_id: auth.organizationId,
+            ref,
+            kind,
+            query: typeof body.query === "string" ? body.query.slice(0, 200) : ref,
+            contributor: auth.displayName.slice(0, 80),
+            created_by: auth.userId,
+            payload: enrichedPayload,
+            verdict: derived.verdict,
+            score: derived.score,
+            attestation_state: "analyst_submitted",
+            ts: new Date().toISOString(),
+          }, {
+            ...body,
+            checkRuns: Array.isArray(serverVersion.payload.checkRuns)
+              ? serverVersion.payload.checkRuns
+              : [],
+            completenessState: serverVersion.payload.completeness_state,
+          });
+          const panelCostToken = issuePanelCostToken(auth.organizationId, persisted.reportVersionId);
+          res.status(200).json({
+            ok: true,
+            reportVersionId: persisted.reportVersionId,
+            caseId: persisted.caseId,
+            version: persisted.version,
+            enriched: true,
+            baseReportVersionId: serverVersion.reportVersionId,
+            ...(panelCostToken ? { panelCostToken } : {}),
+          });
+          return;
+        }
+
+        // No token leg completed. Preserve the already server-attested person
+        // report exactly as collected and keep its existing immutable receipt.
+        await persistProvenance(
+          credentials,
+          {
+            organizationId: auth.organizationId,
+            reportVersionId: serverVersion.reportVersionId,
+            attestationState: "server_collected",
+          },
+          serverVersion.payload,
+          serverVersion.payload.checkRuns,
+        );
+        await activateReportVersion(credentials, auth.organizationId, serverVersion.reportVersionId);
         res.status(200).json({
           ok: true,
-          reportVersionId: persisted.reportVersionId,
-          caseId: persisted.caseId,
-          version: persisted.version,
+          reportVersionId: serverVersion.reportVersionId,
+          caseId: serverVersion.caseId,
+          version: serverVersion.version,
           linked: true,
         });
         return;
