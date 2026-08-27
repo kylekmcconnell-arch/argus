@@ -15126,11 +15126,20 @@ function teamMemberIsDirectlySupported(text2, name, handle, role, projectName2) 
   const identities = [name, handle?.replace(/^@/, "")].filter((value) => Boolean(value?.trim())).map((value) => value.trim().toLowerCase());
   const lower = corpus.toLowerCase();
   const rolePattern = roleEvidencePattern(role);
+  const sectionHeadingSupportsRole = (identityOffset) => {
+    if (!/advisor|adviser/i.test(role)) return false;
+    const before = lower.slice(0, identityOffset);
+    const advisorHeading = Math.max(before.lastIndexOf("our advisors"), before.lastIndexOf("our advisers"));
+    if (advisorHeading < 0) return false;
+    const laterTeamHeading = before.lastIndexOf("our team");
+    return advisorHeading > laterTeamHeading;
+  };
   for (const identity of identities) {
     let offset = lower.indexOf(identity);
     while (offset >= 0) {
       const window = corpus.slice(Math.max(0, offset - 220), Math.min(corpus.length, offset + identity.length + 220));
-      if (rolePattern.test(window) && (!projectName2 || window.toLowerCase().includes(projectName2.toLowerCase()))) return true;
+      const roleSupported = rolePattern.test(window) || sectionHeadingSupportsRole(offset);
+      if (roleSupported && (!projectName2 || window.toLowerCase().includes(projectName2.toLowerCase()))) return true;
       offset = lower.indexOf(identity, offset + identity.length);
     }
   }

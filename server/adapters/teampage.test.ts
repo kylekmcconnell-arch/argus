@@ -23,7 +23,8 @@ describe("official project team document discovery", () => {
   it("keeps Sergey Ilin's full biography while rejecting its organization sentence fragment as a person", async () => {
     const sourceUrl = "https://anyone.io/about-us";
     const exactBiography = "Founder: Bloxroute. Senior lead: Forte Group.";
-    const html = `<html><body><section><h2>Our Advisors</h2><article><h3>Sergey Ilin</h3><p>${exactBiography}</p></article></section>${"Anyone Protocol advisor team. ".repeat(20)}</body></html>`;
+    const earlierAdvisors = `<article><h3>Sean Carey</h3><p>Co-founder, Helium Systems.</p></article>${"industry background and project context ".repeat(18)}`;
+    const html = `<html><body><section><h2>Our Advisors</h2>${earlierAdvisors}<article><h3>Sergey Ilin</h3><p>${exactBiography}</p></article></section>${"Anyone Protocol team. ".repeat(20)}</body></html>`;
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       if (String(input) === sourceUrl) return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
       return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
