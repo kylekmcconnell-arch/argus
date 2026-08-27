@@ -7,12 +7,14 @@ import { isWatched, toggleWatch } from "../lib/watchlist";
 import { deployerRoleLabel, sameWalletAddress, type TokenDossier } from "../token/audit";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { SocialActivityPanel } from "./SocialActivityPanel";
+import { SubjectAccusationStage } from "./SubjectAccusationStage";
+import { EARN_SUBJECT_LEADS, isCanonicalEarnToken } from "../data/earnReport";
 import { EmbeddedThreatScan } from "./ThreatScanPage";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
-import { tokenChecks } from "../lib/scanChecklist";
+import { decisionCriticalChecks, tokenChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness, type DecisionReadiness } from "../lib/decisionReadiness";
 import { applyReportCheckContract, hasExplicitReportCheckContract } from "../lib/reportCheckContract";
 import { publicCaseLabel } from "../lib/caseLabel";
@@ -52,15 +54,16 @@ import {
 } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
-import { ReportExperienceLayout, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
+import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ReportActionsRow } from "./ReportActionsRow";
 import { DimensionChapters } from "./DimensionChapters";
 import { compositionHeadline, orderByPlainAxis, plainAxisLabel, tokenDimensionChapters } from "../lib/dimensionChapters";
-import { deriveDecisionDiscovery, deriveNoticedSignals, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
+import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, isConcentratedLiquidityPool, top10ShareFromRows } from "../lib/reportInsights";
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
+import { useReportLane } from "../reports/shared/ReportLaneContext";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -140,12 +143,15 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 }
 
 export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief, shareView = false }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
+  const reportLane = useReportLane();
+  const isEarn = isCanonicalEarnToken(d.chain, d.address);
   const arkhamEnabled = arkhamProviderEnabled();
   const arkhamDeployer = arkhamEnabled && d.deployer && !sameWalletAddress(d.deployer, d.address) ? d.deployer : null;
   const versionContext = d.versionContext ?? d.viewVersionContext;
   const caseLabel = publicCaseLabel(versionContext?.caseId);
   const embeddedFacet = Boolean(d.viewVersionContext || d.viewPersistence);
   const livePersistence = d.viewPersistence ?? d.persistence;
+  const reportStyle = reportLane.definition.presentationStyle;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
@@ -300,6 +306,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   };
   const recordedChecks = checks.filter((check) => ["confirmed", "reported", "finding", "checked-empty"].includes(check.status));
   const gapChecks = checks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
+  const governingChecks = new Set(decisionCriticalChecks(checks));
+  const requiredGapChecks = gapChecks.filter((check) => governingChecks.has(check));
+  const supplementalGapChecks = gapChecks.filter((check) => !governingChecks.has(check));
   const supportingFindings = d.findings.filter((finding) => finding.tone === "good");
   const limitingFindings = d.findings.filter((finding) => finding.tone !== "good");
   // Checked-empty rows are coverage, never support: a completed no-result
@@ -318,10 +327,24 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       .map((check) => ({ label: check.label, detail: check.note })),
     ...(readiness.status !== "ready" ? [{ label: readiness.title, detail: readiness.guidance }] : []),
   ].slice(0, 6);
-  const nextStepItems = gapChecks.slice(0, 6).map((check) => ({
-    label: `Resolve ${check.label.toLowerCase()}`,
-    detail: check.note,
-  }));
+  const nextStepItems = [
+    ...requiredGapChecks.map((check) => ({
+      label: `Finish required check: ${check.label.toLowerCase()}`,
+      detail: check.note,
+    })),
+    ...supplementalGapChecks.map((check) => ({
+      label: `Optional follow-up: ${check.label.toLowerCase()}`,
+      detail: check.note,
+    })),
+  ].slice(0, 6);
+  const verdictArgument = deriveVerdictArgument({
+    verdict: presentedVerdict,
+    supports: supportItems.map((item) => item.label),
+    concerns: concernItems.map((item) => item.label),
+    capReason: d.capApplied ? `The score is capped: ${d.capApplied.replace(/_/g, " ")}` : null,
+    nextChecks: nextStepItems.map((item) => item.label),
+    applicableChecks: readiness.applicable,
+  });
   const verifiedItems = recordedChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
   const capturedAt = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
@@ -397,7 +420,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         </div>
       </header>
 
-      <div className="report-frame">
+      <div className={`report-frame report-style-${reportStyle}`} data-report-style={reportStyle}>
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -465,11 +488,18 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         <ReportDisclaimer className="mt-2 max-w-3xl" />
 
         <InvestigationDecisionCanvas
+          presentationStyle={reportStyle}
+          subjectName={d.name || `$${d.symbol}`}
+          subjectSummary={d.cg?.description}
+          reportSummary={d.headline}
           verdictLabel={presentationMeta.label}
           score={d.score}
+          scoreLabel="Token safety score"
+          scoreContext="Contract, tradeability, liquidity, holders, market data and sanctions."
           scoreIsProvisional={readiness.status !== "ready"}
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
+          argument={verdictArgument}
           discovery={materialChangeDiscovery ?? controlPathDiscovery ?? decisionDiscovery}
           decisionBoundary={d.decisionBoundary}
           decisionBoundaryEvidenceHref={d.decisionBoundary ? decisionBoundaryHref(d.decisionBoundary, "token") : undefined}
@@ -482,20 +512,22 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           successful={readiness.successful}
           applicable={readiness.applicable}
           checkScopeLabel="Token safety checks"
+          openItemsLabel={requiredGapChecks.length > 0
+            ? "Required checks still open"
+            : supplementalGapChecks.length > 0
+              ? "Optional follow-up research"
+              : "What is still open"}
           capturedAt={capturedAt}
           composition={compositionRows.length > 0 ? compositionRows : undefined}
         />
 
+        {reportLane.definition.navigation === "sticky" && (
+          <ReportStickyTableOfContents items={reportNavItems} />
+        )}
+
         <ReportExperienceLayout
           items={reportNavItems}
-          status={{
-            label: presentationMeta.label,
-            detail: readiness.status === "ready" ? "Required safety checks are finished." : readiness.title,
-            meta: `${readiness.successful}/${readiness.applicable} checks finished`,
-            tone: decisionCanvasTone,
-          }}
-          nextStep={nextStepItems[0]?.label}
-          nextStepHref="#token-methodology"
+          showGuideNavigation={reportLane.definition.navigation === "guide"}
         >
         <TokenStory dossier={d} />
 
@@ -514,7 +546,21 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           />
         </div>
 
-        {d.socialActivity && <SocialActivityPanel snapshot={d.socialActivity} className="mt-4" panelCostToken={panelCostToken} />}
+        {d.socialActivity && (
+          <SocialActivityPanel
+            snapshot={d.socialActivity}
+            className="mt-4"
+            panelCostToken={panelCostToken}
+            afterActivity={isEarn ? (
+              <SubjectAccusationStage leads={EARN_SUBJECT_LEADS} subject="@earnonhood" />
+            ) : undefined}
+          />
+        )}
+        {isEarn && !d.socialActivity && (
+          <div id="subject-leads" className="panel mt-4 scroll-mt-28 px-5 py-5">
+            <SubjectAccusationStage leads={EARN_SUBJECT_LEADS} subject="@earnonhood" />
+          </div>
+        )}
 
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         {showCurrentIntelligence && panelCostToken && (

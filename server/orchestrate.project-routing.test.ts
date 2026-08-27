@@ -11,6 +11,7 @@ import {
   protocolRecordMatchesCanonicalToken,
   projectVerifiedBasicFacts,
   providerBackedRoles,
+  shouldCollectSubjectOrientation,
 } from "./orchestrate";
 import {
   hydrateOfficialProjectIdentityFromFacts,
@@ -297,6 +298,76 @@ describe("provider-backed project routing", () => {
     ]);
   });
 
+  it("still collects a product explanation after deterministic PROJECT routing", () => {
+    expect(shouldCollectSubjectOrientation([SubjectClass.PROJECT])).toBe(true);
+    expect(shouldCollectSubjectOrientation([])).toBe(true);
+    expect(shouldCollectSubjectOrientation([SubjectClass.FOUNDER])).toBe(false);
+  });
+
+  it("routes Fedi as a project and runs the product-understanding pass", () => {
+    const evidence = resolvedProjectProfile(
+      "Fedi is a privacy-first Bitcoin wallet with chat and community spaces| Support: @askfedi Nostr: npub1uq70uqgas9pyhds2zt57kr9se8rg3s68ztphjnq82ts8rzeknmeql7u0c2",
+      "https://www.fedi.xyz/",
+    );
+    evidence.profile.display_name = "Fedi";
+    evidence.profile.site_substance_status = "live";
+
+    const roles = providerBackedRoles(evidence);
+    expect(roles).toEqual([SubjectClass.PROJECT]);
+    expect(shouldCollectSubjectOrientation(roles, evidence)).toBe(true);
+    expect(axisCatalog(roles).map(({ axis }) => axis)).toEqual([
+      "P1_team_and_identity",
+      "P2_product_substance",
+      "P3_token_conduct",
+      "P4_backing_and_partners",
+      "P5_traction_and_liveness",
+      "P6_transparency_integrity",
+    ]);
+  });
+
+  it("rechecks a weak MEMBER-only route when official organization evidence exists", () => {
+    const evidence = resolvedProjectProfile("Contributor tools for community coordination.", "https://example.org/");
+    evidence.profile.site_substance_status = "live";
+
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.MEMBER]);
+    expect(shouldCollectSubjectOrientation([SubjectClass.MEMBER], evidence)).toBe(true);
+
+    evidence.subjectOrientation = {
+      kind: "PROJECT",
+      what: "A coordination product for online communities.",
+      audience: "community operators",
+      boundHandle: "@world_xyz",
+      boundDomain: "example.org",
+      sourceUrls: ["https://x.com/world_xyz", "https://example.org/"],
+    };
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+  });
+
+  it("uses a bound live site plus a confidently classified logo to resolve a weak member conflict", () => {
+    const evidence = resolvedProjectProfile("Contributor tools for community coordination.", "https://example.org/");
+    evidence.profile.site_substance_status = "live";
+    evidence.profileAuthenticity = {
+      provider: "grok-vision",
+      capturedAt: "2026-08-26T17:30:00.000Z",
+      classification: "logo_or_cartoon",
+      confidence: 0.96,
+      isRealPerson: false,
+      flag: false,
+      tells: ["brand mark"],
+      note: "The profile image is a brand logo.",
+    };
+
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+
+    evidence.profileAuthenticity = {
+      ...evidence.profileAuthenticity,
+      classification: "real_candid",
+      confidence: 0.96,
+      isRealPerson: true,
+    };
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.MEMBER]);
+  });
+
   it.each([
     "the onchain prediction market",
     "a decentralized exchange",
@@ -333,6 +404,27 @@ describe("provider-backed project routing", () => {
       "P5_traction_and_liveness",
       "P6_transparency_integrity",
     ]);
+  });
+
+  it("routes an organization bio with one explicit CA as PROJECT even when fund wording is present", () => {
+    const evidence = emptyEvidence("@strategicsuperr");
+    evidence.profile.display_name = "Strategic Super Reserve SSR";
+    evidence.profile.bio = "The Strategic Super Reserve by @EnigmaFund Venture Capital: Multichain DTFs to support builders & communities. CA: BpdHpqznEgYPXZNrJVRZvBhdWoafYLVVuLxTQo34pump";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-26T11:47:27.000Z";
+
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+  });
+
+  it("does not treat an unlabeled wallet in a fund bio as a project identity", () => {
+    const evidence = emptyEvidence("@actualfund");
+    evidence.profile.bio = "Venture Capital. Treasury wallet 0x6982508145454Ce325dDbE47a25d4ec3d2311933";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-08-26T11:47:27.000Z";
+
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.INVESTOR]);
   });
 
   it("routes a person with a cryptic bio to FOUNDER on a verified founder fact", () => {

@@ -2,7 +2,7 @@
 // @ts-expect-error -- test-only access to the tracked source list.
 import { execFileSync } from "node:child_process";
 // @ts-expect-error -- test-only access to checked-in source files.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 
@@ -27,7 +27,8 @@ describe("ARGUS UI copy policy", () => {
     const trackedFiles = String(execFileSync("git", ["ls-files"], { cwd: repoRoot, encoding: "utf8" }));
     const files: string[] = trackedFiles
       .split("\n")
-      .filter((file: string) => /^(?:src|api|server)\/.+\.tsx?$/.test(file) || file === "middleware.ts");
+      .filter((file: string) => /^(?:src|api|server)\/.+\.tsx?$/.test(file) || file === "middleware.ts")
+      .filter((file: string) => existsSync(new URL(file, repoRoot)));
     const violations: string[] = [];
 
     for (const file of files) {

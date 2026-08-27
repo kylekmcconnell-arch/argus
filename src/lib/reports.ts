@@ -91,9 +91,10 @@ export function reportChecks(
 ): ScanCheck[] {
   if (kind === "token") {
     const dossier = payload as TokenDossier;
-    return dossier.versionContext
+    const checks = dossier.versionContext
       ? dossier.versionContext.checks.map((check) => ({ ...check }))
       : tokenChecks(dossier);
+    return applyReportCheckContract("token", checks);
   }
   if (kind === "investigation") {
     const investigation = payload as Investigation;
@@ -102,13 +103,13 @@ export function reportChecks(
       : tokenChecks(investigation.token);
     // Credit org-side outcomes the bound project scan recorded in this same
     // payload; without a confirmed canonical binding this is a no-op.
-    return reconcileInvestigationChecks(
+    return applyReportCheckContract("investigation", reconcileInvestigationChecks(
       base,
       investigation.token.address,
       investigation.projectAccount,
       investigation.projectAccountAudit,
       investigation.projectAccountBinding,
-    );
+    ));
   }
   if (kind === "person") {
     const dossier = payload as Dossier;

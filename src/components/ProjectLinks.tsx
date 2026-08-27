@@ -144,6 +144,7 @@ export function ProjectLinks({
 
   const primary = items.find((item) => item.pri === 0);
   const resources = primary ? items.filter((item) => item !== primary) : items;
+  const primaryHost = primary ? new URL(primary.url).hostname.replace(/^www\./, "") : null;
   if (!items.length && !address) return null;
   const groupCount = Number(Boolean(primary)) + Number(resources.length > 0) + Number(Boolean(address));
   const layout = groupCount === 3
@@ -163,7 +164,7 @@ export function ProjectLinks({
     >
       {primary && (
         <div className="project-identity-group">
-          <div className="project-identity-label">Project</div>
+          <div className="project-identity-label">Web &amp; product</div>
           <a
             href={primary.url}
             target="_blank"
@@ -171,8 +172,13 @@ export function ProjectLinks({
             title={primary.url}
             className="project-identity-primary"
           >
-            <GlobeSimple size={23} weight="duotone" aria-hidden />
-            <span className="min-w-0 flex-1 truncate">{primary.label}</span>
+            <span className="project-identity-favicon" aria-hidden="true">
+              <img src={`https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(primaryHost ?? primary.url)}`} alt="" referrerPolicy="no-referrer" />
+            </span>
+            <span className="project-identity-primary-copy min-w-0 flex-1">
+              <strong className="truncate">{primary.label}</strong>
+              <small>Open the official first-party surface</small>
+            </span>
             <ArrowSquareOut size={16} weight="bold" aria-hidden />
           </a>
         </div>

@@ -157,6 +157,7 @@ function render(report: TokenDossier): void {
 
 beforeEach(() => {
   vi.stubEnv("VITE_ARKHAM_PROVIDER_ENABLED", "true");
+  window.history.replaceState(null, "", "/");
   harness.clipboard.mockReset().mockResolvedValue(undefined);
   harness.livePanel.mockReset();
   harness.askReport.mockReset();
@@ -178,6 +179,42 @@ afterEach(() => {
 });
 
 describe("token report supplemental evidence boundary", () => {
+  it("renders only the canonical Style 2 report without a style selector", () => {
+    render(dossier());
+
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
+    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.textContent).toContain("The state of the house");
+  });
+
+  it("ignores a legacy Style 1 deep link and keeps the canonical report", () => {
+    window.history.replaceState(null, "", "/?s=%24ARG&kind=token&reportStyle=1");
+    render(dossier());
+    expect(container.querySelector('header [aria-label="Report style"]')).toBeNull();
+    expect(container.querySelector(".report-frame.report-style-2")).not.toBeNull();
+    expect(container.textContent).toContain("The state of the house");
+  });
+
+  it("keeps a complete six-check token report complete when project graph and creator follow-ups are open", () => {
+    render(dossier({
+      versionContext: {
+        ...versionContext,
+        checks: [
+          ...versionContext.checks.filter((check) => check.checkId !== "trust-graph-connections"),
+          { checkId: "trust-graph-connections", label: "Trust-graph reconciliation", status: "unknown", decisionCritical: true },
+          { checkId: "deployer-trail-evm", label: "Creator wallet details", status: "unknown", decisionCritical: true },
+        ],
+      },
+    }));
+
+    const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
+    expect(decisionCanvas?.textContent).toContain("6/6 token safety checks complete");
+    expect(decisionCanvas?.textContent).not.toContain("provisional");
+    expect(decisionCanvas?.textContent).toContain("Optional follow-up research");
+    expect(decisionCanvas?.textContent).toContain("Optional follow-up: creator wallet details");
+    expect(decisionCanvas?.textContent).not.toContain("Required checks still open");
+  });
+
   it.each([
     ["QUTRON", "Qutron"],
     ["PROLOGUE", "Prologue"],
@@ -190,12 +227,13 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain(`$${symbol}`);
-    expect(container.textContent).toContain("What this report means");
+    expect(container.textContent).toContain("The state of the house");
     expect(container.querySelector('a[href^="https://dexscreener.com/search?q="]')?.textContent).toBe("Dexscreener");
     const decisionCanvas = container.querySelector('[data-canonical-decision-brief="true"]');
     expect(decisionCanvas?.textContent).toContain("88");
     expect(decisionCanvas?.textContent).toContain("/ 100");
-    expect(decisionCanvas?.textContent).toContain("7/7 token safety checks complete");
+    expect(decisionCanvas?.textContent).toContain("6/6 token safety checks complete");
+    expect(decisionCanvas?.textContent).toContain("Token safety score");
     expect(container.querySelector('[aria-label="Safety check status"]')).toBeNull();
   });
 
@@ -207,7 +245,7 @@ describe("token report supplemental evidence boundary", () => {
       reportVersionId: versionContext.reportVersionId,
     }));
 
-    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report guide"]');
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report table of contents"]');
     expect(nav).not.toBeNull();
     const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
       .map((link) => link.getAttribute("href"));

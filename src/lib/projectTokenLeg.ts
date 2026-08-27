@@ -18,6 +18,35 @@ const EVM_CA = /0x[a-fA-F0-9]{40}/;
 // Base58 mint, matched only as a standalone word (no base58 chars on either
 // side) so prose and URLs never false-positive.
 const SOL_WORD = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/;
+const DECLARED_CA = /(?:^|[^A-Za-z0-9])(?:ca|c\.a\.|contract(?:\s+address)?|token\s+contract|mint(?:\s+address)?)\s*[:=]\s*(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/gi;
+
+/**
+ * Return the one contract the account explicitly labels as its own token.
+ *
+ * A bare address is enough to launch the non-governing threat sidecar, but it
+ * is not enough to change the subject methodology: people also publish wallet
+ * and donation addresses. Routing changes only when the provider-frozen bio
+ * uses an explicit first-party label such as `CA:` or `contract address:` and
+ * names exactly one distinct contract. Multiple declarations remain ambiguous
+ * and require an investigation seeded by an exact address.
+ */
+export function declaredTokenFromBio(bio: string): TokenCandidate | null {
+  const candidates = [...(bio ?? "").matchAll(DECLARED_CA)].flatMap((match): TokenCandidate[] => {
+    const address = match[1] ?? "";
+    if (/^0x[a-fA-F0-9]{40}$/.test(address)) {
+      return [{ address, via: "evm", source: "the contract explicitly declared in the subject's own bio" }];
+    }
+    if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
+      return [{ address, via: "solana", source: "the contract explicitly declared in the subject's own bio" }];
+    }
+    return [];
+  });
+  const unique = [...new Map(candidates.map((candidate) => [
+    candidate.via === "evm" ? candidate.address.toLowerCase() : candidate.address,
+    candidate,
+  ])).values()];
+  return unique.length === 1 ? unique[0] : null;
+}
 
 export function tokenFromBio(bio: string): TokenCandidate | null {
   const b = bio ?? "";

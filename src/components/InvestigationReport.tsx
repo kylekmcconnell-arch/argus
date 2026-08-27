@@ -8,7 +8,7 @@ import {
   type WebPerson,
 } from "../lib/investigation";
 import { Avatar } from "./Avatar";
-import { xAvatar, personAvatar } from "../lib/avatars";
+import { personAvatar, trustedOfficialXAvatarUrl, xAvatar } from "../lib/avatars";
 import { OnChainForensics } from "./OnChainForensics";
 import { deployerRoleLabel } from "../token/audit";
 import { ProjectResearch } from "./ProjectResearch";
@@ -38,6 +38,7 @@ import { arkhamProviderEnabled } from "../lib/providerCapabilities";
 import { TokenSnapshotVisuals } from "./TokenSnapshotVisuals";
 import { LpCustody } from "./LpCustody";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
+import { marketSizeBand } from "../lib/marketPosition";
 import { UsageVisuals } from "./UsageVisuals";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { RingAlert } from "./RingAlert";
@@ -70,7 +71,7 @@ import { SecondOpinion } from "./SecondOpinion";
 import { ExpandableText } from "./ExpandableText";
 import { ReportDisclaimer } from "./ReportDisclaimer";
 import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
-import { ReportExperienceLayout, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
+import { ReportExperienceLayout, ReportStickyTableOfContents, type ReportCanvasNavItem } from "./ReportCanvasPrimitives";
 import { ScoreComposition } from "./ScoreComposition";
 import { ScoreRing } from "./ScoreRing";
 import { DimensionChapters } from "./DimensionChapters";
@@ -83,6 +84,7 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { SocialActivityPanel } from "./SocialActivityPanel";
+import { reportOpeningNarrative } from "../lib/reportNarrative";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import { visibleInvestigativeLeads } from "../lib/subjectLeads";
 import { formatRoleLabel, plainLanguageSummary, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
@@ -103,6 +105,7 @@ import { ArgusEyeAssistant } from "./ArgusEyeAssistant";
 import { projectWebSurfaces } from "../lib/projectWebSurfaces";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import type { DecisionLensId } from "../intelligence/types";
+import { useReportLane } from "../reports/shared/ReportLaneContext";
 
 // Kept only as a rollback seam while the canonical decision brief settles.
 // This is not a runtime/user flag and must remain false until the legacy hero
@@ -739,9 +742,11 @@ export function InvestigationReport({
   /** Read-only share capability view: every workspace action is absent. */
   shareView?: boolean;
 }) {
+  const reportLane = useReportLane();
   const arkhamEnabled = arkhamProviderEnabled();
   const [spent, setSpent] = useState(0);
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
+  const reportStyle = reportLane.definition.presentationStyle;
   const [watched, setWatched] = useState(() => isWatched(inv.token.address));
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const versionContext = inv.versionContext;
@@ -776,6 +781,11 @@ export function InvestigationReport({
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
   const { token, projectX, siteUrl, recon, projectAccount, founders, deployerTrail } = inv;
+  // Social conversation is project-level evidence. Older investigation saves
+  // often persisted it on the embedded project-account dossier while the
+  // report looked only at token.socialActivity, which is why Prologue had no
+  // panel even though @fablesfi had been scanned.
+  const socialActivity = token.socialActivity ?? projectAccount?.socialActivity;
   const accountReport = projectAccount?.report;
   const accountLeadSubject = accountReport?.handle || projectAccount?.handle || projectX || "";
   const accountLeads = accountReport
@@ -787,6 +797,17 @@ export function InvestigationReport({
     : { subjectLeads: [], relatedEntityLeads: [], subjectAdverseLeads: [] };
   const accountGoverning = accountReport?.role_reports?.find((rr) => rr.role === accountReport.governing_role);
   const accountAxes = accountGoverning ? Object.entries(accountGoverning.axes ?? {}) : [];
+  const projectCompositionRows = accountAxes.map(([axis, value]) => ({
+    axis,
+    label: axisLabel(axis),
+    score: value.score,
+    weight: value.weight,
+    rationale: value.rationale,
+    supportCount: value.evidenceRefs?.length,
+    counterCount: value.counterEvidenceRefs?.length,
+    questionCount: value.gaps?.length,
+    evidenceHref: "#investigation-evidence" as const,
+  }));
   const tokenCompositionRows = orderByPlainAxis((token.axes ?? []).map((a) => ({
     axis: a.key,
     label: plainAxisLabel(a.key, a.label),
@@ -908,6 +929,17 @@ export function InvestigationReport({
       ? "This project account review is missing one or more required checks. Open the full report to see what is still needed."
       : projectAccount.headline
     : undefined;
+  const projectSubjectSummary = projectAccount
+    ? reportOpeningNarrative({
+        name: projectAccount.display_name || projectAccount.handle,
+        handle: projectAccount.handle,
+        bio: projectAccount.bio,
+        ...(projectAccount.website ? { website: projectAccount.website } : {}),
+        ...(projectAccount.subjectOrientation ? { subjectOrientation: projectAccount.subjectOrientation } : {}),
+        ...(projectAccount.basicFacts?.length ? { basicFacts: projectAccount.basicFacts } : {}),
+        ...(projectAccount.projectToken ? { projectToken: projectAccount.projectToken } : {}),
+      })
+    : token.cg?.description;
   const marketCap = token.mcap ?? token.cg?.mcapUsd ?? undefined;
   const fullyDilutedValue = token.fdv
     ?? projectAccount?.projectToken?.fdvUsd
@@ -988,8 +1020,8 @@ export function InvestigationReport({
   // Unified team: members named in the project's X content (associates) merged
   // with people dug up via the web/LinkedIn search, deduped by handle so a
   // pseudonymous handle gets enriched with its real name + LinkedIn.
-  const teamUnified: { name: string; handle?: string; role: string; linkedin?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
-    type TeamRow = { name: string; handle?: string; role: string; linkedin?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
+  const teamUnified: { name: string; handle?: string; role: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
+    type TeamRow = { name: string; handle?: string; role: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
     const map = new Map<string, TeamRow>();
     const findExisting = (person: { name: string; handle?: string; linkedin?: string }) => {
       return [...map.entries()].find(([, row]) => sameTeamIdentity(row, person));
@@ -1006,6 +1038,7 @@ export function InvestigationReport({
         name: humanTeamName(row, person),
         handle: row.handle ?? person.handle,
         linkedin: row.linkedin ?? person.linkedin,
+        avatarUrl: row.avatarUrl ?? person.avatarUrl,
         role: !row.role || /^team$/i.test(row.role) ? person.role : row.role,
         sourceUrl: row.sourceUrl ?? person.sourceUrl,
         evidence: row.evidence ?? person.evidence,
@@ -1019,6 +1052,7 @@ export function InvestigationReport({
         handle: p.handle,
         role: p.role,
         linkedin: p.linkedin,
+        avatarUrl: p.avatarUrl,
         sourceUrl: p.sourceUrl,
         evidence: p.evidence,
         developerProfiles: p.developerProfiles,
@@ -1039,8 +1073,8 @@ export function InvestigationReport({
   })();
   // Confirmed team groups contain only grounded project-team artifacts or a
   // direct supplemental team attribution. First-party names render separately.
-  const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
-    type TeamPerson = { name: string; handle?: string; role?: string; linkedin?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
+  const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
+    type TeamPerson = { name: string; handle?: string; role?: string; linkedin?: string; avatarUrl?: string; sourceUrl?: string; evidence?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
     const people: TeamPerson[] = [];
     const add = (person: TeamPerson) => {
       const existing = people.find((candidate) => sameTeamIdentity(candidate, person));
@@ -1051,6 +1085,7 @@ export function InvestigationReport({
       existing.name = humanTeamName(existing, person);
       existing.handle ??= person.handle;
       existing.linkedin ??= person.linkedin;
+      existing.avatarUrl ??= person.avatarUrl;
       existing.role = !existing.role || /^team$/i.test(existing.role) ? person.role : existing.role;
       existing.sourceUrl ??= person.sourceUrl;
       existing.evidence ??= person.evidence;
@@ -1058,7 +1093,7 @@ export function InvestigationReport({
       existing.source = mergeTeamSources(existing.source, person.source);
     };
     for (const m of teamUnified) {
-      add({ name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, sourceUrl: m.sourceUrl, evidence: m.evidence, developerProfiles: m.developerProfiles, source: m.source });
+      add({ name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, avatarUrl: m.avatarUrl, sourceUrl: m.sourceUrl, evidence: m.evidence, developerProfiles: m.developerProfiles, source: m.source });
     }
     return people;
   })();
@@ -1380,7 +1415,7 @@ export function InvestigationReport({
     { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
     { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
     { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
-    ...(token.socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
+    ...(socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
     ...(accountLeads.subjectLeads.length > 0 ? [{ href: "#subject-leads" as const, label: "Accusations", icon: <WarningCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
     { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
     ...(hasConnectionsChapter ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
@@ -1479,7 +1514,7 @@ export function InvestigationReport({
         </div>
       )}
 
-      <div className="report-frame">
+      <div className={`report-frame report-style-${reportStyle}`} data-report-style={reportStyle}>
         {versionContext && (
           <div className="mt-4">
             <SnapshotEvidenceControl
@@ -1566,8 +1601,14 @@ export function InvestigationReport({
           )}
 
           <InvestigationDecisionCanvas
+            presentationStyle={reportStyle}
+            subjectName={projectAccount?.display_name || projectAccount?.handle || token.name || `$${token.symbol}`}
+            subjectSummary={projectSubjectSummary}
+            reportSummary={projectAccountHeadline}
             verdictLabel={readiness.status === "ready" ? observedTokenMeta.label : readinessLabel}
             score={token.score}
+            scoreLabel="Token safety score"
+            scoreContext="Contract, tradeability, liquidity, holders, market data and sanctions."
             scoreIsProvisional={readiness.status !== "ready"}
             favorable={favorableVerdict}
             verdictTone={decisionCanvasTone}
@@ -1594,6 +1635,14 @@ export function InvestigationReport({
             methodologyHref="#investigation-methodology"
             challengeAnchorId={shareView ? null : "investigation-challenge"}
             composition={tokenCompositionRows.length > 0 ? tokenCompositionRows : undefined}
+            secondaryScore={projectAccount && accountReport ? {
+              label: "Project diligence score",
+              score: typeof accountReport.governing_score === "number" ? accountReport.governing_score : null,
+              verdictLabel: verdictMeta(accountReport.composite_verdict).label,
+              context: "Team, product, token conduct, backers, traction and transparency.",
+              composition: projectCompositionRows,
+              unavailableCopy: "The linked project report did not publish a diligence score.",
+            } : undefined}
           />
 
           {LEGACY_REPORT_HERO_ENABLED && <div className={`investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 ${readiness.status === "ready" ? "" : "xl:grid-cols-3"}`}>
@@ -1727,8 +1776,8 @@ export function InvestigationReport({
               </div>
               <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 xl:grid-cols-2" aria-label="Market size details">
                 <div>
-                  <dt className="stat-label">Market rank</dt>
-                  <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg?.rank}` : "Not available"}</dd>
+                  <dt className="stat-label">{token.cg?.rank ? "Market rank" : "Market size band"}</dt>
+                  <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg?.rank}` : marketSizeBand(marketCap) ?? "Not available"}</dd>
                 </div>
                 <div>
                   <dt className="stat-label" title="Estimated value if every token were available to trade.">Value if all circulate</dt>
@@ -1760,7 +1809,7 @@ export function InvestigationReport({
               Two recorded scores stay two honest strips, never blended. The
               full ledger is progressively disclosed after the decision brief. */}
           {token.axes?.length > 0 && (
-            <details id="composition" className="evidence-appendix af-doc group mt-8 scroll-mt-28">
+          <details id="composition" open={reportStyle === 2 ? true : undefined} className="evidence-appendix af-doc group mt-8 scroll-mt-28">
               <summary className="evidence-appendix-summary cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                 <div>
                   <p className="af-sec-label">Evidence ledger</p>
@@ -1898,18 +1947,16 @@ export function InvestigationReport({
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 
+        {reportLane.definition.navigation === "sticky" && (
+          <ReportStickyTableOfContents
+            items={reportNavItems}
+            stickyOffsetClass="top-[101px] sm:top-[65px]"
+          />
+        )}
+
         <ReportExperienceLayout
           items={reportNavItems}
-          label="Report guide"
-          mobileOffsetClass="top-[101px] sm:top-[65px]"
-          status={{
-            label: readiness.status === "ready" ? observedTokenMeta.label : readinessLabel,
-            detail: readiness.status === "ready" ? "Required safety checks are finished." : readinessLabel,
-            meta: `${readiness.successful}/${readiness.applicable} checks finished`,
-            tone: decisionCanvasTone,
-          }}
-          nextStep={nextStepItems[0]?.label}
-          nextStepHref="#investigation-methodology"
+          showGuideNavigation={reportLane.definition.navigation === "guide"}
         >
 
         {projectAccount?.intelligence && (
@@ -1996,8 +2043,21 @@ export function InvestigationReport({
               protocolTvl={projectAccount?.protocolTvl}
               canonicalGeckoId={projectAccount?.projectToken?.coingeckoId}
             />
-            {token.socialActivity && (
-              <SocialActivityPanel snapshot={token.socialActivity} className="mt-3" panelCostToken={panelCostToken} />
+            {socialActivity && (
+              <SocialActivityPanel
+                snapshot={socialActivity}
+                className="mt-3"
+                panelCostToken={panelCostToken}
+                afterActivity={accountLeads.subjectLeads.length > 0 ? (
+                  <div id="subject-leads" className="scroll-mt-28">
+                    <SubjectAccusationStage
+                      leads={accountLeads.subjectLeads}
+                      subject={accountLeadSubject}
+                      panelCostToken={panelCostToken}
+                    />
+                  </div>
+                ) : undefined}
+              />
             )}
           </div>
         </div>
@@ -2008,17 +2068,13 @@ export function InvestigationReport({
             title="Who is behind this project"
             description="Team identity is a core diligence question. Start with the people and roles supported by sources, then review the project account and token creator."
           />
-          {accountLeads.subjectLeads.length > 0 && (
+          {accountLeads.subjectLeads.length > 0 && !socialActivity && (
             <div id="subject-leads" className="mb-4 scroll-mt-28">
-              <h3 className="text-[16px] font-semibold text-ink">What people accused</h3>
-              <p className="mt-1 text-[12.5px] text-ink-faint">these name the subject directly · never counted in this score</p>
-              <div className="mt-3">
-                <SubjectAccusationStage
-                  leads={accountLeads.subjectLeads}
-                  subject={accountLeadSubject}
-                  panelCostToken={panelCostToken}
-                />
-              </div>
+              <SubjectAccusationStage
+                leads={accountLeads.subjectLeads}
+                subject={accountLeadSubject}
+                panelCostToken={panelCostToken}
+              />
             </div>
           )}
           <div id="investigation-evidence" className="scroll-mt-28 grid gap-3 lg:grid-cols-2">
@@ -2180,7 +2236,7 @@ export function InvestigationReport({
                             return (
                             <div key={m.handle ?? m.name} className="team-person-card">
                               <span className="team-person-main">
-                                <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={40} rounded="rounded-full" letterClass="text-[13px]" />
+                                <Avatar src={trustedOfficialXAvatarUrl(m.avatarUrl) ?? personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={48} rounded="rounded-full" letterClass="text-[13px]" />
                                 <span className="text-[15.5px] font-medium text-ink">{m.name}</span>
                                 {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11.5px] text-ink-faint">{m.handle}</span>}
                                 {m.role && <span className="chip tint-signal normal-case tracking-normal">{formatRoleLabel(m.role)}</span>}

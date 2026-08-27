@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- motion math is exported for deterministic tests */
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { verdictMeta } from "../lib/verdict";
 import { compositionRowColor, type CompositionRow } from "./ScoreComposition";
@@ -27,10 +28,14 @@ export const SCORE_RING_ENTRANCE_MS = {
   verdict: 420,
 } as const;
 
-export type ScoreRingCompositionRow = Pick<CompositionRow, "axis" | "score" | "weight" | "tone">;
+export type ScoreRingCompositionRow = Pick<CompositionRow, "axis" | "score" | "weight" | "tone"> & {
+  /** Human label announced while this segment is filling. */
+  label?: string;
+};
 
 export type ScoreRingPiece = {
   axis: string;
+  label: string;
   score: number;
   from: number;
   to: number;
@@ -71,6 +76,7 @@ export function scoreRingCompositionPieces(rows: ScoreRingCompositionRow[]): Sco
     const length = Math.min(score, remaining);
     pieces.push({
       axis: row.axis,
+      label: row.label?.trim() || row.axis,
       score,
       from: cursor,
       to: cursor + length,
@@ -203,6 +209,7 @@ export function ScoreRing({
   bands = false,
   color,
   composition,
+  fallbackLabel = "Saved score",
   children,
 }: {
   score: number | null;
@@ -213,6 +220,8 @@ export function ScoreRing({
   color?: string;
   /** Real ScoreComposition rows. Each row.score is an arc segment out of 100. */
   composition?: ScoreRingCompositionRow[] | undefined;
+  /** What the single fallback arc represents when dimension rows were not saved. */
+  fallbackLabel?: string;
   /** Hero lockup copy whose `.score-ring-verdict` waits for the numeral. */
   children?: ReactNode;
 }) {
@@ -241,6 +250,9 @@ export function ScoreRing({
       return;
     }
 
+    // Reset the entrance whenever the score composition changes; subsequent
+    // updates happen only from observer/animation callbacks.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setElapsed(-1);
     let raf = 0;
     let started = false;
@@ -308,6 +320,14 @@ export function ScoreRing({
     ? 0
     : 1;
   const displayed = motion.numeral;
+  const firstIncompletePiece = motion.fills.findIndex((fill) => fill < 1);
+  const activePieceIndex = motion.phase === "pieces" && pieces.length > 0
+    ? firstIncompletePiece >= 0 ? firstIncompletePiece : pieces.length - 1
+    : -1;
+  const activePiece = activePieceIndex >= 0 ? pieces[activePieceIndex] : null;
+  const activePiecePoints = activePiece
+    ? Math.round(activePiece.score * (motion.fills[activePieceIndex] ?? 0))
+    : 0;
 
   const ring = (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
@@ -358,6 +378,26 @@ export function ScoreRing({
           />
         )}
       </svg>
+      {hero && motion.phase === "track" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center" data-score-ring-stage="composition">
+          <span className="mono text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-faint">{showPieces ? "Building score" : "Preparing score"}</span>
+          <span className="mt-1 max-w-[13rem] text-[13px] font-medium leading-tight text-ink-dim">{showPieces ? "Score composition" : fallbackLabel}</span>
+        </div>
+      )}
+      {hero && activePiece && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-10 text-center" data-score-ring-active-label={activePiece.axis}>
+          <span className="mono text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Adding dimension</span>
+          <span className="mt-1 max-w-[14rem] text-[14px] font-semibold leading-tight text-ink">{activePiece.label}</span>
+          <span className="mono mt-1 text-[10px] text-ink-dim">+{activePiecePoints} / {activePiece.score} pts</span>
+        </div>
+      )}
+      {hero && !showPieces && motion.phase === "pieces" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center px-10 text-center" data-score-ring-active-label="score">
+          <span className="mono text-[9px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Filling score</span>
+          <span className="mt-1 max-w-[13rem] text-[14px] font-semibold leading-tight text-ink">{fallbackLabel}</span>
+          <span className="mono mt-1 text-[10px] text-ink-dim">{Math.round((score ?? 0) * motion.scoreArc)} / {score ?? 0} pts</span>
+        </div>
+      )}
       <div
         className="score-ring-numeral absolute inset-0 flex flex-col items-center justify-center"
         style={{ opacity: numeralOpacity }}

@@ -1,0 +1,24 @@
+# Report presentation lanes are visible to both owners but independently edited.
+/src/reports/kyle/ @kylekmcconnell-arch
+/src/reports/enigma/ @Enigma-Fund
+
+# Shared report semantics, evidence composition, and core renderers require both.
+/src/reports/shared/ @kylekmcconnell-arch @Enigma-Fund
+/src/components/Report.tsx @kylekmcconnell-arch @Enigma-Fund
+/src/components/TokenReport.tsx @kylekmcconnell-arch @Enigma-Fund
+/src/components/InvestigationReport.tsx @kylekmcconnell-arch @Enigma-Fund
+/src/components/ReportCanvasPrimitives.tsx @kylekmcconnell-arch @Enigma-Fund
+/src/components/InvestigationDecisionCanvas.tsx @kylekmcconnell-arch @Enigma-Fund
+/src/components/ScoreComposition.tsx @kylekmcconnell-arch @Enigma-Fund
+/src/components/ScoreRing.tsx @kylekmcconnell-arch @Enigma-Fund
+/src/components/SocialActivityPanel.tsx @kylekmcconnell-arch @Enigma-Fund
+/src/components/SubjectAccusationStage.tsx @kylekmcconnell-arch @Enigma-Fund
+/src/index.css @kylekmcconnell-arch @Enigma-Fund
+/src/main.tsx @kylekmcconnell-arch @Enigma-Fund
+
+# Ownership enforcement itself is controlled by the repository owner.
+/.github/CODEOWNERS @kylekmcconnell-arch
+/.github/workflows/report-lane-ownership.yml @kylekmcconnell-arch
+/scripts/check-report-lane-ownership.mjs @kylekmcconnell-arch
+/scripts/report-lane-ownership-policy.mjs @kylekmcconnell-arch
+/scripts/report-lane-ownership-policy.node-tests.mjs @kylekmcconnell-arch

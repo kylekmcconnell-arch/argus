@@ -7,7 +7,7 @@
 // the whole batch, seconds instead of a 3-minute audit each. The scores/verdicts
 // are untouched; only the taxonomy filing changes.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { claudeMessages, claudeToolInput, grokChat, parseJsonObject, providerFallbacksEnabled } from "./_llm";
+import { claudeMessages, claudeToolInput, grokChat, parseJsonObject, providerFallbacksEnabled } from "./_llm.js";
 
 export const config = { maxDuration: 60 };
 

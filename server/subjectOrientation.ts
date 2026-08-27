@@ -12,7 +12,7 @@ import { grokSearch } from "./adapters/x";
 const RECENT_ACTIVITY_CAP = 24;
 const RECENT_ACTIVITY_ITEM_CHARS = 500;
 const SELF_POST_SAMPLE_CHARS = 6000;
-const WHAT_MAX_CHARS = 240;
+const WHAT_MAX_CHARS = 360;
 const QUOTE_MAX_CHARS = 280;
 const MENTIONED_HANDLE_CAP = 8;
 const ORIENTATION_TIMEOUT_MS = 45_000;
@@ -92,7 +92,14 @@ const ORIENTATION_SYSTEM = [
   "You MAY x_search that exact @handle and fetch the official site host from the packet.",
   "Do not open-web fish other domains or invent handles.",
   "Answer: What is this? Who is it for? Is it a product/protocol/company brand (PROJECT), a person who founds or builds (FOUNDER), a capital allocator (INVESTOR), or unknown (UNKNOWN)?",
-  "One-sentence what from the packet plus live X of THIS handle. audience is who it is for, or \"\".",
+  "Write what as polished report-opening copy, not a transcript of the X bio: one or two compact sentences in plain English from the packet, official site, and live X of THIS handle.",
+  "Write with category fluency for a reader who already understands the field: identify the entity in the vocabulary its users would use, the core job it performs, and why someone uses it. Think of explaining the Yankees to a baseball fan as an MLB team with a competitive role and fan experience, not as an official website or social account.",
+  "First decide whether the bound subject is an organization/product brand or an individual. Words describing users or features, such as community, chat, fans, members, or contributors, do not make a brand account a person.",
+  "Lead with the product or protocol function. Then state its intended user, network, mechanism, or token role only when the bound artifacts support it.",
+  "For a PROJECT, what must explain a concrete user action or product mechanism such as trading, lending, borrowing, staking, supplying liquidity, using a vault, or operating software. Merely saying that a project has an official site, exists on a chain, or is linked to a token is not a product explanation.",
+  "When the official site contains a multi-product application, summarize the actual first-party product suite rather than describing site ownership or repeating the homepage slogan.",
+  "Never copy slogans, emoji separators, @handles, URLs, or contract addresses into what. Do not discuss the ARGUS score or make an investment recommendation in what.",
+  "audience is who it is for, or \"\".",
   "Quote @handles only when they appear in the packet artifacts or in live x_search of THIS subject. Never from a display name alone.",
   "Do not invent a token, contract address, or legal name.",
   "Do not treat display name as identity. The bind keys are the twitterapi handle and the official website host in the packet.",

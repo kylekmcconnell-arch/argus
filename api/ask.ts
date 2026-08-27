@@ -26,7 +26,7 @@ import {
   grokChat,
   grokUsageFromChat,
   providerFallbacksEnabled,
-} from "./_llm";
+} from "./_llm.js";
 import {
   buildEyeQuestionTelemetry,
   claudeUsageFromMessages,
@@ -34,7 +34,7 @@ import {
   publicEyeTelemetry,
   type EyeProvider,
   type EyeUsage,
-} from "./_eyeTelemetry";
+} from "./_eyeTelemetry.js";
 import { authorizeGapInvestigation } from "../src/lib/gapInvestigation.js";
 
 // Exact-version storage verification performs bounded organization-scoped reads

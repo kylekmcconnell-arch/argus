@@ -8,6 +8,7 @@ import { SessionExpiryNotice } from './components/SessionExpiryNotice.tsx'
 import { FeedbackButton } from './components/FeedbackButton.tsx'
 import { installSessionExpiryWatch } from './lib/sessionExpiry.ts'
 import { installPrintTheme } from './lib/printTheme.ts'
+import { ReportLaneProvider } from './reports/shared/ReportLaneContext.tsx'
 
 // Development-only visual harness. It is lazy so the fixture never rejoins the production report chunk.
 // eslint-disable-next-line react-refresh/only-export-components
@@ -40,6 +41,10 @@ const PublicAccessPreview = lazy(() => import('./dev/PublicAccessPreview.tsx').t
 const ReportClarityPreview = lazy(() => import('./dev/ReportClarityPreview.tsx').then((module) => ({ default: module.ReportClarityPreview })))
 // eslint-disable-next-line react-refresh/only-export-components
 const TrustGraphPreview = lazy(() => import('./dev/TrustGraphPreview.tsx').then((module) => ({ default: module.TrustGraphPreview })))
+// eslint-disable-next-line react-refresh/only-export-components
+const EarnReportStyle2Preview = lazy(() => import('./components/EarnReportStyle2.tsx').then((module) => ({ default: module.EarnReportStyle2 })))
+// eslint-disable-next-line react-refresh/only-export-components
+const DualScorePreview = lazy(() => import('./dev/DualScorePreview.tsx').then((module) => ({ default: module.DualScorePreview })))
 
 // Observe 401s from ARGUS API routes so an expired session is stated once
 // instead of surfacing as a page of quietly dead panels.
@@ -70,7 +75,8 @@ const JoinPage = lazy(() => import('./components/PublicGrowthPages.tsx').then((m
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AppErrorBoundary>
+    <ReportLaneProvider>
+      <AppErrorBoundary>
       {showArgusEyePreview ? (
         <Suspense fallback={null}><ArgusEyePreview /></Suspense>
       ) : showProvenancePreview ? (
@@ -101,6 +107,10 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><ReportClarityPreview /></Suspense>
       ) : designPreview === 'trust-graph' ? (
         <Suspense fallback={null}><TrustGraphPreview /></Suspense>
+      ) : designPreview === 'earn-report-style-2' ? (
+        <Suspense fallback={null}><EarnReportStyle2Preview /></Suspense>
+      ) : designPreview === 'earn-dual-score' ? (
+        <Suspense fallback={null}><DualScorePreview /></Suspense>
       ) : sharedReportToken ? (
         <Suspense fallback={null}><SharedReportView token={sharedReportToken} /></Suspense>
       ) : publicView === 'leaderboard' ? (
@@ -116,6 +126,7 @@ createRoot(document.getElementById('root')!).render(
           <App />
         </AuthGate>
       )}
-    </AppErrorBoundary>
+      </AppErrorBoundary>
+    </ReportLaneProvider>
   </StrictMode>,
 )

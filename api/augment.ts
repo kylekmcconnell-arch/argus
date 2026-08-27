@@ -13,7 +13,7 @@
 //      a human approves/denies in AdminOps. Correct-but-unprovable never auto-
 //      publishes, and it's never silently dropped.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { claudeMessages, grokChat, parseJsonObject, providerFallbacksEnabled } from "./_llm";
+import { claudeMessages, grokChat, parseJsonObject, providerFallbacksEnabled } from "./_llm.js";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {

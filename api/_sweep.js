@@ -1746,7 +1746,11 @@ async function runTokenAudit(input, emit, opts) {
   else if (pc24 >= 300 && liquidityUsd < 1e5) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity. This is a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
   if (!opts?.skipSim) {
     if (cg && !cg.listed) {
-      findings.push({ claim: "Not listed on CoinGecko. No independent market-data corroboration is available.", tone: "warn", source: "coingecko" });
+      findings.push({
+        claim: "No CoinGecko asset was matched. DEX market and trading data are still on record, but a global market-cap rank is not available.",
+        tone: "warn",
+        source: "coingecko + dexscreener"
+      });
     } else if (cg) {
       findings.push({ claim: `Corroborated on CoinGecko${cg.rank ? ` (rank #${cg.rank})` : ""}, ${cg.cexCount} centralized market${cg.cexCount === 1 ? "" : "s"}.`, tone: "good", source: "coingecko" });
       if (cg.mcapUsd && fdv && fdv > cg.mcapUsd * 3) {
@@ -2460,7 +2464,10 @@ var TOKEN_REQUIRED_CHECK_IDS = /* @__PURE__ */ new Set([
   "holder-distribution",
   "wallet-clustering",
   "market-intelligence",
-  "ofac-sanctions-address",
+  "ofac-sanctions-address"
+]);
+var INVESTIGATION_REQUIRED_CHECK_IDS = /* @__PURE__ */ new Set([
+  ...TOKEN_REQUIRED_CHECK_IDS,
   "trust-graph-connections"
 ]);
 var TOKEN_REQUIRED_CHECK_LABELS = Object.freeze({
@@ -2478,7 +2485,8 @@ var TOKEN_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
   "bytecode-fingerprint-evm",
   "documents-audits",
   "news-press",
-  "github-forensics"
+  "github-forensics",
+  "trust-graph-connections"
 ]);
 var PERSON_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
   "profile-photo-authenticity",
@@ -2490,10 +2498,11 @@ var PERSON_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
   "investor-fund-scale"
 ]);
 function applyReportCheckContract(kind, checks) {
+  const requiredIds = kind === "investigation" ? INVESTIGATION_REQUIRED_CHECK_IDS : TOKEN_REQUIRED_CHECK_IDS;
   const normalized = checks.map((check) => {
     const checkId = check.checkId?.trim() ?? "";
     if (kind === "token" || kind === "investigation") {
-      if (checkId && TOKEN_REQUIRED_CHECK_IDS.has(checkId)) {
+      if (checkId && requiredIds.has(checkId)) {
         return { ...check, decisionCritical: true };
       }
       if (checkId && TOKEN_SUPPLEMENTAL_CHECK_IDS.has(checkId)) {
@@ -2512,7 +2521,7 @@ function applyReportCheckContract(kind, checks) {
   });
   if (kind === "person") return normalized;
   const present = new Set(normalized.map((check) => check.checkId).filter(Boolean));
-  const missingRequired = [...TOKEN_REQUIRED_CHECK_IDS].filter((checkId) => !present.has(checkId)).map((checkId) => ({
+  const missingRequired = [...requiredIds].filter((checkId) => !present.has(checkId)).map((checkId) => ({
     checkId,
     label: TOKEN_REQUIRED_CHECK_LABELS[checkId] ?? checkId,
     status: "unknown",
@@ -2524,7 +2533,8 @@ function applyReportCheckContract(kind, checks) {
 function hasExplicitReportCheckContract(kind, checks) {
   if (kind === "token" || kind === "investigation") {
     const ids = new Set(checks.map((check) => check.checkId).filter(Boolean));
-    return [...TOKEN_REQUIRED_CHECK_IDS].every((checkId) => ids.has(checkId));
+    const requiredIds = kind === "investigation" ? INVESTIGATION_REQUIRED_CHECK_IDS : TOKEN_REQUIRED_CHECK_IDS;
+    return [...requiredIds].every((checkId) => ids.has(checkId));
   }
   return checks.length > 0 && checks.every((check) => typeof check.decisionCritical === "boolean") && checks.some((check) => check.decisionCritical === true);
 }
@@ -2533,18 +2543,19 @@ function hasExplicitReportCheckContract(kind, checks) {
 function reportChecks(kind, payload) {
   if (kind === "token") {
     const dossier = payload;
-    return dossier.versionContext ? dossier.versionContext.checks.map((check) => ({ ...check })) : tokenChecks(dossier);
+    const checks = dossier.versionContext ? dossier.versionContext.checks.map((check) => ({ ...check })) : tokenChecks(dossier);
+    return applyReportCheckContract("token", checks);
   }
   if (kind === "investigation") {
     const investigation = payload;
     const base = investigation.versionContext ? investigation.versionContext.checks.map((check) => ({ ...check })) : tokenChecks(investigation.token);
-    return reconcileInvestigationChecks(
+    return applyReportCheckContract("investigation", reconcileInvestigationChecks(
       base,
       investigation.token.address,
       investigation.projectAccount,
       investigation.projectAccountAudit,
       investigation.projectAccountBinding
-    );
+    ));
   }
   if (kind === "person") {
     const dossier = payload;

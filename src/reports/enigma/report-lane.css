@@ -1,0 +1,6 @@
+/* Enigma-owned report presentation overrides belong here.
+   Scope every selector to [data-report-lane="enigma"]. */
+
+[data-report-lane="enigma"] {
+  --report-lane-accent: var(--signal);
+}

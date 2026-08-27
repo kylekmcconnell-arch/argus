@@ -691,6 +691,23 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(founder.subject_class).not.toBeNull();
   });
 
+  it("recognizes a wallet brand without mistaking its community feature for a person", () => {
+    const result = classifySubject(
+      "Fedi is a privacy-first Bitcoin wallet with chat and community spaces| Support: @askfedi",
+    );
+
+    expect(result.subject_class).toBe(SubjectClass.PROJECT);
+    expect(result.applicable_classes).toContain(SubjectClass.PROJECT);
+    expect(result.applicable_classes).not.toContain(SubjectClass.MEMBER);
+  });
+
+  it("requires person-role context before community language selects MEMBER", () => {
+    expect(classifySubject("Chat and community spaces for baseball fans").applicable_classes)
+      .not.toContain(SubjectClass.MEMBER);
+    expect(classifySubject("Community manager at a Bitcoin company").applicable_classes)
+      .toContain(SubjectClass.MEMBER);
+  });
+
   it("ADVISOR advised a rug with allocation -> capped", () => {
     const a = new Audit("@advisor_x", { subject_class: SubjectClass.ADVISOR });
     a.setIdentity("Confirmed");
