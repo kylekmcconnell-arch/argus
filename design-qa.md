@@ -55,6 +55,49 @@ final result: passed
 
 ---
 
+# Report typography accessibility QA
+
+## Artifacts
+
+- Source visual truth: `/private/tmp/argus-report-type.ZKOrOV/.design-qa/production-verdict-before.jpg`
+- Rendered implementation: `/private/tmp/argus-report-type.ZKOrOV/.design-qa/readable-type-after.png`
+- Combined report-crop comparison: `/private/tmp/argus-report-type.ZKOrOV/.design-qa/typography-verdict-before-after.png`
+- Browser viewport: 1280 × 720 CSS pixels at device density 1
+- Source and implementation pixels: 1280 × 720 each
+- Comparison normalization: both captures were cropped to the verdict region and normalized to a 1020 × 540 comparison panel
+- State: light-theme Kyle verdict with two score rings; the implementation uses fixture scores while preserving the production structure and content hierarchy
+
+## Full-view comparison evidence
+
+The production capture showed readable headlines but compressed secondary copy: 9–11px mono labels, 10–12px score annotations, and pale gray explanatory text. The implementation retains the same editorial hierarchy and two-ring composition while raising body copy to 15.5–16px, supporting evidence to 13–14.5px, and micro labels to an 11px minimum.
+
+## Focused region comparison evidence
+
+The verdict crop contains the report overline, saved-report metadata, thesis, score-ring labels, score context, completion labels, and the three fact columns. These are the highest-density type tiers in the opening and were large enough to judge at the normalized crop, so an additional detail crop was not needed.
+
+## Fidelity surfaces
+
+- Fonts and typography: existing serif, sans, and mono families remain unchanged; only undersized report tiers were raised, with line heights increased for supporting copy.
+- Spacing and layout rhythm: the two score rings, headline measure, and fact grid remain intact at 1280px. Larger copy wraps naturally without collision in the verified opening and score preview.
+- Colors and visual tokens: report-scoped dim and faint text are darker in light mode and brighter in dark mode; semantic pass, caution, and fail colors are unchanged.
+- Image quality and asset fidelity: no image assets changed.
+- Copy and content: no report copy, score, evidence, or navigation content changed.
+
+## Findings
+
+- No actionable P0, P1, or P2 typography or layout issues remain in the verified desktop verdict and score states.
+- P3: dense tables may become taller because source notes now use a readable minimum size; this is intentional and preserves all content.
+
+## Comparison history
+
+- Initial finding: supporting report text fell below a comfortable reading floor and relied on low-contrast gray.
+- Fix applied: Kyle-report contrast tokens, a utility-size floor, and explicit score, identity, people, and editorial-canvas sizing within Kyle's presentation lane.
+- Post-fix evidence: normalized verdict comparison, full score-card preview, 107 focused tests, TypeScript, lint, and production build all passed.
+
+final result: passed
+
+---
+
 # Content-sized resource links QA
 
 ## Artifacts
