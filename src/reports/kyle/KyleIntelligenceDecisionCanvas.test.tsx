@@ -70,8 +70,8 @@ describe("Kyle intelligence report opening", () => {
       favorable
       concerns={[]}
       composition={[
-        { axis: "team", label: "Team & leadership", score: 15, weight: 16, rationale: "The roster is deeply sourced.", supportCount: 12 },
-        { axis: "product", label: "Product & execution", score: 20, weight: 20, rationale: "The product is live.", supportCount: 2 },
+        { axis: "team", label: "Team & leadership", score: 9, weight: 16, rationale: "The roster is deeply sourced.", supportCount: 8 },
+        { axis: "product", label: "Product & execution", score: 20, weight: 24, rationale: "The product is live.", supportCount: 4 },
       ]}
     />));
 

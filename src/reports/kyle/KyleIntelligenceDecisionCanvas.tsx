@@ -131,7 +131,7 @@ function verdictHeadline(
   unresolvedCount: number,
 ): string {
   const strongest = [...rows]
-    .filter((row) => row.weight > 0 && row.score / row.weight >= 0.65)
+    .filter((row) => row.weight > 0 && (row.supportCount ?? 0) > 0)
     .sort((left, right) => {
       const supportDifference = (right.supportCount ?? 0) - (left.supportCount ?? 0);
       if (supportDifference !== 0) return supportDifference;
