@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import type { GithubAssessment } from "../../data/evidence";
 import type { SocialActivitySnapshot } from "../../data/socialActivity";
+import { ReportStickyTableOfContents, type ReportCanvasNavItem } from "../../components/ReportCanvasPrimitives";
 import { KyleIntelligenceDecisionCanvas } from "./KyleIntelligenceDecisionCanvas";
 import { KyleGithubSynthesis } from "./KyleGithubSynthesis";
 import { KyleSocialSynthesis } from "./KyleSocialSynthesis";
@@ -45,6 +46,16 @@ const githubPreview: GithubAssessment = {
   summary: "Recent original work is visible.",
 };
 
+const previewNavItems: ReportCanvasNavItem[] = [
+  { href: "#report-summary", label: "Decision" },
+  { href: "#composition", label: "Score" },
+  { href: "#dossier-product", label: "Web & product" },
+  { href: "#identity-evidence", label: "People" },
+  { href: "#social-activity", label: "Social" },
+  { href: "#relationships", label: "Connections" },
+  { href: "#evidence-ledger", label: "Evidence & method" },
+];
+
 export function KyleIntelligencePreview() {
   useEffect(() => {
     const previous = document.documentElement.dataset.reportLane;
@@ -58,6 +69,7 @@ export function KyleIntelligencePreview() {
   return (
     <main className="min-h-screen bg-void px-5 py-8 sm:px-10 lg:px-16">
       <div className="mx-auto max-w-[1240px]" data-report-style="2">
+        <ReportStickyTableOfContents items={previewNavItems} />
         <KyleIntelligenceDecisionCanvas
           subjectName="Fedi"
           subjectSummary="Fedi is a privacy-first Bitcoin wallet with chat, community custody, multispend accounts, and mini-app spaces designed for communities coordinating payments and local financial tools."
@@ -113,10 +125,54 @@ export function KyleIntelligencePreview() {
           ]}
         />
         <div data-report-experience-shell="true" className="space-y-10 py-16">
-          <KyleSocialSynthesis snapshot={socialPreview} />
-          <KyleGithubSynthesis assessment={githubPreview} />
+          <section id="dossier-product" className="story-chapter report-section scroll-mt-28" aria-labelledby="preview-product-title">
+            <p className="eyebrow text-signal-lift">Web &amp; product</p>
+            <h2 id="preview-product-title" className="story-chapter-title mt-2 text-ink">A live Bitcoin wallet built around private community coordination.</h2>
+            <p className="story-chapter-description mt-3 max-w-3xl text-ink-dim">ARGUS keeps the official website, product surfaces, legal entity, funding record, and development evidence together here. The editorial conclusion sits above the same underlying checks and source links.</p>
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              <div className="panel p-4"><p className="eyebrow">Product</p><strong className="mt-2 block text-ink">Wallet, chat and community spaces</strong><p className="mt-2 text-[13px] leading-relaxed text-ink-dim">Community custody, multispend accounts and mini-app spaces are described on the live product surface.</p></div>
+              <div className="panel p-4"><p className="eyebrow">Company</p><strong className="mt-2 block text-ink">Fedi, Inc.</strong><p className="mt-2 text-[13px] leading-relaxed text-ink-dim">A source-backed legal entity and a documented $17M Series A remain in the complete record.</p></div>
+              <div className="panel p-4"><p className="eyebrow">Development</p><strong className="mt-2 block text-ink">Active original work</strong><p className="mt-2 text-[13px] leading-relaxed text-ink-dim">Recent repositories establish maintenance more clearly than ecosystem adoption.</p></div>
+            </div>
+            <KyleGithubSynthesis assessment={githubPreview} />
+          </section>
+
+          <section id="identity-evidence" className="story-chapter report-section scroll-mt-28" aria-labelledby="preview-people-title">
+            <header className="report-section-heading">
+              <div><p className="eyebrow text-signal-lift">People &amp; control</p><h2 id="preview-people-title" className="story-chapter-title mt-2 text-ink">Named leadership first. The complete roster remains underneath.</h2><p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">The Kyle layer summarizes the team without deleting identity cards, role sources, continuity checks, or unresolved candidates.</p></div>
+              <span className="verdict-pill tint-signal">11 verified · 3 to verify</span>
+            </header>
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              {[
+                ["ON", "Obi Nwosu", "Founder", "Source-backed leadership identity"],
+                ["FH", "Frank Hinek", "CTO", "Current technical leadership"],
+                ["JM", "Justin Moon", "Cofounder", "Additional role verification open"],
+              ].map(([initials, name, role, note]) => (
+                <article key={name} className="panel flex gap-3 p-4">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-line bg-panel-2 text-[12px] font-semibold text-ink">{initials}</span>
+                  <span><strong className="block text-ink">{name}</strong><small className="mt-0.5 block text-ink-dim">{role}</small><span className="mt-2 block text-[12px] leading-relaxed text-ink-faint">{note}</span></span>
+                </article>
+              ))}
+            </div>
+            <details open className="kyle-people-disclosure"><summary><span><strong>Complete people and control record</strong><small>Profiles, source links, continuity checks and unresolved leadership claims stay in the report.</small></span><span className="mono">14 records</span></summary><div className="panel p-4 text-[13px] leading-relaxed text-ink-dim">In a saved report, every original identity card and its underlying evidence renders here. This preview shows the presentation hierarchy without substituting fixture names for live scan evidence.</div></details>
+          </section>
+
+          <section id="social-activity" className="story-chapter report-section scroll-mt-28" aria-labelledby="preview-social-title">
+            <p className="eyebrow text-signal-lift">Social activity</p>
+            <h2 id="preview-social-title" className="story-chapter-title mt-2 text-ink">Interpretation first. Raw matched posts still follow.</h2>
+            <KyleSocialSynthesis snapshot={socialPreview} />
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {(socialPreview.mentioners ?? []).map((post) => <article key={post.postId} className="panel p-4"><strong className="text-ink">{post.handle}</strong><p className="mt-2 text-[13px] leading-relaxed text-ink-dim">{post.text}</p><a className="link-ext mt-3 inline-flex text-[12px]" href={post.tweetUrl}>Open source post</a></article>)}
+            </div>
+          </section>
+
+          <section id="relationships" className="story-chapter report-section scroll-mt-28" aria-labelledby="preview-connections-title">
+            <p className="eyebrow text-signal-lift">Connections</p>
+            <h2 id="preview-connections-title" className="story-chapter-title mt-2 text-ink">The relationship record remains part of the investigation.</h2>
+            <p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">Funding, legal-entity, team, account and ecosystem relationships continue to render from the saved graph. The redesign changes their editorial order, not their availability.</p>
+          </section>
         </div>
-        <section id="evidence-ledger" className="border-t border-line py-20"><p className="eyebrow">Evidence room preview anchor</p></section>
+        <section id="evidence-ledger" className="story-chapter report-section scroll-mt-28 border-t border-line py-20"><p className="eyebrow text-signal-lift">Evidence &amp; method</p><h2 className="story-chapter-title mt-2 text-ink">The full forensic record is still the foundation.</h2><p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">Saved sources, source problems, frozen evidence, scoring methodology and unanswered research questions remain available here.</p></section>
         <section id="scan-methodology" className="border-t border-line py-20"><p className="eyebrow">Methodology preview anchor</p></section>
         <section id="ask-report" className="border-t border-line py-20"><p className="eyebrow">Challenge preview anchor</p></section>
       </div>

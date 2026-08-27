@@ -2223,7 +2223,7 @@ export function InvestigationReport({
 
               <details
                 className="kyle-people-disclosure"
-                open={reportLane.definition.id === "kyle" ? undefined : true}
+                open
               >
                 <summary>
                   <span>

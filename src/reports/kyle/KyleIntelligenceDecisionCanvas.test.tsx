@@ -47,7 +47,6 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
-  delete document.documentElement.dataset.kyleReportDepth;
   vi.unstubAllGlobals();
 });
 
@@ -65,22 +64,12 @@ describe("Kyle intelligence report opening", () => {
     expect(container.textContent).not.toContain("Return each event");
   });
 
-  it("starts in Brief and exposes Analysis and Evidence room depth controls", async () => {
+  it("keeps the complete report in the reading flow instead of replacing it with depth modes", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
 
-    expect(document.documentElement.dataset.kyleReportDepth).toBe("brief");
-    const analysis = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "Analysis");
-    const evidence = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "Evidence room");
-    expect(analysis).toBeTruthy();
-    expect(evidence).toBeTruthy();
-
-    await act(async () => analysis?.click());
-    expect(document.documentElement.dataset.kyleReportDepth).toBe("analysis");
-
-    await act(async () => evidence?.click());
-    expect(document.documentElement.dataset.kyleReportDepth).toBe("evidence");
+    expect(container.querySelector('[aria-label="Report depth"]')).toBeNull();
+    expect(container.querySelector('a[href="#composition"]')?.textContent).toContain("Continue through the full report");
+    expect([...container.querySelectorAll('a[href="#evidence-ledger"]')]
+      .some((link) => link.textContent?.includes("Enter evidence room"))).toBe(true);
   });
 });
-

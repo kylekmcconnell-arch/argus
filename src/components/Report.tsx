@@ -3552,7 +3552,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               </header>
               <details
                 className="kyle-people-disclosure"
-                open={reportLane.definition.id === "kyle" ? undefined : true}
+                open
               >
                 <summary>
                   <span>

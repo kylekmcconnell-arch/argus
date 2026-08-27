@@ -62,14 +62,6 @@ export interface KyleIntelligenceDecisionCanvasProps {
   secondaryScore?: KyleSecondaryScore | null | undefined;
 }
 
-type ReportDepth = "brief" | "analysis" | "evidence";
-
-const DEPTHS: Array<{ id: ReportDepth; label: string; detail: string }> = [
-  { id: "brief", label: "Brief", detail: "Five-minute decision" },
-  { id: "analysis", label: "Analysis", detail: "Full investigation" },
-  { id: "evidence", label: "Evidence room", detail: "Sources and method" },
-];
-
 function reducedMotion(): boolean {
   return typeof window === "undefined"
     || typeof window.matchMedia !== "function"
@@ -291,7 +283,6 @@ export function KyleIntelligenceDecisionCanvas({
   composition = [],
   secondaryScore,
 }: KyleIntelligenceDecisionCanvasProps) {
-  const [depth, setDepth] = useState<ReportDepth>("brief");
   const name = cleanName(subjectName);
   const unresolvedCount = Math.max(
     composition.reduce((sum, row) => sum + (row.questionCount ?? 0), 0),
@@ -307,51 +298,11 @@ export function KyleIntelligenceDecisionCanvas({
   const headline = verdictHeadline(composition, favorable, adverseCount, unresolvedCount);
   const coverage = coverageLabel(coveragePercent);
 
-  useEffect(() => {
-    const previous = document.documentElement.dataset.kyleReportDepth;
-    document.documentElement.dataset.kyleReportDepth = depth;
-    return () => {
-      if (previous) document.documentElement.dataset.kyleReportDepth = previous;
-      else delete document.documentElement.dataset.kyleReportDepth;
-    };
-  }, [depth]);
-
-  useEffect(() => {
-    const revealForAnchor = (event: MouseEvent) => {
-      const target = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href^='#']") : null;
-      const href = target?.getAttribute("href") ?? "";
-      if (/evidence|method|ledger|source|frozen/i.test(href)) setDepth("evidence");
-      else if (/people|identity|product|social|market|relationship|risk|question|composition/i.test(href)) setDepth("analysis");
-    };
-    document.addEventListener("click", revealForAnchor, true);
-    return () => document.removeEventListener("click", revealForAnchor, true);
-  }, []);
-
   const sortedComposition = useMemo(() => [...composition].sort((left, right) => right.weight - left.weight), [composition]);
   const totalPossible = composition.reduce((sum, row) => sum + row.weight, 0);
 
   return (
     <section id="report-summary" className="kyle-intelligence-report scroll-mt-28" data-kyle-intelligence-report="true">
-      <nav className="kyle-depth-switcher" aria-label="Report depth">
-        <div>
-          <p className="mono">READING DEPTH</p>
-          <span>One frozen report. Choose how far to go.</span>
-        </div>
-        <div className="kyle-depth-options" role="group" aria-label="Choose report depth">
-          {DEPTHS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={depth === option.id}
-              onClick={() => setDepth(option.id)}
-              title={option.detail}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </nav>
-
       <header className="kyle-verdict-hero">
         <div className="kyle-verdict-copy">
           <p className="kyle-overline mono">01 · VERDICT</p>
@@ -611,8 +562,8 @@ export function KyleIntelligenceDecisionCanvas({
           <p>{scoreContext || "Open the full record to inspect the evidence behind this result."}</p>
         </div>
         <div>
-          <button type="button" onClick={() => setDepth("analysis")}>Open full analysis</button>
-          <a href={evidenceHref} onClick={() => setDepth("evidence")}>Enter evidence room <ArrowRight size={14} weight="bold" /></a>
+          <a className="kyle-primary-report-link" href="#composition">Continue through the full report</a>
+          <a href={evidenceHref}>Enter evidence room <ArrowRight size={14} weight="bold" /></a>
         </div>
       </footer>
     </section>
