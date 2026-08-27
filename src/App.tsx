@@ -361,7 +361,7 @@ export default function App() {
   const resultCache = useRef(new Map<string, Cached>());
   const reportPersistenceQueues = useRef(new Map<string, Promise<void>>());
   const enqueueReportPersistence = useCallback((
-    kind: "token" | "investigation",
+    kind: "person" | "token" | "investigation",
     ref: string,
     work: () => Promise<void>,
   ) => {
@@ -804,7 +804,6 @@ export default function App() {
   // and never pulls the user away from their current screen.
   const logPerson = useCallback((d: Dossier, priv = false) => {
     if (priv) return; // private: current view only — nothing is cached or leaves
-    cacheResult(resultCache.current, d.handle, { kind: "person", dossier: d });
     const persistedVersionId = d.persistence?.state === "persisted"
       && typeof d.persistence.reportVersionId === "string"
       && d.persistence.reportVersionId
@@ -813,30 +812,101 @@ export default function App() {
     // A failed server save remains available in this session and the report UI
     // explains how to rescan it, but it must not look like a durable audit or
     // enter the shared graph without an exact immutable version binding.
-    if (!persistedVersionId) return;
-    void syncReport("person", d.handle, d.handle, d, d.report.composite_verdict, d.report.governing_score);
-    logAudit({
-      id: persistedVersionId,
-      kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
-      image: d.avatar_url, // real X photo (falls back to unavatar in auditImage when absent)
-      summary: d.headline,
-      coverage: deriveDecisionReadiness(d.checkRuns?.length ? d.checkRuns : personChecks({
-        identityConfidence: d.report.identity_confidence ?? undefined,
-        realName: (d.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
-        roles: d.report.roles ?? [],
-        hasAssociates: (d.evidence.associates ?? []).length > 0,
-      })).status,
-      // Log EVERY held role (not just the governing one) so a founder-who-is-also-
-      // a-KOL (e.g. blknoiz06) appears in all matching directories.
-      flags: [
-        d.report.cap_applied ? `cap:${d.report.cap_applied}` : "",
-        ...Array.from(new Set([d.report.governing_role, ...(d.report.roles ?? [])])).filter(Boolean).map((r) => `role:${r}`),
-      ].filter(Boolean),
+    if (!persistedVersionId) {
+      cacheResult(resultCache.current, d.handle, { kind: "person", dossier: d });
+      return;
+    }
+
+    // The server first saves the project/person evidence so a background scan
+    // survives a closed tab. The browser then finishes the linked-token safety
+    // leg and adds `threat` to this dossier. Persist that final combined payload
+    // as a second immutable version and, critically, move every live/cache link
+    // to that final version. Otherwise the page shows the in-memory token score
+    // but "Saved report" reopens the earlier pre-token snapshot as N/A.
+    const scanId = d.report.audit_id || persistedVersionId;
+    const pending: Dossier = {
+      ...d,
+      persistence: {
+        ...d.persistence,
+        state: "pending",
+        scanId,
+        reportVersionId: persistedVersionId,
+      },
+    };
+    cacheResult(resultCache.current, d.handle, { kind: "person", dossier: pending });
+
+    enqueueReportPersistence("person", d.handle, async () => {
+      const persisted = await syncReport(
+        "person",
+        d.handle,
+        d.handle,
+        d,
+        d.report.composite_verdict,
+        d.report.governing_score,
+      );
+      const versionContext = persisted.state === "persisted"
+        ? savedVersionContext("person", d, persisted)
+        : undefined;
+      const settled: Dossier = persisted.state === "persisted"
+        ? {
+            ...d,
+            ...(persisted.reportDelta ? { reportDelta: persisted.reportDelta } : {}),
+            ...(versionContext ? { versionContext } : {}),
+            persistence: { ...persisted, scanId },
+          }
+        : {
+            ...d,
+            // Keep the server's durable fallback bound if the enriched save
+            // fails. The current session still renders the completed token leg.
+            persistence: {
+              ...d.persistence,
+              state: "persisted",
+              scanId,
+              reportVersionId: persistedVersionId,
+              reason: persisted.reason,
+            },
+          };
+
+      if (!settleCachedScan(
+        resultCache.current,
+        d.handle,
+        scanId,
+        { kind: "person", dossier: settled },
+      )) return;
+
+      setDossier((current) => (
+        current
+        && normalizeSubjectRef(current.handle) === normalizeSubjectRef(d.handle)
+        && (current.persistence?.scanId === scanId || current.report.audit_id === d.report.audit_id)
+          ? settled
+          : current
+      ));
+      if (versionContext) setPersonBriefTarget(briefTargetForPerson(settled));
+
+      const finalVersionId = versionContext?.reportVersionId ?? persistedVersionId;
+      logAudit({
+        id: finalVersionId,
+        kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
+        image: d.avatar_url, // real X photo (falls back to unavatar in auditImage when absent)
+        summary: d.headline,
+        coverage: deriveDecisionReadiness(d.checkRuns?.length ? d.checkRuns : personChecks({
+          identityConfidence: d.report.identity_confidence ?? undefined,
+          realName: (d.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
+          roles: d.report.roles ?? [],
+          hasAssociates: (d.evidence.associates ?? []).length > 0,
+        })).status,
+        // Log EVERY held role (not just the governing one) so a founder-who-is-also-
+        // a-KOL (e.g. blknoiz06) appears in all matching directories.
+        flags: [
+          d.report.cap_applied ? `cap:${d.report.cap_applied}` : "",
+          ...Array.from(new Set([d.report.governing_role, ...(d.report.roles ?? [])])).filter(Boolean).map((r) => `role:${r}`),
+        ].filter(Boolean),
+      });
+      // Compound the trust graph only after the final report binding settles,
+      // so graph/audit surfaces point at the same immutable evidence version.
+      recordContribution(personContribution(settled));
     });
-    // compound the trust graph with this person and their affiliations, so the
-    // network bridges them to any token/company/person later tied to the same node
-    recordContribution(personContribution(d));
-  }, []);
+  }, [enqueueReportPersistence, setDossier]);
 
   // Register the completion handler once — every finished background run logs +
   // persists through here, so it appears in the library even if navigated away.
@@ -872,9 +942,12 @@ export default function App() {
   }, [setDossier, setInvestigation, setPhase, setQuery, setStoredRecon, setTokenDossier]);
 
   const onLiveDone = useCallback((d: Dossier) => {
+    const cached = privRef.current ? null : resultCache.current.get(cacheKey(d.handle, "person"));
     const completed = privRef.current
       ? { ...d, persistence: { state: "private" as const } }
-      : d;
+      : cached?.kind === "person" && cached.dossier.report.audit_id === d.report.audit_id
+        ? cached.dossier
+        : d;
     setDossier(completed);
     setPersonBriefTarget(briefTargetForPerson(completed));
     setPhase("report");
