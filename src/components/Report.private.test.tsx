@@ -757,6 +757,7 @@ describe("private person report evidence boundary", () => {
     expect(container.textContent).not.toContain("Probable");
     expect(container.querySelector(".team-person-card")?.textContent).toContain("Ada Example");
     expect(container.querySelector(".team-person-card")?.textContent).toContain("Chief Technology Officer");
+    expect(container.querySelector(".team-person-role .chip-wrap")).not.toBeNull();
     expect(container.querySelector('img[src="https://pbs.twimg.com/profile_images/1/ada.jpg"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("Open role source");
     expect(container.querySelector('a[href="https://github.com/ada-example"]')?.textContent).toContain("GitHub");

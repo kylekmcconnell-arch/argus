@@ -767,6 +767,7 @@ describe("investigation exact sharing", () => {
     expect(container.querySelector('[aria-label="Team evidence summary"]')?.textContent).toContain("2source-grounded identities");
     expect(container.querySelector('[aria-label="Team evidence summary"]')?.textContent).toContain("2confirmed founders");
     expect(container.querySelectorAll(".team-person-card")).toHaveLength(2);
+    expect(container.querySelectorAll(".team-person-role")).toHaveLength(2);
     expect(container.querySelector('img[src="https://pbs.twimg.com/profile_images/1/erik.jpg"]')).not.toBeNull();
     expect(container.textContent).toContain("Founders (2)");
     // The handle-only "@twistartups · CEO" row (a media account bound to a
