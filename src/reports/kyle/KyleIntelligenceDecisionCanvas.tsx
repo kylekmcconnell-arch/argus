@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useId, useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import {
   ArrowDown,
   ArrowRight,
@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   WarningCircle,
 } from "@phosphor-icons/react";
-import type { CompositionRow } from "../../components/ScoreComposition";
+import { compositionRowColor, type CompositionRow } from "../../components/ScoreComposition";
 import { ScoreRing } from "../../components/ScoreRing";
 import { DecisionLensSelector } from "../../components/InvestigatorBrief";
 import type { DecisionLensId } from "../../intelligence/types";
@@ -183,6 +183,33 @@ function BriefColumn({
   );
 }
 
+function scoreRingSegments(rows: CompositionRow[], size: number) {
+  const stroke = size >= 200 ? 5.5 : 4;
+  const radius = size / 2 - (size >= 200 ? 8 : 6);
+  const circumference = 2 * Math.PI * radius;
+  const pieceGap = rows.length > 1 ? 2.75 : 0;
+  let cursor = 0;
+  const segments = rows.flatMap((row) => {
+    const remaining = 100 - cursor;
+    if (remaining <= 0) return [];
+    const length = Math.min(Math.max(0, row.score), remaining);
+    if (length <= 0) return [];
+    const from = cursor;
+    const to = cursor + length;
+    cursor = to;
+    const start = (from / 100) * circumference;
+    const raw = ((to - from) / 100) * circumference;
+    const inset = raw > pieceGap * 2 ? pieceGap : 0;
+    return [{
+      row,
+      color: compositionRowColor(row),
+      strokeDasharray: `${Math.max(0, raw - inset)} ${circumference}`,
+      strokeDashoffset: -(start + inset / 2),
+    }];
+  });
+  return { segments, stroke, radius };
+}
+
 function AnimatedVerdictScore({
   kind,
   label,
@@ -222,6 +249,18 @@ function AnimatedVerdictScore({
       ? "No checks saved"
       : `${successful ?? 0}/${applicable} ${(checkScopeLabel ?? "checks").toLowerCase()} complete${scoreIsProvisional ? " · provisional" : ""}`
     : null;
+  const [explainedAxis, setExplainedAxis] = useState<string | null>(null);
+  const explanationId = useId();
+  const explainedRow = buildRows.find((row) => row.axis === explainedAxis) ?? null;
+  const { segments, stroke, radius } = scoreRingSegments(buildRows, size);
+  const clearPointerExplanation = (event: MouseEvent<SVGCircleElement>) => {
+    if (document.activeElement !== event.currentTarget) setExplainedAxis(null);
+  };
+  const handleSegmentKey = (event: KeyboardEvent<SVGCircleElement>) => {
+    if (event.key !== "Escape") return;
+    setExplainedAxis(null);
+    event.currentTarget.blur();
+  };
 
   return (
     <article
@@ -230,21 +269,105 @@ function AnimatedVerdictScore({
       aria-label={score == null ? `${label} withheld` : `${label} ${score} out of 100`}
     >
       <p className="kyle-score-ring-label mono">{label}</p>
-      <ScoreRing
-        score={score}
-        verdict={verdictLabel}
-        color={ringColor}
-        size={size}
-        bands={score != null}
-        composition={buildRows}
-        fallbackLabel={label}
+      <div
+        className="kyle-interactive-score-ring"
+        data-active-axis={explainedRow?.axis}
+        style={{ width: size }}
       >
-        <div className="kyle-score-status">
-          <p className="kyle-verdict-word score-ring-verdict mono">{score == null ? "Not measured" : verdictLabel}</p>
-          {context && <p className="kyle-score-context">{context}</p>}
-          {checksCopy && <p className="kyle-check-state mono">{checksCopy}</p>}
+        <div className="kyle-score-ring-base">
+          <ScoreRing
+            score={score}
+            verdict={verdictLabel}
+            color={ringColor}
+            size={size}
+            bands={score != null}
+            composition={buildRows}
+            fallbackLabel={label}
+          >
+            <div className="kyle-score-status">
+              <p className="kyle-verdict-word score-ring-verdict mono">{score == null ? "Not measured" : verdictLabel}</p>
+              {context && <p className="kyle-score-context">{context}</p>}
+              {checksCopy && <p className="kyle-check-state mono">{checksCopy}</p>}
+            </div>
+          </ScoreRing>
         </div>
-      </ScoreRing>
+        {segments.length > 0 && (
+          <svg
+            width={size}
+            height={size}
+            className="kyle-score-ring-hit-layer"
+            aria-label="Score composition. Explore each arc for its dimension and contribution."
+            role="group"
+          >
+            {explainedRow && segments.filter(({ row }) => row.axis === explainedRow.axis).map((segment) => (
+              <circle
+                key={`active-${segment.row.axis}`}
+                data-score-ring-piece-active={segment.row.axis}
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                fill="none"
+                stroke={segment.color}
+                strokeWidth={stroke + 2.5}
+                strokeLinecap="butt"
+                strokeDasharray={segment.strokeDasharray}
+                strokeDashoffset={segment.strokeDashoffset}
+                aria-hidden="true"
+              />
+            ))}
+            {segments.map((segment) => {
+              const { row } = segment;
+              const isExplained = explainedRow?.axis === row.axis;
+              const evidence = [
+                (row.supportCount ?? 0) > 0 ? `${row.supportCount} supporting ${row.supportCount === 1 ? "source" : "sources"}` : "",
+                (row.counterCount ?? 0) > 0 ? `${row.counterCount} counter-${row.counterCount === 1 ? "signal" : "signals"}` : "",
+                (row.questionCount ?? 0) > 0 ? `${row.questionCount} open ${row.questionCount === 1 ? "question" : "questions"}` : "",
+              ].filter(Boolean).join(", ");
+              const accessibleLabel = `${row.label}: ${row.score} of ${row.weight} available points. ${row.rationale}${evidence ? ` ${evidence}.` : ""}`;
+              return (
+                <circle
+                  key={`hit-${row.axis}`}
+                  data-score-ring-piece-hit={row.axis}
+                  cx={size / 2}
+                  cy={size / 2}
+                  r={radius}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={Math.max(18, stroke + 12)}
+                  strokeLinecap="butt"
+                  strokeDasharray={segment.strokeDasharray}
+                  strokeDashoffset={segment.strokeDashoffset}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={accessibleLabel}
+                  aria-pressed={isExplained}
+                  aria-describedby={isExplained ? explanationId : undefined}
+                  focusable="true"
+                  onMouseEnter={() => setExplainedAxis(row.axis)}
+                  onMouseLeave={clearPointerExplanation}
+                  onFocus={() => setExplainedAxis(row.axis)}
+                  onBlur={() => setExplainedAxis(null)}
+                  onClick={() => setExplainedAxis(row.axis)}
+                  onKeyDown={handleSegmentKey}
+                />
+              );
+            })}
+          </svg>
+        )}
+        {explainedRow && (
+          <div
+            id={explanationId}
+            className="score-ring-explanation"
+            data-score-ring-explanation={explainedRow.axis}
+            role="tooltip"
+          >
+            <span className="score-ring-explanation-kicker mono">Score dimension</span>
+            <span className="score-ring-explanation-label">{explainedRow.label}</span>
+            <span className="score-ring-explanation-points mono">{explainedRow.score} of {explainedRow.weight} points</span>
+            <span className="score-ring-explanation-rationale">{explainedRow.rationale}</span>
+          </div>
+        )}
+      </div>
     </article>
   );
 }

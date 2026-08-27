@@ -160,6 +160,106 @@
   text-wrap: balance;
 }
 
+[data-report-lane="kyle"] .kyle-interactive-score-ring {
+  position: relative;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-hit-layer {
+  cursor: help;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transform: rotate(-90deg);
+  z-index: 2;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-hit-layer [data-score-ring-piece-hit] {
+  cursor: help;
+  pointer-events: stroke;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-card [data-score-ring-piece-hit]:focus-visible {
+  outline: none;
+}
+
+[data-report-lane="kyle"] .kyle-interactive-score-ring[data-active-axis] .kyle-score-ring-base svg,
+[data-report-lane="kyle"] .kyle-interactive-score-ring[data-active-axis] .score-ring-numeral,
+[data-report-lane="kyle"] .kyle-interactive-score-ring[data-active-axis] [data-score-ring-stage],
+[data-report-lane="kyle"] .kyle-interactive-score-ring[data-active-axis] [data-score-ring-active-label] {
+  opacity: 0.28 !important;
+}
+
+[data-report-lane="kyle"] .kyle-interactive-score-ring[data-active-axis] .score-ring-numeral,
+[data-report-lane="kyle"] .kyle-interactive-score-ring[data-active-axis] [data-score-ring-stage],
+[data-report-lane="kyle"] .kyle-interactive-score-ring[data-active-axis] [data-score-ring-active-label] {
+  opacity: 0 !important;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-card .score-ring-explanation {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  height: 252px;
+  justify-content: center;
+  left: 0;
+  padding-inline: 2rem;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  text-wrap: balance;
+  width: 252px;
+  z-index: 3;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-card .score-ring-explanation-kicker {
+  font-size: 0.55rem;
+  letter-spacing: 0.13em;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-card .score-ring-explanation-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.2;
+  margin-top: 0.25rem;
+  max-width: 16ch;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-card .score-ring-explanation-points {
+  color: var(--kyle-editorial-green);
+  font-size: 0.67rem;
+  font-weight: 700;
+  margin-top: 0.25rem;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-card .score-ring-explanation-rationale {
+  color: var(--color-ink);
+  display: -webkit-box;
+  font-size: 0.69rem;
+  font-weight: 500;
+  line-height: 1.35;
+  margin-top: 0.5rem;
+  max-width: 20ch;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-card--secondary .score-ring-explanation {
+  height: 208px;
+  padding-inline: 2rem;
+  width: 208px;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-card--secondary .score-ring-explanation-label {
+  font-size: 0.75rem;
+}
+
+[data-report-lane="kyle"] .kyle-score-ring-card--secondary .score-ring-explanation-rationale {
+  font-size: 0.61rem;
+  -webkit-line-clamp: 3;
+}
+
 [data-report-lane="kyle"] .kyle-score-status {
   max-width: 15rem;
   text-align: center;

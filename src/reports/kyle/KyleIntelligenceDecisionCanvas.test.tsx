@@ -98,4 +98,29 @@ describe("Kyle intelligence report opening", () => {
     expect(tokenScore?.querySelector('[data-composition-piece="T1"]')).not.toBeNull();
     expect(tokenScore?.querySelector('[data-composition-piece="T2"]')).not.toBeNull();
   });
+
+  it("explains score segments on hover and keyboard focus", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
+
+    const teamHit = container.querySelector<SVGCircleElement>('[data-score-ring-piece-hit="team"]');
+    expect(teamHit).not.toBeNull();
+    expect(teamHit?.getAttribute("role")).toBe("button");
+    expect(teamHit?.getAttribute("aria-label")).toContain("16 of 16 available points");
+    expect(teamHit?.getAttribute("aria-label")).toContain("3 supporting sources");
+
+    act(() => teamHit?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true })));
+    const explanation = container.querySelector('[data-score-ring-explanation="team"]');
+    expect(explanation).not.toBeNull();
+    expect(explanation?.textContent).toContain("Team & leadership");
+    expect(explanation?.textContent).toContain("16 of 16 points");
+    expect(explanation?.textContent).toContain("Named leadership is source-backed.");
+    expect(container.querySelector('[data-score-ring-piece-active="team"]')).not.toBeNull();
+
+    act(() => teamHit?.dispatchEvent(new MouseEvent("mouseout", { bubbles: true })));
+    expect(container.querySelector("[data-score-ring-explanation]")).toBeNull();
+
+    act(() => teamHit?.focus());
+    expect(container.querySelector('[data-score-ring-explanation="team"]')).not.toBeNull();
+    expect(teamHit?.getAttribute("aria-pressed")).toBe("true");
+  });
 });
