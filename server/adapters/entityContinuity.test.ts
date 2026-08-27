@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEntityContinuityQueries, normalizeEntityContinuity } from "./entityContinuity";
+import { buildEntityContinuityQueries, buildEntityContinuityRecoveryQueries, normalizeEntityContinuity } from "./entityContinuity";
 
 const DOCS = "https://docs.anyone.io/resources/token";
 const ROADMAP = "https://docs.anyone.io/resources/roadmap";
@@ -14,6 +14,16 @@ describe("entity continuity", () => {
       "ANyONe Protocol ANYONE token migration swap",
       "ANyONe Protocol ANYONE old contract new contract",
       "ANyONe Protocol ANYONE migration contract exchange support",
+    ]);
+  });
+
+  it("turns a discovered predecessor into focused exchange and contract recovery searches", () => {
+    expect(buildEntityContinuityRecoveryQueries("ANyONe Protocol", ["AirTor Protocol", "ATOR"], "ANYONE")).toEqual([
+      "AirTor Protocol ATOR ANYONE 1:1 token swap old contract new contract",
+      "AirTor Protocol ATOR ANYONE migration contract exchange support",
+      "site:kucoin.com AirTor Protocol ATOR ANYONE token swap",
+      "site:mexc.com AirTor Protocol ATOR ANYONE contract swap",
+      "AirTor Protocol ATOR ANYONE official docs token migration contract",
     ]);
   });
 

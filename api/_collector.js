@@ -9522,6 +9522,12 @@ var SECTION_AXIS_ELIGIBILITY = {
     "P3_token_conduct",
     "P5_traction_and_liveness"
   ],
+  entityContinuity: [
+    "P2_product_substance",
+    "P3_token_conduct",
+    "P5_traction_and_liveness",
+    "P6_transparency_integrity"
+  ],
   // Findings are routed by exact finding_type below. A section-wide allowlist
   // made unrelated facts (for example, token collapse) eligible for identity.
   findings: [],
@@ -9646,6 +9652,7 @@ var CHECK_AXIS_ELIGIBILITY = {
   "profile-photo-authenticity": [],
   "code-footprint-github": ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
   "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "entity-continuity": ["P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity"],
   "affiliations-associates": ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
   "project-token-identity": ["P3_token_conduct"],
@@ -10385,6 +10392,7 @@ function serializeAnalystEvidencePacket(input, options) {
     promotions: 16,
     wallets: 12,
     team: 16,
+    entityContinuity: 1,
     basicFacts: 24,
     notableFollowers: 16,
     recentActivity: 12,
@@ -16185,6 +16193,19 @@ function buildEntityContinuityQueries(subject, ticker) {
     `${subject}${token} migration contract exchange support`
   ];
 }
+function buildEntityContinuityRecoveryQueries(subject, aliases, ticker) {
+  const names = [...new Set([subject, ...aliases].map((value) => value.trim()).filter(Boolean))];
+  const currentTicker = ticker?.trim().replace(/^\$/, "") || null;
+  const predecessorTerms = names.filter((name) => name.toLowerCase() !== subject.toLowerCase()).slice(0, 2);
+  const pair = [...predecessorTerms, currentTicker].filter(Boolean).join(" ");
+  return [
+    `${pair || subject} 1:1 token swap old contract new contract`,
+    `${pair || subject} migration contract exchange support`,
+    `site:kucoin.com ${pair || subject} token swap`,
+    `site:mexc.com ${pair || subject} contract swap`,
+    `${pair || subject} official docs token migration contract`
+  ].filter((query, index, all) => query.trim() && all.indexOf(query) === index);
+}
 function parseJson(raw) {
   const candidate = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   try {
@@ -16199,6 +16220,54 @@ function admittedUrls(value, organicUrls) {
 function validKind(value) {
   const allowed = ["predecessor", "rebrand", "token_migration", "contract_replacement", "exchange_handling", "architecture_change", "current_status"];
   return typeof value === "string" && allowed.includes(value) ? value : null;
+}
+function uniqueBy(values, key) {
+  const seen = /* @__PURE__ */ new Set();
+  return values.filter((value) => {
+    const candidate = key(value);
+    if (!candidate || seen.has(candidate)) return false;
+    seen.add(candidate);
+    return true;
+  });
+}
+function recomputeContinuityCoverage(snapshot) {
+  const predecessor = snapshot.tokenLineage.find((node) => node.status === "predecessor");
+  const current = snapshot.tokenLineage.find((node) => node.status === "current");
+  const complete = Boolean(
+    (snapshot.oldContract || predecessor?.contract) && (snapshot.replacementContract || current?.contract) && snapshot.migrationRatio && snapshot.migrationDate && snapshot.events.some((event) => event.kind === "rebrand") && snapshot.events.some((event) => event.kind === "token_migration")
+  );
+  snapshot.predecessorName ??= predecessor?.name ?? null;
+  snapshot.oldTicker ??= predecessor?.ticker ?? null;
+  snapshot.oldContract ??= predecessor?.contract ?? null;
+  snapshot.replacementContract ??= current?.contract ?? null;
+  snapshot.marketHistory = snapshot.tokenLineage.filter((node) => node.status !== "migration").map((node) => ({ ticker: node.ticker, contract: node.contract, status: node.status, sourceUrls: node.sourceUrls }));
+  snapshot.coverage.state = complete ? "complete" : "partial";
+  snapshot.coverage.reason = complete ? "Historical aliases, the dated migration ratio and both sides of the token lineage were recovered from primary records." : "A lifecycle signal was found, but one or more predecessor, contract, migration-ratio or dated-event fields remain unresolved.";
+  snapshot.coverage.primarySourceCount = snapshot.sources.filter((source2) => source2.sourceClass !== "secondary").length;
+  return snapshot;
+}
+function mergeContinuitySnapshots(first, recovery) {
+  const merged = {
+    ...first,
+    historicalAliases: [.../* @__PURE__ */ new Set([...first.historicalAliases, ...recovery.historicalAliases])],
+    predecessorName: first.predecessorName ?? recovery.predecessorName,
+    oldTicker: first.oldTicker ?? recovery.oldTicker,
+    oldContract: first.oldContract ?? recovery.oldContract,
+    migrationRatio: first.migrationRatio ?? recovery.migrationRatio,
+    migrationDate: first.migrationDate ?? recovery.migrationDate,
+    replacementContract: first.replacementContract ?? recovery.replacementContract,
+    migrationContract: first.migrationContract ?? recovery.migrationContract,
+    currentStatus: first.currentStatus ?? recovery.currentStatus,
+    architectureChanges: [.../* @__PURE__ */ new Set([...first.architectureChanges, ...recovery.architectureChanges])],
+    exchangeHandling: [.../* @__PURE__ */ new Set([...first.exchangeHandling, ...recovery.exchangeHandling])],
+    tokenLineage: uniqueBy([...first.tokenLineage, ...recovery.tokenLineage], (node) => `${node.status}:${node.contract?.toLowerCase() || node.ticker?.toLowerCase() || node.name.toLowerCase()}`),
+    events: uniqueBy([...first.events, ...recovery.events], (event) => `${event.kind}:${event.date || ""}:${event.title.toLowerCase()}`),
+    sources: uniqueBy([...first.sources, ...recovery.sources], (source2) => source2.url),
+    aliasSearches: [],
+    marketHistory: [],
+    coverage: { ...first.coverage }
+  };
+  return recomputeContinuityCoverage(merged);
 }
 function normalizeEntityContinuity(raw, subject, organic, official, currentToken) {
   const parsed = parseJson(raw);
@@ -16263,7 +16332,7 @@ function normalizeEntityContinuity(raw, subject, organic, official, currentToken
   const complete = !lifecycleFound || Boolean(
     predecessor?.contract && current?.contract && nullableString(parsed.migrationRatio) && events.some((event) => event.kind === "rebrand") && events.some((event) => event.kind === "token_migration")
   );
-  return {
+  return recomputeContinuityCoverage({
     subject,
     historicalAliases,
     predecessorName: nullableString(parsed.predecessorName) ?? predecessor?.name ?? null,
@@ -16293,7 +16362,7 @@ function normalizeEntityContinuity(raw, subject, organic, official, currentToken
       primarySourceCount,
       searchedAt: (/* @__PURE__ */ new Date()).toISOString()
     }
-  };
+  });
 }
 var EXTRACTION_SYSTEM = `You extract entity and token lifecycle evidence from supplied web results. Return JSON only. Never infer a contract, ratio, date, alias, architecture change or status. Every event and tokenLineage node must include sourceUrls copied exactly from supplied pages. Prefer official project documents, official exchange notices, explorers and regulators. Secondary reporting is a lead only. Schema: {historicalAliases:string[], predecessorName:string|null, oldTicker:string|null, oldContract:string|null, migrationRatio:string|null, migrationDate:string|null, replacementContract:string|null, migrationContract:string|null, currentStatus:string|null, architectureChanges:string[], exchangeHandling:string[], tokenLineage:[{name,ticker,contract,chain,status:"predecessor"|"migration"|"current",validFrom,validTo,sourceUrls:string[]}], events:[{date,kind:"predecessor"|"rebrand"|"token_migration"|"contract_replacement"|"exchange_handling"|"architecture_change"|"current_status",title,detail,sourceUrls:string[]}]}`;
 async function collectEntityContinuity(ctx) {
@@ -16336,7 +16405,7 @@ async function collectEntityContinuity(ctx) {
     queries: buildEntityContinuityQueries(subject, currentToken?.ticker),
     onOrganicResults: (results) => organic.push(...results)
   });
-  const snapshot = raw ? normalizeEntityContinuity(raw, subject, organic, officialHosts(ctx), currentToken) : null;
+  let snapshot = raw ? normalizeEntityContinuity(raw, subject, organic, officialHosts(ctx), currentToken) : null;
   if (!snapshot) return {
     subject,
     historicalAliases: [],
@@ -16357,6 +16426,20 @@ async function collectEntityContinuity(ctx) {
     marketHistory: [],
     coverage: { required: Boolean(currentToken?.contract), state: currentToken?.contract ? "partial" : "not_applicable", reason: "Lifecycle searches completed but did not yield a primary-source-grounded predecessor or a verified no-predecessor record.", primarySourceCount: 0, searchedAt }
   };
+  if (snapshot.coverage.state !== "complete") {
+    const recoveryOrganic = [];
+    const recoveryRaw = await groundedSearch(
+      EXTRACTION_SYSTEM,
+      `Complete the verified token lineage for ${subject}. The broad pass discovered these possible historical names: ${snapshot.historicalAliases.join(", ") || "none"}. Resolve the predecessor ticker and contract, dated rebrand, migration ratio, replacement contract, migration contract, exchange handling and current status. A missing field must remain null.`,
+      {
+        cacheKey: `entity-continuity-recovery:v2:${subject.toLowerCase()}:${currentToken?.contract?.toLowerCase() ?? "none"}:${snapshot.historicalAliases.map((alias) => alias.toLowerCase()).sort().join(":")}`,
+        queries: buildEntityContinuityRecoveryQueries(subject, snapshot.historicalAliases, currentToken?.ticker),
+        onOrganicResults: (results) => recoveryOrganic.push(...results)
+      }
+    );
+    const recovered = recoveryRaw ? normalizeEntityContinuity(recoveryRaw, subject, recoveryOrganic, officialHosts(ctx), currentToken) : null;
+    if (recovered) snapshot = mergeContinuitySnapshots(snapshot, recovered);
+  }
   if (snapshot.historicalAliases.length) {
     const aliasOrganic = [];
     const aliasQueries = snapshot.historicalAliases.flatMap((alias) => [
@@ -36273,6 +36356,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
+    entityContinuity: evidence.entityContinuity ? [evidence.entityContinuity] : [],
     // The scale of the venture a founder verifiably founded is scoreable
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,
