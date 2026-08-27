@@ -1878,7 +1878,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       evidenceHref: "#project-token-threat" as const,
     })))
     : [];
-  const linkedTokenScore = linkedTokenDossier || f.projectToken
+  const tokenSafetyAxisTreatment = f.tokenApplicability?.axisTreatment ?? tokenAxisApplicability?.axisTreatment;
+  const tokenSafetyScoreSuppressed = tokenSafetyAxisTreatment === "not_applicable"
+    || tokenSafetyAxisTreatment === "deferred"
+    || tokenSafetyAxisTreatment === "provisional";
+  const linkedTokenScore = !tokenSafetyScoreSuppressed && (linkedTokenDossier || f.projectToken?.verified)
     ? {
       label: "Token safety score",
       score: linkedTokenDossier?.score ?? null,

@@ -722,6 +722,40 @@ describe("private person report evidence boundary", () => {
     expect(ledgers?.textContent).toContain("Oracle manipulation");
   });
 
+  it("does not render a token-score surface for a confirmed tokenless business", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      // Deliberately retain a stale token candidate to prove that the frozen
+      // applicability decision, not leftover discovery data, controls the UI.
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Stale token candidate",
+        symbol: "STALE",
+        address: "0x5555555555555555555555555555555555555555",
+        chain: "ethereum",
+        sourceUrl: "https://example.com/stale-token",
+        capturedAt: "2026-08-27T00:00:00.000Z",
+      },
+      tokenApplicability: {
+        state: "confirmed_tokenless",
+        axisTreatment: "not_applicable",
+        reason: "A completed identity-bound token search found no project token.",
+        evidence: ["No canonical token is bound to the official project identity."],
+        determinedAt: "2026-08-27T00:00:00.000Z",
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.querySelector('[data-report-score="dual"]')).toBeNull();
+    expect(container.querySelector('[data-report-score="prominent"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("Token safety score");
+  });
+
   it("renders model-only team identities as leads and excludes them from grounded report chat", () => {
     const base = buildReport(SUBJECTS[1]);
     const modelVenture = {
