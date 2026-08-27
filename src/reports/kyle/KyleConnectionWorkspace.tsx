@@ -488,12 +488,16 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
   const subjectName = dossier.display_name || dossier.resolved_name || dossier.handle;
   const subjectImage = dossier.avatar_url || xAvatar(dossier.handle);
   const visible = entities.filter((entity) => filterMatches(entity, filter, lens, query));
+  const connectionEntities = entities.filter((entity) => entity.relation !== "official account");
+  const visibleConnections = visible.filter((entity) => entity.relation !== "official account");
   const visibleIds = new Set(visible.map((entity) => entity.id));
   const selected = entities.find((entity) => entity.id === selectedId) ?? visible[0] ?? null;
   const byId = new Map(entities.map((entity) => [entity.id, entity]));
   const connectionCount = edges.length + props.connections.length;
   const recommendations = recommendedEntities(entities, props);
   const filtersActive = filter !== "all" || lens !== null || Boolean(query.trim());
+  const investigationEmpty = connectionEntities.length === 0;
+  const connectionsHiddenByFilters = !investigationEmpty && visibleConnections.length === 0 && filtersActive;
   const selectedValidation = selected ? entityValidation(selected) : null;
   const selectedConfidenceSegments = selectedValidation?.mode === "exploratory" ? 1 : selected ? confidenceSegments(selected.confidence) : 0;
 
@@ -504,6 +508,8 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
     setSelectedId(entities[0]?.id ?? null);
   };
 
+  const startConnectionSearch = () => searchRef.current?.focus();
+
   return (
     <section className="kyle-connection-workspace" aria-labelledby="kyle-connection-title">
       <header className="kyle-connection-toolbar">
@@ -511,7 +517,7 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
           <MagnifyingGlass size={17} aria-hidden="true" />
           <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search entities, wallets, domains…" aria-label="Search connections" />
         </div>
-        <button type="button" className="kyle-connection-find" onClick={() => searchRef.current?.focus()}><LinkSimple size={16} />Find a connection</button>
+        <button type="button" className="kyle-connection-find" onClick={startConnectionSearch}><LinkSimple size={16} />Find a connection</button>
         <div className="kyle-connection-count"><strong>{entities.length + 1}</strong> entities · <strong>{connectionCount}</strong> relationships</div>
         <button type="button" className="kyle-connection-legend-button" aria-expanded={legendOpen} onClick={() => setLegendOpen((open) => !open)}><IdentificationCard size={15} />Legend</button>
       </header>
@@ -543,16 +549,27 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
             ))}
           </div>
           <div className="kyle-connection-filter-status" role="status" aria-live="polite">
-            <strong>{visible.length} of {entities.length} connections shown</strong>
-            <span>{visible.length === 0
-              ? filtersActive ? "No connections match these filters." : "No connections were found in this investigation."
-              : filtersActive ? "The web is filtered." : "All saved connections are visible."}</span>
-            {filtersActive && <button type="button" onClick={reset}><ArrowsClockwise size={14} />Reset filters</button>}
+            <strong>{investigationEmpty ? "0 connections found" : `${visibleConnections.length} of ${connectionEntities.length} connections shown`}</strong>
+            <span>{investigationEmpty
+              ? "This investigation did not surface any source-backed relationships."
+              : connectionsHiddenByFilters
+                ? "No connections match these filters."
+                : filtersActive ? "The web is filtered." : "All saved connections are visible."}</span>
+            {investigationEmpty
+              ? <button type="button" className="is-primary" onClick={startConnectionSearch}><MagnifyingGlass size={14} />Search for connections</button>
+              : filtersActive && <button type="button" className="is-primary" onClick={reset}><ArrowsClockwise size={14} />Reset filters</button>}
           </div>
         </aside>
 
-        <div className="kyle-connection-canvas" data-empty={visible.length === 0 ? "true" : "false"}>
+        <div className="kyle-connection-canvas">
           <h2 id="kyle-connection-title" className="sr-only">Connections for {subjectName}</h2>
+          {(connectionsHiddenByFilters || investigationEmpty) && (
+            <div className="kyle-connection-canvas-notice" role="status">
+              {connectionsHiddenByFilters
+                ? "No connections match the active filters."
+                : "No source-backed connections were found in this investigation."}
+            </div>
+          )}
           {(["team", "advisors", "projects", "assets", "social"] as Cluster[]).map((cluster) => {
             const count = visible.filter((entity) => entity.cluster === cluster).length;
             const label = cluster === "team" ? "Core team" : cluster === "advisors" ? "Advisors & backers" : cluster === "projects" ? "Projects & Organizations" : cluster === "assets" ? "Wallets & Tokens" : "Social & community";

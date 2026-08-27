@@ -171,4 +171,48 @@ describe("KyleConnectionWorkspace", () => {
 
     await act(async () => root.unmount());
   });
+
+  it("moves the filtered-empty explanation into the controls and keeps only a top graph notice", async () => {
+    const root = createRoot(container);
+    await act(async () => root.render(<KyleConnectionWorkspace dossier={dossier} nodes={nodes} edges={edges} connections={[]} />));
+
+    const advisors = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Advisors");
+    const social = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Social");
+    await act(async () => advisors?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await act(async () => social?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(container.textContent).toContain("0 of 6 connections shown");
+    expect(container.textContent).toContain("No connections match these filters.");
+    expect(container.querySelector(".kyle-connection-canvas-notice")?.textContent).toBe("No connections match the active filters.");
+    expect(container.querySelector(".kyle-connection-empty")).toBeNull();
+
+    const resetFilters = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Reset filters");
+    await act(async () => resetFilters?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(container.textContent).toContain("6 of 6 connections shown");
+
+    await act(async () => root.unmount());
+  });
+
+  it("distinguishes an investigation with no source-backed connections and offers a new search", async () => {
+    const emptyDossier = {
+      ...dossier,
+      webTeam: [],
+      organizationRelationships: [],
+      projectToken: undefined,
+    } as unknown as Dossier;
+    const subjectOnly = [{ type: "Company", key: "@anyonefdn", label: "ANyONe Protocol", subject: true }];
+    const root = createRoot(container);
+    await act(async () => root.render(<KyleConnectionWorkspace dossier={emptyDossier} nodes={subjectOnly} edges={[]} connections={[]} />));
+
+    expect(container.textContent).toContain("0 connections found");
+    expect(container.textContent).toContain("This investigation did not surface any source-backed relationships.");
+    expect(container.querySelector(".kyle-connection-canvas-notice")?.textContent).toBe("No source-backed connections were found in this investigation.");
+    expect(container.textContent).not.toContain("Reset filters");
+
+    const search = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Search for connections");
+    await act(async () => search?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(document.activeElement).toBe(container.querySelector('input[aria-label="Search connections"]'));
+
+    await act(async () => root.unmount());
+  });
 });
