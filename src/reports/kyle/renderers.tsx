@@ -1,6 +1,7 @@
 import { KyleGithubSynthesis } from "./KyleGithubSynthesis";
 import { KyleIntelligenceDecisionCanvas } from "./KyleIntelligenceDecisionCanvas";
 import { KyleSocialSynthesis } from "./KyleSocialSynthesis";
+import { KyleConnectionWorkspace } from "./KyleConnectionWorkspace";
 import type { ReportLaneRenderers } from "../shared/reportLaneRendererTypes";
 
 export const kyleReportRenderers: ReportLaneRenderers = {
@@ -14,6 +15,7 @@ export const kyleReportRenderers: ReportLaneRenderers = {
       checkScopeLabel={props.checkScopeLabel ?? "Required report checks"}
     />
   ),
+  connectionWorkspace: (props) => <KyleConnectionWorkspace {...props} />,
   socialSynthesis: (snapshot) => <KyleSocialSynthesis snapshot={snapshot} />,
   githubSynthesis: (assessment) => <KyleGithubSynthesis assessment={assessment} />,
 };

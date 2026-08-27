@@ -1,4 +1,7 @@
 import type { ReactNode } from "react";
+import type { Dossier } from "../../data/dossier";
+import type { PanoptesEdge, PanoptesNode } from "../../engine";
+import type { SubjectConnection } from "../../graph/network";
 import type { GithubAssessment } from "../../data/evidence";
 import type { SocialActivitySnapshot } from "../../data/socialActivity";
 import type { DecisionLensId } from "../../intelligence/types";
@@ -77,12 +80,23 @@ export interface InvestigationDecisionCanvasProps {
   showDecisionDetails?: boolean;
 }
 
+export interface ConnectionWorkspaceProps {
+  dossier: Dossier;
+  nodes: PanoptesNode[];
+  edges: PanoptesEdge[];
+  connections: SubjectConnection[];
+  onAudit?: ((query: string) => void) | undefined;
+  onOpenProject?: ((name: string) => void) | undefined;
+  shareView?: boolean | undefined;
+}
+
 /**
  * Presentation-only slots over a frozen saved report. Renderers cannot alter
  * evidence collection, saved scores, or report identity.
  */
 export interface ReportLaneRenderers {
   decisionCanvas?: (props: InvestigationDecisionCanvasProps) => ReactNode;
+  connectionWorkspace?: (props: ConnectionWorkspaceProps) => ReactNode;
   socialSynthesis?: (snapshot: SocialActivitySnapshot) => ReactNode;
   githubSynthesis?: (assessment: GithubAssessment) => ReactNode;
 }

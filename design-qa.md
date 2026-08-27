@@ -389,3 +389,43 @@ P3 follow-up: a short first-use hint could improve discoverability for users who
 
 final result: passed
 
+---
+
+# Design QA — Kyle connections workspace (Option 2)
+
+## Verification target
+
+- Source reference: `/var/folders/h7/6njc4p9d12s5cjfrwk2sr2080000gn/T/codex-clipboard-3233c4b2-d0fb-4145-8685-1b9d6e0dcca0.png`
+- Implementation capture: `artifacts/design-qa/kyle-connections-option-2-final.png`
+- Side-by-side comparison: `artifacts/design-qa/kyle-connections-comparison-final.jpg`
+- Responsive capture: `artifacts/design-qa/kyle-connections-responsive-final.png`
+- Desktop viewport: 1488 × 1058
+- Responsive viewport: 820 × 900
+- State: Connections section active, all entity types visible, first direct team relationship selected
+
+## Full-view comparison
+
+- The implementation preserves the reference hierarchy: compact toolbar, entity count, filter rail, four color-coded evidence clusters, central audited subject, and a persistent evidence drawer.
+- The graph uses saved dossier entities and relationships rather than reference-image placeholders. Different entity and relationship totals are therefore intentional.
+- The implementation stays within the existing ARGUS editorial palette, typography, borders, and Kyle lane spacing.
+- The graph remains legible at the responsive check; filters become a horizontal rail and the canvas receives the full available width.
+
+## Focused comparison
+
+- Search, entity-type filters, optional evidence lenses, reset, entity selection, legend, and drawer updates were exercised in the browser.
+- The selected entity drawer exposes relationship wording, confidence, saved sources, and actions in the same information order as the reference.
+- The research action opens a confirmation dialog and states the one-investigation-credit estimate before invoking the existing audit callback.
+- Real saved portraits, project imagery, chain logos, token symbols, and account avatars are used when available; initials remain the truthful fallback when the dossier has no image.
+- Browser console check: no warnings or errors during desktop or responsive interaction passes.
+
+## Iterations made
+
+1. Changed the initial lens from Identity to no lens so “Everything” truthfully displays all saved entity classes.
+2. Corrected entity badges to use explicit singular labels such as `PERSON`, `PROJECT`, `WALLET`, and `TOKEN`.
+3. Moved the horizontal filter treatment to the tablet breakpoint so the graph does not become compressed at 820px.
+4. Verified that People filtering shows five visible people in the sample dossier and that search narrows the graph to one matching USDC node.
+
+## Result
+
+final result: passed
+

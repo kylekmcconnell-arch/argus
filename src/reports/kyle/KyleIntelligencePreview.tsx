@@ -3,8 +3,10 @@ import type { GithubAssessment } from "../../data/evidence";
 import type { SocialActivitySnapshot } from "../../data/socialActivity";
 import { ReportStickyTableOfContents, type ReportCanvasNavItem } from "../../components/ReportCanvasPrimitives";
 import { KyleIntelligenceDecisionCanvas } from "./KyleIntelligenceDecisionCanvas";
+import { KyleConnectionWorkspace } from "./KyleConnectionWorkspace";
 import { KyleGithubSynthesis } from "./KyleGithubSynthesis";
 import { KyleSocialSynthesis } from "./KyleSocialSynthesis";
+import type { Dossier } from "../../data/dossier";
 
 const socialPreview: SocialActivitySnapshot = {
   schemaVersion: 1,
@@ -45,6 +47,48 @@ const githubPreview: GithubAssessment = {
   claimChecks: [],
   summary: "Recent original work is visible.",
 };
+
+const connectionPreviewDossier = {
+  handle: "@anyonefdn",
+  display_name: "ANyONe Protocol",
+  resolved_name: "ANyONe Protocol",
+  avatar: "A",
+  avatar_url: "https://unavatar.io/x/anyonefdn",
+  followers: "142K",
+  report: { roles: ["PROJECT"] },
+  graph: { nodes: [], edges: [] },
+  webTeam: [
+    { name: "Sergey Ilin", role: "Operations Lead", handle: "@SergeyIlin", source: "https://www.anyone.io/about-us", sourceUrl: "https://www.anyone.io/about-us", artifact_verified: true, avatarUrl: "https://unavatar.io/x/SergeyIlin" },
+    { name: "Neuratic", role: "Operations & Product Lead", handle: "@neuratic", source: "https://www.anyone.io/about-us", sourceUrl: "https://www.anyone.io/about-us", artifact_verified: true, avatarUrl: "https://unavatar.io/x/neuratic" },
+    { name: "Dr. Andrzej Tucholka", role: "Technical Advisor", source: "https://www.anyone.io/about-us", sourceUrl: "https://www.anyone.io/about-us", artifact_verified: true },
+    { name: "Yurii Kovalchuk", role: "Engineer", source: "https://www.anyone.io/about-us", sourceUrl: "https://www.anyone.io/about-us", artifact_verified: true },
+    { name: "Anon Morpho", role: "Strategy & Marketing Lead", source: "https://www.anyone.io/about-us", sourceUrl: "https://www.anyone.io/about-us", artifact_verified: true },
+  ],
+  projectToken: { verified: true, verification: "official_domain", name: "ANyONe Protocol", symbol: "ANYONE", rank: 1007, address: "0xFeAc2Eae96899709a43E252B6B92971D32F9C0F9", chain: "ethereum", sourceUrl: "https://docs.anyone.io/resources/token", capturedAt: "2026-08-27T00:00:00.000Z" },
+} as unknown as Dossier;
+
+const connectionPreviewNodes = [
+  { type: "Company", key: "@anyonefdn", label: "ANyONe Protocol", subject: true },
+  { type: "Person", key: "@SergeyIlin", label: "Sergey Ilin", role: "Operations Lead" },
+  { type: "Person", key: "@neuratic", label: "Neuratic", role: "Operations & Product Lead" },
+  { type: "Company", key: "EnigmaLand", label: "EnigmaLand" },
+  { type: "Company", key: "Blixroute", label: "Blixroute" },
+  { type: "Company", key: "rAEka Labs", label: "rAEka Labs" },
+  { type: "Identity", subtype: "Wallet", key: "wallet:solana:9x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a", chain: "solana" },
+  { type: "Identity", subtype: "Wallet", key: "wallet:ethereum:0x1f3a111111111111111111111111111111117b9e", chain: "ethereum" },
+  { type: "Token", key: "token:ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", label: "USDC", chain: "ethereum" },
+];
+
+const connectionPreviewEdges = [
+  { src: "@anyonefdn", dst: "@SergeyIlin", type: "TEAM", source_url: "https://www.anyone.io/about-us" },
+  { src: "@anyonefdn", dst: "@neuratic", type: "TEAM", source_url: "https://www.anyone.io/about-us" },
+  { src: "@SergeyIlin", dst: "EnigmaLand", type: "WORKED_ON" },
+  { src: "@neuratic", dst: "Blixroute", type: "WORKED_ON" },
+  { src: "@neuratic", dst: "rAEka Labs", type: "WORKED_ON" },
+  { src: "@anyonefdn", dst: "wallet:solana:9x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a", type: "CONTROLS_WALLET" },
+  { src: "@anyonefdn", dst: "wallet:ethereum:0x1f3a111111111111111111111111111111117b9e", type: "CONTROLS_WALLET" },
+  { src: "@anyonefdn", dst: "token:ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", type: "LINKS" },
+];
 
 const previewNavItems: ReportCanvasNavItem[] = [
   { href: "#report-summary", label: "Decision" },
@@ -184,9 +228,8 @@ export function KyleIntelligencePreview() {
           </section>
 
           <section id="relationships" className="story-chapter report-section scroll-mt-28" aria-labelledby="preview-connections-title">
-            <p className="eyebrow text-signal-lift">Connections</p>
-            <h2 id="preview-connections-title" className="story-chapter-title mt-2 text-ink">The relationship record remains part of the investigation.</h2>
-            <p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">Funding, legal-entity, team, account and ecosystem relationships continue to render from the saved graph. The redesign changes their editorial order, not their availability.</p>
+            <h2 id="preview-connections-title" className="sr-only">Connections</h2>
+            <KyleConnectionWorkspace dossier={connectionPreviewDossier} nodes={connectionPreviewNodes} edges={connectionPreviewEdges} connections={[]} onAudit={() => undefined} onOpenProject={() => undefined} />
           </section>
         </div>
         <section id="evidence-ledger" className="story-chapter report-section scroll-mt-28 border-t border-line py-20"><p className="eyebrow text-signal-lift">Evidence &amp; method</p><h2 className="story-chapter-title mt-2 text-ink">The full forensic record is still the foundation.</h2><p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">Saved sources, source problems, frozen evidence, scoring methodology and unanswered research questions remain available here.</p></section>

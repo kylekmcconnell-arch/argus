@@ -4312,8 +4312,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         )}
 
         <div id="relationships" className="scroll-mt-28" />
+        {reportLane.renderers.connectionWorkspace?.({
+          dossier: f,
+          nodes: visibleGraphNodes,
+          edges: visibleGraphEdges,
+          connections: showTrustGraphSupplemental ? connections : [],
+          onAudit,
+          onOpenProject: onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined,
+          shareView,
+        })}
         {/* connections — the compounding web: other audited subjects tied to this one */}
-        {showTrustGraphSupplemental && connections.length > 0 && (
+        {!reportLane.renderers.connectionWorkspace && showTrustGraphSupplemental && connections.length > 0 && (
           <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
             <Card className="divide-y divide-line/60">
               {connections.map((c) => {
@@ -4934,7 +4943,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
-          {(visibleGraphEdges.length > 0 || (showTrustGraphSupplemental && connections.length > 0)) && (
+          {!reportLane.renderers.connectionWorkspace && (visibleGraphEdges.length > 0 || (showTrustGraphSupplemental && connections.length > 0)) && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="Connection web" kicker="select a node to inspect it · subject → projects → the people behind them">
                 <Card className="p-2">
