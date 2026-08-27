@@ -368,6 +368,16 @@ function personResult(persistence: Record<string, unknown>) {
       roles: ["FOUNDER"],
       cap_applied: null,
     },
+    projectToken: {
+      verified: true,
+      symbol: "ANYONE",
+      address: "0x1234567890abcdef1234567890abcdef12345678",
+      chain: "ethereum",
+    },
+    threat: {
+      symbol: "ANYONE",
+      dossier: { score: 84, verdict: "PASS", axes: [] },
+    },
     persistence,
   };
 }
@@ -460,18 +470,39 @@ describe("App routing safety", () => {
     expect(harness.recordContribution).not.toHaveBeenCalled();
   });
 
-  it("publishes a person audit only when it carries an immutable version binding", async () => {
+  it("rebinds a completed project report to the final version containing its token score", async () => {
     await renderApp();
-    const reportVersionId = "00000000-0000-4000-8000-000000000301";
-
-    act(() => {
-      harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId }));
+    const initialVersionId = "00000000-0000-4000-8000-000000000301";
+    const finalVersionId = "00000000-0000-4000-8000-000000000302";
+    harness.syncReport.mockResolvedValue({
+      state: "persisted",
+      caseId: "00000000-0000-4000-8000-000000000303",
+      version: 2,
+      reportVersionId: finalVersionId,
+      panelCostToken: "signed-final-person-capability",
     });
 
-    expect(harness.syncReport).toHaveBeenCalledTimes(1);
-    expect(harness.logAudit).toHaveBeenCalledTimes(1);
+    act(() => {
+      harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: initialVersionId }));
+    });
+
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledWith(
+      "person",
+      "@persisted_person",
+      "@persisted_person",
+      expect.objectContaining({
+        threat: expect.objectContaining({ dossier: expect.objectContaining({ score: 84 }) }),
+      }),
+      "PASS",
+      88,
+    ));
+    await vi.waitFor(() => expect(harness.logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      id: finalVersionId,
+    })));
     expect(harness.personContribution).toHaveBeenCalledWith(expect.objectContaining({
-      persistence: expect.objectContaining({ state: "persisted", reportVersionId }),
+      threat: expect.objectContaining({ dossier: expect.objectContaining({ score: 84 }) }),
+      persistence: expect.objectContaining({ state: "persisted", reportVersionId: finalVersionId }),
+      versionContext: expect.objectContaining({ reportVersionId: finalVersionId, version: 2 }),
     }));
     expect(harness.recordContribution).toHaveBeenCalledTimes(1);
   });
