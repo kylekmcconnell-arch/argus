@@ -15,6 +15,7 @@ type ConsoleProps = {
   kind?: "person" | "token" | "investigation";
   hop?: string;
   pct?: number;
+  startedAt?: number;
 };
 
 const harness = vi.hoisted(() => ({

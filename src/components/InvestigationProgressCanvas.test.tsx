@@ -16,6 +16,7 @@ async function renderCanvas(props: {
   steps: TraceStep[];
   working: boolean;
   hop?: string;
+  startedAt?: number;
 }) {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -35,6 +36,7 @@ describe("InvestigationProgressCanvas", () => {
     await renderCanvas({
       kind: "person",
       working: true,
+      startedAt: Date.now() - 65_000,
       steps: [
         { phase: "P0 · Intake", label: "Resolve profile", detail: "Profile returned.", source: "twitterapi.io", tone: "good" },
         { phase: "Adverse", label: "Candidate lead", detail: "Needs review.", source: "grok", tone: "warn" },
@@ -45,8 +47,11 @@ describe("InvestigationProgressCanvas", () => {
     expect(container?.textContent).toContain("twitterapi.io");
     expect(container?.textContent).toContain("grok");
     expect(container?.textContent).toContain("Candidate lead");
-    expect(container?.textContent).toContain("Estimated time remaining");
-    expect(container?.textContent).toMatch(/about [12] minute/);
+    expect(container?.textContent).toContain("Time remaining");
+    expect(container?.textContent).toContain("Estimated completion");
+    expect(container?.textContent).toContain("Elapsed");
+    expect(container?.textContent).toMatch(/01:0[45]/);
+    expect(container?.textContent).toMatch(/about [23] minute/);
     expect(container?.textContent).not.toContain("GitHub");
     expect(container?.querySelectorAll("[aria-label='Sources checked'] .chip")).toHaveLength(2);
 
@@ -61,7 +66,7 @@ describe("InvestigationProgressCanvas", () => {
     expect(container?.textContent).toContain("Resolving the exact subject");
     expect(container?.textContent).toContain("confirming the official name and links before searching sources");
     expect(container?.textContent).toContain("No sources checked yet");
-    expect(container?.textContent).toContain("about 1 minute");
+    expect(container?.textContent).toContain("less than a minute");
     expect(container?.textContent).not.toMatch(/DexScreener|GoPlus|Claude|Grok|GitHub/);
   });
 

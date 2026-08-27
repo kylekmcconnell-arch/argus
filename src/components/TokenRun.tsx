@@ -45,6 +45,7 @@ export function TokenRun({
       working={working}
       mode="live"
       kind="token"
+      startedAt={run?.startedAt}
     />
   );
 }

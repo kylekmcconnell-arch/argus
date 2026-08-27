@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import {
   ChartLineUpIcon, CheckCircleIcon, CrosshairIcon, DatabaseIcon,
   FingerprintSimpleIcon, GitBranchIcon, GlobeSimpleIcon, MagnifyingGlassIcon,
@@ -23,24 +23,74 @@ function StageStateIcon({ state, icon: Icon }: { state: InvestigationStageState;
   return <Icon size={18} weight="regular" aria-hidden />;
 }
 
-function estimatedTimeRemaining(
-  kind: InvestigationProgressKind,
-  stages: Array<{ state: InvestigationStageState }>,
-  working: boolean,
-): string {
-  if (!working) return "Complete";
-  const total = Math.max(stages.length, 1);
-  const remaining = stages.filter((stage) => stage.state !== "observed").length;
-  // Grounded in the documented route envelopes: token scans are about one
-  // minute, person scans about two, and full investigations about six. Stage
-  // progress narrows the estimate without pretending we know provider latency.
-  const baselineMinutes = kind === "investigation" ? 6 : kind === "person" ? 2 : 1;
-  const minutes = Math.max(1, Math.ceil(baselineMinutes * (remaining / total)));
+const BASELINE_SECONDS: Record<InvestigationProgressKind, number> = {
+  resolution: 45,
+  token: 90,
+  person: 240,
+  investigation: 360,
+};
+
+function formatDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function formatRemaining(seconds: number): string {
+  if (seconds < 45) return "less than a minute";
+  const minutes = Math.max(1, Math.round(seconds / 60));
   return minutes === 1 ? "about 1 minute" : `about ${minutes} minutes`;
 }
 
-export function InvestigationProgressCanvas({ kind, subject = "the subject", subtitle, steps, working, hop }: {
-  kind: InvestigationProgressKind; subject?: string; subtitle?: string; steps: TraceStep[]; working: boolean; hop?: string;
+function estimateTimeRemainingSeconds(
+  kind: InvestigationProgressKind,
+  stages: Array<{ state: InvestigationStageState }>,
+  working: boolean,
+): number {
+  if (!working) return 0;
+  const total = Math.max(stages.length, 1);
+  const remaining = stages.reduce((sum, stage) => sum + (stage.state === "observed" ? 0 : stage.state === "active" ? 0.55 : 1), 0);
+  // These are deliberately broad route envelopes, not fake precision. Live
+  // provider latency can move the clock; stage completion steadily narrows it.
+  return Math.max(25, BASELINE_SECONDS[kind] * (remaining / total));
+}
+
+function completionClock(now: number, remainingSeconds: number): string {
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" })
+    .format(new Date(now + remainingSeconds * 1_000));
+}
+
+function ScanClock({ kind, stages, working, startedAt }: {
+  kind: InvestigationProgressKind;
+  stages: Array<{ state: InvestigationStageState }>;
+  working: boolean;
+  startedAt?: number;
+}) {
+  const mountedAtRef = useRef(Date.now());
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!working) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [working]);
+  const effectiveStartedAt = startedAt && Number.isFinite(startedAt) ? startedAt : mountedAtRef.current;
+  const elapsed = Math.max(0, (now - effectiveStartedAt) / 1_000);
+  const remainingSeconds = estimateTimeRemainingSeconds(kind, stages, working);
+  const timeRemaining = working ? formatRemaining(remainingSeconds) : "Complete";
+  const estimatedCompletion = working ? completionClock(now, remainingSeconds) : "Finished";
+  return (
+    <div className="research-eta" aria-label={`Elapsed ${formatDuration(elapsed)}. Estimated time remaining: ${timeRemaining}. Estimated completion: ${estimatedCompletion}.`}>
+      <div><span>Elapsed</span><strong className="tabular-nums">{formatDuration(elapsed)}</strong></div>
+      <div><span>Time remaining</span><strong>{timeRemaining}</strong></div>
+      <div><span>Estimated completion</span><strong>{estimatedCompletion}</strong></div>
+      {working && <small>Live estimate · updates as each research stage finishes. Provider response times can move the clock.</small>}
+    </div>
+  );
+}
+
+export function InvestigationProgressCanvas({ kind, subject = "the subject", subtitle, steps, working, hop, startedAt }: {
+  kind: InvestigationProgressKind; subject?: string; subtitle?: string; steps: TraceStep[]; working: boolean; hop?: string; startedAt?: number;
 }) {
   const progress = deriveInvestigationProgress({ kind, steps, working, hop });
   const latestKey = progress.latestEvent
@@ -51,7 +101,6 @@ export function InvestigationProgressCanvas({ kind, subject = "the subject", sub
     : activeStage === "finalize" || activeStage === "complete" ? "settling"
       : activeStage === "analysis" ? "focused" : "searching";
   const headline = kind === "resolution" ? `Finding the right match for ${subject}` : `Building the case on ${subject}`;
-  const timeRemaining = estimatedTimeRemaining(kind, progress.stages, working);
 
   return (
     <section className="research-command-deck" aria-label="Investigation progress">
@@ -63,11 +112,7 @@ export function InvestigationProgressCanvas({ kind, subject = "the subject", sub
           </div>
           <h1 className="research-command-title">{headline}</h1>
           {subtitle && <p className="research-command-subtitle">{subtitle}</p>}
-          <div className="research-eta" aria-label={`Estimated time remaining: ${timeRemaining}`}>
-            <span>Estimated time remaining</span>
-            <strong>{timeRemaining}</strong>
-            {working && <small>Updates as each research stage finishes.</small>}
-          </div>
+          <ScanClock kind={kind} stages={progress.stages} working={working} startedAt={startedAt} />
         </div>
 
         <div className="research-observation">

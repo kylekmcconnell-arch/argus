@@ -17,9 +17,9 @@ function scrollToLatest(node: HTMLElement): void {
   node.scrollTo({ top: node.scrollHeight, behavior: reducedMotion ? "auto" : "smooth" });
 }
 
-export function AuditConsole({ handle, subtitle, steps, working, mode, kind = "person", hop }: {
+export function AuditConsole({ handle, subtitle, steps, working, mode, kind = "person", hop, startedAt }: {
   handle: string; subtitle: string; steps: TraceStep[]; working: boolean; mode: "live" | "curated";
-  kind?: InvestigationProgressKind; hop?: string;
+  kind?: InvestigationProgressKind; hop?: string; startedAt?: number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
@@ -76,7 +76,7 @@ export function AuditConsole({ handle, subtitle, steps, working, mode, kind = "p
       <div className="research-workspace" role="status" aria-live="off" aria-busy={working}>
         <div className="grid-bg absolute inset-0 -z-10" />
         <div className="research-workspace-inner">
-          <InvestigationProgressCanvas kind={kind} subject={handle} subtitle={subtitle} steps={steps} working={working} hop={hop} />
+          <InvestigationProgressCanvas kind={kind} subject={handle} subtitle={subtitle} steps={steps} working={working} hop={hop} startedAt={startedAt} />
 
           <section className="research-ledger" aria-labelledby="research-ledger-title">
             <div className="research-ledger-header">

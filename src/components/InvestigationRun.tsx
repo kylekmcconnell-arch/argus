@@ -50,6 +50,7 @@ export function InvestigationRun({
       mode="live"
       kind="investigation"
       hop={attached?.hop}
+      startedAt={attached?.startedAt}
     />
   );
 }

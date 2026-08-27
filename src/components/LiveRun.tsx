@@ -49,6 +49,7 @@ export function LiveRun({
       working={working}
       mode="live"
       kind="person"
+      startedAt={run?.startedAt}
     />
   );
 }
