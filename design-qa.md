@@ -340,3 +340,52 @@ No actionable P0, P1, or P2 differences remain.
 The initial normalized comparison found no actionable P0/P1/P2 mismatch, so no correction loop was required.
 
 final result: passed
+
+---
+
+# Score ring segment explanations — design QA
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-27 at 2.07.01 AM.png`
+- Resting implementation: `/private/tmp/argus-ring-hover.azZNxg/.design-qa/ring-resting-1280x720.jpg`
+- Explained implementation: `/private/tmp/argus-ring-hover.azZNxg/.design-qa/ring-explained-1280x720.jpg`
+- Focused comparison: `/private/tmp/argus-ring-hover.azZNxg/.design-qa/ring-source-vs-explained.jpg`
+- Browser URL: `http://127.0.0.1:5174/?design-preview=ring-interaction` (temporary visual harness, removed before commit)
+- Viewport: 1280 × 720 CSS px, device scale factor 1
+- Source pixels: 755 × 436
+- Implementation pixels: 1280 × 720; the comparison crop was normalized to 436 px high before side-by-side review
+- State: light theme, Kyle report lane, dual-score verdict hero; source in resting state and implementation in selected-segment state
+
+## Evidence reviewed
+
+- Full-view comparison: the 1280 × 720 resting implementation preserves the source hierarchy, score sizes, paired-ring proportions, verdict placement, supporting copy, and composition colors.
+- Focused comparison: the side-by-side ring crop verifies that the selected arc becomes thicker, unrelated arcs recede, and the score center becomes a plain-language explanation without changing the ring geometry or pushing nearby content.
+- Interaction surface: both rings expose every saved composition segment as a named, focusable control. The local browser fixture exposed six segment controls with the dimension, earned/available points, rationale, and evidence counts; production reports expose one control per saved dimension.
+- Automated interaction coverage: hover, mouse leave, keyboard focus, selected-segment emphasis, accessible labels, and restored resting state are covered in `src/reports/kyle/KyleIntelligenceDecisionCanvas.test.tsx`.
+- Console/runtime: the preview loaded without an error boundary or visible runtime error.
+
+## Required fidelity surfaces
+
+- Fonts and typography: passed. The explanation uses the existing Kyle mono/editorial hierarchy, with a compact kicker, readable dimension label, green points line, and darker rationale copy.
+- Spacing and layout rhythm: passed. The explanation stays inside both 252 px and 208 px rings; no card, header, or adjacent ring shifts.
+- Colors and visual tokens: passed. Existing composition colors remain authoritative; selection thickens the active arc and lowers competing arcs without introducing a new palette.
+- Image quality and asset fidelity: passed. This interaction adds no image or icon assets and does not replace any source asset.
+- Copy and content: passed. The selected state answers three direct questions: which dimension, how many points it contributed, and why.
+- Accessibility and behavior: passed. Segment controls support hover, focus, tap/click, Escape, expanded hit strokes, full accessible names, and a visible selected state.
+- Responsiveness: passed for the two production hero sizes represented by the source. The smaller token ring uses tighter type and a three-line rationale limit.
+
+## Findings
+
+No actionable P0, P1, or P2 findings remain.
+
+P3 follow-up: a short first-use hint could improve discoverability for users who do not naturally hover chart marks, but the help cursor and immediate arc response make the interaction understandable without adding more persistent copy.
+
+## Comparison history
+
+1. First explained-state capture: the rationale was too light and truncated after three lines.
+   - Fix: moved the rationale to the primary ink token, raised weight and size, and allowed four lines on the primary ring and three on the smaller token ring.
+   - Post-fix evidence: `.design-qa/ring-explained-1280x720.jpg` and `.design-qa/ring-source-vs-explained.jpg`.
+
+## Final result
+
+final result: passed
+
