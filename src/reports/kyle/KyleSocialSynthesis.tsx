@@ -75,7 +75,7 @@ export function KyleSocialSynthesis({ snapshot }: { snapshot: SocialActivitySnap
           <Gauge size={18} weight="duotone" aria-hidden="true" />
           <span className="mono">ACTIVITY</span>
           <strong>{level ? level.label : "Unknown"}</strong>
-          <small>Volume only—not quality or safety.</small>
+          <small>Volume only, not quality or safety.</small>
         </article>
         <article>
           <UsersThree size={18} weight="duotone" aria-hidden="true" />
@@ -93,7 +93,7 @@ export function KyleSocialSynthesis({ snapshot }: { snapshot: SocialActivitySnap
           <Megaphone size={18} weight="duotone" aria-hidden="true" />
           <span className="mono">SPECULATION</span>
           <strong>{speculationLabel}</strong>
-          <small>Keyword read of the displayed sample—not a sentiment score.</small>
+          <small>Keyword read of the displayed sample, not a sentiment score.</small>
         </article>
       </div>
 

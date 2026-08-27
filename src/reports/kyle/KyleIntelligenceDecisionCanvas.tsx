@@ -475,7 +475,7 @@ export function KyleIntelligenceDecisionCanvas({
         <div className="kyle-section-intro">
           <p className="kyle-overline mono">04 · THE ARGUS TAKE</p>
           <h2 id="kyle-argus-take-title">What the evidence means.</h2>
-          <p>Concise analytical justification—not private model reasoning and not a transcript of the research prompts.</p>
+          <p>Concise analytical justification, not private model reasoning or a transcript of the research prompts.</p>
         </div>
         {decisionLensId && onDecisionLensChange && (
           <div className="kyle-decision-lens">

@@ -61,7 +61,7 @@ export function KyleIntelligencePreview() {
         <KyleIntelligenceDecisionCanvas
           subjectName="Fedi"
           subjectSummary="Fedi is a privacy-first Bitcoin wallet with chat, community custody, multispend accounts, and mini-app spaces designed for communities coordinating payments and local financial tools."
-          reportSummary="Fedi clears ARGUS’s basic legitimacy tests, with named leadership, an active product, recent development activity and documented funding. Its result is governed primarily by limited independent validation around security, traction and partnerships—not by a major adverse event established in the current evidence."
+          reportSummary="Fedi clears ARGUS’s basic legitimacy tests, with named leadership, an active product, recent development activity and documented funding. Its result is governed primarily by limited independent validation around security, traction and partnerships, not by a major adverse event established in the current evidence."
           verdictLabel="Caution"
           score={55}
           scoreLabel="Project investigation"
