@@ -20,6 +20,7 @@ export type PersonCheckId =
   | "profile-photo-authenticity"
   | "code-footprint-github"
   | "identity-continuity"
+  | "entity-continuity"
   | "affiliations-associates"
   | "promoted-token-performance"
   | "project-token-identity"

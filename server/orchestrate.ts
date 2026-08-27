@@ -45,6 +45,7 @@ import { checkSiteSubstance, isConfirmedOfficialSiteAccessDenial, officialSiteAc
 import { isLinkHubUrl, resolveLinkHubWebsite } from "./adapters/linkHub";
 import { shouldAnnounceOfficialXAccountStatus, xAccountIdentityEstablished } from "../src/lib/xAccountState";
 import { collectDomainRegistration, deriveLaunchWindow } from "./adapters/domainAge";
+import { collectEntityContinuity } from "./adapters/entityContinuity";
 import { checkLeaderDepartures, type LeaderDepartureCheck } from "./adapters/peopledatalabs";
 import { enrichFirstPartyTeamAvatars } from "./adapters/teamEnrichment";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
@@ -4401,6 +4402,53 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   } else {
     evidence.roles = rolesAfterBasicFacts;
   }
+  // Project and token history is a mandatory pre-scoring stage. A canonical
+  // contract is a point in a lineage, not permission to treat the asset as a
+  // clean launch. Historical aliases discovered here are then available to
+  // every later analyst/scoring packet and are frozen with the report.
+  if (evidence.roles.includes(SubjectClass.PROJECT)) {
+    const continuityStartedAt = startRuntimeStage("entity-continuity");
+    try {
+      evidence.entityContinuity = await collectEntityContinuity(ctx);
+      const continuity = evidence.entityContinuity;
+      const complete = continuity.coverage.state === "complete";
+      checkTracker.record({
+        id: "entity-continuity",
+        status: complete ? "confirmed" : continuity.coverage.state === "not_applicable" ? "not-applicable" : "unavailable",
+        note: continuity.coverage.reason,
+        provider: "serper+primary-source-verification",
+        sourceCount: continuity.coverage.primarySourceCount,
+        completedAt: continuity.coverage.searchedAt,
+      });
+      checkTracker.provider(
+        "entity-continuity",
+        "Project and token continuity",
+        complete ? "executed" : continuity.coverage.state === "partial" ? "partial" : "unavailable",
+        continuity.coverage.reason,
+      );
+      emit({
+        phase: "Continuity",
+        label: complete
+          ? `Lifecycle recovered${continuity.predecessorName ? ` · ${continuity.predecessorName} → ${continuity.subject}` : ""}`
+          : "Lifecycle coverage remains open",
+        detail: complete
+          ? `${continuity.events.length} dated or sourced change records and ${continuity.tokenLineage.length} lineage nodes were frozen before scoring.`
+          : continuity.coverage.reason,
+        source: "serper + primary records",
+        tone: complete ? "good" : "warn",
+      });
+    } catch (error) {
+      checkTracker.record({
+        id: "entity-continuity",
+        status: "unavailable",
+        note: `the mandatory lifecycle stage failed before a verified result was frozen: ${String(error)}`,
+        provider: "serper+primary-source-verification",
+      });
+      checkTracker.provider("entity-continuity", "Project and token continuity", "failed", String(error));
+      emit({ phase: "Continuity", label: "Lifecycle search failed", detail: String(error), tone: "warn" });
+    }
+    finishRuntimeStage("entity-continuity", continuityStartedAt);
+  }
   if (capabilityIsAuthorized("legal_and_adverse")) await organizationSafetyPass();
   if (
     recoveredProjectSite
@@ -4969,6 +5017,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
+    entityContinuity: evidence.entityContinuity ? [evidence.entityContinuity] : [],
     // The scale of the venture a founder verifiably founded is scoreable
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,

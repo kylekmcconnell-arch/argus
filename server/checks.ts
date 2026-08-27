@@ -81,6 +81,13 @@ const CHECKS: readonly CheckDefinition[] = [
   { id: "code-footprint-github", label: "Code footprint (GitHub)", defaultNote: "no completed GitHub resolution was recorded" },
   { id: "identity-continuity", label: "Identity continuity", defaultNote: "no completed handle-history result was recorded" },
   {
+    id: "entity-continuity",
+    label: "Project and token continuity",
+    defaultNote: "no completed predecessor, rebrand, migration, or contract-continuity search was recorded",
+    role: "PROJECT",
+    criticalFor: ["PROJECT"],
+  },
+  {
     id: "affiliations-associates",
     label: "Affiliations & associates",
     defaultNote: "no corroborated affiliation collection outcome was recorded",

@@ -40,6 +40,7 @@ import { LpCustody } from "./LpCustody";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { marketSizeBand } from "../lib/marketPosition";
 import { UsageVisuals } from "./UsageVisuals";
+import { EntityContinuityTimeline } from "./EntityContinuityTimeline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { RingAlert } from "./RingAlert";
 import { TrustGraph } from "./TrustGraph";
@@ -1419,6 +1420,7 @@ export function InvestigationReport({
     `${String(chapter).padStart(2, "0")} · ${label}`;
   const reportNavItems: ReportCanvasNavItem[] = [
     { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
+    ...(projectAccount?.entityContinuity?.events.length ? [{ href: "#what-changed" as const, label: "What changed", icon: <ArrowClockwise size={16} weight="duotone" aria-hidden="true" /> }] : []),
     { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
     { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
     ...(socialActivity ? [{ href: "#social-activity" as const, label: "Social", icon: <ChatsCircle size={16} weight="duotone" aria-hidden="true" /> }] : []),
@@ -1964,6 +1966,8 @@ export function InvestigationReport({
           items={reportNavItems}
           showGuideNavigation={reportLane.definition.navigation === "guide"}
         >
+
+        {projectAccount?.entityContinuity && <EntityContinuityTimeline snapshot={projectAccount.entityContinuity} />}
 
         {projectAccount?.intelligence && (
           <PointInTimeIntelligencePanel

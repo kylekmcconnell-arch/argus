@@ -2656,6 +2656,9 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   projectToken: [
     "P3_token_conduct", "P5_traction_and_liveness",
   ],
+  entityContinuity: [
+    "P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity",
+  ],
   // Findings are routed by exact finding_type below. A section-wide allowlist
   // made unrelated facts (for example, token collapse) eligible for identity.
   findings: [],
@@ -2738,6 +2741,7 @@ const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "profile-photo-authenticity": [],
   "code-footprint-github": ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
   "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "entity-continuity": ["P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity"],
   "affiliations-associates": ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
   "project-token-identity": ["P3_token_conduct"],
@@ -3772,6 +3776,7 @@ function serializeAnalystEvidencePacket(
     promotions: 16,
     wallets: 12,
     team: 16,
+    entityContinuity: 1,
     basicFacts: 24,
     notableFollowers: 16,
     recentActivity: 12,

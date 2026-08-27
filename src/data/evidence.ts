@@ -926,6 +926,70 @@ export interface LaunchWindowSnapshot {
   summary: string;
 }
 
+export type EntityContinuitySourceClass = "first_party" | "exchange" | "explorer" | "regulator" | "secondary";
+
+export interface EntityContinuitySource {
+  url: string;
+  title: string;
+  sourceClass: EntityContinuitySourceClass;
+}
+
+export interface EntityLifecycleEvent {
+  date: string | null;
+  kind: "predecessor" | "rebrand" | "token_migration" | "contract_replacement" | "exchange_handling" | "architecture_change" | "current_status";
+  title: string;
+  detail: string;
+  sourceUrls: string[];
+}
+
+export interface TokenLineageNode {
+  name: string;
+  ticker: string | null;
+  contract: string | null;
+  chain: string | null;
+  status: "predecessor" | "migration" | "current";
+  validFrom: string | null;
+  validTo: string | null;
+  sourceUrls: string[];
+}
+
+/** Frozen project/token history collected before scoring. */
+export interface EntityContinuitySnapshot {
+  subject: string;
+  historicalAliases: string[];
+  predecessorName: string | null;
+  oldTicker: string | null;
+  oldContract: string | null;
+  migrationRatio: string | null;
+  migrationDate: string | null;
+  replacementContract: string | null;
+  migrationContract: string | null;
+  currentStatus: string | null;
+  architectureChanges: string[];
+  exchangeHandling: string[];
+  tokenLineage: TokenLineageNode[];
+  events: EntityLifecycleEvent[];
+  sources: EntityContinuitySource[];
+  aliasSearches: Array<{
+    alias: string;
+    categories: Array<"team" | "security" | "market" | "legal" | "audit" | "incident">;
+    sourceUrls: string[];
+  }>;
+  marketHistory: Array<{
+    ticker: string | null;
+    contract: string | null;
+    status: "predecessor" | "current";
+    sourceUrls: string[];
+  }>;
+  coverage: {
+    required: boolean;
+    state: "complete" | "partial" | "unavailable" | "not_applicable";
+    reason: string;
+    primarySourceCount: number;
+    searchedAt: string;
+  };
+}
+
 /** Grok first-pass read of the bound X profile + official site. Display name is never a bind key. */
 /** Product/token the COMPANY launched. Separate unique-id from the subject. */
 export interface LaunchedProductLead {
@@ -1042,6 +1106,8 @@ export interface CollectedEvidence {
   /** Official-domain registration record, and the launch window it brackets with the account age. */
   domainRegistration?: DomainRegistrationSnapshot;
   launchWindow?: LaunchWindowSnapshot;
+  /** Project and token aliases, migrations and contract replacements discovered before scoring. */
+  entityContinuity?: EntityContinuitySnapshot;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to

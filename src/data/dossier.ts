@@ -249,6 +249,8 @@ export interface Dossier {
   companyEnrichment?: CollectedEvidence["companyEnrichment"];
   /** Frozen registration observation for the canonical official domain. */
   domainRegistration?: CollectedEvidence["domainRegistration"];
+  /** Frozen predecessor, rebrand, migration and contract lineage evidence. */
+  entityContinuity?: CollectedEvidence["entityContinuity"];
   /**
    * Deterministic, score-neutral decision intelligence built from this exact
    * evidence capture. Older reports omit it and must not reconstruct it from
@@ -615,6 +617,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       },
     } : {}),
     ...(ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {}),
+    ...(ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),

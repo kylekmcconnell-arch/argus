@@ -94,6 +94,7 @@ describe("PersonCheckTracker", () => {
       "profile-photo-authenticity",
       "code-footprint-github",
       "identity-continuity",
+      "entity-continuity",
       "affiliations-associates",
       "news-press",
       "trust-graph-connections",
@@ -122,6 +123,7 @@ describe("PersonCheckTracker", () => {
       "identity-resolution",
       "code-footprint-github",
       "identity-continuity",
+      "entity-continuity",
       "affiliations-associates",
       "project-token-identity",
       "project-product-substance",
@@ -165,8 +167,8 @@ describe("PersonCheckTracker", () => {
 
     expect(readiness).toMatchObject({
       status: "ready",
-      successful: 7,
-      applicable: 7,
+      successful: 8,
+      applicable: 8,
       coveragePercent: 100,
       unresolved: 0,
     });

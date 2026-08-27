@@ -69,6 +69,7 @@ import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
 import { ProjectIntel } from "./ProjectIntel";
 import { ProjectTokenCard } from "./ProjectTokenCard";
+import { EntityContinuityTimeline } from "./EntityContinuityTimeline";
 import { changeReportLifecycle } from "../lib/reports";
 import { LegalScreen } from "./LegalScreen";
 import { SanctionsNameScreen } from "./SanctionsNameScreen";
@@ -2932,6 +2933,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const reportNavItems: ReportCanvasNavItem[] = [
     { href: "#report-summary", label: "Decision", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
     ...(presentation.primaryScore && governingAxes.length > 0 ? [{ href: "#composition" as const, label: "Score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" /> }] : []),
+    ...(f.entityContinuity?.events.length ? [{ href: "#what-changed" as const, label: "What changed", icon: <ArrowsClockwise aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(roles.includes(SubjectClass.PROJECT)
       ? [{ href: "#dossier-product" as const, label: "Product", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]
       : [{ href: "#dossier" as const, label: "Summary", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]),
@@ -3416,6 +3418,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         {reportLane.definition.navigation === "sticky" && (
           <ReportStickyTableOfContents items={reportNavItems} />
         )}
+
+        {f.entityContinuity && <EntityContinuityTimeline snapshot={f.entityContinuity} />}
 
         <InvestigationDecisionCanvas
           presentationStyle={reportStyle}
