@@ -72,4 +72,22 @@ describe("Kyle intelligence report opening", () => {
     expect([...container.querySelectorAll('a[href="#evidence-ledger"]')]
       .some((link) => link.textContent?.includes("Enter evidence room"))).toBe(true);
   });
+
+  it("keeps project diligence and linked-token safety as two separate scores", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      secondaryScore={{
+        label: "Token safety score",
+        score: 82,
+        verdictLabel: "Pass",
+        context: "Contract, tradeability, liquidity, holders, market data and sanctions.",
+      }}
+    />));
+
+    expect(container.querySelector(".kyle-investigation-meta")?.textContent).toContain("Project diligence score");
+    expect(container.querySelector(".kyle-verdict-score")?.textContent).toContain("55");
+    const tokenScore = container.querySelector(".kyle-secondary-score");
+    expect(tokenScore?.textContent).toContain("Token safety score");
+    expect(tokenScore?.textContent).toContain("82/100");
+  });
 });

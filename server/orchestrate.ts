@@ -29,7 +29,12 @@ import {
   scanContradictions,
 } from "./agent";
 import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cost";
-import { declaredTokenFromBio, tokenFromBio, tokenFromPromotions } from "../src/lib/projectTokenLeg";
+import {
+  declaredTokenFromBio,
+  tokenFromBio,
+  tokenFromPromotions,
+  tokenFromVerifiedProjectToken,
+} from "../src/lib/projectTokenLeg";
 import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
@@ -4097,12 +4102,14 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // Resolve the subject's token as early as possible and stamp it on a step
   // (machine-readable `token` field) so the CLIENT launches the browser-side
   // threat scanner in parallel with everything below - one product, no added
-  // wall-clock. The bio CA is authoritative (impersonation defense: the
-  // official account states its own contract); a claimed promotion with a
-  // contract is second. No match here is not terminal - the client falls back
-  // to a canonical name-match after the dossier lands.
+  // wall-clock. The canonical project-token record is strongest because the
+  // collector has already joined it to the official X account or domain. A bio
+  // CA and then a claimed promotion remain fallbacks. No match here is not
+  // terminal - the client makes the same checks after the dossier lands.
   try {
-    const tokenCand = tokenFromBio(evidence.profile.bio) ?? tokenFromPromotions(evidence.promotions);
+    const tokenCand = tokenFromVerifiedProjectToken(evidence.projectToken)
+      ?? tokenFromBio(evidence.profile.bio)
+      ?? tokenFromPromotions(evidence.promotions);
     if (tokenCand) {
       emit({
         phase: "ARGUS · Threat",
