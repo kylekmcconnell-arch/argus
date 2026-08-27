@@ -1861,7 +1861,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
     ?? report.role_reports[0];
   const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
-  const compositionRows = governingAxes.map(([axis, a]) => ({
+  const tokenAxisApplicability = governingRoleReport?.axis_applicability?.P3_token_conduct;
+  const tokenAxisExcluded = tokenAxisApplicability?.axisTreatment === "not_applicable"
+    || tokenAxisApplicability?.axisTreatment === "deferred";
+  const compositionRows = [
+    ...governingAxes.map(([axis, a]) => ({
     axis,
     label: diligenceAreaLabel(axis),
     score: a.score,
@@ -1871,7 +1875,19 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     counterCount: a.counterEvidenceRefs?.length,
     questionCount: a.gaps?.length,
     evidenceHref: f.projectStrengthBands ? `#dimension-${axis}` as const : undefined,
-  }));
+    })),
+    ...(tokenAxisExcluded ? [{
+      axis: "P3_token_conduct",
+      label: "Token design and conduct",
+      score: 0,
+      weight: 0,
+      rationale: tokenAxisApplicability.reason,
+      evidenceHref: null,
+      applicability: tokenAxisApplicability.axisTreatment as "not_applicable" | "deferred",
+      sublabel: tokenAxisApplicability.axisTreatment === "deferred" ? "deferred until launch" : "not applicable",
+      countsLine: `Project score normalized over ${governingRoleReport?.applicable_weight ?? 80} applicable points.`,
+    }] : []),
+  ];
   const linkedTokenDossier = f.threat?.dossier;
   const linkedTokenCompositionRows = linkedTokenDossier
     ? orderByPlainAxis(linkedTokenDossier.axes.map((tokenAxis) => ({
@@ -3430,7 +3446,9 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           score={presentation.primaryScore && typeof report.governing_score === "number" ? report.governing_score : null}
           scoreLabel={roles.includes(SubjectClass.PROJECT) ? "Project diligence score" : "Person diligence score"}
           scoreContext={roles.includes(SubjectClass.PROJECT)
-            ? "Team, product, token conduct, backers, traction and transparency."
+            ? tokenAxisExcluded
+              ? `Token conduct is ${tokenAxisApplicability.axisTreatment === "deferred" ? "deferred until launch" : "not applicable"}; the score is normalized across team, product, backers, traction and transparency.`
+              : "Team, product, token conduct, backers, traction and transparency."
             : "Identity, operating record, relationships and attributable risk."}
           scoreIsProvisional={!presentation.final}
           favorable={favorableVerdict}

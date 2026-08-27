@@ -251,6 +251,8 @@ export interface Dossier {
   domainRegistration?: CollectedEvidence["domainRegistration"];
   /** Frozen predecessor, rebrand, migration and contract lineage evidence. */
   entityContinuity?: CollectedEvidence["entityContinuity"];
+  /** Frozen pre-scoring token applicability decision. */
+  tokenApplicability?: CollectedEvidence["tokenApplicability"];
   /**
    * Deterministic, score-neutral decision intelligence built from this exact
    * evidence capture. Older reports omit it and must not reconstruct it from
@@ -287,6 +289,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   a.setIdentity(ev.profile.identity_confidence);
+  a.setTokenApplicability(ev.tokenApplicability);
   graphAudit.setIdentity(ev.profile.identity_confidence);
 
   const governingEligible = (row: { evidence_origin?: string; artifact_verified?: boolean }) =>
@@ -620,6 +623,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     } : {}),
     ...(ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {}),
     ...(ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {}),
+    ...(ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {}),
     ...(ev.evmControlReality
       ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) }
       : {}),

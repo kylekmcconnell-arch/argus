@@ -92,7 +92,9 @@ function executiveText(value: string | null | undefined): string {
     .trim();
 }
 
-function evidenceBand(row: CompositionRow): "Strong" | "Moderate" | "Limited" | "Unresolved" {
+function evidenceBand(row: CompositionRow): "Strong" | "Moderate" | "Limited" | "Unresolved" | "Not applicable" | "Deferred" {
+  if (row.applicability === "not_applicable") return "Not applicable";
+  if (row.applicability === "deferred") return "Deferred";
   const ratio = row.weight > 0 ? row.score / row.weight : 0;
   if (row.questionCount && row.score === 0) return "Unresolved";
   if (ratio >= 0.72 && (row.supportCount ?? 0) > 0) return "Strong";
@@ -243,6 +245,15 @@ function AnimatedVerdictScore({
   size: number;
 }) {
   const buildRows = rows.filter((row) => row.score > 0);
+  const applicableWeight = buildRows.reduce((sum, row) => sum + Math.max(0, row.weight), 0) || 100;
+  const hasExcludedAxis = rows.some((row) => row.applicability !== undefined);
+  const ringRows = hasExcludedAxis && applicableWeight < 100
+    ? buildRows.map((row) => ({
+        ...row,
+        score: (row.score / applicableWeight) * 100,
+        weight: (row.weight / applicableWeight) * 100,
+      }))
+    : buildRows;
   const tone = scoreTone(score);
   const ringColor = tone === "positive"
     ? "var(--kyle-editorial-green)"
@@ -259,7 +270,7 @@ function AnimatedVerdictScore({
   const [explainedAxis, setExplainedAxis] = useState<string | null>(null);
   const explanationId = useId();
   const explainedRow = buildRows.find((row) => row.axis === explainedAxis) ?? null;
-  const { segments, stroke, radius } = scoreRingSegments(buildRows, size);
+  const { segments, stroke, radius } = scoreRingSegments(ringRows, size);
   const clearPointerExplanation = (event: MouseEvent<SVGCircleElement>) => {
     if (document.activeElement !== event.currentTarget) setExplainedAxis(null);
   };
@@ -288,7 +299,7 @@ function AnimatedVerdictScore({
             color={ringColor}
             size={size}
             bands={score != null}
-            composition={buildRows}
+            composition={ringRows}
             fallbackLabel={label}
           >
             <div className="kyle-score-status">
@@ -515,6 +526,7 @@ export function KyleIntelligenceDecisionCanvas({
           </div>
           {sortedComposition.length ? sortedComposition.map((row) => {
             const band = evidenceBand(row);
+            const excluded = row.applicability !== undefined;
             const open = Math.max(0, row.weight - row.score);
             return (
               <details key={row.axis} className="kyle-composition-row">
@@ -524,18 +536,18 @@ export function KyleIntelligenceDecisionCanvas({
                     <strong>{row.label}</strong>
                     <small>{band} evidence</small>
                   </span>
-                  <span className="kyle-composition-points mono"><strong>{Math.round(row.score)}</strong> / {row.weight}</span>
-                  <span className="kyle-composition-open mono">{open > 0 ? `${Math.round(open)} ${Math.round(open) === 1 ? "pt" : "pts"} not earned` : "fully earned"}</span>
+                  <span className="kyle-composition-points mono">{excluded ? <strong>N/A</strong> : <><strong>{Math.round(row.score)}</strong> / {row.weight}</>}</span>
+                  <span className="kyle-composition-open mono">{excluded ? "not scored" : open > 0 ? `${Math.round(open)} ${Math.round(open) === 1 ? "pt" : "pts"} not earned` : "fully earned"}</span>
                   <ArrowDown size={15} weight="bold" aria-hidden="true" />
                 </summary>
                 <div className="kyle-composition-detail">
-                  <ClaimLabel type={band === "Strong" ? "FACT" : "INFERENCE"} strength={band} />
+                  <ClaimLabel type={band === "Strong" || excluded ? "FACT" : "INFERENCE"} strength={band} />
                   <p>{sentence(row.rationale) || "No public rationale was saved for this dimension."}</p>
                   <div>
                     <span className="mono">{row.supportCount ?? 0} supporting source{row.supportCount === 1 ? "" : "s"}</span>
                     {(row.counterCount ?? 0) > 0 && <span className="mono kyle-text-negative">{row.counterCount} counter-signal{row.counterCount === 1 ? "" : "s"}</span>}
                     {(row.questionCount ?? 0) > 0 && <span className="mono kyle-text-unresolved">{row.questionCount} open question{row.questionCount === 1 ? "" : "s"}</span>}
-                    <a href={row.evidenceHref ?? evidenceHref}>View evidence <ArrowRight size={13} weight="bold" /></a>
+                    {!excluded && <a href={row.evidenceHref ?? evidenceHref}>View evidence <ArrowRight size={13} weight="bold" /></a>}
                   </div>
                 </div>
               </details>

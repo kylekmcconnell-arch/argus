@@ -17,6 +17,7 @@ import {
 } from "./taxonomy";
 import { getProfile, effectiveCaps, classForAxis, SHARED_CAPS } from "./profiles";
 import { classifyTestimonial, scoreAxis, type AxisSummary } from "./corroboration";
+import type { TokenApplicabilitySnapshot } from "../data/evidence";
 
 export const VERDICT_BANDS: [string, number, number][] = [
   ["PASS", 70, 100],
@@ -61,6 +62,10 @@ export interface RoleReport {
   cap_applied: string | null;
   dox_bonus: number;
   axes: Record<string, AxisScore>;
+  /** Why a normal methodology axis was assessed, waived, deferred, or left provisional. */
+  axis_applicability?: Record<string, TokenApplicabilitySnapshot>;
+  /** Maximum applicable weighted points before normalization to 100. */
+  applicable_weight?: number;
 }
 
 export type EvidenceOrigin = "deterministic" | "model_lead" | "human_verified";
@@ -340,6 +345,7 @@ export class Audit {
   axisScores: Record<string, AxisScore> = {};
   identity: IdentityConfidence | null = null;
   display_name?: string;
+  tokenApplicability?: TokenApplicabilitySnapshot;
 
   private ventures: Venture[] = [];
   private testimonials: Testimonial[] = [];
@@ -366,6 +372,10 @@ export class Audit {
 
   setIdentity(confidence: IdentityConfidence) {
     this.identity = confidence;
+  }
+
+  setTokenApplicability(applicability: TokenApplicabilitySnapshot | undefined) {
+    this.tokenApplicability = applicability ? structuredClone(applicability) : undefined;
   }
 
   addVenture(v: Venture) {
@@ -691,7 +701,16 @@ export class Audit {
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;
       }
-      const expectedAxes = Object.keys(getProfile(role).axes);
+      const omitTokenConduct = role === SubjectClass.PROJECT
+        && (this.tokenApplicability?.axisTreatment === "not_applicable"
+          || this.tokenApplicability?.axisTreatment === "deferred");
+      const expectedAxes = Object.keys(getProfile(role).axes)
+        .filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct"));
+      const axisApplicability = role === SubjectClass.PROJECT && this.tokenApplicability
+        ? { P3_token_conduct: structuredClone(this.tokenApplicability) }
+        : undefined;
+      const applicableWeight = expectedAxes.reduce((sum, axis) =>
+        sum + (getProfile(role).axes[axis] ?? 0), 0);
       const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
       if (!complete || Object.keys(axes).length !== expectedAxes.length) {
         roleReports.push({
@@ -702,10 +721,17 @@ export class Audit {
           cap_applied: null,
           dox_bonus: doxBonus,
           axes,
+          ...(axisApplicability ? { axis_applicability: axisApplicability } : {}),
+          applicable_weight: applicableWeight,
         });
         continue;
       }
-      const raw = Math.round(Object.values(axes).reduce((a, x) => a + x.score, 0));
+      const earnedPoints = Object.values(axes).reduce((a, x) => a + x.score, 0);
+      // Project axes are weighted to 100 in the full methodology. When a
+      // frozen applicability decision removes P3, normalize the five remaining
+      // axes over their 80 applicable points. Token absence therefore neither
+      // rewards nor penalizes the project.
+      const raw = Math.round(applicableWeight > 0 ? (earnedPoints / applicableWeight) * 100 : 0);
       const base = raw + doxBonus;
       const caps = effectiveCaps(role);
       const triggered: [number, string][] = [
@@ -743,6 +769,8 @@ export class Audit {
         cap_applied: applied,
         score_total: published,
         verdict,
+        ...(axisApplicability ? { axis_applicability: axisApplicability } : {}),
+        applicable_weight: applicableWeight,
       });
     }
 

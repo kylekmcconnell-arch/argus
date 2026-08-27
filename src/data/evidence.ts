@@ -990,6 +990,27 @@ export interface EntityContinuitySnapshot {
   };
 }
 
+export type TokenApplicabilityState =
+  | "verified_live_token"
+  | "historical_token_lineage"
+  | "confirmed_tokenless"
+  | "prelaunch_token_deferred"
+  | "unresolved_token_identity";
+
+/**
+ * Frozen, pre-scoring decision about whether token conduct belongs in this
+ * subject's methodology. This is evidence applicability, not a token score.
+ * It must be established before the analyst sees an axis catalog so absence
+ * can never be translated into a low score by either the model or renderer.
+ */
+export interface TokenApplicabilitySnapshot {
+  state: TokenApplicabilityState;
+  axisTreatment: "assess" | "not_applicable" | "deferred" | "provisional";
+  reason: string;
+  evidence: string[];
+  determinedAt: string;
+}
+
 /** Grok first-pass read of the bound X profile + official site. Display name is never a bind key. */
 /** Product/token the COMPANY launched. Separate unique-id from the subject. */
 export interface LaunchedProductLead {
@@ -1108,6 +1129,8 @@ export interface CollectedEvidence {
   launchWindow?: LaunchWindowSnapshot;
   /** Project and token aliases, migrations and contract replacements discovered before scoring. */
   entityContinuity?: EntityContinuitySnapshot;
+  /** Pre-scoring determination of whether P3 token conduct applies. */
+  tokenApplicability?: TokenApplicabilitySnapshot;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to

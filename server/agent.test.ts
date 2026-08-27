@@ -6314,14 +6314,16 @@ describe("derived project bands always persist", () => {
     expect(bands.P4_backing_and_partners.tier).toBe("assessed_null");
   });
 
-  it("waives token conduct for a project whose bio explicitly declares no token", () => {
-    // MultiHopper case: the official bio says the project has no token, the
-    // canonical token search confirms it, and the old behavior still banded
-    // P3 assessed_null (0-39% of weight) - a red 15/100 for a product
-    // decision. The declaration now opens the exceptional ceiling.
+  it("removes token conduct from a confirmed-tokenless project's scorer methodology", () => {
     const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .filter(([axis]) => axis !== "P3_token_conduct")
       .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
     const packet = buildScoringEvidencePacket({
+      tokenApplicability: {
+        state: "confirmed_tokenless",
+        axisTreatment: "not_applicable",
+        reason: "completed identity-bound search found no project token",
+      },
       profile: {
         handle: "@multihopper",
         display_name: "MultiHopper",
@@ -6335,16 +6337,11 @@ describe("derived project bands always persist", () => {
       ],
     }, axes);
     const bands = deriveProjectStrengthBands(packet, axes);
-    const p3 = bands.P3_token_conduct;
-    expect(p3.tier).toBe("exceptional");
-    expect(p3.maxScore).toBe(20);
-    expect(p3.reasons).toContain(
-      "official profile explicitly declares the project has no token; token conduct criteria waived until a token launches",
-    );
-    expect(p3.anchorArtifactIds.length).toBeGreaterThanOrEqual(1);
+    expect(bands.P3_token_conduct).toBeUndefined();
+    expect(inspectAnalystScoringPreflight(axes, packet).missingSubstantiveAxes).not.toContain("P3_token_conduct");
   });
 
-  it("enforces a solid floor when a confirmed token-identity check corroborates the declaration", () => {
+  it("does not let biography wording award token-conduct points", () => {
     const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
       .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
     const packet = buildScoringEvidencePacket({
@@ -6362,9 +6359,10 @@ describe("derived project bands always persist", () => {
     }, axes);
     const bands = deriveProjectStrengthBands(packet, axes);
     const p3 = bands.P3_token_conduct;
-    expect(p3.tier).toBe("exceptional");
-    expect(p3.floorTier).toBe("solid");
-    expect(p3.minScore).toBe(Math.ceil(20 * 0.7));
+    expect(p3.tier).not.toBe("exceptional");
+    expect(p3.reasons).not.toContain(
+      "official profile explicitly declares the project has no token; token conduct criteria waived until a token launches",
+    );
   });
 
   it("does not waive token conduct for promises or usage copy", () => {

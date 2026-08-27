@@ -32,6 +32,8 @@ export interface CompositionRow {
   sublabel?: string;
   /** Replaces the sources/questions counts line under the rationale. */
   countsLine?: string;
+  /** The dimension was deliberately excluded before scoring, never scored zero. */
+  applicability?: "not_applicable" | "deferred";
 }
 
 function bandColor(ratio: number): string {
@@ -77,6 +79,8 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
   const counter = row.counterCount ?? 0;
   const questions = row.questionCount ?? 0;
   const detailId = `composition-detail-${row.axis}`;
+  const excluded = row.applicability !== undefined;
+  const applicabilityLabel = row.applicability?.replace("_", " ");
   return (
     <div className="score-composition-row">
       <button
@@ -91,10 +95,12 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
             <span className="flex items-baseline gap-2">
               <span className="score-composition-label text-[13.5px] font-medium text-ink">{row.label}</span>
               <span className="score-composition-weight mono text-[10px] uppercase tracking-wide text-ink-faint max-sm:hidden">
-                {row.sublabel ?? `${row.weight}% weight`}
+                {row.sublabel ?? (applicabilityLabel ?? `${row.weight}% weight`)}
               </span>
             </span>
-            {row.tone ? (
+            {excluded ? (
+              <span className="mono text-[11px] uppercase tracking-wide text-ink-dim">N/A · not scored</span>
+            ) : row.tone ? (
               <span className="mono text-[11px] tabular text-ink-dim">
                 <span className="font-semibold" style={{ color }}>{row.score}</span>
                 <span className="text-ink-faint"> / {row.weight}</span>
@@ -114,7 +120,7 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
           <div className="mt-2 h-[3px] overflow-hidden rounded-full bg-line" role="presentation">
             <div
               className="h-full rounded-full motion-safe:transition-[width] motion-safe:duration-700 motion-safe:ease-out"
-              style={{ width: `${ratio * 100}%`, background: color }}
+              style={{ width: excluded ? "0%" : `${ratio * 100}%`, background: color }}
             />
           </div>
         </div>
@@ -152,7 +158,7 @@ function Row({ row, evidenceAnchor, challengeAnchor }: {
                   Read the evidence ↓
                 </a>
               )}
-              {challengeAnchor && (
+              {challengeAnchor && !excluded && (
                 <button
                   type="button"
                   onClick={() => requestChallenge(

@@ -63,6 +63,31 @@ function trustGraphFinding(
 }
 
 describe("ARGUS-P v2 engine (port fidelity)", () => {
+  it("normalizes a confirmed-tokenless project over the remaining 80 applicable points", () => {
+    const audit = new Audit("@fedibtc", { subject_class: SubjectClass.PROJECT });
+    audit.setTokenApplicability({
+      state: "confirmed_tokenless",
+      axisTreatment: "not_applicable",
+      reason: "Completed identity-bound search found no project token.",
+      evidence: ["No token bound to fedi.xyz."],
+      determinedAt: "2026-08-27T00:00:00.000Z",
+    });
+    audit.setAxis("P1_team_and_identity", 10);
+    audit.setAxis("P2_product_substance", 16);
+    audit.setAxis("P4_backing_and_partners", 7);
+    audit.setAxis("P5_traction_and_liveness", 9);
+    audit.setAxis("P6_transparency_integrity", 7);
+
+    const report = audit.finalize().role_reports[0];
+    expect(report.raw_total).toBe(61);
+    expect(report.score_total).toBe(61);
+    expect(report.applicable_weight).toBe(80);
+    expect(report.axes.P3_token_conduct).toBeUndefined();
+    expect(report.axis_applicability?.P3_token_conduct).toMatchObject({
+      state: "confirmed_tokenless",
+      axisTreatment: "not_applicable",
+    });
+  });
   it("mints a distinct immutable audit id for repeated subjects", () => {
     const first = new Audit("@same_subject", { subject_class: SubjectClass.FOUNDER });
     const second = new Audit("@same_subject", { subject_class: SubjectClass.FOUNDER });

@@ -38,6 +38,7 @@ import {
 import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { isPlausiblePersonRosterName } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
+import { deriveTokenApplicability } from "./tokenApplicability";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
@@ -4978,6 +4979,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const profileForLlm: Record<string, unknown> = { ...evidence.profile };
   delete profileForLlm.identity_confidence;
   delete profileForLlm.identity_note;
+  const frozenCheckOutcomes = checkTracker.snapshot(evidence.roles, {
+    resolvedRealName: hasResolvedRealName(ctx),
+    organizationSubject: isOrganizationAccount(evidence),
+  });
+  evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -5018,14 +5024,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
     entityContinuity: evidence.entityContinuity ? [evidence.entityContinuity] : [],
+    tokenApplicability: evidence.tokenApplicability,
     // The scale of the venture a founder verifiably founded is scoreable
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,
     basicFacts: evidence.basicFacts,
-    checkOutcomes: checkTracker.snapshot(evidence.roles, {
-      resolvedRealName: hasResolvedRealName(ctx),
-      organizationSubject: isOrganizationAccount(evidence),
-    }),
+    checkOutcomes: frozenCheckOutcomes,
     providerRuns: checkTracker.providers().runs,
     // Keep the exclusion explicit at the packet boundary. The raw fixed-block
     // receipts persist in the dossier but cannot affect v1 scoring or model
@@ -5040,7 +5044,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     // Decision models receive a structurally isolated packet. Related-entity and
     // model-discovered leads remain visible to investigators, but are absent from
     // both the subject scorer and contradiction analyzer context.
-    const requestedAxes = axisCatalog(evidence.roles);
+    const requestedAxes = axisCatalog(evidence.roles).filter(({ axis, role }) => !(
+      role === SubjectClass.PROJECT
+      && axis === "P3_token_conduct"
+      && (evidence.tokenApplicability?.axisTreatment === "not_applicable"
+        || evidence.tokenApplicability?.axisTreatment === "deferred")
+    ));
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
     const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson, requestedAxes);
     const projectStrengthBands = deriveProjectStrengthBands(evidenceJson, requestedAxes);

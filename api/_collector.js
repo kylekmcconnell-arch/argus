@@ -79,12 +79,12 @@ var POSITIVE_OUTCOMES = /* @__PURE__ */ new Set([
 var SEVERE_OUTCOMES = /* @__PURE__ */ new Set(["Rug" /* RUG */]);
 function classifyFounderPattern(outcomes) {
   const outs = outcomes.map((o) => o);
-  const completed = outs.filter((o) => !NON_TERMINAL.has(o));
+  const completed2 = outs.filter((o) => !NON_TERMINAL.has(o));
   if (outs.some((o) => SEVERE_OUTCOMES.has(o))) return "RugHistory" /* RUG_HISTORY */;
   if (outs.length === 0) return "FirstVenture" /* FIRST_VENTURE */;
-  if (completed.length === 0) return "Unproven" /* UNPROVEN */;
-  const successes = completed.filter((o) => POSITIVE_OUTCOMES.has(o)).length;
-  const failures = completed.filter(
+  if (completed2.length === 0) return "Unproven" /* UNPROVEN */;
+  const successes = completed2.filter((o) => POSITIVE_OUTCOMES.has(o)).length;
+  const failures = completed2.filter(
     (o) => o === "SilentShutdown" /* SILENT_SHUTDOWN */ || o === "Failure" /* FAILURE */
   ).length;
   if (successes >= 2 && failures === 0) return "SerialSuccess" /* SERIAL_SUCCESS */;
@@ -618,6 +618,7 @@ var Audit = class {
   axisScores = {};
   identity = null;
   display_name;
+  tokenApplicability;
   ventures = [];
   testimonials = [];
   advisedProjects = [];
@@ -638,6 +639,9 @@ var Audit = class {
   }
   setIdentity(confidence) {
     this.identity = confidence;
+  }
+  setTokenApplicability(applicability) {
+    this.tokenApplicability = applicability ? structuredClone(applicability) : void 0;
   }
   addVenture(v) {
     this.ventures.push(v);
@@ -859,7 +863,10 @@ var Audit = class {
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;
       }
-      const expectedAxes = Object.keys(getProfile(role).axes);
+      const omitTokenConduct = role === "PROJECT" /* PROJECT */ && (this.tokenApplicability?.axisTreatment === "not_applicable" || this.tokenApplicability?.axisTreatment === "deferred");
+      const expectedAxes = Object.keys(getProfile(role).axes).filter((axis) => !(omitTokenConduct && axis === "P3_token_conduct"));
+      const axisApplicability = role === "PROJECT" /* PROJECT */ && this.tokenApplicability ? { P3_token_conduct: structuredClone(this.tokenApplicability) } : void 0;
+      const applicableWeight = expectedAxes.reduce((sum, axis) => sum + (getProfile(role).axes[axis] ?? 0), 0);
       const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
       if (!complete || Object.keys(axes).length !== expectedAxes.length) {
         roleReports.push({
@@ -869,11 +876,14 @@ var Audit = class {
           score_total: null,
           cap_applied: null,
           dox_bonus: doxBonus,
-          axes
+          axes,
+          ...axisApplicability ? { axis_applicability: axisApplicability } : {},
+          applicable_weight: applicableWeight
         });
         continue;
       }
-      const raw = Math.round(Object.values(axes).reduce((a, x) => a + x.score, 0));
+      const earnedPoints = Object.values(axes).reduce((a, x) => a + x.score, 0);
+      const raw = Math.round(applicableWeight > 0 ? earnedPoints / applicableWeight * 100 : 0);
       const base = raw + doxBonus;
       const caps = effectiveCaps(role);
       const triggered = [
@@ -908,7 +918,9 @@ var Audit = class {
         dox_bonus: doxBonus,
         cap_applied: applied,
         score_total: published,
-        verdict
+        verdict,
+        ...axisApplicability ? { axis_applicability: axisApplicability } : {},
+        applicable_weight: applicableWeight
       });
     }
     const scored = roleReports.filter((r) => r.verdict !== "INCOMPLETE");
@@ -6405,10 +6417,10 @@ function extraEvidence(definition, evidence, measurements) {
     const screens = evidence.sourceArtifacts.map((artifact, index) => ({ artifact, index })).filter(({ artifact }) => artifact.kind === "sanctions_screen" || artifact.kind === "legal_case");
     if (!screens.length) return null;
     const unavailable = screens.filter(({ artifact }) => artifact.coverageState === "unavailable");
-    const completed = screens.filter(({ artifact }) => artifact.coverageState !== "unavailable");
+    const completed2 = screens.filter(({ artifact }) => artifact.coverageState !== "unavailable");
     return {
       state: "partial",
-      basis: unavailable.length ? `${completed.length} saved screen artifact${completed.length === 1 ? " completed" : "s completed"}; ${unavailable.length} remained unavailable. A completed no-match is limited to the named dataset and exact identity searched, not legal clearance.` : `${completed.length} saved screen artifact${completed.length === 1 ? " records" : "s record"} bounded search coverage. The frozen evidence bag does not encode a complete required-regime set, so this broader question remains partial. A no-match is limited to the named dataset and exact identity searched, not legal clearance.`,
+      basis: unavailable.length ? `${completed2.length} saved screen artifact${completed2.length === 1 ? " completed" : "s completed"}; ${unavailable.length} remained unavailable. A completed no-match is limited to the named dataset and exact identity searched, not legal clearance.` : `${completed2.length} saved screen artifact${completed2.length === 1 ? " records" : "s record"} bounded search coverage. The frozen evidence bag does not encode a complete required-regime set, so this broader question remains partial. A no-match is limited to the named dataset and exact identity searched, not legal clearance.`,
       answerRefs: [],
       sourceRefs: screens.map(({ index }) => artifactSourceRef(index))
     };
@@ -6875,6 +6887,7 @@ function assembleDossier(ev, live) {
   const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   a.setIdentity(ev.profile.identity_confidence);
+  a.setTokenApplicability(ev.tokenApplicability);
   graphAudit.setIdentity(ev.profile.identity_confidence);
   const governingEligible = (row) => row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
   const meaningfulTeamValue = (value) => Boolean(value.trim()) && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(value.trim());
@@ -7162,6 +7175,7 @@ function assembleDossier(ev, live) {
     } : {},
     ...ev.domainRegistration ? { domainRegistration: { ...ev.domainRegistration } } : {},
     ...ev.entityContinuity ? { entityContinuity: structuredClone(ev.entityContinuity) } : {},
+    ...ev.tokenApplicability ? { tokenApplicability: structuredClone(ev.tokenApplicability) } : {},
     ...ev.evmControlReality ? { evmControlReality: cloneEvmControlRealitySnapshot(ev.evmControlReality) } : {},
     ...intelligence ? { intelligence } : {},
     ...ev.researchPlan ? {
@@ -8112,7 +8126,7 @@ var PROJECT_SCORING_POLICY = [
   "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
   "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
-  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis. EXCEPTION: when the official profile biography in the packet explicitly declares the project has no token and no canonical token is bound, there is no token-conduct risk surface to assess and the null search result CONFIRMS the declaration. Score P3 at the top of its allowed band as clean conduct, and write the rationale as: the project explicitly declares itself token-free, so token conduct criteria are waived until a token launches. Never describe a declared-token-free project as lacking demonstrated conduct history, and never score it low for not having a token.",
+  "P3 token conduct is governed by the frozen tokenApplicability state established before scoring. verified_live_token and historical_token_lineage are assessed; lineage means the analyst must consider predecessor names, contracts, migrations, and current status together. confirmed_tokenless removes P3 as not applicable and normalizes the project score over the remaining 80 weighted points. prelaunch_token_deferred also removes P3 without penalty until a token is live. unresolved_token_identity keeps P3 unresolved and the overall project verdict provisional. Never infer applicability from biography wording, never award clean-conduct points for lacking a token, and never penalize a tokenless business for having no token history.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
   "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end as a null result on this axis only, never counter-evidence against any other axis.",
   "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
@@ -8916,17 +8930,6 @@ var sourceArtifactPriority = (value) => {
   return 6;
 };
 var retainSourceArtifacts = (source2, limit) => source2.map((value, index) => ({ value, index, priority: sourceArtifactPriority(value) })).sort((left, right) => left.priority - right.priority || left.index - right.index).slice(0, limit).map(({ value }) => value);
-var NO_TOKEN_DECLARATION = new RegExp([
-  String.raw`\bno (?:official )?(?:token|coin)s?\b(?!\s*(?:needed|required|gate|gating|sale))`,
-  String.raw`\b(?:do(?:es)? not|don'?t|doesn'?t) have an? (?:official )?(?:token|coin)\b`,
-  String.raw`\bthere is no (?:official )?(?:token|coin)\b`,
-  String.raw`\btoken:?\s*none\b`,
-  String.raw`\btoken-?less\b`,
-  String.raw`\bno (?:token|coin) (?:has been |was )?(?:launched|issued|released|deployed)\b`,
-  String.raw`\bhave(?: not|n'?t) (?:launched|issued|released) an? (?:token|coin)\b`,
-  String.raw`\bnever launch(?:ed|ing)? an? (?:token|coin)\b`,
-  String.raw`\b(?:any|all|every) (?:token|coin)s? (?:claiming|impersonat\w+|using|named|bearing)\b[\s\S]{0,60}\b(?:scams?|fake|not ours|unofficial)\b`
-].join("|"), "i");
 var PROJECT_EARLY_STAGE = /\b(?:alpha|beta|testnet|prototype|demo|pilot|coming soon|pre-?launch|waitlist)\b/i;
 var PROJECT_MATURE_STAGE = /\b(?:live|mainnet|production|in production|operational|operating)\b/i;
 var TOKEN_MARKET_ONLY_TRACTION = /\b(?:token|trading volume|volume|market cap|liquidity|price|fdv)\b/i;
@@ -8980,6 +8983,8 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const recentActivity = records(packet.recentActivity);
   const productActivity = recentActivity.filter((row) => PROJECT_PRODUCT_ACTIVITY.test(String(row.text ?? row.value ?? row.claim ?? row.title ?? "")));
   const token = packet.projectToken && typeof packet.projectToken === "object" && !Array.isArray(packet.projectToken) ? packet.projectToken : void 0;
+  const tokenApplicability = packet.tokenApplicability && typeof packet.tokenApplicability === "object" && !Array.isArray(packet.tokenApplicability) ? packet.tokenApplicability : void 0;
+  const historicalTokenLineage = tokenApplicability?.state === "historical_token_lineage";
   const verifiedToken = token?.verified === true && (token.verification === "official_x" || token.verification === "official_domain");
   const explicitOfficialBioContract = verifiedToken && token?.verification === "official_x" && token.producerSources && typeof token.producerSources === "object" && !Array.isArray(token.producerSources) && token.producerSources.identity && typeof token.producerSources.identity === "object" && !Array.isArray(token.producerSources.identity) && token.producerSources.identity.provider === "twitterapi";
   const rank = typeof token?.rank === "number" ? token.rank : Number.POSITIVE_INFINITY;
@@ -9102,31 +9107,23 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   ], artifactIds(p2Anchors), p2FloorTier);
   const tokenDisclosures = [...tokenDisclosureFacts];
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0].filter(Boolean).length;
-  const p3NullSearch = assessmentArtifactFor("P3_token_conduct", "project-token-identity");
-  const declaredTokenless = !token && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 && typeof profile?.bio === "string" && NO_TOKEN_DECLARATION.test(String(profile.bio));
-  const p3CeilingTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditExceptionalCeiling ? "exceptional" : moderateMarket ? "solid" : "emerging" : declaredTokenless ? "exceptional" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
-  const p3FloorTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : declaredTokenless ? p3NullSearch ? "solid" : "none" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
-  const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 ? p3NullSearch : null;
-  let p3FinalTier = p3Assessment ? "assessed_null" : p3CeilingTier;
-  let p3FinalFloorTier = p3Assessment ? "assessed_null" : p3FloorTier;
+  const p3CeilingTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditExceptionalCeiling ? "exceptional" : moderateMarket ? "solid" : "emerging" : historicalTokenLineage ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
+  const p3FloorTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : historicalTokenLineage ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
+  let p3FinalTier = p3CeilingTier;
+  let p3FinalFloorTier = p3FloorTier;
   if (severeUnrecoveredProtocolIncident && (p3FinalTier === "solid" || p3FinalTier === "exceptional")) p3FinalTier = "emerging";
   if (severeUnrecoveredProtocolIncident && (p3FinalFloorTier === "solid" || p3FinalFloorTier === "exceptional")) p3FinalFloorTier = "emerging";
   setBand("P3_token_conduct", p3FinalTier, [
     ...verifiedToken ? ["canonical token verified"] : [],
-    ...declaredTokenless ? ["official profile explicitly declares the project has no token; token conduct criteria waived until a token launches"] : [],
-    ...!token && !declaredTokenless && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : [],
-    ...p3Assessment ? ["completed token-identity assessment bound no canonical token"] : [],
+    ...historicalTokenLineage ? ["predecessor or migration lineage requires continuous token-conduct assessment"] : [],
+    ...!token && !historicalTokenLineage && p3FinalTier !== "none" ? ["token conduct scored from verified disclosures"] : [],
     ...moderateMarket ? ["measured market activity"] : [],
     ...governanceFacts.length ? ["verified token governance"] : [],
     ...tokenDisclosures.length ? ["verified token economic disclosure"] : [],
     ...auditFacts.length ? ["verified security review"] : auditLeadCount >= 2 ? [`${auditLeadCount} registry-matched auditor leads from bounded audit discovery sources`] : [],
     ...severeUnrecoveredProtocolIncident ? ["material protocol security incident without a recorded full recovery caps token and control evidence at emerging"] : []
   ], [
-    ...artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
-    ...p3Assessment ? [p3Assessment.artifactId] : [],
-    // The waived band anchors on the completed search that corroborates the
-    // declaration; without it the anchor fallback in setBand still applies.
-    ...declaredTokenless && p3NullSearch ? [p3NullSearch.artifactId] : []
+    ...artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts])
   ], p3FinalFloorTier);
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
   let p4FloorTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || advisorTeam.length ? "emerging" : "none";
@@ -10223,6 +10220,7 @@ var SCORING_ARRAY_SECTIONS = [
   "wallets",
   "team",
   "basicFacts",
+  "entityContinuity",
   "notableFollowers",
   "recentActivity",
   "sourceArtifacts",
@@ -10451,6 +10449,7 @@ function serializeAnalystEvidencePacket(input, options) {
     profileAuthenticity: compactProfileAuthenticity(input.profileAuthenticity),
     trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
     projectToken: input.projectToken && typeof input.projectToken === "object" && !Array.isArray(input.projectToken) ? compactProjectToken(input.projectToken) : void 0,
+    tokenApplicability: input.tokenApplicability && typeof input.tokenApplicability === "object" && !Array.isArray(input.tokenApplicability) ? compactObject(input.tokenApplicability, 2) : void 0,
     // Findings stay ahead of descriptive context in the budget. This prevents a
     // long social corpus from hiding the material facts that govern a verdict.
     findings
@@ -11478,6 +11477,93 @@ var PersonCheckTracker = class {
     });
   }
 };
+
+// server/tokenApplicability.ts
+var PRELAUNCH_TOKEN = /\b(?:token|coin)\b[\s\S]{0,45}\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched|TGE)\b|\b(?:pre[- ]?launch|planned|upcoming|coming soon|will launch|will issue|not yet live|not launched|TGE)\b[\s\S]{0,45}\b(?:token|coin)\b/i;
+var completed = (status) => status === "confirmed" || status === "reported" || status === "finding" || status === "checked-empty";
+var unresolvedCandidate = (check) => check?.status === "finding" && /\b(?:official (?:x )?bio declared a contract|declared contract|exact address|candidate contract)\b[\s\S]{0,100}\b(?:no market|unresolved|could not be attributed|not resolved)\b/i.test(check.note ?? "");
+var continuityHasTokenLineage = (evidence) => {
+  const continuity = evidence.entityContinuity;
+  if (!continuity) return false;
+  return Boolean(
+    continuity.predecessorName || continuity.oldTicker || continuity.oldContract || continuity.migrationContract || continuity.replacementContract || continuity.tokenLineage.length > 0 || continuity.events.some((event) => event.kind === "token_migration" || event.kind === "contract_replacement")
+  );
+};
+var prelaunchText = (evidence) => [
+  evidence.profile.bio,
+  evidence.profile.self_post_sample,
+  evidence.subjectOrientation?.what,
+  ...(evidence.basicFacts ?? []).flatMap((fact) => [
+    String(fact.value ?? ""),
+    ...(fact.sources ?? []).map((source2) => source2.excerpt)
+  ])
+].filter(Boolean).join("\n");
+function deriveTokenApplicability(evidence, checks, determinedAt = (/* @__PURE__ */ new Date()).toISOString()) {
+  if (!evidence.roles.some((role) => String(role) === "PROJECT")) return void 0;
+  const tokenCheck = checks.find((check) => check.checkId === "project-token-identity");
+  const continuity = evidence.entityContinuity;
+  const evidenceLines = [];
+  if (evidence.projectToken?.verified) {
+    evidenceLines.push(`Canonical token ${evidence.projectToken.symbol} is bound to the official project identity.`);
+    if (continuityHasTokenLineage(evidence)) {
+      evidenceLines.push(continuity?.coverage.reason ?? "Historical token lineage was recovered before scoring.");
+      return {
+        state: "historical_token_lineage",
+        axisTreatment: "assess",
+        reason: "A current token and predecessor or migration evidence exist, so ARGUS assesses the complete token lineage.",
+        evidence: evidenceLines,
+        determinedAt
+      };
+    }
+    return {
+      state: "verified_live_token",
+      axisTreatment: "assess",
+      reason: "A live canonical token is verified against the project's official identity.",
+      evidence: evidenceLines,
+      determinedAt
+    };
+  }
+  if (continuityHasTokenLineage(evidence)) {
+    evidenceLines.push(continuity?.coverage.reason ?? "Historical token lineage was recovered before scoring.");
+    return {
+      state: "historical_token_lineage",
+      axisTreatment: "assess",
+      reason: "Historical, migrated, or abandoned token evidence exists, so token conduct remains applicable across the full lineage.",
+      evidence: evidenceLines,
+      determinedAt
+    };
+  }
+  if (PRELAUNCH_TOKEN.test(prelaunchText(evidence))) {
+    evidenceLines.push("A bound first-party source describes a token as planned or not yet live.");
+    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
+    return {
+      state: "prelaunch_token_deferred",
+      axisTreatment: "deferred",
+      reason: "The project describes a future token, but no live token conduct surface exists yet; P3 is deferred without penalty.",
+      evidence: evidenceLines,
+      determinedAt
+    };
+  }
+  if (!tokenCheck || !completed(tokenCheck.status) || unresolvedCandidate(tokenCheck)) {
+    if (tokenCheck?.note) evidenceLines.push(tokenCheck.note);
+    return {
+      state: "unresolved_token_identity",
+      axisTreatment: "provisional",
+      reason: "Token identity did not reach a completed, attributable result, so the project verdict remains provisional.",
+      evidence: evidenceLines.length ? evidenceLines : ["No completed project-token identity result was frozen."],
+      determinedAt
+    };
+  }
+  if (tokenCheck.note) evidenceLines.push(tokenCheck.note);
+  evidenceLines.push("No canonical token is bound to the official project handle or domain.");
+  return {
+    state: "confirmed_tokenless",
+    axisTreatment: "not_applicable",
+    reason: "A completed identity-bound token search found no project token; token conduct is not applicable and the project score is normalized over the remaining axes.",
+    evidence: evidenceLines,
+    determinedAt
+  };
+}
 
 // server/cache.ts
 import { createHash as createHash2 } from "node:crypto";
@@ -36396,6 +36482,11 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const profileForLlm = { ...evidence.profile };
   delete profileForLlm.identity_confidence;
   delete profileForLlm.identity_note;
+  const frozenCheckOutcomes = checkTracker.snapshot(evidence.roles, {
+    resolvedRealName: hasResolvedRealName(ctx),
+    organizationSubject: isOrganizationAccount(evidence)
+  });
+  evidence.tokenApplicability = deriveTokenApplicability(evidence, frozenCheckOutcomes);
   const baseEvidence = excludeScoreNeutralControlReality({
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -36434,14 +36525,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
     entityContinuity: evidence.entityContinuity ? [evidence.entityContinuity] : [],
+    tokenApplicability: evidence.tokenApplicability,
     // The scale of the venture a founder verifiably founded is scoreable
     // evidence about them (F2/F4). It was collected and then dropped before.
     ventureToken: evidence.ventureToken,
     basicFacts: evidence.basicFacts,
-    checkOutcomes: checkTracker.snapshot(evidence.roles, {
-      resolvedRealName: hasResolvedRealName(ctx),
-      organizationSubject: isOrganizationAccount(evidence)
-    }),
+    checkOutcomes: frozenCheckOutcomes,
     providerRuns: checkTracker.providers().runs,
     // Keep the exclusion explicit at the packet boundary. The raw fixed-block
     // receipts persist in the dossier but cannot affect v1 scoring or model
@@ -36450,7 +36539,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   });
   const analystStartedAt = startRuntimeStage("analyst");
   if (analystAvailable()) {
-    const requestedAxes = axisCatalog(evidence.roles);
+    const requestedAxes = axisCatalog(evidence.roles).filter(({ axis, role }) => !(role === "PROJECT" /* PROJECT */ && axis === "P3_token_conduct" && (evidence.tokenApplicability?.axisTreatment === "not_applicable" || evidence.tokenApplicability?.axisTreatment === "deferred")));
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
     const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson, requestedAxes);
     const projectStrengthBands = deriveProjectStrengthBands(evidenceJson, requestedAxes);
