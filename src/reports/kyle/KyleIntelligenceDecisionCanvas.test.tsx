@@ -98,6 +98,9 @@ describe("Kyle intelligence report opening", () => {
     expect(container.querySelector('[aria-label="Report depth"]')).toBeNull();
     expect(container.textContent).not.toContain("Review this for");
     expect(container.querySelector('[aria-label="Review angle"]')).toBeNull();
+    expect(container.textContent).toContain("What matters before you decide.");
+    expect(container.textContent).toContain("The strongest case for it, the reason to hesitate, and the evidence that could change the verdict.");
+    expect(container.textContent).not.toContain("research-engine language");
     expect(container.querySelector('a[href="#composition"]')?.textContent).toContain("Continue through the full report");
     expect([...container.querySelectorAll('a[href="#evidence-ledger"]')]
       .some((link) => link.textContent?.includes("Enter evidence room"))).toBe(true);

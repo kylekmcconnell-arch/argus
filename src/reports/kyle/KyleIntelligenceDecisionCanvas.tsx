@@ -549,8 +549,8 @@ export function KyleIntelligenceDecisionCanvas({
       <section id="decision-brief" className="kyle-argus-brief scroll-mt-28" aria-labelledby="kyle-argus-brief-title">
         <div className="kyle-section-intro">
           <p className="kyle-overline mono">03 · ARGUS BRIEF</p>
-          <h2 id="kyle-argus-brief-title">The decision, without the research-engine language.</h2>
-          <p>Three views of the same frozen evidence: the limitation, the counterweight, and the evidence most likely to change the result.</p>
+          <h2 id="kyle-argus-brief-title">What matters before you decide.</h2>
+          <p>The strongest case for it, the reason to hesitate, and the evidence that could change the verdict.</p>
         </div>
         <div className="kyle-brief-grid">
           <BriefColumn title="Why we’re cautious" subtitle="DECISION PRESSURE" items={concerns} tone="caution" empty="No decision-changing concern was recorded." href={evidenceHref} />
