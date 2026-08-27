@@ -62,9 +62,20 @@ function decisionBasisText(): string {
 describe("private person report evidence boundary", () => {
   it("keeps the canonical chapter order and never renders retired notable followers", () => {
     const base = buildReport(SUBJECTS[1]);
+    const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
+    const axisName = Object.keys(governing.axes)[0]!;
     const dossier = {
       ...base,
       report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      projectStrengthBands: {
+        [axisName]: {
+          tier: "strong",
+          minScore: 70,
+          maxScore: 100,
+          reasons: ["Source-backed evidence supports this dimension."],
+          anchorArtifactIds: [],
+        },
+      },
       notableFollowers: [{ handle: "legacywhale", label: "Legacy Whale", size: "2.4M", count: 2_400_000 }],
       subjectOrientation: {
         kind: "PROJECT",
@@ -124,6 +135,13 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelector("#key-developments")?.textContent).toContain("The events that shaped this case");
     expect(container.textContent).not.toContain("Notable followers");
     expect(container.querySelector('a[href="https://x.com/legacywhale"]')).toBeNull();
+
+    const relationships = container.querySelector("#relationships");
+    const scoreEvidence = [...container.querySelectorAll("details")].find((detail) =>
+      detail.textContent?.includes("Evidence behind each score dimension"));
+    expect(relationships).not.toBeNull();
+    expect(scoreEvidence).not.toBeUndefined();
+    expect(relationships!.compareDocumentPosition(scoreEvidence!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("uses the linked token scan as Style 2's separate second score", () => {

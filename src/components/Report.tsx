@@ -3656,6 +3656,58 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
             {f.entityContinuity && <EntityContinuityTimeline snapshot={f.entityContinuity} />}
           </>
         )}
+
+        <div id="relationships" className="scroll-mt-28" />
+        {reportLane.renderers.connectionWorkspace?.({
+          dossier: f,
+          nodes: visibleGraphNodes,
+          edges: visibleGraphEdges,
+          connections: showTrustGraphSupplemental ? connections : [],
+          onAudit: onResearchAudit ?? onAudit,
+          onOpenSavedReport: onOpenSavedResearch,
+          onOpenProject: onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined,
+          shareView,
+        })}
+        {/* connections — the compounding web: other audited subjects tied to this one */}
+        {!reportLane.renderers.connectionWorkspace && showTrustGraphSupplemental && connections.length > 0 && (
+          <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
+            <Card className="divide-y divide-line/60">
+              {connections.map((c) => {
+                const vm = c.otherVerdict ? verdictMeta(c.otherVerdict) : null;
+                return (
+                  <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
+                      <div className="min-w-0">
+                      <span className="mono text-[12.5px] text-ink">{c.other}</span>
+                      {vm && <span className={`verdict-pill ml-2 ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={c.otherVerdict === "FAIL" ? undefined : ({ "--tint": vm.color } as React.CSSProperties)}>{vm.label}</span>}
+                      <div className="mt-0.5 text-[12.5px] leading-snug text-ink-dim">
+                        {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
+                        {c.ties.length > 0 && (
+                          <span>via {c.ties.map((t, ti) => (
+                            <span key={t.key}>
+                              {ti > 0 && ", "}
+                              {onOpenProject && t.type === "Company" ? (
+                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-lift hover:underline">{t.label}</button>
+                              ) : (
+                                <span className="text-ink">{t.label}</span>
+                              )}
+                            </span>
+                          ))}</span>
+                        )}
+                      </div>
+                      </div>
+                    </div>
+                    {onAudit && (
+                      <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+          </Section>
+        )}
+
         {f.projectStrengthBands && (
           reportStyle === 2 ? (
             <details className="canonical-evidence-disclosure panel mt-7 scroll-mt-28">
@@ -4279,57 +4331,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
               </Card>
             </Section>
           </div>
-        )}
-
-        <div id="relationships" className="scroll-mt-28" />
-        {reportLane.renderers.connectionWorkspace?.({
-          dossier: f,
-          nodes: visibleGraphNodes,
-          edges: visibleGraphEdges,
-          connections: showTrustGraphSupplemental ? connections : [],
-          onAudit: onResearchAudit ?? onAudit,
-          onOpenSavedReport: onOpenSavedResearch,
-          onOpenProject: onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined,
-          shareView,
-        })}
-        {/* connections — the compounding web: other audited subjects tied to this one */}
-        {!reportLane.renderers.connectionWorkspace && showTrustGraphSupplemental && connections.length > 0 && (
-          <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
-            <Card className="divide-y divide-line/60">
-              {connections.map((c) => {
-                const vm = c.otherVerdict ? verdictMeta(c.otherVerdict) : null;
-                return (
-                  <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
-                    <div className="flex min-w-0 items-start gap-2">
-                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
-                      <div className="min-w-0">
-                      <span className="mono text-[12.5px] text-ink">{c.other}</span>
-                      {vm && <span className={`verdict-pill ml-2 ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={c.otherVerdict === "FAIL" ? undefined : ({ "--tint": vm.color } as React.CSSProperties)}>{vm.label}</span>}
-                      <div className="mt-0.5 text-[12.5px] leading-snug text-ink-dim">
-                        {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
-                        {c.ties.length > 0 && (
-                          <span>via {c.ties.map((t, ti) => (
-                            <span key={t.key}>
-                              {ti > 0 && ", "}
-                              {onOpenProject && t.type === "Company" ? (
-                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-lift hover:underline">{t.label}</button>
-                              ) : (
-                                <span className="text-ink">{t.label}</span>
-                              )}
-                            </span>
-                          ))}</span>
-                        )}
-                      </div>
-                      </div>
-                    </div>
-                    {onAudit && (
-                      <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
-                    )}
-                  </div>
-                );
-              })}
-            </Card>
-          </Section>
         )}
 
         <details id="evidence-ledger" className="canonical-evidence-disclosure panel mt-5 scroll-mt-28">
