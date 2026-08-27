@@ -296,6 +296,11 @@ export default function App() {
   const [evidenceReviewVersionId, setEvidenceReviewVersionId] = useState<string | null>(boot.openVersionId ?? null);
   const [phase, setPhase] = useState<Phase>(boot.phase);
   const [dossier, setDossier] = useState<Dossier | null>(boot.dossier);
+  const [researchReturn, setResearchReturn] = useState<{
+    ref: string;
+    label: string;
+    kind: ReportKind;
+  } | null>(null);
   const [personBriefTarget, setPersonBriefTarget] = useState<CaseBriefTarget | null>(null);
   const [query, setQuery] = useState(boot.query);
   const [tokenInput, setTokenInput] = useState<RunnableTokenInput | null>(null);
@@ -1378,6 +1383,25 @@ export default function App() {
     [onSafeAuditMode],
   );
 
+  const onReportResearch = useCallback((raw: string, priv = false) => {
+    if (!dossier) return;
+    setResearchReturn({
+      ref: dossier.handle,
+      label: dossier.display_name || dossier.handle,
+      kind: "person",
+    });
+    // A paid rabbit-hole action is always a fresh investigation. Stored cases
+    // remain available through the free "Open saved report" path in the sheet.
+    void onSafeAuditMode(raw, priv, "token", true, false);
+  }, [dossier, onSafeAuditMode]);
+
+  const returnToResearchSource = useCallback(async () => {
+    if (!researchReturn) return;
+    const source = researchReturn;
+    await onOpenRecent(source.ref, source.kind);
+    setResearchReturn(null);
+  }, [onOpenRecent, researchReturn]);
+
   // Incognito pivots still need canonical ticker/address resolution, but must
   // skip durable public-case reuse all the way through that resolver.
   const onPrivateAudit = useCallback((raw: string) => {
@@ -1456,6 +1480,7 @@ export default function App() {
     setTokenChoiceMode("investigation");
     privRef.current = false;
     setPrivateMode(false);
+    setResearchReturn(null);
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, setDossier, setInvestigation, setInvestigationInput, setLiveError, setPhase, setPrivateMode, setQuery, setTokenDossier, setTokenInput]);
 
   // from the investigation report: open the full on-chain token report
@@ -1503,6 +1528,7 @@ export default function App() {
     if ((t === "admin" || t === "providers" || t === "changelog") && role !== "owner") return;
     if (!closeCaseBriefForNavigation()) return;
     safeAuditRequestRef.current += 1;
+    setResearchReturn(null);
     setPersonBriefTarget(null);
     setTokenBriefTarget(null);
     leaveEvidenceReview();
@@ -1558,6 +1584,27 @@ export default function App() {
           <span>Opened in a separate tab so the Case Brief draft remains intact.</span>
         </div>
       )}
+      {researchReturn && inAudit && (
+        <div className="mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-950 shadow-sm" role="status">
+          <span className="font-semibold">Rabbit-hole investigation</span>
+          <span className="text-emerald-800">Opened from {researchReturn.label}.</span>
+          <button
+            type="button"
+            onClick={() => void returnToResearchSource()}
+            className="ml-auto rounded-full border border-emerald-300 bg-white px-3 py-1.5 font-medium text-emerald-950 transition hover:border-emerald-500 hover:bg-emerald-100"
+          >
+            Back to {researchReturn.label}
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss return link"
+            onClick={() => setResearchReturn(null)}
+            className="rounded-full px-2 py-1 text-emerald-800 transition hover:bg-emerald-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {phase === "idle" && <Landing onAudit={onHomeAudit} onAbout={() => setPhase("about")} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
@@ -1601,7 +1648,7 @@ export default function App() {
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 
-      {phase === "report" && dossier && <Report key={`person:${dossier.versionContext?.reportVersionId ?? dossier.viewVersionContext?.reportVersionId ?? dossier.persistence?.scanId ?? dossier.viewPersistence?.scanId ?? dossier.report.audit_id}`} dossier={dossier} onReset={reset} onAudit={personReportPrivate ? onPrivateAudit : onSafeAudit} onRescan={() => onAudit(dossier.handle, personReportPrivate)} onOpenProject={personReportPrivate ? onOpenPrivateProject : (name, domain, panelCostToken) => onOpenProject(name, domain, false, panelCostToken)} onOpenBrief={!evidenceReviewVersionId && !privateMode && personBriefTarget ? () => setCaseBriefTarget(personBriefTarget) : undefined} />}
+      {phase === "report" && dossier && <Report key={`person:${dossier.versionContext?.reportVersionId ?? dossier.viewVersionContext?.reportVersionId ?? dossier.persistence?.scanId ?? dossier.viewPersistence?.scanId ?? dossier.report.audit_id}`} dossier={dossier} onReset={reset} onAudit={personReportPrivate ? onPrivateAudit : onSafeAudit} onResearchAudit={(raw, priv) => onReportResearch(raw, personReportPrivate || priv)} onOpenSavedResearch={(raw, kind) => void onOpenRecent(raw, kind)} onRescan={() => onAudit(dossier.handle, personReportPrivate)} onOpenProject={personReportPrivate ? onOpenPrivateProject : (name, domain, panelCostToken) => onOpenProject(name, domain, false, panelCostToken)} onOpenBrief={!evidenceReviewVersionId && !privateMode && personBriefTarget ? () => setCaseBriefTarget(personBriefTarget) : undefined} />}
       {phase === "project" && viewedProject && <ProjectView project={viewedProject} onAudit={viewedProject.privateMode ? onPrivateAudit : onSafeAudit} onReset={reset} record={!viewedProject.privateMode} panelCostToken={viewedProject.panelCostToken} />}
 
       {phase === "token-run" && tokenInput && (

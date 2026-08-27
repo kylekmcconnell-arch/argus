@@ -229,7 +229,7 @@ export function KyleIntelligencePreview() {
 
           <section id="relationships" className="story-chapter report-section scroll-mt-28" aria-labelledby="preview-connections-title">
             <h2 id="preview-connections-title" className="sr-only">Connections</h2>
-            <KyleConnectionWorkspace dossier={connectionPreviewDossier} nodes={connectionPreviewNodes} edges={connectionPreviewEdges} connections={[]} onAudit={() => undefined} onOpenProject={() => undefined} />
+            <KyleConnectionWorkspace dossier={connectionPreviewDossier} nodes={connectionPreviewNodes} edges={connectionPreviewEdges} connections={[]} onAudit={() => undefined} onOpenProject={() => undefined} previewBalance={49_975} />
           </section>
         </div>
         <section id="evidence-ledger" className="story-chapter report-section scroll-mt-28 border-t border-line py-20"><p className="eyebrow text-signal-lift">Evidence &amp; method</p><h2 className="story-chapter-title mt-2 text-ink">The full forensic record is still the foundation.</h2><p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">Saved sources, source problems, frozen evidence, scoring methodology and unanswered research questions remain available here.</p></section>

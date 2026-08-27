@@ -13,7 +13,6 @@ import {
   ShieldCheck,
   Users,
   Wallet,
-  X,
 } from "@phosphor-icons/react";
 import { Avatar } from "../../components/Avatar";
 import type { PanoptesEdge, PanoptesNode } from "../../engine";
@@ -26,6 +25,7 @@ import {
   xAvatar,
 } from "../../lib/avatars";
 import type { ConnectionWorkspaceProps } from "../shared/reportLaneRendererTypes";
+import { KyleResearchSheet, type KyleResearchTarget } from "./KyleResearchSheet";
 import "./kyle-connection-workspace.css";
 
 type Cluster = "team" | "projects" | "assets" | "social";
@@ -44,7 +44,6 @@ interface WorkspaceEntity {
   confidence: "High" | "Moderate" | "Limited";
   sources: Array<{ label: string; url: string }>;
   researchQuery?: string;
-  projectName?: string;
   parentId?: string;
 }
 
@@ -213,8 +212,7 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
       direct: !parentId,
       confidence: edge?.verdict === "Unconfirmed" ? "Limited" : parentId ? "Moderate" : "High",
       sources: source ? [{ label: "Relationship source", url: source }] : [],
-      researchQuery: kind === "projects" ? undefined : researchKey(key),
-      projectName: kind === "projects" ? label : undefined,
+      researchQuery: kind === "projects" ? label : researchKey(key),
       parentId,
     });
   }
@@ -296,28 +294,88 @@ function confidenceSegments(confidence: WorkspaceEntity["confidence"]): number {
   return 1;
 }
 
-function entityAction(entity: WorkspaceEntity, props: ConnectionWorkspaceProps): (() => void) | undefined {
-  if (entity.projectName && props.onOpenProject) return () => props.onOpenProject?.(entity.projectName!);
-  if (entity.researchQuery && props.onAudit) return () => props.onAudit?.(entity.researchQuery!);
+function entityAction(entity: WorkspaceEntity, props: ConnectionWorkspaceProps, privateSearch = false): (() => void) | undefined {
+  if (entity.researchQuery && props.onAudit) return () => props.onAudit?.(entity.researchQuery!, privateSearch);
   return undefined;
 }
 
-function ResearchConfirmation({ entity, onCancel, onConfirm }: { entity: WorkspaceEntity; onCancel: () => void; onConfirm: () => void }) {
-  return (
-    <div className="kyle-connection-modal-backdrop" role="presentation" onMouseDown={onCancel}>
-      <section className="kyle-connection-modal" role="dialog" aria-modal="true" aria-labelledby="connection-research-title" onMouseDown={(event) => event.stopPropagation()}>
-        <button type="button" className="kyle-connection-modal-close" onClick={onCancel} aria-label="Close research confirmation"><X size={17} weight="bold" /></button>
-        <p className="kyle-connection-kicker mono">New investigation</p>
-        <h3 id="connection-research-title">Research {entity.label}</h3>
-        <p>Run a fresh ARGUS investigation and add the resulting evidence to your case history.</p>
-        <div className="kyle-connection-cost"><span>Estimated charge</span><strong>1 investigation credit</strong><small>Provider spend is recorded after the run.</small></div>
-        <div className="kyle-connection-modal-actions">
-          <button type="button" className="btn-secondary" onClick={onCancel}>Cancel</button>
-          <button type="button" className="btn-primary" onClick={onConfirm}>Confirm research</button>
-        </div>
-      </section>
-    </div>
-  );
+function entityValidation(entity: WorkspaceEntity): { eligible: boolean; explanation: string } {
+  if (entity.confidence !== "High" || entity.sources.length === 0) {
+    return { eligible: false, explanation: "This lead needs a stronger identity source before ARGUS can charge for research." };
+  }
+  if (/[.;:|][\s]|\b(?:senior|lead|manager|advisor|engineer|director|founder|chief|head)\s*$/i.test(entity.label.trim())) {
+    return { eligible: false, explanation: "The saved label looks like a role fragment, not a resolved entity." };
+  }
+  if (entity.kind === "people") {
+    const handle = /^@[A-Za-z0-9_]{2,30}$/.test(entity.researchQuery ?? "");
+    const name = /^(?:(?:Dr|Mr|Ms|Mrs)\.\s+)?[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]+(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]+){1,4}$/.test(entity.label.trim());
+    if (!handle && !name) return { eligible: false, explanation: "ARGUS has not resolved this candidate to a valid person identity." };
+  }
+  if (entity.kind === "wallets" || entity.kind === "tokens") {
+    const ref = entity.researchQuery ?? "";
+    const address = /^0x[a-fA-F0-9]{40}$/.test(ref) || /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(ref);
+    if (!address) return { eligible: false, explanation: "The saved identifier is not a complete supported wallet or token address." };
+  }
+  if (entity.kind === "social" && !/^@[A-Za-z0-9_]{2,30}$/.test(entity.researchQuery ?? "")) {
+    return { eligible: false, explanation: "ARGUS has not resolved this account to a canonical handle." };
+  }
+  return { eligible: true, explanation: "Identity and entity type are source-backed." };
+}
+
+function impactReason(entity: WorkspaceEntity, subjectName: string): string {
+  const relation = `${entity.relation} ${entity.detail ?? ""}`.toLowerCase();
+  if (/founder|chief|lead|director|team/.test(relation)) return `${entity.label} appears close to leadership. Verifying their identity and track record could materially change confidence in ${subjectName}'s team.`;
+  if (entity.kind === "wallets" || /control/.test(relation)) return `${entity.label} touches a control or capital path. Tracing it could expose custody, concentration, or undisclosed coordination.`;
+  if (entity.kind === "tokens") return `${entity.label} is part of the project's economic surface. A fresh contract and market investigation could change the token-risk decision.`;
+  if (/fund|back|invest|partner/.test(relation)) return `${entity.label} may support or influence the project. Independent validation could strengthen or weaken the backer thesis.`;
+  return `${entity.label} is a source-backed adjacent entity. Investigating it could resolve an open relationship in the ${subjectName} decision file.`;
+}
+
+function impactScore(entity: WorkspaceEntity): number {
+  const relation = `${entity.relation} ${entity.detail ?? ""}`.toLowerCase();
+  return (entity.direct ? 20 : 0)
+    + (/founder|chief|control|fund|back|invest/.test(relation) ? 35 : 0)
+    + (/lead|director|advisor|partner|team/.test(relation) ? 20 : 0)
+    + (entity.kind === "wallets" || entity.kind === "tokens" ? 18 : 0)
+    + entity.sources.length * 3;
+}
+
+function researchTarget(entity: WorkspaceEntity, subjectName: string): KyleResearchTarget {
+  const estimateMinutes = entity.kind === "projects" ? "4–7 minutes" : entity.kind === "wallets" ? "2–5 minutes" : entity.kind === "tokens" ? "3–6 minutes" : "2–4 minutes";
+  return {
+    id: entity.id,
+    name: entity.label,
+    image: entity.image,
+    entityType: ENTITY_KIND_LABEL[entity.kind].toLowerCase().replace(/^./, (letter) => letter.toUpperCase()),
+    sourceReport: subjectName,
+    reason: impactReason(entity, subjectName),
+    estimateMinutes,
+    costMin: 0.8,
+    costMax: 1.6,
+    privateSurcharge: 0.4,
+    query: entity.researchQuery ?? entity.label,
+    reportKind: entity.kind === "tokens" || entity.kind === "wallets" ? "token" : "person",
+  };
+}
+
+function recommendedEntities(entities: WorkspaceEntity[], props: ConnectionWorkspaceProps): WorkspaceEntity[] {
+  const ranked = entities
+    .filter((entity) => entity.relation !== "official account" && entityValidation(entity).eligible && entityAction(entity, props))
+    .sort((left, right) => impactScore(right) - impactScore(left));
+  const recommendations: WorkspaceEntity[] = [];
+  const represented = new Set<Cluster>();
+  for (const entity of ranked) {
+    if (represented.has(entity.cluster)) continue;
+    recommendations.push(entity);
+    represented.add(entity.cluster);
+    if (recommendations.length === 3) return recommendations;
+  }
+  for (const entity of ranked) {
+    if (recommendations.some((candidate) => candidate.id === entity.id)) continue;
+    recommendations.push(entity);
+    if (recommendations.length === 3) break;
+  }
+  return recommendations;
 }
 
 export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
@@ -339,6 +397,7 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
   const selected = entities.find((entity) => entity.id === selectedId) ?? visible[0] ?? null;
   const byId = new Map(entities.map((entity) => [entity.id, entity]));
   const connectionCount = edges.length + props.connections.length;
+  const recommendations = recommendedEntities(entities, props);
 
   const reset = () => {
     setFilter("all");
@@ -451,14 +510,42 @@ export function KyleConnectionWorkspace(props: ConnectionWorkspaceProps) {
             <div className="kyle-connection-drawer-block"><span className="mono">Relationship</span><p>{selected.label} is connected to {subjectName} as <strong>{selected.relation}</strong>.</p></div>
             <div className="kyle-connection-drawer-block"><span className="mono">Evidence confidence</span><div className="kyle-confidence-row"><strong>{selected.confidence}</strong><small>{confidenceSegments(selected.confidence)} of 3 signals</small></div><div className="kyle-confidence-meter">{[1, 2, 3].map((value) => <i key={value} data-on={value <= confidenceSegments(selected.confidence) ? "true" : "false"} />)}</div><small>{selected.direct ? "Direct relationship saved with this report." : "Relationship is inferred through another saved entity."}</small></div>
             <div className="kyle-connection-drawer-block"><span className="mono">Sources ({selected.sources.length})</span>{selected.sources.length ? <ul>{selected.sources.slice(0, 3).map((source) => <li key={source.url}><a href={source.url} target="_blank" rel="noreferrer">{source.label} ↗</a></li>)}</ul> : <p>No direct source URL was preserved for this graph edge.</p>}</div>
-            {!shareView && <div className="kyle-connection-drawer-actions"><span className="mono">Actions</span>{selected.sources[0] && <a className="btn-primary" href={selected.sources[0].url} target="_blank" rel="noreferrer">Open evidence</a>}{entityAction(selected, props) && <button type="button" className="btn-secondary" onClick={() => setPendingResearch(selected)}>Research {selected.kind === "people" ? "person" : selected.kind === "projects" ? "project" : "entity"}</button>}</div>}
+            {!shareView && <div className="kyle-connection-drawer-actions"><span className="mono">Actions</span>{selected.sources[0] && <a className="btn-primary" href={selected.sources[0].url} target="_blank" rel="noreferrer">Open evidence</a>}{entityAction(selected, props) && entityValidation(selected).eligible ? <button type="button" className="btn-secondary" onClick={() => setPendingResearch(selected)}>Research this</button> : entityAction(selected, props) ? <div className="kyle-connection-validation"><strong>Verify identity first</strong><small>{entityValidation(selected).explanation}</small></div> : null}</div>}
           </>
         ) : (
           <div className="kyle-connection-drawer-subject"><Avatar src={subjectImage} letter={(subjectName[0] ?? "?").toUpperCase()} size={82} rounded="rounded-full" letterClass="text-xl" /><div><p className="mono">Audited subject</p><h3>{subjectName}</h3><span>{subjectKey}</span></div></div>
         )}
       </aside>
 
-      {pendingResearch && entityAction(pendingResearch, props) && <ResearchConfirmation entity={pendingResearch} onCancel={() => setPendingResearch(null)} onConfirm={() => { const action = entityAction(pendingResearch, props); setPendingResearch(null); action?.(); }} />}
+      {!shareView && recommendations.length > 0 && (
+        <section className="kyle-rabbit-holes" aria-labelledby="kyle-rabbit-holes-title">
+          <header><div><p className="mono">Recommended next investigations</p><h3 id="kyle-rabbit-holes-title">Next rabbit holes</h3></div><span>Ranked by decision impact, not popularity.</span></header>
+          <div className="kyle-rabbit-hole-grid">
+            {recommendations.map((entity, index) => (
+              <article key={entity.id}>
+                <span className="kyle-rabbit-hole-rank mono">0{index + 1}</span>
+                <Avatar src={entity.image} letter={(entity.label.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={42} rounded="rounded-full" letterClass="text-sm" />
+                <div><small className="mono">{ENTITY_KIND_LABEL[entity.kind]}</small><h4>{entity.label}</h4><p>{impactReason(entity, subjectName)}</p></div>
+                <button type="button" onClick={() => setPendingResearch(entity)}>Research this</button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {pendingResearch && entityAction(pendingResearch, props) && entityValidation(pendingResearch).eligible && (
+        <KyleResearchSheet
+          target={researchTarget(pendingResearch, subjectName)}
+          onClose={() => setPendingResearch(null)}
+          onRun={(privateSearch) => entityAction(pendingResearch, props, privateSearch)?.()}
+          onOpenSaved={props.onOpenSavedReport ? () => props.onOpenSavedReport?.(
+            pendingResearch.researchQuery ?? pendingResearch.label,
+            pendingResearch.kind === "tokens" || pendingResearch.kind === "wallets" ? "token" : "person",
+          ) : undefined}
+          onOpenCompleted={() => entityAction(pendingResearch, props)?.()}
+          previewBalance={props.previewBalance}
+        />
+      )}
     </section>
   );
 }

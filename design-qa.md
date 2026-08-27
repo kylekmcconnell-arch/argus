@@ -55,6 +55,69 @@ final result: passed
 
 ---
 
+# Design QA — Rabbit-hole research CTAs
+
+## Verification target
+
+- Product audit: `/Users/kyle/Documents/ARGUS/.design-audit/rabbit-hole-ctas-2026-08-27/AUDIT.md`
+- Visual language reference: `/var/folders/h7/6njc4p9d12s5cjfrwk2sr2080000gn/T/codex-clipboard-3233c4b2-d0fb-4145-8685-1b9d6e0dcca0.png`
+- Running-state capture: `artifacts/design-qa/kyle-research-sheet-progress.png`
+- Completed-state capture: `artifacts/design-qa/kyle-research-sheet-complete.png`
+- Browser preview: `http://127.0.0.1:4173/?design-preview=kyle-intelligence#relationships`
+- Desktop viewport: 1488 × 1058
+- Responsive viewport: 720 × 900
+
+## Implementation evidence
+
+- Eligible relationship nodes now expose one consistent `Research this` action. The action opens a confirmation sheet before spending and separates free saved evidence from a fresh investigation.
+- The confirmation state presents entity identity, source-report context, decision-impact reasoning, a 0.8–1.6 credit estimate, 2–4 minute estimate for people, current balance, private-search surcharge, and a maximum-charge confirmation label.
+- Confirmation hands the request to the real fresh-scan path with stored-case reuse disabled. The app retains a `Back to {source report}` strip through resolving, live progress, and the finished report.
+- The prototype sheet demonstrates live progress and completion states. In the real app the existing live-run surface takes over after confirmation and continues in the background.
+- `Next rabbit holes` is limited to three source-backed entities, ranked by decision impact and diversified across relationship clusters. The verified ANYONE fixture resolves to a person, token, and second person rather than three generic popular accounts.
+- Paid CTAs require high confidence, at least one saved source, a valid entity identifier, and kind-specific validation. Exact role-fragment input `Bloxroute. Senior` is covered by a regression test and receives `Verify identity first`, never a paid action.
+
+## Accessibility and responsive evidence
+
+- Dialog semantics, name and description are exposed to the browser accessibility tree.
+- Focus moves to the sheet, remains trapped inside it, and returns to the originating `Research this` button after Escape.
+- Price, progress, completion, and invalid-identity explanations use text and live-region semantics rather than color alone.
+- The 720px pass preserves all confirmation details and stacks the actions without horizontal clipping.
+- Reduced-motion CSS disables nonessential research animations.
+
+## Fidelity surfaces
+
+- Typography and color stay within the Kyle report lane’s editorial serif/mono hierarchy, neutral panels, green evidence accent, and black primary action.
+- The sheet is deliberately narrower than the graph so the source relationship remains visible behind the modal context.
+- Person portraits and entity imagery are reused from the evidence web; letter fallbacks remain truthful when no source-backed image exists.
+- The research lifecycle preserves the selected Option 2 graph’s information architecture instead of introducing a separate generic checkout page.
+
+## Iterations made
+
+1. Replaced the first-pass single-credit modal with an explicit saved-versus-fresh decision sheet.
+2. Added a source-backed identity gate after the audit revealed malformed role fragments could otherwise become billable subjects.
+3. Diversified recommendations by graph cluster so team members do not crowd out a controlling asset or token.
+4. Corrected a nested text selector that initially caused row labels and descriptions to sit on the same line; final browser DOM and responsive checks show the intended stacked hierarchy.
+5. Added app-level return context and forced fresh execution so confirmation cannot silently reopen an old saved case.
+
+## Automated and runtime checks
+
+- Focused ESLint on all modified TS/TSX files: passed.
+- TypeScript client, server and API projects: passed.
+- Production build: passed.
+- Full Vitest suite: 386 files and 4,048 tests passed.
+- Browser console: no warnings or errors; Vite/React development messages only.
+- Repository-wide lint remains red on 222 pre-existing errors outside this feature; no modified file contributes an error.
+
+## Findings
+
+No actionable P0, P1 or P2 findings remain in this scope.
+
+P3 follow-up: a future billing service can replace the current estimate with an exact provider-specific reservation and refund receipt without changing the confirmation contract.
+
+final result: passed
+
+---
+
 # Report typography accessibility QA
 
 ## Artifacts
@@ -428,4 +491,3 @@ final result: passed
 ## Result
 
 final result: passed
-

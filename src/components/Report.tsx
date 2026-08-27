@@ -1626,7 +1626,7 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
   );
 }
 
-export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
+export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSavedResearch, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onResearchAudit?: (q: string, privateSearch?: boolean) => void; onOpenSavedResearch?: (q: string, kind: "person" | "token") => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const reportLane = useReportLane();
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
   const reportStyle = reportLane.definition.presentationStyle;
@@ -4317,7 +4317,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           nodes: visibleGraphNodes,
           edges: visibleGraphEdges,
           connections: showTrustGraphSupplemental ? connections : [],
-          onAudit,
+          onAudit: onResearchAudit ?? onAudit,
+          onOpenSavedReport: onOpenSavedResearch,
           onOpenProject: onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined,
           shareView,
         })}

@@ -85,9 +85,11 @@ export interface ConnectionWorkspaceProps {
   nodes: PanoptesNode[];
   edges: PanoptesEdge[];
   connections: SubjectConnection[];
-  onAudit?: ((query: string) => void) | undefined;
+  onAudit?: ((query: string, privateSearch?: boolean) => void) | undefined;
+  onOpenSavedReport?: ((query: string, kind: "person" | "token") => void) | undefined;
   onOpenProject?: ((name: string) => void) | undefined;
   shareView?: boolean | undefined;
+  previewBalance?: number | undefined;
 }
 
 /**
