@@ -52,3 +52,56 @@ The loading sequence was also observed before the memo appeared. It named the ac
 - browser console checked with no warnings or errors
 
 final result: passed
+
+---
+
+# Dexscreener report-link visual QA
+
+## Artifacts
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-26 at 10.25.00 PM.png`
+- Rendered implementation, light focused region: `/tmp/argus-dex-logo.OfQ30R/artifacts/dexscreener-link-qa/implementation-light-focused.png`
+- Rendered implementation, light full header: `/tmp/argus-dex-logo.OfQ30R/artifacts/dexscreener-link-qa/implementation-light-full.png`
+- Rendered implementation, dark focused region: `/tmp/argus-dex-logo.OfQ30R/artifacts/dexscreener-link-qa/implementation-dark-focused.png`
+- Combined comparison: `/tmp/argus-dex-logo.OfQ30R/artifacts/dexscreener-link-qa/source-vs-implementation.png`
+- Source pixels: 103 x 174
+- Implementation browser viewport: 1280 x 720 CSS pixels at device pixel ratio 1
+- Focused implementation pixels: 395 x 58 in both themes
+- Comparison normalization: source retained at native size; focused implementation retained at native size; both placed on one neutral 570 x 190 comparison canvas
+- State: official website, one Dexscreener resource, Robinhood Chain contract; light and dark themes
+
+## Full-view comparison evidence
+
+The shared identity rail preserves its existing three-part hierarchy and spacing. The resource group now has a complete perimeter border, a theme-aware panel surface, and balanced first-item padding instead of appearing as an isolated vertical divider on the document background.
+
+## Focused region comparison evidence
+
+The source crop showed a generic chart glyph with gray duotone shading. The revised focused capture shows Dexscreener's official favicon at 21 x 21 pixels, with the same label and destination. The logo loaded at full intrinsic resolution, remained sharp at device pixel ratio 1, and retained sufficient contrast in both light and dark captures.
+
+## Fidelity surfaces
+
+- Fonts and typography: the existing 11px report-resource label, line height, and type hierarchy are preserved.
+- Spacing and layout rhythm: the resource strip is 58px tall with equal 13px horizontal item padding, a 5px icon-to-label gap, and no first-item indentation exception.
+- Colors and visual tokens: background, border, text, hover, and shadow use shared ARGUS theme tokens; the light state is neutral rather than gray-washed, and the dark state does not inherit a light panel.
+- Image quality and asset fidelity: the generic Phosphor chart icon is replaced only for Dexscreener by the official `https://dexscreener.com/favicon.png` asset. Other platform icons remain unchanged.
+- Copy and content: `Resources & community` and `Dexscreener` remain unchanged, and the link still targets the contract-specific Dexscreener search.
+
+## Findings
+
+- No actionable P0, P1, or P2 differences remain for the requested logo and shading scope.
+- P3: a remote official favicon depends on Dexscreener availability; the report label and link remain usable if the image is unavailable.
+
+## Comparison history
+
+- Initial source finding: generic chart mark, duotone gray fill, isolated left-divider treatment, and no resource-panel surface.
+- Fix applied: official Dexscreener favicon, complete panel border, neutral theme-aware surface, balanced padding, and restrained hover/shadow tokens.
+- Post-fix evidence: matched light/dark captures, 82 focused component/report tests passed, TypeScript passed, and browser console warnings/errors were empty.
+
+## Primary interactions tested
+
+- official favicon loads without a browser warning or error
+- Dexscreener anchor remains contract-specific and accessible by its text label
+- light and dark theme rendering
+- hover/focus styling remains defined through shared theme tokens
+
+final result: passed
