@@ -48,4 +48,6 @@ All three editorial presentations currently use the synchronized narrative repor
 
 The policy runs against pull requests into protected `main`. Kyle and Enigma work on short-lived branches, see each other's presentation in the production selector after merge, and cannot modify the other owner's directory.
 
-Promotion is an explicit reviewed change into `src/reports/production/**`. A selection in the browser cannot promote a renderer and cannot change saved evidence or scoring. Lane-owned synthesis enters shared report surfaces only through the neutral renderer slots in `ReportLaneDefinition`; shared components never import an owner lane directly.
+Promotion is an explicit reviewed change into `src/reports/production/**`. A selection in the browser cannot promote a renderer and cannot change saved evidence or scoring. Lane-owned synthesis enters shared report surfaces only through the neutral renderer registry; shared components never import an owner lane directly.
+
+Each lane already owns a `renderers.tsx` package. Kyle and Enigma can add lane-specific decision, social, or GitHub presentation components entirely inside their own directories; the neutral shared registry is prewired and does not need to change when either owner iterates.
