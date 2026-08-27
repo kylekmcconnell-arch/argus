@@ -2221,6 +2221,17 @@ export function InvestigationReport({
                 </div>
               </div>
 
+              <details
+                className="kyle-people-disclosure"
+                open={reportLane.definition.id === "kyle" ? undefined : true}
+              >
+                <summary>
+                  <span>
+                    <strong>View the complete people and control record</strong>
+                    <small>Verified identities, project claims, search leads, continuity records, and advisors.</small>
+                  </span>
+                  <span className="mono">{teamPeople.length + teamIdentityGapCount + advisors.length} records</span>
+                </summary>
               {teamPeople.length > 0 ? (
                 <div>
                   <p className="mt-5 text-[13px] leading-relaxed text-ink-dim">
@@ -2444,6 +2455,7 @@ export function InvestigationReport({
                   <p className="mt-2 text-[12.5px] leading-snug text-ink-faint">A claimed advisor who has never publicly acknowledged the project may be a misleading name-drop.</p>
                 </div>
               )}
+              </details>
             </section>
           </div>
         </div>

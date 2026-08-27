@@ -1,0 +1,125 @@
+import { useEffect } from "react";
+import type { GithubAssessment } from "../../data/evidence";
+import type { SocialActivitySnapshot } from "../../data/socialActivity";
+import { KyleIntelligenceDecisionCanvas } from "./KyleIntelligenceDecisionCanvas";
+import { KyleGithubSynthesis } from "./KyleGithubSynthesis";
+import { KyleSocialSynthesis } from "./KyleSocialSynthesis";
+
+const socialPreview: SocialActivitySnapshot = {
+  schemaVersion: 1,
+  provider: "x-api-v2",
+  state: "complete",
+  capturedAt: "2026-08-26T12:00:00.000Z",
+  sourceUrl: "https://x.com/search?q=fedi",
+  queryBasis: { handle: "@fedibtc", projectName: "Fedi", query: "@fedibtc -is:retweet", excludesReposts: true },
+  windows: {
+    last24Hours: { start: "2026-08-25T12:00:00.000Z", end: "2026-08-26T12:00:00.000Z", postCount: 8, uniqueAccounts: 3, inspectedPosts: 8, authorCoverageComplete: true },
+    previous24Hours: { start: "2026-08-24T12:00:00.000Z", end: "2026-08-25T12:00:00.000Z", postCount: 11, uniqueAccounts: 4, inspectedPosts: 11, authorCoverageComplete: true },
+    last7Days: { start: "2026-08-19T12:00:00.000Z", end: "2026-08-26T12:00:00.000Z", postCount: 32, uniqueAccounts: 14, inspectedPosts: 32, authorCoverageComplete: true },
+  },
+  hourlyPostCounts: [],
+  top10AccountSharePct: 72,
+  activeDays: 5,
+  activityScore: 24,
+  scoreVersion: "social-activity-v1",
+  collection: { countsRequestCompleted: true, searchRequests: 1, postReads: 32, maxPosts: 100, estimatedUsd: 0.1 },
+  note: "Saved X search.",
+  mentioners: [
+    { postId: "1", handle: "@builder", text: "The Fedi wallet shipped a new privacy feature for community custody.", tweetUrl: "https://x.com/builder/status/1", createdAt: "2026-08-26T10:00:00.000Z", followers: 1200 },
+    { postId: "2", handle: "@trader", text: "$FEDI could moon after this airdrop.", tweetUrl: "https://x.com/trader/status/2", createdAt: "2026-08-26T09:00:00.000Z", followers: 300 },
+  ],
+};
+
+const githubPreview: GithubAssessment = {
+  login: "fedibtc",
+  confidence: "gold",
+  publicRepos: 12,
+  originalCount: 9,
+  forkCount: 3,
+  forkRatio: 0.25,
+  totalStarsOnOriginals: 64,
+  topLanguages: [{ language: "Rust", repos: 5 }],
+  notableRepos: [],
+  daysSinceActivity: 12,
+  claimChecks: [],
+  summary: "Recent original work is visible.",
+};
+
+export function KyleIntelligencePreview() {
+  useEffect(() => {
+    const previous = document.documentElement.dataset.reportLane;
+    document.documentElement.dataset.reportLane = "kyle";
+    return () => {
+      if (previous) document.documentElement.dataset.reportLane = previous;
+      else delete document.documentElement.dataset.reportLane;
+    };
+  }, []);
+
+  return (
+    <main className="min-h-screen bg-void px-5 py-8 sm:px-10 lg:px-16">
+      <div className="mx-auto max-w-[1240px]" data-report-style="2">
+        <KyleIntelligenceDecisionCanvas
+          subjectName="Fedi"
+          subjectSummary="Fedi is a privacy-first Bitcoin wallet with chat, community custody, multispend accounts, and mini-app spaces designed for communities coordinating payments and local financial tools."
+          reportSummary="Fedi clears ARGUS’s basic legitimacy tests, with named leadership, an active product, recent development activity and documented funding. Its result is governed primarily by limited independent validation around security, traction and partnerships—not by a major adverse event established in the current evidence."
+          verdictLabel="Caution"
+          score={55}
+          scoreLabel="Project investigation"
+          scoreContext="Team, product, token conduct, backers, traction and transparency."
+          favorable={false}
+          argument={{
+            forLine: "Named leadership, a live wallet product, active repositories and documented funding establish operating credibility.",
+            againstLine: "Independent security, adoption and partnership evidence remains limited.",
+            moveLine: "A credible independent audit, verified adoption metrics, or evidence of an undocumented security incident would materially change the current assessment.",
+          }}
+          supports={[
+            { label: "Leadership identity is strongly supported", detail: "Named founder Obi Nwosu, CTO Frank Hinek and multiple team members are tied to Fedi through source-backed role evidence." },
+            { label: "The product is live and actively maintained", detail: "ARGUS verified the wallet product and active GitHub repositories with recent development activity." },
+            { label: "Corporate identity is attributable", detail: "Fedi, Inc. is tied to the project through source-backed legal-entity evidence." },
+          ]}
+          concerns={[
+            { label: "Independent security evidence is incomplete", detail: "ARGUS has not yet established a complete source-backed record of independent security reviews, incidents, losses or recovery events." },
+            { label: "Funding is confirmed, but broader backer validation is limited", detail: "A $17M Series A is source-backed, while independent evidence on the wider investor and partnership network remains limited." },
+            { label: "Usage remains difficult to independently validate", detail: "The product is live, but robust third-party adoption evidence remains thin." },
+          ]}
+          context={[
+            { label: "Development is active, but external developer validation is modest", detail: "Recent original work is visible while repository adoption remains relatively limited." },
+          ]}
+          nextSteps={[
+            { label: "Independent security review", detail: "A credible third-party audit or assessment would materially improve evidence quality." },
+            { label: "Complete incident history", detail: "A documented record of material incidents or recovery events could raise or lower confidence." },
+            { label: "Strong adoption evidence", detail: "Independent usage metrics would clarify whether current activity reflects meaningful traction." },
+          ]}
+          verified={[
+            { label: "Project identity confirmed" },
+            { label: "Live product confirmed" },
+            { label: "Named leadership confirmed" },
+          ]}
+          coveragePercent={68}
+          successful={7}
+          applicable={7}
+          capturedAt="Aug 26, 2026 · 2:13 PM"
+          evidenceHref="#evidence-ledger"
+          methodologyHref="#scan-methodology"
+          challengeAnchorId="ask-report"
+          checkScopeLabel="Required report checks"
+          composition={[
+            { axis: "team", label: "Team & leadership", score: 15, weight: 16, rationale: "Named founder, CTO and multiple team identities are supported by official and independent role evidence.", supportCount: 4 },
+            { axis: "product", label: "Product & execution", score: 14, weight: 24, rationale: "A live wallet and active repositories are confirmed, while broader product-usage evidence remains limited.", supportCount: 2, questionCount: 1 },
+            { axis: "backers", label: "Backers & partnerships", score: 8, weight: 14, rationale: "The $17M Series A is source-backed, but independent investor and partnership validation remains thin.", supportCount: 1, questionCount: 1 },
+            { axis: "traction", label: "Traction & usage", score: 8, weight: 14, rationale: "Current operation is established, but independent adoption evidence remains limited.", supportCount: 2, questionCount: 2 },
+            { axis: "transparency", label: "Transparency & integrity", score: 7, weight: 12, rationale: "Corporate identity and official surfaces are attributable, with several third-party questions still open.", supportCount: 2, questionCount: 1 },
+            { axis: "token", label: "Token design & conduct", score: 3, weight: 20, rationale: "No canonical project token was established in this saved report.", supportCount: 1 },
+          ]}
+        />
+        <div data-report-experience-shell="true" className="space-y-10 py-16">
+          <KyleSocialSynthesis snapshot={socialPreview} />
+          <KyleGithubSynthesis assessment={githubPreview} />
+        </div>
+        <section id="evidence-ledger" className="border-t border-line py-20"><p className="eyebrow">Evidence room preview anchor</p></section>
+        <section id="scan-methodology" className="border-t border-line py-20"><p className="eyebrow">Methodology preview anchor</p></section>
+        <section id="ask-report" className="border-t border-line py-20"><p className="eyebrow">Challenge preview anchor</p></section>
+      </div>
+    </main>
+  );
+}

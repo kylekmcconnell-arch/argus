@@ -3,6 +3,8 @@ import { ArrowDown, ArrowUp, ChatsCircle, Pulse, UsersThree } from "@phosphor-ic
 import { observedSocialActivityLevel, type SocialActivityBucket, type SocialActivityMention, type SocialActivitySnapshot } from "../data/socialActivity";
 import { plainLanguageSummary } from "../lib/plainLanguage";
 import { PfpAvatar } from "./PfpCheck";
+import { useReportLane } from "../reports/shared/ReportLaneContext";
+import { KyleSocialSynthesis } from "../reports/kyle/KyleSocialSynthesis";
 
 type WindowChoice = "24h" | "7d";
 
@@ -160,6 +162,7 @@ export function SocialActivityPanel({
   /** Optional report-specific context, such as direct-subject accusation leads. */
   afterActivity?: ReactNode;
 }) {
+  const reportLane = useReportLane();
   const [choice, setChoice] = useState<WindowChoice>("24h");
   const window = choice === "24h" ? snapshot.windows.last24Hours : snapshot.windows.last7Days;
   const chartBuckets = useMemo(() => {
@@ -200,6 +203,7 @@ export function SocialActivityPanel({
         </div>
       ) : (
         <>
+          {reportLane.definition.id === "kyle" && <KyleSocialSynthesis snapshot={snapshot} />}
           <div className="grid gap-4 border-b border-line/70 py-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(180px,.55fr)_minmax(170px,.5fr)] lg:items-end">
             <div className="flex min-w-0 items-end gap-4">
               <div className="mono text-[44px] font-semibold leading-none text-ink">{people === null ? "Unknown" : integer.format(people)}</div>

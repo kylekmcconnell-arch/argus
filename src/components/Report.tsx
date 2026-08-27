@@ -115,6 +115,7 @@ import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelli
 import { SocialActivityPanel } from "./SocialActivityPanel";
 import { reportOpeningNarrative } from "../lib/reportNarrative";
 import { useReportLane } from "../reports/shared/ReportLaneContext";
+import { KyleGithubSynthesis } from "../reports/kyle/KyleGithubSynthesis";
 import { SubjectAccusationStage } from "./SubjectAccusationStage";
 import {
   SUBJECT_LEAD_RELATIONSHIP,
@@ -3549,6 +3550,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   </span>
                 )}
               </header>
+              <details
+                className="kyle-people-disclosure"
+                open={reportLane.definition.id === "kyle" ? undefined : true}
+              >
+                <summary>
+                  <span>
+                    <strong>View the complete people and control record</strong>
+                    <small>Profiles, role sources, continuity checks, and unresolved leadership claims.</small>
+                  </span>
+                  <span className="mono">{webTeam.length + webTeamLeads.length + unmatchedLeadershipRows.length} records</span>
+                </summary>
               {webTeam.length > 0 && (
                 <div className={`grid gap-3 ${webTeam.length > 1 ? "xl:grid-cols-2" : ""}`}>
                   {webTeam.map((person, index) => {
@@ -3638,6 +3650,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   </ol>
                 </div>
               )}
+              </details>
             </section>
 
             {f.projectToken && (
@@ -4805,6 +4818,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <div className="min-w-0 lg:col-span-2">
               <Section title="GitHub assessment" kicker="quality of work · account history · bio claims vs GitHub reality">
                 <Card className="p-4">
+                  {reportLane.definition.id === "kyle" && <KyleGithubSynthesis assessment={f.githubAssessment} />}
                   <GithubAssessment a={f.githubAssessment} />
                 </Card>
               </Section>

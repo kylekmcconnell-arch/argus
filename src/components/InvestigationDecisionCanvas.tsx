@@ -14,6 +14,8 @@ import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief"
 import { HERO_SCORE_RING_SIZE, ScoreRing } from "./ScoreRing";
 import { compositionRowColor, type CompositionRow } from "./ScoreComposition";
 import type { TokenDecisionBoundary } from "../lib/decisionBoundary";
+import { useReportLane } from "../reports/shared/ReportLaneContext";
+import { KyleIntelligenceDecisionCanvas } from "../reports/kyle/KyleIntelligenceDecisionCanvas";
 
 export interface DecisionCanvasItem {
   label: string;
@@ -410,6 +412,44 @@ export function InvestigationDecisionCanvas({
   /** Report surfaces can supply a single later decision brief instead of repeating this detail panel. */
   showDecisionDetails?: boolean;
 }) {
+  const reportLane = useReportLane();
+  if (reportLane.definition.id === "kyle") {
+    return (
+      <KyleIntelligenceDecisionCanvas
+        subjectName={subjectName}
+        subjectSummary={subjectSummary}
+        reportSummary={reportSummary}
+        verdictLabel={verdictLabel}
+        score={score}
+        scoreLabel={scoreLabel}
+        scoreContext={scoreContext}
+        scoreIsProvisional={scoreIsProvisional}
+        favorable={favorable}
+        argument={argument}
+        discovery={discovery}
+        decisionBoundary={decisionBoundary}
+        decisionBoundaryEvidenceHref={decisionBoundaryEvidenceHref}
+        decisionLensId={decisionLensId}
+        onDecisionLensChange={onDecisionLensChange}
+        supports={supports}
+        concerns={concerns}
+        context={context}
+        nextSteps={nextSteps}
+        verified={verified}
+        coveragePercent={coveragePercent}
+        successful={successful}
+        applicable={applicable}
+        capturedAt={capturedAt}
+        evidenceHref={evidenceHref}
+        methodologyHref={methodologyHref}
+        challengeAnchorId={challengeAnchorId}
+        checkScopeLabel={checkScopeLabel}
+        composition={composition}
+        secondaryScore={secondaryScore}
+      />
+    );
+  }
+
   const verdictItems = favorable ? supports : concerns;
   const countervailingItems = favorable ? concerns : supports;
   const verdictClass = verdictTone === "pass"
