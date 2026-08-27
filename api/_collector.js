@@ -16230,7 +16230,31 @@ function uniqueBy(values, key) {
     return true;
   });
 }
+function dateFromSourceUrl(value) {
+  const match = value.match(/(?:^|\D)(20\d{2})(0[1-9]|1[0-2])([0-2]\d|3[01])(?:\D|$)/);
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+}
+function ratioFromLifecycleText(value) {
+  const equation = value.match(/(\d+(?:\.\d+)?)\s+(?:old\s+)?([A-Z][A-Z0-9]{1,11})\s*=\s*(\d+(?:\.\d+)?)\s+(?:new\s+)?([A-Z][A-Z0-9]{1,11})/);
+  if (equation) return `${equation[1]} ${equation[2]} = ${equation[3]} ${equation[4]}`;
+  const ratio = value.match(/\b(?:ratio\s+of\s+)?(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\b/i);
+  return ratio ? `${ratio[1]}:${ratio[2]}` : null;
+}
 function recomputeContinuityCoverage(snapshot) {
+  snapshot.events = snapshot.events.map((event) => ({
+    ...event,
+    date: event.date ?? event.sourceUrls.map(dateFromSourceUrl).find((value) => Boolean(value)) ?? null
+  }));
+  snapshot.migrationRatio ??= snapshot.events.map((event) => ratioFromLifecycleText(`${event.title} ${event.detail}`)).find((value) => Boolean(value)) ?? null;
+  snapshot.migrationDate ??= snapshot.events.filter((event) => event.kind === "token_migration" || /swap|migration/i.test(`${event.title} ${event.detail}`)).map((event) => event.date).find((value) => Boolean(value)) ?? null;
+  if (!snapshot.events.some((event) => event.kind === "rebrand")) {
+    const rebrandReceipt = snapshot.events.find((event) => /\brebrand(?:ed|ing)?\b|\brenamed\b|\bbecame\b/i.test(`${event.title} ${event.detail}`));
+    if (rebrandReceipt) snapshot.events.push({
+      ...rebrandReceipt,
+      kind: "rebrand",
+      title: rebrandReceipt.title
+    });
+  }
   const predecessor = snapshot.tokenLineage.find((node) => node.status === "predecessor");
   const current = snapshot.tokenLineage.find((node) => node.status === "current");
   const complete = Boolean(

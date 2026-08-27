@@ -72,6 +72,43 @@ describe("entity continuity", () => {
     expect(snapshot?.marketHistory.map((segment) => segment.status)).toEqual(["predecessor", "current"]);
   });
 
+  it("joins a dated official exchange rebrand receipt without inventing model fields", () => {
+    const completedNotice = "https://www.kucoin.com/announcement/en-kucoin-has-completed-the-token-swap-and-rebranding-of-ator-protocol-ator-to-anyone-protocol-anyone-20240717";
+    const raw = JSON.stringify({
+      historicalAliases: ["AirTor Protocol", "ATOR"],
+      predecessorName: "AirTor Protocol",
+      oldTicker: "ATOR",
+      oldContract: "0x0f7b3f5a8fed821c5eb60049538a548db2d479ce",
+      migrationRatio: null,
+      migrationDate: null,
+      replacementContract: "0xFeAc2Eae96899709a43E252B6B92971D32F9C0F9",
+      tokenLineage: [
+        { name: "AirTor Protocol", ticker: "ATOR", contract: "0x0f7b3f5a8fed821c5eb60049538a548db2d479ce", chain: "ethereum", status: "predecessor", validFrom: null, validTo: null, sourceUrls: [completedNotice] },
+        { name: "ANyONe Protocol", ticker: "ANYONE", contract: "0xFeAc2Eae96899709a43E252B6B92971D32F9C0F9", chain: "ethereum", status: "current", validFrom: null, validTo: null, sourceUrls: [completedNotice] },
+      ],
+      events: [{
+        date: null,
+        kind: "token_migration",
+        title: "KuCoin completed the token swap and rebranding",
+        detail: "1 old ATOR = 1 new ANYONE",
+        sourceUrls: [completedNotice],
+      }],
+    });
+    const snapshot = normalizeEntityContinuity(raw, "ANyONe Protocol", [
+      { title: "KuCoin completed the swap", url: completedNotice, snippet: "" },
+    ], new Set(), {
+      name: "ANyONe Protocol",
+      ticker: "ANYONE",
+      contract: "0xFeAc2Eae96899709a43E252B6B92971D32F9C0F9",
+      chain: "ethereum",
+    });
+
+    expect(snapshot?.migrationDate).toBe("2024-07-17");
+    expect(snapshot?.migrationRatio).toBe("1 ATOR = 1 ANYONE");
+    expect(snapshot?.events.some((event) => event.kind === "rebrand")).toBe(true);
+    expect(snapshot?.coverage.state).toBe("complete");
+  });
+
   it("rejects lineage claims whose URLs were not returned by search", () => {
     const snapshot = normalizeEntityContinuity(JSON.stringify({
       historicalAliases: ["ATOR"],
