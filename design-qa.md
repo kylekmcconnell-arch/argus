@@ -55,6 +55,57 @@ final result: passed
 
 ---
 
+# Team role title containment QA
+
+## Artifacts
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-26 at 10.31.08 PM.png`
+- Rendered implementation: `/private/tmp/argus-team-role-wrap.kJX5MR/artifacts/team-role-wrap-qa/implementation-light.png`
+- Combined comparison: `/private/tmp/argus-team-role-wrap.kJX5MR/artifacts/team-role-wrap-qa/source-vs-implementation.png`
+- Source pixels: 572 x 239
+- Implementation browser viewport: 1100 x 360 CSS pixels at device pixel ratio 1
+- Implementation capture: 1100 x 360 pixels; comparison uses the matching 572 x 239 top-left report crop
+- State: light-theme ANYONE people roster with two report columns and a long first-party role title
+
+## Findings
+
+- No actionable P0, P1, or P2 differences remain after the containment fix.
+- P3: exceptionally verbose first-party roles may occupy two lines. Preserving the full sourced title is preferable to truncation because the role is decision evidence.
+
+## Full-view comparison evidence
+
+The source shows the first role pill crossing its card boundary and painting over the adjacent team card. In the revised implementation the role occupies a dedicated metadata row, remains visually subordinate to the person's name, and stays entirely inside the card. The two-column grid, card proportions, avatar, evidence link, and source copy remain otherwise unchanged.
+
+## Focused region comparison evidence
+
+Browser geometry measured the first card's right edge at 544 CSS pixels and the long role pill's right edge at 467.7 pixels. The pill uses `white-space: normal` and `overflow-wrap: anywhere`; document-level horizontal overflow is false. The title therefore has more than 76 pixels of clearance before the card boundary in the supplied state and can wrap when longer.
+
+## Fidelity surfaces
+
+- Fonts and typography: name weight, role mono face, 11-pixel metadata size, and source-link hierarchy are preserved. The role now uses normal white-space and balanced wrapping instead of clipping or truncation.
+- Spacing and layout rhythm: the role receives one full card row while its inner pill remains content-sized. Existing card padding, two-column gap, radii, and evidence indentation remain intact.
+- Colors and visual tokens: existing light-theme panel, line, ink, and signal tint tokens remain unchanged.
+- Image quality and asset fidelity: no image or avatar treatment changed in this fix.
+- Copy and content: the complete first-party role title remains visible; no ellipsis or shortened paraphrase removes evidence.
+
+## Comparison history
+
+- Initial P1: the no-wrap role pill was wider than the card and obscured the adjacent person's content.
+- Fix applied: removed the team role's non-shrinking single-line treatment, moved it to its own flex row, and enabled wrapping within the card boundary.
+- Post-fix evidence: the combined comparison shows the title contained; browser geometry reports no component or document overflow; focused report tests and TypeScript pass.
+
+## Primary interactions tested
+
+- long team role in a two-column report grid
+- complete role text remains readable
+- role source link remains visible and clickable
+- light-theme rendering at the supplied report density
+- horizontal overflow and card-boundary containment
+
+final result: passed
+
+---
+
 # Official team portrait QA
 
 ## Artifacts

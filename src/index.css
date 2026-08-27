@@ -1393,6 +1393,18 @@
   align-items: center;
   gap: 7px;
 }
+.team-person-role {
+  display: flex;
+  flex: 0 0 100%;
+  min-width: 0;
+}
+.team-person-role > .chip {
+  max-width: 100%;
+  align-items: flex-start;
+  border-radius: 7px;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
 .team-person-evidence {
   min-width: 100%;
   padding-left: 48px;

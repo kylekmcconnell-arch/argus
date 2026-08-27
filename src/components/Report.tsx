@@ -3578,7 +3578,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                           />
                           <span className="text-[16px] font-semibold text-ink">{person.name}</span>
                           {person.handle && <span className="mono text-[12px] text-ink-faint">{person.handle}</span>}
-                          <span className="chip tint-signal shrink-0 normal-case tracking-normal">{formatRoleLabel(person.role)}</span>
+                          <span className="team-person-role">
+                            <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(person.role)}</span>
+                          </span>
                           {roleProof && <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Open role source</a>}
                           {continuityLabel && (
                             <span className={`chip ${continuity?.state === "current" ? "tint-pass" : continuity?.state === "departed" ? "tint-caution" : ""}`}>
@@ -4133,7 +4135,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       />
                       <span className="text-[15.5px] font-medium text-ink">{p.name}</span>
                       {p.handle && <span className="mono text-[11.5px] text-ink-faint">{p.handle}</span>}
-                      <span className="chip tint-signal shrink-0 normal-case tracking-normal">{formatRoleLabel(p.role)}</span>
+                      <span className="team-person-role">
+                        <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(p.role)}</span>
+                      </span>
                       {p.linkedin && (
                         <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                       )}

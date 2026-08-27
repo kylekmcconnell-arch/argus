@@ -2251,7 +2251,11 @@ export function InvestigationReport({
                                 />
                                 <span className="text-[15.5px] font-medium text-ink">{m.name}</span>
                                 {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11.5px] text-ink-faint">{m.handle}</span>}
-                                {m.role && <span className="chip tint-signal normal-case tracking-normal">{formatRoleLabel(m.role)}</span>}
+                                {m.role && (
+                                  <span className="team-person-role">
+                                    <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(m.role)}</span>
+                                  </span>
+                                )}
                                 {m.linkedin && (
                                   <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                                 )}
