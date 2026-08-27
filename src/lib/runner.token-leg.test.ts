@@ -1,0 +1,81 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Dossier } from "../data/dossier";
+import type { ThreatScan } from "../threat/types";
+
+const mocks = vi.hoisted(() => ({
+  streamAudit: vi.fn(),
+  threatScan: vi.fn(),
+  resolveProjectToken: vi.fn(),
+}));
+
+vi.mock("./live", () => ({ streamAudit: mocks.streamAudit }));
+vi.mock("../threat/scan", () => ({ threatScan: mocks.threatScan }));
+vi.mock("./resolveProjectToken", () => ({ resolveProjectToken: mocks.resolveProjectToken }));
+
+import { getRun, setOnComplete, startPersonAudit } from "./runner";
+
+function anyoneDossier(): Dossier {
+  return {
+    handle: "@AnyoneFDN",
+    display_name: "Anyone Protocol",
+    avatar: "",
+    bio: "DePIN-powered privacy network.",
+    followers: "100K",
+    joined: "2022",
+    identity_note: "Official project identity confirmed.",
+    headline: "Anyone Protocol runs a decentralized privacy network.",
+    live: true,
+    roles: ["PROJECT"],
+    projectToken: {
+      verified: true,
+      verification: "official_domain",
+      name: "Anyone Protocol",
+      symbol: "ANYONE",
+      rank: null,
+      address: "0x1234567890abcdef1234567890abcdef12345678",
+      chain: "ethereum",
+      sourceUrl: "https://www.anyone.io/",
+      capturedAt: "2026-08-26T22:00:00.000Z",
+    },
+  } as unknown as Dossier;
+}
+
+describe("project report token-safety leg", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setOnComplete(() => undefined);
+    mocks.resolveProjectToken.mockResolvedValue(null);
+  });
+
+  it("scans the verified canonical token even when the bio has no contract and CoinGecko name lookup is unavailable", async () => {
+    const dossier = anyoneDossier();
+    const tokenSafety = {
+      symbol: "ANYONE",
+      call: { verdict: "PASS", risk: 18 },
+      dossier: { score: 82, verdict: "PASS", axes: [] },
+    } as unknown as ThreatScan;
+    mocks.threatScan.mockResolvedValue(tokenSafety);
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onDone: (value: Dossier) => void },
+    ) => {
+      handlers.onDone(dossier);
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("done"));
+
+    expect(mocks.threatScan).toHaveBeenCalledOnce();
+    expect(mocks.threatScan).toHaveBeenCalledWith({
+      kind: "token",
+      ref: "0x1234567890abcdef1234567890abcdef12345678",
+      via: "evm",
+    }, expect.any(Function));
+    expect(mocks.resolveProjectToken).not.toHaveBeenCalled();
+    expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
+    expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("canonical $ANYONE project token");
+    expect(getRun("@AnyoneFDN")?.dossier?.threatNote).toContain("PASS · 18/100 risk");
+  });
+});

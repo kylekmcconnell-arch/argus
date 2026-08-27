@@ -10771,6 +10771,22 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
 var EVM_CA = /0x[a-fA-F0-9]{40}/;
 var SOL_WORD = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/;
 var DECLARED_CA = /(?:^|[^A-Za-z0-9])(?:ca|c\.a\.|contract(?:\s+address)?|token\s+contract|mint(?:\s+address)?)\s*[:=]\s*(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/gi;
+function tokenFromVerifiedProjectToken(token) {
+  if (token?.verified !== true) return null;
+  const address = (token.address ?? "").trim();
+  const chain = (token.chain ?? "").trim().toLowerCase();
+  const isEvm = /^0x[a-fA-F0-9]{40}$/.test(address);
+  const isSolana = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+  const via = chain === "solana" ? isSolana ? "solana" : null : isEvm ? "evm" : !chain && isSolana ? "solana" : null;
+  if (!via) return null;
+  const symbol = (token.symbol ?? "").trim().replace(/^\$+/, "");
+  const identitySource = token.verification === "official_x" ? "the official X identity" : token.verification === "official_domain" ? "the official project domain" : "verified project identity evidence";
+  return {
+    address,
+    via,
+    source: `the canonical${symbol ? ` $${symbol}` : ""} project token verified through ${identitySource}`
+  };
+}
 function declaredTokenFromBio(bio) {
   const candidates = [...(bio ?? "").matchAll(DECLARED_CA)].flatMap((match) => {
     const address = match[1] ?? "";
@@ -35113,7 +35129,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
   try {
-    const tokenCand = tokenFromBio(evidence.profile.bio) ?? tokenFromPromotions(evidence.promotions);
+    const tokenCand = tokenFromVerifiedProjectToken(evidence.projectToken) ?? tokenFromBio(evidence.profile.bio) ?? tokenFromPromotions(evidence.promotions);
     if (tokenCand) {
       emit({
         phase: "ARGUS \xB7 Threat",

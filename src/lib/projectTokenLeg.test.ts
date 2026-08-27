@@ -1,5 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { declaredTokenFromBio, tokenFromBio, tokenFromPromotions } from "./projectTokenLeg";
+import {
+  declaredTokenFromBio,
+  tokenFromBio,
+  tokenFromPromotions,
+  tokenFromVerifiedProjectToken,
+} from "./projectTokenLeg";
+
+describe("tokenFromVerifiedProjectToken", () => {
+  it("uses an official-domain EVM token as the canonical safety-scan input", () => {
+    expect(tokenFromVerifiedProjectToken({
+      verified: true,
+      address: "0x1234567890abcdef1234567890abcdef12345678",
+      chain: "ethereum",
+      symbol: "ANYONE",
+      verification: "official_domain",
+    })).toEqual({
+      address: "0x1234567890abcdef1234567890abcdef12345678",
+      via: "evm",
+      source: "the canonical $ANYONE project token verified through the official project domain",
+    });
+  });
+
+  it("rejects unverified or malformed project-token records", () => {
+    expect(tokenFromVerifiedProjectToken({
+      verified: false,
+      address: "0x1234567890abcdef1234567890abcdef12345678",
+      chain: "ethereum",
+    })).toBeNull();
+    expect(tokenFromVerifiedProjectToken({
+      verified: true,
+      address: "not-a-contract",
+      chain: "ethereum",
+    })).toBeNull();
+  });
+});
 
 const EVM = "0x6982508145454Ce325dDbE47a25d4ec3d2311933"; // $PEPE
 const SOL = "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"; // $BONK

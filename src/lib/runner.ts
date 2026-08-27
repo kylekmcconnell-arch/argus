@@ -11,7 +11,12 @@
 import { streamAudit } from "./live";
 import { threatScan } from "../threat/scan";
 import type { ThreatScan } from "../threat/types";
-import { tokenFromBio, tokenFromPromotions, type TokenCandidate } from "./projectTokenLeg";
+import {
+  tokenFromBio,
+  tokenFromPromotions,
+  tokenFromVerifiedProjectToken,
+  type TokenCandidate,
+} from "./projectTokenLeg";
 import { resolveProjectToken } from "./resolveProjectToken";
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
@@ -93,6 +98,7 @@ export function startPersonAudit(
   let threatLeg: Promise<ThreatScan | null> | null = null;
   let threatSettled = false;
   let threatNote = "";
+  let threatFailure = "";
   const pushStep = (s: TraceStep) => {
     run.steps = [...run.steps, s];
     run.pct = Math.min(92, Math.max(run.pct, run.steps.length * 11));
@@ -103,7 +109,17 @@ export function startPersonAudit(
     threatNote = `Token attributed via ${cand.source}.`;
     pushStep({ phase: "ARGUS · Threat", label: "Token threat leg", detail: `Full scan includes the token threat pipeline - scanning ${cand.address.slice(0, 10)}… (${cand.via}) in parallel.`, source: "argus", tone: "neutral" });
     threatLeg = threatScan({ kind: "token", ref: cand.address, via: cand.via }, pushStep)
-      .catch(() => null)
+      .catch((error: unknown) => {
+        threatFailure = error instanceof Error ? error.message : String(error);
+        pushStep({
+          phase: "ARGUS · Threat",
+          label: "Token safety leg failed",
+          detail: threatFailure || "The token-safety scanner returned an unknown error.",
+          source: "argus",
+          tone: "warn",
+        });
+        return null;
+      })
       .then((r) => { threatSettled = true; return r; });
   };
 
@@ -113,7 +129,9 @@ export function startPersonAudit(
     // against namesakes by the bio's own domain (never smear a subject with a
     // same-name token that isn't theirs).
     if (!threatLeg) {
-      const cand = tokenFromBio(d.bio) ?? tokenFromPromotions(d.evidence?.promotions);
+      const cand = tokenFromVerifiedProjectToken(d.projectToken)
+        ?? tokenFromBio(d.bio)
+        ?? tokenFromPromotions(d.evidence?.promotions);
       if (cand) startThreatLeg(cand);
       else {
         const cg = await resolveProjectToken(d.display_name || d.handle).catch(() => null);
@@ -145,7 +163,7 @@ export function startPersonAudit(
       d.threat = scan;
       threatNote = scan
         ? `${threatNote} $${scan.symbol}: ${scan.call.verdict} · ${scan.call.risk}/100 risk.`
-        : `${threatNote} The token scan did not complete (no DEX pair, or the scan errored) - it can be rerun from the Threat tab.`;
+        : `${threatNote} The token scan did not complete${threatFailure ? `: ${threatFailure}` : " (no DEX pair or no completed scanner result)"} - it can be rerun from the Threat tab.`;
     }
     if (threatNote) d.threatNote = threatNote;
     if (runs.get(key) !== run) return; // cancelled / purged while the token leg ran

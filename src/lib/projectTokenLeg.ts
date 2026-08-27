@@ -14,11 +14,58 @@ export interface TokenCandidate {
   source: string; // one line of provenance, rendered with the report
 }
 
+type VerifiedProjectTokenCandidate = {
+  verified?: boolean;
+  address?: string | null;
+  chain?: string | null;
+  symbol?: string | null;
+  verification?: string | null;
+};
+
 const EVM_CA = /0x[a-fA-F0-9]{40}/;
 // Base58 mint, matched only as a standalone word (no base58 chars on either
 // side) so prose and URLs never false-positive.
 const SOL_WORD = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/;
 const DECLARED_CA = /(?:^|[^A-Za-z0-9])(?:ca|c\.a\.|contract(?:\s+address)?|token\s+contract|mint(?:\s+address)?)\s*[:=]\s*(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/gi;
+
+/**
+ * Convert the canonical token already bound by the project-identity collector
+ * into the input expected by the token-safety scanner.
+ *
+ * This is stronger than rediscovering the asset from a bio, promotion, or
+ * same-name market listing: the record has already passed ARGUS's official-X
+ * or official-domain identity join. A linked token must therefore never lose
+ * its safety leg merely because CoinGecko cannot resolve the project by name.
+ */
+export function tokenFromVerifiedProjectToken(
+  token: VerifiedProjectTokenCandidate | null | undefined,
+): TokenCandidate | null {
+  if (token?.verified !== true) return null;
+  const address = (token.address ?? "").trim();
+  const chain = (token.chain ?? "").trim().toLowerCase();
+  const isEvm = /^0x[a-fA-F0-9]{40}$/.test(address);
+  const isSolana = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
+  const via: TokenCandidate["via"] | null = chain === "solana"
+    ? isSolana ? "solana" : null
+    : isEvm
+      ? "evm"
+      : !chain && isSolana
+        ? "solana"
+        : null;
+  if (!via) return null;
+
+  const symbol = (token.symbol ?? "").trim().replace(/^\$+/, "");
+  const identitySource = token.verification === "official_x"
+    ? "the official X identity"
+    : token.verification === "official_domain"
+      ? "the official project domain"
+      : "verified project identity evidence";
+  return {
+    address,
+    via,
+    source: `the canonical${symbol ? ` $${symbol}` : ""} project token verified through ${identitySource}`,
+  };
+}
 
 /**
  * Return the one contract the account explicitly labels as its own token.
