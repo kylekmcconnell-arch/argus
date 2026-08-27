@@ -136,7 +136,11 @@ function verdictHeadline(
   const lead = strongest ? `${strongest.label} leads the evidence.` : "The available evidence establishes a starting position.";
   if (favorable && unresolvedCount === 0 && adverseCount === 0) return `${lead} No decision-critical gap is recorded.`;
   if (adverseCount > 0) return `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`;
-  return `${lead} Independent evidence remains incomplete.`;
+  if (strongest) {
+    const strongestLabel = strongest.label.replace(/\s*&\s*/g, " and ");
+    return `${strongestLabel} is the strongest verified part of the case. The available public record still lacks independent security and governance evidence.`;
+  }
+  return "The available evidence establishes a starting position. The available public record still lacks independent security and governance evidence.";
 }
 
 function ClaimLabel({ type, strength }: { type: "FACT" | "SIGNAL" | "INFERENCE"; strength: string }) {

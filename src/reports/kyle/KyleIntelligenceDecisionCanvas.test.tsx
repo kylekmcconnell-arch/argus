@@ -51,6 +51,19 @@ afterEach(async () => {
 });
 
 describe("Kyle intelligence report opening", () => {
+  it("describes unresolved public evidence without implying a research failure", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      favorable
+      concerns={[]}
+    />));
+
+    expect(container.textContent).toContain(
+      "Team and leadership is the strongest verified part of the case. The available public record still lacks independent security and governance evidence.",
+    );
+    expect(container.textContent).not.toContain("Independent evidence remains incomplete.");
+  });
+
   it("leads with the verdict and separates evidence gaps from adverse evidence", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
 
