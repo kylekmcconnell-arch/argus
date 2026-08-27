@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Dossier } from "../data/dossier";
 import { buildReport, SUBJECTS } from "../data/subjects";
+import { SubjectClass } from "../engine";
 import type { ThreatScan } from "../threat/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -59,6 +60,72 @@ function decisionBasisText(): string {
 }
 
 describe("private person report evidence boundary", () => {
+  it("keeps the canonical chapter order and never renders retired notable followers", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: { ...base.report, roles: [SubjectClass.PROJECT] },
+      notableFollowers: [{ handle: "legacywhale", label: "Legacy Whale", size: "2.4M", count: 2_400_000 }],
+      subjectOrientation: {
+        kind: "PROJECT",
+        what: "The product routes application traffic through a distributed privacy network.",
+        audience: "internet applications",
+        boundHandle: base.handle,
+        boundDomain: "example.com",
+        sourceUrls: ["https://example.com"],
+      },
+      entityContinuity: {
+        subject: "Anyone Protocol",
+        historicalAliases: ["ATOR Protocol"],
+        predecessorName: "ATOR Protocol",
+        oldTicker: "ATOR",
+        oldContract: "0xold",
+        migrationRatio: "1:1",
+        migrationDate: "2024-07-01",
+        replacementContract: "0xnew",
+        migrationContract: null,
+        currentStatus: "active",
+        architectureChanges: [],
+        exchangeHandling: [],
+        tokenLineage: [],
+        events: [{
+          date: "2024-07-01",
+          kind: "rebrand",
+          title: "ATOR became Anyone Protocol",
+          detail: "The project changed its name and migrated its token.",
+          sourceUrls: ["https://example.com/rebrand"],
+        }],
+        sources: [],
+        aliasSearches: [],
+        marketHistory: [],
+        coverage: {
+          required: true,
+          state: "complete",
+          reason: "Lifecycle search completed.",
+          primarySourceCount: 1,
+          searchedAt: "2026-08-27T00:00:00.000Z",
+        },
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const nav = container.querySelector('nav[aria-label="Report table of contents"]');
+    const links = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])];
+    expect(links.slice(0, 4).map((link) => link.textContent?.trim())).toEqual([
+      "Decision",
+      "What the product is",
+      "Key developments",
+      "People",
+    ]);
+    expect(links.map((link) => link.textContent)).not.toContain("What changed");
+    expect(container.querySelector("#key-developments")?.textContent).toContain("The events that shaped this case");
+    expect(container.textContent).not.toContain("Notable followers");
+    expect(container.querySelector('a[href="https://x.com/legacywhale"]')).toBeNull();
+  });
+
   it("uses the linked token scan as Style 2's separate second score", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {

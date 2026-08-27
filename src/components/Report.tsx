@@ -361,27 +361,6 @@ function SubjectProfileContext({
           </span>
         )}
       </div>
-      {dossier.notableFollowers.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-ink-faint">Notable followers</span>
-          {dossier.notableFollowers.slice(0, 6).map((notable) => {
-            const big = (notable.count ?? 0) >= 1e6;
-            return (
-              <a
-                key={notable.handle}
-                href={`https://x.com/${notable.handle}`}
-                target="_blank"
-                rel="noreferrer"
-                className={`chip normal-case tracking-normal transition hover:text-ink ${big ? "tint-pass" : ""}`}
-                title={`${notable.label} · ${notable.size} followers`}
-              >
-                @{notable.handle} <span className="opacity-70">{notable.size}</span>
-              </a>
-            );
-          })}
-          {dossier.notableFollowers.length > 6 && <span className="mono text-[11px] text-ink-faint">+{dossier.notableFollowers.length - 6}</span>}
-        </div>
-      )}
     </>
   );
 }
@@ -2949,17 +2928,15 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const reportNavItems: ReportCanvasNavItem[] = [
     { href: "#report-summary", label: "Decision", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
     ...(presentation.primaryScore && governingAxes.length > 0 ? [{ href: "#composition" as const, label: "Score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" /> }] : []),
-    ...(f.entityContinuity?.events.length ? [{ href: "#what-changed" as const, label: "What changed", icon: <ArrowsClockwise aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(roles.includes(SubjectClass.PROJECT)
-      ? [{ href: "#dossier-product" as const, label: "Product", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]
+      ? [{ href: "#dossier-product" as const, label: "What the product is", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]
       : [{ href: "#dossier" as const, label: "Summary", icon: <Briefcase aria-hidden="true" size={15} weight="bold" /> }]),
+    ...(f.entityContinuity?.events.length ? [{ href: "#key-developments" as const, label: "Key developments", icon: <ArrowsClockwise aria-hidden="true" size={15} weight="bold" /> }] : []),
     { href: "#identity-evidence", label: "People", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
     ...(f.projectToken ? [{ href: "#project-token" as const, label: "Market", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
     { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
-    ...(f.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> }] : []),
     { href: "#evidence-ledger", label: "Evidence & method", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount },
-    ...(!shareView ? [{ href: "#ask-report" as const, label: "Challenge", icon: <MagnifyingGlassPlus aria-hidden="true" size={15} weight="bold" /> }] : []),
   ];
 
   return (
@@ -3435,8 +3412,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           <ReportStickyTableOfContents items={reportNavItems} />
         )}
 
-        {f.entityContinuity && <EntityContinuityTimeline snapshot={f.entityContinuity} />}
-
         <InvestigationDecisionCanvas
           presentationStyle={reportStyle}
           subjectName={f.display_name || f.handle}
@@ -3503,53 +3478,14 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         >
         {reportStyle === 2 && (
           <>
-            <section id="decision-brief" className="canonical-decision-brief story-chapter report-section scroll-mt-28">
-              <header className="report-section-heading">
-                <div>
-                  <p className="eyebrow text-signal-lift">02 · Decision brief</p>
-                  <h2 className="story-chapter-title mt-2 text-ink">The case, without the repetition.</h2>
-                  <p className="story-chapter-description mt-2 max-w-3xl text-ink-dim">
-                    The strongest evidence, the main concerns, and the questions most likely to change the result.
-                  </p>
-                </div>
-              </header>
-              <div className="canonical-decision-grid panel overflow-hidden">
-                <ReportCanvasNarrativeSection
-                  id="canonical-verdict-rationale"
-                  title={favorableVerdict ? "What supports this result" : "Main concerns"}
-                  description="The three decision-changing points that most strongly govern the result."
-                  tone={decisionNarrativeTone}
-                  items={verdictNarrative.slice(0, 3)}
-                  emptyCopy="No decision-changing concern was recorded. Review the evidence before relying on the result."
-                  singleColumn
-                />
-                <ReportCanvasNarrativeSection
-                  id="canonical-confidence-limits"
-                  title={favorableVerdict ? "Main concerns" : "What looks credible"}
-                  description="The strongest counterweight to the governing result."
-                  tone={favorableVerdict ? "caution" : "pass"}
-                  items={countervailingNarrative.slice(0, 3)}
-                  emptyCopy="No countervailing finding was recorded in this saved report."
-                  singleColumn
-                />
-                <ReportCanvasNarrativeSection
-                  id="canonical-verification-next"
-                  title="What to check next"
-                  description="The three unanswered questions most likely to change the result."
-                  tone="signal"
-                  items={verificationNext.slice(0, 3)}
-                  emptyCopy="No unresolved decision question was recorded."
-                  singleColumn
-                />
-              </div>
-            </section>
-
             <DossierReport
               payload={f as unknown as Record<string, unknown>}
               includeBeats={roles.includes(SubjectClass.PROJECT) ? ["product"] : undefined}
               includeSources={false}
               subjectSummary={openingSubjectSummary}
             />
+
+            {f.entityContinuity && <EntityContinuityTimeline snapshot={f.entityContinuity} />}
 
             <section id="identity-evidence" className="canonical-people-section story-chapter report-section scroll-mt-28" aria-labelledby="report-team-heading">
               <header className="report-section-heading">
@@ -3708,10 +3644,13 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         )}
 
         {reportStyle !== 2 && (
-          <DossierReport
-            payload={f as unknown as Record<string, unknown>}
-            subjectSummary={openingSubjectSummary}
-          />
+          <>
+            <DossierReport
+              payload={f as unknown as Record<string, unknown>}
+              subjectSummary={openingSubjectSummary}
+            />
+            {f.entityContinuity && <EntityContinuityTimeline snapshot={f.entityContinuity} />}
+          </>
         )}
         {f.projectStrengthBands && (
           reportStyle === 2 ? (

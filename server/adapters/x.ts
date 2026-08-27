@@ -2905,38 +2905,6 @@ export const xAdapter: Adapter = {
       ctx.emit({ phase: "P0 · Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days. A project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
     }
 
-    // 1b. follower QUALITY: which respected accounts follow the subject. The
-    //     answer (who, not how many) is a credibility signal a bot farm can't fake.
-    if (!ctx.evidence.notableFollowers.length) {
-      ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "Checking which top funds, founders, and KOLs follow the subject…", source: "twitterapi.io", tone: "neutral" });
-      // Parse the profile's follower count ("12.4K"/"1.2M") so the hybrid can pick
-      // enumerate-vs-reverse-check; unknown → reverse-check (safe default).
-      const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
-      const followerCount = fcm ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1) : undefined;
-      const scan = await notableFollowers(ctx.handle, { followerCount, organizationId: ctx.organizationId });
-      const nf = scan.list;
-      ctx.evidence.notableFollowers = nf;
-      if (nf.length) {
-        const coverageDetail = scan.coverage === "complete"
-          ? `Followed by ${nf.length} of ${scan.checked} known accounts checked`
-          : `Observed ${nf.length} notable follower${nf.length === 1 ? "" : "s"} before provider coverage became incomplete`;
-        ctx.emit({ phase: "P0 · Intake", label: scan.coverage === "complete" ? "Notable followers" : "Notable followers · partial coverage", detail: `${coverageDetail}: ${nf.slice(0, 8).map((n) => `@${n.handle}${n.label ? ` (${n.label})` : ""}`).join(", ")}${nf.length > 8 ? ", …" : ""}.${scan.coverage === "complete" ? "" : " Unobserved relationships remain unknown."}`, source: "twitterapi.io", tone: scan.coverage === "complete" ? "good" : "warn" });
-      } else if (scan.coverage === "complete" && scan.checked > 0) {
-        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `None of the ${scan.checked} known funds/founders/KOLs checked follow this subject.`, source: "twitterapi.io", tone: "neutral" });
-      } else if (scan.coverage === "partial") {
-        ctx.emit({ phase: "P0 · Intake", label: "Notable follower check incomplete", detail: scan.checked > 0 ? `No notable follower was observed in ${scan.checked} returned relationship result${scan.checked === 1 ? "" : "s"}; unobserved accounts remain unknown, so ARGUS withheld the negative conclusion.` : "Some follower data returned, but full reference-set coverage was not established; ARGUS withheld the negative conclusion.", source: "twitterapi.io", tone: "warn" });
-      } else {
-        ctx.emit({ phase: "P0 · Intake", label: "Notable follower check unavailable", detail: "The relationship provider returned no observable results; ARGUS withheld the notable-follower conclusion.", source: "twitterapi.io", tone: "warn" });
-      }
-      // The follower rows the enumerate path already downloaded carry an
-      // audience shape no user can assemble by hand. Report the distribution
-      // and stop: the tone stays neutral because a shape is not a verdict, and
-      // the reverse-check path reads no profile at all, so it says nothing.
-      if (scan.audience) {
-        ctx.emit({ phase: "P0 · Intake", label: "Audience shape", detail: describeAudienceSample(scan.audience), source: "twitterapi.io", tone: "neutral" });
-      }
-    }
-
     // 2. corroborate each claimed testimonial / advisory / advisor relationship.
     //    Run concurrently and cap the count: each does a follow-graph check plus a
     //    Grok acknowledgment, and a sequential loop over many claims (advisors add

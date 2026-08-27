@@ -5017,7 +5017,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     })),
     ventureTeams: evidence.ventureTeams,
     findings: evidence.findings,
-    notableFollowers: evidence.notableFollowers.map((follower) => ({ ...follower, provider: "twitterapi" })),
+    // Notable-follower enumeration is intentionally retired: it is costly,
+    // incomplete for large accounts, and must not influence a diligence score.
+    notableFollowers: [],
     recentActivity: evidence.recentActivity.slice(0, 12).map((text) => ({ text, provider: "twitterapi" })),
     sourceArtifacts: evidence.sourceArtifacts,
     profileAuthenticity: evidence.profileAuthenticity,
