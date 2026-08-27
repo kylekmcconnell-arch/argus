@@ -30,6 +30,7 @@ import type { ReportPersistenceContext, ReportVersionContext } from "../lib/repo
 import type { MaterialReportDelta } from "../lib/reportDelta";
 import type { ScanCheck } from "../lib/scanChecklist";
 import type { ResearchPlan } from "../lib/researchDirector";
+import { isPlausiblePersonRosterName } from "../lib/personName";
 import { portfolioRelationshipBinding } from "../lib/portfolioRelationshipBinding";
 import { buildPointInTimeIntelligence } from "../intelligence/buildPointInTimeIntelligence";
 import { buildEntityPointInTimeIntelligence } from "../intelligence/buildEntityPointInTimeIntelligence";
@@ -302,6 +303,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   };
   const identityGrounded = (row: WebTeamMember) =>
     meaningfulTeamValue(row.name)
+    && isPlausiblePersonRosterName(row.name)
     && meaningfulTeamValue(row.role)
     && row.evidence_origin !== "model_lead"
     && row.artifact_verified === true
@@ -321,7 +323,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
-    if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
+    if (!meaningfulTeamValue(member.name) || !isPlausiblePersonRosterName(member.name) || !meaningfulTeamValue(member.role)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     // Only an unproven identity LINK makes a verified person a candidate
     // again. Model-found projects alone are stripped from the verified row

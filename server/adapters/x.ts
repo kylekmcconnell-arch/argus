@@ -13,6 +13,7 @@ import { addGrokUsage, addClaudeUsage, recordCall, recordTwitterapi, grokSpendUs
 import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower, WebTeamMember } from "../../src/data/evidence";
+import { isPlausiblePersonRosterName } from "../../src/lib/personName";
 import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
 import {
   classifyPublicXAccountPage,
@@ -1414,6 +1415,8 @@ export interface TeamMember {
   name: string;
   handle?: string;
   role: string;
+  /** Descriptive first-party copy about the person; never parsed as another name. */
+  biography?: string;
   evidence?: string;
   kind: "team" | "advisor";
   linkedin?: string;
@@ -2633,7 +2636,7 @@ export function officialXNamedOrgs(posts: string[]): LinkedOrg[] {
 
 
 // Shared parser for the team JSON both Grok team-finders return.
-function parseTeamJSON(text: string | null, selfHandle: string | undefined, source: string): TeamMember[] {
+export function parseTeamJSON(text: string | null, selfHandle: string | undefined, source: string): TeamMember[] {
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -2642,7 +2645,7 @@ function parseTeamJSON(text: string | null, selfHandle: string | undefined, sour
     const arr: any[] = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
     const self = (selfHandle ?? "").replace(/^@/, "").toLowerCase();
     return arr
-      .filter((t) => t && typeof t.name === "string" && t.name.trim())
+      .filter((t) => t && typeof t.name === "string" && isPlausiblePersonRosterName(t.name))
       .map((t) => {
         const role = (t.role || "team").toString();
         const kind: "team" | "advisor" = (t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role)) ? "advisor" : "team";
@@ -2656,7 +2659,9 @@ function parseTeamJSON(text: string | null, selfHandle: string | undefined, sour
         return {
           name: t.name.trim(),
           handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : undefined,
-          role, kind, linkedin, evidence: typeof t.evidence === "string" ? t.evidence : undefined, source,
+          role,
+          biography: typeof t.biography === "string" && t.biography.trim() ? t.biography.trim() : undefined,
+          kind, linkedin, evidence: typeof t.evidence === "string" ? t.evidence : undefined, source,
           projects: projects && projects.length ? projects : undefined,
         };
       })

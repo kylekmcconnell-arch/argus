@@ -844,6 +844,8 @@ export interface WebTeamMember {
   name: string;
   handle?: string;
   role: string;
+  /** First-party descriptive copy about this person, separate from their project role. */
+  biography?: string;
   /** Person vs linked fund/incubator/VC. Unique-id is still the handle. */
   kind?: "person" | "org";
   linkedin?: string;

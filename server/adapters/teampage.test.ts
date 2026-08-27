@@ -20,6 +20,31 @@ afterEach(() => {
 });
 
 describe("official project team document discovery", () => {
+  it("keeps Sergey Ilin's full biography while rejecting its organization sentence fragment as a person", async () => {
+    const sourceUrl = "https://anyone.io/about-us";
+    const exactBiography = "Founder: Bloxroute. Senior lead: Forte Group.";
+    const html = `<html><body><section><h2>Our Advisors</h2><article><h3>Sergey Ilin</h3><p>${exactBiography}</p></article></section>${"Anyone Protocol advisor team. ".repeat(20)}</body></html>`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      if (String(input) === sourceUrl) return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+      return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
+    }));
+    structuredMock.mockResolvedValue({
+      people: [
+        { name: "Sergey Ilin", role: "Advisor", biography: exactBiography, source_url: sourceUrl },
+        { name: "Bloxroute. Senior", role: "Lead", source_url: sourceUrl },
+        { name: "Forte Group", role: "Team", source_url: sourceUrl },
+      ],
+    });
+
+    const { fetchTeamPage } = await import("./teampage");
+    const team = await fetchTeamPage("anyone.io", "Anyone");
+
+    expect(team).toEqual([
+      expect.objectContaining({ name: "Sergey Ilin", role: "Advisor", biography: exactBiography }),
+    ]);
+    expect(team.some((person) => person.name === "Bloxroute. Senior" || person.name === "Forte Group")).toBe(false);
+  });
+
   it("binds ANYONE-style first-party team and advisor portraits to the adjacent named person", async () => {
     const sourceUrl = "https://anyone.io/about-us";
     const html = `

@@ -1053,10 +1053,121 @@ function canonicalEntityKey(opts) {
   return (opts.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+// src/lib/personName.ts
+var ORGANIZATION_WORDS = /* @__PURE__ */ new Set([
+  "app",
+  "capital",
+  "company",
+  "corp",
+  "corporation",
+  "dao",
+  "exchange",
+  "finance",
+  "foundation",
+  "fund",
+  "group",
+  "inc",
+  "incorporated",
+  "labs",
+  "limited",
+  "llc",
+  "ltd",
+  "markets",
+  "network",
+  "protocol",
+  "studio",
+  "studios",
+  "systems",
+  "ventures",
+  "wallet"
+]);
+var ROLE_OR_FRAGMENT_WORDS = /* @__PURE__ */ new Set([
+  "advisor",
+  "adviser",
+  "and",
+  "backer",
+  "board",
+  "chief",
+  "community",
+  "cofounder",
+  "co-founder",
+  "consultant",
+  "cto",
+  "ceo",
+  "cfo",
+  "cmo",
+  "coo",
+  "developer",
+  "director",
+  "engineer",
+  "executive",
+  "founder",
+  "head",
+  "lead",
+  "leader",
+  "manager",
+  "marketing",
+  "member",
+  "mentor",
+  "officer",
+  "operations",
+  "operator",
+  "owner",
+  "partner",
+  "president",
+  "product",
+  "researcher",
+  "senior",
+  "staff",
+  "strategist",
+  "team",
+  "technical",
+  "the",
+  "vice",
+  "vp"
+]);
+var SENTENCE_WORDS = /* @__PURE__ */ new Set([
+  "are",
+  "at",
+  "builds",
+  "building",
+  "founded",
+  "from",
+  "has",
+  "have",
+  "is",
+  "joined",
+  "leads",
+  "of",
+  "runs",
+  "was",
+  "were",
+  "with"
+]);
+var HONORIFIC = /^(?:dr|mr|mrs|ms|prof)\.$/i;
+var INITIAL = /^[A-Z]\.$/;
+var HANDLE = /^@[A-Za-z0-9_]{2,30}$/;
+var NAME_PART = /^[\p{L}\p{M}][\p{L}\p{M}'’\-]*\.?$/u;
+function isPlausiblePersonRosterName(value) {
+  const name = value.trim().replace(/\s+/g, " ");
+  if (!name || name.length > 80) return false;
+  if (HANDLE.test(name)) return true;
+  if (/[:;!?()[\]{}|/\\]/.test(name)) return false;
+  const parts = name.split(" ");
+  if (parts.length > 6) return false;
+  if (parts.some((part) => !NAME_PART.test(part))) return false;
+  if (parts.some((part) => part.includes(".") && !HONORIFIC.test(part) && !INITIAL.test(part))) return false;
+  const words = parts.map((part) => part.toLowerCase().replace(/[.'’]/g, ""));
+  if (words.some((word) => ORGANIZATION_WORDS.has(word))) return false;
+  if (words.some((word) => SENTENCE_WORDS.has(word))) return false;
+  if (words.every((word) => ROLE_OR_FRAGMENT_WORDS.has(word))) return false;
+  return true;
+}
+
 // src/lib/fundScaleEvidence.ts
 var SHA256_HEX = /^[a-f0-9]{64}$/i;
 var CLAIM_ID = /^[A-Za-z0-9:_-]{8,180}$/;
-var HANDLE = /^[A-Za-z0-9_]{2,30}$/;
+var HANDLE2 = /^[A-Za-z0-9_]{2,30}$/;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var CLOCK_SKEW_MS = 5 * 60 * 1e3;
 var AUM_MAX_AGE_MS = 731 * DAY_MS;
@@ -1240,7 +1351,7 @@ var profileBioHasCurrentAffiliation = (profile, value) => {
 var profileBioHasCurrentHandleAffiliation = (profile, value) => {
   const bio = normalizedWords(profile.bio);
   const handle = canonicalHandle(value);
-  if (!bio || !HANDLE.test(handle)) return false;
+  if (!bio || !HANDLE2.test(handle)) return false;
   const role = `(?:${AFFILIATION_ROLE})`;
   const pattern = new RegExp(`@${regexEscape(handle)}(?=$|[^a-z0-9_])`, "gi");
   for (const match of bio.matchAll(pattern)) {
@@ -1375,7 +1486,7 @@ var hasCurrentAffiliationProof = (value, capturedAt, now, profile) => {
   const source2 = boundedWebUrl(value.attributionSourceUrl);
   const sourceHash = typeof value.attributionSourceContentHash === "string" ? value.attributionSourceContentHash : "";
   const affiliationCapturedAt = validDate(value.attributionCapturedAt);
-  if (!subjectName3 || !HANDLE.test(handle) || !source2 || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
+  if (!subjectName3 || !HANDLE2.test(handle) || !source2 || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
   if (affiliationCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || affiliationCapturedAt.getTime() > capturedAt.getTime() + CLOCK_SKEW_MS || capturedAt.getTime() - affiliationCapturedAt.getTime() > 7 * DAY_MS) return false;
   const host = cleanHost(source2.hostname);
   const path = source2.pathname.split("/").filter(Boolean);
@@ -6774,7 +6885,7 @@ function assembleDossier(ev, live) {
     const compact3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
     return Boolean(row.handle) && compact3(name) === compact3((row.handle ?? "").replace(/^@/, ""));
   };
-  const identityGrounded = (row) => meaningfulTeamValue(row.name) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
+  const identityGrounded = (row) => meaningfulTeamValue(row.name) && isPlausiblePersonRosterName(row.name) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
   // often use @handle as the display name until enrichment fills it.
   (row.handleProvenance === "subject_first_party" && Boolean(row.handle) || !teamNameIsOwnHandle(row));
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
@@ -6783,7 +6894,7 @@ function assembleDossier(ev, live) {
     ...member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}
   }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
-    if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
+    if (!meaningfulTeamValue(member.name) || !isPlausiblePersonRosterName(member.name) || !meaningfulTeamValue(member.role)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     if (member.identity_link_evidence_origin !== "model_lead") return [];
     return [{
@@ -14369,7 +14480,7 @@ function parseTeamJSON(text2, selfHandle, source2) {
     const parsed = JSON.parse(m[0]);
     const arr2 = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
     const self = (selfHandle ?? "").replace(/^@/, "").toLowerCase();
-    return arr2.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => {
+    return arr2.filter((t) => t && typeof t.name === "string" && isPlausiblePersonRosterName(t.name)).map((t) => {
       const role = (t.role || "team").toString();
       const kind = t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
       const linkedin = typeof t.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(t.linkedin) ? t.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
@@ -14378,6 +14489,7 @@ function parseTeamJSON(text2, selfHandle, source2) {
         name: t.name.trim(),
         handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : void 0,
         role,
+        biography: typeof t.biography === "string" && t.biography.trim() ? t.biography.trim() : void 0,
         kind,
         linkedin,
         evidence: typeof t.evidence === "string" ? t.evidence : void 0,
@@ -14886,7 +14998,7 @@ function scanPageTextForCredits(text2, sourceUrl2, projectName2, anchors) {
       if (!words.length) continue;
       const name = words.join(" ").replace(/[.,;:]+$/, "");
       const key = creditKey(name);
-      if (!key || NON_PERSON_CREDITS.has(name.toLowerCase()) || seen.has(key)) continue;
+      if (!key || !isPlausiblePersonRosterName(name) || NON_PERSON_CREDITS.has(name.toLowerCase()) || seen.has(key)) continue;
       if (projectKey && (key === projectKey || projectKey.startsWith(key))) continue;
       seen.add(key);
       const handle = name.startsWith("@") ? name : anchors?.find((anchor) => anchor.kind === "x" && (creditKey(anchor.anchorText) === key || creditKey(anchor.value) === key))?.value;
@@ -15035,7 +15147,7 @@ var canonicalSourceUrl = (value) => {
   }
 };
 var pageScore = (page) => (/\/(?:team|leadership|founders?|people)(?:[/.?#-]|$)/i.test(page.url) ? 100 : 0) + (/\b(?:co-?founders?|founders?)\b/i.test(page.text) ? 70 : 0) + (/\/(?:tokenomics|governance|transparency)(?:[/.?#-]|$)/i.test(page.url) ? 35 : 0) + Math.min(20, page.text.length / 1e3);
-var TEAM_EXTRACTION_SYSTEM = "You extract a crypto/tech project's team roster from fetched first-party project text. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the exact role the page states. Capture any X/Twitter handle and LinkedIn URL shown next to a person. For every person copy the exact PAGE URL that directly states that person's role. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
+var TEAM_EXTRACTION_SYSTEM = "You extract a crypto/tech project's team roster from fetched first-party project text. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the person's role in THIS project (for example founder, team member, or advisor). When the page includes descriptive credentials or biography copy next to the person, preserve that entire phrase verbatim in biography; never split biography text into additional people. Capture any X/Twitter handle and LinkedIn URL shown next to a person. For every person copy the exact PAGE URL that directly states that person's role. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
 var TEAM_EXTRACTION_TOOL = {
   name: "record_team",
   description: "Record named project people whose roles are directly stated in fetched first-party text.",
@@ -15049,6 +15161,7 @@ var TEAM_EXTRACTION_TOOL = {
           properties: {
             name: { type: "string" },
             role: { type: "string" },
+            biography: { type: "string", description: "Optional exact descriptive phrase shown for this person; preserve it verbatim" },
             twitter: { type: "string", description: "@handle if shown" },
             linkedin: { type: "string", description: "linkedin.com/in/... if shown" },
             source_url: { type: "string", description: "Exact PAGE URL from the supplied corpus that directly states this role" }
@@ -15074,10 +15187,11 @@ ${corpus}`,
     2048
   );
   if (!out?.people?.length) return [];
-  return out.people.filter((person) => person.name && person.name.trim()).flatMap((person) => {
+  return out.people.filter((person) => person.name && isPlausiblePersonRosterName(person.name)).flatMap((person) => {
     const rawName = person.name.trim();
     const displayName = /^[a-z][a-z'-]{1,30}$/.test(rawName) ? rawName[0].toUpperCase() + rawName.slice(1) : rawName;
     const role = (person.role || "team").toString();
+    const biography = typeof person.biography === "string" && person.biography.trim() ? person.biography.trim() : void 0;
     const kind = /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
     const handle = person.twitter && /^@?[A-Za-z0-9_]{2,30}$/.test(person.twitter.replace(/^@/, "")) ? "@" + person.twitter.replace(/^@/, "") : void 0;
     const modelLinkedin = person.linkedin && /linkedin\.com\/(in|company)\//i.test(person.linkedin) ? person.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
@@ -15097,6 +15211,7 @@ ${corpus}`,
       name: displayName,
       handle: boundHandle,
       role,
+      biography,
       kind,
       linkedin,
       evidence: `direct role statement on ${sourcePage.url}`,
@@ -31843,10 +31958,10 @@ function trustedOfficialXAvatarUrl(raw) {
 // src/data/socialActivity.ts
 var SOCIAL_MENTION_CARD_MAX = 8;
 var clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-var HANDLE2 = /^[A-Za-z0-9_]{1,15}$/;
+var HANDLE3 = /^[A-Za-z0-9_]{1,15}$/;
 function normalizedSocialHandle(value) {
   const handle = value?.trim().replace(/^@/, "") ?? "";
-  return HANDLE2.test(handle) ? handle.toLowerCase() : null;
+  return HANDLE3.test(handle) ? handle.toLowerCase() : null;
 }
 function tweetPermalink(handle, postId, rawUrl) {
   if (rawUrl) {
@@ -32595,6 +32710,7 @@ function coalesceTeamMembersByHandle(members) {
       merged.projects = secondary.projects;
       merged.projects_evidence_origin = secondary.projects_evidence_origin;
     }
+    if (!merged.biography && secondary.biography) merged.biography = secondary.biography;
     if (secondary.identity_link_evidence_origin !== "model_lead" && preferred.identity_link_evidence_origin === "model_lead") {
       merged.identity_link_evidence_origin = secondary.identity_link_evidence_origin;
       if (secondary.handle) merged.handle = secondary.handle;
@@ -33304,6 +33420,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     const h = t.handle ? norm2(t.handle) : "";
     const n = norm2(t.name);
     if (!h && !n) continue;
+    if (!isPlausiblePersonRosterName(t.name)) continue;
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = h && byHandle.get(h) || n && byName.get(n) || null;
     if (existing) {
@@ -33320,6 +33437,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         existing.projects = t.projects;
         existing.projects_evidence_origin = t.projects_evidence_origin;
       }
+      if (!existing.biography && t.biography) existing.biography = t.biography;
       if (!existing.officialPortraitUrl && t.officialPortraitUrl) {
         existing.officialPortraitUrl = t.officialPortraitUrl;
         existing.officialPortraitSourceUrl = t.officialPortraitSourceUrl;
@@ -33346,6 +33464,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       name: t.name,
       handle: t.handle,
       role: t.role,
+      biography: t.biography,
       kind: "kind" in t && (t.kind === "org" || t.kind === "person") ? t.kind : "person",
       linkedin: t.linkedin,
       evidence: t.evidence,

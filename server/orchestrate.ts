@@ -36,6 +36,7 @@ import {
   tokenFromVerifiedProjectToken,
 } from "../src/lib/projectTokenLeg";
 import { teamIdentityKeys } from "../src/lib/teamIdentity";
+import { isPlausiblePersonRosterName } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, officialXNamedTeam, officialXNamedOrgs, discoverOperatorsFromFollowings, discoverOperatorsFromAmplified, findRoleClaimants, confirmClaimantBios, serperConfirmedFounderFollowup, discoverReverseBioFromTwitterapi, followsSubject, resetFollowScanMemo, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
@@ -391,6 +392,7 @@ export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): 
       merged.projects = secondary.projects;
       merged.projects_evidence_origin = secondary.projects_evidence_origin;
     }
+    if (!merged.biography && secondary.biography) merged.biography = secondary.biography;
     if (
       secondary.identity_link_evidence_origin !== "model_lead"
       && preferred.identity_link_evidence_origin === "model_lead"
@@ -1359,6 +1361,9 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     const h = t.handle ? norm(t.handle) : "";
     const n = norm(t.name);
     if (!h && !n) continue;
+    // Final roster boundary: search/model lanes can return a company or a
+    // sentence fragment as `name`. It is neither a person nor a research CTA.
+    if (!isPlausiblePersonRosterName(t.name)) continue;
     // Never list the audited subject handle as founder (or any role) of itself.
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
@@ -1376,6 +1381,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         existing.projects = t.projects;
         existing.projects_evidence_origin = t.projects_evidence_origin;
       }
+      if (!existing.biography && t.biography) existing.biography = t.biography;
       if (!existing.officialPortraitUrl && t.officialPortraitUrl) {
         existing.officialPortraitUrl = t.officialPortraitUrl;
         existing.officialPortraitSourceUrl = t.officialPortraitSourceUrl;
@@ -1423,6 +1429,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       name: t.name,
       handle: t.handle,
       role: t.role,
+      biography: t.biography,
       kind: "kind" in t && (t.kind === "org" || t.kind === "person") ? t.kind : "person" as const,
       linkedin: t.linkedin,
       evidence: t.evidence,

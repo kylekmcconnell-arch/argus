@@ -3581,6 +3581,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                           <span className="team-person-role">
                             <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(person.role)}</span>
                           </span>
+                          {person.biography && <span className="team-person-evidence text-[13px] leading-relaxed text-ink-dim">{person.biography}</span>}
                           {roleProof && <a href={roleProof.href} target="_blank" rel="noreferrer" className="link-ext text-[12px]">Open role source</a>}
                           {continuityLabel && (
                             <span className={`chip ${continuity?.state === "current" ? "tint-pass" : continuity?.state === "departed" ? "tint-caution" : ""}`}>
@@ -4138,6 +4139,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                       <span className="team-person-role">
                         <span className="chip chip-wrap tint-signal normal-case tracking-normal">{formatRoleLabel(p.role)}</span>
                       </span>
+                      {p.biography && <span className="team-person-evidence text-[13px] leading-relaxed text-ink-dim">{p.biography}</span>}
                       {p.linkedin && (
                         <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                       )}
