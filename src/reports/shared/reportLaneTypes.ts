@@ -1,4 +1,4 @@
-export type ReportLaneId = "production" | "kyle" | "enigma";
+export type ReportLaneId = "production" | "kyle" | "enigma" | "raw";
 
 export type ReportNavigationMode = "sticky" | "guide";
 
@@ -7,6 +7,7 @@ export interface ReportLaneDefinition {
   label: string;
   shortLabel: string;
   owner: "joint" | "@kylekmcconnell-arch" | "@Enigma-Fund";
+  kind: "editorial" | "evidence";
   description: string;
   navigation: ReportNavigationMode;
   presentationStyle: 1 | 2;

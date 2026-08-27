@@ -6,7 +6,7 @@ export const REPORT_VIEW_STORAGE_KEY = "argus-owner-report-view-v1";
 
 export function normalizedReportLane(value: string | null | undefined): ReportLaneId | null {
   const normalized = String(value ?? "").trim().toLowerCase();
-  return normalized === "production" || normalized === "kyle" || normalized === "enigma"
+  return normalized === "production" || normalized === "kyle" || normalized === "enigma" || normalized === "raw"
     ? normalized
     : null;
 }

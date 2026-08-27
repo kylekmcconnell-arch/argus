@@ -5,13 +5,18 @@ import {
   resolveReportLane,
 } from "./resolveReportLane";
 import type { ReportLaneId, ResolvedReportLane } from "./reportLaneTypes";
+import { reportLaneRenderers } from "./reportLaneRendererRegistry";
+import type { ReportLaneRenderers } from "./reportLaneRendererTypes";
 
 interface ReportLaneContextValue extends ResolvedReportLane {
+  renderers: ReportLaneRenderers;
   selectLane: (id: ReportLaneId) => void;
 }
 
+const defaultResolvedLane = resolveReportLane({ search: "" });
 const defaultLane: ReportLaneContextValue = {
-  ...resolveReportLane({ search: "" }),
+  ...defaultResolvedLane,
+  renderers: reportLaneRenderers(defaultResolvedLane.definition.id),
   selectLane: () => undefined,
 };
 const ReportLaneContext = createContext<ReportLaneContextValue>(defaultLane);
@@ -85,7 +90,11 @@ export function ReportLaneProvider({
     setLane(resolveReportLane({ search: window.location.search, storedLane: id, canSelect: true }));
   }, [allowSelection]);
 
-  const value = useMemo<ReportLaneContextValue>(() => ({ ...lane, selectLane }), [lane, selectLane]);
+  const value = useMemo<ReportLaneContextValue>(() => ({
+    ...lane,
+    renderers: reportLaneRenderers(lane.definition.id),
+    selectLane,
+  }), [lane, selectLane]);
 
   return (
     <ReportLaneContext.Provider value={value}>

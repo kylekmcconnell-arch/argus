@@ -4805,6 +4805,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <div className="min-w-0 lg:col-span-2">
               <Section title="GitHub assessment" kicker="quality of work · account history · bio claims vs GitHub reality">
                 <Card className="p-4">
+                  {reportLane.renderers.githubSynthesis?.(f.githubAssessment)}
                   <GithubAssessment a={f.githubAssessment} />
                 </Card>
               </Section>

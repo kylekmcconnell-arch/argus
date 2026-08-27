@@ -12,6 +12,7 @@ export const productionReportLane = {
   label: "Production Report",
   shortLabel: "Production",
   owner: "joint",
+  kind: "editorial",
   description: "The public ARGUS report experience.",
   navigation: "sticky",
   presentationStyle: 2,

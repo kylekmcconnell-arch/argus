@@ -8,30 +8,22 @@ import {
 import { publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { publicFindingTitle, publicIntelligenceText } from "../lib/intelligencePresentation";
 import { requestChallenge } from "../lib/challenge";
-import type { DecisionDiscovery, VerdictArgument } from "../lib/reportInsights";
-import type { DecisionLensId } from "../intelligence/types";
 import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief";
 import { HERO_SCORE_RING_SIZE, ScoreRing } from "./ScoreRing";
-import { compositionRowColor, type CompositionRow } from "./ScoreComposition";
+import { compositionRowColor } from "./ScoreComposition";
 import type { TokenDecisionBoundary } from "../lib/decisionBoundary";
+import { useReportLane } from "../reports/shared/ReportLaneContext";
+import type {
+  DecisionCanvasItem,
+  DecisionCanvasScore,
+  InvestigationDecisionCanvasProps,
+} from "../reports/shared/reportLaneRendererTypes";
 
-export interface DecisionCanvasItem {
-  label: string;
-  detail?: string | undefined;
-}
-
-export interface DecisionCanvasScore {
-  label: string;
-  score: number | null;
-  verdictLabel: string;
-  context?: string | undefined;
-  composition?: CompositionRow[] | undefined;
-  scoreIsProvisional?: boolean | undefined;
-  successful?: number | undefined;
-  applicable?: number | undefined;
-  checkScopeLabel?: string | undefined;
-  unavailableCopy?: string | undefined;
-}
+export type {
+  DecisionCanvasItem,
+  DecisionCanvasScore,
+  InvestigationDecisionCanvasProps,
+} from "../reports/shared/reportLaneRendererTypes";
 
 function scoreTone(score: number | null): "pass" | "caution" | "fail" | "unknown" {
   if (score == null) return "unknown";
@@ -325,7 +317,12 @@ function DecisionLedgerList({
   );
 }
 
-export function InvestigationDecisionCanvas({
+export function InvestigationDecisionCanvas(props: InvestigationDecisionCanvasProps) {
+  const reportLane = useReportLane();
+  const laneCanvas = reportLane.renderers.decisionCanvas?.(props);
+  if (laneCanvas != null) return <>{laneCanvas}</>;
+
+  const {
   presentationStyle = 1,
   subjectName,
   subjectSummary,
@@ -360,56 +357,8 @@ export function InvestigationDecisionCanvas({
   composition,
   secondaryScore,
   showDecisionDetails = true,
-}: {
-  /** Style 2 is the narrative reading view; Style 1 keeps the compact brief. */
-  presentationStyle?: 1 | 2;
-  /** Human-readable subject used by the Style 2 state-of-the-house opening. */
-  subjectName?: string | undefined;
-  /** Saved first-party or registry description of what the subject actually does. */
-  subjectSummary?: string | null | undefined;
-  /** Grok analyst sentence explaining what governs the saved report result. */
-  reportSummary?: string | null | undefined;
-  verdictLabel: string;
-  /** Saved ARGUS risk score. Null means the scoring contract withheld it. */
-  score: number | null;
-  /** Names the rubric so linked project and token scores are never conflated. */
-  scoreLabel?: string;
-  /** Short scope statement explaining what this score measures. */
-  scoreContext?: string;
-  /** Marks a saved score that readers may inspect while required checks remain open. */
-  scoreIsProvisional?: boolean;
-  favorable: boolean;
-  verdictTone: ReportCanvasTone;
-  argument?: VerdictArgument | undefined;
-  discovery?: DecisionDiscovery | null | undefined;
-  decisionBoundary?: TokenDecisionBoundary | null | undefined;
-  decisionBoundaryEvidenceHref?: `#${string}` | undefined;
-  decisionLensId?: DecisionLensId | undefined;
-  onDecisionLensChange?: ((lensId: DecisionLensId) => void) | undefined;
-  supports: DecisionCanvasItem[];
-  concerns: DecisionCanvasItem[];
-  context?: DecisionCanvasItem[];
-  nextSteps: DecisionCanvasItem[];
-  verified: DecisionCanvasItem[];
-  coveragePercent: number;
-  successful: number;
-  applicable: number;
-  capturedAt?: string | undefined;
-  evidenceHref?: `#${string}`;
-  methodologyHref?: `#${string}`;
-  /** Anchor id of the ask console; null hides the per-item challenge push. */
-  challengeAnchorId?: string | null;
-  /** Public name for the exact check set behind successful/applicable. */
-  checkScopeLabel?: string;
-  /** Heading for required gaps or non-blocking follow-up research. */
-  openItemsLabel?: string;
-  /** Real ScoreComposition rows. Drives the hero ring pieces when present. */
-  composition?: CompositionRow[];
-  /** A separately scored linked facet. Style 2 shows both without blending them. */
-  secondaryScore?: DecisionCanvasScore | null | undefined;
-  /** Report surfaces can supply a single later decision brief instead of repeating this detail panel. */
-  showDecisionDetails?: boolean;
-}) {
+  } = props;
+
   const verdictItems = favorable ? supports : concerns;
   const countervailingItems = favorable ? concerns : supports;
   const verdictClass = verdictTone === "pass"

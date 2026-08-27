@@ -19,4 +19,22 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: [
+      'src/components/InvestigationDecisionCanvas.tsx',
+      'src/components/SocialActivityPanel.tsx',
+      'src/components/Report.tsx',
+      'src/components/InvestigationReport.tsx',
+      'src/reports/shared/**/*.{ts,tsx}',
+    ],
+    ignores: ['src/reports/shared/reportLaneRegistry.ts', 'src/reports/shared/reportLaneRendererRegistry.tsx'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [{
+          group: ['**/reports/kyle/**', '**/reports/enigma/**', '**/reports/production/**', '**/reports/raw/**'],
+          message: 'Shared report code must use neutral ReportLaneDefinition renderer slots instead of importing an owned lane.',
+        }],
+      }],
+    },
+  },
 ])

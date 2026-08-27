@@ -72,4 +72,22 @@ describe("owner report selector", () => {
     expect(document.documentElement.dataset.reportLane).toBe("enigma");
     expect(enigma.getAttribute("aria-pressed")).toBe("true");
   });
+
+  it("offers three interpretations plus the raw evidence record", async () => {
+    await renderSelector(true);
+    const labels = [...container.querySelectorAll<HTMLButtonElement>("button")].map((button) => button.textContent);
+    expect(labels).toEqual(["Production", "Kyle", "Enigma", "Raw"]);
+
+    const raw = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "Raw");
+    if (!raw) throw new Error("Raw Evidence selector was not rendered");
+
+    await act(async () => raw.click());
+
+    expect(window.location.search).toContain("s=fedi");
+    expect(window.location.search).toContain("reportView=raw");
+    expect(window.localStorage.getItem(REPORT_VIEW_STORAGE_KEY)).toBe("raw");
+    expect(document.documentElement.dataset.reportLane).toBe("raw");
+    expect(raw.getAttribute("aria-pressed")).toBe("true");
+  });
 });

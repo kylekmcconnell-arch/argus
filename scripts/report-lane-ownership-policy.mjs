@@ -43,6 +43,7 @@ export function evaluateReportLaneOwnership({ actor, baseRef, files, approvals =
   const productionFiles = changedUnder(files, "src/reports/production/");
   const kyleFiles = changedUnder(files, "src/reports/kyle/");
   const enigmaFiles = changedUnder(files, "src/reports/enigma/");
+  const rawFiles = changedUnder(files, "src/reports/raw/");
   const sharedFiles = changedShared(files);
   const policyFiles = changedPolicy(files);
 
@@ -56,13 +57,13 @@ export function evaluateReportLaneOwnership({ actor, baseRef, files, approvals =
     errors.push(`Report-lane enforcement can only be changed by @${REPORT_LANE_OWNERS.kyle}: ${policyFiles.join(", ")}`);
   }
 
-  if (productionFiles.length > 0 || sharedFiles.length > 0) {
+  if (productionFiles.length > 0 || rawFiles.length > 0 || sharedFiles.length > 0) {
     const requiredReviewer = normalizedActor.toLowerCase() === REPORT_LANE_OWNERS.enigma.toLowerCase()
       ? REPORT_LANE_OWNERS.kyle
       : REPORT_LANE_OWNERS.enigma;
     if (!normalizedApprovals.has(requiredReviewer.toLowerCase())) {
-      const jointlyReviewed = [...productionFiles, ...sharedFiles];
-      errors.push(`Production and shared report files require approval from @${requiredReviewer}: ${jointlyReviewed.join(", ")}`);
+      const jointlyReviewed = [...productionFiles, ...rawFiles, ...sharedFiles];
+      errors.push(`Production, Raw Evidence, and shared report files require approval from @${requiredReviewer}: ${jointlyReviewed.join(", ")}`);
     }
   }
 
@@ -76,6 +77,7 @@ export function evaluateReportLaneOwnership({ actor, baseRef, files, approvals =
       productionFiles,
       kyleFiles,
       enigmaFiles,
+      rawFiles,
       sharedFiles,
       policyFiles,
     },
