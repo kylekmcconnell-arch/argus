@@ -63,8 +63,8 @@ afterEach(() => {
 
 describe("ProjectTokenCard", () => {
   it("renders frozen fundamentals and chart even when the report verdict is incomplete", () => {
-    const onAudit = vi.fn();
-    act(() => root.render(<ProjectTokenCard token={token} showCurrentIntelligence={false} onAudit={onAudit} />));
+    const onOpenReport = vi.fn();
+    act(() => root.render(<ProjectTokenCard token={token} showCurrentIntelligence={false} onOpenReport={onOpenReport} />));
 
     expect(container.textContent).toContain("Token and market");
     expect(container.textContent).toContain("$JUP");
@@ -74,6 +74,7 @@ describe("ProjectTokenCard", () => {
     // close-based nor the range-based figure is a lifetime record.
     expect(container.textContent).toContain("From the highest close in the window");
     expect(container.textContent).toContain("Official site");
+    expect(container.textContent).toContain("Included in this scan · no credits");
     expect(harness.sparkline).toHaveBeenCalledWith(expect.objectContaining({
       address: token.address,
       chain: "solana",
@@ -85,9 +86,16 @@ describe("ProjectTokenCard", () => {
     }));
 
     const action = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("Open full token report"));
+      .find((button) => button.textContent?.includes("Open included token report"));
     act(() => action?.click());
-    expect(onAudit).toHaveBeenCalledWith(token.address);
+    expect(onOpenReport).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer a paid-looking token-report action without an included token dossier", () => {
+    act(() => root.render(<ProjectTokenCard token={token} showCurrentIntelligence={false} />));
+
+    expect(container.textContent).not.toContain("Open included token report");
+    expect(container.textContent).not.toContain("Open full token report");
   });
 
   it("does not fetch a live chart for a frozen snapshot without frozen history", () => {

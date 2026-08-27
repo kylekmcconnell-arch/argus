@@ -74,12 +74,13 @@ vi.mock("./components/LiveRun", () => ({
 }));
 
 vi.mock("./components/Report", () => ({
-  Report: (props: { dossier: Record<string, unknown>; onAudit?: (q: string) => void; onOpenProject?: (name: string) => void; onOpenBrief?: () => void }) => {
+  Report: (props: { dossier: Record<string, unknown>; onAudit?: (q: string) => void; onOpenTokenReport?: (token: Record<string, unknown>) => void; onOpenProject?: (name: string) => void; onOpenBrief?: () => void }) => {
     harness.personReports.push(props);
     return (
       <div data-testid="stored-person-report">
         Stored person report
         {props.onAudit && <button data-testid="person-pivot" onClick={() => props.onAudit?.("@person_pivot")}>Audit person pivot</button>}
+        {props.onOpenTokenReport && (props.dossier.threat as { dossier?: Record<string, unknown> } | undefined)?.dossier && <button data-testid="open-included-token" onClick={() => props.onOpenTokenReport?.((props.dossier.threat as { dossier: Record<string, unknown> }).dossier)}>Open included token</button>}
         {props.onOpenProject && <button data-testid="project-pivot" onClick={() => props.onOpenProject?.("Private Project")}>Open project pivot</button>}
         {props.onOpenBrief && <button data-testid="person-case-brief" onClick={props.onOpenBrief}>Case brief</button>}
       </div>
@@ -783,6 +784,28 @@ describe("App routing safety", () => {
       coverage: "ready",
       summary: "Stored founder has a verified track record.",
     });
+    expectNoRunnerStarted();
+  });
+
+  it("opens a project report's included token dossier without starting another scan", async () => {
+    const payload = personResult({ state: "persisted", reportVersionId: "version-person-token" });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "person",
+        ref: "persisted_person",
+        payload,
+        versionContext: { caseId: "case-person-token", reportVersionId: "version-person-token" },
+      },
+    });
+
+    const view = await renderApp("/?s=persisted_person&kind=person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='open-included-token']")).not.toBeNull());
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='open-included-token']")?.click());
+    await settle();
+
+    expect(view.querySelector("[data-testid='stored-token-report']")).not.toBeNull();
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({ score: 84, verdict: "PASS" }));
     expectNoRunnerStarted();
   });
 

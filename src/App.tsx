@@ -1514,6 +1514,21 @@ export default function App() {
     });
   }, [closeCaseBriefForNavigation, setInvestigation, setPhase, setTokenDossier]);
 
+  // A project report's integrated token leg has already been collected and
+  // charged as part of that report. Opening it is navigation, never a new scan.
+  const onOpenIncludedToken = useCallback((included: TokenDossier) => {
+    if (!closeCaseBriefForNavigation()) return;
+    setTokenBriefTarget(null);
+    const versionContext = dossier?.versionContext ?? dossier?.viewVersionContext;
+    const persistence = dossier?.persistence ?? dossier?.viewPersistence;
+    setTokenDossier(versionContext
+      ? { ...included, viewVersionContext: versionContext }
+      : persistence
+        ? { ...included, viewPersistence: persistence }
+        : included);
+    setPhase("token-report");
+  }, [closeCaseBriefForNavigation, dossier, setPhase, setTokenDossier]);
+
   // from the investigation report: open the full people report for the project
   // account (already collected — no re-spend), which shows the axis/cap reasoning.
   const onOpenProjectAccount = useCallback(() => {
@@ -1659,7 +1674,7 @@ export default function App() {
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 
-      {phase === "report" && dossier && <Report key={`person:${dossier.versionContext?.reportVersionId ?? dossier.viewVersionContext?.reportVersionId ?? dossier.persistence?.scanId ?? dossier.viewPersistence?.scanId ?? dossier.report.audit_id}`} dossier={dossier} onReset={reset} onAudit={personReportPrivate ? onPrivateAudit : onSafeAudit} onResearchAudit={(raw, priv) => onReportResearch(raw, personReportPrivate || priv)} onOpenSavedResearch={(raw, kind) => void onOpenRecent(raw, kind)} onRescan={() => onAudit(dossier.handle, personReportPrivate)} onOpenProject={personReportPrivate ? onOpenPrivateProject : (name, domain, panelCostToken) => onOpenProject(name, domain, false, panelCostToken)} onOpenBrief={!evidenceReviewVersionId && !privateMode && personBriefTarget ? () => setCaseBriefTarget(personBriefTarget) : undefined} />}
+      {phase === "report" && dossier && <Report key={`person:${dossier.versionContext?.reportVersionId ?? dossier.viewVersionContext?.reportVersionId ?? dossier.persistence?.scanId ?? dossier.viewPersistence?.scanId ?? dossier.report.audit_id}`} dossier={dossier} onReset={reset} onAudit={personReportPrivate ? onPrivateAudit : onSafeAudit} onResearchAudit={(raw, priv) => onReportResearch(raw, personReportPrivate || priv)} onOpenSavedResearch={(raw, kind) => void onOpenRecent(raw, kind)} onOpenTokenReport={onOpenIncludedToken} onRescan={() => onAudit(dossier.handle, personReportPrivate)} onOpenProject={personReportPrivate ? onOpenPrivateProject : (name, domain, panelCostToken) => onOpenProject(name, domain, false, panelCostToken)} onOpenBrief={!evidenceReviewVersionId && !privateMode && personBriefTarget ? () => setCaseBriefTarget(personBriefTarget) : undefined} />}
       {phase === "project" && viewedProject && <ProjectView project={viewedProject} onAudit={viewedProject.privateMode ? onPrivateAudit : onSafeAudit} onReset={reset} record={!viewedProject.privateMode} panelCostToken={viewedProject.panelCostToken} />}
 
       {phase === "token-run" && tokenInput && (

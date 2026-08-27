@@ -32,6 +32,7 @@ import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
 import type { Dossier } from "../data/dossier";
 import type { SourceArtifact } from "../data/evidence";
+import type { TokenDossier } from "../token/audit";
 import { getProfile, SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
@@ -1606,7 +1607,7 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
   );
 }
 
-export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSavedResearch, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onResearchAudit?: (q: string, privateSearch?: boolean) => void; onOpenSavedResearch?: (q: string, kind: "person" | "token") => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
+export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSavedResearch, onOpenTokenReport, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onResearchAudit?: (q: string, privateSearch?: boolean) => void; onOpenSavedResearch?: (q: string, kind: "person" | "token") => void; onOpenTokenReport?: (token: TokenDossier) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const reportLane = useReportLane();
   const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("general_diligence");
   const reportStyle = reportLane.definition.presentationStyle;
@@ -3619,7 +3620,9 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                   chains={f.projectToken.deployedChains}
                   showCurrentIntelligence={showCurrentIntelligence}
                   refreshCurrentMarket={currentIntelligenceEnabled}
-                  onAudit={onAudit}
+                  onOpenReport={linkedTokenDossier && onOpenTokenReport
+                    ? () => onOpenTokenReport(linkedTokenDossier)
+                    : undefined}
                   onLoadCurrentIntelligence={versionContext
                     ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
                     : undefined}
@@ -3886,7 +3889,9 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
               chains={f.projectToken.deployedChains}
               showCurrentIntelligence={showCurrentIntelligence}
               refreshCurrentMarket={currentIntelligenceEnabled}
-              onAudit={onAudit}
+              onOpenReport={linkedTokenDossier && onOpenTokenReport
+                ? () => onOpenTokenReport(linkedTokenDossier)
+                : undefined}
               onLoadCurrentIntelligence={versionContext
                 ? () => setCurrentIntelligenceVersionId(versionContext.reportVersionId)
                 : undefined}

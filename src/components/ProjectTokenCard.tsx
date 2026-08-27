@@ -7,7 +7,7 @@ export function ProjectTokenCard({
   chains,
   showCurrentIntelligence,
   refreshCurrentMarket,
-  onAudit,
+  onOpenReport,
   onLoadCurrentIntelligence,
 }: {
   token: ProjectTokenSnapshot;
@@ -19,7 +19,8 @@ export function ProjectTokenCard({
   chains?: string[];
   showCurrentIntelligence: boolean;
   refreshCurrentMarket?: boolean;
-  onAudit?: (query: string) => void;
+  /** Opens the token dossier already collected with the parent report. Never starts a scan. */
+  onOpenReport?: () => void;
   onLoadCurrentIntelligence?: () => void;
 }) {
   const verifiedBy = token.verification === "official_x" ? "official X account" : "official project domain";
@@ -80,10 +81,18 @@ export function ProjectTokenCard({
       <div className="flex flex-wrap items-center gap-3 border-t border-line/70 bg-panel-2/30 px-5 py-3">
         <span className="chip normal-case tracking-normal">{chainDisplay}</span>
         <span className="mono break-all text-[11px] text-ink-faint">{token.address}</span>
-        {onAudit && (
-          <button type="button" onClick={() => onAudit(token.address)} className="btn-chip tint-signal ml-auto min-h-10 gap-1.5 font-medium">
-            Open full token report <ArrowSquareOut size={13} aria-hidden="true" />
-          </button>
+        {onOpenReport && (
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <span className="mono text-[10px] text-ink-faint">Included in this scan · no credits</span>
+            <button
+              type="button"
+              onClick={onOpenReport}
+              title="Open the token analysis already collected with this report. No new scan or credits."
+              className="btn-chip tint-signal min-h-10 gap-1.5 font-medium"
+            >
+              Open included token report <ArrowSquareOut size={13} aria-hidden="true" />
+            </button>
+          </div>
         )}
       </div>
     </section>
