@@ -1241,9 +1241,13 @@
 .project-identity-resources {
   display: flex;
   min-width: 0;
-  min-height: 52px;
+  min-height: 58px;
   align-items: stretch;
   overflow-x: auto;
+  border: 1px solid var(--color-line-2);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--color-panel) 96%, var(--color-ink) 1%);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-panel) 88%, white 12%);
   scrollbar-width: none;
 }
 .project-identity-resources::-webkit-scrollbar {
@@ -1251,27 +1255,34 @@
 }
 .project-identity-resource {
   display: inline-flex;
-  min-width: 62px;
+  min-width: 68px;
   flex: 0 0 auto;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  border-left: 1px solid var(--color-line);
-  padding-inline: 12px;
+  gap: 5px;
+  border-left: 1px solid var(--color-line-2);
+  padding: 8px 13px;
   font-size: 11px;
   line-height: 1.1;
-  color: color-mix(in oklab, var(--color-ink) 82%, var(--color-ink-dim));
+  color: var(--color-ink-dim);
   transition: color var(--motion-fast) var(--ease-premium), background var(--motion-fast) var(--ease-premium);
 }
 .project-identity-resource:first-child {
   border-left: 0;
-  padding-left: 0;
+}
+.project-identity-resource-logo {
+  display: block;
+  width: 21px;
+  height: 21px;
+  border-radius: 5px;
+  object-fit: contain;
+  box-shadow: 0 2px 8px -5px color-mix(in oklab, var(--color-ink) 48%, transparent);
 }
 .project-identity-resource:hover,
 .project-identity-resource:focus-visible {
   color: var(--color-ink);
-  background: color-mix(in oklab, var(--color-brand) 4%, transparent);
+  background: color-mix(in oklab, var(--color-brand) 5%, var(--color-panel));
 }
 .project-identity-contract {
   color: var(--color-ink-dim);

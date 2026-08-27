@@ -16,6 +16,8 @@ import {
 type RawLink = { label?: string; url: string };
 type IconType = typeof GlobeSimple;
 
+const DEXSCREENER_LOGO_URL = "https://dexscreener.com/favicon.png";
+
 const RULES: [RegExp, string, number, IconType][] = [
   [/(?:x\.com|twitter\.com)\//i, "X", 1, XLogo],
   [/t\.me|telegram/i, "Telegram", 2, TelegramLogo],
@@ -197,7 +199,18 @@ export function ProjectLinks({
                 title={link.url}
                 className="project-identity-resource"
               >
-                <link.Icon size={21} weight="duotone" aria-hidden />
+                {link.label === "Dexscreener"
+                  ? <img
+                      className="project-identity-resource-logo"
+                      src={DEXSCREENER_LOGO_URL}
+                      alt=""
+                      width={21}
+                      height={21}
+                      loading="eager"
+                      referrerPolicy="no-referrer"
+                      aria-hidden="true"
+                    />
+                  : <link.Icon size={21} weight="duotone" aria-hidden />}
                 <span>{link.label}</span>
               </a>
             ))}
