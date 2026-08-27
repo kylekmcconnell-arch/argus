@@ -16426,6 +16426,12 @@ async function collectEntityContinuity(ctx) {
   const organic = [];
   const raw = await groundedSearch(EXTRACTION_SYSTEM, `Recover the full predecessor, rebrand, migration and contract history for ${subject}${currentToken?.ticker ? ` ($${currentToken.ticker})` : ""}. Challenge any clean-new-token framing and keep project architecture changes distinct from token price performance.`, {
     cacheKey: `entity-continuity:${subject.toLowerCase()}:${currentToken?.contract?.toLowerCase() ?? "none"}`,
+    // The grounded-search cache currently stores extraction text but not the
+    // organic URL receipts required by normalizeEntityContinuity. Replaying
+    // only the text would correctly fail source admission and make a rescan
+    // less complete than the first run. The saved dossier is the lifecycle
+    // cache until result+receipt caching is atomic.
+    bypassCache: true,
     queries: buildEntityContinuityQueries(subject, currentToken?.ticker),
     onOrganicResults: (results) => organic.push(...results)
   });
@@ -16457,6 +16463,7 @@ async function collectEntityContinuity(ctx) {
       `Complete the verified token lineage for ${subject}. The broad pass discovered these possible historical names: ${snapshot.historicalAliases.join(", ") || "none"}. Resolve the predecessor ticker and contract, dated rebrand, migration ratio, replacement contract, migration contract, exchange handling and current status. A missing field must remain null.`,
       {
         cacheKey: `entity-continuity-recovery:v2:${subject.toLowerCase()}:${currentToken?.contract?.toLowerCase() ?? "none"}:${snapshot.historicalAliases.map((alias) => alias.toLowerCase()).sort().join(":")}`,
+        bypassCache: true,
         queries: buildEntityContinuityRecoveryQueries(subject, snapshot.historicalAliases, currentToken?.ticker),
         onOrganicResults: (results) => recoveryOrganic.push(...results)
       }
@@ -16477,6 +16484,7 @@ async function collectEntityContinuity(ctx) {
       `Repeat team, security, audit, incident, legal, governance and market-history discovery for the historical aliases of ${subject}: ${snapshot.historicalAliases.join(", ")}.`,
       {
         cacheKey: `entity-continuity-aliases:${snapshot.historicalAliases.map((alias) => alias.toLowerCase()).sort().join(":")}`,
+        bypassCache: true,
         queries: aliasQueries,
         onOrganicResults: (results) => aliasOrganic.push(...results)
       }
