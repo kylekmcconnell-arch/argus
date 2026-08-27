@@ -52,6 +52,57 @@ The loading sequence was also observed before the memo appeared. It named the ac
 - browser console checked with no warnings or errors
 
 final result: passed
+
+---
+
+# Content-sized resource links QA
+
+## Artifacts
+
+- Source visual truth: `/Users/kyle/Downloads/Screenshot 2026-08-27 at 2.03.50 AM.png`
+- Browser-rendered implementation: `/tmp/argus-resource-width.aoQcwe/.design-qa/project-links-implementation-full.png`
+- Focused implementation crop: `/tmp/argus-resource-width.aoQcwe/.design-qa/project-links-implementation-crop.png`
+- Combined comparison: `/tmp/argus-resource-width.aoQcwe/.design-qa/source-vs-content-sized-resources.png`
+- Browser viewport: 1280 × 720 CSS px at device density 1
+- Source pixels: 537 × 127; focused implementation pixels: 537 × 127
+- Normalization: the implementation was cropped at native density to the same 537 × 127 region and alignment as the source
+- State: light theme with X and Dexscreener as the only resource links
+
+## Full-view comparison evidence
+
+The local 1280 × 720 report-link preview preserved the three-column identity rail, its labels, site card, contract card, vertical alignment, and surrounding border rhythm. The resources surface no longer fills its grid column.
+
+## Focused region comparison evidence
+
+In the combined source/implementation crop, the source shows a 467 px-wide resources surface with unused space after Dexscreener. The implementation measures 162.84 px wide with a 161 px content width and scroll width, so the border closes immediately after the two available links without clipping or overflow.
+
+## Fidelity surfaces
+
+- Typography: labels, link text, font sizes, weights, line heights, and letter spacing are unchanged.
+- Spacing and layout: only the resources surface width changed; internal padding, separators, height, radius, and alignment remain unchanged.
+- Colors and tokens: the existing neutral border, background mix, icon treatment, and shadows remain intact.
+- Image quality and assets: the existing official Dexscreener favicon and X icon are unchanged and render sharply.
+- Copy and content: `Resources & community`, `X`, and `Dexscreener` remain unchanged.
+- Behavior and accessibility: both anchors remain keyboard-focusable and horizontally scrollable when a larger link set reaches the 100% width cap. Browser console errors were empty.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain for the requested width correction.
+
+## Comparison history
+
+- Initial source finding: the resources surface stretched to its full grid track and left a large empty tail after two links.
+- Fix applied: `width: fit-content` with `max-width: 100%` on the Kyle report resources ledger.
+- Post-fix evidence: the focused native-density comparison shows the border ending after Dexscreener with no collision or overflow.
+
+## Primary interactions tested
+
+- X and Dexscreener links remain present and correctly ordered
+- the surface width matches its rendered links
+- the existing overflow cap remains in place for larger link sets
+- browser console checked with no errors
+
+final result: passed
 ---
 
 # Team role title containment QA

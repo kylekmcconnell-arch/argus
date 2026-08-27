@@ -13,6 +13,11 @@
   margin-top: 1.25rem;
 }
 
+[data-report-lane="kyle"] .project-identity-resources {
+  width: fit-content;
+  max-width: 100%;
+}
+
 [data-report-lane="kyle"] .kyle-intelligence-report h2,
 [data-report-lane="kyle"] .kyle-intelligence-report h3,
 [data-report-lane="kyle"] .kyle-intelligence-report p {
