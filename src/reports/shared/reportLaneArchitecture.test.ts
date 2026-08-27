@@ -12,4 +12,9 @@ describe("report lane architecture", () => {
     const contracts = new Set(REPORT_LANE_ORDER.map((id) => REPORT_LANE_DEFINITIONS[id].dataContract));
     expect([...contracts]).toEqual(["shared-saved-report-v1"]);
   });
+
+  it("keeps editorial synthesis out of the Raw Evidence renderer", () => {
+    expect(REPORT_LANE_DEFINITIONS.raw.kind).toBe("evidence");
+    expect(REPORT_LANE_DEFINITIONS.raw.description).toContain("frozen evidence");
+  });
 });

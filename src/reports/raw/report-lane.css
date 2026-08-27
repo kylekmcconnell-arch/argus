@@ -6,6 +6,13 @@
   overflow: hidden;
 }
 
+/* Raw is a verification lens, not a fourth editorial memo. The score
+   composition and complete factual report continue immediately into product,
+   people, social, connections, evidence, and method. */
+[data-report-lane="raw"] .canonical-decision-brief {
+  display: none;
+}
+
 [data-report-lane="raw"] .raw-evidence-opening > header {
   display: flex;
   align-items: flex-start;
