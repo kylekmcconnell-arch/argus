@@ -360,27 +360,6 @@ function SubjectProfileContext({
           </span>
         )}
       </div>
-      {dossier.notableFollowers.length > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-ink-faint">Notable followers</span>
-          {dossier.notableFollowers.slice(0, 6).map((notable) => {
-            const big = (notable.count ?? 0) >= 1e6;
-            return (
-              <a
-                key={notable.handle}
-                href={`https://x.com/${notable.handle}`}
-                target="_blank"
-                rel="noreferrer"
-                className={`chip normal-case tracking-normal transition hover:text-ink ${big ? "tint-pass" : ""}`}
-                title={`${notable.label} · ${notable.size} followers`}
-              >
-                @{notable.handle} <span className="opacity-70">{notable.size}</span>
-              </a>
-            );
-          })}
-          {dossier.notableFollowers.length > 6 && <span className="mono text-[11px] text-ink-faint">+{dossier.notableFollowers.length - 6}</span>}
-        </div>
-      )}
     </>
   );
 }
