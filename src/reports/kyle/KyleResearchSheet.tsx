@@ -24,6 +24,7 @@ export interface KyleResearchTarget {
   privateSurcharge: number;
   query: string;
   reportKind: "person" | "token";
+  researchMode?: "verified" | "exploratory";
 }
 
 interface AccountGrowthResponse {
@@ -146,6 +147,7 @@ export function KyleResearchSheet({
   }, [onClose, phase]);
 
   const costLine = useMemo(() => `${minimum.toFixed(1)}–${maximum.toFixed(1)} credits`, [maximum, minimum]);
+  const exploratory = target.researchMode === "exploratory";
 
   const confirm = () => {
     setPhase("running");
@@ -169,7 +171,7 @@ export function KyleResearchSheet({
             <Avatar src={target.image} letter={(target.name.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={54} rounded="rounded-full" letterClass="text-base" />
             <div>
               <p className="mono">{target.entityType} · surfaced in the {target.sourceReport} report</p>
-              <h2 id="kyle-research-sheet-title">Investigate {target.name}</h2>
+              <h2 id="kyle-research-sheet-title">{exploratory ? "Explore" : "Investigate"} {target.name}</h2>
             </div>
           </div>
           <button ref={closeRef} type="button" className="kyle-research-sheet-close" onClick={onClose} aria-label={phase === "running" ? "Continue investigation in background" : "Close research sheet"}><X size={18} weight="bold" /></button>
@@ -180,6 +182,7 @@ export function KyleResearchSheet({
             <section className="kyle-research-why">
               <p className="mono">Why this may matter</p>
               <strong id="kyle-research-sheet-description">{target.reason}</strong>
+              {exploratory && <small>ARGUS will start from this exact public identifier. The relationship shown in the current report remains unverified unless the fresh investigation independently confirms it.</small>}
             </section>
 
             <div className="kyle-research-paths">
@@ -190,7 +193,7 @@ export function KyleResearchSheet({
                   : <span className="kyle-research-unavailable">{savedState === "loading" ? "Checking saved reports…" : "No saved report yet"}</span>}
               </section>
               <section className="kyle-research-path is-fresh">
-                <div><MagnifyingGlass size={20} weight="duotone" /><span><strong>Run fresh investigation</strong><small>New web, social, entity, and control evidence</small></span></div>
+                <div><MagnifyingGlass size={20} weight="duotone" /><span><strong>{exploratory ? "Run exploratory investigation" : "Run fresh investigation"}</strong><small>{exploratory ? "Resolve identity first, then follow web, social, entity, and control evidence" : "New web, social, entity, and control evidence"}</small></span></div>
                 <strong>{costLine}</strong>
               </section>
             </div>
@@ -212,7 +215,7 @@ export function KyleResearchSheet({
 
             <div className="kyle-research-sheet-actions">
               <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-              <button type="button" className="btn-primary" onClick={confirm} disabled={balanceState === "ready" && balance != null && balance < maximum}>Run investigation · up to {maximum.toFixed(1)} credits</button>
+              <button type="button" className="btn-primary" onClick={confirm} disabled={balanceState === "ready" && balance != null && balance < maximum}>{exploratory ? "Explore lead" : "Run investigation"} · up to {maximum.toFixed(1)} credits</button>
             </div>
           </div>
         )}

@@ -140,4 +140,35 @@ describe("KyleConnectionWorkspace", () => {
 
     await act(async () => root.unmount());
   });
+
+  it("allows a canonical X handle to seed an exploratory investigation without verifying the relationship", async () => {
+    const onAudit = vi.fn();
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <KyleConnectionWorkspace
+        dossier={dossier}
+        nodes={nodes}
+        edges={edges}
+        connections={[{ other: "@zoomeroracle", ties: [], direct: true }]}
+        onAudit={onAudit}
+        previewBalance={49_975}
+      />,
+    ));
+
+    const lead = [...container.querySelectorAll("button")].find((button) => button.getAttribute("aria-label")?.startsWith("@zoomeroracle,"));
+    await act(async () => lead?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(container.textContent).toContain("No direct source URL was preserved for this graph edge.");
+    expect(container.textContent).toContain("This exact X handle can seed a fresh investigation, but its current relationship remains unverified.");
+    const explore = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Explore this lead");
+    expect(explore).toBeDefined();
+    await act(async () => explore?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(document.body.textContent).toContain("Explore @zoomeroracle");
+    expect(document.body.textContent).toContain("The relationship shown in the current report remains unverified unless the fresh investigation independently confirms it.");
+    const confirm = [...document.body.querySelectorAll("button")].find((button) => button.textContent?.includes("Explore lead · up to 1.6 credits"));
+    expect(confirm).toBeDefined();
+
+    await act(async () => root.unmount());
+  });
 });

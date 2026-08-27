@@ -231,6 +231,8 @@
 [data-report-lane="kyle"] .kyle-connection-validation { background: color-mix(in srgb, var(--color-caution) 7%, var(--color-panel)); border: 1px solid color-mix(in srgb, var(--color-caution) 24%, var(--color-line)); border-radius: 0.55rem; padding: 0.65rem; }
 [data-report-lane="kyle"] .kyle-connection-validation strong { color: var(--color-caution); display: block; font-size: 0.68rem; }
 [data-report-lane="kyle"] .kyle-connection-validation small { color: var(--color-ink-dim); display: block; font-size: 0.6rem; line-height: 1.4; margin-top: 0.25rem; }
+[data-report-lane="kyle"] .kyle-connection-validation.is-exploratory { background: color-mix(in srgb, var(--kyle-editorial-green) 6%, var(--color-panel)); border-color: color-mix(in srgb, var(--kyle-editorial-green) 22%, var(--color-line)); }
+[data-report-lane="kyle"] .kyle-connection-validation.is-exploratory strong { color: var(--kyle-editorial-green); }
 
 [data-report-lane="kyle"] .kyle-rabbit-holes { border-top: 1px solid var(--color-line-2); padding: 1.4rem 1rem 1rem; }
 [data-report-lane="kyle"] .kyle-rabbit-holes > header { align-items: end; display: flex; justify-content: space-between; margin-bottom: 1rem; }
@@ -257,6 +259,7 @@
 [data-report-lane="kyle"] .kyle-research-why { border-left: 2px solid var(--kyle-editorial-green); padding: 0.2rem 0 0.2rem 0.85rem; }
 [data-report-lane="kyle"] .kyle-research-why p { color: var(--kyle-editorial-green); font-size: 0.55rem; letter-spacing: 0.12em; text-transform: uppercase; }
 [data-report-lane="kyle"] .kyle-research-why strong { color: var(--color-ink); display: block; font-size: 0.86rem; font-weight: 540; line-height: 1.5; margin-top: 0.4rem; }
+[data-report-lane="kyle"] .kyle-research-why > small { color: var(--color-ink-dim); display: block; font-size: 0.68rem; line-height: 1.5; margin-top: 0.65rem; max-width: 43rem; }
 [data-report-lane="kyle"] .kyle-research-paths { border: 1px solid var(--color-line); border-radius: 0.75rem; overflow: hidden; }
 [data-report-lane="kyle"] .kyle-research-path { align-items: center; display: flex; justify-content: space-between; min-height: 5rem; padding: 0.85rem 0.95rem; }
 [data-report-lane="kyle"] .kyle-research-path + .kyle-research-path { border-top: 1px solid var(--color-line); }
