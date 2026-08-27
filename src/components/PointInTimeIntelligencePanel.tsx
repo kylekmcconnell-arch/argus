@@ -1,5 +1,4 @@
-import { useId, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent } from "react";
+import { useId, useMemo } from "react";
 import type {
   DecisionLens,
   DecisionLensId,
@@ -375,8 +374,6 @@ export function PointInTimeIntelligencePanel({
   snapshot,
   thesisEligible = true,
   governingVerdict = null,
-  selectedLensId: controlledLensId,
-  onSelectedLensChange,
 }: {
   snapshot: IntelligenceSpineSnapshot;
   /** False when the parent report withheld a final decision state. */
@@ -389,13 +386,9 @@ export function PointInTimeIntelligencePanel({
 }) {
   const generatedId = useId();
   const panelId = `${generatedId}-point-intelligence-panel`;
-  const tabRefs = useRef<Partial<Record<DecisionLensId, HTMLButtonElement | null>>>({});
   const lenses = useMemo(() => normalizedLenses(snapshot), [snapshot]);
   const signals = useMemo(() => uniqueById(snapshot.signals), [snapshot.signals]);
-  const [internalLensId, setInternalLensId] = useState<DecisionLensId>("investment");
-  const selectedLensId = controlledLensId ?? internalLensId;
-
-  const selectedLens = lenses.find((lens) => lens.id === selectedLensId) ?? lenses[0];
+  const selectedLens = lenses.find((lens) => lens.id === "general_diligence") ?? lenses[0];
   if (!selectedLens) return null;
 
   const sortedSignals = orderedSignals(signals, selectedLens);
@@ -496,24 +489,6 @@ export function PointInTimeIntelligencePanel({
   const uniqueArtifactCount = new Set(snapshot.sources.map(sourceArtifactKey)).size;
   const lineageOriginCount = new Set(snapshot.sources.map((source) => source.provider)).size;
 
-  const selectLens = (lensId: DecisionLensId) => {
-    if (onSelectedLensChange) onSelectedLensChange(lensId);
-    else setInternalLensId(lensId);
-    tabRefs.current[lensId]?.focus();
-  };
-
-  const moveLens = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    let nextIndex: number | null = null;
-    if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (index + 1) % lenses.length;
-    if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (index - 1 + lenses.length) % lenses.length;
-    if (event.key === "Home") nextIndex = 0;
-    if (event.key === "End") nextIndex = lenses.length - 1;
-    if (nextIndex == null) return;
-    event.preventDefault();
-    const nextLens = lenses[nextIndex];
-    if (nextLens) selectLens(nextLens.id);
-  };
-
   const recheckCondition = hasUsableThesis
     ? (selectedLens.changeConditions[0] ? publicIntelligenceText(selectedLens.changeConditions[0]) : scenarioCondition(strongestPressure)) ?? null
     : null;
@@ -528,7 +503,7 @@ export function PointInTimeIntelligencePanel({
             What the evidence says
           </h2>
           <p className="story-chapter-description mt-2 max-w-3xl leading-relaxed text-ink-dim">
-            A plain-language reading of the evidence saved with this report for <span className="font-medium text-ink">{snapshot.subject.label}</span>. Choose a view to bring the most relevant facts forward. The underlying evidence and report result do not change.
+            A plain-language reading of the complete evidence saved with this report for <span className="font-medium text-ink">{snapshot.subject.label}</span>. This is the canonical full-diligence view.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
@@ -554,38 +529,12 @@ export function PointInTimeIntelligencePanel({
           </details>
         </div>
 
-        <div className="border-b border-line/70 px-4 py-3 sm:px-5">
-          <div role="tablist" aria-label="Decision lens" className="scrollbar-none flex gap-1 overflow-x-auto">
-            {lenses.map((lens, index) => {
-              const selected = lens.id === selectedLens.id;
-              const tabId = `${generatedId}-lens-${lens.id}`;
-              return (
-                <button
-                  key={lens.id}
-                  ref={(node) => { tabRefs.current[lens.id] = node; }}
-                  id={tabId}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  aria-controls={panelId}
-                  tabIndex={selected ? 0 : -1}
-                  onClick={() => selectLens(lens.id)}
-                  onKeyDown={(event) => moveLens(event, index)}
-                  className={`min-h-11 shrink-0 rounded-md px-3 text-[12.5px] font-medium transition ${selected ? "bg-signal/10 text-signal-lift" : "text-ink-dim hover:bg-panel-2 hover:text-ink"}`}
-                >
-                  {lens.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div id={panelId} role="tabpanel" aria-labelledby={`${generatedId}-lens-${selectedLens.id}`} className="px-4 py-5 sm:px-5">
+        <div id={panelId} className="px-4 py-5 sm:px-5">
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.6fr)]">
             <section className={`panel-inset p-4 ${hasUsableThesis ? "tint-signal" : "tint-caution"}`} aria-label="Current report conclusion">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="eyebrow">{hasUsableThesis ? "Current read" : "Conclusion limited"}</p>
-                <span className="ml-auto text-[11px] text-ink-faint">{selectedLens.label} view</span>
+                <span className="ml-auto text-[11px] text-ink-faint">Full diligence</span>
               </div>
               <p className="mt-2 text-[15px] font-semibold leading-relaxed text-ink">{thesis}</p>
               <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">{selectedLens.question}</p>

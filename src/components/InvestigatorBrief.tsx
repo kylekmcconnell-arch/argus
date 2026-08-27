@@ -1,13 +1,5 @@
 import type { NoticedSignal, VerdictArgument } from "../lib/reportInsights";
-import type { DecisionLensId } from "../intelligence/types";
 import { plainLanguageSummary } from "../lib/plainLanguage";
-
-const DECISION_LENSES: ReadonlyArray<{ id: DecisionLensId; label: string; description: string }> = [
-  { id: "investment", label: "Investment", description: "Capital allocation, downside, and decision-changing evidence" },
-  { id: "alpha_research", label: "Alpha", description: "Market setup, timing, change, and information advantage" },
-  { id: "counterparty", label: "Counterparty", description: "Identity, authority, control, and reliability" },
-  { id: "general_diligence", label: "Full diligence", description: "The broadest point-in-time evidence review" },
-];
 
 const SEVERITY_COLOR: Record<NoticedSignal["severity"], string> = {
   alert: "var(--color-avoid)",
@@ -66,34 +58,5 @@ export function VerdictArgumentBlock({ argument }: { argument: VerdictArgument }
         </div>
       ))}
     </dl>
-  );
-}
-
-export function DecisionLensSelector({
-  value,
-  onChange,
-}: {
-  value: DecisionLensId;
-  onChange: (value: DecisionLensId) => void;
-}) {
-  const selected = DECISION_LENSES.find((lens) => lens.id === value) ?? DECISION_LENSES[0]!;
-  return (
-    <div className="mb-3 border-b border-line/60 pb-3" aria-label="Review angle">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="eyebrow mr-1 text-ink-faint">Review this for</span>
-        {DECISION_LENSES.map((lens) => (
-          <button
-            key={lens.id}
-            type="button"
-            aria-pressed={lens.id === value}
-            onClick={() => onChange(lens.id)}
-            className={`btn-chip min-h-9 ${lens.id === value ? "tint-signal text-signal-lift" : ""}`}
-          >
-            {lens.label}
-          </button>
-        ))}
-      </div>
-      <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">{selected.description}. The evidence and score stay fixed; only relevance and ordering change.</p>
-    </div>
   );
 }

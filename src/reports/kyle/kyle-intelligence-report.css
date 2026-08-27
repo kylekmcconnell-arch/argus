@@ -395,7 +395,6 @@
 [data-report-lane="kyle"] .kyle-context-disclosure li strong { font-size: 0.78rem; }
 [data-report-lane="kyle"] .kyle-context-disclosure li span { color: var(--color-ink-faint); font-size: 0.72rem; }
 
-[data-report-lane="kyle"] .kyle-decision-lens { border-top: 1px solid var(--color-line); margin-top: 2rem; padding-top: 1rem; }
 
 [data-report-lane="kyle"] .kyle-beneath-headlines,
 [data-report-lane="kyle"] .kyle-decision-lock {

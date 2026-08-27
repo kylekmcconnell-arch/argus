@@ -96,6 +96,8 @@ describe("Kyle intelligence report opening", () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
 
     expect(container.querySelector('[aria-label="Report depth"]')).toBeNull();
+    expect(container.textContent).not.toContain("Review this for");
+    expect(container.querySelector('[aria-label="Review angle"]')).toBeNull();
     expect(container.querySelector('a[href="#composition"]')?.textContent).toContain("Continue through the full report");
     expect([...container.querySelectorAll('a[href="#evidence-ledger"]')]
       .some((link) => link.textContent?.includes("Enter evidence room"))).toBe(true);

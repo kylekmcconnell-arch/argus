@@ -12,7 +12,6 @@ import {
 } from "@phosphor-icons/react";
 import { compositionRowColor, type CompositionRow } from "../../components/ScoreComposition";
 import { ScoreRing } from "../../components/ScoreRing";
-import { DecisionLensSelector } from "../../components/InvestigatorBrief";
 import type { DecisionLensId } from "../../intelligence/types";
 import type { TokenDecisionBoundary } from "../../lib/decisionBoundary";
 import type { DecisionDiscovery, VerdictArgument } from "../../lib/reportInsights";
@@ -394,8 +393,6 @@ export function KyleIntelligenceDecisionCanvas({
   discovery,
   decisionBoundary,
   decisionBoundaryEvidenceHref,
-  decisionLensId,
-  onDecisionLensChange,
   supports,
   concerns,
   context = [],
@@ -568,11 +565,6 @@ export function KyleIntelligenceDecisionCanvas({
           <h2 id="kyle-argus-take-title">What the evidence means.</h2>
           <p>Concise analytical justification, not private model reasoning or a transcript of the research prompts.</p>
         </div>
-        {decisionLensId && onDecisionLensChange && (
-          <div className="kyle-decision-lens">
-            <DecisionLensSelector value={decisionLensId} onChange={onDecisionLensChange} />
-          </div>
-        )}
         <div className="kyle-evidence-ladder">
           <article>
             <span className="mono">FACT</span>

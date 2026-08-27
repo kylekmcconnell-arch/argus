@@ -8,7 +8,7 @@ import {
 import { publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { publicFindingTitle, publicIntelligenceText } from "../lib/intelligencePresentation";
 import { requestChallenge } from "../lib/challenge";
-import { DecisionLensSelector, VerdictArgumentBlock } from "./InvestigatorBrief";
+import { VerdictArgumentBlock } from "./InvestigatorBrief";
 import { HERO_SCORE_RING_SIZE, ScoreRing } from "./ScoreRing";
 import { compositionRowColor } from "./ScoreComposition";
 import type { TokenDecisionBoundary } from "../lib/decisionBoundary";
@@ -347,8 +347,6 @@ export function InvestigationDecisionCanvas(props: InvestigationDecisionCanvasPr
   discovery,
   decisionBoundary,
   decisionBoundaryEvidenceHref,
-  decisionLensId,
-  onDecisionLensChange,
   evidenceHref = "#token-evidence",
   methodologyHref = "#token-methodology",
   challengeAnchorId = null,
@@ -528,9 +526,6 @@ export function InvestigationDecisionCanvas(props: InvestigationDecisionCanvasPr
         )}
         {argument && (
           <div className="border-b border-line/70 px-5 py-4">
-            {decisionLensId && onDecisionLensChange && (
-              <DecisionLensSelector value={decisionLensId} onChange={onDecisionLensChange} />
-            )}
             <VerdictArgumentBlock argument={argument} />
           </div>
         )}

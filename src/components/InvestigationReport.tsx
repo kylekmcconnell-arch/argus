@@ -745,7 +745,7 @@ export function InvestigationReport({
   const reportLane = useReportLane();
   const arkhamEnabled = arkhamProviderEnabled();
   const [spent, setSpent] = useState(0);
-  const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
+  const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("general_diligence");
   const reportStyle = reportLane.definition.presentationStyle;
   const [watched, setWatched] = useState(() => isWatched(inv.token.address));
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap

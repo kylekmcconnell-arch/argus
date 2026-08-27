@@ -412,11 +412,9 @@ describe("private person report evidence boundary", () => {
           },
         ],
         questions: [],
-        lenses: base.intelligence!.lenses.map((lens) => lens.id === "investment"
-          ? { ...lens, signalIds: ["entity-support-investment-record", "entity-pressure-related-party"], unresolvedQuestionIds: [] }
-          : lens.id === "alpha_research"
-            ? { ...lens, signalIds: ["entity-support-alpha-change", "entity-pressure-related-party"], unresolvedQuestionIds: [] }
-            : { ...lens, signalIds: [], unresolvedQuestionIds: [] }),
+        lenses: base.intelligence!.lenses.map((lens) => lens.id === "general_diligence"
+          ? { ...lens, signalIds: ["entity-support-investment-record", "entity-support-alpha-change", "entity-pressure-related-party"], unresolvedQuestionIds: [] }
+          : { ...lens, signalIds: [], unresolvedQuestionIds: [] }),
       },
     };
 
@@ -435,17 +433,11 @@ describe("private person report evidence boundary", () => {
     expect(dossier.report.governing_score).toBe(base.report.governing_score);
 
     const synthesis = container.querySelector('[aria-label="Case synthesis"]')!;
-    const alphaButton = [...synthesis.querySelectorAll("button")]
-      .find((button) => button.textContent?.trim() === "Alpha")!;
-    act(() => alphaButton.click());
-
     expect(synthesis.textContent).toContain("Strongest evidence");
-    expect(synthesis.textContent).toContain("A newly verified operating milestone changes the setup");
+    expect(synthesis.textContent).toContain("A verified operating record supports the base case");
     expect(synthesis.textContent).toContain("A related-party relationship needs review");
-    expect(alphaButton.getAttribute("aria-pressed")).toBe("true");
-    const alphaAtlasTab = [...container.querySelectorAll('button[role="tab"]')]
-      .find((button) => button.textContent?.trim() === "Alpha research");
-    expect(alphaAtlasTab?.getAttribute("aria-selected")).toBe("true");
+    expect(synthesis.textContent).not.toContain("Review this for");
+    expect(container.querySelector('[role="tablist"][aria-label="Decision lens"]')).toBeNull();
     expect(dossier.report.governing_score).toBe(base.report.governing_score);
   });
 

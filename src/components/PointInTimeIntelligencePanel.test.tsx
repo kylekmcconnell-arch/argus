@@ -303,49 +303,25 @@ function render(value: IntelligenceSpineSnapshot, thesisEligible = true, governi
 }
 
 describe("PointInTimeIntelligencePanel", () => {
-  it("defaults to investment and keeps the complete signal set across accessible lenses", () => {
-    render(snapshot());
+  it("uses one canonical full-diligence view and keeps the complete signal set", () => {
+    const value = snapshot();
+    render(value);
 
-    const tabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
-    expect(tabs.map((tab) => tab.textContent)).toEqual([
-      "Investment",
-      "Alpha research",
-      "Counterparty",
-      "General diligence",
-    ]);
-    expect(tabs.map((tab) => tab.tabIndex)).toEqual([0, -1, -1, -1]);
-    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
-    expect(container.querySelector('[role="tabpanel"]')?.getAttribute("aria-labelledby")).toBe(tabs[0].id);
-
-    const investmentOrder = signalIds(container);
-    expect(investmentOrder).toHaveLength(5);
-    expect(investmentOrder.slice(0, 3)).toEqual([
-      "support-liquidity",
-      "risk-control",
-      "coverage-treasury",
-    ]);
-
-    act(() => tabs[1].click());
-    const alphaOrder = signalIds(container);
-    expect(alphaOrder[0]).toBe("alpha-supply");
-    expect([...alphaOrder].sort()).toEqual([...investmentOrder].sort());
-    expect(tabs[1].getAttribute("aria-selected")).toBe("true");
-
-    act(() => tabs[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
-    expect(tabs[2].getAttribute("aria-selected")).toBe("true");
-    expect(document.activeElement).toBe(tabs[2]);
-    expect([...signalIds(container)].sort()).toEqual([...investmentOrder].sort());
+    expect(container.querySelector('[role="tablist"]')).toBeNull();
+    expect(container.textContent).toContain("canonical full-diligence view");
+    expect(container.textContent).toContain("Full diligence");
+    expect([...signalIds(container)].sort()).toEqual([...value.signals.map((signal) => signal.id)].sort());
   });
 
-  it("withholds the investment thesis when only a coverage gap is tagged to that lens", () => {
+  it("withholds the canonical thesis when only a coverage gap is tagged to full diligence", () => {
     const base = snapshot();
     const signals = base.signals.map((item) => ({
       ...item,
       lenses: item.id === "coverage-treasury"
-        ? ["investment" as const, "general_diligence" as const]
-        : item.lenses.filter((lensId) => lensId !== "investment"),
+        ? ["general_diligence" as const]
+        : item.lenses.filter((lensId) => lensId !== "general_diligence"),
     }));
-    const lenses = base.lenses.map((item) => item.id === "investment"
+    const lenses = base.lenses.map((item) => item.id === "general_diligence"
       ? { ...item, signalIds: ["coverage-treasury"] }
       : item);
     render({
@@ -362,11 +338,7 @@ describe("PointInTimeIntelligencePanel", () => {
     expect(thesis?.textContent).toContain("does not support a conclusion");
     expect(signalIds(container)).toHaveLength(base.signals.length);
 
-    const alpha = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-      .find((tab) => tab.textContent === "Alpha research");
-    act(() => alpha?.click());
-    expect(container.querySelector('[aria-label="Current report conclusion"]')?.textContent).toContain("Current read");
-    expect(signalIds(container)).toHaveLength(base.signals.length);
+    expect(container.querySelector('[role="tablist"]')).toBeNull();
   });
 
   it("withholds every decision thesis when the parent report is not decision-ready", () => {
@@ -418,14 +390,20 @@ describe("PointInTimeIntelligencePanel", () => {
     const thesis = container.querySelector('[aria-label="Current report conclusion"]');
     expect(thesis?.textContent).toContain("Current read");
     expect(thesis?.textContent).toContain("ARGUS rates this report CAUTION");
-    expect(thesis?.textContent).toContain("Strongest supporting finding: Direct sources describe what the product does.");
+    expect(thesis?.textContent).toContain("Strongest supporting finding: The operating entity is source backed.");
     expect(thesis?.textContent).toContain("Strongest concern: A contract or deployer warning was recorded.");
     expect(thesis?.textContent).not.toMatch(/GoPlus/i);
     expect(thesis?.textContent).not.toMatch(/This report is CAUTION|strict direct-subject|fired .* flag/i);
   });
 
-  it("withholds a lens thesis across an uncollected critical priority question", () => {
-    render(snapshot());
+  it("withholds the canonical thesis across an uncollected critical priority question", () => {
+    const value = snapshot();
+    render({
+      ...value,
+      lenses: value.lenses.map((lens) => lens.id === "general_diligence"
+        ? { ...lens, domainPriority: ["treasury", ...lens.domainPriority.filter((domain) => domain !== "treasury")] }
+        : lens),
+    });
 
     const thesis = container.querySelector('[aria-label="Current report conclusion"]');
     expect(thesis?.textContent).toContain("Conclusion limited");
@@ -436,10 +414,13 @@ describe("PointInTimeIntelligencePanel", () => {
       .toContain("No specific refresh trigger is supported");
   });
 
-  it("withholds a lens thesis when a critical priority question is unresolved", () => {
+  it("withholds the canonical thesis when a critical priority question is unresolved", () => {
     const value = snapshot();
     render({
       ...value,
+      lenses: value.lenses.map((lens) => lens.id === "general_diligence"
+        ? { ...lens, domainPriority: ["treasury", ...lens.domainPriority.filter((domain) => domain !== "treasury")] }
+        : lens),
       questions: value.questions.map((question) => question.id === "question:treasury"
         ? { ...question, state: "unresolved" }
         : question),
@@ -452,13 +433,16 @@ describe("PointInTimeIntelligencePanel", () => {
   it("states that a missing opposite-polarity signal is bounded absence, not evidence", () => {
     const value = snapshot();
     const signals = value.signals.map((item) => item.polarity === "risk" || item.polarity === "mixed"
-      ? { ...item, lenses: item.lenses.filter((lensId) => lensId !== "investment") }
+      ? { ...item, lenses: item.lenses.filter((lensId) => lensId !== "general_diligence") }
       : item);
     const questions = value.questions.map((question) => question.id === "question:treasury"
       ? { ...question, state: "partial" as const }
       : question);
-    const lenses = value.lenses.map((item) => item.id === "investment"
-      ? { ...item, signalIds: item.signalIds.filter((signalId) => signalId !== "risk-control") }
+    const riskSignalIds = new Set(value.signals
+      .filter((item) => item.polarity === "risk" || item.polarity === "mixed")
+      .map((item) => item.id));
+    const lenses = value.lenses.map((item) => item.id === "general_diligence"
+      ? { ...item, signalIds: item.signalIds.filter((signalId) => !riskSignalIds.has(signalId)) }
       : item);
     render({ ...value, signals, questions, lenses });
 

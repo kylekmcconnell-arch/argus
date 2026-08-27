@@ -26,7 +26,7 @@ import { usdCompact } from "../lib/format";
 import { claimedTicker, deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument } from "../lib/reportInsights";
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
-import { DecisionLensSelector, NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
+import { NoticedRail, VerdictArgumentBlock } from "./InvestigatorBrief";
 import type { DecisionLensId } from "../intelligence/types";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
@@ -1628,7 +1628,7 @@ function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
 
 export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSavedResearch, onRescan, onOpenProject, onOpenBrief, shareView = false }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onResearchAudit?: (q: string, privateSearch?: boolean) => void; onOpenSavedResearch?: (q: string, kind: "person" | "token") => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void; /** Read-only share capability view: every workspace action is absent. */ shareView?: boolean }) {
   const reportLane = useReportLane();
-  const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("investment");
+  const [decisionLensId, setDecisionLensId] = useState<DecisionLensId>("general_diligence");
   const reportStyle = reportLane.definition.presentationStyle;
   const { role } = useArgusAuth();
   const f = dossier;
@@ -3935,9 +3935,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           )}
           <div className="panel px-5">
             <div className="border-b border-line/70 py-4" aria-label="Case synthesis">
-              {f.intelligence && (
-                <DecisionLensSelector value={decisionLensId} onChange={setDecisionLensId} />
-              )}
               <VerdictArgumentBlock argument={caseArgument} />
             </div>
             <ReportCanvasNarrativeSection
