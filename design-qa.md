@@ -55,6 +55,123 @@ final result: passed
 
 ---
 
+# Persistent terminal evidence ledger — design QA
+
+## Artifacts
+
+- Source visual truth: `/var/folders/h7/6njc4p9d12s5cjfrwk2sr2080000gn/T/codex-clipboard-95a1c65d-939a-4017-9f4c-9f4241e35a9d.png`
+- Light-mode implementation: `artifacts/evidence-ledger-light-mode-final.jpg`
+- Responsive light-mode implementation: `artifacts/evidence-ledger-light-mode-responsive.jpg`
+- Combined comparison: `artifacts/evidence-ledger-reference-vs-light.jpg`
+- Source pixels: 1926 × 816
+- Desktop browser state: 1280 × 720 CSS px at device density 1; the Codex panel exposed a 969 × 720 screenshot crop
+- Responsive browser state: 760 × 900 CSS px at device density 1
+- State: light application theme, live project investigation, four saved trace events
+
+## Full-view comparison evidence
+
+The light ARGUS workspace remains a white editorial surface while the evidence ledger becomes a bounded dark execution chamber. The implementation preserves the selected reference's near-black green surface, mint live indicators, mono metadata, explicit execution-trace column, semantic status colors and compact ruled rows without changing the surrounding application theme.
+
+The source contains six example findings while the live fixture contains four real trace events. That content difference is intentional; component hierarchy and density remain consistent with the amount of saved evidence rather than adding placeholder rows.
+
+## Focused region comparison evidence
+
+The combined comparison verifies the persistent dark surface, live elapsed clock, trace lane, source icons, highlighted current row and confirmed/review/observed status hierarchy. Browser geometry confirmed the desktop ledger has no internal horizontal overflow and each row settles near 85 CSS pixels. At 760 px, the trace column collapses while source, finding and status remain visible and the document has no horizontal overflow.
+
+## Fidelity surfaces
+
+- Fonts and typography: existing ARGUS sans and mono families remain in use. Headline, source metadata, elapsed time and statuses preserve the reference hierarchy with readable light-on-dark contrast.
+- Spacing and layout rhythm: the desktop five-column grid, ruled rows, compact header and terminal footer match the reference structure. The responsive state removes only the decorative trace lane and stacks finding copy without clipping.
+- Colors and visual tokens: the ledger owns a local near-black, muted mint and semantic amber/red palette in both application themes. The surrounding light report does not inherit these terminal tokens.
+- Image quality and asset fidelity: the section contains no raster imagery. Source and status marks use the existing Phosphor icon library rather than improvised graphics.
+- Copy and content: all live evidence text, source names and statuses come from the actual trace. The added clock and column labels describe the running system without inventing findings.
+- Accessibility and behavior: the live region semantics remain unchanged, elapsed time is represented with a `time` element, reduced-motion scrolling behavior remains covered, and the narrow layout has no horizontal overflow.
+
+## Comparison history
+
+1. Initial implementation: the pulse icon reserved a square 116 px box, making rows too tall and pushing earlier findings out of the visible ledger.
+   - Fix: constrained the icon to a 116 × 24 px trace lane.
+   - Post-fix evidence: desktop rows measure roughly 85 px and all four fixture events fit with the live tail.
+2. Responsive verification: the five-column desktop grid would be too dense below 760 px.
+   - Fix: hide only the execution trace, retain source/finding/status, and stack the header clock below the title.
+   - Post-fix evidence: `artifacts/evidence-ledger-light-mode-responsive.jpg`; browser geometry reports no document or ledger overflow.
+
+## Primary interactions tested
+
+- live elapsed clock updates
+- live/saved status treatment
+- automatic tail-follow behavior and jump-to-latest behavior through the existing test suite
+- reduced-motion scrolling
+- desktop and 760 px light-mode rendering
+- browser console checked with no warnings or errors
+
+final result: passed
+
+---
+
+# Design QA — Rabbit-hole research CTAs
+
+## Verification target
+
+- Product audit: `/Users/kyle/Documents/ARGUS/.design-audit/rabbit-hole-ctas-2026-08-27/AUDIT.md`
+- Visual language reference: `/var/folders/h7/6njc4p9d12s5cjfrwk2sr2080000gn/T/codex-clipboard-3233c4b2-d0fb-4145-8685-1b9d6e0dcca0.png`
+- Running-state capture: `artifacts/design-qa/kyle-research-sheet-progress.png`
+- Completed-state capture: `artifacts/design-qa/kyle-research-sheet-complete.png`
+- Browser preview: `http://127.0.0.1:4173/?design-preview=kyle-intelligence#relationships`
+- Desktop viewport: 1488 × 1058
+- Responsive viewport: 720 × 900
+
+## Implementation evidence
+
+- Eligible relationship nodes now expose one consistent `Research this` action. The action opens a confirmation sheet before spending and separates free saved evidence from a fresh investigation.
+- The confirmation state presents entity identity, source-report context, decision-impact reasoning, a 0.8–1.6 credit estimate, 2–4 minute estimate for people, current balance, private-search surcharge, and a maximum-charge confirmation label.
+- Confirmation hands the request to the real fresh-scan path with stored-case reuse disabled. The app retains a `Back to {source report}` strip through resolving, live progress, and the finished report.
+- The prototype sheet demonstrates live progress and completion states. In the real app the existing live-run surface takes over after confirmation and continues in the background.
+- `Next rabbit holes` is limited to three source-backed entities, ranked by decision impact and diversified across relationship clusters. The verified ANYONE fixture resolves to a person, token, and second person rather than three generic popular accounts.
+- Paid CTAs require high confidence, at least one saved source, a valid entity identifier, and kind-specific validation. Exact role-fragment input `Bloxroute. Senior` is covered by a regression test and receives `Verify identity first`, never a paid action.
+
+## Accessibility and responsive evidence
+
+- Dialog semantics, name and description are exposed to the browser accessibility tree.
+- Focus moves to the sheet, remains trapped inside it, and returns to the originating `Research this` button after Escape.
+- Price, progress, completion, and invalid-identity explanations use text and live-region semantics rather than color alone.
+- The 720px pass preserves all confirmation details and stacks the actions without horizontal clipping.
+- Reduced-motion CSS disables nonessential research animations.
+
+## Fidelity surfaces
+
+- Typography and color stay within the Kyle report lane’s editorial serif/mono hierarchy, neutral panels, green evidence accent, and black primary action.
+- The sheet is deliberately narrower than the graph so the source relationship remains visible behind the modal context.
+- Person portraits and entity imagery are reused from the evidence web; letter fallbacks remain truthful when no source-backed image exists.
+- The research lifecycle preserves the selected Option 2 graph’s information architecture instead of introducing a separate generic checkout page.
+
+## Iterations made
+
+1. Replaced the first-pass single-credit modal with an explicit saved-versus-fresh decision sheet.
+2. Added a source-backed identity gate after the audit revealed malformed role fragments could otherwise become billable subjects.
+3. Diversified recommendations by graph cluster so team members do not crowd out a controlling asset or token.
+4. Corrected a nested text selector that initially caused row labels and descriptions to sit on the same line; final browser DOM and responsive checks show the intended stacked hierarchy.
+5. Added app-level return context and forced fresh execution so confirmation cannot silently reopen an old saved case.
+
+## Automated and runtime checks
+
+- Focused ESLint on all modified TS/TSX files: passed.
+- TypeScript client, server and API projects: passed.
+- Production build: passed.
+- Full Vitest suite: 386 files and 4,048 tests passed.
+- Browser console: no warnings or errors; Vite/React development messages only.
+- Repository-wide lint remains red on 222 pre-existing errors outside this feature; no modified file contributes an error.
+
+## Findings
+
+No actionable P0, P1 or P2 findings remain in this scope.
+
+P3 follow-up: a future billing service can replace the current estimate with an exact provider-specific reservation and refund receipt without changing the confirmation contract.
+
+final result: passed
+
+---
+
 # Report typography accessibility QA
 
 ## Artifacts
@@ -388,4 +505,3 @@ P3 follow-up: a short first-use hint could improve discoverability for users who
 ## Final result
 
 final result: passed
-
