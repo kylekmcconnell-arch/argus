@@ -193,6 +193,76 @@ function BriefColumn({
   );
 }
 
+function verificationImpact(
+  item: KyleDecisionItem,
+  rows: CompositionRow[],
+  verdictLabel: string,
+): string {
+  const haystack = `${item.label} ${item.detail ?? ""}`.toLowerCase();
+  const axisTerms: Array<[RegExp, RegExp]> = [
+    [/team|founder|leadership|identity|operator|advisor/, /team|people|leadership|identity/],
+    [/product|service|roadmap|build|execution/, /product|execution/],
+    [/token|mint|supply|holder|liquidity|contract/, /token|onchain|contract|liquidity/],
+    [/backer|partner|investor|funding/, /backer|partner|funding/],
+    [/usage|customer|activity|revenue|traction|adoption/, /traction|usage|activity|adoption/],
+    [/audit|security|governance|legal|control|transparency/, /transparency|integrity|security|governance|control/],
+  ];
+  const axisPattern = axisTerms.find(([itemPattern]) => itemPattern.test(haystack))?.[1];
+  const candidates = rows
+    .filter((row) => row.applicability === undefined && row.weight > row.score)
+    .sort((left, right) => {
+      const leftMatch = axisPattern?.test(`${left.axis} ${left.label}`.toLowerCase()) ? 1 : 0;
+      const rightMatch = axisPattern?.test(`${right.axis} ${right.label}`.toLowerCase()) ? 1 : 0;
+      if (leftMatch !== rightMatch) return rightMatch - leftMatch;
+      const questionDifference = (right.questionCount ?? 0) - (left.questionCount ?? 0);
+      if (questionDifference !== 0) return questionDifference;
+      return (right.weight - right.score) - (left.weight - left.score);
+    });
+  const row = candidates[0];
+  if (!row) {
+    return `Decision impact: could materially change the current ${verdictLabel.toLowerCase()} verdict once independently verified.`;
+  }
+  const openPoints = Math.max(1, Math.round(row.weight - row.score));
+  return `Decision impact: ${openPoints} ${openPoints === 1 ? "point remains" : "points remain"} unsettled in ${row.label}; the answer could change the current ${verdictLabel.toLowerCase()} verdict.`;
+}
+
+function VerifyNextStrip({
+  items,
+  rows,
+  verdictLabel,
+  href,
+}: {
+  items: KyleDecisionItem[];
+  rows: CompositionRow[];
+  verdictLabel: string;
+  href: `#${string}`;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <section className="kyle-verify-next" aria-labelledby="kyle-verify-next-title">
+      <header>
+        <p className="kyle-overline mono">VERIFY NEXT</p>
+        <h3 id="kyle-verify-next-title">The evidence most likely to change the decision.</h3>
+      </header>
+      <ol>
+        {items.slice(0, 2).map((item, index) => (
+          <li key={`verify-next-${index}`}>
+            <span className="kyle-verify-index mono">0{index + 1}</span>
+            <div>
+              <strong>{sentence(item.label)}</strong>
+              {item.detail && <p>{sentence(item.detail)}</p>}
+              <small>{verificationImpact(item, rows, verdictLabel)}</small>
+            </div>
+            <a href={href} aria-label={`Open evidence question: ${executiveText(item.label)}`}>
+              Open question <ArrowRight size={13} weight="bold" />
+            </a>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function scoreRingSegments(rows: CompositionRow[], size: number) {
   const stroke = size >= 200 ? 5.5 : 4;
   const radius = size / 2 - (size >= 200 ? 8 : 6);
@@ -568,8 +638,8 @@ export function KyleIntelligenceDecisionCanvas({
         <div className="kyle-brief-grid">
           <BriefColumn title="Why we’re cautious" subtitle="DECISION PRESSURE" items={concerns} tone="caution" empty="No decision-changing concern was recorded." href={evidenceHref} />
           <BriefColumn title="Why this may still be credible" subtitle="COUNTERWEIGHT" items={supports} tone="positive" empty="No positive counterweight was recorded." href={evidenceHref} />
-          <BriefColumn title="What could change the verdict" subtitle="EXPECTED DECISION VALUE" items={nextSteps} tone="unresolved" empty="No required question remains open." href={methodologyHref} />
         </div>
+        <VerifyNextStrip items={nextSteps} rows={sortedComposition} verdictLabel={verdictLabel} href={methodologyHref} />
       </section>
 
       <section className="kyle-argus-take" aria-labelledby="kyle-argus-take-title">
@@ -661,31 +731,6 @@ export function KyleIntelligenceDecisionCanvas({
           </dl>
           {challengeAnchorId && <a href={`#${challengeAnchorId}`}>Challenge the thesis <MagnifyingGlassPlus size={15} weight="bold" /></a>}
         </div>
-      </section>
-
-      <section className="kyle-watch-next" aria-labelledby="kyle-watch-next-title">
-        <div className="kyle-section-intro">
-          <p className="kyle-overline mono">05 · WHAT HAPPENS NEXT</p>
-          <h2 id="kyle-watch-next-title">What ARGUS is watching.</h2>
-          <p>The unresolved items with the highest current decision value. No prediction is shown unless the saved evidence supports one.</p>
-        </div>
-        {nextSteps.length ? (
-          <ol>
-            {nextSteps.slice(0, 3).map((item, index) => (
-              <li key={`watch-${index}`}>
-                <span className="mono">WATCH {String(index + 1).padStart(2, "0")}</span>
-                <h3>{sentence(item.label)}</h3>
-                {item.detail && <p>{sentence(item.detail)}</p>}
-                <a href={methodologyHref}>Open the underlying question <ArrowRight size={13} weight="bold" /></a>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <div className="kyle-quiet-state">
-            <CheckCircle size={23} weight="duotone" aria-hidden="true" />
-            <div><strong>No required question remains open.</strong><p>A new scan would show whether the current thesis still holds.</p></div>
-          </div>
-        )}
       </section>
 
       <section className="kyle-company-snapshot" aria-labelledby="kyle-company-snapshot-title">

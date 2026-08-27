@@ -106,6 +106,32 @@ describe("Kyle intelligence report opening", () => {
       .some((link) => link.textContent?.includes("Enter evidence room"))).toBe(true);
   });
 
+  it("replaces the full watching chapter with a compact, impact-based Verify next strip", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      nextSteps={[
+        { label: "Establish a complete independent security history" },
+        { label: "Verify current product adoption" },
+        { label: "Confirm a third lower-impact item" },
+      ]}
+    />));
+
+    const strip = container.querySelector(".kyle-verify-next");
+    expect(strip?.textContent).toContain("VERIFY NEXT");
+    expect(strip?.textContent).toContain("The evidence most likely to change the decision.");
+    expect(strip?.textContent).toContain("Decision impact:");
+    expect(strip?.querySelectorAll("li")).toHaveLength(2);
+    expect(container.textContent).not.toContain("What ARGUS is watching.");
+    expect(container.textContent).not.toContain("Confirm a third lower-impact item");
+  });
+
+  it("removes Verify next entirely when no material question remains", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} nextSteps={[]} />));
+
+    expect(container.querySelector(".kyle-verify-next")).toBeNull();
+    expect(container.textContent).not.toContain("VERIFY NEXT");
+  });
+
   it("keeps project diligence and linked-token safety as two separate scores", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas
       {...props}
