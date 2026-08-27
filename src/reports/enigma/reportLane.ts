@@ -13,6 +13,7 @@ export const enigmaReportLane = {
   label: "Enigma Report",
   shortLabel: "Enigma",
   owner: "@Enigma-Fund",
+  kind: "editorial",
   description: "Narrative decision memo with a sticky contents bar and separate project and token scores.",
   navigation: "sticky",
   presentationStyle: 2,

@@ -2,6 +2,7 @@
 /src/reports/production/ @kylekmcconnell-arch @Enigma-Fund
 /src/reports/kyle/ @kylekmcconnell-arch
 /src/reports/enigma/ @Enigma-Fund
+/src/reports/raw/ @kylekmcconnell-arch @Enigma-Fund
 
 # Shared report semantics, evidence composition, and core renderers require both.
 /src/reports/shared/ @kylekmcconnell-arch @Enigma-Fund

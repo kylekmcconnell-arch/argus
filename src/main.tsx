@@ -43,8 +43,6 @@ const TrustGraphPreview = lazy(() => import('./dev/TrustGraphPreview.tsx').then(
 const EarnReportStyle2Preview = lazy(() => import('./components/EarnReportStyle2.tsx').then((module) => ({ default: module.EarnReportStyle2 })))
 // eslint-disable-next-line react-refresh/only-export-components
 const DualScorePreview = lazy(() => import('./dev/DualScorePreview.tsx').then((module) => ({ default: module.DualScorePreview })))
-// eslint-disable-next-line react-refresh/only-export-components
-const KyleIntelligencePreview = lazy(() => import('./reports/kyle/KyleIntelligencePreview.tsx').then((module) => ({ default: module.KyleIntelligencePreview })))
 
 // Observe 401s from ARGUS API routes so an expired session is stated once
 // instead of surfacing as a page of quietly dead panels.
@@ -61,9 +59,6 @@ document.documentElement.dataset.reportLane = 'production'
 const designPreview = import.meta.env.DEV
   ? new URLSearchParams(window.location.search).get('design-preview')
   : null
-const showKyleIntelligencePreview = designPreview === 'kyle-intelligence-report'
-  || (window.location.hostname.endsWith('-kyle-mcconnells-projects.vercel.app')
-    && new URLSearchParams(window.location.search).get('design-preview') === 'kyle-intelligence-report')
 const showArgusEyePreview = designPreview === 'argus-eye'
 const showProvenancePreview = designPreview === 'provenance'
 
@@ -118,8 +113,6 @@ createRoot(document.getElementById('root')!).render(
         <Suspense fallback={null}><EarnReportStyle2Preview /></Suspense>
       ) : designPreview === 'earn-dual-score' ? (
         <Suspense fallback={null}><DualScorePreview /></Suspense>
-      ) : showKyleIntelligencePreview ? (
-        <Suspense fallback={null}><KyleIntelligencePreview /></Suspense>
       ) : sharedReportToken ? (
         <Suspense fallback={null}><SharedReportView token={sharedReportToken} /></Suspense>
       ) : publicView === 'leaderboard' ? (

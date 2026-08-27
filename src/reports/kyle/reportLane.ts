@@ -12,6 +12,7 @@ export const kyleReportLane = {
   label: "Kyle Report",
   shortLabel: "Kyle",
   owner: "@kylekmcconnell-arch",
+  kind: "editorial",
   description: "Narrative decision memo with a sticky contents bar and separate project and token scores.",
   navigation: "sticky",
   presentationStyle: 2,

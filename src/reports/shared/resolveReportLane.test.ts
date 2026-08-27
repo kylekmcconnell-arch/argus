@@ -10,7 +10,7 @@ describe("report lane resolution", () => {
     });
   });
 
-  it("lets an owner select either report through a link", () => {
+  it("lets an owner select any internal report view through a link", () => {
     expect(resolveReportLane({ search: "?reportView=kyle", canSelect: true })).toMatchObject({
       definition: { id: "kyle", owner: "@kylekmcconnell-arch" },
       selectable: true,
@@ -18,6 +18,11 @@ describe("report lane resolution", () => {
     });
     expect(resolveReportLane({ search: "?reportView=enigma", canSelect: true })).toMatchObject({
       definition: { id: "enigma", owner: "@Enigma-Fund" },
+      selectable: true,
+      source: "query",
+    });
+    expect(resolveReportLane({ search: "?reportView=raw", canSelect: true })).toMatchObject({
+      definition: { id: "raw", owner: "joint", kind: "evidence" },
       selectable: true,
       source: "query",
     });
@@ -38,11 +43,18 @@ describe("report lane resolution", () => {
   });
 
   it("keeps all presentations on the same saved-report data contract", () => {
-    for (const reportView of ["production", "kyle", "enigma"] as const) {
+    for (const reportView of ["production", "kyle", "enigma", "raw"] as const) {
       const definition = resolveReportLane({ search: `?reportView=${reportView}`, canSelect: true }).definition;
       expect(definition.dataContract).toBe("shared-saved-report-v1");
       expect(definition.presentationStyle).toBe(2);
       expect(definition.navigation).toBe("sticky");
     }
+  });
+
+  it("keeps Raw Evidence distinct from the three editorial interpretations", () => {
+    for (const reportView of ["production", "kyle", "enigma"] as const) {
+      expect(resolveReportLane({ search: `?reportView=${reportView}`, canSelect: true }).definition.kind).toBe("editorial");
+    }
+    expect(resolveReportLane({ search: "?reportView=raw", canSelect: true }).definition.kind).toBe("evidence");
   });
 });

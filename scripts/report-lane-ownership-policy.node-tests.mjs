@@ -69,6 +69,20 @@ test("Production promotion needs the other owner's approval", () => {
   }).ok, true);
 });
 
+test("Raw Evidence changes need the other owner's approval", () => {
+  assert.equal(evaluateReportLaneOwnership({
+    actor: "kylekmcconnell-arch",
+    baseRef: "main",
+    files: ["src/reports/raw/reportLane.ts"],
+  }).ok, false);
+  assert.equal(evaluateReportLaneOwnership({
+    actor: "kylekmcconnell-arch",
+    baseRef: "main",
+    files: ["src/reports/raw/reportLane.ts"],
+    approvals: ["Enigma-Fund"],
+  }).ok, true);
+});
+
 test("only Kyle can change the enforcement policy", () => {
   assert.equal(evaluateReportLaneOwnership({
     actor: "Enigma-Fund",
