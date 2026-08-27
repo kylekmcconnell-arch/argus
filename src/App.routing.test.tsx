@@ -628,6 +628,38 @@ describe("App routing safety", () => {
     expect(harness.startTokenScan).not.toHaveBeenCalled();
   });
 
+  it("upgrades a persistent contract search from a legacy token-only snapshot to a combined investigation", async () => {
+    const address = "0x1313131313131313131313131313131313131313";
+    const candidate = {
+      input: { kind: "token" as const, ref: address, via: "evm" as const },
+      canonicalRef: address,
+      chain: "ethereum",
+      symbol: "FULL",
+      name: "Full Project Token",
+      pairAddress: "pair-full",
+      liquidityUsd: 100,
+    };
+    harness.shellInput = address;
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "legacy-token-only",
+        kind: "token",
+        ref: address,
+        query: address,
+        status: "open",
+      }],
+    });
+    harness.resolveTokenSubject.mockResolvedValue({ state: "resolved", candidate });
+
+    await renderApp();
+    await submitShell();
+
+    expect(harness.fetchReportState).not.toHaveBeenCalled();
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { intent: "investment_due_diligence" });
+    expect(harness.startTokenScan).not.toHaveBeenCalled();
+  });
+
   it("keeps Recon's automatic token bridge storage-first", async () => {
     const address = "0x7878787878787878787878787878787878787878";
     harness.landingInput = "example.com";
@@ -1229,7 +1261,7 @@ describe("App routing safety", () => {
     );
   });
 
-  it("retries a failed quick lookup as a quick token audit, not a full investigation", async () => {
+  it("retries a failed contract lookup as the same full investigation", async () => {
     harness.shellInput = "$QUICK";
     harness.resolveStoredCases.mockResolvedValueOnce({ status: "unavailable", subjects: [] });
     const view = await renderApp();
@@ -1259,8 +1291,8 @@ describe("App routing safety", () => {
     await act(async () => { retry?.click(); });
     await settle();
 
-    expect(harness.startTokenScan).toHaveBeenCalledTimes(1);
-    expect(harness.startInvestigationScan).not.toHaveBeenCalled();
+    expect(harness.startInvestigationScan).toHaveBeenCalledTimes(1);
+    expect(harness.startTokenScan).not.toHaveBeenCalled();
   });
 
   it("opens a stored site report with initialRecon and no fresh recon input", async () => {
@@ -1447,7 +1479,7 @@ describe("App routing safety", () => {
     expect(harness.startPersonAudit).toHaveBeenLastCalledWith("project_pivot", true, "investment_due_diligence");
   });
 
-  it("keeps token and investigation founder pivots private", async () => {
+  it("keeps canonical contract investigations and their founder pivots private", async () => {
     const tokenAddress = "0x4444444444444444444444444444444444444444";
     harness.shellInput = tokenAddress;
     harness.shellPrivate = true;
@@ -1466,21 +1498,16 @@ describe("App routing safety", () => {
     const view = await renderApp();
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='shell-run']")?.click());
     await settle();
-    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='finish-token-run']")?.click());
-    await settle();
-
-    expect(harness.tokenReports.at(-1)?.persistence).toEqual({ state: "private", scanId: "private-token-scan" });
-    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='token-pivot']")?.click());
-    await settle();
-    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("token_pivot", true, "investment_due_diligence");
-
-    // Start a separate private investigation and verify its founder callback.
-    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='nav-home']")?.click());
-    harness.landingInput = "0x5555555555555555555555555555555555555555";
-    harness.landingPrivate = true;
-    await submitLanding();
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: tokenAddress }),
+      true,
+      expect.objectContaining({ intent: "investment_due_diligence" }),
+    );
+    expect(harness.startTokenScan).not.toHaveBeenCalled();
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='finish-investigation-run']")?.click());
     await settle();
+
+    expect(harness.investigationReports.at(-1)?.persistence).toEqual({ state: "private", scanId: "private-investigation-scan" });
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='investigation-pivot']")?.click());
     await settle();
     expect(harness.startPersonAudit).toHaveBeenLastCalledWith("investigation_pivot", true, "investment_due_diligence");

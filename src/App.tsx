@@ -265,6 +265,15 @@ function preferredStoredCase(
     ?? subjects[0];
 }
 
+function exactStoredCase(subjects: StoredCaseSubject[], kind: ReportKind): StoredCaseSubject | null {
+  if (!subjects.length || new Set(subjects.map((subject) => subject.ref)).size > 1) return null;
+  return subjects.find((subject) => subject.kind === kind) ?? null;
+}
+
+function storedCaseRefsAreAmbiguous(subjects: StoredCaseSubject[]): boolean {
+  return new Set(subjects.map((subject) => subject.ref)).size > 1;
+}
+
 // Deep links:
 //   ?s=<handle>    -> open the stored report for that subject (share links)
 //   ?live=<handle> -> resolve the person case before re-attaching or launching
@@ -484,10 +493,10 @@ export default function App() {
     }
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, setLiveError, setPhase, setPolymarketWallet, setPrivateMode, setQuery, setReconUrl, setTokenInput, showPrivacyConflict]);
 
-  // The main search bar runs the full autonomous investigation for a contract;
-  // handles and sites fall through to the normal routing. Internal clicks
-  // (Radar, recon, watchlist, founder buttons) keep using onAudit for a quick
-  // single-surface audit and don't auto-spend.
+  // Contract inputs run the full autonomous investigation; handles and sites
+  // fall through to their normal routing. This is the canonical research path
+  // regardless of whether the user starts from Home, the persistent search,
+  // or an entity pivot elsewhere in ARGUS.
   const onInvestigate = useCallback((raw: string, priv = false, force = false) => {
     if (!closeCaseBriefForNavigation()) return;
     leaveEvidenceReview();
@@ -1187,12 +1196,12 @@ export default function App() {
           return;
         }
         const preferredKind: ReportKind = mode === "token" ? "token" : "investigation";
-        const stored = preferredStoredCase(storedLookup.subjects, preferredKind);
+        const stored = exactStoredCase(storedLookup.subjects, preferredKind);
         if (stored) {
           await onOpenRecent(stored.ref, stored.kind);
           return;
         }
-        if (storedLookup.subjects.length) {
+        if (storedCaseRefsAreAmbiguous(storedLookup.subjects)) {
           setQuery(candidate.canonicalRef);
           setCaseNotice({ reason: "case-ambiguous", ref: candidate.canonicalRef });
           setLiveError(null);
@@ -1330,12 +1339,12 @@ export default function App() {
       // stored case currently uses that display label.
       if (reuseStored && parsed.via !== "ticker" && parsed.via !== "dexscreener") {
         const preferredKind: ReportKind = mode === "token" ? "token" : "investigation";
-        const stored = preferredStoredCase(storedLookup.subjects, preferredKind);
+        const stored = exactStoredCase(storedLookup.subjects, preferredKind);
         if (stored) {
           await onOpenRecent(stored.ref, stored.kind);
           return;
         }
-        if (storedLookup.subjects.length) {
+        if (storedCaseRefsAreAmbiguous(storedLookup.subjects)) {
           setQuery(raw);
           setCaseNotice({ reason: "case-ambiguous", ref: raw });
           setLiveError(null);
@@ -1390,7 +1399,7 @@ export default function App() {
   );
 
   const onSafeAudit = useCallback(
-    (raw: string, priv = false) => onSafeAuditMode(raw, priv, "token"),
+    (raw: string, priv = false) => onSafeAuditMode(raw, priv, "investigation"),
     [onSafeAuditMode],
   );
 
@@ -1403,7 +1412,7 @@ export default function App() {
     });
     // A paid rabbit-hole action is always a fresh investigation. Stored cases
     // remain available through the free "Open saved report" path in the sheet.
-    void onSafeAuditMode(raw, priv, "token", true, false);
+    void onSafeAuditMode(raw, priv, "investigation", true, false);
   }, [dossier, onSafeAuditMode]);
 
   const returnToResearchSource = useCallback(async () => {
