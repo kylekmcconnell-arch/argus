@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChatsCircle, UsersThree } from "@phosphor-icons/react";
-import type { SocialActivityBucket, SocialActivityMention, SocialActivitySnapshot } from "../data/socialActivity";
+import { useMemo, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, ChatsCircle, Pulse, UsersThree } from "@phosphor-icons/react";
+import { observedSocialActivityLevel, type SocialActivityBucket, type SocialActivityMention, type SocialActivitySnapshot } from "../data/socialActivity";
 import { plainLanguageSummary } from "../lib/plainLanguage";
 import { PfpAvatar } from "./PfpCheck";
 
@@ -60,15 +60,15 @@ function incompleteCopy(snapshot: SocialActivitySnapshot): string {
       ? "post_limit"
       : "pagination_incomplete");
   if (reason === "post_limit") {
-    return `ARGUS collected the maximum ${integer.format(snapshot.collection.maxPosts)} posts allowed for this saved scan. Account figures are minimums, so the activity score stays withheld.`;
+    return `Minimum observed counts: the saved scan reached its ${integer.format(snapshot.collection.maxPosts)}-post collection ceiling.`;
   }
   if (reason === "provider_error") {
-    return "X stopped responding before ARGUS finished this saved search. Account figures are minimums, so the activity score stays withheld.";
+    return "Minimum observed counts: X stopped responding after ARGUS had already captured the activity shown above.";
   }
   if (reason === "time_budget") {
-    return "ARGUS stopped this social search to leave time for required checks. Account figures are minimums, so the activity score stays withheld.";
+    return "Minimum observed counts: this saved search ended after the activity shown above was captured.";
   }
-  return "X returned more result pages than this saved scan collected. Account figures are minimums, so the activity score stays withheld.";
+  return "Minimum observed counts: more matching result pages existed than this saved search collected.";
 }
 
 const followers = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
@@ -152,10 +152,13 @@ export function SocialActivityPanel({
   snapshot,
   className = "",
   panelCostToken,
+  afterActivity,
 }: {
   snapshot: SocialActivitySnapshot;
   className?: string;
   panelCostToken?: string;
+  /** Optional report-specific context, such as direct-subject accusation leads. */
+  afterActivity?: ReactNode;
 }) {
   const [choice, setChoice] = useState<WindowChoice>("24h");
   const window = choice === "24h" ? snapshot.windows.last24Hours : snapshot.windows.last7Days;
@@ -174,6 +177,11 @@ export function SocialActivityPanel({
   const subject = snapshot.queryBasis.projectName || "this project";
   const identity = projectIdentityPhrase(snapshot.queryBasis);
   const savedSearchNote = publicSocialSearchNote(snapshot);
+  const observedLevel = observedSocialActivityLevel(snapshot);
+  const scoreExplanation = snapshot.activityScore === null
+    ? observedLevel?.detail ?? "Not enough matched conversation was available to describe activity."
+    : "Measures conversation activity, not project quality or safety.";
+  const hasConcentration = snapshot.top10AccountSharePct !== null;
 
   return (
     <section id="social-activity" className={`panel scroll-mt-28 px-5 py-5 ${className}`} aria-labelledby="social-activity-title">
@@ -211,20 +219,23 @@ export function SocialActivityPanel({
               <p className="mt-1 text-[11px] text-ink-faint">{change !== null ? "compared with the previous 24 hours" : "switch to 24 hours for the short-term change"}</p>
             </div>
             <div className="pb-1 lg:border-l lg:border-line/70 lg:pl-5">
-              <div className="stat-label">Activity score</div>
+              <div className="stat-label">{snapshot.activityScore === null ? "Activity level" : "Activity score"}</div>
               {snapshot.activityScore === null ? (
-                <div className="mono mt-1 text-[18px] font-semibold text-ink">Withheld</div>
+                <div className="mt-1 flex items-center gap-2 text-[18px] font-semibold text-ink">
+                  <Pulse aria-hidden="true" size={19} weight="duotone" className="text-pass" />
+                  {observedLevel ? `${observedLevel.label} observed` : "Not enough activity"}
+                </div>
               ) : (
                 <div className="mono mt-1 inline-flex items-baseline gap-1 rounded border border-line-2 px-2 py-1 text-[15px] font-semibold">
                   <span className="text-pass">{snapshot.activityScore}</span>
                   <span className="text-ink">/ 100</span>
                 </div>
               )}
-              <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">Measures conversation activity, not project quality or safety.</p>
+              <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">{scoreExplanation}</p>
             </div>
           </div>
 
-          <div className="grid divide-y divide-line/60 border-b border-line/70 py-1 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div className={`grid divide-y divide-line/60 border-b border-line/70 py-1 ${hasConcentration ? "sm:grid-cols-3" : "sm:grid-cols-2"} sm:divide-x sm:divide-y-0`}>
             <div className="flex items-center gap-3 py-3 sm:pr-4">
               <UsersThree aria-hidden="true" size={20} weight="duotone" className="text-signal-lift" />
               <div><span className="mono text-[15px] font-semibold text-ink">{snapshot.windows.last7Days.uniqueAccounts === null ? "Unknown" : `${snapshot.windows.last7Days.authorCoverageComplete ? "" : "At least "}${integer.format(snapshot.windows.last7Days.uniqueAccounts)}`}</span><span className="ml-1 text-[12.5px] text-ink-dim">unique accounts</span></div>
@@ -233,19 +244,25 @@ export function SocialActivityPanel({
               <ChatsCircle aria-hidden="true" size={20} weight="duotone" className="text-signal-lift" />
               <div><span className="mono text-[15px] font-semibold text-ink">{snapshot.windows.last7Days.postCount === null ? "Unknown" : `${snapshot.collection.countsRequestCompleted ? "" : "At least "}${integer.format(snapshot.windows.last7Days.postCount)}`}</span><span className="ml-1 text-[12.5px] text-ink-dim">posts in 7 days</span></div>
             </div>
-            <div className="py-3 sm:pl-4">
-              <span className="mono text-[15px] font-semibold text-ink">{snapshot.top10AccountSharePct === null ? "Unknown" : `${snapshot.top10AccountSharePct}%`}</span>
-              <span className="ml-1 text-[12.5px] text-ink-dim">from the 10 most active accounts</span>
-            </div>
+            {hasConcentration && (
+              <div className="py-3 sm:pl-4">
+                <span className="mono text-[15px] font-semibold text-ink">{snapshot.top10AccountSharePct}%</span>
+                <span className="ml-1 text-[12.5px] text-ink-dim">from the 10 most active accounts</span>
+              </div>
+            )}
           </div>
 
           <Chart buckets={chartBuckets} label={`Public X posts matched to this project ${period}`} />
           {snapshot.state === "partial" && (
-            <p className="mt-3 text-[11px] font-medium text-caution">{incompleteCopy(snapshot)}</p>
+            <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
+              {incompleteCopy(snapshot)} Totals are minimums; no safety or project score depends on this social pulse.
+            </p>
           )}
           <MentionerBoard mentioners={snapshot.mentioners ?? []} identity={identity} panelCostToken={panelCostToken} />
         </>
       )}
+
+      {afterActivity && <div className="mt-6 border-t border-line/70 pt-5">{afterActivity}</div>}
 
       <div className="mt-4 flex flex-wrap items-start justify-between gap-2 border-t border-line/70 pt-3 text-[11px] leading-relaxed text-ink-faint">
         <p className="max-w-3xl">{savedSearchNote} Matches use {identity} saved with this report.</p>

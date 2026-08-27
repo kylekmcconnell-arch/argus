@@ -23,6 +23,22 @@ function StageStateIcon({ state, icon: Icon }: { state: InvestigationStageState;
   return <Icon size={18} weight="regular" aria-hidden />;
 }
 
+function estimatedTimeRemaining(
+  kind: InvestigationProgressKind,
+  stages: Array<{ state: InvestigationStageState }>,
+  working: boolean,
+): string {
+  if (!working) return "Complete";
+  const total = Math.max(stages.length, 1);
+  const remaining = stages.filter((stage) => stage.state !== "observed").length;
+  // Grounded in the documented route envelopes: token scans are about one
+  // minute, person scans about two, and full investigations about six. Stage
+  // progress narrows the estimate without pretending we know provider latency.
+  const baselineMinutes = kind === "investigation" ? 6 : kind === "person" ? 2 : 1;
+  const minutes = Math.max(1, Math.ceil(baselineMinutes * (remaining / total)));
+  return minutes === 1 ? "about 1 minute" : `about ${minutes} minutes`;
+}
+
 export function InvestigationProgressCanvas({ kind, subject = "the subject", subtitle, steps, working, hop }: {
   kind: InvestigationProgressKind; subject?: string; subtitle?: string; steps: TraceStep[]; working: boolean; hop?: string;
 }) {
@@ -35,6 +51,7 @@ export function InvestigationProgressCanvas({ kind, subject = "the subject", sub
     : activeStage === "finalize" || activeStage === "complete" ? "settling"
       : activeStage === "analysis" ? "focused" : "searching";
   const headline = kind === "resolution" ? `Finding the right match for ${subject}` : `Building the case on ${subject}`;
+  const timeRemaining = estimatedTimeRemaining(kind, progress.stages, working);
 
   return (
     <section className="research-command-deck" aria-label="Investigation progress">
@@ -46,6 +63,11 @@ export function InvestigationProgressCanvas({ kind, subject = "the subject", sub
           </div>
           <h1 className="research-command-title">{headline}</h1>
           {subtitle && <p className="research-command-subtitle">{subtitle}</p>}
+          <div className="research-eta" aria-label={`Estimated time remaining: ${timeRemaining}`}>
+            <span>Estimated time remaining</span>
+            <strong>{timeRemaining}</strong>
+            {working && <small>Updates as each research stage finishes.</small>}
+          </div>
         </div>
 
         <div className="research-observation">

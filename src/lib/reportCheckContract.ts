@@ -17,6 +17,17 @@ export const TOKEN_REQUIRED_CHECK_IDS: ReadonlySet<string> = new Set([
   "wallet-clustering",
   "market-intelligence",
   "ofac-sanctions-address",
+]);
+
+/**
+ * A full project investigation has one additional never-waive screen. The
+ * standalone token collector does not run the prior-report trust-graph join,
+ * so putting that row in its denominator made every otherwise complete token
+ * scan read 6/7 forever. Investigations do run and persist this screen through
+ * the bound project-account collector.
+ */
+export const INVESTIGATION_REQUIRED_CHECK_IDS: ReadonlySet<string> = new Set([
+  ...TOKEN_REQUIRED_CHECK_IDS,
   "trust-graph-connections",
 ]);
 
@@ -37,6 +48,7 @@ export const TOKEN_SUPPLEMENTAL_CHECK_IDS: ReadonlySet<string> = new Set([
   "documents-audits",
   "news-press",
   "github-forensics",
+  "trust-graph-connections",
 ]);
 
 /**
@@ -66,10 +78,13 @@ export function applyReportCheckContract(
   kind: CanonicalReportKind,
   checks: readonly ScanCheck[],
 ): ScanCheck[] {
+  const requiredIds = kind === "investigation"
+    ? INVESTIGATION_REQUIRED_CHECK_IDS
+    : TOKEN_REQUIRED_CHECK_IDS;
   const normalized = checks.map((check) => {
     const checkId = check.checkId?.trim() ?? "";
     if (kind === "token" || kind === "investigation") {
-      if (checkId && TOKEN_REQUIRED_CHECK_IDS.has(checkId)) {
+      if (checkId && requiredIds.has(checkId)) {
         return { ...check, decisionCritical: true };
       }
       if (checkId && TOKEN_SUPPLEMENTAL_CHECK_IDS.has(checkId)) {
@@ -93,7 +108,7 @@ export function applyReportCheckContract(
 
   if (kind === "person") return normalized;
   const present = new Set(normalized.map((check) => check.checkId).filter(Boolean));
-  const missingRequired = [...TOKEN_REQUIRED_CHECK_IDS]
+  const missingRequired = [...requiredIds]
     .filter((checkId) => !present.has(checkId))
     .map((checkId): ScanCheck => ({
       checkId,
@@ -112,7 +127,10 @@ export function hasExplicitReportCheckContract(
 ): boolean {
   if (kind === "token" || kind === "investigation") {
     const ids = new Set(checks.map((check) => check.checkId).filter(Boolean));
-    return [...TOKEN_REQUIRED_CHECK_IDS].every((checkId) => ids.has(checkId));
+    const requiredIds = kind === "investigation"
+      ? INVESTIGATION_REQUIRED_CHECK_IDS
+      : TOKEN_REQUIRED_CHECK_IDS;
+    return [...requiredIds].every((checkId) => ids.has(checkId));
   }
   return checks.length > 0
     && checks.every((check) => typeof check.decisionCritical === "boolean")

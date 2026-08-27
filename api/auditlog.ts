@@ -111,12 +111,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       };
       // An owner reconciling another analyst's entry (opening a shared case
       // folds the stored outcome back into the rail) must not become its
-      // author: merge-duplicates leaves omitted columns untouched, so the
-      // original contributor survives the update.
+      // author. Use an exact PATCH instead of an upsert: an upsert whose target
+      // row is absent becomes an INSERT, and omitting the required contributor
+      // columns then fails with Postgres 23502.
       const editingForeignRow = mode === "update" && !clientId.startsWith(`${auth.userId}:`);
       if (editingForeignRow) {
-        delete (row as Partial<typeof row>).contributor;
-        delete (row as Partial<typeof row>).contributor_user_id;
+        const patch: Partial<typeof row> = { ...row };
+        delete patch.organization_id;
+        delete patch.client_id;
+        delete patch.contributor;
+        delete patch.contributor_user_id;
+        const response = await fetch(
+          `${credentials.url}/rest/v1/${TABLE}?${orgFilter}&client_id=eq.${encodeURIComponent(clientId)}`,
+          {
+            method: "PATCH",
+            headers: serviceHeaders(credentials.key, { prefer: "return=minimal" }),
+            body: JSON.stringify(patch),
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        if (!response.ok) {
+          throw new Error(`audit log update failed (${response.status}): ${(await response.text()).slice(0, 240)}`);
+        }
+        res.status(200).json({ ok: true, clientId });
+        return;
       }
       const resolution = mode === "update" ? "merge-duplicates" : "ignore-duplicates";
       const response = await fetch(

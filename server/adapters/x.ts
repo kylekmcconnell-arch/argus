@@ -2711,11 +2711,11 @@ export async function searchAdverseSignals(
     ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}`
     : `the person behind X account @${h}`;
   const system =
-    "You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, or general community complaints/FUD. " +
-    "Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. " +
-    "Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. " +
+    "You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, stolen technology or intellectual property, insider dumping, unpaid obligations, misleading partnerships, or material community complaints/FUD. " +
+    "Search X, Reddit, Trustpilot and other review sites, scam-report sites, technical forums, and news. Run exact-handle, display-name, domain, and token-ticker variants with terms such as scam, rug, fraud, stolen, copied, exploit, drain, dump, complaint, lawsuit, warning, and beware. Search both quoted and unquoted variants. " +
+    "Prefer the original post, complaint, filing, or article over a social mirror or search-result page. Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. " +
     "Reply with ONLY compact JSON: {\"signals\":[{\"category\":\"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud\",\"claim\":\"\",\"source\":\"\",\"source_url\":\"\"}]}. Never use em dashes.";
-  const text = await generalWebSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}` });
+  const text = await generalWebSearch(system, `Subject: ${subject}. Surface direct source URLs that may contain complaints or accusations involving rug, slow rug, liquidity pull, wallet drains, exit scam, stolen technology, insider dumping, misleading claims, or other material misconduct. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}:v2` });
   // No answer, and an answer we cannot read, are both screens that did not run.
   if (!text) return ADVERSE_NOT_ANSWERED;
   const m = text.match(/\{[\s\S]*\}/);

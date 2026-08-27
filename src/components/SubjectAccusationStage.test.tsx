@@ -48,12 +48,14 @@ afterEach(() => {
 });
 
 describe("SubjectAccusationStage", () => {
-  it("renders a people-card rumor with speaker pfp, quote, cannot-verify stamp, and source link", () => {
+  it("renders a source-triaged accusation lead with verification guidance and a source link", () => {
     act(() => {
       root.render(<SubjectAccusationStage leads={[lead]} subject="@alice" />);
     });
-    expect(container.textContent).toContain("unconfirmed · not scored");
-    expect(container.textContent).toContain("We cannot verify this.");
+    expect(container.textContent).toContain("1 lead · not scored");
+    expect(container.textContent).toContain("Uncorroborated");
+    expect(container.textContent).toContain("Original social post");
+    expect(container.textContent).toContain("Find an original post, independent report, or first-party response.");
     expect(container.textContent).toContain("rug pull accusation lead");
     expect(container.textContent).toContain("pfp:zachxbt");
     expect(container.querySelector('a[href="https://x.com/zachxbt/status/123456789"]')).not.toBeNull();

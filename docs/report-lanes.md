@@ -10,6 +10,10 @@ ARGUS has two independently owned report presentations over one shared evidence 
 
 Both owners can read and run both reports. The ownership boundary controls who may merge presentation changes.
 
+## Shared divergence baseline
+
+Both lanes use the approved Kyle report presentation as their common visual and narrative baseline as of 26 August 2026. From that synchronization point forward, each owner may evolve only their own protected staging lane; changes do not flow into the other lane automatically.
+
 ## Permanent staging environments
 
 - Kyle: https://argus-git-codex-staging-kyle-reports-kyle-mcconnells-projects.vercel.app

@@ -45,6 +45,8 @@ describe("InvestigationProgressCanvas", () => {
     expect(container?.textContent).toContain("twitterapi.io");
     expect(container?.textContent).toContain("grok");
     expect(container?.textContent).toContain("Candidate lead");
+    expect(container?.textContent).toContain("Estimated time remaining");
+    expect(container?.textContent).toMatch(/about [12] minute/);
     expect(container?.textContent).not.toContain("GitHub");
     expect(container?.querySelectorAll("[aria-label='Sources checked'] .chip")).toHaveLength(2);
 
@@ -59,6 +61,7 @@ describe("InvestigationProgressCanvas", () => {
     expect(container?.textContent).toContain("Resolving the exact subject");
     expect(container?.textContent).toContain("confirming the official name and links before searching sources");
     expect(container?.textContent).toContain("No sources checked yet");
+    expect(container?.textContent).toContain("about 1 minute");
     expect(container?.textContent).not.toMatch(/DexScreener|GoPlus|Claude|Grok|GitHub/);
   });
 
@@ -110,5 +113,6 @@ describe("InvestigationProgressCanvas", () => {
 
     expect(container?.querySelector("[data-argus-eye-state='idle']")).not.toBeNull();
     expect(container?.querySelector(".argus-eye-live-ring")).toBeNull();
+    expect(container?.textContent).toContain("Complete");
   });
 });

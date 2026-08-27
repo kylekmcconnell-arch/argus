@@ -18,7 +18,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import {
   addressStats, classifyAddresses, attributeSells, farmStats, vaultStats,
   type LedgerTransfer,
-} from "./_ledgerflow";
+} from "./_ledgerflow.js";
 
 export const config = { maxDuration: 60 };
 

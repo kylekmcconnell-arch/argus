@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Dossier } from "../data/dossier";
 import { buildReport, SUBJECTS } from "../data/subjects";
+import type { ThreatScan } from "../threat/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -28,8 +29,11 @@ vi.mock("./LinkEntity", () => ({ LinkEntity: () => { harness.livePanel("link-ent
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => <div>service-ready</div> }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: (props: Record<string, unknown>) => { harness.trustGraph(props); return null; } }));
 vi.mock("./ArgusEyeAssistant", () => ({ ArgusEyeAssistant: (props: Record<string, unknown>) => { harness.askReport(props); return null; } }));
-vi.mock("./Avatar", () => ({ Avatar: () => null }));
+vi.mock("./Avatar", () => ({
+  Avatar: ({ src }: { src: string | null }) => src ? <img src={src} alt="" /> : null,
+}));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
+vi.mock("./ThreatScanPage", () => ({ ThreatReport: () => null }));
 
 import { Report } from "./Report";
 
@@ -55,6 +59,40 @@ function decisionBasisText(): string {
 }
 
 describe("private person report evidence boundary", () => {
+  it("uses the linked token scan as Style 2's separate second score", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: {
+        ...base.report,
+        governing_score: 54,
+        composite_verdict: "CAUTION",
+      },
+      threat: {
+        dossier: {
+          score: 79,
+          verdict: "PASS",
+          axes: [
+            { key: "T1", label: "Liquidity & lock", score: 18, weight: 24, rationale: "Usable pool." },
+            { key: "T2", label: "Contract safety", score: 16, weight: 26, rationale: "No critical flag." },
+          ],
+        },
+      } as unknown as ThreatScan,
+    } as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const dual = container.querySelector('[data-report-score="dual"]');
+    expect(dual).not.toBeNull();
+    expect(dual?.textContent).toContain("Person diligence score54");
+    expect(dual?.textContent).toContain("Token safety score79");
+    expect(dual?.textContent).toContain("The liquidity");
+    expect(dual?.textContent).toContain("Code & security");
+    expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
+  });
+
   it("puts the exact unfinished required check ahead of general research questions", () => {
     const base = buildReport(SUBJECTS[1]);
     const requiredChecks = [
@@ -222,10 +260,40 @@ describe("private person report evidence boundary", () => {
     expect(container.querySelectorAll('[data-report-experience-shell="true"]')).toHaveLength(1);
     expect(container.querySelectorAll('[data-canonical-report-header="true"]')).toHaveLength(1);
     expect(container.textContent).toContain("SuperGemma");
-    expect(container.textContent).toContain("What this report means");
+    expect(container.textContent).toContain("The state of the house");
     expect(container.querySelector('a[href="https://supergemma.example"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://x.com/0xsupergemma"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Report result and check status"]')?.classList.contains("hidden")).toBe(true);
+  });
+
+  it("does not mistake a saved website value for the product narrative", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      bio: "DeFi for real-world assets, live on Robinhood Chain.",
+      basicFacts: [{
+        factId: "earn-product-site",
+        subjectKey: "@earnonhood",
+        predicate: "product",
+        value: "earnonhood.com",
+        normalizedValue: "earnonhood.com",
+        status: "verified",
+        critical: true,
+        attributionScope: "direct_subject",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "official-site",
+        sources: [],
+      }],
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const brief = container.querySelector('[data-canonical-decision-brief="true"]');
+    expect(brief?.textContent).toContain("DeFi for real-world assets, live on Robinhood Chain.");
+    expect(brief?.textContent).not.toContain("What it does: earnonhood.com");
   });
 
   it("promotes a fully sourced official-claim conflict into the shared decision brief", () => {
@@ -406,7 +474,7 @@ describe("private person report evidence boundary", () => {
     expect(result?.className).toBe("hidden");
     expect(result?.getAttribute("aria-hidden")).toBe("true");
     const decisionCanvas = container.querySelector("#report-summary");
-    expect(decisionCanvas?.textContent).toContain("What this report means");
+    expect(decisionCanvas?.textContent).toContain("The state of the house");
     expect(decisionCanvas?.textContent).toContain("Required report checks");
 
     const toolbar = container.querySelector("header.sticky");
@@ -622,7 +690,8 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Investigative team candidates");
+    expect(container.textContent).toContain("Needs verification");
+    expect(container.textContent).not.toContain("Investigative team candidates");
     expect(container.textContent).toContain("Model Team Lead");
     expect(container.textContent).toContain("not identity proof");
     expect(container.textContent).not.toContain("identity resolved through the named team");
@@ -640,6 +709,7 @@ describe("private person report evidence boundary", () => {
         name: "Ada Example",
         handle: "@ada_example",
         role: "Chief Technology Officer",
+        avatarUrl: "https://pbs.twimg.com/profile_images/1/ada.jpg",
         linkedin: "linkedin.com/in/ada-example",
         evidence: "Named on the saved official team page.",
         source: "official team page",
@@ -681,21 +751,21 @@ describe("private person report evidence boundary", () => {
 
     act(() => root.render(<Report dossier={dossier} onReset={() => {}} />));
 
-    expect(container.querySelector("#report-team-heading")?.textContent).toContain("People tied to this project");
+    expect(container.querySelector("#report-team-heading")?.textContent).toContain("One roster. Evidence first.");
     expect(container.textContent).toContain("ARGUS found 1 source-grounded person");
-    expect(container.textContent).toContain("1 named person");
+    expect(container.textContent).toContain("1 verified · 0 to verify");
     expect(container.textContent).not.toContain("Probable");
     expect(container.querySelector(".team-person-card")?.textContent).toContain("Ada Example");
     expect(container.querySelector(".team-person-card")?.textContent).toContain("Chief Technology Officer");
+    expect(container.querySelector('img[src="https://pbs.twimg.com/profile_images/1/ada.jpg"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://fixture.example/team"]')?.textContent).toContain("Open role source");
     expect(container.querySelector('a[href="https://github.com/ada-example"]')?.textContent).toContain("GitHub");
     expect(container.querySelector('a[href="https://x.com/ada_example"]')?.textContent).toContain("profile link proof");
-    const continuity = container.querySelector('[aria-label="Frozen leadership continuity ledger"]');
-    expect(continuity?.textContent).toContain("provider record lists project");
-    expect(continuity?.textContent).toContain("provider record ends Mar 1, 2024");
-    expect(continuity?.textContent).toContain("provider record did not answer for this project");
-    expect(continuity?.textContent).toContain("not evidence that this person was never involved");
-    expect(continuity?.querySelector('a[href="https://linkedin.com/in/ada-example"]')).not.toBeNull();
+    expect(container.querySelector(".team-person-card")?.textContent).toContain("current in provider record");
+    expect(container.textContent).toContain("Leadership records to reconcile");
+    expect(container.textContent).toContain("provider record ends Mar 1, 2024");
+    expect(container.textContent).toContain("provider record did not answer for this project");
+    expect(container.querySelector('a[href="https://linkedin.com/in/ada-example"]')).not.toBeNull();
   });
 
   it("renders a server-derived model-enriched lead once, not re-derived from the sanitized team copy", () => {
@@ -728,11 +798,9 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    const candidatesCard = () => [...container.querySelectorAll<HTMLElement>("div")]
-      .find((el) => el.className.includes("border-caution/25"));
-    expect(candidatesCard()).toBeDefined();
-    expect((candidatesCard()?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(1);
-    expect(candidatesCard()?.textContent).toContain("candidate @jane_founder");
+    expect(container.textContent).not.toContain("Needs verification");
+    expect(container.textContent).not.toContain("candidate @jane_founder");
+    expect((container.querySelector("#identity-evidence")?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(1);
 
     // A legacy sanitized row no longer has the model-supplied handle. It fails
     // closed instead of resurfacing an unverifiable name-only candidate.
@@ -740,7 +808,7 @@ describe("private person report evidence boundary", () => {
     act(() => {
       root.render(<Report dossier={legacy} onReset={() => {}} onAudit={() => {}} />);
     });
-    expect((candidatesCard()?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(0);
+    expect(container.textContent).not.toContain("candidate @jane_founder");
   });
 
   it("hides model-only team names that have no stable identity locator", () => {
@@ -765,6 +833,42 @@ describe("private person report evidence boundary", () => {
 
     expect(container.textContent).not.toContain("Dr. Unrelated Executive");
     expect(container.textContent).not.toContain("Investigative team candidates");
+  });
+
+  it("keeps support accounts, integrations, grantors, and speakers out of team candidates", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const candidate = (name: string, handle: string, role: string) => ({
+      name,
+      handle,
+      role,
+      source: "Saved orientation research",
+      provider: "grok",
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
+    });
+    const dossier = {
+      ...base,
+      webTeam: [],
+      webTeamLeads: [
+        candidate("Skyler", "@skyler", "Community Manager"),
+        candidate("Ask Fedi", "@askfedi", "Support account"),
+        candidate("Tapnob", "@tapnobhq", "Mini-app integration"),
+        candidate("HRF", "@hrf", "Grantor"),
+        candidate("Conference Guest", "@guest", "Event speaker"),
+      ],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const people = container.querySelector("#identity-evidence");
+    expect(people?.textContent).toContain("Needs verification");
+    expect(people?.textContent).toContain("Skyler");
+    expect(people?.textContent).not.toContain("Ask Fedi");
+    expect(people?.textContent).not.toContain("Tapnob");
+    expect(people?.textContent).not.toContain("HRF");
+    expect(people?.textContent).not.toContain("Conference Guest");
   });
 
   it("cleans namesake citations and answers the project product from the frozen official profile", () => {
@@ -1836,7 +1940,7 @@ describe("decision-safe person report presentation", () => {
     expect(decisionResult?.getAttribute("aria-hidden")).toBe("true");
     const decisionCanvas = container.querySelector("#report-summary");
     expect(decisionCanvas?.textContent).toContain("INCOMPLETE");
-    expect(decisionCanvas?.textContent).toContain("What this report means");
+    expect(decisionCanvas?.textContent).toContain("The state of the house");
     expect(decisionCanvas?.textContent).not.toContain("EARLY SCORE");
     const preliminarySignal = [...container.querySelectorAll<HTMLElement>(".chip")]
       .find((chip) => chip.textContent?.includes("EARLY SCORE"));

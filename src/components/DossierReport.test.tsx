@@ -79,6 +79,17 @@ const livePayload = (): Record<string, unknown> => ({
 });
 
 describe("DossierReport", () => {
+  it("can render only a canonical reading beat and leave sources to the report appendix", () => {
+    act(() => {
+      root.render(<DossierReport payload={livePayload()} includeBeats={["team"]} includeSources={false} />);
+    });
+
+    expect(container.querySelector('[data-beat="team"]')).not.toBeNull();
+    expect(container.querySelector('[data-beat="verdict"]')).toBeNull();
+    expect(container.querySelector('[data-beat="coverage"]')).toBeNull();
+    expect(container.querySelector("#dossier-sources")).toBeNull();
+  });
+
   it("renders buildDossier of the live payload, never the dynex fixture", () => {
     render(livePayload());
     expect(container.textContent).toContain("@clutchmarkets");
