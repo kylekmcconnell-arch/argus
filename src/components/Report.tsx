@@ -3703,10 +3703,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 snapshot={f.socialActivity}
                 className="canonical-social-section mt-3"
                 panelCostToken={panelCostToken}
-                afterActivity={subjectLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
+                afterActivity={subjectAdverseLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
                   <div id="subject-leads" className="scroll-mt-28">
                     <SubjectAccusationStage
-                      leads={subjectLeads}
+                      leads={subjectAdverseLeads}
                       socialLeads={f.socialActivity?.adverseMentions}
                       subject={report.handle}
                       summary={subjectLeadSummary}
@@ -3938,10 +3938,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
             snapshot={f.socialActivity}
             className="mt-3"
             panelCostToken={panelCostToken}
-            afterActivity={subjectLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
+            afterActivity={subjectAdverseLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
               <div id="subject-leads" className="scroll-mt-28">
                 <SubjectAccusationStage
-                  leads={subjectLeads}
+                  leads={subjectAdverseLeads}
                   socialLeads={f.socialActivity?.adverseMentions}
                   subject={report.handle}
                   summary={subjectLeadSummary}
@@ -5043,11 +5043,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         {/* Leads that name the subject themselves are never filed behind a
             disclosure the reader has to open: a reader who sees only the
             collapsed related-entity list would read this page as clean. */}
-        {subjectLeads.length > 0 && !(f.socialActivity && roles.includes(SubjectClass.PROJECT)) && (
+        {subjectAdverseLeads.length > 0 && !(f.socialActivity && roles.includes(SubjectClass.PROJECT)) && (
           <div id="subject-leads" className="scroll-mt-28">
             <Section title="Adverse conversation" kicker="direct-subject leads · never counted in this score">
               <SubjectAccusationStage
-                leads={subjectLeads}
+                leads={subjectAdverseLeads}
                 socialLeads={f.socialActivity?.adverseMentions}
                 subject={report.handle}
                 summary={subjectLeadSummary}

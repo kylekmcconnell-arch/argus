@@ -2063,10 +2063,10 @@ export function InvestigationReport({
                 snapshot={socialActivity}
                 className="mt-3"
                 panelCostToken={panelCostToken}
-                afterActivity={accountLeads.subjectLeads.length > 0 || (socialActivity.adverseMentions?.length ?? 0) > 0 ? (
+                afterActivity={accountLeads.subjectAdverseLeads.length > 0 || (socialActivity.adverseMentions?.length ?? 0) > 0 ? (
                   <div id="subject-leads" className="scroll-mt-28">
                     <SubjectAccusationStage
-                      leads={accountLeads.subjectLeads}
+                      leads={accountLeads.subjectAdverseLeads}
                       socialLeads={socialActivity.adverseMentions}
                       subject={accountLeadSubject}
                       panelCostToken={panelCostToken}
@@ -2084,10 +2084,10 @@ export function InvestigationReport({
             title="Who is behind this project"
             description="Team identity is a core diligence question. Start with the people and roles supported by sources, then review the project account and token creator."
           />
-          {accountLeads.subjectLeads.length > 0 && !socialActivity && (
+          {accountLeads.subjectAdverseLeads.length > 0 && !socialActivity && (
             <div id="subject-leads" className="mb-4 scroll-mt-28">
               <SubjectAccusationStage
-                leads={accountLeads.subjectLeads}
+                leads={accountLeads.subjectAdverseLeads}
                 subject={accountLeadSubject}
                 panelCostToken={panelCostToken}
               />
