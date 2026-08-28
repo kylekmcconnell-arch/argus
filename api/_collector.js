@@ -15,7 +15,8 @@ var PROVIDERS = [
   { id: "arkham", label: "Arkham", env: ["ARKHAM_API_KEY"], free: false, feeds: "score-neutral identity and exposure context for evidence-bound wallets" },
   { id: "bitquery", label: "Bitquery (not yet in core collector)", env: ["BITQUERY_API_KEY"], free: false, feeds: "reserved credential only; does not run or attest core audits" },
   { id: "analyst", label: "Grok analyst agent", env: ["XAI_API_KEY"], free: false, feeds: "messy-to-structured axis scoring + rationale + headline" },
-  { id: "openrouter", label: "OpenRouter (optional extract fallback)", env: ["OPENROUTER_API_KEY"], free: false, feeds: "cheap extraction fallback when ARGUS_PROVIDER_FALLBACKS is on" }
+  { id: "openrouter", label: "OpenRouter (optional extract fallback)", env: ["OPENROUTER_API_KEY"], free: false, feeds: "cheap extraction fallback when ARGUS_PROVIDER_FALLBACKS is on" },
+  { id: "chart-signals", label: "Chart signals (self-hosted technical posture)", env: ["CHART_SIGNALS_URL", "CHART_SIGNALS_TOKEN"], free: true, feeds: "generic chart-posture panel on token scans (majors only)" }
 ];
 function hasEnv(keys) {
   if (keys.length === 0) return true;
@@ -8309,6 +8310,45 @@ function normalizeAnalystCitationEligibility(value, evidenceCatalog, axisCatalog
     return changed ? { ...root, axes } : value;
   }
   return value;
+}
+function reconcileAnalystVerdictLineage(verdict, evidenceCatalog, axisCatalog2) {
+  const artifacts = new Map(evidenceCatalog.map((artifact) => [artifact.artifactId, artifact]));
+  const roleByAxis = new Map(axisCatalog2.map((axis) => [axis.axis, axis.role]));
+  const removed = [];
+  const unique2 = (values) => [...new Set(values)];
+  const eligible = (axis, artifactId, relation) => {
+    const artifact = artifacts.get(artifactId);
+    const allowed = Boolean(
+      artifact && artifact.eligibleAxes.includes(axis) && (relation === "support" || isSubstantiveArtifact(artifact)) && (relation === "support" || roleByAxis.get(axis) !== "PROJECT" || artifact.counterEligibleAxes?.includes(axis))
+    );
+    if (!allowed) {
+      removed.push({
+        axis,
+        artifactId,
+        relation,
+        eligibleAxes: artifact ? [...artifact.eligibleAxes] : []
+      });
+    }
+    return allowed;
+  };
+  const axes = verdict.axes.map((row) => {
+    const support = unique2(row.evidenceRefs).filter((artifactId) => eligible(row.axis, artifactId, "support"));
+    const supportSet = new Set(support);
+    const counter = unique2(row.counterEvidenceRefs).filter((artifactId) => !supportSet.has(artifactId) && eligible(row.axis, artifactId, "counter"));
+    return { ...row, evidenceRefs: support, counterEvidenceRefs: counter };
+  });
+  const unsupported = axes.find((row) => !row.evidenceRefs.some((artifactId) => isSubstantiveArtifact(artifacts.get(artifactId))));
+  if (unsupported) {
+    return {
+      verdict: null,
+      removed,
+      reason: `${unsupported.axis} has no substantive eligible support in the final report catalog`
+    };
+  }
+  return {
+    verdict: removed.length > 0 ? { ...verdict, axes } : verdict,
+    removed
+  };
 }
 function normalizeGroundedTeamNarrative(value, evidenceCatalog, axisCatalog2) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -35888,12 +35928,21 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     evidence.axes = [];
     const contradictionBefore = analystAttemptTotals(["record_contradictions"]);
     const scorerBefore = analystAttemptTotals(["record_verdict"]);
-    const [found, verdict] = await Promise.all([
+    const [found, rawVerdict] = await Promise.all([
       decisionPacketUsable ? scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt }) : Promise.resolve(null),
       scorerCanRun ? analyzeSubject(evidence.profile.handle, evidence.roles, scoringAxes, scoringEvidenceJson, {
         analystDeadlineAt
       }) : Promise.resolve(null)
     ]);
+    const lineageReconciliation = rawVerdict ? reconcileAnalystVerdictLineage(rawVerdict, frozenAxisEvidence, scoringAxes) : null;
+    const verdict = lineageReconciliation?.verdict ?? null;
+    if (lineageReconciliation?.removed.length) {
+      console.warn("[agent-lineage]", JSON.stringify({
+        state: verdict ? "reconciled" : "failed_closed",
+        removed: lineageReconciliation.removed,
+        ...lineageReconciliation.reason ? { reason: lineageReconciliation.reason } : {}
+      }));
+    }
     const contradictionAttempts = attemptDelta(
       contradictionBefore,
       analystAttemptTotals(["record_contradictions"])

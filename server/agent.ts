@@ -986,6 +986,88 @@ export function normalizeAnalystCitationEligibility(
   return value;
 }
 
+export interface AnalystLineageReconciliation {
+  verdict: AnalystVerdict | null;
+  removed: Array<{
+    axis: string;
+    artifactId: string;
+    relation: "support" | "counter";
+    eligibleAxes: string[];
+  }>;
+  reason?: string;
+}
+
+/**
+ * Reconcile a validated analyst result against the exact evidence catalog that
+ * will be attached to the finished report. The scorer can run against a
+ * compacted or supported-axis packet while persistence validates the final
+ * report catalog. Any drift between those two immutable views must be resolved
+ * before the report reaches the database, not surfaced to the reader as a save
+ * failure.
+ *
+ * This never invents or substitutes evidence. Ineligible extra references are
+ * removed. If that would leave an axis without substantive support, the whole
+ * verdict fails closed so the report can publish honestly as incomplete.
+ */
+export function reconcileAnalystVerdictLineage(
+  verdict: AnalystVerdict,
+  evidenceCatalog: AxisEvidenceRecord[],
+  axisCatalog: AnalystAxis[],
+): AnalystLineageReconciliation {
+  const artifacts = new Map(evidenceCatalog.map((artifact) => [artifact.artifactId, artifact]));
+  const roleByAxis = new Map(axisCatalog.map((axis) => [axis.axis, axis.role]));
+  const removed: AnalystLineageReconciliation["removed"] = [];
+  const unique = (values: readonly string[]): string[] => [...new Set(values)];
+  const eligible = (
+    axis: string,
+    artifactId: string,
+    relation: "support" | "counter",
+  ): boolean => {
+    const artifact = artifacts.get(artifactId);
+    const allowed = Boolean(
+      artifact
+      && artifact.eligibleAxes.includes(axis)
+      && (relation === "support" || isSubstantiveArtifact(artifact))
+      && (
+        relation === "support"
+        || roleByAxis.get(axis) !== "PROJECT"
+        || artifact.counterEligibleAxes?.includes(axis)
+      ),
+    );
+    if (!allowed) {
+      removed.push({
+        axis,
+        artifactId,
+        relation,
+        eligibleAxes: artifact ? [...artifact.eligibleAxes] : [],
+      });
+    }
+    return allowed;
+  };
+
+  const axes = verdict.axes.map((row) => {
+    const support = unique(row.evidenceRefs).filter((artifactId) =>
+      eligible(row.axis, artifactId, "support"));
+    const supportSet = new Set(support);
+    const counter = unique(row.counterEvidenceRefs).filter((artifactId) =>
+      !supportSet.has(artifactId) && eligible(row.axis, artifactId, "counter"));
+    return { ...row, evidenceRefs: support, counterEvidenceRefs: counter };
+  });
+  const unsupported = axes.find((row) => !row.evidenceRefs.some((artifactId) =>
+    isSubstantiveArtifact(artifacts.get(artifactId))));
+  if (unsupported) {
+    return {
+      verdict: null,
+      removed,
+      reason: `${unsupported.axis} has no substantive eligible support in the final report catalog`,
+    };
+  }
+  return {
+    verdict: removed.length > 0 ? { ...verdict, axes } : verdict,
+    removed,
+  };
+}
+
 // A verified project-team artifact makes "the team is unresolved" wording
 // internally false. Re-asking the model to rewrite an otherwise valid verdict
 // is expensive and can introduce a new citation error, so normalize only that
