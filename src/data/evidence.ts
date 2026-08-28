@@ -281,6 +281,8 @@ export interface ProjectTokenSnapshot {
   maxSupply?: number;
   liquidityUsd?: number;
   pairAddress?: string;
+  /** Provider-reported creation time for the canonical DEX pair, in Unix milliseconds. */
+  pairCreatedAt?: number;
   /** CoinGecko lifetime high, captured with the canonical-token snapshot. */
   ath?: {
     priceUsd?: number;

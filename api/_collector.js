@@ -1177,6 +1177,24 @@ function isPlausiblePersonRosterName(value) {
   return true;
 }
 
+// src/lib/teamCandidateIdentity.ts
+function teamCandidateSourceMatchesIdentity(candidate) {
+  const expected = (candidate.handle ?? "").trim().replace(/^@/, "").toLowerCase();
+  const sourceUrl2 = (candidate.sourceUrl ?? "").trim();
+  if (!expected || !sourceUrl2) return true;
+  try {
+    const url = new URL(sourceUrl2);
+    const host2 = url.hostname.replace(/^www\./, "").toLowerCase();
+    if (host2 !== "x.com" && host2 !== "twitter.com") return true;
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (!parts.length || parts[1]?.toLowerCase() === "status") return true;
+    if (parts.length === 1) return parts[0].replace(/^@/, "").toLowerCase() === expected;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 // src/lib/fundScaleEvidence.ts
 var SHA256_HEX = /^[a-f0-9]{64}$/i;
 var CLAIM_ID = /^[A-Za-z0-9:_-]{8,180}$/;
@@ -6911,6 +6929,7 @@ function assembleDossier(ev, live) {
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
     if (member.kind === "org") return [];
     if (!meaningfulTeamValue(member.name) || !isPlausiblePersonRosterName(member.name) || !meaningfulTeamValue(member.role)) return [];
+    if (!teamCandidateSourceMatchesIdentity(member)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     if (member.identity_link_evidence_origin !== "model_lead") return [];
     return [{
@@ -8134,7 +8153,7 @@ var PROJECT_SCORING_POLICY = [
   "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
   "P3 token conduct is governed by the frozen tokenApplicability state established before scoring. verified_live_token and historical_token_lineage are assessed; lineage means the analyst must consider predecessor names, contracts, migrations, and current status together. confirmed_tokenless removes P3 as not applicable and normalizes the project score over the remaining 80 weighted points. prelaunch_token_deferred also removes P3 without penalty until a token is live. unresolved_token_identity keeps P3 unresolved and the overall project verdict provisional. Never infer applicability from biography wording, never award clean-conduct points for lacking a token, and never penalize a tokenless business for having no token history.",
   "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
-  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end as a null result on this axis only, never counter-evidence against any other axis.",
+  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end because no positive backing signal was verified on that axis only, never as counter-evidence against any other axis.",
   "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
   "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
   "P6 transparency and integrity: a named legal operator, terms, public docs or repositories, governance materials, and consistent current disclosures justify a solid score. Published independent audits, treasury reporting, and fuller financial disclosures may justify the exceptional band. An unavailable disclosure path is a confidence gap unless a direct verified search establishes a material nondisclosure.",
@@ -10727,6 +10746,8 @@ Axis citation guidance (the substantive aliases are authoritative, while each co
 ${citationEligibilityTable}
 
 Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.
+
+PUBLIC LANGUAGE RULE: write for a reader, not for the research pipeline. Never use analyst shorthand such as "null backing", "null result", "governing limitation", "project and token continuity", or internal collection-state language in the headline, identity note, rationales, or gaps. Say exactly what was or was not verified in plain English, for example "no financial backers were verified" or "the token launched recently, so it has little trading history."
 
 ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the account has been silent. For a PROJECT/token, going quiet for weeks (roughly 21+ days) is a real liveness flag (abandoned, winding down, or quiet after a raise) and should temper traction/execution axes; for an individual it is a milder signal. Recent, steady posting is mildly positive, not a free pass.
 
@@ -15651,6 +15672,9 @@ function parseJson(raw) {
     return null;
   }
 }
+function isCompletedContinuityExtraction(raw) {
+  return Boolean(raw && parseJson(raw));
+}
 function admittedUrls(value, organicUrls) {
   return strings(value).map(canonicalUrl).filter((url) => organicUrls.has(url));
 }
@@ -15873,26 +15897,35 @@ async function collectEntityContinuity(ctx) {
     onOrganicResults: (results) => organic.push(...results)
   });
   let snapshot = raw ? normalizeEntityContinuity(raw, subject, organic, officialHosts(ctx), currentToken) : null;
-  if (!snapshot) return {
-    subject,
-    historicalAliases: [],
-    predecessorName: null,
-    oldTicker: null,
-    oldContract: null,
-    migrationRatio: null,
-    migrationDate: null,
-    replacementContract: currentToken?.contract ?? null,
-    migrationContract: null,
-    currentStatus: null,
-    architectureChanges: [],
-    exchangeHandling: [],
-    tokenLineage: [],
-    events: [],
-    sources: organic.map((item) => ({ url: canonicalUrl(item.url), title: item.title, sourceClass: sourceClass(item.url, officialHosts(ctx)) })),
-    aliasSearches: [],
-    marketHistory: [],
-    coverage: { required: Boolean(currentToken?.contract), state: currentToken?.contract ? "partial" : "not_applicable", reason: "Lifecycle searches completed but did not yield a primary-source-grounded predecessor or a verified no-predecessor record.", primarySourceCount: 0, searchedAt }
-  };
+  if (!snapshot) {
+    const completedEmptySearch = isCompletedContinuityExtraction(raw);
+    return {
+      subject,
+      historicalAliases: [],
+      predecessorName: null,
+      oldTicker: null,
+      oldContract: null,
+      migrationRatio: null,
+      migrationDate: null,
+      replacementContract: currentToken?.contract ?? null,
+      migrationContract: null,
+      currentStatus: null,
+      architectureChanges: [],
+      exchangeHandling: [],
+      tokenLineage: [],
+      events: [],
+      sources: organic.map((item) => ({ url: canonicalUrl(item.url), title: item.title, sourceClass: sourceClass(item.url, officialHosts(ctx)) })),
+      aliasSearches: [],
+      marketHistory: [],
+      coverage: {
+        required: Boolean(currentToken?.contract),
+        state: currentToken?.contract ? completedEmptySearch ? "complete" : "partial" : "not_applicable",
+        reason: completedEmptySearch ? "The history search completed and found no earlier project name, predecessor token, migration, or replacement contract. This is a completed negative search, not proof that no private or undisclosed history exists." : "The history search did not return a usable result, so earlier names and token history remain unchecked.",
+        primarySourceCount: 0,
+        searchedAt
+      }
+    };
+  }
   if (snapshot.coverage.state !== "complete") {
     const recoveryOrganic = [];
     const recoveryRaw = await groundedSearch(
@@ -28284,6 +28317,7 @@ function dexProjectCandidates(ctx, query, rows) {
     if (!identity) return [];
     const liquidity = isRecord4(row.liquidity) ? finiteNumber2(row.liquidity.usd) : void 0;
     const volume = isRecord4(row.volume) ? finiteNumber2(row.volume.h24) : void 0;
+    const pairCreatedAt = finiteNumber2(row.pairCreatedAt);
     return [{
       name,
       symbol,
@@ -28297,7 +28331,8 @@ function dexProjectCandidates(ctx, query, rows) {
       ...finiteNumber2(row.marketCap) !== void 0 ? { marketCapUsd: finiteNumber2(row.marketCap) } : {},
       ...finiteNumber2(row.fdv) !== void 0 ? { fdvUsd: finiteNumber2(row.fdv) } : {},
       ...volume !== void 0 ? { volume24hUsd: volume } : {},
-      ...liquidity !== void 0 ? { liquidityUsd: liquidity } : {}
+      ...liquidity !== void 0 ? { liquidityUsd: liquidity } : {},
+      ...pairCreatedAt !== void 0 ? { pairCreatedAt } : {}
     }];
   });
   return candidates.sort(
@@ -28362,6 +28397,7 @@ async function collectDexProjectToken(ctx, query) {
       ...candidate.volume24hUsd !== void 0 ? { volume24hUsd: candidate.volume24hUsd } : {},
       ...candidate.liquidityUsd !== void 0 ? { liquidityUsd: candidate.liquidityUsd } : {},
       pairAddress: candidate.pairAddress,
+      ...candidate.pairCreatedAt !== void 0 ? { pairCreatedAt: candidate.pairCreatedAt } : {},
       ...history ? { history } : {}
     }
   };
@@ -28472,6 +28508,7 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
   const symbol = cleanText2(base.symbol);
   const chain = cleanText2(best.chainId);
   const pairAddress = cleanText2(best.pairAddress);
+  const pairCreatedAt = finiteNumber2(best.pairCreatedAt);
   if (!symbol || !chain) return null;
   const info = isRecord4(best.info) ? best.info : {};
   const priceUsd = finiteNumber2(best.priceUsd);
@@ -28515,7 +28552,8 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
       ...volume24hUsd !== void 0 ? { volume24hUsd } : {},
       ...historyResult.history ? { history: historyResult.history } : {},
       ...cleanText2(info.imageUrl) ? { imageUrl: cleanText2(info.imageUrl) } : {},
-      ...pairAddress ? { pairAddress } : {}
+      ...pairAddress ? { pairAddress } : {},
+      ...pairCreatedAt !== void 0 ? { pairCreatedAt } : {}
     }
   };
 }
@@ -28603,7 +28641,8 @@ function selectPriceCorroboratedPair(rows, token, coingeckoPrice) {
       quoteSymbol: cleanText2(quoteToken.symbol),
       priceUsd,
       liquidityUsd: liquidity,
-      sourceUrl: cleanText2(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`
+      sourceUrl: cleanText2(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`,
+      ...finiteNumber2(row.pairCreatedAt) !== void 0 ? { pairCreatedAt: finiteNumber2(row.pairCreatedAt) } : {}
     }];
   });
   return candidates.sort(
@@ -28711,6 +28750,7 @@ async function collectProfileDeclaredToken(ctx, candidate) {
   const symbol = cleanText2(base.symbol).toUpperCase();
   const chain = cleanText2(best.chainId).toLowerCase();
   const pairAddress = cleanText2(best.pairAddress);
+  const pairCreatedAt = finiteNumber2(best.pairCreatedAt);
   if (!name || !symbol || !chain || !pairAddress) {
     return {
       state: "failed",
@@ -28763,6 +28803,7 @@ async function collectProfileDeclaredToken(ctx, candidate) {
       ...volume24hUsd !== void 0 ? { volume24hUsd } : {},
       ...liquidityUsd !== void 0 ? { liquidityUsd } : {},
       pairAddress,
+      ...pairCreatedAt !== void 0 ? { pairCreatedAt } : {},
       ...history ? { history } : {},
       ...cleanText2(info.imageUrl) ? { imageUrl: cleanText2(info.imageUrl) } : {}
     }
@@ -29084,7 +29125,11 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     ...circulatingSupply !== void 0 ? { circulatingSupply } : {},
     ...totalSupply !== void 0 ? { totalSupply } : {},
     ...maxSupply !== void 0 ? { maxSupply } : {},
-    ...pair ? { liquidityUsd: pair.liquidityUsd, pairAddress: pair.pairAddress } : {},
+    ...pair ? {
+      liquidityUsd: pair.liquidityUsd,
+      pairAddress: pair.pairAddress,
+      ...pair.pairCreatedAt !== void 0 ? { pairCreatedAt: pair.pairCreatedAt } : {}
+    } : {},
     ...ath ? { ath } : {},
     ...history ? { history } : {}
   };
@@ -33294,6 +33339,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     const n = norm2(t.name);
     if (!h && !n) continue;
     if (!isPlausiblePersonRosterName(t.name)) continue;
+    if (!teamCandidateSourceMatchesIdentity(t)) continue;
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = h && byHandle.get(h) || n && byName.get(n) || null;
     if (existing) {
@@ -35427,9 +35473,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       evidence.entityContinuity = await collectEntityContinuity(ctx);
       const continuity = evidence.entityContinuity;
       const complete = continuity.coverage.state === "complete";
+      const completedWithoutHistory = complete && continuity.historicalAliases.length === 0 && continuity.tokenLineage.length === 0 && continuity.events.length === 0;
       checkTracker.record({
         id: "entity-continuity",
-        status: complete ? "confirmed" : continuity.coverage.state === "not_applicable" ? "not-applicable" : "unavailable",
+        status: completedWithoutHistory ? "checked-empty" : complete ? "confirmed" : continuity.coverage.state === "not_applicable" ? "not-applicable" : "unavailable",
         note: continuity.coverage.reason,
         provider: "serper+primary-source-verification",
         sourceCount: continuity.coverage.primarySourceCount,
@@ -35443,8 +35490,8 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       );
       emit({
         phase: "Continuity",
-        label: complete ? `Lifecycle recovered${continuity.predecessorName ? ` \xB7 ${continuity.predecessorName} \u2192 ${continuity.subject}` : ""}` : "Lifecycle coverage remains open",
-        detail: complete ? `${continuity.events.length} dated or sourced change records and ${continuity.tokenLineage.length} lineage nodes were frozen before scoring.` : continuity.coverage.reason,
+        label: complete ? completedWithoutHistory ? "No earlier name or token migration found" : `Lifecycle recovered${continuity.predecessorName ? ` \xB7 ${continuity.predecessorName} \u2192 ${continuity.subject}` : ""}` : "Lifecycle coverage remains open",
+        detail: complete ? completedWithoutHistory ? continuity.coverage.reason : `${continuity.events.length} dated or sourced change records and ${continuity.tokenLineage.length} lineage nodes were frozen before scoring.` : continuity.coverage.reason,
         source: "serper + primary records",
         tone: complete ? "good" : "warn"
       });

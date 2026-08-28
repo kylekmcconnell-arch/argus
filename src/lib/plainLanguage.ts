@@ -7,6 +7,8 @@
  */
 export function plainLanguageSummary(value: string): string {
   return humanizeAxisIds(value)
+    .replace(/\bnull backing\b/gi, "no verified financial backing")
+    .replace(/\bproject and token continuity\b/gi, "Earlier names and token history")
     .replace(/\bproject[- _]attributed role\b/gi, "named by the project")
     .replace(/\bproject[- _]attributed\b/gi, "named by the project")
     .replace(/\bsource[- ]reported\b/gi, "reported by a source")
@@ -52,6 +54,7 @@ export function plainLanguageSummary(value: string): string {
     .replace(/\bchecked-empty\b/gi, "nothing found")
     .replace(/\ba null result on this axis(?:, not adverse(?: conduct)? evidence)?\b/gi, "no result was recorded in this area")
     .replace(/\bnull result on this axis\b/gi, "no result in this area")
+    .replace(/\bnull (?:result|record|evidence)\b/gi, "no verified result")
     .replace(/\bbound project identifiers\b/gi, "official X handle and ticker")
     .replace(/\bbound identifiers\b/gi, "official X handle and ticker")
     .replace(/\bare bound to this subject\b/gi, "are tied to this project")

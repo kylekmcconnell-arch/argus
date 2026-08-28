@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildEntityContinuityQueries, buildEntityContinuityRecoveryQueries, normalizeEntityContinuity } from "./entityContinuity";
+import { buildEntityContinuityQueries, buildEntityContinuityRecoveryQueries, isCompletedContinuityExtraction, normalizeEntityContinuity } from "./entityContinuity";
 
 const DOCS = "https://docs.anyone.io/resources/token";
 const ROADMAP = "https://docs.anyone.io/resources/roadmap";
@@ -7,6 +7,16 @@ const KUCOIN = "https://www.kucoin.com/announcement/en-kucoin-will-support-the-r
 const MEXC = "https://www.mexc.com/ko-KR/announcements/tag/contract-swaps-38?page=44";
 
 describe("entity continuity", () => {
+  it("treats a valid empty history extraction as a completed search", () => {
+    expect(isCompletedContinuityExtraction(JSON.stringify({
+      historicalAliases: [],
+      tokenLineage: [],
+      events: [],
+    }))).toBe(true);
+    expect(isCompletedContinuityExtraction("not json")).toBe(false);
+    expect(isCompletedContinuityExtraction(null)).toBe(false);
+  });
+
   it("always asks the plain-language history questions", () => {
     expect(buildEntityContinuityQueries("ANyONe Protocol", "ANYONE")).toEqual([
       "what happened to ANyONe Protocol",

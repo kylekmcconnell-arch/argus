@@ -96,6 +96,7 @@ export function startPersonAudit(
   // finalized only once both legs land, so a full-scan report always carries its
   // token verdict. The standalone Threat tab remains the cheap, token-only tier.
   let threatLeg: Promise<ThreatScan | null> | null = null;
+  let threatCandidate: TokenCandidate | null = null;
   let threatSettled = false;
   let threatNote = "";
   let threatFailure = "";
@@ -106,6 +107,7 @@ export function startPersonAudit(
   };
   const startThreatLeg = (cand: TokenCandidate) => {
     if (threatLeg) return;
+    threatCandidate = cand;
     threatNote = `Token attributed via ${cand.source}.`;
     pushStep({ phase: "ARGUS · Threat", label: "Token threat leg", detail: `Full scan includes the token threat pipeline - scanning ${cand.address.slice(0, 10)}… (${cand.via}) in parallel.`, source: "argus", tone: "neutral" });
     threatLeg = threatScan({ kind: "token", ref: cand.address, via: cand.via }, pushStep)
@@ -156,10 +158,44 @@ export function startPersonAudit(
       // Bounded wait: the threat scanner's own fetches are all timeout-capped,
       // so this only guards against a pathological hang - never block a
       // finished person audit indefinitely on the token leg.
-      const scan = await Promise.race([
+      let scan = await Promise.race([
         threatLeg,
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 120_000)),
       ]);
+      // Newly launched tokens can reach the server's identity-bound search a
+      // moment before DexScreener's by-token endpoint reaches the browser. The
+      // first lookup then caches an empty result. Once the completed dossier
+      // confirms the exact token, retry that resolution once without the null
+      // cache. A completed token assessment is never rerun here.
+      if (!scan) {
+        const retryCandidate = tokenFromVerifiedProjectToken(d.projectToken) ?? threatCandidate;
+        if (retryCandidate) {
+          const projectPairAddress = d.projectToken?.pairAddress?.trim();
+          const projectPairChain = d.projectToken?.chain?.trim().toLowerCase();
+          const retryInput = projectPairAddress && projectPairChain
+            ? {
+                kind: "token" as const,
+                ref: `https://dexscreener.com/${encodeURIComponent(projectPairChain)}/${encodeURIComponent(projectPairAddress)}`,
+                via: "dexscreener" as const,
+              }
+            : { kind: "token" as const, ref: retryCandidate.address, via: retryCandidate.via };
+          pushStep({
+            phase: "ARGUS · Threat",
+            label: "Retrying the token safety check",
+            detail: "The first market lookup returned before the new token was fully indexed. Retrying the verified contract once.",
+            source: "argus",
+            tone: "neutral",
+          });
+          scan = await threatScan(
+            retryInput,
+            pushStep,
+            { force: true },
+          ).catch((error: unknown) => {
+            threatFailure = error instanceof Error ? error.message : String(error);
+            return null;
+          });
+        }
+      }
       d.threat = scan;
       threatNote = scan
         ? `${threatNote} $${scan.symbol}: ${scan.call.verdict} · ${scan.call.risk}/100 risk.`

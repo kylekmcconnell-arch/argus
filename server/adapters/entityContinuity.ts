@@ -94,6 +94,11 @@ function parseJson(raw: string): Record<string, unknown> | null {
   try { return record(JSON.parse(candidate)); } catch { return null; }
 }
 
+/** A syntactically completed extraction can legitimately report no history. */
+export function isCompletedContinuityExtraction(raw: string | null | undefined): boolean {
+  return Boolean(raw && parseJson(raw));
+}
+
 function admittedUrls(value: unknown, organicUrls: Set<string>): string[] {
   return strings(value).map(canonicalUrl).filter((url) => organicUrls.has(url));
 }
@@ -355,12 +360,23 @@ export async function collectEntityContinuity(ctx: CollectContext): Promise<Enti
     onOrganicResults: (results) => organic.push(...results),
   });
   let snapshot = raw ? normalizeEntityContinuity(raw, subject, organic, officialHosts(ctx), currentToken) : null;
-  if (!snapshot) return {
+  if (!snapshot) {
+    const completedEmptySearch = isCompletedContinuityExtraction(raw);
+    return {
     subject, historicalAliases: [], predecessorName: null, oldTicker: null, oldContract: null,
     migrationRatio: null, migrationDate: null, replacementContract: currentToken?.contract ?? null,
     migrationContract: null, currentStatus: null, architectureChanges: [], exchangeHandling: [], tokenLineage: [], events: [], sources: organic.map((item) => ({ url: canonicalUrl(item.url), title: item.title, sourceClass: sourceClass(item.url, officialHosts(ctx)) })), aliasSearches: [], marketHistory: [],
-    coverage: { required: Boolean(currentToken?.contract), state: currentToken?.contract ? "partial" : "not_applicable", reason: "Lifecycle searches completed but did not yield a primary-source-grounded predecessor or a verified no-predecessor record.", primarySourceCount: 0, searchedAt },
-  };
+    coverage: {
+      required: Boolean(currentToken?.contract),
+      state: currentToken?.contract ? completedEmptySearch ? "complete" : "partial" : "not_applicable",
+      reason: completedEmptySearch
+        ? "The history search completed and found no earlier project name, predecessor token, migration, or replacement contract. This is a completed negative search, not proof that no private or undisclosed history exists."
+        : "The history search did not return a usable result, so earlier names and token history remain unchecked.",
+      primarySourceCount: 0,
+      searchedAt,
+    },
+    };
+  }
 
   // A first broad pass is allowed to discover the predecessor without yet
   // resolving every migration field. It is not allowed to score from that

@@ -107,6 +107,7 @@ import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
 import { formatRoleLabel, plainLanguageSummary, plainReportStatusLabel, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
+import { teamCandidateSourceMatchesIdentity } from "../lib/teamCandidateIdentity";
 import { publicFindingTitle, publicIntelligenceText, publicStrengthLabel } from "../lib/intelligencePresentation";
 import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
@@ -1479,6 +1480,7 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
   const seen = new Set<string>();
   return [...(dossier.webTeamLeads ?? []), ...inferred].filter((member) => {
     if (!meaningfulTeamMember(member)) return false;
+    if (!teamCandidateSourceMatchesIdentity(member)) return false;
     // Orientation also discovers support accounts, integrations, grantors,
     // speakers, customers, and community examples. Those remain available in
     // the evidence appendix, but they are not team candidates.
@@ -1920,6 +1922,15 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     }] : []),
   ];
   const linkedTokenDossier = f.threat?.dossier;
+  const tokenPairCreatedAt = linkedTokenDossier?.pairCreatedAt ?? f.projectToken?.pairCreatedAt ?? null;
+  const reportReferenceTime = Date.parse(report.finalized_at ?? f.projectToken?.capturedAt ?? "");
+  const tokenLaunchAgeDays = linkedTokenDossier?.ageDays ?? (
+    typeof tokenPairCreatedAt === "number"
+    && Number.isFinite(tokenPairCreatedAt)
+    && Number.isFinite(reportReferenceTime)
+      ? Math.max(0, (reportReferenceTime - tokenPairCreatedAt) / 86_400_000)
+      : null
+  );
   const linkedTokenCompositionRows = linkedTokenDossier
     ? orderByPlainAxis(linkedTokenDossier.axes.map((tokenAxis) => ({
       axis: tokenAxis.key,
@@ -2388,6 +2399,15 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   // a single aggregate row so a favorable report can never render an
   // all-clear while questions remain open.
   const confidenceLimitsBase: ReportCanvasNarrativeItem[] = [
+    ...(tokenLaunchAgeDays !== null && tokenLaunchAgeDays < 30 ? [{
+      id: "recent-token-launch",
+      title: "The token launched recently.",
+      detail: tokenLaunchAgeDays < 1
+        ? "The market has less than one day of trading history. That is too little history to judge how liquidity, holder behavior, and price hold up over time."
+        : `The market has about ${Math.max(1, Math.round(tokenLaunchAgeDays))} days of trading history. That is still a short record for judging how liquidity, holder behavior, and price hold up over time.`,
+      provenance: "Saved market history",
+      href: "#project-token" as `#${string}`,
+    }] : []),
     ...(report.cap_applied ? [{
       id: "hard-cap",
       title: `The score is limited because of: ${capLabel(report.cap_applied)}.`,

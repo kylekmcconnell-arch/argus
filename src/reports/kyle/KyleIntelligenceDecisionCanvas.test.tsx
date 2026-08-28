@@ -157,6 +157,19 @@ describe("Kyle intelligence report opening", () => {
     expect(container.textContent).not.toContain("VERIFY NEXT");
   });
 
+  it("does not expose empty internal limitation language or analyst shorthand", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      concerns={[]}
+      reportSummary="Emerging service with null backing."
+    />));
+
+    expect(container.textContent).toContain("No material concern was identified in the evidence reviewed.");
+    expect(container.textContent).toContain("no verified financial backing");
+    expect(container.textContent).not.toContain("No governing limitation was recorded");
+    expect(container.textContent).not.toContain("null backing");
+  });
+
   it("keeps project diligence and linked-token safety as two separate scores", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas
       {...props}

@@ -109,6 +109,38 @@ describe("project report token-safety leg", () => {
     expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
   });
 
+  it("retries a newly indexed verified token once without the cached empty result", async () => {
+    const dossier = anyoneDossier();
+    const tokenSafety = {
+      symbol: "ANYONE",
+      call: { verdict: "PASS", risk: 18 },
+      dossier: { score: 82, verdict: "PASS", axes: [] },
+    } as unknown as ThreatScan;
+    mocks.threatScan
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(tokenSafety);
+    mocks.streamAudit.mockImplementation((
+      _handle: string,
+      _priv: boolean,
+      handlers: { onDone: (value: Dossier) => void },
+    ) => {
+      handlers.onDone(dossier);
+      return () => undefined;
+    });
+
+    startPersonAudit("@AnyoneFDN");
+    await vi.waitFor(() => expect(getRun("@AnyoneFDN")?.status).toBe("done"));
+
+    expect(mocks.threatScan).toHaveBeenCalledTimes(2);
+    expect(mocks.threatScan).toHaveBeenNthCalledWith(2, {
+      kind: "token",
+      ref: "0x1234567890abcdef1234567890abcdef12345678",
+      via: "evm",
+    }, expect.any(Function), { force: true });
+    expect(getRun("@AnyoneFDN")?.dossier?.threat).toBe(tokenSafety);
+    expect(getRun("@AnyoneFDN")?.steps.some((step) => step.label === "Retrying the token safety check")).toBe(true);
+  });
+
   it("surfaces a final persistence failure instead of publishing the project-only version", async () => {
     const dossier = anyoneDossier();
     mocks.threatScan.mockResolvedValue({

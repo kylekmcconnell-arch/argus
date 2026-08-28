@@ -82,6 +82,7 @@ interface DexPair {
   priceUsd: number;
   liquidityUsd: number;
   sourceUrl: string;
+  pairCreatedAt?: number;
 }
 
 interface DexProjectCandidate {
@@ -99,6 +100,7 @@ interface DexProjectCandidate {
   fdvUsd?: number;
   volume24hUsd?: number;
   liquidityUsd?: number;
+  pairCreatedAt?: number;
   relevance: number;
 }
 
@@ -599,6 +601,7 @@ function dexProjectCandidates(
     if (!identity) return [];
     const liquidity = isRecord(row.liquidity) ? finiteNumber(row.liquidity.usd) : undefined;
     const volume = isRecord(row.volume) ? finiteNumber(row.volume.h24) : undefined;
+    const pairCreatedAt = finiteNumber(row.pairCreatedAt);
     return [{
       name,
       symbol,
@@ -613,6 +616,7 @@ function dexProjectCandidates(
       ...(finiteNumber(row.fdv) !== undefined ? { fdvUsd: finiteNumber(row.fdv) } : {}),
       ...(volume !== undefined ? { volume24hUsd: volume } : {}),
       ...(liquidity !== undefined ? { liquidityUsd: liquidity } : {}),
+      ...(pairCreatedAt !== undefined ? { pairCreatedAt } : {}),
     }];
   });
   return candidates.sort((left, right) =>
@@ -698,6 +702,7 @@ async function collectDexProjectToken(
       ...(candidate.volume24hUsd !== undefined ? { volume24hUsd: candidate.volume24hUsd } : {}),
       ...(candidate.liquidityUsd !== undefined ? { liquidityUsd: candidate.liquidityUsd } : {}),
       pairAddress: candidate.pairAddress,
+      ...(candidate.pairCreatedAt !== undefined ? { pairCreatedAt: candidate.pairCreatedAt } : {}),
       ...(history ? { history } : {}),
     },
   };
@@ -845,6 +850,7 @@ async function resolveSiteDeclaredOnPage(
   const symbol = cleanText(base.symbol);
   const chain = cleanText(best.chainId);
   const pairAddress = cleanText(best.pairAddress);
+  const pairCreatedAt = finiteNumber(best.pairCreatedAt);
   if (!symbol || !chain) return null;
   const info = isRecord(best.info) ? best.info as JsonRecord : {};
   const priceUsd = finiteNumber(best.priceUsd);
@@ -902,6 +908,7 @@ async function resolveSiteDeclaredOnPage(
       ...(historyResult.history ? { history: historyResult.history } : {}),
       ...(cleanText(info.imageUrl) ? { imageUrl: cleanText(info.imageUrl) } : {}),
       ...(pairAddress ? { pairAddress } : {}),
+      ...(pairCreatedAt !== undefined ? { pairCreatedAt } : {}),
     } as ProjectTokenSnapshot,
   };
 }
@@ -1012,6 +1019,9 @@ function selectPriceCorroboratedPair(
       priceUsd,
       liquidityUsd: liquidity,
       sourceUrl: cleanText(row.url) || `${DEXSCREENER}/${encodeURIComponent(token.address)}`,
+      ...(finiteNumber(row.pairCreatedAt) !== undefined
+        ? { pairCreatedAt: finiteNumber(row.pairCreatedAt) }
+        : {}),
     }];
   });
   return candidates.sort((left, right) =>
@@ -1150,6 +1160,7 @@ async function collectProfileDeclaredToken(
   const symbol = cleanText(base.symbol).toUpperCase();
   const chain = cleanText(best.chainId).toLowerCase();
   const pairAddress = cleanText(best.pairAddress);
+  const pairCreatedAt = finiteNumber(best.pairCreatedAt);
   if (!name || !symbol || !chain || !pairAddress) {
     return {
       state: "failed",
@@ -1211,6 +1222,7 @@ async function collectProfileDeclaredToken(
       ...(volume24hUsd !== undefined ? { volume24hUsd } : {}),
       ...(liquidityUsd !== undefined ? { liquidityUsd } : {}),
       pairAddress,
+      ...(pairCreatedAt !== undefined ? { pairCreatedAt } : {}),
       ...(history ? { history } : {}),
       ...(cleanText(info.imageUrl) ? { imageUrl: cleanText(info.imageUrl) } : {}),
     },
@@ -1614,7 +1626,11 @@ export async function collectProjectTokenIdentity(
     ...circulatingSupply !== undefined ? { circulatingSupply } : {},
     ...totalSupply !== undefined ? { totalSupply } : {},
     ...maxSupply !== undefined ? { maxSupply } : {},
-    ...pair ? { liquidityUsd: pair.liquidityUsd, pairAddress: pair.pairAddress } : {},
+    ...pair ? {
+      liquidityUsd: pair.liquidityUsd,
+      pairAddress: pair.pairAddress,
+      ...(pair.pairCreatedAt !== undefined ? { pairCreatedAt: pair.pairCreatedAt } : {}),
+    } : {},
     ...ath ? { ath } : {},
     ...history ? { history } : {},
   };

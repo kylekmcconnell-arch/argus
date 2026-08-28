@@ -36,6 +36,7 @@ import {
   tokenFromVerifiedProjectToken,
 } from "../src/lib/projectTokenLeg";
 import { teamIdentityKeys } from "../src/lib/teamIdentity";
+import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIdentity";
 import { isPlausiblePersonRosterName } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 import { deriveTokenApplicability } from "./tokenApplicability";
@@ -1367,6 +1368,9 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     // Final roster boundary: search/model lanes can return a company or a
     // sentence fragment as `name`. It is neither a person nor a research CTA.
     if (!isPlausiblePersonRosterName(t.name)) continue;
+    // A bare X profile is an identity locator. If it points at somebody other
+    // than the candidate, the search result is a failed join, not a weak lead.
+    if (!teamCandidateSourceMatchesIdentity(t)) continue;
     // Never list the audited subject handle as founder (or any role) of itself.
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
@@ -4416,9 +4420,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       evidence.entityContinuity = await collectEntityContinuity(ctx);
       const continuity = evidence.entityContinuity;
       const complete = continuity.coverage.state === "complete";
+      const completedWithoutHistory = complete
+        && continuity.historicalAliases.length === 0
+        && continuity.tokenLineage.length === 0
+        && continuity.events.length === 0;
       checkTracker.record({
         id: "entity-continuity",
-        status: complete ? "confirmed" : continuity.coverage.state === "not_applicable" ? "not-applicable" : "unavailable",
+        status: completedWithoutHistory ? "checked-empty" : complete ? "confirmed" : continuity.coverage.state === "not_applicable" ? "not-applicable" : "unavailable",
         note: continuity.coverage.reason,
         provider: "serper+primary-source-verification",
         sourceCount: continuity.coverage.primarySourceCount,
@@ -4433,10 +4441,14 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       emit({
         phase: "Continuity",
         label: complete
-          ? `Lifecycle recovered${continuity.predecessorName ? ` · ${continuity.predecessorName} → ${continuity.subject}` : ""}`
+          ? completedWithoutHistory
+            ? "No earlier name or token migration found"
+            : `Lifecycle recovered${continuity.predecessorName ? ` · ${continuity.predecessorName} → ${continuity.subject}` : ""}`
           : "Lifecycle coverage remains open",
         detail: complete
-          ? `${continuity.events.length} dated or sourced change records and ${continuity.tokenLineage.length} lineage nodes were frozen before scoring.`
+          ? completedWithoutHistory
+            ? continuity.coverage.reason
+            : `${continuity.events.length} dated or sourced change records and ${continuity.tokenLineage.length} lineage nodes were frozen before scoring.`
           : continuity.coverage.reason,
         source: "serper + primary records",
         tone: complete ? "good" : "warn",

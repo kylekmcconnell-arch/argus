@@ -16,6 +16,7 @@ import type { DecisionLensId } from "../../intelligence/types";
 import type { TokenDecisionBoundary } from "../../lib/decisionBoundary";
 import type { DecisionDiscovery, VerdictArgument } from "../../lib/reportInsights";
 import { neutralizeProductCopy } from "../../lib/productLanguage";
+import { plainLanguageSummary } from "../../lib/plainLanguage";
 import "./kyle-intelligence-report.css";
 
 export interface KyleDecisionItem {
@@ -77,7 +78,7 @@ function sentence(value: string | null | undefined): string {
 }
 
 function executiveText(value: string | null | undefined): string {
-  const clean = (value ?? "")
+  const clean = plainLanguageSummary(value ?? "")
     .replace(/<[^>]*>/g, " ")
     .replace(/\bReturn each event\b.*$/i, "")
     .replace(/\bReturn exact\b.*$/i, "")
@@ -518,7 +519,7 @@ export function KyleIntelligenceDecisionCanvas({
             </div>
             <div>
               <span className="mono">MAIN LIMITATION</span>
-              <strong>{sentence(mainConcern?.label) || "No governing limitation was recorded."}</strong>
+              <strong>{sentence(mainConcern?.label) || "No material concern was identified in the evidence reviewed."}</strong>
             </div>
             <div>
               <span className="mono">HIGHEST-VALUE NEXT CHECK</span>

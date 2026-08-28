@@ -29,6 +29,15 @@ describe("plainLanguageSummary", () => {
     );
   });
 
+  it("translates the exact Bandos analyst shorthand into plain English", () => {
+    expect(plainLanguageSummary(
+      "Emerging Solana cash-out service with verified live token and product but null backing and limited operator transparency.",
+    )).toBe(
+      "Emerging Solana cash-out service with verified live token and product but no verified financial backing and limited operator transparency.",
+    );
+    expect(plainLanguageSummary("Project and token continuity.")).toBe("Earlier names and token history.");
+  });
+
   it("replaces internal axis ids with their labels", () => {
     expect(plainLanguageSummary(
       "Investigation incomplete: substantive evidence is missing for I2_portfolio_quality.",
