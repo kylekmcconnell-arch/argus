@@ -145,6 +145,22 @@ describe("public Decision Intelligence presentation", () => {
     expect(JSON.stringify(copy)).not.toMatch(/scorer|assessed_null|P\d_|deterministic|frozen/i);
   });
 
+  it("explains no-code authority observations without exposing RPC jargon or block hashes", () => {
+    const copy = publicSignalCopy(signal({
+      id: "evm_no_code_control_address",
+      ruleId: "evm-no-code-control-address",
+      headline: "A standard control address has no runtime bytecode",
+      finding: "1 standard-interface authority address has no runtime bytecode at block 25,848,828 (0xbfb8a191874f847b7255f4f7e931c80bcc88104c939fc80d28a8e8d5d930a4e2): 0x1234567890abcdef1234567890abcdef12345678 (admin, owner). This does not prove EOA status, one key, or one human.",
+      whyItMatters: "Custody and authorization mechanics must be established.",
+    }));
+
+    expect(copy.headline).toBe("One detected control role points to an address with no deployed contract code");
+    expect(copy.finding).toContain("0x123456…5678");
+    expect(copy.finding).toContain("This can be normal for a signer wallet and is not a warning by itself.");
+    expect(copy.whyItMatters).toContain("multiple signers, MPC, or a single key");
+    expect(JSON.stringify(copy)).not.toMatch(/runtime bytecode|standard-interface|block 25,848,828|bfb8a191|EOA status/i);
+  });
+
   it("turns legacy launch timestamps into a readable, neutral explanation", () => {
     const copy = publicSignalCopy(signal({
       id: "launch_boundary_gap",

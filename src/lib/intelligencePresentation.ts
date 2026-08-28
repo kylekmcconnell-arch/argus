@@ -189,6 +189,10 @@ function strengthBandSummary(value: string): string | null {
   }).join(" ");
 }
 
+function compactEvmAddress(value: string): string {
+  return value.replace(/\b(0x[a-f0-9]{6})[a-f0-9]{30}([a-f0-9]{4})\b/gi, "$1…$2");
+}
+
 /**
  * Reader-facing copy for saved intelligence. This deliberately runs at the
  * presentation boundary so older immutable reports benefit without rewriting
@@ -306,6 +310,28 @@ export function publicSignalCopy(signal: DerivedIntelligenceSignal): PublicSigna
         ?? publicIntelligenceText(signal.finding),
       whyItMatters: "This shows which parts of the report rest on stronger evidence and which parts still need confirmation. It does not add points or make an investment recommendation.",
       changeCondition: "Run the report again when new reliable evidence becomes available.",
+      tone: "tint-neutral",
+    };
+  }
+
+  if (signal.ruleId === "evm-no-code-control-address") {
+    const count = Number(signal.finding.match(/^(\d+)\s+/)?.[1] ?? 1);
+    const address = signal.finding.match(/\b0x[a-f0-9]{40}\b/i)?.[0];
+    const role = signal.finding.match(/\b0x[a-f0-9]{40}\s+\(([^)]+)\)/i)?.[1]
+      ?.split(",")
+      .map((value) => value.trim().replaceAll("_", " "))
+      .filter(Boolean)
+      .join(", ");
+    const subject = count === 1 ? "One detected control role" : `${count} detected control roles`;
+    const target = address ? ` to ${compactEvmAddress(address)}` : "";
+    const roleText = role ? ` (${role})` : "";
+    return {
+      status: "Context",
+      priority: "Context",
+      headline: `${subject} ${count === 1 ? "points" : "point"} to an address with no deployed contract code`,
+      finding: `At the saved block, ${subject.toLowerCase()} pointed${target}${roleText}. The address had no deployed smart-contract code at that moment. This can be normal for a signer wallet and is not a warning by itself.`,
+      whyItMatters: "This check does not show whether the address is protected by multiple signers, MPC, or a single key. That custody setup matters if the role can change important contract settings.",
+      changeCondition: "Verify what the role can change and how the address's signing authority is secured.",
       tone: "tint-neutral",
     };
   }

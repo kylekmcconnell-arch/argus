@@ -191,7 +191,10 @@ export function deriveIntelligenceBrief(
     // produced a brief that never mentioned it. Context is the honest home:
     // the reader sees it without ARGUS asserting a polarity it did not derive.
     context: orderedSignals
-      .filter((signal) => signal.polarity === "neutral" || signal.polarity === "unknown")
+      .filter((signal) => (signal.polarity === "neutral" || signal.polarity === "unknown")
+        // The score chapter already explains these bands. Repeating them under
+        // "Other useful context" adds no new fact and crowds out actual context.
+        && signal.ruleId !== "project-strength-band-summary")
       .map(signalItem),
     questions,
   };

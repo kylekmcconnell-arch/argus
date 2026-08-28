@@ -202,6 +202,22 @@ describe("deriveIntelligenceBrief", () => {
     expect(text).not.toContain("unowned");
   });
 
+  it("does not repeat the score-strength summary as unrelated useful context", () => {
+    const value = snapshot();
+    value.signals.push({
+      ...value.signals[2]!,
+      id: "project_strength_band_summary",
+      ruleId: "project-strength-band-summary",
+      headline: "How strong the evidence is in each area",
+      finding: "Team and leadership: strong evidence (12 to 13).",
+    });
+
+    const brief = deriveIntelligenceBrief(value);
+
+    expect(brief.context.map((item) => item.title)).not.toContain("How strong the evidence is in each area.");
+    expect(brief.context.map((item) => item.title)).toContain("A leadership transition is recorded.");
+  });
+
   it("keeps a high-severity risk at the head of pressures under every lens", () => {
     // Consumers truncate this list, so a lens that sorts a high-severity risk
     // below the cut removes a direct concern from the surface the reader
