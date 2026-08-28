@@ -3608,6 +3608,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 <ProjectTokenCard
                   token={f.projectToken}
                   chains={f.projectToken.deployedChains}
+                  threat={f.threat ?? undefined}
+                  threatNote={f.threatNote}
                   showCurrentIntelligence={showCurrentIntelligence}
                   refreshCurrentMarket={currentIntelligenceEnabled}
                   onOpenReport={linkedTokenDossier && onOpenTokenReport
@@ -3877,6 +3879,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
             <ProjectTokenCard
               token={f.projectToken}
               chains={f.projectToken.deployedChains}
+              threat={f.threat ?? undefined}
+              threatNote={f.threatNote}
               showCurrentIntelligence={showCurrentIntelligence}
               refreshCurrentMarket={currentIntelligenceEnabled}
               onOpenReport={linkedTokenDossier && onOpenTokenReport
@@ -4808,7 +4812,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
               scanned by the complete threat pipeline in the same run. Absent
               field = older report from before the fold-in; a note without a
               scan = the leg was skipped or failed, and says why. */}
-          {(f.threat || f.threatNote) && (
+          {!f.projectToken && (f.threat || f.threatNote) && (
             <div id="project-token-threat" className="min-w-0 scroll-mt-28 lg:col-span-2">
               <Section title="Project token · threat scan" kicker={f.threatNote ?? "the token threat leg of this audit"}>
                 {f.threat ? (

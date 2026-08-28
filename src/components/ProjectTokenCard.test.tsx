@@ -4,12 +4,19 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectTokenSnapshot } from "../data/evidence";
+import type { ThreatScan } from "../threat/types";
 
-const harness = vi.hoisted(() => ({ sparkline: vi.fn() }));
+const harness = vi.hoisted(() => ({ sparkline: vi.fn(), marketIntelligence: vi.fn() }));
 vi.mock("./TokenSparkline", () => ({
   TokenSparkline: (props: Record<string, unknown>) => {
     harness.sparkline(props);
     return <div data-testid="token-chart">chart</div>;
+  },
+}));
+vi.mock("./ThreatScanPage", () => ({
+  ProjectMarketIntelligence: (props: Record<string, unknown>) => {
+    harness.marketIntelligence(props);
+    return <div data-testid="deep-market-intelligence">deep market intelligence</div>;
   },
 }));
 
@@ -51,6 +58,7 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   harness.sparkline.mockReset();
+  harness.marketIntelligence.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -96,6 +104,15 @@ describe("ProjectTokenCard", () => {
 
     expect(container.textContent).not.toContain("Open included token report");
     expect(container.textContent).not.toContain("Open full token report");
+  });
+
+  it("places the saved deep token evidence inside the canonical market chapter", () => {
+    const threat = { address: token.address, symbol: token.symbol } as unknown as ThreatScan;
+    act(() => root.render(<ProjectTokenCard token={token} threat={threat} showCurrentIntelligence={false} />));
+
+    expect(container.textContent).toContain("01 · Market overview");
+    expect(container.querySelector('[data-testid="deep-market-intelligence"]')).not.toBeNull();
+    expect(harness.marketIntelligence).toHaveBeenCalledWith(expect.objectContaining({ scan: threat }));
   });
 
   it("does not fetch a live chart for a frozen snapshot without frozen history", () => {

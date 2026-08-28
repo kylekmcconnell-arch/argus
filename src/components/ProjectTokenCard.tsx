@@ -1,6 +1,8 @@
 import { ArrowSquareOut, ChartLineUp, ShieldCheck } from "@phosphor-icons/react";
 import type { ProjectTokenSnapshot } from "../data/evidence";
+import type { ThreatScan } from "../threat/types";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
+import { ProjectMarketIntelligence } from "./ThreatScanPage";
 
 export function ProjectTokenCard({
   token,
@@ -9,6 +11,8 @@ export function ProjectTokenCard({
   refreshCurrentMarket,
   onOpenReport,
   onLoadCurrentIntelligence,
+  threat,
+  threatNote,
 }: {
   token: ProjectTokenSnapshot;
   /**
@@ -22,6 +26,10 @@ export function ProjectTokenCard({
   /** Opens the token dossier already collected with the parent report. Never starts a scan. */
   onOpenReport?: () => void;
   onLoadCurrentIntelligence?: () => void;
+  /** Deep token evidence saved within the same project investigation. */
+  threat?: ThreatScan;
+  /** Why the deep token leg was unavailable in this saved investigation. */
+  threatNote?: string;
 }) {
   const verifiedBy = token.verification === "official_x" ? "official X account" : "official project domain";
   const marketSource = token.providers?.includes("coingecko") || token.coingeckoId
@@ -69,6 +77,13 @@ export function ProjectTokenCard({
       </div>
 
       <div className="px-3 py-3 sm:px-4 sm:py-4">
+        {threat && (
+          <div className="mb-3 px-1">
+            <div className="eyebrow">01 · Market overview</div>
+            <h3 className="mt-1 text-[22px] font-semibold tracking-tight text-ink">Price, size, liquidity, and market position.</h3>
+            <p className="mt-1 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">The saved market snapshot and price history captured with this report.</p>
+          </div>
+        )}
         <MarketPerformancePanel
           projectToken={token}
           showCurrentIntelligence={showCurrentIntelligence}
@@ -77,6 +92,14 @@ export function ProjectTokenCard({
           embedded
         />
       </div>
+
+      {threat && <ProjectMarketIntelligence scan={threat} />}
+      {!threat && threatNote && (
+        <div className="border-t border-line/70 px-5 py-4">
+          <div className="eyebrow text-caution">Deep token analysis unavailable</div>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{threatNote}</p>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3 border-t border-line/70 bg-panel-2/30 px-5 py-3">
         <span className="chip normal-case tracking-normal">{chainDisplay}</span>

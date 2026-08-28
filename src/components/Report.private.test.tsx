@@ -10,7 +10,7 @@ import type { ThreatScan } from "../threat/types";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn(), trustGraph: vi.fn() }));
+const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn(), trustGraph: vi.fn(), marketIntelligence: vi.fn() }));
 
 vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
@@ -34,7 +34,13 @@ vi.mock("./Avatar", () => ({
   Avatar: ({ src }: { src: string | null }) => src ? <img src={src} alt="" /> : null,
 }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
-vi.mock("./ThreatScanPage", () => ({ ThreatReport: () => null }));
+vi.mock("./ThreatScanPage", () => ({
+  ThreatReport: () => <div data-testid="late-threat-report">late threat report</div>,
+  ProjectMarketIntelligence: (props: Record<string, unknown>) => {
+    harness.marketIntelligence(props);
+    return <div data-testid="market-intelligence">market intelligence</div>;
+  },
+}));
 
 import { Report } from "./Report";
 
@@ -45,6 +51,7 @@ beforeEach(() => {
   harness.livePanel.mockReset();
   harness.askReport.mockReset();
   harness.trustGraph.mockReset();
+  harness.marketIntelligence.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -176,6 +183,38 @@ describe("private person report evidence boundary", () => {
     expect(dual?.textContent).toContain("The liquidity");
     expect(dual?.textContent).toContain("Code & security");
     expect(container.querySelectorAll('[data-canonical-decision-brief="true"]')).toHaveLength(1);
+  });
+
+  it("moves saved deep token evidence into Market instead of repeating it in the late appendix", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const threat = {
+      address: "0x5555555555555555555555555555555555555555",
+      symbol: "FIX",
+      dossier: { score: 82, verdict: "PASS", axes: [] },
+    } as unknown as ThreatScan;
+    const dossier = {
+      ...base,
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Fixture",
+        symbol: "FIX",
+        address: threat.address,
+        chain: "ethereum",
+        sourceUrl: "https://dexscreener.com/ethereum/fixture",
+        capturedAt: "2026-08-27T00:00:00.000Z",
+      },
+      threat,
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.querySelector('[data-testid="market-intelligence"]')).not.toBeNull();
+    expect(harness.marketIntelligence).toHaveBeenCalledWith(expect.objectContaining({ scan: threat }));
+    expect(container.querySelector('[data-testid="late-threat-report"]')).toBeNull();
+    expect(container.textContent).not.toContain("Project token · threat scan");
   });
 
   it("puts the exact unfinished required check ahead of general research questions", () => {
