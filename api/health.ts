@@ -94,6 +94,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     retiredService("reddit", "Reddit (community signal)", "Reddit API access was not approved"),
     configuredService("gmgn", "GMGN (holder cost basis + wallet tags)", process.env.GMGN_API_KEY, "configure GMGN_API_KEY (apply at https://gmgn.ai/ai)"),
     optionalService("safebrowsing", "Google Safe Browsing (site-safety recall)", process.env.GOOGLE_SAFE_BROWSING_KEY, "configure GOOGLE_SAFE_BROWSING_KEY"),
+    optionalService("chart-signals", "Chart signals (technical posture)", process.env.CHART_SIGNALS_URL, "configure CHART_SIGNALS_URL + CHART_SIGNALS_TOKEN"),
     optionalService("x-api-bearer", "Official X API v2 (authenticity fallback)", process.env.X_API_BEARER, "configure X_API_BEARER"),
   ];
 
