@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { auditReadinessLabel, hasCoverageGap, presentedAuditVerdict, reconcileAuditOutcome } from "./auditlog";
+import { applyAuditCaseFamily, auditReadinessLabel, hasCoverageGap, presentedAuditVerdict, reconcileAuditOutcome } from "./auditlog";
 
 describe("audit-list verdict presentation", () => {
   it.each([undefined, "partial", "incomplete", "failed"])(
@@ -93,5 +93,44 @@ describe("reconcileAuditOutcome (chip vs active-report truth)", () => {
     await Promise.resolve();
     expect(JSON.parse(store.get("argus:auditlog")!)[0]).toMatchObject({ score: 82, coverage: "complete" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("linked project and token case family", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("annotates both saved facets from one verified identity binding", () => {
+    const rows = [
+      { id: "project", ts: 2, kind: "person", query: "@anyonefdn", ref: "@anyonefdn", score: 69, summary: "Project" },
+      { id: "token", ts: 1, kind: "token", query: "$ANYONE", ref: "0xabc", score: 84, summary: "Token" },
+      { id: "other", ts: 0, kind: "person", query: "@other", ref: "@other", score: 50, summary: "Other" },
+    ];
+    const store = new Map<string, string>([["argus:auditlog", JSON.stringify(rows)]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+
+    applyAuditCaseFamily(
+      [{ kind: "person", ref: "@anyonefdn" }, { kind: "token", ref: "0xABC" }],
+      "0xABC",
+      "ANyONe Protocol",
+    );
+
+    const stored = JSON.parse(store.get("argus:auditlog")!) as Array<{ id: string; flags?: string[] }>;
+    expect(stored.find((row) => row.id === "project")?.flags).toEqual([
+      "case-family:0xabc",
+      "case-title:ANyONe Protocol",
+    ]);
+    expect(stored.find((row) => row.id === "token")?.flags).toEqual([
+      "case-family:0xabc",
+      "case-title:ANyONe Protocol",
+    ]);
+    expect(stored.find((row) => row.id === "other")?.flags).toBeUndefined();
   });
 });

@@ -3,7 +3,7 @@ import { AppShell } from "./components/AppShell";
 import { ArgusMark } from "./components/ArgusMark";
 import { AuditConsole } from "./components/AuditConsole";
 import { Landing } from "./components/Landing";
-import { logAudit, hydrateSharedLog, reconcileAuditOutcome } from "./lib/auditlog";
+import { applyAuditCaseFamily, logAudit, hydrateSharedLog, reconcileAuditOutcome } from "./lib/auditlog";
 import {
   syncReport,
   savedVersionContext,
@@ -229,6 +229,17 @@ function reconcileStoredPersonOutcome(ref: string, dossier: Dossier): void {
       hasAssociates: (dossier.evidence.associates ?? []).length > 0,
     })).status,
   });
+  const token = dossier.projectToken;
+  if (token?.verified === true && token.address) {
+    applyAuditCaseFamily(
+      [
+        { kind: "person", ref: dossier.handle },
+        { kind: "token", ref: token.address },
+      ],
+      token.address,
+      token.name || dossier.display_name,
+    );
+  }
 }
 
 function cachedFromStoredReport(report: StoredReport): Cached | null {
@@ -927,6 +938,17 @@ export default function App() {
           ...Array.from(new Set([d.report.governing_role, ...(d.report.roles ?? [])])).filter(Boolean).map((r) => `role:${r}`),
         ].filter(Boolean),
       });
+      const projectToken = d.projectToken;
+      if (projectToken?.verified === true && projectToken.address) {
+        applyAuditCaseFamily(
+          [
+            { kind: "person", ref: d.handle },
+            { kind: "token", ref: projectToken.address },
+          ],
+          projectToken.address,
+          projectToken.name || d.display_name,
+        );
+      }
       // Compound the trust graph only after the final report binding settles,
       // so graph/audit surfaces point at the same immutable evidence version.
       recordContribution(personContribution(settled));

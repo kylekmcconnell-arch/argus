@@ -34,6 +34,7 @@ const harness = vi.hoisted(() => ({
   startTokenScan: vi.fn(),
   syncReport: vi.fn(),
   logAudit: vi.fn(),
+  applyAuditCaseFamily: vi.fn(),
   reconcileAuditOutcome: vi.fn(),
   personContribution: vi.fn(),
   recordContribution: vi.fn(),
@@ -192,6 +193,7 @@ vi.mock("./components/CaseBriefPanel", () => ({
 }));
 
 vi.mock("./lib/auditlog", () => ({
+  applyAuditCaseFamily: harness.applyAuditCaseFamily,
   hydrateSharedLog: vi.fn(),
   logAudit: harness.logAudit,
   reconcileAuditOutcome: harness.reconcileAuditOutcome,
