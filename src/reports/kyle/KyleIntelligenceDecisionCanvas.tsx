@@ -638,34 +638,28 @@ export function KyleIntelligenceDecisionCanvas({
       <section className="kyle-argus-take" aria-labelledby="kyle-argus-take-title">
         <div className="kyle-section-intro">
           <p className="kyle-overline mono">04 · THE ARGUS TAKE</p>
-          <h2 id="kyle-argus-take-title">What the evidence means.</h2>
-          <p>Concise analytical justification, not private model reasoning or a transcript of the research prompts.</p>
+          <h2 id="kyle-argus-take-title">The bottom line.</h2>
+          <p>The clearest reading of what is established, where the case is strongest, and what still deserves scrutiny.</p>
         </div>
-        <div className="kyle-evidence-ladder">
+        <p className="kyle-take-thesis">{thesis}</p>
+        <div className="kyle-take-grid">
           <article>
-            <span className="mono">FACT</span>
-            <h3>Observed</h3>
-            <p>{sentence(strongestSupport?.label) || "No leading fact was recorded."}</p>
-            {strongestSupport?.detail && <small>{sentence(strongestSupport.detail)}</small>}
+            <span className="mono">EVIDENCE BASE</span>
+            <h3>{sentence(strongestSupport?.label) || "No leading support was recorded."}</h3>
+            {strongestSupport?.detail && <p>{sentence(strongestSupport.detail)}</p>}
           </article>
-          <ArrowDown size={17} aria-hidden="true" />
           <article>
-            <span className="mono">SIGNAL</span>
-            <h3>Interpretation</h3>
-            <p>{sentence(argument?.forLine) || thesis}</p>
+            <span className="mono">THE RESERVATION</span>
+            <h3>{sentence(mainConcern?.label) || "No decision-changing concern was recorded."}</h3>
+            {mainConcern?.detail && <p>{sentence(mainConcern.detail)}</p>}
           </article>
-          <ArrowDown size={17} aria-hidden="true" />
-          <article>
-            <span className="mono">INFERENCE</span>
-            <h3>Implication</h3>
-            <p>{sentence(argument?.againstLine) || sentence(mainConcern?.label) || "No decision-changing implication was recorded."}</p>
-          </article>
-          <ArrowDown size={17} aria-hidden="true" />
-          <article className="kyle-ladder-final">
-            <span className="mono">FALSIFIABLE</span>
-            <h3>What would change our mind?</h3>
-            <p>{sentence(argument?.moveLine) || sentence(topNextStep?.label) || "No required check remains open."}</p>
-          </article>
+          {topNextStep && (
+            <article className="kyle-take-next">
+              <span className="mono">WHAT TO VERIFY NEXT</span>
+              <h3>{sentence(topNextStep.label)}</h3>
+              {topNextStep.detail && <p>{sentence(topNextStep.detail)}</p>}
+            </article>
+          )}
         </div>
         {context.length > 0 && (
           <details className="kyle-context-disclosure">

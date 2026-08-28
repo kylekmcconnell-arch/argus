@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IntelligenceSpineSnapshot } from "../intelligence/types";
-import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion } from "./intelligenceBrief";
+import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion, isProductDescriptionQuestion } from "./intelligenceBrief";
 
 function snapshot(): IntelligenceSpineSnapshot {
   return {
@@ -133,6 +133,17 @@ describe("deriveIntelligenceBrief", () => {
       title: "What exact project or company does this account represent?",
     })).toBe(true);
     expect(isOfficialIdentityQuestion({
+      id: "intelligence-question:security-audit",
+      title: "Which independent security audits are published?",
+    })).toBe(false);
+  });
+
+  it("identifies a stale product-description question", () => {
+    expect(isProductDescriptionQuestion({
+      id: "intelligence-question:project.product_surface",
+      title: "What live products or services does the project provide?",
+    })).toBe(true);
+    expect(isProductDescriptionQuestion({
       id: "intelligence-question:security-audit",
       title: "Which independent security audits are published?",
     })).toBe(false);

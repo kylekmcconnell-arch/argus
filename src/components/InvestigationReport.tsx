@@ -94,8 +94,8 @@ import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, i
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
-import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
-import { hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
+import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion, isProductDescriptionQuestion } from "../lib/intelligenceBrief";
+import { hasBoundProjectDescription, hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
 import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
 import { walletAgeFact } from "../lib/operatorTrace";
@@ -1371,6 +1371,7 @@ export function InvestigationReport({
         (isOfficialTokenQuestion(item)
           && (projectAccount?.projectToken?.verified || inv.projectAccountBinding?.status === "verified"))
         || (projectAccount != null && hasBoundProjectIdentity(projectAccount) && isOfficialIdentityQuestion(item))
+        || (projectAccount != null && hasBoundProjectDescription(projectAccount) && isProductDescriptionQuestion(item))
       ))
       .map((item) => ({
       label: item.title,

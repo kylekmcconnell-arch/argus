@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { Dossier } from "../data/dossier";
-import { hasBoundProjectIdentity, isReaderDecisionCheck } from "./verificationQuestionPolicy";
+import { hasBoundProjectDescription, hasBoundProjectIdentity, isReaderDecisionCheck } from "./verificationQuestionPolicy";
 
 describe("verification question policy", () => {
-  it("treats an exact provider-resolved project/domain binding as resolved identity", () => {
+  it("treats an exact project/domain orientation as resolved even in an older saved dossier", () => {
     const dossier = {
       handle: "@anyonefdn",
       profile_collection_state: "resolved",
       profile_provider: "twitterapi",
       subjectOrientation: {
         kind: "PROJECT",
-        what: "A privacy network.",
+        what: "A privacy network for internet applications.",
         audience: "internet users",
         boundHandle: "anyonefdn",
         boundDomain: "anyone.io",
@@ -19,8 +19,13 @@ describe("verification question policy", () => {
     } satisfies Pick<Dossier, "handle" | "profile_collection_state" | "profile_provider" | "subjectOrientation">;
 
     expect(hasBoundProjectIdentity(dossier)).toBe(true);
+    expect(hasBoundProjectDescription(dossier)).toBe(true);
     expect(hasBoundProjectIdentity({ ...dossier, handle: "@namesake" })).toBe(false);
-    expect(hasBoundProjectIdentity({ ...dossier, profile_collection_state: "unavailable" })).toBe(false);
+    expect(hasBoundProjectIdentity({ ...dossier, profile_collection_state: "unavailable", profile_provider: undefined })).toBe(true);
+    expect(hasBoundProjectIdentity({
+      ...dossier,
+      subjectOrientation: { ...dossier.subjectOrientation, boundDomain: null },
+    })).toBe(false);
   });
 
   it("keeps graph version diagnostics in methodology instead of Verify next", () => {

@@ -561,6 +561,15 @@ describe("private person report evidence boundary", () => {
           answerRefs: [],
           sourceRefs: [],
         }, {
+          id: "project.product_surface",
+          domain: "product",
+          prompt: "What live products or services does the project provide?",
+          materiality: "important",
+          state: "partial",
+          basis: "An older collection pass completed only partially.",
+          answerRefs: [],
+          sourceRefs: [],
+        }, {
           id: "project.security_audit",
           domain: "control",
           prompt: "Which independent security audits are published?",
@@ -579,6 +588,7 @@ describe("private person report evidence boundary", () => {
 
     const verifyNext = container.querySelector(".kyle-verify-next")?.textContent ?? "";
     expect(verifyNext).not.toContain("What exact project or company does this account represent");
+    expect(verifyNext).not.toContain("What live products or services does the project provide");
     expect(verifyNext).not.toContain("Connection map connections");
     expect(verifyNext).not.toContain("Team and leadership");
     expect(container.textContent).toContain("does not affect the score or verdict");

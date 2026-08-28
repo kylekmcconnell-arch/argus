@@ -117,6 +117,13 @@ describe("Kyle intelligence report opening", () => {
     expect(container.textContent).toContain("What matters before you decide.");
     expect(container.textContent).toContain("The strongest case for it, the reason to hesitate, and the evidence that could change the verdict.");
     expect(container.textContent).not.toContain("research-engine language");
+    expect(container.textContent).toContain("The bottom line.");
+    expect(container.textContent).toContain("The clearest reading of what is established");
+    expect(container.textContent).not.toContain("What the evidence means.");
+    expect(container.textContent).not.toContain("FALSIFIABLE");
+    expect(container.textContent).not.toContain("private model reasoning");
+    const take = container.querySelector(".kyle-argus-take")?.textContent ?? "";
+    expect(take.match(/Leadership identity is source-backed/g)).toHaveLength(1);
     expect(container.querySelector('a[href="#composition"]')?.textContent).toContain("Continue through the full report");
     expect([...container.querySelectorAll('a[href="#evidence-ledger"]')]
       .some((link) => link.textContent?.includes("Enter evidence room"))).toBe(true);

@@ -113,8 +113,8 @@ import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
-import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
-import { hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
+import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion, isProductDescriptionQuestion } from "../lib/intelligenceBrief";
+import { hasBoundProjectDescription, hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
 import { SocialActivityPanel } from "./SocialActivityPanel";
 import { reportOpeningNarrative } from "../lib/reportNarrative";
 import { useReportLane } from "../reports/shared/ReportLaneContext";
@@ -2277,6 +2277,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     ? deriveIntelligenceBrief(f.intelligence, decisionLensId)
     : { supports: [], pressures: [], context: [], questions: [] };
   const boundProjectIdentity = hasBoundProjectIdentity(f);
+  const boundProjectDescription = hasBoundProjectDescription(f);
 
   const axisSupportNarrative: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
     .filter((axis) => Boolean(axis.rationale) && axis.support.length > 0)
@@ -2489,6 +2490,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       .filter((item) => !(
         (f.projectToken?.verified && isOfficialTokenQuestion(item))
         || (boundProjectIdentity && isOfficialIdentityQuestion(item))
+        || (boundProjectDescription && isProductDescriptionQuestion(item))
       ))
       .map((item) => ({
       id: item.id,

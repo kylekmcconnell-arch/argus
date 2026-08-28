@@ -12,19 +12,26 @@ function normalizedHandle(value: string | null | undefined): string {
 }
 
 /**
- * True when the saved dossier already contains a provider-resolved account
- * bound to a concrete project/domain. A stale open-question ledger may remain
- * auditable, but it must not ask the reader to identify a subject we resolved.
+ * True when subject orientation binds the audited handle to a concrete project
+ * and official domain. Orientation is itself built only from bound artifacts;
+ * older saved dossiers do not always retain the profile-provider metadata.
  */
 export function hasBoundProjectIdentity(
   dossier: Pick<Dossier, "handle" | "profile_collection_state" | "profile_provider" | "subjectOrientation">,
 ): boolean {
   const orientation = dossier.subjectOrientation;
   if (!orientation || orientation.kind !== "PROJECT" || !orientation.boundDomain) return false;
-  if (dossier.profile_collection_state !== "resolved") return false;
-  if (!/twitterapi/i.test(dossier.profile_provider ?? "")) return false;
   const auditedHandle = normalizedHandle(dossier.handle);
   return auditedHandle.length > 0 && auditedHandle === normalizedHandle(orientation.boundHandle);
+}
+
+/** True when the bound orientation already explains what the project does. */
+export function hasBoundProjectDescription(
+  dossier: Pick<Dossier, "handle" | "profile_collection_state" | "profile_provider" | "subjectOrientation">,
+): boolean {
+  if (!hasBoundProjectIdentity(dossier)) return false;
+  const description = dossier.subjectOrientation?.what.replace(/\s+/g, " ").trim() ?? "";
+  return description.length >= 24;
 }
 
 /**

@@ -39,6 +39,13 @@ export function isOfficialIdentityQuestion(item: Pick<IntelligenceBriefItem, "id
     || /what exact project or company does this account represent/i.test(item.title);
 }
 
+/** A product-description question is stale once bound orientation answers it. */
+export function isProductDescriptionQuestion(item: Pick<IntelligenceBriefItem, "id" | "title">): boolean {
+  return /(?:live[_ .-])?(?:product|service)[_ .-](?:surface|description|offering)/i.test(item.id)
+    || /what live products? or services? does the project provide/i.test(item.title)
+    || /what (?:does|is) (?:the )?(?:project|product).*(?:do|provide)/i.test(item.title);
+}
+
 const SEVERITY_RANK: Record<DerivedIntelligenceSignal["severity"], number> = {
   high: 0,
   medium: 1,
