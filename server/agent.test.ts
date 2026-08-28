@@ -13,6 +13,7 @@ import {
   extractScoringEvidenceCatalog,
   inspectAnalystScoringPreflight,
   normalizeAnalystCitationEligibility,
+  reconcileAnalystVerdictLineage,
   normalizeGroundedTeamNarrative,
   normalizeAnalystSupportCounterOverlap,
   projectScoreFloorsForPacket,
@@ -1696,6 +1697,64 @@ describe("analyst verdict integrity", () => {
 
     expect(normalized).not.toBe(raw);
     expect(result?.axes[0]).toMatchObject({ evidenceRefs: [F1_REF], counterEvidenceRefs: [] });
+  });
+
+  it("reconciles a validated verdict against the exact final persistence catalog", () => {
+    const driftedRef = `art_v1_${"9".repeat(64)}`;
+    const finalCatalog = [
+      ...validationCatalog,
+      axisArtifact(driftedRef, ["F2_track_record"], "verified"),
+    ];
+    const verdict = {
+      axes: [
+        {
+          axis: "F1_identity_verifiability",
+          score: 9,
+          rationale: "Identity is verified.",
+          evidenceRefs: [F1_REF, driftedRef],
+          counterEvidenceRefs: [],
+          gaps: [],
+        },
+        {
+          axis: "F2_track_record",
+          score: 20,
+          rationale: "The operating record is documented.",
+          evidenceRefs: [F2_REF],
+          counterEvidenceRefs: [],
+          gaps: [],
+        },
+      ],
+      headline: "The evidence supports the case.",
+      identity_note: "Identity is resolved.",
+    };
+
+    const result = reconcileAnalystVerdictLineage(verdict, finalCatalog, catalog);
+
+    expect(result.verdict?.axes[0].evidenceRefs).toEqual([F1_REF]);
+    expect(result.removed).toEqual([{
+      axis: "F1_identity_verifiability",
+      artifactId: driftedRef,
+      relation: "support",
+      eligibleAxes: ["F2_track_record"],
+    }]);
+  });
+
+  it("fails closed when final-catalog reconciliation removes the only support", () => {
+    const result = reconcileAnalystVerdictLineage({
+      axes: [{
+        axis: "F1_identity_verifiability",
+        score: 9,
+        rationale: "Identity is verified.",
+        evidenceRefs: [F2_REF],
+        counterEvidenceRefs: [],
+        gaps: [],
+      }],
+      headline: "The evidence supports the case.",
+      identity_note: "Identity is resolved.",
+    }, validationCatalog, [catalog[0]]);
+
+    expect(result.verdict).toBeNull();
+    expect(result.reason).toContain("F1_identity_verifiability has no substantive eligible support");
   });
 
   it("promotes an already-selected eligible additional citation when the primary belongs to another axis", () => {

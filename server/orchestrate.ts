@@ -26,6 +26,7 @@ import {
   extractClaims,
   extractScoringEvidenceCatalog,
   inspectAnalystScoringPreflight,
+  reconcileAnalystVerdictLineage,
   scanContradictions,
 } from "./agent";
 import { getCost, providerFailureLines, recordCall, withCostLedger } from "./cost";
@@ -5110,7 +5111,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const contradictionBefore = analystAttemptTotals(["record_contradictions"]);
     const scorerBefore = analystAttemptTotals(["record_verdict"]);
     // analystDeadlineAt is computed once at the top of the run (see above).
-    const [found, verdict] = await Promise.all([
+    const [found, rawVerdict] = await Promise.all([
       decisionPacketUsable
         ? scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt })
         : Promise.resolve(null),
@@ -5120,6 +5121,17 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           })
         : Promise.resolve(null),
     ]);
+    const lineageReconciliation = rawVerdict
+      ? reconcileAnalystVerdictLineage(rawVerdict, frozenAxisEvidence, scoringAxes)
+      : null;
+    const verdict = lineageReconciliation?.verdict ?? null;
+    if (lineageReconciliation?.removed.length) {
+      console.warn("[agent-lineage]", JSON.stringify({
+        state: verdict ? "reconciled" : "failed_closed",
+        removed: lineageReconciliation.removed,
+        ...(lineageReconciliation.reason ? { reason: lineageReconciliation.reason } : {}),
+      }));
+    }
     const contradictionAttempts = attemptDelta(
       contradictionBefore,
       analystAttemptTotals(["record_contradictions"]),
