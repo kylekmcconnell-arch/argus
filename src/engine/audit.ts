@@ -194,7 +194,10 @@ export interface Testimonial extends EvidenceProvenance {
   sentiment?: string | null;
   fud_present?: boolean;
   corroboration_verdict?: TestimonialVerdict;
+  /** Exact first-party page or post where the subject made the relationship claim. */
   evidence_url?: string;
+  /** Exact public post where the named party acknowledged the subject, when one was found. */
+  acknowledgment_source_url?: string;
   notes?: string;
 }
 
@@ -908,6 +911,7 @@ export class Audit {
           type: "CLAIMED_ENDORSEMENT",
           verdict: t.corroboration_verdict,
           claimed_relation: t.claimed_relationship,
+          ...receipt(t, t.evidence_url),
         });
       }
     }

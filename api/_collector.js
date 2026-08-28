@@ -1021,7 +1021,8 @@ var Audit = class {
           dst: this.handle,
           type: "CLAIMED_ENDORSEMENT",
           verdict: t.corroboration_verdict,
-          claimed_relation: t.claimed_relationship
+          claimed_relation: t.claimed_relationship,
+          ...receipt(t, t.evidence_url)
         });
       }
     }
@@ -7997,7 +7998,7 @@ Return exactly one ${tool.name} object. ${tool.description}` },
   return valid ? parsed : null;
 }
 async function extractClaims(handle, bio, posts) {
-  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization: a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR. A caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, listing each ticker once with its contract address and chain when a chart link or CA is present. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
+  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization: a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR. A caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. When a post includes a [Source: URL] stamp, copy that exact URL into evidence_url for the testimonial extracted from that post. Advised = projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, listing each ticker once with its contract address and chain when a chart link or CA is present. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
   const user = `Subject: ${handle}
 Bio: ${bio || "(none)"}
 
@@ -8022,7 +8023,7 @@ ${posts.slice(0, 70).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
           type: "array",
           items: {
             type: "object",
-            properties: { claimed_endorser_handle: { type: "string" }, claimed_relationship: { type: "string" } },
+            properties: { claimed_endorser_handle: { type: "string" }, claimed_relationship: { type: "string" }, evidence_url: { type: "string" } },
             required: ["claimed_endorser_handle"]
           }
         },
@@ -12916,6 +12917,7 @@ function parseTweet(t) {
   const isReply = !!(t.isReply ?? t.inReplyToId ?? t.in_reply_to_status_id ?? t.in_reply_to_user_id) || /^@\w/.test(text2);
   return {
     text: text2,
+    id: String(t.id ?? t.id_str ?? "").trim() || void 0,
     at: Number.isFinite(at) ? at : null,
     views: num(t.viewCount, t.view_count, t.views) ?? 0,
     likes: num(t.likeCount, t.favorite_count, t.favoriteCount, t.likes) ?? 0,
@@ -12943,11 +12945,12 @@ async function searchFrom(handle, terms, key, queryType = "Top") {
   const d = await res.json();
   return d.tweets ?? d.data?.tweets ?? [];
 }
-var stamp = (p) => {
+var stamp = (p, author) => {
   const when = p.at ? new Date(p.at).toLocaleString("en-US", { month: "short", year: "numeric" }) : "";
   const v = p.views >= 1e3 ? `${Math.round(p.views / 1e3)}k views` : p.views ? `${p.views} views` : "";
   const meta = [when, v].filter(Boolean).join(" \xB7 ");
-  return (meta ? `[${meta}] ` : "") + p.text;
+  const source2 = p.id ? ` [Source: https://x.com/${author}/status/${p.id}]` : "";
+  return (meta ? `[${meta}] ` : "") + p.text + source2;
 };
 async function collectCorpus(handle) {
   const key = env("TWITTERAPI_KEY");
@@ -12990,7 +12993,7 @@ async function collectCorpus(handle) {
   const rankedKeys = new Set(ranked.map((p) => p.text.slice(0, 80).toLowerCase()));
   for (const p of newest) if (!rankedKeys.has(p.text.slice(0, 80).toLowerCase())) ranked.push(p);
   return {
-    posts: ranked.map(stamp),
+    posts: ranked.map((post) => stamp(post, u)),
     newest: newest.map((p) => p.text),
     teamSignalPosts: [...new Set(sId.map((tweet) => String(tweet?.text ?? tweet?.full_text ?? "").trim()).filter(Boolean))].slice(0, 30),
     count: { originals: originals.length, searched: searched.length, ranked: ranked.length }
@@ -14127,6 +14130,7 @@ var xAdapter = {
         if (ack?.source_url) {
           const lead = `Model-search acknowledgment lead: ${ack.ack}, ${ack.sentiment} (${ack.source_url}); independent artifact verification required`;
           t.notes = [t.notes, lead].filter(Boolean).join(" \xB7 ");
+          t.acknowledgment_source_url = ack.source_url;
         }
         t.corroboration_verdict = classifyTestimonial(t);
         if (t.corroboration_verdict === "Contradicted" /* CONTRADICTED */) {
@@ -33114,6 +33118,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       claimed_endorser_handle: t.claimed_endorser_handle,
       claimed_relationship: t.claimed_relationship,
       appears_at: "subject surfaces",
+      ...t.evidence_url ? { evidence_url: t.evidence_url } : {},
       evidence_origin: "model_lead",
       artifact_verified: false
     }));
@@ -33595,6 +33600,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         claimed_endorser_handle: a.handle,
         claimed_relationship: "advisor",
         appears_at: "model search of project X content",
+        ...a.sourceUrl ? { evidence_url: a.sourceUrl } : {},
         evidence_origin: "model_lead",
         artifact_verified: false
       });

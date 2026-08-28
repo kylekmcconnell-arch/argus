@@ -1143,6 +1143,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
       claimed_endorser_handle: t.claimed_endorser_handle,
       claimed_relationship: t.claimed_relationship,
       appears_at: "subject surfaces",
+      ...(t.evidence_url ? { evidence_url: t.evidence_url } : {}),
       evidence_origin: "model_lead" as const,
       artifact_verified: false,
     }));
@@ -1772,6 +1773,7 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         claimed_endorser_handle: a.handle,
         claimed_relationship: "advisor",
         appears_at: "model search of project X content",
+        ...(a.sourceUrl ? { evidence_url: a.sourceUrl } : {}),
         evidence_origin: "model_lead",
         artifact_verified: false,
       });

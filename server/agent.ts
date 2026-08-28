@@ -352,7 +352,7 @@ async function structuredGrok<T>(
 export interface ExtractedClaims {
   roles: string[];
   ventures: { project_name: string; role?: string; period?: string; claimed_outcome?: string }[];
-  testimonials: { claimed_endorser_handle: string; claimed_relationship?: string }[];
+  testimonials: { claimed_endorser_handle: string; claimed_relationship?: string; evidence_url?: string }[];
   advised: { project_name: string; project_handle?: string; claimed_role?: string }[];
   promotions: { ticker: string; contract_address?: string; chain?: string }[];
 }
@@ -382,7 +382,7 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
     "can hold several roles, but do not tag KOL merely for hype words or for promoting the " +
     "project's own token, and do not tag INVESTOR merely for trading talk. " +
     "Ventures = companies/projects they say they founded or led. " +
-    "Testimonials = named people/accounts they cite as backers or endorsers. Advised " +
+    "Testimonials = named people/accounts they cite as backers or endorsers. When a post includes a [Source: URL] stamp, copy that exact URL into evidence_url for the testimonial extracted from that post. Advised " +
     "= projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller " +
     "capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, " +
     "listing each ticker once with its contract address and chain when a chart link or CA is present. Use the " +
@@ -407,7 +407,7 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
           type: "array",
           items: {
             type: "object",
-            properties: { claimed_endorser_handle: { type: "string" }, claimed_relationship: { type: "string" } },
+            properties: { claimed_endorser_handle: { type: "string" }, claimed_relationship: { type: "string" }, evidence_url: { type: "string" } },
             required: ["claimed_endorser_handle"],
           },
         },

@@ -589,7 +589,7 @@ export async function getRecentPostsMeta(handle: string, limit = 40): Promise<Po
 // reads everything and decides what's a claim (keyword lists miss non-English /
 // novel slang; their job is only to get the right posts onto its desk).
 const num = (...v: any[]): number | undefined => { for (const x of v) if (typeof x === "number") return x; return undefined; };
-interface CorpusPost { text: string; at: number | null; views: number; likes: number; isReply: boolean; isRt: boolean; }
+interface CorpusPost { text: string; id?: string; at: number | null; views: number; likes: number; isReply: boolean; isRt: boolean; }
 
 const KW_IDENTITY = [
   "founder", "co-founder", "cofounder", "CEO", "CTO", "advisor",
@@ -622,7 +622,9 @@ function parseTweet(t: any): CorpusPost {
   const isRt = /^RT @/.test(text) || !!t.retweeted_tweet || !!t.retweeted_status || t.isRetweet === true;
   const isReply = !!(t.isReply ?? t.inReplyToId ?? t.in_reply_to_status_id ?? t.in_reply_to_user_id) || /^@\w/.test(text);
   return {
-    text, at: Number.isFinite(at) ? at : null,
+    text,
+    id: String(t.id ?? t.id_str ?? "").trim() || undefined,
+    at: Number.isFinite(at) ? at : null,
     views: num(t.viewCount, t.view_count, t.views) ?? 0,
     likes: num(t.likeCount, t.favorite_count, t.favoriteCount, t.likes) ?? 0,
     isReply, isRt,
@@ -653,11 +655,12 @@ export async function searchFrom(handle: string, terms: string[], key: string, q
   return d.tweets ?? d.data?.tweets ?? [];
 }
 
-const stamp = (p: CorpusPost): string => {
+const stamp = (p: CorpusPost, author: string): string => {
   const when = p.at ? new Date(p.at).toLocaleString("en-US", { month: "short", year: "numeric" }) : "";
   const v = p.views >= 1000 ? `${Math.round(p.views / 1000)}k views` : p.views ? `${p.views} views` : "";
   const meta = [when, v].filter(Boolean).join(" · ");
-  return (meta ? `[${meta}] ` : "") + p.text;
+  const source = p.id ? ` [Source: https://x.com/${author}/status/${p.id}]` : "";
+  return (meta ? `[${meta}] ` : "") + p.text + source;
 };
 
 export interface Corpus {
@@ -714,7 +717,7 @@ export async function collectCorpus(handle: string): Promise<Corpus> {
   for (const p of newest) if (!rankedKeys.has(p.text.slice(0, 80).toLowerCase())) ranked.push(p);
 
   return {
-    posts: ranked.map(stamp),
+    posts: ranked.map((post) => stamp(post, u)),
     newest: newest.map((p) => p.text),
     teamSignalPosts: [...new Set(sId
       .map((tweet) => String((tweet as { text?: unknown; full_text?: unknown })?.text ?? (tweet as { full_text?: unknown })?.full_text ?? "").trim())
@@ -2929,12 +2932,13 @@ export const xAdapter: Adapter = {
           if (!follows) nonFollowingRelationships += 1;
         }
         if (ack?.source_url) {
-          // Grok supplied the URL, so this is still a model lead: it has not
+          // X search supplied the URL, so this is still a discovery lead: it has not
           // been independently fetched and checked for author/text/relationship.
           // Keep it visible for follow-up without letting it self-corroborate or
           // self-contradict the claim that generated the search.
           const lead = `Model-search acknowledgment lead: ${ack.ack}, ${ack.sentiment} (${ack.source_url}); independent artifact verification required`;
           t.notes = [t.notes, lead].filter(Boolean).join(" · ");
+          t.acknowledgment_source_url = ack.source_url;
         }
         t.corroboration_verdict = classifyTestimonial(t);
         if (t.corroboration_verdict === TestimonialVerdict.CONTRADICTED) {

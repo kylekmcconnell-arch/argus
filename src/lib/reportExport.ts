@@ -37,6 +37,19 @@ const roleLabel = (r: string) => ROLE_META[r as SubjectClass]?.label ?? r;
 // A short host string from a URL for compact source lines.
 const host = (u: string) => String(u ?? "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 
+const safeHref = (value?: string): string | null => {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value.trim());
+    if ((parsed.protocol === "https:" || parsed.protocol === "http:") && parsed.hostname && !parsed.username && !parsed.password) {
+      return esc(parsed.href);
+    }
+  } catch {
+    // Invalid or non-web URLs remain unavailable in the portable export.
+  }
+  return null;
+};
+
 /* ── section builders ─────────────────────────────────────────────── */
 
 function subjectBlock(d: Dossier): string {
@@ -207,19 +220,30 @@ function walletsBlock(d: Dossier): string {
 function testimonialsBlock(d: Dossier): string {
   const t = d.evidence.testimonials ?? [];
   if (!t.length) return "";
+  const publicSignal = (x: (typeof t)[number]): string => {
+    const ack = x.public_acknowledgment?.toLowerCase();
+    if (ack === "endorsement") return "Public endorsement found";
+    if (ack === "thanks") return "Public acknowledgment found";
+    if (ack === "mention") return "Public mention found; relationship unconfirmed";
+    if (ack === "none" || x.follows_subject === false) return "No public confirmation found";
+    if (x.follows_subject === true) return "Follows the project; acknowledgment not checked";
+    return "Independent confirmation was not completed";
+  };
   const rows = t
-    .map(
-      (x) => `
+    .map((x) => {
+      const claimHref = safeHref(x.evidence_url);
+      const acknowledgmentHref = safeHref(x.acknowledgment_source_url);
+      return `
       <tr>
-        <td>${esc(x.claimed_endorser_handle ?? x.claimed_endorser_name ?? "-")}${x.claimed_relationship ? `<br><span class="dim">claims: ${esc(x.claimed_relationship)}</span>` : ""}</td>
-        <td>${x.follows_subject ? "follows" : "no follow"} · ${esc(x.public_acknowledgment && x.public_acknowledgment !== "none" ? x.public_acknowledgment : "no ack")}</td>
+        <td>${esc(x.claimed_endorser_handle ?? x.claimed_endorser_name ?? "-")}${x.claimed_relationship ? `<br><span class="dim">Claimed role: ${esc(x.claimed_relationship)}</span>` : ""}${claimHref ? `<br><a href="${claimHref}">Claim source</a>` : `<br><span class="dim">Exact claim link unavailable</span>`}</td>
+        <td>${esc(publicSignal(x))}${acknowledgmentHref ? `<br><a href="${acknowledgmentHref}">Public acknowledgment</a>` : ""}</td>
         <td>${esc(x.corroboration_verdict ?? "Unconfirmed")}</td>
-      </tr>`,
-    )
+      </tr>`;
+    })
     .join("");
   return section(
-    "Testimonial corroboration",
-    `<table><thead><tr><th>Claimed endorser</th><th>Public signal</th><th>Verdict</th></tr></thead><tbody>${rows}</tbody></table>`,
+    "Claimed relationships",
+    `<p class="note">People or organizations the subject publicly described as advisors, investors, partners, or backers. These claims remain separate from independent confirmation.</p><table><thead><tr><th>Named party and claimed role</th><th>Independent verification</th><th>Result</th></tr></thead><tbody>${rows}</tbody></table>`,
   );
 }
 

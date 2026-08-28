@@ -113,6 +113,28 @@ describe("reportToHtml", () => {
     expect(reportToHtml(first)).not.toContain("Project token · threat scan");
   });
 
+  it("exports claimed relationships with plain verification language and source links", () => {
+    const dossier: Dossier = {
+      ...first,
+      evidence: {
+        ...first.evidence,
+        testimonials: [{
+          claimed_endorser_handle: "@exampleadvisor",
+          claimed_relationship: "advisor",
+          evidence_url: "https://project.example/team",
+          acknowledgment_source_url: "https://x.com/exampleadvisor/status/123",
+          public_acknowledgment: "mention",
+        }],
+      },
+    };
+    const html = reportToHtml(dossier);
+    expect(html).toContain("Claimed relationships");
+    expect(html).toContain("Public mention found; relationship unconfirmed");
+    expect(html).toContain("https://project.example/team");
+    expect(html).toContain("https://x.com/exampleadvisor/status/123");
+    expect(html).not.toContain("ack unchecked");
+  });
+
   it("keeps the case label stable across saved versions and prints unique report IDs", () => {
     const caseId = "aaf133f8-7a13-4df0-ae17-000000000008";
     const context = (version: number, reportVersionId: string): ReportVersionContext => ({

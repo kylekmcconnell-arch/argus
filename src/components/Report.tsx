@@ -636,48 +636,102 @@ const TV_TONE: Record<string, string> = {
 };
 const TV_SHORT: Record<string, string> = {
   Corroborated: "Confirmed",
-  PartiallyCorroborated: "Mixed",
-  Unconfirmed: "Not confirmed",
-  Contradicted: "Sources disagree",
+  PartiallyCorroborated: "Partial evidence",
+  Unconfirmed: "Not independently confirmed",
+  Contradicted: "Conflicting evidence",
 };
+
+function relationshipSignalLabel(follows?: boolean | null, acknowledgment?: string | null): string {
+  const ack = acknowledgment?.toLowerCase();
+  if (ack === "endorsement") return "Public endorsement found";
+  if (ack === "thanks") return "Public acknowledgment found";
+  if (ack === "mention") return "Public mention found; relationship unconfirmed";
+  if (ack === "none" && follows === true) return "Follows the project; no relationship confirmation found";
+  if (ack === "none" || follows === false) return "No public confirmation found";
+  if (follows === true) return "Follows the project; acknowledgment not checked";
+  return "Independent confirmation was not completed";
+}
+
+function xProfileLink(handle: string): { href: string; label: string } | null {
+  const match = handle.trim().match(/^@([A-Za-z0-9_]{1,30})$/);
+  return match ? { href: `https://x.com/${match[1]}`, label: "Open X profile" } : null;
+}
+
+function xClaimSearchLink(subjectHandle: string, namedParty: string): string | null {
+  const subject = subjectHandle.trim().replace(/^@/, "");
+  const party = namedParty.trim().match(/^@[A-Za-z0-9_]{1,30}$/)?.[0];
+  if (!subject || !party) return null;
+  return `https://x.com/search?q=${encodeURIComponent(`from:${subject} ${party}`)}&src=typed_query&f=live`;
+}
 
 function CorroborationTable({
   rows,
+  subjectHandle,
 }: {
-  rows: { who: string; rel?: string; follows?: boolean | null; ack?: string | null; verdict?: string; note?: string }[];
+  rows: {
+    who: string;
+    rel?: string;
+    follows?: boolean | null;
+    ack?: string | null;
+    verdict?: string;
+    note?: string;
+    evidenceUrl?: string;
+    acknowledgmentUrl?: string;
+  }[];
+  subjectHandle: string;
 }) {
   return (
     <Card className="overflow-hidden">
-      <div className="grid grid-cols-[1.4fr_1fr_auto] gap-2 border-b border-line px-4 py-2 eyebrow">
-        <span>Claimed endorser</span>
-        <span>Public signal</span>
+      <div className="border-b border-line px-4 py-3 text-[12.5px] leading-relaxed text-ink-dim">
+        These are people or organizations the subject publicly described as advisors, investors, partners, or backers. A claim is not treated as confirmed until the named party acknowledges it or another source corroborates it.
+      </div>
+      <div className="hidden grid-cols-[1.25fr_1.15fr_auto] gap-3 border-b border-line px-4 py-2 eyebrow sm:grid">
+        <span>Named party and claimed role</span>
+        <span>Independent verification</span>
         <span className="text-right">Result</span>
       </div>
       <div className="divide-y divide-line/60">
-        {rows.map((r, i) => (
-          <div key={i} className="grid grid-cols-[1.4fr_1fr_auto] items-center gap-2 px-4 py-2.5">
-            <div className="min-w-0">
-              <div className="mono truncate text-[12.5px] text-ink">{r.who}</div>
-              {r.rel && <div className="text-[11px] text-ink-faint">claims: {r.rel}</div>}
+        {rows.map((r, i) => {
+          const profile = xProfileLink(r.who);
+          const claimSource = safeSourceLink(r.evidenceUrl);
+          const acknowledgmentSource = safeSourceLink(r.acknowledgmentUrl);
+          const claimSearch = claimSource ? null : xClaimSearchLink(subjectHandle, r.who);
+          return (
+            <div key={i} className="grid grid-cols-1 items-start gap-3 px-4 py-3 sm:grid-cols-[1.25fr_1.15fr_auto]">
+              <div className="min-w-0">
+                {profile ? (
+                  <a href={profile.href} target="_blank" rel="noopener noreferrer" className="mono block truncate text-[12.5px] text-ink underline-offset-2 hover:text-signal-lift hover:underline">{r.who}</a>
+                ) : (
+                  <div className="mono truncate text-[12.5px] text-ink">{r.who}</div>
+                )}
+                <div className="mt-0.5 text-[11.5px] text-ink-dim">Claimed role: {r.rel || "relationship not specified"}</div>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                  {claimSource ? (
+                    <a href={claimSource.href} target="_blank" rel="noopener noreferrer" className="link-ext">Open claim source</a>
+                  ) : claimSearch ? (
+                    <>
+                      <span className="text-ink-faint">Exact claim link not preserved in this saved scan.</span>
+                      <a href={claimSearch} target="_blank" rel="noopener noreferrer" className="link-ext">Search the subject's posts</a>
+                    </>
+                  ) : (
+                    <span className="text-ink-faint">Claim source link unavailable</span>
+                  )}
+                </div>
+              </div>
+              <div className="min-w-0 text-[12.5px] leading-relaxed text-ink-dim">
+                <div>{relationshipSignalLabel(r.follows, r.ack)}</div>
+                {acknowledgmentSource && (
+                  <a href={acknowledgmentSource.href} target="_blank" rel="noopener noreferrer" className="link-ext mt-1.5 inline-flex">Open acknowledgment</a>
+                )}
+              </div>
+              <div className="max-w-[14rem] sm:max-w-[11rem] sm:text-right">
+                <span className="mono text-[11px] font-medium" style={{ color: TV_TONE[r.verdict ?? "Unconfirmed"] }}>
+                  {TV_SHORT[r.verdict ?? "Unconfirmed"]}
+                </span>
+              </div>
             </div>
-            {/* null/undefined means the check never ran: render "unchecked",
-                not an affirmative negative about a named person */}
-            <div className="text-[12.5px] text-ink-dim">
-              <span className={r.follows ? "text-ink-dim" : "text-ink-faint line-through/0"}>
-                {r.follows ? "follows" : r.follows === false ? "no follow" : "follow unchecked"}
-              </span>
-              <span className="text-ink-faint"> · {!r.ack ? "ack unchecked" : r.ack !== "none" ? r.ack : "no ack"}</span>
-            </div>
-            <div className="text-right">
-              <span
-                className="mono text-[11px] font-medium"
-                style={{ color: TV_TONE[r.verdict ?? "Unconfirmed"] }}
-              >
-                {TV_SHORT[r.verdict ?? "Unconfirmed"]}
-              </span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </Card>
   );
@@ -2242,6 +2296,8 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       ack: t.public_acknowledgment,
       verdict: t.corroboration_verdict,
       note: t.notes,
+      evidenceUrl: t.evidence_url,
+      acknowledgmentUrl: t.acknowledgment_source_url,
     })),
   ];
 
@@ -4714,9 +4770,9 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
 
           {corroborationRows.length > 0 && (
             <div className="mb-3 min-w-0 break-inside-avoid">
-              <Section title="Testimonial corroboration" kicker="claimed vs. acknowledged">
-                <Clamp itemCount={corroborationRows.length} label="endorsements">
-                <CorroborationTable rows={corroborationRows} />
+              <Section title="Claimed relationships" kicker="project claims checked against public evidence">
+                <Clamp itemCount={corroborationRows.length} label="relationships">
+                <CorroborationTable rows={corroborationRows} subjectHandle={report.handle} />
                 </Clamp>
               </Section>
             </div>

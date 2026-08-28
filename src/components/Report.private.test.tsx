@@ -1503,7 +1503,7 @@ describe("private person report evidence boundary", () => {
     expect(container.textContent).not.toContain("2 public funding rounds");
   });
 
-  it("renders never-collected follow and acknowledgment checks as unchecked instead of affirmative negatives", () => {
+  it("explains claimed relationships in public language and links the preserved evidence", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
       ...base,
@@ -1512,11 +1512,13 @@ describe("private person report evidence boundary", () => {
         testimonials: [{
           claimed_endorser_handle: "@unchecked_endorser",
           claimed_relationship: "advisor",
+          evidence_url: "https://project.example/team",
         }, {
           claimed_endorser_handle: "@screened_endorser",
           claimed_relationship: "investor",
           follows_subject: false,
           public_acknowledgment: "none",
+          acknowledgment_source_url: "https://x.com/screened_endorser/status/123",
         }],
       },
     };
@@ -1526,18 +1528,22 @@ describe("private person report evidence boundary", () => {
     });
 
     const rowText = (handle: string) => [...container.querySelectorAll<HTMLElement>("div")]
-      .find((el) => el.className.includes("grid-cols-[1.4fr_1fr_auto]") && el.textContent?.includes(handle))
+      .find((el) => el.className.includes("sm:grid-cols-[1.25fr_1.15fr_auto]") && el.textContent?.includes(handle))
       ?.textContent ?? "";
 
     const unchecked = rowText("@unchecked_endorser");
-    expect(unchecked).toContain("follow unchecked");
-    expect(unchecked).toContain("ack unchecked");
-    expect(unchecked).not.toContain("no follow");
-    expect(unchecked).not.toContain("no ack");
+    expect(unchecked).toContain("Claimed role: advisor");
+    expect(unchecked).toContain("Independent confirmation was not completed");
+    expect(unchecked).not.toContain("ack unchecked");
 
     const screened = rowText("@screened_endorser");
-    expect(screened).toContain("no follow");
-    expect(screened).toContain("no ack");
+    expect(screened).toContain("No public confirmation found");
+    expect(screened).toContain("Not independently confirmed");
+
+    const hrefs = [...container.querySelectorAll<HTMLAnchorElement>("a")].map((link) => link.href);
+    expect(hrefs).toContain("https://project.example/team");
+    expect(hrefs).toContain("https://x.com/screened_endorser/status/123");
+    expect(container.textContent).toContain("These are people or organizations the subject publicly described");
   });
 
   it("does not mount subject-specific supplemental panels", () => {
