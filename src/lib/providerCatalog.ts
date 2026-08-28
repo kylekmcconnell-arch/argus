@@ -265,6 +265,18 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
     env: ["GMGN_API_KEY"],
   },
   {
+    id: "chart-signals",
+    label: "Chart signals (self-hosted)",
+    powers: "Generic technical posture for tickers listed on major venues: trend state, breakout and reversal formations, momentum and volume readings",
+    limits: "Majors-only coverage, matched by ticker with a market-cap guard. Readings are chart structure, never identity verification or investment advice.",
+    source: "self-hosted",
+    tier: "optional",
+    kind: "evidence",
+    lifecycle: "active",
+    category: "Markets and projects",
+    env: ["CHART_SIGNALS_URL", "CHART_SIGNALS_TOKEN"],
+  },
+  {
     id: "goplus",
     label: "GoPlus",
     powers: "Contract controls, token security flags, and holder context",

@@ -26,7 +26,8 @@ import { launchProvenance } from "./launch";
 import { registryVerification } from "./verification";
 import { sellStructure } from "./sellers";
 import { siteSafety } from "./sitesafety";
-import type { CrossChain, MigrationInfo, LaunchProvenance, RegistryVerification, SellStructure, SiteSafety } from "./types";
+import { technicalPosture } from "./technicalposture";
+import type { CrossChain, MigrationInfo, LaunchProvenance, RegistryVerification, SellStructure, SiteSafety, TechnicalPosture } from "./types";
 
 const money = (n: number) =>
   n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(1) + "K" : "$" + Math.round(n);
@@ -93,6 +94,18 @@ export async function threatScan(
   else if (site?.worst === "suspicious") emit?.({ phase: "ARGUS · Site", label: "Suspicious linked site", detail: "The token's website shows drainer-style cloaking or phishing signatures.", tone: "warn" });
   if (site?.xBio?.status === "mismatch") emit?.({ phase: "ARGUS · Authenticity", label: "Namesake / impersonation", detail: site.xBio.note, tone: "bad" });
   else if (site?.xBio?.status === "verified") emit?.({ phase: "ARGUS · Authenticity", label: "CA verified on X", detail: site.xBio.note, tone: "good" });
+  // Chart posture: a generic technical read for tickers that also trade on
+  // major venues (matched by symbol with a market-cap sanity guard). Most fresh
+  // CAs are not covered and the lane stays silent.
+  const posture = await technicalPosture(dossier.symbol, dossier.mcap ?? null);
+  if (posture) {
+    emit?.({
+      phase: "ARGUS · Chart",
+      label: `Chart posture: ${posture.stance}`,
+      detail: posture.readings[0]?.observations.slice(0, 3).join("; ") ?? "",
+      tone: posture.stance === "bullish" ? "good" : posture.stance === "bearish" ? "warn" : "neutral",
+    });
+  }
   const sellers = await sellStructure(dossier.chain, dossier.address, dossier.deployer ?? null);
   if (sellers) {
     if (sellers.devSold) emit?.({ phase: "ARGUS · Sellers", label: "Dev sold", detail: "The deployer/creator wallet has sold into the pool.", tone: "bad" });
@@ -169,7 +182,7 @@ export async function threatScan(
     emit?.({ phase: "ARGUS · Tokenomics", label: "Tax → real-world assets", detail: "The transfer tax appears to buy real-world assets/stocks and distribute them to holders - a yield mechanism, not a rug tax.", tone: "good" });
   }
   const call = judge(dossier, code, deployer, rc, hp, meta, clones, tokenomics, xchain, migration, launch, verification, sellers, site, classification);
-  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers, site, classification);
+  const checks = buildChecks(dossier, code, deployer, rc, hp, meta, tokenomics, launch, verification, sellers, site, classification, posture);
   emit?.({ phase: "Verdict", label: call.verdict, detail: `${call.risk}/100 risk · ${call.action}`, tone: call.verdict === "SAFE" ? "good" : call.verdict === "CAUTION" ? "warn" : "bad" });
 
   const scan: ThreatScan = {
@@ -178,7 +191,7 @@ export async function threatScan(
     symbol: dossier.symbol,
     name: dossier.name,
     dossier, classification, call, code, deployer, tokenomics, checks,
-    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers, site },
+    deep: { rugcheck: rc, honeypot: hp, meta, fingerprint: fp?.fingerprint ?? null, clones, xchain, migration, launch, verification, sellers, site, posture },
     scannedAt: Date.now(),
   };
 
@@ -593,6 +606,7 @@ function buildChecks(
   tk: TokenomicsView, launch: LaunchProvenance | null, verification: RegistryVerification | null,
   sellers: SellStructure | null, site: SiteSafety | null,
   cls: TokenClassification = UNCLASSIFIED,
+  posture: TechnicalPosture | null = null,
 ): ThreatCheck[] {
   const s = d.safety;
   const sol = d.chain === "solana";
@@ -609,6 +623,11 @@ function buildChecks(
     chk("class", "market", "Token class",
       cls.kind === "unknown" ? "na" : "pass",
       `${cls.label}${cls.confidence !== "high" ? ` (${cls.confidence} confidence)` : ""} - ${cls.signals[0] ?? "no strong signals"}`),
+    chk("posture", "market", "Chart posture",
+      posture == null ? "na" : posture.stance === "bearish" ? "warn" : "pass",
+      posture == null
+        ? "Not covered by major-venue chart data"
+        : `${posture.stance.charAt(0).toUpperCase()}${posture.stance.slice(1)} - ${posture.readings[0]?.observations[0] ?? "no dominant signal"}`),
     chk("honeypot", "honeypot", "Can holders sell?",
       na ? "na" : s.honeypot || s.cannotSellAll || (hp?.siphoned ?? 0) > 0 ? "fail" : "pass",
       na ? "Not verifiable on this chain keyless" : s.honeypot ? "Selling is blocked" : (hp?.siphoned ?? 0) > 0 ? "Real holders' sells are siphoned" : hp && hp.holdersAnalyzed >= 5 ? `Sells simulated for ${hp.holdersAnalyzed} real holders` : s.simChecked ? "Real sell simulated successfully" : "No sell restriction found on-chain"),
