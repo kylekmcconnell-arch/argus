@@ -128,8 +128,21 @@ export interface ThreatScan {
     verification: RegistryVerification | null;
     sellers: SellStructure | null;
     site: SiteSafety | null;
+    // Optional so cached scans frozen before this lane existed still parse.
+    posture?: TechnicalPosture | null;
   };
   scannedAt: number;
+}
+
+// ---- chart posture (generic technical read for major-venue-listed tickers) ----
+// Deliberately vendor-anonymous: observations are plain chart language
+// ("confirmed bullish breakout", "potential bearish reversal forming") and the
+// upstream signal source is never named in any user-facing surface.
+export interface TechnicalPosture {
+  covered: boolean;
+  stance: "bullish" | "bearish" | "mixed" | "neutral";
+  readings: { timeframe: string; stance: string; observations: string[] }[];
+  note: string | null;
 }
 
 // ---- linked-site safety (drainer / blacklist check on the token's website) ----

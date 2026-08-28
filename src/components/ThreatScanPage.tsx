@@ -528,6 +528,30 @@ function SitePanel({ s }: { s: NonNullable<ThreatScan["deep"]["site"]> }) {
     </div>
   );
 }
+function TechnicalPosturePanel({ p }: { p: NonNullable<ThreatScan["deep"]["posture"]> }) {
+  const c = p.stance === "bullish" ? "var(--color-pass)" : p.stance === "bearish" ? "var(--color-caution)" : "var(--color-ink-dim)";
+  return (
+    <div className="mt-4 panel p-4">
+      <h2 className="display-sm text-[18px] leading-tight text-ink">Chart posture</h2>
+      <p className="mt-0.5 text-[11.5px] text-ink-faint">Technical read from major-venue market data, matched by ticker. Chart structure only - not identity verification, and not investment advice.</p>
+      <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+        <span className="mono rounded border px-2 py-0.5" style={{ borderColor: c, color: c }}>{p.stance.toUpperCase()}</span>
+        {p.readings.map((r) => (
+          <span key={r.timeframe} className="mono rounded border border-line px-2 py-0.5 text-ink-dim">{r.timeframe.toUpperCase()} · {r.stance}</span>
+        ))}
+      </div>
+      {p.readings.map((r) => (
+        <div key={r.timeframe} className="mt-2 border-t border-line/50 pt-2">
+          <div className="mono text-[11px] text-ink-faint">{r.timeframe.toUpperCase()} chart</div>
+          {r.observations.map((o, i) => (
+            <div key={i} className="mt-0.5 text-[12.5px] text-ink-dim">{o}</div>
+          ))}
+        </div>
+      ))}
+      {p.note && <p className="mt-2 text-[11.5px] text-ink-faint">{p.note}</p>}
+    </div>
+  );
+}
 function SellStructurePanel({ s, chain }: { s: NonNullable<ThreatScan["deep"]["sellers"]>; chain: string }) {
   const flagged = s.topSellers.filter((x) => x.flags.length > 0);
   const rows = (flagged.length ? flagged : s.topSellers).slice(0, 8);
@@ -739,6 +763,9 @@ function Report({ scan }: { scan: ThreatScan }) {
           && (scan.tokenomics.lp.status === "unconfirmed" || scan.tokenomics.lp.status === "unlocked")
           ? `${scan.deep.launch.venue}: ${scan.deep.launch.lpNote}` : null}
       />
+
+      {/* chart posture: generic technical read for majors that trade on large venues */}
+      {scan.deep.posture && <TechnicalPosturePanel p={scan.deep.posture} />}
 
       {/* market structure: chart, trading ranges, volume concentration, fib zones */}
       <MarketStructurePanel address={scan.address} chain={scan.chain} pairAddress={scan.dossier.pairAddress} />
