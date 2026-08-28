@@ -48,9 +48,34 @@ export function hasCoverageGap(entry: Pick<LogEntry, "kind" | "verdict" | "cover
 const KEY = "argus:auditlog";
 const CAP = 250;
 const SYNC_URL = "/api/auditlog";
+const FAILED_ENIGMAFUNGE_CLEANUP_KEY = "argus:auditlog-cleanup:2026-08-28-enigmafund";
+
+// The Aug 28 EnigmaFunge run failed before an immutable report version was
+// saved, but an older client build had already left a local recent-history
+// entry behind. There is no durable case or shared audit row to archive. Remove
+// that exact orphan once per browser; setting the marker means a later,
+// successfully persisted @enigmafund investigation is retained normally.
+function removeFailedEnigmaFungeOrphan(): void {
+  try {
+    if (localStorage.getItem(FAILED_ENIGMAFUNGE_CLEANUP_KEY) === "1") return;
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const rows = JSON.parse(raw) as LogEntry[];
+      const normalized = (value?: string) => (value ?? "").trim().toLowerCase().replace(/^[@$]/, "");
+      const retained = Array.isArray(rows)
+        ? rows.filter((entry) => !(entry.kind === "person" && normalized(entry.ref ?? entry.query) === "enigmafund"))
+        : [];
+      if (retained.length !== rows.length) localStorage.setItem(KEY, JSON.stringify(retained));
+    }
+    localStorage.setItem(FAILED_ENIGMAFUNGE_CLEANUP_KEY, "1");
+  } catch {
+    /* malformed or unavailable local storage must never block the app */
+  }
+}
 
 export function getLog(): LogEntry[] {
   try {
+    removeFailedEnigmaFungeOrphan();
     const raw = localStorage.getItem(KEY);
     return raw ? (JSON.parse(raw) as LogEntry[]) : [];
   } catch {

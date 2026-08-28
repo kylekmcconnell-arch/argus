@@ -1,5 +1,31 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyAuditCaseFamily, auditReadinessLabel, hasCoverageGap, presentedAuditVerdict, reconcileAuditOutcome } from "./auditlog";
+import { applyAuditCaseFamily, auditReadinessLabel, getLog, hasCoverageGap, presentedAuditVerdict, reconcileAuditOutcome } from "./auditlog";
+
+describe("failed local scan cleanup", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("removes the unsaved EnigmaFunge orphan once without suppressing a later successful scan", () => {
+    const rows = [
+      { id: "failed", ts: 2, kind: "person", query: "EnigmaFunge", ref: "@enigmafund", summary: "save failed" },
+      { id: "kept", ts: 1, kind: "person", query: "@other", ref: "@other", summary: "saved" },
+    ];
+    const store = new Map<string, string>([["argus:auditlog", JSON.stringify(rows)]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+    });
+
+    expect(getLog().map((entry) => entry.id)).toEqual(["kept"]);
+
+    const successful = { id: "saved-later", ts: 3, kind: "person", query: "@enigmafund", ref: "@enigmafund", summary: "saved" };
+    store.set("argus:auditlog", JSON.stringify([successful, ...getLog()]));
+    expect(getLog().map((entry) => entry.id)).toEqual(["saved-later", "kept"]);
+  });
+});
 
 describe("audit-list verdict presentation", () => {
   it.each([undefined, "partial", "incomplete", "failed"])(
