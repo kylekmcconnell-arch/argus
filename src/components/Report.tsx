@@ -113,7 +113,8 @@ import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
 import { ResearchPlanPanel } from "./ResearchPlanPanel";
 import { EvmControlSurfacePanel } from "./EvmControlSurfacePanel";
 import { isOrganizationAccount } from "../lib/investorSubject";
-import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
+import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
+import { hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
 import { SocialActivityPanel } from "./SocialActivityPanel";
 import { reportOpeningNarrative } from "../lib/reportNarrative";
 import { useReportLane } from "../reports/shared/ReportLaneContext";
@@ -2265,7 +2266,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     const diagnostic = [check.label, check.note, check.provider].filter(Boolean).join(" ").toLowerCase();
     const optionalSource = /\b(?:crunchbase|reddit|people data labs|pdl|grok|twitterapi(?:\.io)?|x provider)\b/.test(diagnostic);
     const availabilityOnly = /\b(?:collection|provider|api|failed|failure|partial|unavailable|rate limit)\b/.test(diagnostic);
-    return !(optionalSource && availabilityOnly);
+    return isReaderDecisionCheck(check) && !(optionalSource && availabilityOnly);
   });
   const providerGaps = (f.providerSnapshot?.runs ?? []).filter((run) =>
     run.state === "partial" || run.state === "failed" || run.state === "unavailable",
@@ -2275,6 +2276,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   const intelligenceBrief = f.intelligence
     ? deriveIntelligenceBrief(f.intelligence, decisionLensId)
     : { supports: [], pressures: [], context: [], questions: [] };
+  const boundProjectIdentity = hasBoundProjectIdentity(f);
 
   const axisSupportNarrative: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
     .filter((axis) => Boolean(axis.rationale) && axis.support.length > 0)
@@ -2392,6 +2394,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
         detail: publicIntelligenceText(artifact.excerpt || `Source coverage is incomplete for ${diligenceAreaLabel(axis.axis).toLowerCase()}.`),
         provenance: "Source unavailable",
         href: axisHref(axis.axis),
+        impactAxis: axis.axis,
       })));
   const axisGapQuestions: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows.flatMap((axis) =>
     axis.gaps.map((gap, index) => ({
@@ -2400,6 +2403,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       detail: "Worth confirming before you invest.",
       provenance: "Not yet confirmed",
       href: axisHref(axis.axis),
+      impactAxis: axis.axis,
     })));
   const decisionBasicFactQuestions = reportBasicFactQuestionsFor(
     basicFactsAudience,
@@ -2482,7 +2486,10 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     }] : []),
     ...conflictedBasicFactQuestions,
     ...intelligenceBrief.questions
-      .filter((item) => !(f.projectToken?.verified && isOfficialTokenQuestion(item)))
+      .filter((item) => !(
+        (f.projectToken?.verified && isOfficialTokenQuestion(item))
+        || (boundProjectIdentity && isOfficialIdentityQuestion(item))
+      ))
       .map((item) => ({
       id: item.id,
       title: plainLanguageSummary(item.title),
@@ -2625,8 +2632,15 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     nextChecks: verificationNext.map((item) => item.title),
   });
   const toDecisionCanvasItems = (items: readonly ReportCanvasNarrativeItem[]): DecisionCanvasItem[] =>
-    items.map((item) => ({ label: item.title, ...(item.detail ? { detail: item.detail } : {}) }));
-  const unresolvedRequiredNextSteps: ReportCanvasNarrativeItem[] = unresolvedChecks.map((check, index) => ({
+    items.map((item) => ({
+      label: item.title,
+      ...(item.detail ? { detail: item.detail } : {}),
+      ...(item.impactAxis ? { impactAxis: item.impactAxis } : {}),
+      ...(item.impact ? { impact: item.impact } : {}),
+    }));
+  const unresolvedRequiredNextSteps: ReportCanvasNarrativeItem[] = unresolvedChecks
+    .filter(isReaderDecisionCheck)
+    .map((check, index) => ({
     id: `required-check-${check.checkId || index}`,
     title: publicCheckLabel(check.label),
     detail: publicCheckNote(check.note || (
@@ -2637,7 +2651,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
           : "This required check did not finish. A rescan may complete it."
     )),
     href: "#scan-methodology" as `#${string}`,
-  }));
+    }));
   const decisionCanvasSupports = toDecisionCanvasItems(supportNarrative);
   const decisionCanvasConcerns = toDecisionCanvasItems(
     [...confidenceLimits, ...subjectLeadNarrative]

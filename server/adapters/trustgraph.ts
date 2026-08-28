@@ -692,7 +692,7 @@ export async function collectTrustGraph(
         ? "risk"
         : "clear";
     const line = connectedUnqualified.length
-      ? `${connectedUnqualified.length} graph connection${connectedUnqualified.length === 1 ? "" : "s"} could not be qualified because the linked immutable report is not the active case projection, or is stale, partial, or incompletely attested.`
+      ? `${connectedUnqualified.length} saved relationship${connectedUnqualified.length === 1 ? " is" : "s are"} excluded from this comparison because the linked case is older, incomplete, or no longer the active version. ${connectedUnqualified.length === 1 ? "It has not been treated as evidence about this subject and does not affect" : "They have not been treated as evidence about this subject and do not affect"} the score or verdict.`
       : adverse.length
         ? `${adverse.length} exact, coverage-qualified connection${adverse.length === 1 ? "" : "s"} lead to prior FAIL/AVOID reports. Review the frozen ties before relying on the score.`
         : connections.length

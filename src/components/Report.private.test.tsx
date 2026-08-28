@@ -526,6 +526,65 @@ describe("private person report evidence boundary", () => {
     expect(dossier.report.governing_score).toBe(base.report.governing_score);
   });
 
+  it("does not ask readers to re-identify a bound project or promote graph version diagnostics", () => {
+    const base = buildReport(SUBJECTS[1]);
+    expect(base.intelligence).toBeDefined();
+    const dossier: Dossier = {
+      ...base,
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      subjectOrientation: {
+        kind: "PROJECT",
+        what: "A privacy network for internet applications.",
+        audience: "internet users",
+        boundHandle: base.handle,
+        boundDomain: "example.com",
+        sourceUrls: ["https://example.com"],
+      },
+      checkRuns: [{
+        checkId: "trust-graph-connections",
+        label: "Connection map connections",
+        status: "unavailable",
+        note: "1 graph connection could not be qualified because the linked immutable report is not the active case projection, or is stale, partial, or incompletely attested.",
+        decisionCritical: true,
+      }],
+      intelligence: {
+        ...base.intelligence!,
+        signals: [],
+        questions: [{
+          id: "project.official_identity",
+          domain: "identity",
+          prompt: "What exact project or company does this account represent?",
+          materiality: "critical",
+          state: "reported",
+          basis: "The saved evidence records an answer, but one or more saved answer or source references failed the Intelligence Spine source-link check. Surviving fragments cannot upgrade this question's prior evidence state.",
+          answerRefs: [],
+          sourceRefs: [],
+        }, {
+          id: "project.security_audit",
+          domain: "control",
+          prompt: "Which independent security audits are published?",
+          materiality: "important",
+          state: "unavailable",
+          basis: "No independent audit was confirmed.",
+          answerRefs: [],
+          sourceRefs: [],
+        }],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const verifyNext = container.querySelector(".kyle-verify-next")?.textContent ?? "";
+    expect(verifyNext).not.toContain("What exact project or company does this account represent");
+    expect(verifyNext).not.toContain("Connection map connections");
+    expect(verifyNext).not.toContain("Team and leadership");
+    expect(container.textContent).toContain("does not affect the score or verdict");
+    expect(container.textContent).not.toContain("linked immutable report is not the active case projection");
+  });
+
   it("uses the unified decision canvas and collapses secondary mobile actions", () => {
     const dossier = buildReport(SUBJECTS[1]);
 

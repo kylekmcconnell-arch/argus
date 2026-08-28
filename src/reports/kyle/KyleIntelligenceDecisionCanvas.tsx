@@ -21,6 +21,8 @@ import "./kyle-intelligence-report.css";
 export interface KyleDecisionItem {
   label: string;
   detail?: string | undefined;
+  impactAxis?: string | undefined;
+  impact?: string | undefined;
 }
 
 export interface KyleSecondaryScore {
@@ -207,45 +209,22 @@ function BriefColumn({
 function verificationImpact(
   item: KyleDecisionItem,
   rows: CompositionRow[],
-  verdictLabel: string,
-): string {
-  const haystack = `${item.label} ${item.detail ?? ""}`.toLowerCase();
-  const axisTerms: Array<[RegExp, RegExp]> = [
-    [/team|founder|leadership|identity|operator|advisor/, /team|people|leadership|identity/],
-    [/product|service|roadmap|build|execution/, /product|execution/],
-    [/token|mint|supply|holder|liquidity|contract/, /token|onchain|contract|liquidity/],
-    [/backer|partner|investor|funding/, /backer|partner|funding/],
-    [/usage|customer|activity|revenue|traction|adoption/, /traction|usage|activity|adoption/],
-    [/audit|security|governance|legal|control|transparency/, /transparency|integrity|security|governance|control/],
-  ];
-  const axisPattern = axisTerms.find(([itemPattern]) => itemPattern.test(haystack))?.[1];
-  const candidates = rows
-    .filter((row) => row.applicability === undefined && row.weight > row.score)
-    .sort((left, right) => {
-      const leftMatch = axisPattern?.test(`${left.axis} ${left.label}`.toLowerCase()) ? 1 : 0;
-      const rightMatch = axisPattern?.test(`${right.axis} ${right.label}`.toLowerCase()) ? 1 : 0;
-      if (leftMatch !== rightMatch) return rightMatch - leftMatch;
-      const questionDifference = (right.questionCount ?? 0) - (left.questionCount ?? 0);
-      if (questionDifference !== 0) return questionDifference;
-      return (right.weight - right.score) - (left.weight - left.score);
-    });
-  const row = candidates[0];
-  if (!row) {
-    return `Decision impact: could materially change the current ${verdictLabel.toLowerCase()} verdict once independently verified.`;
-  }
+): string | null {
+  if (item.impact) return item.impact;
+  if (!item.impactAxis) return null;
+  const row = rows.find((candidate) => candidate.axis === item.impactAxis);
+  if (!row || row.applicability !== undefined || row.weight <= row.score) return null;
   const openPoints = Math.max(1, Math.round(row.weight - row.score));
-  return `Decision impact: ${openPoints} ${openPoints === 1 ? "point remains" : "points remain"} unsettled in ${row.label}; the answer could change the current ${verdictLabel.toLowerCase()} verdict.`;
+  return `Decision impact: this question is tied to ${row.label}, where ${openPoints} ${openPoints === 1 ? "point remains" : "points remain"} open.`;
 }
 
 function VerifyNextStrip({
   items,
   rows,
-  verdictLabel,
   href,
 }: {
   items: KyleDecisionItem[];
   rows: CompositionRow[];
-  verdictLabel: string;
   href: `#${string}`;
 }) {
   if (items.length === 0) return null;
@@ -256,19 +235,22 @@ function VerifyNextStrip({
         <h3 id="kyle-verify-next-title">The evidence most likely to change the decision.</h3>
       </header>
       <ol>
-        {items.slice(0, 2).map((item, index) => (
-          <li key={`verify-next-${index}`}>
-            <span className="kyle-verify-index mono">0{index + 1}</span>
-            <div>
-              <strong>{sentence(item.label)}</strong>
-              {item.detail && <p>{sentence(item.detail)}</p>}
-              <small>{verificationImpact(item, rows, verdictLabel)}</small>
-            </div>
-            <a href={href} aria-label={`Open evidence question: ${executiveText(item.label)}`}>
-              Open question <ArrowRight size={13} weight="bold" />
-            </a>
-          </li>
-        ))}
+        {items.slice(0, 2).map((item, index) => {
+          const impact = verificationImpact(item, rows);
+          return (
+            <li key={`verify-next-${index}`}>
+              <span className="kyle-verify-index mono">0{index + 1}</span>
+              <div>
+                <strong>{sentence(item.label)}</strong>
+                {item.detail && <p>{sentence(item.detail)}</p>}
+                {impact ? <small>{impact}</small> : null}
+              </div>
+              <a href={href} aria-label={`Open evidence question: ${executiveText(item.label)}`}>
+                Open question <ArrowRight size={13} weight="bold" />
+              </a>
+            </li>
+          );
+        })}
       </ol>
     </section>
   );
@@ -650,7 +632,7 @@ export function KyleIntelligenceDecisionCanvas({
           <BriefColumn title="Why we’re cautious" subtitle="DECISION PRESSURE" items={concerns} tone="caution" empty="No decision-changing concern was recorded." href={evidenceHref} />
           <BriefColumn title="Why this may still be credible" subtitle="COUNTERWEIGHT" items={supports} tone="positive" empty="No positive counterweight was recorded." href={evidenceHref} />
         </div>
-        <VerifyNextStrip items={nextSteps} rows={sortedComposition} verdictLabel={verdictLabel} href={methodologyHref} />
+        <VerifyNextStrip items={nextSteps} rows={sortedComposition} href={methodologyHref} />
       </section>
 
       <section className="kyle-argus-take" aria-labelledby="kyle-argus-take-title">

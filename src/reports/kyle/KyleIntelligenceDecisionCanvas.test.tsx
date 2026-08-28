@@ -126,7 +126,7 @@ describe("Kyle intelligence report opening", () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas
       {...props}
       nextSteps={[
-        { label: "Establish a complete independent security history" },
+        { label: "Establish a complete independent security history", impactAxis: "product" },
         { label: "Verify current product adoption" },
         { label: "Confirm a third lower-impact item" },
       ]}
@@ -136,6 +136,8 @@ describe("Kyle intelligence report opening", () => {
     expect(strip?.textContent).toContain("VERIFY NEXT");
     expect(strip?.textContent).toContain("The evidence most likely to change the decision.");
     expect(strip?.textContent).toContain("Decision impact:");
+    expect(strip?.textContent).toContain("tied to Product & execution");
+    expect(strip?.textContent).not.toContain("Team & leadership");
     expect(strip?.querySelectorAll("li")).toHaveLength(2);
     expect(container.textContent).not.toContain("What ARGUS is watching.");
     expect(container.textContent).not.toContain("Confirm a third lower-impact item");

@@ -94,7 +94,8 @@ import { deriveDecisionDiscovery, deriveNoticedSignals, deriveVerdictArgument, i
 import { materialDeltaDiscovery } from "../lib/reportDelta";
 import { decisionBoundaryHref } from "../lib/decisionBoundary";
 import { buildPublicClaimConflictDiscovery, buildPublicControlPathDiscovery } from "../lib/reasoningReceipts";
-import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
+import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion } from "../lib/intelligenceBrief";
+import { hasBoundProjectIdentity, isReaderDecisionCheck } from "../lib/verificationQuestionPolicy";
 import { NoticedRail } from "./InvestigatorBrief";
 import { summarizeFundingEvidence, type FundingEvidenceRound } from "../lib/fundingEvidence";
 import { walletAgeFact } from "../lib/operatorTrace";
@@ -1349,11 +1350,13 @@ export function InvestigationReport({
     }] : []),
   ].slice(0, 6);
   const requiredNextStepItems = requiredGapChecks
+    .filter(isReaderDecisionCheck)
     .map((check) => ({
       label: `Required: ${publicCheckLabel(check.label)}`,
       ...(check.note ? { detail: publicCheckNote(check.note) } : {}),
     }));
   const enrichmentNextStepItems = enrichmentGapChecks
+    .filter(isReaderDecisionCheck)
     .map((check) => ({
       label: publicCheckLabel(check.label),
       ...(check.note ? { detail: publicCheckNote(check.note) } : {}),
@@ -1365,8 +1368,9 @@ export function InvestigationReport({
     ...requiredNextStepItems.slice(0, 2),
     ...intelligenceBrief.questions
       .filter((item) => !(
-        isOfficialTokenQuestion(item)
-        && (projectAccount?.projectToken?.verified || inv.projectAccountBinding?.status === "verified")
+        (isOfficialTokenQuestion(item)
+          && (projectAccount?.projectToken?.verified || inv.projectAccountBinding?.status === "verified"))
+        || (projectAccount != null && hasBoundProjectIdentity(projectAccount) && isOfficialIdentityQuestion(item))
       ))
       .map((item) => ({
       label: item.title,

@@ -203,6 +203,11 @@ export function savedSiteSubstanceStatus(payload: Record<string, unknown>): stri
 export function publicCheckNote(value: string | null | undefined): string {
   const trimmed = (value ?? "").replace(/\s+/g, " ").trim();
   if (!trimmed) return "";
+  const legacyGraphDiagnostic = trimmed.match(/^(\d+) graph connections? could not be qualified because the linked immutable report/i);
+  if (legacyGraphDiagnostic) {
+    const count = Number(legacyGraphDiagnostic[1]);
+    return `${count} saved relationship${count === 1 ? " is" : "s are"} excluded from this comparison because the linked case is older, incomplete, or no longer the active version. ${count === 1 ? "It has not been treated as evidence about this subject and does not affect" : "They have not been treated as evidence about this subject and do not affect"} the score or verdict.`;
+  }
   const rateLimited = /\bHTTP 429\b/i.test(trimmed) || /\brate-limited\b/i.test(trimmed);
   const accessDenied = /\bHTTP 40[13]\b/i.test(trimmed)
     || /denied the automated(?: liveness)? request/i.test(trimmed)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IntelligenceSpineSnapshot } from "../intelligence/types";
-import { deriveIntelligenceBrief, isOfficialTokenQuestion } from "./intelligenceBrief";
+import { deriveIntelligenceBrief, isOfficialIdentityQuestion, isOfficialTokenQuestion } from "./intelligenceBrief";
 
 function snapshot(): IntelligenceSpineSnapshot {
   return {
@@ -122,6 +122,17 @@ describe("deriveIntelligenceBrief", () => {
       title: "What is the project's official crypto token?",
     })).toBe(true);
     expect(isOfficialTokenQuestion({
+      id: "intelligence-question:security-audit",
+      title: "Which independent security audits are published?",
+    })).toBe(false);
+  });
+
+  it("identifies the exact stale official-identity question", () => {
+    expect(isOfficialIdentityQuestion({
+      id: "intelligence-question:project.official_identity",
+      title: "What exact project or company does this account represent?",
+    })).toBe(true);
+    expect(isOfficialIdentityQuestion({
       id: "intelligence-question:security-audit",
       title: "Which independent security audits are published?",
     })).toBe(false);

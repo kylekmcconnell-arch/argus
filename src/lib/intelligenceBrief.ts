@@ -33,6 +33,12 @@ export function isOfficialTokenQuestion(item: Pick<IntelligenceBriefItem, "id" |
     || /\bofficial (?:crypto )?token\b/i.test(item.title);
 }
 
+/** A frozen ledger can retain this question after subject orientation binds it. */
+export function isOfficialIdentityQuestion(item: Pick<IntelligenceBriefItem, "id" | "title">): boolean {
+  return /official[_ .-]identity/i.test(item.id)
+    || /what exact project or company does this account represent/i.test(item.title);
+}
+
 const SEVERITY_RANK: Record<DerivedIntelligenceSignal["severity"], number> = {
   high: 0,
   medium: 1,

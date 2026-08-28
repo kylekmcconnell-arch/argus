@@ -115,6 +115,15 @@ describe("public Decision Intelligence presentation", () => {
     expect(drawdown).not.toContain("39.7410894525038");
   });
 
+  it("turns failed saved source references into a reader-facing evidence state", () => {
+    const copy = publicIntelligenceText(
+      "The saved evidence records an answer, but one or more saved answer or source references failed the Intelligence Spine source-link check. Surviving fragments cannot upgrade this question's prior evidence state.",
+    );
+
+    expect(copy).toBe("The saved answer is not tied to a reliable direct source in this report, so it remains unconfirmed.");
+    expect(copy).not.toMatch(/Intelligence Spine|failed|surviving fragments/i);
+  });
+
   it("does not treat a provider name as the public explanation", () => {
     expect(publicProviderExplanation("GoPlus")).toBeUndefined();
     expect(publicProviderExplanation("twitterapi.io")).toBeUndefined();

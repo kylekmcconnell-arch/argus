@@ -59,6 +59,8 @@ describe("public report labels", () => {
     expect(publicCheckNote("supergemma.ai serves a verified coming-soon page"))
       .toBe("The project website is not live yet. It still shows a coming-soon or early-access page.");
     expect(publicCheckNote("SiteNotLive")).toContain("not live yet");
+    expect(publicCheckNote("1 graph connection could not be qualified because the linked immutable report is not the active case projection, or is stale, partial, or incompletely attested."))
+      .toBe("1 saved relationship is excluded from this comparison because the linked case is older, incomplete, or no longer the active version. It has not been treated as evidence about this subject and does not affect the score or verdict.");
     expect(publicOfficialSiteSentence({ website: "https://earnonhood.com", status: "live" }))
       .toBe("The official site is live.");
     expect(publicOfficialSiteSentence({ website: "https://earnonhood.com", status: "access_blocked" }))

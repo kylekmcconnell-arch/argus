@@ -13,6 +13,8 @@ export type DecisionCanvasTone = "pass" | "caution" | "signal" | "avoid" | "neut
 export interface DecisionCanvasItem {
   label: string;
   detail?: string | undefined;
+  impactAxis?: string | undefined;
+  impact?: string | undefined;
 }
 
 export interface DecisionCanvasCompositionRow {

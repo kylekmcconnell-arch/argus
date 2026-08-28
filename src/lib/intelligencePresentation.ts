@@ -196,6 +196,9 @@ function strengthBandSummary(value: string): string | null {
  */
 export function publicIntelligenceText(value: string | null | undefined): string {
   if (value == null || !String(value).trim()) return "";
+  if (/saved (?:answer|evidence).*(?:source references?|source refs?).*(?:failed|did not pass)|surviving fragments cannot upgrade/i.test(value)) {
+    return "The saved answer is not tied to a reliable direct source in this report, so it remains unconfirmed.";
+  }
   const bands = strengthBandSummary(value);
   if (bands) return bands;
   const integrity = collapseIntegrityDump(value);
