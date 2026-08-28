@@ -47,7 +47,25 @@ export interface SocialActivityMention {
   avatarUrl?: string;
 }
 
+export type SocialActivityAdverseCategory =
+  | "wallet_cluster"
+  | "operator_history"
+  | "fraud_accusation"
+  | "general_warning";
+
+/**
+ * A direct public warning found inside the subject-bound social search.
+ * The post is verified to exist; its allegations are not verified and never
+ * enter a score without separate corroboration.
+ */
+export interface SocialActivityAdverseMention extends SocialActivityMention {
+  category: SocialActivityAdverseCategory;
+  specificity: "specific" | "general";
+  signals: string[];
+}
+
 export const SOCIAL_MENTION_CARD_MAX = 8;
+export const SOCIAL_ADVERSE_MENTION_MAX = 12;
 
 export interface SocialActivityMentionSelection {
   posts: SocialActivityMentionCandidate[];
@@ -95,6 +113,8 @@ export interface SocialActivitySnapshot {
    * provider-returned followers. Absent on legacy snapshots.
    */
   mentioners?: SocialActivityMention[];
+  /** Direct warning posts preserved for a clearly-labelled, unscored review. */
+  adverseMentions?: SocialActivityAdverseMention[];
 }
 
 export interface SocialActivityScoreInput {
@@ -225,6 +245,80 @@ export function selectSocialMentioners(
       return Date.parse(right.createdAt) - Date.parse(left.createdAt);
     })
     .slice(0, Math.max(0, Math.min(SOCIAL_MENTION_CARD_MAX, Math.round(limit))));
+}
+
+const ADVERSE_PATTERNS: Array<{ signal: string; pattern: RegExp }> = [
+  { signal: "scam warning", pattern: /\bscam(?:mer|ming|med)?\b/i },
+  { signal: "rug warning", pattern: /\brug(?:ged|ging|pull|pulls)?\b/i },
+  { signal: "credibility warning", pattern: /\blarp\b/i },
+  { signal: "prior exploit allegation", pattern: /\bhack(?:er|ed|ing)?\b/i },
+  { signal: "wallet bundling claim", pattern: /\bbundl(?:e|ed|ing)\b/i },
+  { signal: "fresh-wallet claim", pattern: /\bfresh wallets?\b/i },
+  { signal: "funding-link claim", pattern: /\b(?:same|shared) fund(?:er|ing|ing source)?\b/i },
+  { signal: "deployer claim", pattern: /\bdeployer\b/i },
+  { signal: "operator-history claim", pattern: /\b(?:same|previous|prior|old) dev(?:eloper)?\b/i },
+  { signal: "avoidance warning", pattern: /\b(?:don['’]?t buy|do not buy|stay away|beware|avoid)\b/i },
+  { signal: "dump warning", pattern: /\b(?:dump(?:ed|ing)?|crash(?:ed|ing)?)\b/i },
+];
+
+function adverseCategory(text: string): SocialActivityAdverseCategory {
+  if (/\b(?:bundl(?:e|ed|ing)|fresh wallets?|fund(?:er|ing|ing source)|deployer|holders?|liquidity|pool)\b/i.test(text)) {
+    return "wallet_cluster";
+  }
+  if (/\b(?:same|previous|prior|old) dev(?:eloper)?\b|\b(?:previously|formerly)\b|\bhack(?:er|ed|ing)?\b/i.test(text)) {
+    return "operator_history";
+  }
+  if (/\b(?:scam(?:mer|ming|med)?|rug(?:ged|ging|pull|pulls)?)\b/i.test(text)) return "fraud_accusation";
+  return "general_warning";
+}
+
+/**
+ * Preserve direct warning posts before the general mentioner ranking discards
+ * them. This is deliberately deterministic and recall-oriented: it identifies
+ * leads for human review, not truth, sentiment, or a score adjustment.
+ */
+export function selectSocialAdverseMentions(
+  posts: SocialActivityMentionCandidate[],
+  subjectHandle: string,
+  limit = SOCIAL_ADVERSE_MENTION_MAX,
+): SocialActivityAdverseMention[] {
+  const subject = normalizedSocialHandle(subjectHandle);
+  const byPost = new Map<string, SocialActivityAdverseMention>();
+  for (const post of posts) {
+    const handle = normalizedSocialHandle(post.handle);
+    if (!handle || handle === subject) continue;
+    const text = post.text?.replace(/\s+/g, " ").trim() ?? "";
+    if (!text) continue;
+    const signals = ADVERSE_PATTERNS.filter(({ pattern }) => pattern.test(text)).map(({ signal }) => signal);
+    if (!signals.length) continue;
+    const tweetUrl = tweetPermalink(handle, post.id, post.tweetUrl);
+    if (!tweetUrl) continue;
+    const specific = /\b(?:wallet|holder|liquidity|pool|deployer|fund(?:er|ing)|contract|address|same dev|previous|prior|old dev)\b/i.test(text)
+      || /\b\d+(?:\.\d+)?%\b/.test(text)
+      || /\b[1-9]\d*\s+(?:wallets?|holders?)\b/i.test(text);
+    byPost.set(post.id, {
+      postId: post.id,
+      handle: `@${handle}`,
+      ...(post.displayName?.trim() ? { displayName: post.displayName.trim() } : {}),
+      text,
+      tweetUrl,
+      createdAt: post.createdAt,
+      ...(typeof post.followers === "number" && Number.isFinite(post.followers) && post.followers >= 0
+        ? { followers: Math.round(post.followers) }
+        : {}),
+      ...(post.avatarUrl ? { avatarUrl: post.avatarUrl } : {}),
+      category: adverseCategory(text),
+      specificity: specific ? "specific" : "general",
+      signals,
+    });
+  }
+  return [...byPost.values()]
+    .sort((left, right) => {
+      if (left.specificity !== right.specificity) return left.specificity === "specific" ? -1 : 1;
+      if ((left.followers ?? -1) !== (right.followers ?? -1)) return (right.followers ?? -1) - (left.followers ?? -1);
+      return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+    })
+    .slice(0, Math.max(0, Math.min(SOCIAL_ADVERSE_MENTION_MAX, Math.round(limit))));
 }
 
 /**

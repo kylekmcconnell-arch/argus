@@ -13996,12 +13996,12 @@ function parseTeamJSON(text2, selfHandle, source2) {
   }
 }
 var ADVERSE_NOT_ANSWERED = { completed: false, signals: [] };
-async function searchAdverseSignals(handle, kind, context, ticker) {
+async function searchAdverseSignals(handle, kind, context, ticker, contractAddress) {
   const h = handle.replace(/^@/, "");
   const targetEntityKey = `@${h.toLowerCase()}`;
-  const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}` : `the person behind X account @${h}`;
+  const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}${contractAddress ? ` (verified contract ${contractAddress})` : ""}` : `the person behind X account @${h}`;
   const system = `You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, stolen technology or intellectual property, insider dumping, unpaid obligations, misleading partnerships, or material community complaints/FUD. Search X, Reddit, Trustpilot and other review sites, scam-report sites, technical forums, and news. Run exact-handle, display-name, domain, and token-ticker variants with terms such as scam, rug, fraud, stolen, copied, exploit, drain, dump, complaint, lawsuit, warning, and beware. Search both quoted and unquoted variants. Prefer the original post, complaint, filing, or article over a social mirror or search-result page. Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. Reply with ONLY compact JSON: {"signals":[{"category":"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud","claim":"","source":"","source_url":""}]}. Never use em dashes.`;
-  const text2 = await generalWebSearch(system, `Subject: ${subject}. Surface direct source URLs that may contain complaints or accusations involving rug, slow rug, liquidity pull, wallet drains, exit scam, stolen technology, insider dumping, misleading claims, or other material misconduct. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}:v2` });
+  const text2 = await generalWebSearch(system, `Subject: ${subject}. Surface direct source URLs that may contain complaints or accusations involving rug, slow rug, liquidity pull, wallet drains, exit scam, stolen technology, insider dumping, misleading claims, or other material misconduct. Search the exact verified contract when supplied. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}:v3` });
   if (!text2) return ADVERSE_NOT_ANSWERED;
   const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return ADVERSE_NOT_ANSWERED;
@@ -31874,6 +31874,7 @@ function trustedOfficialXAvatarUrl(raw) {
 
 // src/data/socialActivity.ts
 var SOCIAL_MENTION_CARD_MAX = 8;
+var SOCIAL_ADVERSE_MENTION_MAX = 12;
 var clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 var HANDLE3 = /^[A-Za-z0-9_]{1,15}$/;
 function normalizedSocialHandle(value) {
@@ -31935,6 +31936,62 @@ function selectSocialMentioners(posts, subjectHandle, limit = SOCIAL_MENTION_CAR
     return Date.parse(right.createdAt) - Date.parse(left.createdAt);
   }).slice(0, Math.max(0, Math.min(SOCIAL_MENTION_CARD_MAX, Math.round(limit))));
 }
+var ADVERSE_PATTERNS = [
+  { signal: "scam warning", pattern: /\bscam(?:mer|ming|med)?\b/i },
+  { signal: "rug warning", pattern: /\brug(?:ged|ging|pull|pulls)?\b/i },
+  { signal: "credibility warning", pattern: /\blarp\b/i },
+  { signal: "prior exploit allegation", pattern: /\bhack(?:er|ed|ing)?\b/i },
+  { signal: "wallet bundling claim", pattern: /\bbundl(?:e|ed|ing)\b/i },
+  { signal: "fresh-wallet claim", pattern: /\bfresh wallets?\b/i },
+  { signal: "funding-link claim", pattern: /\b(?:same|shared) fund(?:er|ing|ing source)?\b/i },
+  { signal: "deployer claim", pattern: /\bdeployer\b/i },
+  { signal: "operator-history claim", pattern: /\b(?:same|previous|prior|old) dev(?:eloper)?\b/i },
+  { signal: "avoidance warning", pattern: /\b(?:don['’]?t buy|do not buy|stay away|beware|avoid)\b/i },
+  { signal: "dump warning", pattern: /\b(?:dump(?:ed|ing)?|crash(?:ed|ing)?)\b/i }
+];
+function adverseCategory(text2) {
+  if (/\b(?:bundl(?:e|ed|ing)|fresh wallets?|fund(?:er|ing|ing source)|deployer|holders?|liquidity|pool)\b/i.test(text2)) {
+    return "wallet_cluster";
+  }
+  if (/\b(?:same|previous|prior|old) dev(?:eloper)?\b|\b(?:previously|formerly)\b|\bhack(?:er|ed|ing)?\b/i.test(text2)) {
+    return "operator_history";
+  }
+  if (/\b(?:scam(?:mer|ming|med)?|rug(?:ged|ging|pull|pulls)?)\b/i.test(text2)) return "fraud_accusation";
+  return "general_warning";
+}
+function selectSocialAdverseMentions(posts, subjectHandle, limit = SOCIAL_ADVERSE_MENTION_MAX) {
+  const subject = normalizedSocialHandle(subjectHandle);
+  const byPost = /* @__PURE__ */ new Map();
+  for (const post of posts) {
+    const handle = normalizedSocialHandle(post.handle);
+    if (!handle || handle === subject) continue;
+    const text2 = post.text?.replace(/\s+/g, " ").trim() ?? "";
+    if (!text2) continue;
+    const signals = ADVERSE_PATTERNS.filter(({ pattern }) => pattern.test(text2)).map(({ signal: signal2 }) => signal2);
+    if (!signals.length) continue;
+    const tweetUrl = tweetPermalink(handle, post.id, post.tweetUrl);
+    if (!tweetUrl) continue;
+    const specific = /\b(?:wallet|holder|liquidity|pool|deployer|fund(?:er|ing)|contract|address|same dev|previous|prior|old dev)\b/i.test(text2) || /\b\d+(?:\.\d+)?%\b/.test(text2) || /\b[1-9]\d*\s+(?:wallets?|holders?)\b/i.test(text2);
+    byPost.set(post.id, {
+      postId: post.id,
+      handle: `@${handle}`,
+      ...post.displayName?.trim() ? { displayName: post.displayName.trim() } : {},
+      text: text2,
+      tweetUrl,
+      createdAt: post.createdAt,
+      ...typeof post.followers === "number" && Number.isFinite(post.followers) && post.followers >= 0 ? { followers: Math.round(post.followers) } : {},
+      ...post.avatarUrl ? { avatarUrl: post.avatarUrl } : {},
+      category: adverseCategory(text2),
+      specificity: specific ? "specific" : "general",
+      signals
+    });
+  }
+  return [...byPost.values()].sort((left, right) => {
+    if (left.specificity !== right.specificity) return left.specificity === "specific" ? -1 : 1;
+    if ((left.followers ?? -1) !== (right.followers ?? -1)) return (right.followers ?? -1) - (left.followers ?? -1);
+    return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+  }).slice(0, Math.max(0, Math.min(SOCIAL_ADVERSE_MENTION_MAX, Math.round(limit))));
+}
 function socialActivityScore(input) {
   const breadth = clamp(Math.log10(input.uniqueAccounts7d + 1) / Math.log10(1001), 0, 1) * 50;
   const prior = Math.max(1, input.uniqueAccountsPrevious24h);
@@ -31970,6 +32027,10 @@ function safeProjectName(value) {
   const name = value?.replace(/["\\]/g, " ").replace(/\s+/g, " ").trim() ?? "";
   return name.length >= 3 && name.length <= 48 && /[A-Za-z]/.test(name) ? name : null;
 }
+function safeContractAddress(value) {
+  const address = value?.trim() ?? "";
+  return /^(?:0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(address) ? address : null;
+}
 var SHORT_GENERIC_PROJECT_NAME = /^[A-Za-z]{1,4}$/;
 function pastDeadline(deadlineAt) {
   return typeof deadlineAt === "number" && Number.isFinite(deadlineAt) && Date.now() >= deadlineAt;
@@ -31989,8 +32050,10 @@ function buildSocialActivityQuery(identity) {
   if (!handle) return null;
   const ticker = safeTicker(identity.ticker);
   const projectName2 = safeProjectName(identity.projectName);
+  const contractAddress = safeContractAddress(identity.contractAddress);
   const terms = [`@${handle}`];
   if (ticker) terms.push(`$${ticker}`);
+  if (contractAddress) terms.push(`"${contractAddress}"`);
   const nameTerm = projectName2 ? projectNameSearchTerm(projectName2, handle, ticker) : null;
   if (nameTerm) terms.push(`"${nameTerm}"`);
   return {
@@ -32391,7 +32454,7 @@ async function collectSocialActivity(rawIdentity, options = {}) {
   );
   const fetchImpl = options.fetchImpl ?? fetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1e3));
-  const cacheKey = `social-activity:v2:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
+  const cacheKey = `social-activity:v3:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
   if (!options.fetchImpl) {
     const cached = await cacheGet(cacheKey, { operation: "social-activity-hit", meta: "15 minute activity snapshot" });
     if (cached) {
@@ -32428,6 +32491,7 @@ async function collectSocialActivity(rawIdentity, options = {}) {
   }) : null;
   const state = counts.ok && last7Days.authorCoverageComplete ? "complete" : "partial";
   const mentioners = selectSocialMentioners(search.posts, identity.handle);
+  const adverseMentions = selectSocialAdverseMentions(search.posts, identity.handle);
   const snapshot = {
     schemaVersion: 1,
     provider,
@@ -32456,7 +32520,8 @@ async function collectSocialActivity(rawIdentity, options = {}) {
       ...search.incompleteReason ? { incompleteReason: search.incompleteReason } : {}
     },
     note: state === "complete" ? `Public X posts matched to the bound project identifiers through ${provider === "x-api-v2" ? "the official X API" : "twitterapi.io"}. Reposts are excluded.` : search.incompleteReason === "post_limit" ? `ARGUS collected the maximum ${maxPosts.toLocaleString()} posts allowed for this saved scan. Unique-account counts are minimums.` : search.incompleteReason === "provider_error" ? `X stopped responding before ARGUS finished the search. Unique-account counts are minimums.` : search.incompleteReason === "time_budget" ? "ARGUS stopped the social-activity search to leave time for required checks. Unique-account counts are minimums." : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`,
-    ...mentioners.length ? { mentioners } : {}
+    ...mentioners.length ? { mentioners } : {},
+    ...adverseMentions.length ? { adverseMentions } : {}
   };
   if (!options.fetchImpl) void cacheSet(cacheKey, JSON.stringify(snapshot));
   return snapshot;
@@ -34440,7 +34505,7 @@ async function adverseSignalsAndTooling(ctx, record5) {
     searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
       relationship_label: "audited subject"
-    }, ticker),
+    }, ticker, evidence.projectToken?.address),
     Promise.all(projectTargets.map((p) => searchAdverseSignals(p.handle, "project", {
       relationship_to_subject: "venture",
       relationship_label: [p.role, p.name].filter(Boolean).join(" at ") || p.name
@@ -35420,7 +35485,8 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       evidence.socialActivity = await collectSocialActivity({
         handle: evidence.profile.handle,
         ticker: evidence.projectToken?.symbol ?? ctx.tokenSymbol,
-        projectName: evidence.projectToken?.name ?? evidence.profile.display_name
+        projectName: evidence.projectToken?.name ?? evidence.profile.display_name,
+        contractAddress: evidence.projectToken?.address
       }, {
         deadlineAt: Math.min(Date.now() + SOCIAL_ACTIVITY_BUDGET_MS, collectionDeadlineAt)
       });
@@ -37418,7 +37484,8 @@ async function runTokenAudit(input, emit, opts) {
   const socialActivity = projectX && opts?.collectSocialActivity ? await opts.collectSocialActivity({
     handle: projectX,
     ticker: pair.baseToken.symbol,
-    projectName: pair.baseToken.name
+    projectName: pair.baseToken.name,
+    contractAddress: pair.baseToken.address
   }).catch(() => void 0) : void 0;
   const deployer = deployerAttribution?.address ?? null;
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");

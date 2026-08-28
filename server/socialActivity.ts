@@ -4,9 +4,11 @@ import { cacheGet, cacheSet } from "./cache";
 import { trustedOfficialXAvatarUrl } from "../src/lib/avatars";
 import {
   socialActivityScore,
+  selectSocialAdverseMentions,
   selectSocialMentioners,
   type SocialActivityBucket,
   type SocialActivityMention,
+  type SocialActivityAdverseMention,
   type SocialActivitySnapshot,
   type SocialActivityIncompleteReason,
   type SocialActivityWindow,
@@ -39,6 +41,7 @@ export interface SocialActivityIdentity {
   handle: string;
   ticker?: string | null;
   projectName?: string | null;
+  contractAddress?: string | null;
 }
 
 export interface SocialActivityCollectorOptions {
@@ -93,6 +96,11 @@ function safeProjectName(value?: string | null): string | null {
   return name.length >= 3 && name.length <= 48 && /[A-Za-z]/.test(name) ? name : null;
 }
 
+function safeContractAddress(value?: string | null): string | null {
+  const address = value?.trim() ?? "";
+  return /^(?:0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(address) ? address : null;
+}
+
 const SHORT_GENERIC_PROJECT_NAME = /^[A-Za-z]{1,4}$/;
 
 function pastDeadline(deadlineAt?: number): boolean {
@@ -130,8 +138,10 @@ export function buildSocialActivityQuery(identity: SocialActivityIdentity): {
   if (!handle) return null;
   const ticker = safeTicker(identity.ticker);
   const projectName = safeProjectName(identity.projectName);
+  const contractAddress = safeContractAddress(identity.contractAddress);
   const terms = [`@${handle}`];
   if (ticker) terms.push(`$${ticker}`);
+  if (contractAddress) terms.push(`"${contractAddress}"`);
   const nameTerm = projectName ? projectNameSearchTerm(projectName, handle, ticker) : null;
   if (nameTerm) terms.push(`"${nameTerm}"`);
   return {
@@ -616,7 +626,7 @@ export async function collectSocialActivity(
   );
   const fetchImpl = options.fetchImpl ?? fetch;
   const cacheWindow = Math.floor(now.getTime() / (15 * 60 * 1000));
-  const cacheKey = `social-activity:v2:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
+  const cacheKey = `social-activity:v3:${provider}:${identity.query}:${maxPosts}:${cacheWindow}`;
   if (!options.fetchImpl) {
     const cached = await cacheGet(cacheKey, { operation: "social-activity-hit", meta: "15 minute activity snapshot" });
     if (cached) {
@@ -669,6 +679,7 @@ export async function collectSocialActivity(
       : null;
   const state = counts.ok && last7Days.authorCoverageComplete ? "complete" : "partial";
   const mentioners: SocialActivityMention[] = selectSocialMentioners(search.posts, identity.handle);
+  const adverseMentions: SocialActivityAdverseMention[] = selectSocialAdverseMentions(search.posts, identity.handle);
   const snapshot: SocialActivitySnapshot = {
     schemaVersion: 1,
     provider,
@@ -707,6 +718,7 @@ export async function collectSocialActivity(
             ? "ARGUS stopped the social-activity search to leave time for required checks. Unique-account counts are minimums."
           : `X returned more result pages than this saved scan collected. Unique-account counts are minimums.`,
     ...(mentioners.length ? { mentioners } : {}),
+    ...(adverseMentions.length ? { adverseMentions } : {}),
   };
   if (!options.fetchImpl) void cacheSet(cacheKey, JSON.stringify(snapshot));
   return snapshot;

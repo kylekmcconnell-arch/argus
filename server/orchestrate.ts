@@ -3101,7 +3101,7 @@ export async function adverseSignalsAndTooling(
     searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
       relationship_label: "audited subject",
-    }, ticker),
+    }, ticker, evidence.projectToken?.address),
     Promise.all(projectTargets.map((p) => searchAdverseSignals(p.handle!, "project", {
       relationship_to_subject: "venture",
       relationship_label: [p.role, p.name].filter(Boolean).join(" at ") || p.name,
@@ -4341,6 +4341,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         handle: evidence.profile.handle,
         ticker: evidence.projectToken?.symbol ?? ctx.tokenSymbol,
         projectName: evidence.projectToken?.name ?? evidence.profile.display_name,
+        contractAddress: evidence.projectToken?.address,
       }, {
         deadlineAt: Math.min(Date.now() + SOCIAL_ACTIVITY_BUDGET_MS, collectionDeadlineAt),
       });

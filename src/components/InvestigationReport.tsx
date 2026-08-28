@@ -2063,10 +2063,11 @@ export function InvestigationReport({
                 snapshot={socialActivity}
                 className="mt-3"
                 panelCostToken={panelCostToken}
-                afterActivity={accountLeads.subjectLeads.length > 0 ? (
+                afterActivity={accountLeads.subjectLeads.length > 0 || (socialActivity.adverseMentions?.length ?? 0) > 0 ? (
                   <div id="subject-leads" className="scroll-mt-28">
                     <SubjectAccusationStage
                       leads={accountLeads.subjectLeads}
+                      socialLeads={socialActivity.adverseMentions}
                       subject={accountLeadSubject}
                       panelCostToken={panelCostToken}
                     />

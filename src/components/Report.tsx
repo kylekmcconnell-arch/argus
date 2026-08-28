@@ -3703,10 +3703,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                 snapshot={f.socialActivity}
                 className="canonical-social-section mt-3"
                 panelCostToken={panelCostToken}
-                afterActivity={subjectLeads.length > 0 ? (
+                afterActivity={subjectLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
                   <div id="subject-leads" className="scroll-mt-28">
                     <SubjectAccusationStage
                       leads={subjectLeads}
+                      socialLeads={f.socialActivity?.adverseMentions}
                       subject={report.handle}
                       summary={subjectLeadSummary}
                       panelCostToken={panelCostToken}
@@ -3937,10 +3938,11 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
             snapshot={f.socialActivity}
             className="mt-3"
             panelCostToken={panelCostToken}
-            afterActivity={subjectLeads.length > 0 ? (
+            afterActivity={subjectLeads.length > 0 || (f.socialActivity.adverseMentions?.length ?? 0) > 0 ? (
               <div id="subject-leads" className="scroll-mt-28">
                 <SubjectAccusationStage
                   leads={subjectLeads}
+                  socialLeads={f.socialActivity?.adverseMentions}
                   subject={report.handle}
                   summary={subjectLeadSummary}
                   panelCostToken={panelCostToken}
@@ -5046,6 +5048,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
             <Section title="Adverse conversation" kicker="direct-subject leads · never counted in this score">
               <SubjectAccusationStage
                 leads={subjectLeads}
+                socialLeads={f.socialActivity?.adverseMentions}
                 subject={report.handle}
                 summary={subjectLeadSummary}
                 panelCostToken={panelCostToken}

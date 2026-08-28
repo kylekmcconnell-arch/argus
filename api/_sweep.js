@@ -1914,7 +1914,8 @@ async function runTokenAudit(input, emit, opts) {
   const socialActivity = projectX && opts?.collectSocialActivity ? await opts.collectSocialActivity({
     handle: projectX,
     ticker: pair.baseToken.symbol,
-    projectName: pair.baseToken.name
+    projectName: pair.baseToken.name,
+    contractAddress: pair.baseToken.address
   }).catch(() => void 0) : void 0;
   const deployer = deployerAttribution?.address ?? null;
   const deployerRole = deployerRoleLabel(deployerAttribution, "wallet");

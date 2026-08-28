@@ -259,6 +259,7 @@ export type CollectTokenSocialActivityFn = (identity: {
   handle: string;
   ticker: string;
   projectName: string;
+  contractAddress?: string;
 }) => Promise<SocialActivitySnapshot>;
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -1167,6 +1168,7 @@ async function runTokenAudit(
         handle: projectX,
         ticker: pair.baseToken.symbol,
         projectName: pair.baseToken.name,
+        contractAddress: pair.baseToken.address,
       }).catch(() => undefined)
     : undefined;
   const deployer = deployerAttribution?.address ?? null;
