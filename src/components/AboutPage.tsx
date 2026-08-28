@@ -14,7 +14,7 @@ const PHASES: { n: number; title: string; steps: [string, Status][] }[] = [
   ] },
   { n: 3, title: "Code, founders, and funding", steps: [
     ["Find the correct GitHub accounts and review their history", "partial"],
-    ["Check founder backgrounds, public affiliations, and notable followers", "live"],
+    ["Check founder backgrounds and public affiliations", "live"],
     ["Trace where the contract deployer's funds came from", "live"],
     ["Look for important connections to known people, wallets, and projects", "live"],
   ] },
