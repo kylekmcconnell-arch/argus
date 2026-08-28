@@ -79,6 +79,22 @@ describe("Kyle intelligence report opening", () => {
     expect(container.textContent).not.toContain("Product and execution is the strongest verified part of the case.");
   });
 
+  it("names the actual unresolved evidence area instead of hard-coding security and governance", async () => {
+    await act(async () => root.render(<KyleIntelligenceDecisionCanvas
+      {...props}
+      favorable
+      concerns={[]}
+      nextSteps={[{ label: "Verify current customer adoption and recurring usage" }]}
+      composition={[
+        { axis: "team", label: "Team & leadership", score: 15, weight: 16, rationale: "Named leadership is source-backed.", supportCount: 4 },
+        { axis: "traction", label: "Traction & usage", score: 8, weight: 16, rationale: "Adoption remains partly measured.", supportCount: 1, questionCount: 1 },
+      ]}
+    />));
+
+    expect(container.textContent).toContain("The available public record still lacks independent usage and market evidence.");
+    expect(container.textContent).not.toContain("still lacks independent security and governance evidence");
+  });
+
   it("leads with the verdict and separates evidence gaps from adverse evidence", async () => {
     await act(async () => root.render(<KyleIntelligenceDecisionCanvas {...props} />));
 

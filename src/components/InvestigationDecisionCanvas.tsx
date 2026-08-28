@@ -538,7 +538,7 @@ export function InvestigationDecisionCanvas(props: InvestigationDecisionCanvasPr
                 items={verdictItems}
                 emptyCopy={favorable
                   ? "No sourced support is recorded yet. Read the open questions before using this result."
-                  : "No recorded risk explains this result. Read the evidence before relying on it."}
+                  : "No verified adverse finding was recorded. Lower-scoring areas reflect limited demonstrated evidence or maturity; review the score breakdown and Verify next."}
                 pushNote={!favorable}
                 challengeAnchorId={challengeAnchorId}
               />

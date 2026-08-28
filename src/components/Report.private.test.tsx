@@ -1895,7 +1895,7 @@ describe("decision-safe person report presentation", () => {
     expect(counterweight).toContain("What looks credible");
   });
 
-  it("titles assessed-null axes with their deterministic finding and keeps coverage out of the risk section", () => {
+  it("keeps an assessed-null axis in score composition without promoting it to a caution", () => {
     const base = buildReport(SUBJECTS[0]);
     const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
     const axisName = Object.keys(governing.axes)[0]!;
@@ -1941,8 +1941,119 @@ describe("decision-safe person report presentation", () => {
     });
 
     const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
-    expect(verdictDrivers).toMatch(/assessed with no positive record|No token could be tied|No outside backers/);
+    expect(verdictDrivers).not.toMatch(/assessed with no positive record|No token could be tied|No outside backers/);
+    expect(verdictDrivers).toContain("The score is limited because of");
     expect(verdictDrivers).not.toContain("needs more verification");
+  });
+
+  it("keeps low-scoring official team and disclosure evidence out of Why we're cautious", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const teamHash = "1".repeat(64);
+    const disclosureHash = "2".repeat(64);
+    const teamArtifactId = `art_v1_${teamHash}`;
+    const disclosureArtifactId = `art_v1_${disclosureHash}`;
+    const dossier = {
+      ...base,
+      intelligence: undefined,
+      checkRuns: [],
+      axisCitationVersion: 1 as const,
+      axisEvidenceCatalog: [{
+        artifactId: teamArtifactId,
+        kind: "axis_evidence" as const,
+        provider: "official-project-site",
+        operation: "project-team-identity",
+        section: "team",
+        title: "The official site names eleven team members and advisors",
+        excerpt: "The official team page lists multiple named leads and advisors with direct role statements.",
+        contentHash: teamHash,
+        eligibleAxes: ["P1_team_and_identity"],
+        verification: "verified" as const,
+        scope: "direct_subject" as const,
+      }, {
+        artifactId: disclosureArtifactId,
+        kind: "axis_evidence" as const,
+        provider: "official-project-site",
+        operation: "project-transparency",
+        section: "disclosures",
+        title: "The project publishes documentation and token migration records",
+        excerpt: "Public documentation and migration records establish basic disclosure.",
+        contentHash: disclosureHash,
+        eligibleAxes: ["P6_transparency_integrity"],
+        verification: "verified" as const,
+        scope: "direct_subject" as const,
+      }],
+      projectStrengthBands: {
+        P1_team_and_identity: {
+          tier: "emerging" as const,
+          minScore: 7,
+          maxScore: 11,
+          reasons: ["The official roster is source-backed."],
+          anchorArtifactIds: [teamArtifactId],
+        },
+        P6_transparency_integrity: {
+          tier: "emerging" as const,
+          minScore: 5,
+          maxScore: 8,
+          reasons: ["Official documentation establishes basic disclosure."],
+          anchorArtifactIds: [disclosureArtifactId],
+        },
+      },
+      report: {
+        ...base.report,
+        roles: ["PROJECT"],
+        governing_role: "PROJECT",
+        governing_score: 58,
+        composite_verdict: "CAUTION" as const,
+        role_reports: [{
+          role: "PROJECT",
+          verdict: "CAUTION",
+          raw_total: 58,
+          score_total: 58,
+          cap_applied: null,
+          dox_bonus: 0,
+          axes: {
+            P1_team_and_identity: {
+              axis: "P1_team_and_identity",
+              role: "PROJECT",
+              score: 9,
+              weight: 16,
+              rationale: "The official team page lists multiple named leads and advisors with direct role statements.",
+              evidenceRefs: [teamArtifactId],
+              counterEvidenceRefs: [],
+              gaps: ["Which roles have independent employment or authority confirmation?"],
+            },
+            P6_transparency_integrity: {
+              axis: "P6_transparency_integrity",
+              role: "PROJECT",
+              score: 7,
+              weight: 12,
+              rationale: "Public team, documentation, and migration records establish basic disclosure.",
+              evidenceRefs: [disclosureArtifactId],
+              counterEvidenceRefs: [],
+              gaps: ["Which governance and treasury disclosures are independently confirmed?"],
+            },
+          },
+        }],
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const decisionBrief = container.querySelector("#report-summary")?.textContent ?? "";
+    const cautionColumn = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
+    const supportColumn = container.querySelector('section[aria-labelledby="confidence-limits-title"]')?.textContent ?? "";
+    const scoreEvidence = container.querySelector("#decision-basis")?.textContent ?? "";
+
+    expect(cautionColumn).toContain("No verified adverse finding was recorded");
+    expect(cautionColumn).not.toContain("Verified evidence on");
+    expect(cautionColumn).not.toContain("is thin");
+    expect(supportColumn).toContain("Team and leadership");
+    expect(supportColumn).toContain("Transparency and integrity");
+    expect(scoreEvidence).toMatch(/independent employment|governance and treasury/i);
+    expect(decisionBrief).not.toContain("Verified evidence on team and leadership is thin");
+    expect(decisionBrief).not.toContain("Verified evidence on transparency and integrity is thin");
   });
 
   it("translates internal axis and provider language into an investor-readable summary", () => {

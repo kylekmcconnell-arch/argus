@@ -131,6 +131,7 @@ function verdictHeadline(
   favorable: boolean,
   adverseCount: number,
   unresolvedCount: number,
+  nextSteps: KyleDecisionItem[],
 ): string {
   const strongest = [...rows]
     .filter((row) => row.weight > 0 && (row.supportCount ?? 0) > 0)
@@ -142,11 +143,21 @@ function verdictHeadline(
   const lead = strongest ? `${strongest.label} leads the evidence.` : "The available evidence establishes a starting position.";
   if (favorable && unresolvedCount === 0 && adverseCount === 0) return `${lead} No decision-critical gap is recorded.`;
   if (adverseCount > 0) return `${lead} ${adverseCount} scored counter-${adverseCount === 1 ? "signal requires" : "signals require"} review.`;
+  const unresolvedText = nextSteps.map((item) => `${item.label} ${item.detail ?? ""}`).join(" ").toLowerCase();
+  const unresolvedEvidence = /audit|security|governance|treasury|control/.test(unresolvedText)
+    ? "independent security and governance evidence"
+    : /team|founder|leadership|identity|operator|advisor/.test(unresolvedText)
+      ? "independent team and identity confirmation"
+      : /product|service|roadmap|build|execution/.test(unresolvedText)
+        ? "independent product evidence"
+        : /usage|customer|activity|revenue|traction|adoption|market/.test(unresolvedText)
+          ? "independent usage and market evidence"
+          : "some decision-critical evidence";
   if (strongest) {
     const strongestLabel = strongest.label.replace(/\s*&\s*/g, " and ");
-    return `${strongestLabel} is the strongest verified part of the case. The available public record still lacks independent security and governance evidence.`;
+    return `${strongestLabel} is the strongest verified part of the case. The available public record still lacks ${unresolvedEvidence}.`;
   }
-  return "The available evidence establishes a starting position. The available public record still lacks independent security and governance evidence.";
+  return `The available evidence establishes a starting position. The available public record still lacks ${unresolvedEvidence}.`;
 }
 
 function ClaimLabel({ type, strength }: { type: "FACT" | "SIGNAL" | "INFERENCE"; strength: string }) {
@@ -503,7 +514,7 @@ export function KyleIntelligenceDecisionCanvas({
   const topNextStep = nextSteps[0];
   const thesis = sentence(reportSummary) || sentence(argument?.againstLine) || sentence(mainConcern?.label) || "ARGUS assembled the available evidence into a decision-ready view.";
   const summary = sentence(neutralizeProductCopy(subjectSummary ?? ""));
-  const headline = verdictHeadline(composition, favorable, adverseCount, unresolvedCount);
+  const headline = verdictHeadline(composition, favorable, adverseCount, unresolvedCount, nextSteps);
   const coverage = coverageLabel(coveragePercent);
 
   const sortedComposition = useMemo(() => [...composition].sort((left, right) => right.weight - left.weight), [composition]);

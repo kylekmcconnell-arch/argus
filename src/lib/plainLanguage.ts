@@ -61,37 +61,6 @@ export function plainLanguageSummary(value: string): string {
     .trim();
 }
 
-const PUBLIC_CONCERN_FALLBACKS: Record<string, string> = {
-  F4_build_substance: "A live product could not be independently verified.",
-  P2_product_substance: "A live product could not be independently verified.",
-};
-
-const PROMOTIONAL_SOURCE_COPY = /(?:\b(?:our|we|we're|we’ve|my)\b|\bbiggest\s+releases?\b|\bnow\s+live\b|\bjust\s+launched\b|\b(?:announcing|introducing)\b|\bavailable\s+now\b|\bjoin\s+us\b)/i;
-const EMOJI_OR_PICTOGRAPH = /\p{Extended_Pictographic}/u;
-
-/**
- * Choose a reader-facing concern heading without mistaking source copy for
- * ARGUS's conclusion. Promotional claims remain available in the supporting
- * detail and source ledger; the heading names the evaluated risk instead.
- */
-export function publicConcernTitle({
-  axis,
-  axisLabel,
-  gap,
-}: {
-  axis: string;
-  axisLabel: string;
-  gap?: string | null;
-}): string {
-  const candidate = plainLanguageSummary(gap ?? "").trim();
-  const fallback = PUBLIC_CONCERN_FALLBACKS[axis]
-    ?? `Verified evidence on ${axisLabel.toLowerCase()} is thin.`;
-
-  if (!candidate || candidate.length > 140) return fallback;
-  if (PROMOTIONAL_SOURCE_COPY.test(candidate) || EMOJI_OR_PICTOGRAPH.test(candidate)) return fallback;
-  return /[.!?]$/.test(candidate) ? candidate : `${candidate}.`;
-}
-
 const PUBLIC_RELATIONSHIP_LABELS: Record<string, string> = {
   ASSOCIATES_WITH: "is associated with",
   FOUNDED: "founded",

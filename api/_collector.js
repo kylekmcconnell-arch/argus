@@ -998,7 +998,7 @@ var Audit = class {
       ...row.artifact_verified !== void 0 ? { artifact_verified: row.artifact_verified } : {}
     });
     for (const a of this.associates) {
-      nodes.push({ type: "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
+      nodes.push({ type: a.kind === "org" ? "Company" : "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
       edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation, ...receipt(a, a.evidence_url) });
     }
     for (const v of this.ventures) {
@@ -6906,6 +6906,7 @@ function assembleDossier(ev, live) {
     ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0, github: void 0, developerProfiles: void 0 } : {},
     ...member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}
   }));
+  const organizationRelationships = (ev.webTeam ?? []).filter((member) => member.kind === "org" && meaningfulTeamValue(member.name) && meaningfulTeamValue(member.role) && member.evidence_origin !== "model_lead" && member.artifact_verified === true).map((member) => ({ ...member }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
     if (member.kind === "org") return [];
     if (!meaningfulTeamValue(member.name) || !isPlausiblePersonRosterName(member.name) || !meaningfulTeamValue(member.role)) return [];
@@ -6943,9 +6944,12 @@ function assembleDossier(ev, live) {
     a.addClientEngagement(c);
     if (governingEligible(c)) graphAudit.addClientEngagement(c);
   });
-  ev.associates.forEach((as) => {
-    a.addAssociate(as);
-    if (governingEligible(as)) graphAudit.addAssociate(as);
+  const organizationHandles = new Set(organizationRelationships.map((member) => (member.handle ?? "").replace(/^@/, "").toLowerCase()).filter(Boolean));
+  ev.associates.forEach((associate) => {
+    const normalizedHandle4 = associate.associate_handle.replace(/^@/, "").toLowerCase();
+    const typedAssociate = associate.kind ? associate : organizationHandles.has(normalizedHandle4) ? { ...associate, kind: "org" } : associate;
+    a.addAssociate(typedAssociate);
+    if (governingEligible(typedAssociate)) graphAudit.addAssociate(typedAssociate);
   });
   ev.findings.forEach((f) => {
     a.addFinding(f);
@@ -7100,6 +7104,7 @@ function assembleDossier(ev, live) {
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
     webTeam: groundedWebTeam,
+    ...organizationRelationships.length ? { organizationRelationships } : {},
     ...webTeamLeads.length ? { webTeamLeads } : {},
     ...ev.leaderDepartures?.length ? { leaderDepartures: ev.leaderDepartures.map((row) => ({ ...row })) } : {},
     ventureTeams: ev.ventureTeams ?? [],
@@ -33396,6 +33401,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       ctx.evidence.associates.push({
         associate_handle: org.handle,
         relation: org.role,
+        kind: "org",
         notes: org.evidence,
         evidence_url: org.sourceUrl,
         provider: "twitterapi",

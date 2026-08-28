@@ -80,7 +80,7 @@ import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvide
 import { DecisionBasis } from "./DecisionBasis";
 import { isStrictFundScaleArtifact } from "../lib/fundScaleEvidence";
 import { portfolioRelationshipBinding, type PortfolioBindingSubject } from "../lib/portfolioRelationshipBinding";
-import { buildDecisionBasis } from "../lib/decisionBasis";
+import { buildDecisionBasis, verifiedDecisionPressureArtifact } from "../lib/decisionBasis";
 import {
   ReportCanvasNarrativeSection,
   ReportCanvasRailCard,
@@ -106,7 +106,7 @@ import {
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 import { isExactOfficialXProfile, projectLeadIsRelevant } from "../lib/projectLeadRelevance";
 import { ExpandableText } from "./ExpandableText";
-import { formatRoleLabel, plainLanguageSummary, plainReportStatusLabel, publicCheckLabel, publicCheckNote, publicConcernTitle } from "../lib/plainLanguage";
+import { formatRoleLabel, plainLanguageSummary, plainReportStatusLabel, publicCheckLabel, publicCheckNote } from "../lib/plainLanguage";
 import { publicFindingTitle, publicIntelligenceText, publicStrengthLabel } from "../lib/intelligencePresentation";
 import { PointInTimeIntelligencePanel } from "./PointInTimeIntelligencePanel";
 import { DiligenceEvidenceLedgers } from "./DiligenceEvidenceLedgers";
@@ -453,10 +453,6 @@ function evidenceStrength({
   if (supportCount >= 3 && ratio >= 0.72 && counterCount === 0 && questionCount === 0) return "Strong support";
   if (supportCount >= 2 && ratio >= 0.48 && counterCount <= 1) return "Some support";
   return "Limited support";
-}
-
-function questionMeta(count: number): string {
-  return count > 0 ? ` · ${count} ${count === 1 ? "question" : "questions"} to verify` : "";
 }
 
 // Copy a full wallet address (the row shows a truncated form).
@@ -2358,51 +2354,27 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       provenance: item.provenance,
       href: "#decision-intelligence" as `#${string}`,
     })),
-    ...decisionBasisSummary.rows
-      .filter((axis) => axis.counter.length > 0)
-      .map((axis) => ({
-        id: `counter-${axis.axis}`,
-        title: `The evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is mixed.`,
-        detail: `${axis.counter.length} ${axis.counter.length === 1 ? "source disagrees" : "sources disagree"}.`,
-        provenance: "Review competing sources",
+    ...decisionBasisSummary.rows.flatMap((axis) => {
+      const artifact = verifiedDecisionPressureArtifact(axis);
+      if (!artifact) return [];
+      return [{
+        id: `verified-pressure-${axis.axis}-${artifact.artifactId}`,
+        title: publicFindingTitle(artifact.title),
+        detail: publicIntelligenceText(artifact.excerpt || axis.rationale),
+        provenance: "Verified score-limiting evidence",
         href: axisHref(axis.axis),
-      })),
+      }];
+    }),
   ];
   const favorableVerdict = presentedVerdict === "PASS"
     || (presentedVerdict === "PROVISIONAL" && report.composite_verdict === "PASS");
-  // Risk cards lead with a FINDING about the subject, never with our process
-  // status: an assessed-null axis gets its deterministic conclusion, any other
-  // weak axis gets the analyst's own first gap statement (already specific,
-  // already dash-stripped server-side), and only then a thin-evidence fallback.
-  // A solid or exceptional strength band is not a risk driver even when its
-  // integer floor dips just under the 70 percent line.
+  // Confidence and score are deliberately separate. An emerging band, an
+  // assessed-null axis, a first-party-only source, or an unanswered question
+  // may limit the score without establishing an adverse fact. Those states
+  // remain visible in score composition and Verify next; only the direct,
+  // verified, counter-eligible records assembled above can become cautions.
   const bandTierFor = (axis: string): string | undefined => f.projectStrengthBands?.[axis]?.tier;
-  const ASSESSED_NULL_RISK_TITLES: Record<string, string> = {
-    P3_token_conduct: "No token could be tied to the project's official identity.",
-    P4_backing_and_partners: "No outside backers or partners are verified.",
-  };
   const sentence = (value: string): string => /[.!?]$/.test(value) ? value : `${value}.`;
-  const lowAxisDrivers: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
-    .filter((axis) => axis.weight > 0 && axis.score / axis.weight < 0.7)
-    .filter((axis) => !["solid", "exceptional"].includes(bandTierFor(axis.axis) ?? ""))
-    .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
-    .map((axis) => {
-      const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
-      const title = bandTierFor(axis.axis) === "assessed_null"
-        ? (ASSESSED_NULL_RISK_TITLES[axis.axis] ?? `${diligenceAreaLabel(axis.axis)} was assessed with no positive record.`)
-        : publicConcernTitle({
-          axis: axis.axis,
-          axisLabel: diligenceAreaLabel(axis.axis),
-          gap: axis.gaps[0],
-        });
-      return {
-        id: `low-axis-${axis.axis}`,
-        title,
-        detail: plainLanguageSummary(axis.rationale),
-        provenance: `Limited source support${questionMeta(questions)}`,
-        href: axisHref(axis.axis),
-      };
-    });
 
   const notApplicableCheckIds = new Set(diligenceChecks
     .filter((check) => check.status === "not-applicable")
@@ -2608,7 +2580,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     remainingPointsItems[0] ? `Top open item: ${remainingPointsItems[0].title}.` : "",
   ].filter(Boolean).join("\n");
   const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
-  const adverseVerdictNarrative = [...confidenceLimits, ...lowAxisDrivers]
+  const adverseVerdictNarrative = [...confidenceLimits]
     .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
     .slice(0, 6);
   // An unverified lead is not a finding: it never enters the findings ledger and
@@ -2646,10 +2618,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
       ...intelligenceBrief.supports.map((item) => item.title),
       ...axisSupportNarrative.map((item) => item.title),
     ],
-    concerns: [
-      ...confidenceLimitsBase,
-      ...lowAxisDrivers,
-    ].map((item) => item.title),
+    concerns: confidenceLimitsBase.map((item) => item.title),
     capReason: report.cap_applied
       ? `The score is limited because of: ${capLabel(report.cap_applied)}`
       : null,
@@ -2671,8 +2640,13 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
   }));
   const decisionCanvasSupports = toDecisionCanvasItems(supportNarrative);
   const decisionCanvasConcerns = toDecisionCanvasItems(
-    [...confidenceLimits, ...lowAxisDrivers, ...subjectLeadNarrative]
-      .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
+    [...confidenceLimits, ...subjectLeadNarrative]
+      .filter((item, index, items) => {
+        const key = item.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ");
+        return items.findIndex((candidate) =>
+          candidate.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ") === key,
+        ) === index;
+      })
       .slice(0, 8),
   );
   const decisionCanvasContext = toDecisionCanvasItems(intelligenceContextNarrative);
@@ -3983,7 +3957,7 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
                   : "No usable sources were saved. Review which sources were available and try the investigation again."
                 : favorableVerdict
                   ? "This saved report does not explain the score. Review the sources before relying on it."
-                  : "No warning in the saved sources explains this result. Review why it scored this way before relying on it."}
+                  : "No verified adverse finding was recorded. Lower-scoring areas reflect limited demonstrated evidence or maturity; review the score breakdown and Verify next."}
             />
             <ReportCanvasNarrativeSection
               id="confidence-limits"
