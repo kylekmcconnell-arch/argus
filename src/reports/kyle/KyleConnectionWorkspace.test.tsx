@@ -102,6 +102,58 @@ describe("KyleConnectionWorkspace", () => {
     await act(async () => root.unmount());
   });
 
+  it("never drops a source-backed advisor when the cluster contains more than six entries", async () => {
+    const advisorDossier = {
+      ...dossier,
+      webTeam: [
+        { name: "Nik Hawks", role: "Advisor", sourceUrl: "https://www.anyone.io/team", artifact_verified: true },
+        { name: "Andrzej Tucholka", role: "Technical Advisor", sourceUrl: "https://www.anyone.io/team", artifact_verified: true },
+        { name: "Sean Carey", role: "Advisor", sourceUrl: "https://www.anyone.io/team", artifact_verified: true },
+        { name: "Max Gold", role: "Advisor", sourceUrl: "https://www.anyone.io/team", artifact_verified: true },
+        { name: "Slava Kreynin", role: "Advisor", sourceUrl: "https://www.anyone.io/team", artifact_verified: true },
+        { name: "Sergey Ilin", role: "Advisor", sourceUrl: "https://www.anyone.io/team", artifact_verified: true },
+      ],
+    } as unknown as Dossier;
+    const root = createRoot(container);
+    await act(async () => root.render(<KyleConnectionWorkspace dossier={advisorDossier} nodes={nodes.slice(0, 1)} edges={[]} connections={[]} />));
+
+    const advisors = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Advisors");
+    await act(async () => advisors?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(container.textContent).toContain("Advisors & backers 7");
+    expect(container.querySelector('button[aria-label^="Enigma Fund,"]')?.getAttribute("data-hidden")).toBe("false");
+
+    await act(async () => root.unmount());
+  });
+
+  it("recovers corroborated legacy advisor evidence without promoting unconfirmed claims", async () => {
+    const testimonialDossier = {
+      ...dossier,
+      webTeam: [],
+      organizationRelationships: [],
+      evidence: {
+        testimonials: [{
+          claimed_endorser_name: "Enigma Fund",
+          claimed_endorser_handle: "@EnigmaFund",
+          claimed_relationship: "advisor",
+          corroboration_verdict: "Corroborated",
+          evidence_url: "https://x.com/anyonefdn/status/1",
+        }, {
+          claimed_endorser_name: "Unverified Capital",
+          claimed_relationship: "advisor",
+          corroboration_verdict: "Unconfirmed",
+        }],
+      },
+    } as unknown as Dossier;
+    const root = createRoot(container);
+    await act(async () => root.render(<KyleConnectionWorkspace dossier={testimonialDossier} nodes={nodes.slice(0, 1)} edges={[]} connections={[]} />));
+
+    expect(container.textContent).toContain("Enigma Fund");
+    expect(container.textContent).not.toContain("Unverified Capital");
+
+    await act(async () => root.unmount());
+  });
+
   it("opens a priced confirmation sheet before starting a rabbit-hole investigation", async () => {
     vi.useFakeTimers();
     const onAudit = vi.fn();

@@ -84,12 +84,12 @@ const ENTITY_KIND_LABEL: Record<EntityKind, string> = {
   social: "ENTITY",
 };
 
-const POSITIONS: Record<Cluster, Array<[number, number]>> = {
-  team: [[11, 31], [24, 39], [9, 51], [27, 57], [16, 67], [32, 29], [31, 69], [8, 66]],
-  advisors: [[37, 79], [48, 84], [39, 91], [52, 92], [46, 74], [31, 88]],
-  projects: [[43, 13], [55, 9], [66, 16], [45, 28], [65, 29], [56, 22]],
-  assets: [[79, 29], [91, 37], [77, 49], [89, 58], [79, 67], [94, 50]],
-  social: [[66, 78], [77, 83], [89, 77], [68, 92], [83, 92], [92, 87]],
+const CLUSTER_BOUNDS: Record<Cluster, { x: [number, number]; y: [number, number]; columns: number }> = {
+  team: { x: [8, 31], y: [29, 68], columns: 3 },
+  advisors: { x: [31, 52], y: [77, 93], columns: 4 },
+  projects: { x: [42, 67], y: [10, 29], columns: 4 },
+  assets: { x: [78, 94], y: [29, 68], columns: 3 },
+  social: { x: [66, 92], y: [78, 93], columns: 4 },
 };
 
 const ADVISOR_ROLE = /\b(?:advisor|adviser|advisory|board|backer|investor|fund|incubator|venture partner)\b/i;
@@ -104,6 +104,10 @@ function isAdvisorRelationship(value?: string | null): boolean {
 
 function isMalformedPersonLabel(value: string): boolean {
   return /[.;:|][\s]|\b(?:senior|lead|manager|advisor|engineer|director|founder|chief|head)\s*$/i.test(value.trim());
+}
+
+function looksLikeOrganization(value: string): boolean {
+  return /\b(?:capital|fund|ventures?|labs?|foundation|protocol|dao|partners?|group|network|company|collective)\b/i.test(value);
 }
 
 const compactAddress = (value: string) => value.length > 15 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
@@ -216,7 +220,7 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
     for (const key of keys) identityIndex.set(key, index);
   };
 
-  for (const member of (dossier.webTeam ?? []).slice(0, 8)) {
+  for (const member of dossier.webTeam ?? []) {
     const key = member.handle ?? `person:${member.name}`;
     const roleSource = safeUrl(member.sourceUrl ?? member.source);
     const linkedin = safeUrl(member.linkedin);
@@ -263,6 +267,40 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
         ...(xSource ? [{ label: "X profile", url: xSource }] : []),
       ],
       researchQuery: organization.handle ?? organization.name,
+    });
+  }
+
+  // Older saved dossiers sometimes preserve an advisor in the corroboration
+  // ledger without promoting it into organizationRelationships. Keep the graph
+  // consistent with the report, but only elevate corroborated relationships.
+  for (const testimonial of dossier.evidence?.testimonials ?? []) {
+    const verdict = String(testimonial.corroboration_verdict ?? "");
+    if (verdict !== "Corroborated" && verdict !== "PartiallyCorroborated") continue;
+    const relation = testimonial.claimed_relationship ?? "advisor";
+    if (!isAdvisorRelationship(relation)) continue;
+    const label = testimonial.claimed_endorser_name ?? testimonial.claimed_endorser_handle;
+    if (!label) continue;
+    const query = testimonial.claimed_endorser_handle ?? label;
+    const organization = looksLikeOrganization(label) || looksLikeOrganization(query);
+    const source = safeUrl(testimonial.evidence_url);
+    const xSource = testimonial.claimed_endorser_handle
+      ? `https://x.com/${testimonial.claimed_endorser_handle.replace(/^@/, "")}`
+      : null;
+    add({
+      id: testimonial.claimed_endorser_handle ?? `${organization ? "organization" : "person"}:${label}`,
+      label,
+      detail: relation.replaceAll("_", " "),
+      cluster: "advisors",
+      kind: organization ? "projects" : "people",
+      image: testimonial.claimed_endorser_handle ? xAvatar(testimonial.claimed_endorser_handle) : null,
+      relation: relation.replaceAll("_", " "),
+      direct: true,
+      confidence: verdict === "Corroborated" ? "High" : "Moderate",
+      sources: [
+        ...(source ? [{ label: "Corroboration source", url: source }] : []),
+        ...(xSource ? [{ label: "X profile", url: xSource }] : []),
+      ],
+      researchQuery: query,
     });
   }
 
@@ -326,7 +364,7 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
     researchQuery: dossier.handle,
   });
 
-  for (const connection of connections.slice(0, 6)) {
+  for (const connection of connections) {
     add({
       id: `connection:${connection.other}`,
       label: connection.other,
@@ -342,15 +380,28 @@ function buildEntities(props: ConnectionWorkspaceProps): WorkspaceEntity[] {
     });
   }
 
-  const caps: Record<Cluster, number> = { team: 8, advisors: 6, projects: 6, assets: 6, social: 6 };
-  return (Object.keys(caps) as Cluster[]).flatMap((cluster) => entities.filter((entity) => entity.cluster === cluster).slice(0, caps[cluster]));
+  return entities;
 }
 
 function positionEntities(entities: WorkspaceEntity[]): PlacedEntity[] {
+  const totals = entities.reduce<Record<Cluster, number>>((result, entity) => {
+    result[entity.cluster] += 1;
+    return result;
+  }, { team: 0, advisors: 0, projects: 0, assets: 0, social: 0 });
   const counts: Record<Cluster, number> = { team: 0, advisors: 0, projects: 0, assets: 0, social: 0 };
   return entities.map((entity) => {
     const index = counts[entity.cluster]++;
-    const [x, y] = POSITIONS[entity.cluster][index % POSITIONS[entity.cluster].length];
+    const bounds = CLUSTER_BOUNDS[entity.cluster];
+    const columns = Math.min(bounds.columns, Math.max(1, totals[entity.cluster]));
+    const rows = Math.ceil(totals[entity.cluster] / columns);
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = columns === 1
+      ? (bounds.x[0] + bounds.x[1]) / 2
+      : bounds.x[0] + ((bounds.x[1] - bounds.x[0]) * column) / (columns - 1);
+    const y = rows === 1
+      ? (bounds.y[0] + bounds.y[1]) / 2
+      : bounds.y[0] + ((bounds.y[1] - bounds.y[0]) * row) / (rows - 1);
     return { ...entity, x, y };
   });
 }

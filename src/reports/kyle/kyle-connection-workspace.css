@@ -145,7 +145,7 @@
 [data-report-lane="kyle"] .kyle-connection-cluster small { color: var(--color-ink-faint); font-size: 0.64rem; font-weight: 500; margin-left: 0.25rem; }
 [data-report-lane="kyle"] .kyle-connection-cluster--team { background: color-mix(in srgb, var(--kyle-editorial-green) 3%, transparent); color: var(--kyle-editorial-green); height: 49%; left: -5%; top: 21%; width: 40%; }
 [data-report-lane="kyle"] .kyle-connection-cluster--team > span { left: 21%; top: -1.25rem; }
-[data-report-lane="kyle"] .kyle-connection-cluster--advisors { background: color-mix(in srgb, #a26027 3%, transparent); bottom: -5%; color: #a26027; height: 32%; left: 27%; width: 32%; }
+[data-report-lane="kyle"] .kyle-connection-cluster--advisors { background: color-mix(in srgb, #a26027 3%, transparent); bottom: -6%; color: #a26027; height: 35%; left: 24%; width: 36%; }
 [data-report-lane="kyle"] .kyle-connection-cluster--advisors > span { left: 24%; top: -1.2rem; }
 [data-report-lane="kyle"] .kyle-connection-cluster--projects { background: color-mix(in srgb, var(--connection-blue) 3%, transparent); color: var(--connection-blue); height: 35%; left: 34%; top: 3%; width: 39%; }
 [data-report-lane="kyle"] .kyle-connection-cluster--projects > span { left: 31%; top: -1.2rem; }
