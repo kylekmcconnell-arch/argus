@@ -297,6 +297,51 @@ describe("report save reliability", () => {
     });
   });
 
+  it("accepts the linked receipt for a token-less person report and keeps its server attestation", async () => {
+    // Mirrors the exact `linked: true` body api/report returns when the person
+    // POST re-links the server-collected version. This shape used to omit the
+    // panel capability and was rejected here as an incomplete receipt, so a
+    // durably saved project report read as a failed save.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      reportVersionId: "00000000-0000-4000-8000-000000000301",
+      caseId: "00000000-0000-4000-8000-000000000201",
+      version: 3,
+      linked: true,
+      attestationState: "server_collected",
+      panelCostToken: "signed-panel-token",
+    }), { status: 200 })));
+
+    const dossier = {
+      ...legacyDossier,
+      checkRuns: [{ checkId: "identity", label: "Identity", status: "confirmed" }],
+      persistence: { state: "persisted", reportVersionId: "00000000-0000-4000-8000-000000000301" },
+    } as unknown as Dossier;
+    const persisted = await syncReport("person", "@example", "@example", dossier, "PASS", 80);
+    expect(persisted).toMatchObject({
+      state: "persisted",
+      caseId: "00000000-0000-4000-8000-000000000201",
+      version: 3,
+      attestationState: "server_collected",
+    });
+    if (persisted.state !== "persisted") throw new Error("expected persisted");
+    expect(savedVersionContext("person", dossier, persisted).attestationState).toBe("server_collected");
+    expect(savedVersionContext("person", dossier, { caseId: "c", reportVersionId: "v", version: 1 }).attestationState)
+      .toBe("analyst_submitted");
+  });
+
+  it("names the unbound token leg when the server rejects only the combined save", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ error: "person_token_subject_mismatch" }),
+      { status: 409 },
+    )));
+
+    await expect(syncReport("person", "@example", "@example", legacyDossier, "PASS", 80)).resolves.toEqual({
+      state: "failed",
+      reason: expect.stringContaining("The project report is saved"),
+    });
+  });
+
   it("fails closed when the save receipt omits case identity", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       reportVersionId: "00000000-0000-4000-8000-000000000123",
