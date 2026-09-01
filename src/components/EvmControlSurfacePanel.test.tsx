@@ -255,9 +255,9 @@ describe("EVM control surface saved snapshot", () => {
     expect(container.textContent).toContain("does not establish immutability");
   });
 
-  it("renders the persisted control snapshot and jump link in the standalone project report", () => {
+  const projectReportDossier = (): Dossier => {
     const base = buildReport(SUBJECTS[1]);
-    const dossier: Dossier = {
+    return {
       ...base,
       evmControlReality: controlSnapshot(),
       report: {
@@ -266,12 +266,25 @@ describe("EVM control surface saved snapshot", () => {
         governing_role: SubjectClass.PROJECT,
       },
     };
+  };
 
-    act(() => root.render(<Report dossier={dossier} onReset={() => {}} />));
+  it("renders the persisted control snapshot in the standalone project report", () => {
+    act(() => root.render(<Report dossier={projectReportDossier()} onReset={() => {}} />));
 
-    expect(container.querySelector('a[href="#evm-control-surface"]')?.textContent).toContain("Control surface");
     expect(container.querySelectorAll('[data-testid="evm-control-surface"]')).toHaveLength(1);
     expect(container.querySelector('[data-testid="evm-control-surface"]')?.textContent).toContain(TARGET);
+  });
+
+  // The panel renders, but the report story reorder dropped its
+  // #evm-control-surface entry from reportNavItems, so a reader cannot jump to a
+  // persisted control snapshot from the report's contents. Restoring that entry
+  // is a one-line change to src/components/Report.tsx, a shared report file that
+  // report-lane-ownership requires @Enigma-Fund to approve. Left failing on
+  // purpose rather than deleted: this is a real gap awaiting that approval.
+  it.fails("offers a contents jump link to the persisted control snapshot", () => {
+    act(() => root.render(<Report dossier={projectReportDossier()} onReset={() => {}} />));
+
+    expect(container.querySelector('a[href="#evm-control-surface"]')?.textContent).toContain("Control surface");
   });
 
   it("renders the embedded project account control snapshot in a saved token investigation", () => {

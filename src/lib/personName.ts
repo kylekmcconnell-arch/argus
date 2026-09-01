@@ -47,3 +47,32 @@ export function isPlausiblePersonRosterName(value: string): boolean {
   if (words.every((word) => ROLE_OR_FRAGMENT_WORDS.has(word))) return false;
   return true;
 }
+
+/** One X screen name: letters, digits, and underscores, no spaces. */
+const SCREEN_NAME = /^[A-Za-z0-9_]{2,30}$/;
+
+/**
+ * The same boundary for a roster row the subject's OWN first-party edge already
+ * bound to an @handle. There the handle is the unique id and the display name is
+ * only a label, so a pseudonymous screen name has to survive: crypto operators
+ * routinely carry one ("S0Ldev", "blknoiz06"), and no human-name shape will ever
+ * admit a digit. Rejecting those rows discarded the operator that the followings
+ * plus bio-claim cross had already resolved deterministically.
+ *
+ * A name that is prose, an organization, or a bare job title is still rejected,
+ * and a candidate without a first-party handle is judged on its name alone.
+ */
+export function isPlausiblePersonRosterIdentity(candidate: {
+  name?: string | null;
+  handle?: string | null;
+  handleBoundBySubject?: boolean;
+}): boolean {
+  const name = (candidate.name ?? "").trim().replace(/\s+/g, " ");
+  const handle = (candidate.handle ?? "").trim().replace(/^@/, "");
+  const handleBound = candidate.handleBoundBySubject === true && HANDLE.test(`@${handle}`);
+  if (!handleBound) return isPlausiblePersonRosterName(name);
+  if (!name || isPlausiblePersonRosterName(name)) return true;
+  if (!SCREEN_NAME.test(name)) return false;
+  const word = name.toLowerCase();
+  return !ORGANIZATION_WORDS.has(word) && !ROLE_OR_FRAGMENT_WORDS.has(word);
+}

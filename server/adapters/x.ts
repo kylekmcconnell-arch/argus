@@ -1164,6 +1164,118 @@ export async function dynamicNotable(organizationId?: string): Promise<{ handle:
   } catch { return []; }
 }
 
+interface FollowerPageScan {
+  /** True once at least one page returned an explicit follower array. */
+  observedPage: boolean;
+  /** True only when pagination reached the end of the follower list. */
+  coverageComplete: boolean;
+  audience: AudienceTally;
+}
+
+/**
+ * Page the subject's follower list, tallying audience shape off the rows the
+ * request already paid for and handing each raw row to `onRow`. Bounded by
+ * `maxPages` and a shared wall-clock deadline; every early exit (budget, HTTP
+ * failure, provider-declared failure, schema drift, missing cursor) leaves
+ * coverage partial rather than asserting the list ran out.
+ */
+async function scanFollowerPages(
+  subject: string,
+  key: string,
+  opts: {
+    maxPages: number;
+    followerCount: number;
+    deadline: number;
+    onRow?: (row: unknown) => void;
+  },
+): Promise<FollowerPageScan> {
+  const audience = newAudienceTally();
+  const u = subject.replace(/^@/, "");
+  let cursor = "";
+  let observedFollowers = 0;
+  let observedPage = false;
+  let coverageComplete = false;
+  for (let page = 0; page < opts.maxPages; page++) {
+    if (Date.now() > opts.deadline) break; // out of budget: coverage stays partial
+    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await twFetch(url, key);
+    if (!res || !res.ok) break;
+    let d: JsonRecord;
+    try {
+      d = asRecord(await res.json());
+    } catch {
+      break;
+    }
+    if (twitterProviderFailure(d)) break;
+    const nested = asRecord(d.data);
+    const followerValue = Array.isArray(d.followers)
+      ? d.followers
+      : Array.isArray(nested.followers)
+        ? nested.followers
+        : null;
+    // A 200 without an explicit follower array is schema drift, not proof that
+    // the follower list ended here.
+    if (!followerValue) break;
+    const followers = followerValue;
+    observedPage = true;
+    observedFollowers += followers.length;
+    for (const follower of followers) {
+      tallyAudienceRow(audience, follower);
+      opts.onRow?.(follower);
+    }
+    const hasNextPage = typeof d.has_next_page === "boolean"
+      ? d.has_next_page
+      : typeof nested.has_next_page === "boolean"
+        ? nested.has_next_page
+        : undefined;
+    const nextCursorValue = d.next_cursor ?? nested.next_cursor;
+    const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue : "";
+    if (hasNextPage === false || (hasNextPage === undefined && observedFollowers >= opts.followerCount)) {
+      coverageComplete = true;
+      break;
+    }
+    if (!hasNextPage || !nextCursor) break;
+    cursor = nextCursor;
+  }
+  return { observedPage, coverageComplete, audience };
+}
+
+/**
+ * Pages of follower profiles this lane is willing to buy for audience shape
+ * alone (200 rows each). A larger account is not measured rather than measured
+ * off its newest slice: an interrupted pass is a floor, and this lane has no
+ * reference set to make a truncated read worth its cost.
+ */
+export const AUDIENCE_MAX_PAGES = 6;
+
+/**
+ * Audience shape on its own, with no reference-set matching. The notable-follower
+ * lane that used to carry this read is retired, and its labeling was the
+ * unreliable half; the distribution is a neutral, first-party measurement that
+ * nobody can assemble by hand, so it keeps its own bounded pass.
+ *
+ * Returns undefined - never an empty sample - when no key is set, when the
+ * follower count is unknown or beyond the page budget, or when the provider
+ * returned no follower page. A shape nobody measured is not a measured zero.
+ */
+export async function followerAudience(
+  subject: string,
+  opts?: { followerCount?: number; budgetMs?: number },
+): Promise<AudienceSample | undefined> {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return undefined;
+  const followerCount = opts?.followerCount ?? Infinity;
+  if (!Number.isFinite(followerCount) || followerCount <= 0) return undefined;
+  const pages = Math.ceil(followerCount / 200);
+  if (pages > AUDIENCE_MAX_PAGES) return undefined;
+  const scan = await scanFollowerPages(subject, key, {
+    maxPages: pages + 1,
+    followerCount,
+    deadline: Date.now() + (opts?.budgetMs ?? 20_000),
+  });
+  return sealAudienceSample(scan.audience, scan.coverageComplete);
+}
+
 export async function notableFollowers(subject: string, opts?: { followerCount?: number; budgetMs?: number; organizationId?: string }): Promise<NotableScan> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return { list: [], checked: 0, coverage: "unavailable" };
@@ -1193,69 +1305,27 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
     const set = new Map(candidates.map((n) => [n.handle.toLowerCase(), n]));
     const hits: NotableFollower[] = [];
     const got = new Set<string>();
-    const audience = newAudienceTally();
-    const u = subject.replace(/^@/, "");
-    let cursor = "";
-    let observedFollowers = 0;
-    let observedPage = false;
-    let coverageComplete = false;
-    for (let page = 0; page < enumPages + 2; page++) {
-      if (Date.now() > deadline) break; // out of budget: keep the observed hits, coverage stays partial
-      const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-      const res = await twFetch(url, key);
-      if (!res || !res.ok) break;
-      let d: JsonRecord;
-      try {
-        d = asRecord(await res.json());
-      } catch {
-        break;
-      }
-      if (twitterProviderFailure(d)) break;
-      const nested = asRecord(d.data);
-      const followerValue = Array.isArray(d.followers)
-        ? d.followers
-        : Array.isArray(nested.followers)
-          ? nested.followers
-          : null;
-      // A 200 without an explicit follower array is schema drift, not proof that
-      // none of the reference accounts follows the subject.
-      if (!followerValue) break;
-      const followers = followerValue;
-      observedPage = true;
-      observedFollowers += followers.length;
-      for (const follower of followers) {
-        const f = asRecord(follower);
-        // The whole row was paid for whether or not it matches the reference
-        // set, so read its shape before dropping everything but the handle.
-        tallyAudienceRow(audience, follower);
+    const scan = await scanFollowerPages(subject, key, {
+      maxPages: enumPages + 2,
+      followerCount: fc,
+      deadline,
+      onRow: (row) => {
+        const f = asRecord(row);
         const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
         const m = set.get(h);
         if (m && !got.has(h)) { got.add(h); hits.push({ handle: m.handle, label: m.label, size: "" }); }
-      }
-      const hasNextPage = typeof d.has_next_page === "boolean"
-        ? d.has_next_page
-        : typeof nested.has_next_page === "boolean"
-          ? nested.has_next_page
-          : undefined;
-      const nextCursorValue = d.next_cursor ?? nested.next_cursor;
-      const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue : "";
-      if (hasNextPage === false || (hasNextPage === undefined && observedFollowers >= fc)) {
-        coverageComplete = true;
-        break;
-      }
-      if (!hasNextPage || !nextCursor) break;
-      cursor = nextCursor;
-    }
+      },
+    });
     // Enumeration can assert a negative only after every page completed. On a
     // partial run, the positive matches are still observed facts, but every
     // unobserved candidate remains unknown.
     return {
       list: hits,
-      checked: coverageComplete ? total : hits.length,
-      coverage: coverageComplete ? "complete" : observedPage ? "partial" : "unavailable",
+      checked: scan.coverageComplete ? total : hits.length,
+      coverage: scan.coverageComplete ? "complete" : scan.observedPage ? "partial" : "unavailable",
       // The sample is complete only when pagination finished; an interrupted
       // pass reports the rows it read as a floor, never as the audience.
-      audience: sealAudienceSample(audience, coverageComplete),
+      audience: sealAudienceSample(scan.audience, scan.coverageComplete),
     };
   }
 
@@ -2907,6 +2977,25 @@ export const xAdapter: Adapter = {
       ctx.evidence.profile.days_since_post = days;
       const dormant = days >= 21;
       ctx.emit({ phase: "P0 · Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days. A project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
+    }
+
+    // 1b. AUDIENCE SHAPE over the follower profiles this scan reads. A farmed or
+    //     purchased audience has a distinctive distribution, and it is only
+    //     visible in the profile rows themselves. Report the distribution and
+    //     stop: the tone stays neutral because a shape is not a verdict, and
+    //     followerAudience declines to measure at all rather than project a
+    //     truncated read onto the account's real follower total.
+    {
+      // Parse the profile's follower count ("12.4K"/"1.2M"); an unknown count
+      // means no bounded read exists, so the lane says nothing.
+      const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
+      const followerCount = fcm
+        ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1)
+        : undefined;
+      const audience = await followerAudience(ctx.handle, { followerCount });
+      if (audience) {
+        ctx.emit({ phase: "P0 · Intake", label: "Audience shape", detail: describeAudienceSample(audience), source: "twitterapi.io", tone: "neutral" });
+      }
     }
 
     // 2. corroborate each claimed testimonial / advisory / advisor relationship.

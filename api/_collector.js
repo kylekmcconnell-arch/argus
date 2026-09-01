@@ -1177,6 +1177,17 @@ function isPlausiblePersonRosterName(value) {
   if (words.every((word) => ROLE_OR_FRAGMENT_WORDS.has(word))) return false;
   return true;
 }
+var SCREEN_NAME = /^[A-Za-z0-9_]{2,30}$/;
+function isPlausiblePersonRosterIdentity(candidate) {
+  const name = (candidate.name ?? "").trim().replace(/\s+/g, " ");
+  const handle = (candidate.handle ?? "").trim().replace(/^@/, "");
+  const handleBound = candidate.handleBoundBySubject === true && HANDLE.test(`@${handle}`);
+  if (!handleBound) return isPlausiblePersonRosterName(name);
+  if (!name || isPlausiblePersonRosterName(name)) return true;
+  if (!SCREEN_NAME.test(name)) return false;
+  const word = name.toLowerCase();
+  return !ORGANIZATION_WORDS.has(word) && !ROLE_OR_FRAGMENT_WORDS.has(word);
+}
 
 // src/lib/teamCandidateIdentity.ts
 function teamCandidateSourceMatchesIdentity(candidate) {
@@ -6918,7 +6929,12 @@ function assembleDossier(ev, live) {
     const compact3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
     return Boolean(row.handle) && compact3(name) === compact3((row.handle ?? "").replace(/^@/, ""));
   };
-  const identityGrounded = (row) => row.kind !== "org" && meaningfulTeamValue(row.name) && isPlausiblePersonRosterName(row.name) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
+  const rosterIdentityIsPerson = (row) => isPlausiblePersonRosterIdentity({
+    name: row.name,
+    handle: row.handle,
+    handleBoundBySubject: row.handleProvenance === "subject_first_party" && row.identity_link_evidence_origin === "deterministic"
+  });
+  const identityGrounded = (row) => row.kind !== "org" && meaningfulTeamValue(row.name) && rosterIdentityIsPerson(row) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
   // often use @handle as the display name until enrichment fills it.
   (row.handleProvenance === "subject_first_party" && Boolean(row.handle) || !teamNameIsOwnHandle(row));
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
@@ -6929,7 +6945,7 @@ function assembleDossier(ev, live) {
   const organizationRelationships = (ev.webTeam ?? []).filter((member) => member.kind === "org" && meaningfulTeamValue(member.name) && meaningfulTeamValue(member.role) && member.evidence_origin !== "model_lead" && member.artifact_verified === true).map((member) => ({ ...member }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
     if (member.kind === "org") return [];
-    if (!meaningfulTeamValue(member.name) || !isPlausiblePersonRosterName(member.name) || !meaningfulTeamValue(member.role)) return [];
+    if (!meaningfulTeamValue(member.name) || !rosterIdentityIsPerson(member) || !meaningfulTeamValue(member.role)) return [];
     if (!teamCandidateSourceMatchesIdentity(member)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     if (member.identity_link_evidence_origin !== "model_lead") return [];
@@ -13136,6 +13152,188 @@ async function checkFollowUncached(source2, target) {
     return null;
   }
 }
+function newAudienceTally() {
+  return {
+    profilesExamined: 0,
+    creationMeasured: 0,
+    creationMonths: /* @__PURE__ */ new Map(),
+    postsMeasured: 0,
+    zeroPosts: 0,
+    avatarMeasured: 0,
+    defaultAvatar: 0,
+    bioMeasured: 0,
+    emptyBio: 0,
+    starterMeasured: 0,
+    starterAccounts: 0,
+    ratioMeasured: 0,
+    followingHeavy: 0,
+    balanced: 0,
+    followerHeavy: 0
+  };
+}
+var DEFAULT_AVATAR_URL = /default_profile(?:_images)?[/_]/i;
+var AUDIENCE_RATIO_DOMINANCE = 10;
+var AUDIENCE_SAMPLE_MIN = 50;
+var audienceNumber = (row, ...keys) => {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+    if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+  }
+  return null;
+};
+var audienceMonth = (row) => {
+  const raw = row.createdAt ?? row.created_at;
+  if (typeof raw !== "string") return null;
+  const at = new Date(raw);
+  if (Number.isNaN(at.getTime())) return null;
+  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+function tallyAudienceRow(tally, row) {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return;
+  const record5 = row;
+  tally.profilesExamined += 1;
+  const month = audienceMonth(record5);
+  if (month) {
+    tally.creationMeasured += 1;
+    tally.creationMonths.set(month, (tally.creationMonths.get(month) ?? 0) + 1);
+  }
+  const posts = audienceNumber(record5, "statusesCount", "statuses_count", "tweetCount", "tweet_count");
+  if (posts !== null) {
+    tally.postsMeasured += 1;
+    if (posts === 0) tally.zeroPosts += 1;
+  }
+  const avatarUrl = typeof record5.profilePicture === "string" ? record5.profilePicture : typeof record5.profile_image_url_https === "string" ? record5.profile_image_url_https : typeof record5.profile_image_url === "string" ? record5.profile_image_url : null;
+  const defaultAvatar = avatarUrl === null ? null : DEFAULT_AVATAR_URL.test(avatarUrl);
+  if (defaultAvatar !== null) {
+    tally.avatarMeasured += 1;
+    if (defaultAvatar) tally.defaultAvatar += 1;
+  }
+  const bio = typeof record5.description === "string" ? record5.description : null;
+  const emptyBio = bio === null ? null : bio.trim() === "";
+  if (emptyBio !== null) {
+    tally.bioMeasured += 1;
+    if (emptyBio) tally.emptyBio += 1;
+  }
+  if (defaultAvatar !== null && emptyBio !== null) {
+    tally.starterMeasured += 1;
+    if (defaultAvatar && emptyBio) tally.starterAccounts += 1;
+  }
+  const followers = audienceNumber(record5, "followers", "followersCount", "followers_count");
+  const following = audienceNumber(record5, "following", "followingCount", "following_count", "friends_count");
+  if (followers !== null && following !== null) {
+    tally.ratioMeasured += 1;
+    if (followers === 0 && following === 0) tally.balanced += 1;
+    else if (followers >= following * AUDIENCE_RATIO_DOMINANCE) tally.followerHeavy += 1;
+    else if (following >= followers * AUDIENCE_RATIO_DOMINANCE) tally.followingHeavy += 1;
+    else tally.balanced += 1;
+  }
+}
+function sealAudienceSample(tally, sampleIsComplete) {
+  if (tally.profilesExamined <= 0) return void 0;
+  let largestMonth;
+  for (const [month, accounts] of tally.creationMonths) {
+    if (!largestMonth || accounts > largestMonth.accounts) largestMonth = { month, accounts };
+  }
+  return {
+    profilesExamined: tally.profilesExamined,
+    sampleIsComplete,
+    creation: { measured: tally.creationMeasured, ...largestMonth ? { largestMonth } : {} },
+    posts: { measured: tally.postsMeasured, zeroPosts: tally.zeroPosts },
+    avatar: { measured: tally.avatarMeasured, defaultAvatar: tally.defaultAvatar },
+    bio: { measured: tally.bioMeasured, empty: tally.emptyBio },
+    starterProfile: { measured: tally.starterMeasured, accounts: tally.starterAccounts },
+    followRatio: {
+      measured: tally.ratioMeasured,
+      followingHeavy: tally.followingHeavy,
+      balanced: tally.balanced,
+      followerHeavy: tally.followerHeavy
+    }
+  };
+}
+var audienceShare = (part, whole) => `${part} of ${whole} (${Math.round(part / whole * 100)}%)`;
+function describeAudienceSample(sample) {
+  if (!sample) return "No follower profiles were read on this path, so audience shape is not measured.";
+  const profiles = `${sample.profilesExamined} follower profile${sample.profilesExamined === 1 ? "" : "s"}`;
+  if (sample.profilesExamined < AUDIENCE_SAMPLE_MIN) {
+    return `Read ${profiles}, too thin to describe an audience shape, so no share is reported.`;
+  }
+  const parts = [];
+  const thin = [];
+  if (sample.posts.measured >= AUDIENCE_SAMPLE_MIN) {
+    parts.push(`${audienceShare(sample.posts.zeroPosts, sample.posts.measured)} had never posted`);
+  } else thin.push("post counts");
+  if (sample.starterProfile.measured >= AUDIENCE_SAMPLE_MIN) {
+    parts.push(`${audienceShare(sample.starterProfile.accounts, sample.starterProfile.measured)} carried a default avatar over an empty bio`);
+  } else thin.push("avatar and bio");
+  if (sample.creation.measured >= AUDIENCE_SAMPLE_MIN && sample.creation.largestMonth) {
+    parts.push(`the largest single creation cohort was ${sample.creation.largestMonth.month}, ${audienceShare(sample.creation.largestMonth.accounts, sample.creation.measured)} of the rows carrying a creation date`);
+  } else thin.push("creation dates");
+  if (sample.followRatio.measured >= AUDIENCE_SAMPLE_MIN) {
+    const ratio = sample.followRatio;
+    parts.push(`across ${ratio.measured} rows carrying both follow counts, ${ratio.followingHeavy} follow at least ${AUDIENCE_RATIO_DOMINANCE}x more accounts than follow them, ${ratio.balanced} sit in between, and ${ratio.followerHeavy} are followed by at least ${AUDIENCE_RATIO_DOMINANCE}x more than they follow`);
+  } else thin.push("follow counts");
+  const basis = sample.sampleIsComplete ? `all ${profiles}` : `${profiles}, a floor: pagination stopped before the follower list ran out, and the rows read are the most recently gained followers rather than a random draw`;
+  const shape = parts.length ? `${parts.join("; ")}.` : "no dimension came back for enough of the sample to describe.";
+  const gap = thin.length ? ` The provider returned ${thin.join(", ")} for too little of the sample, so ${thin.length === 1 ? "that dimension stays" : "those dimensions stay"} unmeasured.` : "";
+  return `Audience shape across ${basis}: ${shape} This describes the profiles read, not the account's full follower count, and a shape like this is never proof that a follower was bought.${gap}`;
+}
+async function scanFollowerPages(subject, key, opts) {
+  const audience = newAudienceTally();
+  const u = subject.replace(/^@/, "");
+  let cursor = "";
+  let observedFollowers = 0;
+  let observedPage = false;
+  let coverageComplete = false;
+  for (let page = 0; page < opts.maxPages; page++) {
+    if (Date.now() > opts.deadline) break;
+    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await twFetch(url, key);
+    if (!res || !res.ok) break;
+    let d;
+    try {
+      d = asRecord2(await res.json());
+    } catch {
+      break;
+    }
+    if (twitterProviderFailure(d)) break;
+    const nested = asRecord2(d.data);
+    const followerValue = Array.isArray(d.followers) ? d.followers : Array.isArray(nested.followers) ? nested.followers : null;
+    if (!followerValue) break;
+    const followers = followerValue;
+    observedPage = true;
+    observedFollowers += followers.length;
+    for (const follower of followers) {
+      tallyAudienceRow(audience, follower);
+      opts.onRow?.(follower);
+    }
+    const hasNextPage = typeof d.has_next_page === "boolean" ? d.has_next_page : typeof nested.has_next_page === "boolean" ? nested.has_next_page : void 0;
+    const nextCursorValue = d.next_cursor ?? nested.next_cursor;
+    const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue : "";
+    if (hasNextPage === false || hasNextPage === void 0 && observedFollowers >= opts.followerCount) {
+      coverageComplete = true;
+      break;
+    }
+    if (!hasNextPage || !nextCursor) break;
+    cursor = nextCursor;
+  }
+  return { observedPage, coverageComplete, audience };
+}
+var AUDIENCE_MAX_PAGES = 6;
+async function followerAudience(subject, opts) {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return void 0;
+  const followerCount = opts?.followerCount ?? Infinity;
+  if (!Number.isFinite(followerCount) || followerCount <= 0) return void 0;
+  const pages = Math.ceil(followerCount / 200);
+  if (pages > AUDIENCE_MAX_PAGES) return void 0;
+  const scan = await scanFollowerPages(subject, key, {
+    maxPages: pages + 1,
+    followerCount,
+    deadline: Date.now() + (opts?.budgetMs ?? 2e4)
+  });
+  return sealAudienceSample(scan.audience, scan.coverageComplete);
+}
 var ACK_POSITIVE = /\b(?:great|amazing|excited|proud|congrats|congratulations|grateful|honored|honoured|bullish|legend|brilliant|incredible|impressive|welcome)\b/i;
 var ACK_NEGATIVE = /\b(?:scam|rug|fraud|avoid|warning|beware|ponzi|stole|stolen|fake|do not trust|stay away)\b/i;
 var ACK_THANKS = /\b(?:thank|thanks|grateful|appreciate)\b/i;
@@ -14172,6 +14370,14 @@ var xAdapter = {
       ctx.evidence.profile.days_since_post = days;
       const dormant = days >= 21;
       ctx.emit({ phase: "P0 \xB7 Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days. A project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
+    }
+    {
+      const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
+      const followerCount = fcm ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1) : void 0;
+      const audience = await followerAudience(ctx.handle, { followerCount });
+      if (audience) {
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Audience shape", detail: describeAudienceSample(audience), source: "twitterapi.io", tone: "neutral" });
+      }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);
     let observedRelationships = 0;
@@ -33443,7 +33649,11 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     const h = t.handle ? norm2(t.handle) : "";
     const n = norm2(t.name);
     if (!h && !n) continue;
-    if (!isPlausiblePersonRosterName(t.name)) continue;
+    if (!isPlausiblePersonRosterIdentity({
+      name: t.name,
+      handle: t.handle,
+      handleBoundBySubject: t.handleProvenance === "subject_first_party" && t.identity_link_evidence_origin === "deterministic"
+    })) continue;
     if (!teamCandidateSourceMatchesIdentity(t)) continue;
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = h && byHandle.get(h) || n && byName.get(n) || null;

@@ -285,6 +285,19 @@ function storedCaseRefsAreAmbiguous(subjects: StoredCaseSubject[]): boolean {
   return new Set(subjects.map((subject) => subject.ref)).size > 1;
 }
 
+/**
+ * The durable token case bound to one exact contract, whichever report kind
+ * saved it. A contract search prefers a fresh combined investigation, so this
+ * is only the last resort once live resolution cannot start one: a saved report
+ * and its score must stay reachable rather than dead-ending on a resolver miss.
+ */
+function storedTokenCaseFallback(subjects: StoredCaseSubject[]): StoredCaseSubject | null {
+  if (!subjects.length || storedCaseRefsAreAmbiguous(subjects)) return null;
+  return subjects.find((subject) => subject.kind === "investigation")
+    ?? subjects.find((subject) => subject.kind === "token")
+    ?? null;
+}
+
 // Deep links:
 //   ?s=<handle>    -> open the stored report for that subject (share links)
 //   ?live=<handle> -> resolve the person case before re-attaching or launching
@@ -835,16 +848,26 @@ export default function App() {
       && d.persistence.reportVersionId
       ? d.persistence.reportVersionId
       : null;
-    // A failed server save remains available in this session and the report UI
-    // explains how to rescan it, but it must not look like a durable audit or
-    // enter the shared graph without an exact immutable version binding.
+    // A failed server save stays available in this session with its real score,
+    // and the report UI explains how to rescan it. It must not look like a
+    // durable audit or enter the shared graph without an exact immutable
+    // version binding. Throwing here instead took the whole finished scan down
+    // with the save: the runner marked the run errored, so a collected report
+    // with a real verdict and score rendered as a failure with neither.
     if (!persistedVersionId) {
-      cacheResult(resultCache.current, d.handle, { kind: "person", dossier: d });
-      throw new Error(
-        d.persistence?.reason
-          ? `The project report could not be saved: ${d.persistence.reason}`
-          : "The project report finished without an immutable saved-version receipt.",
-      );
+      cacheResult(resultCache.current, d.handle, {
+        kind: "person",
+        dossier: {
+          ...d,
+          persistence: {
+            ...d.persistence,
+            state: "failed",
+            reason: d.persistence?.reason
+              || "This report finished without an immutable saved-version receipt, so it was not saved.",
+          },
+        },
+      });
+      return;
     }
 
     // The server first saves the project/person evidence so a background scan
@@ -874,34 +897,35 @@ export default function App() {
         d.report.composite_verdict,
         d.report.governing_score,
       );
-      const versionContext = persisted.state === "persisted"
-        ? savedVersionContext("person", d, persisted)
-        : undefined;
-      const settled: Dossier = persisted.state === "persisted"
-        ? {
+      if (persisted.state !== "persisted") {
+        // The project evidence is already durable, but the combined
+        // token-enriched version did not land. Keep the completed report in
+        // this session, keep the durable version reachable, and publish
+        // nothing: audit and graph must never point at a version that does
+        // not carry the token score this page is showing.
+        settleCachedScan(resultCache.current, d.handle, scanId, {
+          kind: "person",
+          dossier: {
             ...d,
-            ...(persisted.reportDelta ? { reportDelta: persisted.reportDelta } : {}),
-            ...(versionContext ? { versionContext } : {}),
-            persistence: { ...persisted, scanId },
-          }
-        : {
-            ...d,
-            // Keep the server's durable fallback bound if the enriched save
-            // fails. The current session still renders the completed token leg.
             persistence: {
               ...d.persistence,
-              state: "persisted",
+              state: "failed",
               scanId,
               reportVersionId: persistedVersionId,
               reason: persisted.reason,
             },
-          };
-
-      if (persisted.state !== "persisted") {
-        throw new Error(
-          `The combined project and token report could not be saved: ${persisted.reason}`,
-        );
+          },
+        });
+        return;
       }
+
+      const versionContext = savedVersionContext("person", d, persisted);
+      const settled: Dossier = {
+        ...d,
+        ...(persisted.reportDelta ? { reportDelta: persisted.reportDelta } : {}),
+        ...(versionContext ? { versionContext } : {}),
+        persistence: { ...persisted, scanId },
+      };
 
       if (!settleCachedScan(
         resultCache.current,
@@ -917,9 +941,9 @@ export default function App() {
           ? settled
           : current
       ));
-      if (versionContext) setPersonBriefTarget(briefTargetForPerson(settled));
+      setPersonBriefTarget(briefTargetForPerson(settled));
 
-      const finalVersionId = versionContext?.reportVersionId ?? persistedVersionId;
+      const finalVersionId = versionContext.reportVersionId;
       logAudit({
         id: finalVersionId,
         kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
@@ -1377,6 +1401,21 @@ export default function App() {
 
       const resolution = await resolveTokenSubject(parsed);
       if (requestId !== safeAuditRequestRef.current) return;
+      // Live resolution could not produce a contract to scan. An exact input
+      // with one durable case is still the analyst's saved report: reopen it
+      // with its score instead of dead-ending, which is how a delisted or
+      // unindexed pair used to make a finished saved report unreachable.
+      const unresolvableExactInput = (resolution.state === "unavailable" || resolution.state === "not_found")
+        && reuseStored
+        && parsed.via !== "ticker"
+        && parsed.via !== "dexscreener";
+      const storedFallback = unresolvableExactInput
+        ? storedTokenCaseFallback(storedLookup.subjects)
+        : null;
+      if (storedFallback) {
+        await onOpenRecent(storedFallback.ref, storedFallback.kind);
+        return;
+      }
       if (resolution.state === "unavailable") {
         setQuery(raw);
         setCaseNotice({ reason: "search-unavailable", ref: raw, mode, reuseStored });

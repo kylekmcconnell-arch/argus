@@ -473,6 +473,61 @@ describe("App routing safety", () => {
     expect(harness.recordContribution).not.toHaveBeenCalled();
   });
 
+  it("keeps a scan whose save claimed no immutable version session-only instead of failing completion", async () => {
+    const view = await renderApp();
+
+    // The server reported a successful save with no version id behind it. The
+    // report itself is finished and carries a real verdict and score.
+    await act(async () => {
+      await harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: null }));
+    });
+
+    expect(harness.syncReport).not.toHaveBeenCalled();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+
+    // Reopening it in this session still shows the completed report, and its
+    // persistence reads as failed so the page can explain the missing save.
+    harness.shellInput = "@persisted_person";
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-unreceipted-save",
+        kind: "person",
+        ref: "persisted_person",
+        query: "@persisted_person",
+        status: "open",
+      }],
+    });
+    harness.fetchReportState.mockResolvedValue({ status: "open", report: null });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='shell-run']")?.click());
+    await settle();
+
+    expect(harness.startPersonAudit).not.toHaveBeenCalled();
+    expect(harness.personReports.at(-1)?.dossier).toMatchObject({
+      report: expect.objectContaining({ governing_score: 88, composite_verdict: "PASS" }),
+      persistence: expect.objectContaining({ state: "failed" }),
+    });
+  });
+
+  it("keeps a failed combined save out of audit and graph while the session keeps its token score", async () => {
+    await renderApp();
+    const initialVersionId = "00000000-0000-4000-8000-000000000311";
+    harness.syncReport.mockResolvedValue({ state: "failed", reason: "Report storage did not accept the save." });
+
+    await act(async () => {
+      await harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: initialVersionId }));
+    });
+
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(1));
+    // The durable project version exists, but it does not carry the token leg
+    // this session is showing, so nothing may point shared surfaces at it.
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.personContribution).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+    expect(harness.applyAuditCaseFamily).not.toHaveBeenCalled();
+  });
+
   it("rebinds a completed project report to the final version containing its token score", async () => {
     await renderApp();
     const initialVersionId = "00000000-0000-4000-8000-000000000301";
@@ -1261,6 +1316,82 @@ describe("App routing safety", () => {
       "PASS",
       80,
     );
+
+    // The whole point of the receipt: the saved report reopens as that exact
+    // immutable version, carrying the score the finished scan produced.
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='nav-home']")?.click());
+    await settle();
+
+    harness.shellInput = address;
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-earn-live",
+        kind: "investigation",
+        ref: address,
+        query: "$EARN",
+        status: "open",
+      }],
+    });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "investigation",
+        ref: address,
+        payload: {
+          rootRef: address,
+          token: { address, symbol: "EARN", name: "EARN", verdict: "PASS", score: 80 },
+        },
+        versionContext: { caseId: "case-earn-live", reportVersionId: "rv-earn-v2", version: 2 },
+      },
+    });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='shell-run']")?.click());
+    await settle();
+
+    expect(harness.startInvestigationScan).toHaveBeenCalledTimes(1); // no rescan
+    expect(harness.investigationReports.at(-1)).toEqual(expect.objectContaining({
+      token: expect.objectContaining({ symbol: "EARN", verdict: "PASS", score: 80 }),
+      versionContext: expect.objectContaining({ reportVersionId: "rv-earn-v2", version: 2 }),
+    }));
+  });
+
+  // A saved report has to stay reachable by its own contract even when the live
+  // market lookup no longer resolves it: a delisted or unindexed pair used to
+  // dead-end on "Couldn't resolve that token" and hide the finished report.
+  it("reopens a saved token case with its score when live resolution finds no contract", async () => {
+    const address = "0x1414141414141414141414141414141414141414";
+    harness.shellInput = address;
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-delisted",
+        kind: "token",
+        ref: address,
+        query: "$GONE",
+        status: "open",
+      }],
+    });
+    harness.resolveTokenSubject.mockResolvedValue({ state: "not_found" });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "token",
+        ref: address,
+        payload: { ...tokenResult(address, "Saved before delisting"), symbol: "GONE", score: 73 },
+        versionContext: { caseId: "case-delisted", reportVersionId: "rv-gone-v1", version: 1 },
+      },
+    });
+
+    const view = await renderApp();
+    await submitShell();
+
+    expect(view.querySelector("[data-testid='stored-token-report']")).not.toBeNull();
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
+      symbol: "GONE",
+      score: 73,
+      versionContext: expect.objectContaining({ reportVersionId: "rv-gone-v1" }),
+    }));
+    expectNoRunnerStarted();
   });
 
   it("retries a failed contract lookup as the same full investigation", async () => {

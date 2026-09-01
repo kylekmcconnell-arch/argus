@@ -386,6 +386,39 @@ describe("person audit input guard", () => {
     });
   });
 
+  it("reports a failed save when report storage returns no immutable version instead of claiming one", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    // Report storage is not configured, so persistServerDossier returns null
+    // without throwing. The finished report still has a real verdict and score.
+    vi.mocked(serviceCredentials).mockReturnValue(undefined as never);
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@argus",
+      report: { audit_id: "audit-run-unconfigured-storage", composite_verdict: "PASS", governing_score: 81 },
+      cost: { schemaVersion: 1, calls: [] },
+    } as never);
+    const { res, captured } = response();
+
+    await handler(request("argus"), res);
+
+    expect(persistReportVersionBundle).not.toHaveBeenCalled();
+    expect(issuePanelCostToken).not.toHaveBeenCalled();
+    const stream = captured.chunks.join("");
+    const done = JSON.parse(stream.match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    // The score survives; only the save receipt is reported as failed.
+    expect(done.report.governing_score).toBe(81);
+    expect(done.persistence).toEqual({
+      state: "failed",
+      reportVersionId: null,
+      reason: "Report storage did not return an immutable version for this scan.",
+    });
+    const persistenceEvent = JSON.parse(stream.match(/event: persistence\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(persistenceEvent).toEqual({
+      state: "failed",
+      reason: "Report storage did not return an immutable version for this scan.",
+    });
+  });
+
   it("fails closed when a live audit returns no collector-owned usage ledger", async () => {
     vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
     vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
