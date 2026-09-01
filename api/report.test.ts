@@ -29,6 +29,8 @@ vi.mock("./_provenance.js", () => ({
 import { requireArgusAuth } from "./_auth.js";
 import { activateReportVersion } from "./_provenance.js";
 import handler, { reportSearchParams } from "./report";
+import { syncReport } from "../src/lib/reports";
+import type { Dossier } from "../src/data/dossier";
 
 interface CapturedResponse {
   statusCode: number;
@@ -318,6 +320,79 @@ describe("report case lifecycle API", () => {
       panelCostToken: "signed-panel-token",
     });
     expect(issuePanelCostToken).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001", versionId);
+  });
+
+  it("hands the browser's syncReport a receipt it accepts for every person save outcome", async () => {
+    // Cross-boundary contract: the real route handler answers the real client
+    // save function. A shape drift between the two (the linked branch once
+    // omitted panelCostToken) turned durable saves into "failed" reports, and
+    // both sides' unit tests kept passing because each mocked the other.
+    const caseId = "00000000-0000-4000-8000-000000000201";
+    const versionId = "00000000-0000-4000-8000-000000000301";
+    const finalVersionId = "00000000-0000-4000-8000-000000000302";
+    const address = "0xfeac2eae96899709a43e252b6b92971d32f9c0f9";
+    const storedPayload = {
+      handle: "@AnyoneFDN",
+      report: { audit_id: "server-audit-1", composite_verdict: "PASS", governing_score: 79 },
+      projectToken: { address, verified: true, symbol: "ANYONE" },
+      checkRuns: [{ checkId: "identity", label: "Identity", status: "confirmed" }],
+      completeness_state: "complete",
+    };
+    const routeFetch = (databaseRows: unknown[][]) => {
+      const database = vi.fn();
+      for (const rows of databaseRows) database.mockResolvedValueOnce(jsonResponse(rows));
+      return database;
+    };
+    const stubBrowserFetch = (database: ReturnType<typeof vi.fn>) => {
+      vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        if (String(input).startsWith("/api/report")) {
+          vi.stubGlobal("fetch", database);
+          const { res, captured } = response();
+          await handler(request("POST", { body: JSON.parse(String(init?.body)) }), res);
+          return new Response(JSON.stringify(captured.body), { status: captured.statusCode });
+        }
+        throw new Error(`unexpected browser fetch ${String(input)}`);
+      }));
+    };
+    const liveDossier = (threat: unknown) => ({
+      ...storedPayload,
+      persistence: { state: "persisted", reportVersionId: versionId },
+      ...(threat ? { threat } : {}),
+    }) as unknown as Dossier;
+    const versionRow = [{ id: versionId, case_id: caseId, payload: storedPayload, attestation_state: "server_collected", version: 3 }];
+    const caseRow = [{ id: caseId, canonical_ref: "anyonefdn", kind: "person" }];
+
+    // No token leg: the server version is linked and the client must treat it
+    // as a completed save with a case receipt.
+    stubBrowserFetch(routeFetch([versionRow, caseRow]));
+    await expect(syncReport("person", "anyonefdn", "@AnyoneFDN", liveDossier(null), "PASS", 79)).resolves.toMatchObject({
+      state: "persisted",
+      reportVersionId: versionId,
+      caseId,
+      version: 3,
+      attestationState: "server_collected",
+      panelCostToken: "signed-panel-token",
+    });
+
+    // Completed token leg on the verified project token: a second immutable
+    // version is created and the client is handed its receipt.
+    persistReportVersionBundle.mockResolvedValue({ caseId, reportVersionId: finalVersionId, version: 4 });
+    stubBrowserFetch(routeFetch([versionRow, caseRow]));
+    await expect(syncReport("person", "anyonefdn", "@AnyoneFDN", liveDossier({
+      address,
+      chain: "ethereum",
+      symbol: "ANYONE",
+      name: "Anyone Protocol",
+      dossier: { address, score: 84, verdict: "PASS", axes: [], socials: [], safety: { available: true } },
+      call: { verdict: "SAFE", risk: 18 },
+      checks: [],
+      scannedAt: 1_788_000_000_000,
+    }), "PASS", 79)).resolves.toMatchObject({
+      state: "persisted",
+      reportVersionId: finalVersionId,
+      caseId,
+      version: 4,
+    });
   });
 
   it("persists the token leg the server itself attributed from the subject's own bio", async () => {
