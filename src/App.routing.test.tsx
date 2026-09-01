@@ -473,6 +473,61 @@ describe("App routing safety", () => {
     expect(harness.recordContribution).not.toHaveBeenCalled();
   });
 
+  it("keeps a scan whose save claimed no immutable version session-only instead of failing completion", async () => {
+    const view = await renderApp();
+
+    // The server reported a successful save with no version id behind it. The
+    // report itself is finished and carries a real verdict and score.
+    await act(async () => {
+      await harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: null }));
+    });
+
+    expect(harness.syncReport).not.toHaveBeenCalled();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+
+    // Reopening it in this session still shows the completed report, and its
+    // persistence reads as failed so the page can explain the missing save.
+    harness.shellInput = "@persisted_person";
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-unreceipted-save",
+        kind: "person",
+        ref: "persisted_person",
+        query: "@persisted_person",
+        status: "open",
+      }],
+    });
+    harness.fetchReportState.mockResolvedValue({ status: "open", report: null });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='shell-run']")?.click());
+    await settle();
+
+    expect(harness.startPersonAudit).not.toHaveBeenCalled();
+    expect(harness.personReports.at(-1)?.dossier).toMatchObject({
+      report: expect.objectContaining({ governing_score: 88, composite_verdict: "PASS" }),
+      persistence: expect.objectContaining({ state: "failed" }),
+    });
+  });
+
+  it("keeps a failed combined save out of audit and graph while the session keeps its token score", async () => {
+    await renderApp();
+    const initialVersionId = "00000000-0000-4000-8000-000000000311";
+    harness.syncReport.mockResolvedValue({ state: "failed", reason: "Report storage did not accept the save." });
+
+    await act(async () => {
+      await harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId: initialVersionId }));
+    });
+
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(1));
+    // The durable project version exists, but it does not carry the token leg
+    // this session is showing, so nothing may point shared surfaces at it.
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.personContribution).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+    expect(harness.applyAuditCaseFamily).not.toHaveBeenCalled();
+  });
+
   it("rebinds a completed project report to the final version containing its token score", async () => {
     await renderApp();
     const initialVersionId = "00000000-0000-4000-8000-000000000301";

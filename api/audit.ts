@@ -370,6 +370,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }));
         try {
           reportVersionId = await persistServerDossier(handle, dossier, auth);
+          if (!reportVersionId) {
+            // persistServerDossier returns null without throwing when report
+            // storage is unconfigured or the subject carries no canonical ref.
+            // Reporting that as "persisted" handed the browser a save receipt
+            // with no immutable version behind it, which then failed the
+            // client's version binding and took the whole finished scan -
+            // score included - down with it. An absent version id is a failed
+            // save, and the report says so.
+            persistence = "failed";
+            persistenceFailureReason = "Report storage did not return an immutable version for this scan.";
+            send("persistence", { state: "failed", reason: persistenceFailureReason });
+          }
         } catch (persistenceError) {
           persistence = "failed";
           console.error("[api/audit] persistence failed", persistenceError);
