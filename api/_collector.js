@@ -1177,6 +1177,17 @@ function isPlausiblePersonRosterName(value) {
   if (words.every((word) => ROLE_OR_FRAGMENT_WORDS.has(word))) return false;
   return true;
 }
+var SCREEN_NAME = /^[A-Za-z0-9_]{2,30}$/;
+function isPlausiblePersonRosterIdentity(candidate) {
+  const name = (candidate.name ?? "").trim().replace(/\s+/g, " ");
+  const handle = (candidate.handle ?? "").trim().replace(/^@/, "");
+  const handleBound = candidate.handleBoundBySubject === true && HANDLE.test(`@${handle}`);
+  if (!handleBound) return isPlausiblePersonRosterName(name);
+  if (!name || isPlausiblePersonRosterName(name)) return true;
+  if (!SCREEN_NAME.test(name)) return false;
+  const word = name.toLowerCase();
+  return !ORGANIZATION_WORDS.has(word) && !ROLE_OR_FRAGMENT_WORDS.has(word);
+}
 
 // src/lib/teamCandidateIdentity.ts
 function teamCandidateSourceMatchesIdentity(candidate) {
@@ -6918,7 +6929,12 @@ function assembleDossier(ev, live) {
     const compact3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
     return Boolean(row.handle) && compact3(name) === compact3((row.handle ?? "").replace(/^@/, ""));
   };
-  const identityGrounded = (row) => row.kind !== "org" && meaningfulTeamValue(row.name) && isPlausiblePersonRosterName(row.name) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
+  const rosterIdentityIsPerson = (row) => isPlausiblePersonRosterIdentity({
+    name: row.name,
+    handle: row.handle,
+    handleBoundBySubject: row.handleProvenance === "subject_first_party" && row.identity_link_evidence_origin === "deterministic"
+  });
+  const identityGrounded = (row) => row.kind !== "org" && meaningfulTeamValue(row.name) && rosterIdentityIsPerson(row) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true && // A first-party handle is the unique id. Post-scan and reverse-bio rows
   // often use @handle as the display name until enrichment fills it.
   (row.handleProvenance === "subject_first_party" && Boolean(row.handle) || !teamNameIsOwnHandle(row));
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
@@ -6929,7 +6945,7 @@ function assembleDossier(ev, live) {
   const organizationRelationships = (ev.webTeam ?? []).filter((member) => member.kind === "org" && meaningfulTeamValue(member.name) && meaningfulTeamValue(member.role) && member.evidence_origin !== "model_lead" && member.artifact_verified === true).map((member) => ({ ...member }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
     if (member.kind === "org") return [];
-    if (!meaningfulTeamValue(member.name) || !isPlausiblePersonRosterName(member.name) || !meaningfulTeamValue(member.role)) return [];
+    if (!meaningfulTeamValue(member.name) || !rosterIdentityIsPerson(member) || !meaningfulTeamValue(member.role)) return [];
     if (!teamCandidateSourceMatchesIdentity(member)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     if (member.identity_link_evidence_origin !== "model_lead") return [];
@@ -33443,7 +33459,11 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     const h = t.handle ? norm2(t.handle) : "";
     const n = norm2(t.name);
     if (!h && !n) continue;
-    if (!isPlausiblePersonRosterName(t.name)) continue;
+    if (!isPlausiblePersonRosterIdentity({
+      name: t.name,
+      handle: t.handle,
+      handleBoundBySubject: t.handleProvenance === "subject_first_party" && t.identity_link_evidence_origin === "deterministic"
+    })) continue;
     if (!teamCandidateSourceMatchesIdentity(t)) continue;
     if (t.handle && handlesMatch(t.handle, ctx.handle)) continue;
     const existing = h && byHandle.get(h) || n && byName.get(n) || null;

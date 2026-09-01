@@ -38,7 +38,7 @@ import {
 } from "../src/lib/projectTokenLeg";
 import { teamIdentityKeys } from "../src/lib/teamIdentity";
 import { teamCandidateSourceMatchesIdentity } from "../src/lib/teamCandidateIdentity";
-import { isPlausiblePersonRosterName } from "../src/lib/personName";
+import { isPlausiblePersonRosterIdentity } from "../src/lib/personName";
 import { PersonCheckTracker, type ChecklistObservation, type ProviderRunState } from "./checks";
 import { deriveTokenApplicability } from "./tokenApplicability";
 
@@ -1368,7 +1368,14 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
     if (!h && !n) continue;
     // Final roster boundary: search/model lanes can return a company or a
     // sentence fragment as `name`. It is neither a person nor a research CTA.
-    if (!isPlausiblePersonRosterName(t.name)) continue;
+    // A handle the subject's own follow / amplification / post edge bound is
+    // identified by that handle, so its pseudonymous screen name stands.
+    if (!isPlausiblePersonRosterIdentity({
+      name: t.name,
+      handle: t.handle,
+      handleBoundBySubject: t.handleProvenance === "subject_first_party"
+        && t.identity_link_evidence_origin === "deterministic",
+    })) continue;
     // A bare X profile is an identity locator. If it points at somebody other
     // than the candidate, the search result is a failed join, not a weak lead.
     if (!teamCandidateSourceMatchesIdentity(t)) continue;
