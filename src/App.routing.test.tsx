@@ -1316,6 +1316,82 @@ describe("App routing safety", () => {
       "PASS",
       80,
     );
+
+    // The whole point of the receipt: the saved report reopens as that exact
+    // immutable version, carrying the score the finished scan produced.
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='nav-home']")?.click());
+    await settle();
+
+    harness.shellInput = address;
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-earn-live",
+        kind: "investigation",
+        ref: address,
+        query: "$EARN",
+        status: "open",
+      }],
+    });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "investigation",
+        ref: address,
+        payload: {
+          rootRef: address,
+          token: { address, symbol: "EARN", name: "EARN", verdict: "PASS", score: 80 },
+        },
+        versionContext: { caseId: "case-earn-live", reportVersionId: "rv-earn-v2", version: 2 },
+      },
+    });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='shell-run']")?.click());
+    await settle();
+
+    expect(harness.startInvestigationScan).toHaveBeenCalledTimes(1); // no rescan
+    expect(harness.investigationReports.at(-1)).toEqual(expect.objectContaining({
+      token: expect.objectContaining({ symbol: "EARN", verdict: "PASS", score: 80 }),
+      versionContext: expect.objectContaining({ reportVersionId: "rv-earn-v2", version: 2 }),
+    }));
+  });
+
+  // A saved report has to stay reachable by its own contract even when the live
+  // market lookup no longer resolves it: a delisted or unindexed pair used to
+  // dead-end on "Couldn't resolve that token" and hide the finished report.
+  it("reopens a saved token case with its score when live resolution finds no contract", async () => {
+    const address = "0x1414141414141414141414141414141414141414";
+    harness.shellInput = address;
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-delisted",
+        kind: "token",
+        ref: address,
+        query: "$GONE",
+        status: "open",
+      }],
+    });
+    harness.resolveTokenSubject.mockResolvedValue({ state: "not_found" });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "token",
+        ref: address,
+        payload: { ...tokenResult(address, "Saved before delisting"), symbol: "GONE", score: 73 },
+        versionContext: { caseId: "case-delisted", reportVersionId: "rv-gone-v1", version: 1 },
+      },
+    });
+
+    const view = await renderApp();
+    await submitShell();
+
+    expect(view.querySelector("[data-testid='stored-token-report']")).not.toBeNull();
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
+      symbol: "GONE",
+      score: 73,
+      versionContext: expect.objectContaining({ reportVersionId: "rv-gone-v1" }),
+    }));
+    expectNoRunnerStarted();
   });
 
   it("retries a failed contract lookup as the same full investigation", async () => {
