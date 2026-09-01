@@ -38,9 +38,14 @@ export function hasBoundProjectDescription(
  * Coverage and attestation diagnostics remain visible in methodology. They are
  * not unanswered facts about the subject and therefore do not belong in the
  * reader's decision-changing question list.
+ *
+ * The test is the diagnostic note, never the check id. Excluding every
+ * trust-graph row outright silenced a genuinely unfinished decision-critical
+ * check: the report told the reader that Known connections had to finish before
+ * it was ready, then filled "What is still open" with lower-priority research
+ * instead of naming the one check that was actually blocking.
  */
 export function isReaderDecisionCheck(check: CheckLike): boolean {
-  if (check.checkId === "trust-graph-connections") return false;
   const diagnostic = [check.label, check.note, check.provider].filter(Boolean).join(" ").toLowerCase();
   if (/active case projection|immutable report|incompletely attested|source-link check|integrity gate/.test(diagnostic)) {
     return false;
