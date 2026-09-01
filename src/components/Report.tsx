@@ -3007,7 +3007,6 @@ export function Report({ dossier, onReset, onAudit, onResearchAudit, onOpenSaved
     ...(f.projectToken ? [{ href: "#project-token" as const, label: "Market", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
     ...(f.socialActivity && roles.includes(SubjectClass.PROJECT) ? [{ href: "#social-activity" as const, label: "Social", icon: <Megaphone aria-hidden="true" size={15} weight="bold" /> }] : []),
     { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
-    ...(f.evmControlReality ? [{ href: "#evm-control-surface" as const, label: "Control surface", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> }] : []),
     { href: "#evidence-ledger", label: "Evidence & method", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount },
   ];
 
