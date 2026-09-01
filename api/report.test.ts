@@ -29,6 +29,8 @@ vi.mock("./_provenance.js", () => ({
 import { requireArgusAuth } from "./_auth.js";
 import { activateReportVersion } from "./_provenance.js";
 import handler, { reportSearchParams } from "./report";
+import { syncReport } from "../src/lib/reports";
+import type { Dossier } from "../src/data/dossier";
 
 interface CapturedResponse {
   statusCode: number;
@@ -273,7 +275,11 @@ describe("report case lifecycle API", () => {
     });
   });
 
-  it("does not mint a fresh panel capability when a person POST only links an existing server version", async () => {
+  it("returns the complete save receipt when a person POST only links an existing server version", async () => {
+    // The browser's syncReport treats a receipt without a panel capability as
+    // a failed save. Linking the server-collected version therefore has to
+    // return the same receipt shape as every other successful persist, or a
+    // token-less project report reads as "not saved" despite being durable.
     const caseId = "00000000-0000-4000-8000-000000000201";
     const versionId = "00000000-0000-4000-8000-000000000301";
     const storedPayload = { report: { audit_id: "server-audit-1" }, checkRuns: [] };
@@ -310,8 +316,188 @@ describe("report case lifecycle API", () => {
       caseId,
       version: 3,
       linked: true,
+      attestationState: "server_collected",
+      panelCostToken: "signed-panel-token",
     });
-    expect(issuePanelCostToken).not.toHaveBeenCalled();
+    expect(issuePanelCostToken).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000001", versionId);
+  });
+
+  it("hands the browser's syncReport a receipt it accepts for every person save outcome", async () => {
+    // Cross-boundary contract: the real route handler answers the real client
+    // save function. A shape drift between the two (the linked branch once
+    // omitted panelCostToken) turned durable saves into "failed" reports, and
+    // both sides' unit tests kept passing because each mocked the other.
+    const caseId = "00000000-0000-4000-8000-000000000201";
+    const versionId = "00000000-0000-4000-8000-000000000301";
+    const finalVersionId = "00000000-0000-4000-8000-000000000302";
+    const address = "0xfeac2eae96899709a43e252b6b92971d32f9c0f9";
+    const storedPayload = {
+      handle: "@AnyoneFDN",
+      report: { audit_id: "server-audit-1", composite_verdict: "PASS", governing_score: 79 },
+      projectToken: { address, verified: true, symbol: "ANYONE" },
+      checkRuns: [{ checkId: "identity", label: "Identity", status: "confirmed" }],
+      completeness_state: "complete",
+    };
+    const routeFetch = (databaseRows: unknown[][]) => {
+      const database = vi.fn();
+      for (const rows of databaseRows) database.mockResolvedValueOnce(jsonResponse(rows));
+      return database;
+    };
+    const stubBrowserFetch = (database: ReturnType<typeof vi.fn>) => {
+      vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
+        if (String(input).startsWith("/api/report")) {
+          vi.stubGlobal("fetch", database);
+          const { res, captured } = response();
+          await handler(request("POST", { body: JSON.parse(String(init?.body)) }), res);
+          return new Response(JSON.stringify(captured.body), { status: captured.statusCode });
+        }
+        throw new Error(`unexpected browser fetch ${String(input)}`);
+      }));
+    };
+    const liveDossier = (threat: unknown) => ({
+      ...storedPayload,
+      persistence: { state: "persisted", reportVersionId: versionId },
+      ...(threat ? { threat } : {}),
+    }) as unknown as Dossier;
+    const versionRow = [{ id: versionId, case_id: caseId, payload: storedPayload, attestation_state: "server_collected", version: 3 }];
+    const caseRow = [{ id: caseId, canonical_ref: "anyonefdn", kind: "person" }];
+
+    // No token leg: the server version is linked and the client must treat it
+    // as a completed save with a case receipt.
+    stubBrowserFetch(routeFetch([versionRow, caseRow]));
+    await expect(syncReport("person", "anyonefdn", "@AnyoneFDN", liveDossier(null), "PASS", 79)).resolves.toMatchObject({
+      state: "persisted",
+      reportVersionId: versionId,
+      caseId,
+      version: 3,
+      attestationState: "server_collected",
+      panelCostToken: "signed-panel-token",
+    });
+
+    // Completed token leg on the verified project token: a second immutable
+    // version is created and the client is handed its receipt.
+    persistReportVersionBundle.mockResolvedValue({ caseId, reportVersionId: finalVersionId, version: 4 });
+    stubBrowserFetch(routeFetch([versionRow, caseRow]));
+    await expect(syncReport("person", "anyonefdn", "@AnyoneFDN", liveDossier({
+      address,
+      chain: "ethereum",
+      symbol: "ANYONE",
+      name: "Anyone Protocol",
+      dossier: { address, score: 84, verdict: "PASS", axes: [], socials: [], safety: { available: true } },
+      call: { verdict: "SAFE", risk: 18 },
+      checks: [],
+      scannedAt: 1_788_000_000_000,
+    }), "PASS", 79)).resolves.toMatchObject({
+      state: "persisted",
+      reportVersionId: finalVersionId,
+      caseId,
+      version: 4,
+    });
+  });
+
+  it("persists the token leg the server itself attributed from the subject's own bio", async () => {
+    // orchestrate.ts announces a bio contract as the token leg when no verified
+    // project token exists. Refusing to persist that same attribution here
+    // turned every such finished scan into a failed combined save.
+    const caseId = "00000000-0000-4000-8000-000000000201";
+    const baseVersionId = "00000000-0000-4000-8000-000000000301";
+    const finalVersionId = "00000000-0000-4000-8000-000000000302";
+    const address = "0xFEAC2eae96899709a43e252b6b92971d32f9c0f9";
+    const storedPayload = {
+      handle: "@bio_ca_project",
+      bio: `Official token CA: ${address}`,
+      report: { audit_id: "server-audit-2", composite_verdict: "CAUTION", governing_score: 61 },
+      checkRuns: [],
+      completeness_state: "complete",
+      persistence: { state: "persisted", reportVersionId: baseVersionId },
+    };
+    const threat = {
+      address: address.toLowerCase(),
+      chain: "ethereum",
+      symbol: "BIO",
+      name: "Bio Token",
+      dossier: { address: address.toLowerCase(), score: 40, verdict: "CAUTION", axes: [], socials: [], safety: { available: true } },
+      call: { verdict: "CAUTION", risk: 55 },
+      checks: [],
+      scannedAt: 1_788_000_000_000,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{
+        id: baseVersionId,
+        case_id: caseId,
+        payload: storedPayload,
+        attestation_state: "server_collected",
+        version: 1,
+      }]))
+      .mockResolvedValueOnce(jsonResponse([{ id: caseId, canonical_ref: "bio_ca_project", kind: "person" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    persistReportVersionBundle.mockResolvedValue({ caseId, reportVersionId: finalVersionId, version: 2 });
+    const { res, captured } = response();
+
+    await handler(request("POST", {
+      body: {
+        kind: "person",
+        ref: "bio_ca_project",
+        payload: {
+          persistence: { state: "persisted", reportVersionId: baseVersionId },
+          report: { audit_id: "server-audit-2" },
+          threat,
+          threatNote: "Token attributed via the contract in the subject's own bio.",
+        },
+      },
+    }), res);
+
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toMatchObject({ ok: true, enriched: true, reportVersionId: finalVersionId, version: 2 });
+    expect(persistReportVersionBundle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          handle: "@bio_ca_project",
+          threat: expect.objectContaining({ address: address.toLowerCase() }),
+        }),
+      }),
+    );
+  });
+
+  it("still rejects a token the server never attributed to the subject", async () => {
+    const caseId = "00000000-0000-4000-8000-000000000201";
+    const versionId = "00000000-0000-4000-8000-000000000301";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{
+        id: versionId,
+        case_id: caseId,
+        payload: {
+          bio: "Building things. No contract here.",
+          evidence: { promotions: [] },
+          report: { audit_id: "server-audit-3" },
+          checkRuns: [],
+        },
+        attestation_state: "server_collected",
+        version: 1,
+      }]))
+      .mockResolvedValueOnce(jsonResponse([{ id: caseId, canonical_ref: "namesake", kind: "person" }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("POST", {
+      body: {
+        kind: "person",
+        ref: "namesake",
+        payload: {
+          persistence: { state: "persisted", reportVersionId: versionId },
+          report: { audit_id: "server-audit-3" },
+          threat: {
+            address: "0x00000000000000000000000000000000000000aa",
+            dossier: { address: "0x00000000000000000000000000000000000000aa" },
+          },
+        },
+      },
+    }), res);
+
+    expect(captured.statusCode).toBe(409);
+    expect(captured.body).toEqual({ error: "person_token_subject_mismatch" });
+    expect(persistReportVersionBundle).not.toHaveBeenCalled();
   });
 
   it("persists a matching completed token dossier as a second immutable person version", async () => {

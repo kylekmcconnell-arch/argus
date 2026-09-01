@@ -28,6 +28,8 @@ export type ReportSyncResult =
     caseId: string;
     version: number;
     panelCostToken: string;
+    /** Present when the save re-linked an existing server-collected version. */
+    attestationState?: ReportAttestationState;
     reportDelta?: MaterialReportDelta;
   }
   | { state: "failed"; reason: string };
@@ -42,7 +44,7 @@ const payloadCaseId = (payload: unknown): string | undefined => {
 export function savedVersionContext(
   kind: ReportKind,
   payload: unknown,
-  receipt: { caseId: string; reportVersionId: string; version: number },
+  receipt: { caseId: string; reportVersionId: string; version: number; attestationState?: ReportAttestationState },
 ): ReportVersionContext {
   const checks = reportChecks(kind, payload);
   return {
@@ -50,7 +52,7 @@ export function savedVersionContext(
     reportVersionId: receipt.reportVersionId,
     version: receipt.version,
     completenessState: reportCompleteness(kind, payload, checks),
-    attestationState: "analyst_submitted",
+    attestationState: receipt.attestationState ?? "analyst_submitted",
     methodologyVersion: null,
     createdAt: new Date().toISOString(),
     checks,
@@ -64,6 +66,12 @@ function reportSaveFailure(status: number, serverError?: string): string {
   if (status === 403) return "Your account does not have permission to save this report.";
   if (status === 413) return "The report was too large to save.";
   if (serverError === "storage_not_configured") return "Report storage is not configured.";
+  if (serverError === "person_token_subject_mismatch") {
+    return "The project report is saved, but the linked-token result could not be bound to a token the server attributed to this subject, so the combined report was not saved.";
+  }
+  if (serverError === "person_token_overlay_invalid") {
+    return "The project report is saved, but the linked-token result was incomplete, so the combined report was not saved.";
+  }
   return "Report storage did not accept the save.";
 }
 
@@ -308,6 +316,7 @@ export async function syncReport(
         caseId?: unknown;
         version?: unknown;
         panelCostToken?: unknown;
+        attestationState?: unknown;
         reportDelta?: unknown;
       };
       if (
@@ -326,6 +335,9 @@ export async function syncReport(
         caseId: body.caseId,
         version: body.version,
         panelCostToken: body.panelCostToken,
+        ...(body.attestationState === "server_collected" || body.attestationState === "analyst_submitted"
+          ? { attestationState: body.attestationState }
+          : {}),
         ...(body.reportDelta && typeof body.reportDelta === "object"
           ? { reportDelta: body.reportDelta as MaterialReportDelta }
           : {}),
