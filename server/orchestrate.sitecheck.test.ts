@@ -433,3 +433,15 @@ describe("bio website domain extraction", () => {
     expect(bioWebsiteDomain("building the future at myproject.xyz")).toBe("myproject.xyz");
   });
 });
+
+describe("bio website domain extraction covers the TLDs crypto projects register on", () => {
+  it("finds a .cash or .markets domain that the old allow-list skipped", () => {
+    expect(bioWebsiteDomain("CA on stonkbrokers.cash")).toBe("stonkbrokers.cash");
+    expect(bioWebsiteDomain("Trade perps at clutch.markets | est. 2024")).toBe("clutch.markets");
+  });
+
+  it("never returns a shared publication host named in the bio", () => {
+    expect(bioWebsiteDomain("Watch us on youtube.com and chat on t.me")).toBeUndefined();
+    expect(bioWebsiteDomain("Watch us on youtube.com, then visit stonkbrokers.cash")).toBe("stonkbrokers.cash");
+  });
+});

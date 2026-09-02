@@ -650,11 +650,19 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
       ctx.evidence.profile.avatar_source_state = "none";
     }
     ctx.evidence.profile.bio = prof.bio ?? "";
-    const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? undefined;
-    ctx.evidence.profile.website = profileWebsite;
     const officialWebsites = (prof.officialWebsites ?? [])
       .map((url) => canonicalPublicProfileWebsite(url))
       .filter((url): url is string => Boolean(url));
+    // The official website is the first CREDIBLE first-party domain on the
+    // provider-frozen record. When the first profile URL is a shared host
+    // (t.me, youtube.com, discord.gg) the real site is usually the next URL on
+    // the same record; leaving the shared host in place disabled every
+    // official-domain gate for the run.
+    const firstWebsite = canonicalPublicProfileWebsite(prof.website) ?? undefined;
+    const profileWebsite = firstWebsite && canonicalOfficialWebsite(firstWebsite)
+      ? firstWebsite
+      : officialWebsites.find((url) => canonicalOfficialWebsite(url) !== null) ?? firstWebsite;
+    ctx.evidence.profile.website = profileWebsite;
     if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
     // A link aggregator is a pointer, not a website: left as-is it kills
     // PROJECT routing, official-site verification, and token binding for the
@@ -897,10 +905,22 @@ async function collectProjectSiteSubstance(ctx: CollectContext, domain: string):
 // make gmail.com the subject's official website, which seeds product-substance
 // credit, official-source classification, and team-page fetches. Emails are
 // stripped before matching. Exported for tests.
+//
+// The TLD list is an allow-list on purpose (a bare "node.js" or "web3.summit"
+// in prose must not become a domain), but it has to cover the TLDs crypto
+// projects actually register on: stonkbrokers.cash and clutch.markets were
+// both invisible to the old list. Every match is still validated through
+// canonicalOfficialWebsite(), so a shared publication host named in the bio
+// (youtube.com, t.me) never qualifies either.
+const BIO_DOMAIN = /\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money|cash|markets|trade|exchange|capital|fund|vc|tech|info|me|pro|club|link|wtf|lol|world|digital|ventures|partners|group|global|studio|tools|crypto|dao|games|foundation|labs|protocol|systems|cloud|market|social|solutions))\b/gi;
+
 export function bioWebsiteDomain(bio: string): string | undefined {
-  return bio
-    .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, " ")
-    .match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const text = bio.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, " ");
+  for (const match of text.matchAll(BIO_DOMAIN)) {
+    const host = match[1];
+    if (canonicalOfficialWebsite(`https://${host}/`)) return host;
+  }
+  return undefined;
 }
 
 /**

@@ -14,7 +14,7 @@ import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower, WebTeamMember } from "../../src/data/evidence";
 import { isPlausiblePersonRosterName } from "../../src/lib/personName";
-import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
+import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
 import {
   classifyPublicXAccountPage,
   shouldAnnounceOfficialXAccountStatus,
@@ -417,8 +417,19 @@ function twitterapiOfficialUrls(p: any): string[] {
   return out;
 }
 
+// The profile's official website is the FIRST credible first-party domain on
+// the record, not merely the first URL. An account with no website field whose
+// bio opens with t.me/... or youtube.com/... used to make that shared host the
+// profile website; canonicalOfficialWebsite() then rejected it downstream and
+// every official-domain gate ran with no domain at all, while the real site sat
+// one URL later on the same provider-frozen record. A record with no credible
+// domain keeps its first URL so link-hub dereference still runs on it.
+export function pickProfileWebsite(urls: readonly string[]): string | undefined {
+  return urls.find((url) => canonicalOfficialWebsite(url) !== null) ?? urls[0];
+}
+
 function pickWebsite(p: any): string | undefined {
-  return twitterapiOfficialUrls(p)[0];
+  return pickProfileWebsite(twitterapiOfficialUrls(p));
 }
 
 export async function getProfile(handle: string): Promise<XProfile | null> {
