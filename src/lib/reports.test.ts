@@ -523,6 +523,41 @@ describe("fetchReport", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("surfaces an ambiguous label as its candidate subjects without retrying the 409", async () => {
+    const subjects = [
+      { caseId: "case-1", kind: "person", ref: "clutch", query: "@clutch", status: "open" },
+      { caseId: "case-2", kind: "person", ref: "clutchmarkets", query: "@CLUTCHMARKETS", status: "archived", updatedAt: "2026-09-01T00:00:00.000Z" },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "case_subject_ambiguous", subjects }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReportState("clutch")).resolves.toEqual({
+      status: "ambiguous",
+      report: null,
+      subjects,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry another deterministic 409 and never invents subjects for it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "person_token_subject_mismatch" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReportState("@alice", "person")).resolves.toEqual({
+      status: "unavailable",
+      report: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("loads one immutable report version without resolving the active projection", async () => {
     const reportVersionId = "00000000-0000-4000-8000-000000000201";
     const report = { kind: "token", ref: "0xabc", payload: { headline: "Frozen" } };
