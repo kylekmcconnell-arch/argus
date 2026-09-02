@@ -2368,12 +2368,14 @@ function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount, p
   if (!projectRows || !projectRows.length) {
     if (projectAccountAudit) {
       const note = projectAccountAudit.state === "complete" ? "Embedded project-account audit completed without a stored check ledger." : projectAccountAudit.note;
+      const unbound = projectAccountAudit.state === "unavailable";
       for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
         const target = rows.find((row) => row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
         if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
         target.status = "unavailable";
         target.note = note;
         target.provider = "project-account-audit";
+        if (unbound) target.retryable = false;
       }
     }
     return rows;
@@ -2498,11 +2500,17 @@ var PERSON_SUPPLEMENTAL_CHECK_IDS = /* @__PURE__ */ new Set([
   "founder-repeat-backing",
   "investor-fund-scale"
 ]);
+function isUnboundInvestigationGraphRow(check, checkId) {
+  return checkId === "trust-graph-connections" && check.provider === "project-account-audit" && check.retryable === false;
+}
 function applyReportCheckContract(kind, checks) {
   const requiredIds = kind === "investigation" ? INVESTIGATION_REQUIRED_CHECK_IDS : TOKEN_REQUIRED_CHECK_IDS;
   const normalized = checks.map((check) => {
     const checkId = check.checkId?.trim() ?? "";
     if (kind === "token" || kind === "investigation") {
+      if (kind === "investigation" && isUnboundInvestigationGraphRow(check, checkId)) {
+        return { ...check, decisionCritical: false };
+      }
       if (checkId && requiredIds.has(checkId)) {
         return { ...check, decisionCritical: true };
       }

@@ -406,6 +406,58 @@ describe("stored token and investigation checks", () => {
     expect(checks).toContainEqual(versionContext.checks[0]);
     expect(checks.filter((check) => check.decisionCritical === true)).toHaveLength(7);
   });
+
+  // The default search shell runs every pasted contract as an investigation.
+  // A token whose sources link no official X account has no embedded project
+  // collector, so it is exactly a standalone token scan: once its six safety
+  // checks record, it is complete. It used to sit at 6 of 7 forever because
+  // the investigation contract demanded a trust-graph screen nothing could run.
+  it("completes an investigation that never bound a project account once its token safety checks record", () => {
+    const token = {
+      address: "0x7777777777777777777777777777777777777777",
+      chain: "ethereum",
+      safety: { available: true, simChecked: true, tradeabilityAssessed: true, buyTax: 0, sellTax: 0, holderCount: 900, topHolderPct: 9, ownerRenounced: true, openSource: true },
+      topHolders: [{ address: "0xholder1", percent: 9 }],
+      holdersAssessed: true,
+      bundleCount: 0,
+      insiderPct: 0,
+      bundleRisk: "low",
+      cg: { listed: true, cexCount: 1, rank: 900 },
+      sanctionsScreen: { available: true, checked: 2, sanctioned: [], completedAt: "2026-08-30T00:00:00.000Z" },
+    } as unknown as TokenDossier;
+    const unbound = {
+      token,
+      projectX: null,
+      projectAccount: null,
+      projectAccountAudit: {
+        state: "unavailable",
+        note: "Embedded project-account audit was unavailable because no official project X account was resolved.",
+      },
+    } as unknown as Investigation;
+
+    const checks = reportChecks("investigation", unbound);
+    expect(checks.find((check) => check.checkId === "trust-graph-connections")).toMatchObject({
+      status: "unavailable",
+      decisionCritical: false,
+      retryable: false,
+      provider: "project-account-audit",
+    });
+    expect(reportCompleteness("investigation", unbound, checks)).toBe("complete");
+
+    // The same token whose real project account failed its embedded audit is
+    // still a retryable gap and stays partial.
+    const failed = {
+      ...unbound,
+      projectX: "@realproject",
+      projectAccountAudit: { state: "failed", note: "Embedded project-account audit failed for @realproject: timeout." },
+    } as unknown as Investigation;
+    const failedChecks = reportChecks("investigation", failed);
+    expect(failedChecks.find((check) => check.checkId === "trust-graph-connections")).toMatchObject({
+      status: "unavailable",
+      decisionCritical: true,
+    });
+    expect(reportCompleteness("investigation", failed, failedChecks)).toBe("partial");
+  });
 });
 
 describe("fetchReport", () => {

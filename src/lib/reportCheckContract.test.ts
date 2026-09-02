@@ -72,6 +72,44 @@ describe("canonical report check contracts", () => {
     expect(clearanceCoverage(checks).sufficient).toBe(false);
   });
 
+  it("waives the trust-graph screen only for an investigation that never bound a project account", () => {
+    const required = [...TOKEN_REQUIRED_CHECK_IDS].map((id) => row(id, "confirmed"));
+    const unboundNote = "Embedded project-account audit was unavailable because no official project X account was resolved.";
+
+    // No official X account: the embedded collector never ran, and a rescan of
+    // the token cannot create the account. This is a standalone token scan.
+    const unbound = applyReportCheckContract("investigation", [
+      ...required,
+      { ...row("trust-graph-connections", "unavailable", true), provider: "project-account-audit", retryable: false, note: unboundNote },
+    ]);
+    expect(decisionCriticalChecks(unbound).map((check) => check.checkId)).toEqual([...TOKEN_REQUIRED_CHECK_IDS]);
+    expect(clearanceCoverage(unbound).openNeverWaive).toEqual([]);
+    expect(clearanceCoverage(unbound).sufficient).toBe(true);
+    // The row stays visible and honest; only its power to withhold changed.
+    expect(unbound.find((check) => check.checkId === "trust-graph-connections")).toMatchObject({
+      status: "unavailable",
+      decisionCritical: false,
+      note: unboundNote,
+    });
+
+    // A real account whose embedded audit failed can be rescanned, so the
+    // screen stays required.
+    const failed = applyReportCheckContract("investigation", [
+      ...required,
+      { ...row("trust-graph-connections", "unavailable", true), provider: "project-account-audit", note: "Embedded project-account audit failed for @askvenice: invalid analyst response." },
+    ]);
+    expect(clearanceCoverage(failed).openNeverWaive).toEqual(["trust-graph-connections"]);
+    expect(clearanceCoverage(failed).sufficient).toBe(false);
+
+    // A bound project collector that recorded the screen as unavailable is the
+    // collector's own gap, not an unbound account, and stays required.
+    const collectorGap = applyReportCheckContract("investigation", [
+      ...required,
+      { ...row("trust-graph-connections", "unavailable", true), provider: "argus-graph", retryable: false },
+    ]);
+    expect(clearanceCoverage(collectorGap).sufficient).toBe(false);
+  });
+
   it("still fails closed when a required token safety check is open", () => {
     const checks = applyReportCheckContract("investigation", [
       ...[...TOKEN_REQUIRED_CHECK_IDS].map((id) => row(id, id === "ofac-sanctions-address" ? "unavailable" : "confirmed")),
