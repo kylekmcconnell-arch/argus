@@ -1069,29 +1069,46 @@ function canonicalEntityKey(opts) {
 
 // src/lib/personName.ts
 var ORGANIZATION_WORDS = /* @__PURE__ */ new Set([
+  "advisors",
   "app",
+  "asset",
+  "assets",
   "capital",
+  "college",
   "company",
   "corp",
   "corporation",
+  "credit",
   "dao",
+  "digital",
+  "equity",
   "exchange",
   "finance",
   "foundation",
   "fund",
   "group",
+  "holdings",
   "inc",
   "incorporated",
+  "infrastructure",
   "labs",
   "limited",
   "llc",
   "ltd",
+  "management",
   "markets",
   "network",
   "protocol",
+  "solutions",
+  "strategies",
+  "strategy",
   "studio",
   "studios",
   "systems",
+  "technologies",
+  "treasuries",
+  "treasury",
+  "university",
   "ventures",
   "wallet"
 ]);
@@ -12825,8 +12842,11 @@ function twitterapiOfficialUrls(p) {
   push(p?.link);
   return out;
 }
+function pickProfileWebsite(urls) {
+  return urls.find((url) => canonicalOfficialWebsite(url) !== null) ?? urls[0];
+}
 function pickWebsite(p) {
-  return twitterapiOfficialUrls(p)[0];
+  return pickProfileWebsite(twitterapiOfficialUrls(p));
 }
 async function getProfile2(handle) {
   const key = env("TWITTERAPI_KEY");
@@ -28462,6 +28482,24 @@ var officialHomepages = (details) => {
   );
 };
 var domainsMatch = (left, right) => left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
+function profileOfficialScopes(ctx) {
+  const profile = ctx.evidence.profile;
+  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
+  if (profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi" || !Number.isFinite(capturedAt)) return [];
+  const seen = /* @__PURE__ */ new Set();
+  const scopes = [];
+  for (const value of [profile.website, ...profile.official_websites ?? []]) {
+    const scope = canonicalOfficialWebsite(value);
+    if (!scope || seen.has(scope.domain)) continue;
+    seen.add(scope.domain);
+    scopes.push(scope);
+  }
+  return scopes;
+}
+var homepageOnProfileDomain = (scopes, homepages) => scopes.length ? homepages.find((candidate) => {
+  const tokenScope = canonicalOfficialWebsite(candidate);
+  return tokenScope !== null && scopes.some((scope) => domainsMatch(scope.domain, tokenScope.domain));
+}) : void 0;
 function verifyIdentity(ctx, details) {
   const links = isRecord4(details.links) ? details.links : {};
   const officialHandle = cleanText2(links.twitter_screen_name);
@@ -28474,14 +28512,8 @@ function verifyIdentity(ctx, details) {
       officialX: `@${matchedX}`
     };
   }
-  const profile = ctx.evidence.profile;
-  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
-  const profileScope = profile.profile_collection_state === "resolved" && profile.profile_provider === "twitterapi" && Number.isFinite(capturedAt) ? canonicalOfficialWebsite(profile.website) : null;
-  const homepage = profileScope ? homepages.find((candidate) => {
-    const tokenScope = canonicalOfficialWebsite(candidate);
-    return tokenScope !== null && domainsMatch(profileScope.domain, tokenScope.domain);
-  }) : void 0;
-  if (!profileScope || !homepage) return null;
+  const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), homepages);
+  if (!homepage) return null;
   return {
     verification: "official_domain",
     homepage,
@@ -28566,15 +28598,9 @@ function dexIdentity(ctx, row) {
     const handle = xHandleFromUrl(candidate.url);
     return handle ? [handle] : [];
   }) : [];
-  const profile = ctx.evidence.profile;
-  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
-  const profileScope = profile.profile_collection_state === "resolved" && profile.profile_provider === "twitterapi" && Number.isFinite(capturedAt) ? canonicalOfficialWebsite(profile.website) : null;
-  const homepage = profileScope ? websites.find((candidate) => {
-    const tokenScope = canonicalOfficialWebsite(candidate);
-    return tokenScope !== null && domainsMatch(profileScope.domain, tokenScope.domain);
-  }) : void 0;
+  const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), websites);
   const exactHandle = handles.find((handle) => handle === normalizeHandle3(ctx.handle));
-  if (!profileScope || !homepage || !exactHandle) return null;
+  if (!homepage || !exactHandle) return null;
   return {
     verification: "official_x",
     homepage,
@@ -33226,9 +33252,10 @@ async function resolveProfile(ctx) {
       ctx.evidence.profile.avatar_source_state = "none";
     }
     ctx.evidence.profile.bio = prof.bio ?? "";
-    const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? void 0;
-    ctx.evidence.profile.website = profileWebsite;
     const officialWebsites = (prof.officialWebsites ?? []).map((url) => canonicalPublicProfileWebsite(url)).filter((url) => Boolean(url));
+    const firstWebsite = canonicalPublicProfileWebsite(prof.website) ?? void 0;
+    const profileWebsite = firstWebsite && canonicalOfficialWebsite(firstWebsite) ? firstWebsite : officialWebsites.find((url) => canonicalOfficialWebsite(url) !== null) ?? firstWebsite;
+    ctx.evidence.profile.website = profileWebsite;
     if (officialWebsites.length) ctx.evidence.profile.official_websites = officialWebsites;
     if (isLinkHubUrl(profileWebsite)) {
       const hubResolved = await resolveLinkHubWebsite(profileWebsite, ctx.handle);
@@ -33404,8 +33431,14 @@ async function collectProjectSiteSubstance(ctx, domain) {
   applySiteSubstanceOutcome(ctx, domain, site);
   return site;
 }
+var BIO_DOMAIN = /\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money|cash|markets|trade|exchange|capital|fund|vc|tech|info|me|pro|club|link|wtf|lol|world|digital|ventures|partners|group|global|studio|tools|crypto|dao|games|foundation|labs|protocol|systems|cloud|market|social|solutions))\b/gi;
 function bioWebsiteDomain(bio) {
-  return bio.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, " ").match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const text2 = bio.replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, " ");
+  for (const match of text2.matchAll(BIO_DOMAIN)) {
+    const host2 = match[1];
+    if (canonicalOfficialWebsite(`https://${host2}/`)) return host2;
+  }
+  return void 0;
 }
 function mergeDiscoveredAffiliations(ventures, discovered) {
   const byName = new Map(ventures.map((row) => [row.project_name.toLowerCase(), row]));

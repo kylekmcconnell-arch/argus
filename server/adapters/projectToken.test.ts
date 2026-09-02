@@ -1615,3 +1615,113 @@ describe("DexScreener's null-pairs answer is a completed empty market read", () 
     expect(evidence.projectToken?.liquidityUsd).toBeUndefined();
   });
 });
+
+describe("official-domain gates read every credible domain on the frozen profile record", () => {
+  // Live shape (#337): an account with no website field whose bio opens with a
+  // Telegram link. The provider record still carries the real site one URL
+  // later, and that record is first-party, so the gates must read it.
+  const withTelegramFirst = (handle: string, displayName: string, site: string) => {
+    const { ctx, evidence } = context(handle, displayName, `https://t.me/${handle.replace(/^@/, "")}`);
+    evidence.profile.official_websites = [`https://t.me/${handle.replace(/^@/, "")}`, site];
+    return { ctx, evidence };
+  };
+
+  it("binds a CoinGecko official-domain token whose site sits only in official_websites", async () => {
+    const { ctx, evidence } = withTelegramFirst("@project_updates", "Project Dex", "https://app.project.example/");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search?")) return json(search());
+      if (url.includes("/coins/project-token?")) return json(details({ links: { twitter_screen_name: "", homepage: ["https://app.project.example/"] } }));
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toMatchObject({ verification: "official_domain", homepage: "https://app.project.example/" });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
+  });
+
+  it("satisfies the DexScreener dual gate when the row's domain is only in official_websites", async () => {
+    const { ctx, evidence } = withTelegramFirst("@ponsdotfamily", "Pons", "https://ponsfamily.com/");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({
+        pairs: [{
+          chainId: "robinhood",
+          pairAddress: PONS_POOL,
+          url: `https://dexscreener.com/robinhood/${PONS_POOL.toLowerCase()}`,
+          baseToken: { address: PONS_TOKEN, name: "Pons", symbol: "PONS" },
+          quoteToken: { address: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", symbol: "WETH" },
+          priceUsd: "0.04125",
+          liquidity: { usd: 1_552_550.02 },
+          info: {
+            websites: [{ url: "https://ponsfamily.com/launchpad", label: "Website" }],
+            socials: [{ url: "https://x.com/ponsdotfamily", type: "twitter" }],
+          },
+        }],
+      });
+      if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      symbol: "PONS",
+      address: PONS_TOKEN,
+      homepage: "https://ponsfamily.com/launchpad",
+    });
+  });
+
+  it("does not let a domain that only appears in a third-party citation satisfy the dual gate", async () => {
+    const { ctx, evidence } = context("@ponsdotfamily", "Pons", "https://t.me/ponsdotfamily");
+    evidence.profile.official_websites = ["https://t.me/ponsdotfamily"];
+    evidence.basicFacts = [{
+      factId: "fact-1",
+      subjectKey: "@ponsdotfamily",
+      predicate: "official_identity",
+      value: "Pons",
+      normalizedValue: "pons",
+      status: "verified",
+      critical: false,
+      artifact_verified: true,
+      sources: [{
+        url: "https://ponsfamily.com/launchpad",
+        sourceClass: "other_public",
+        relation: "supports",
+        excerpt: "Pons launchpad",
+        contentHash: "hash-1",
+        capturedAt: "2026-09-02T00:00:00.000Z",
+        provider: "serper",
+        artifactVerified: true,
+      }],
+    } as never];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({
+        pairs: [{
+          chainId: "robinhood",
+          pairAddress: PONS_POOL,
+          url: `https://dexscreener.com/robinhood/${PONS_POOL.toLowerCase()}`,
+          baseToken: { address: PONS_TOKEN, name: "Pons", symbol: "PONS" },
+          quoteToken: { address: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", symbol: "WETH" },
+          liquidity: { usd: 1_552_550.02 },
+          info: {
+            websites: [{ url: "https://ponsfamily.com/launchpad", label: "Website" }],
+            socials: [{ url: "https://x.com/ponsdotfamily", type: "twitter" }],
+          },
+        }],
+      });
+      if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({ pairs: null });
+      if (url.includes("t.me/ponsdotfamily")) return new Response("<p>telegram</p>", { status: 200 });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
+  });
+});

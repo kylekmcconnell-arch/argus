@@ -475,6 +475,47 @@ const officialHomepages = (details: JsonRecord): string[] => {
 const domainsMatch = (left: string, right: string): boolean =>
   left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
 
+/**
+ * Credible official domains declared on the provider-frozen X profile record:
+ * the profile website plus every other twitterapi website/entity URL on that
+ * same record. Nothing else qualifies here. A search lead, a registry
+ * homepage or a third-party citation must never enter this set, because these
+ * scopes are one half of the CoinGecko official-domain gate and of the
+ * DexScreener dual gate.
+ *
+ * Reading only `profile.website` left the gate unsatisfiable whenever the
+ * first profile URL was a shared host (t.me, youtube.com): the real domain sat
+ * in `official_websites` on the same frozen record and the token never bound.
+ */
+function profileOfficialScopes(ctx: CollectContext): OfficialWebsiteScope[] {
+  const profile = ctx.evidence.profile;
+  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
+  if (
+    profile.profile_collection_state !== "resolved"
+    || profile.profile_provider !== "twitterapi"
+    || !Number.isFinite(capturedAt)
+  ) return [];
+  const seen = new Set<string>();
+  const scopes: OfficialWebsiteScope[] = [];
+  for (const value of [profile.website, ...(profile.official_websites ?? [])]) {
+    const scope = canonicalOfficialWebsite(value);
+    if (!scope || seen.has(scope.domain)) continue;
+    seen.add(scope.domain);
+    scopes.push(scope);
+  }
+  return scopes;
+}
+
+const homepageOnProfileDomain = (
+  scopes: readonly OfficialWebsiteScope[],
+  homepages: readonly string[],
+): string | undefined => scopes.length
+  ? homepages.find((candidate) => {
+      const tokenScope = canonicalOfficialWebsite(candidate);
+      return tokenScope !== null && scopes.some((scope) => domainsMatch(scope.domain, tokenScope.domain));
+    })
+  : undefined;
+
 function verifyIdentity(
   ctx: CollectContext,
   details: JsonRecord,
@@ -491,20 +532,8 @@ function verifyIdentity(
     };
   }
 
-  const profile = ctx.evidence.profile;
-  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
-  const profileScope = profile.profile_collection_state === "resolved"
-    && profile.profile_provider === "twitterapi"
-    && Number.isFinite(capturedAt)
-    ? canonicalOfficialWebsite(profile.website)
-    : null;
-  const homepage = profileScope
-    ? homepages.find((candidate) => {
-        const tokenScope = canonicalOfficialWebsite(candidate);
-        return tokenScope !== null && domainsMatch(profileScope.domain, tokenScope.domain);
-      })
-    : undefined;
-  if (!profileScope || !homepage) return null;
+  const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), homepages);
+  if (!homepage) return null;
   return {
     verification: "official_domain",
     homepage,
@@ -610,25 +639,13 @@ function dexIdentity(
         return handle ? [handle] : [];
       })
     : [];
-  const profile = ctx.evidence.profile;
-  const capturedAt = Date.parse(profile.profile_captured_at ?? "");
-  const profileScope = profile.profile_collection_state === "resolved"
-    && profile.profile_provider === "twitterapi"
-    && Number.isFinite(capturedAt)
-    ? canonicalOfficialWebsite(profile.website)
-    : null;
-  const homepage = profileScope
-    ? websites.find((candidate) => {
-        const tokenScope = canonicalOfficialWebsite(candidate);
-        return tokenScope !== null && domainsMatch(profileScope.domain, tokenScope.domain);
-      })
-    : undefined;
+  const homepage = homepageOnProfileDomain(profileOfficialScopes(ctx), websites);
   const exactHandle = handles.find((handle) => handle === normalizeHandle(ctx.handle));
   // DexScreener metadata is permissionless enough that one self-supplied link
   // is not a canonical-token identity proof. Require the token row to bridge
   // BOTH provider-frozen identity surfaces: the exact audited X account and
-  // the exact official profile domain.
-  if (!profileScope || !homepage || !exactHandle) return null;
+  // one of the official domains declared on that same profile record.
+  if (!homepage || !exactHandle) return null;
   return {
     verification: "official_x",
     homepage,
