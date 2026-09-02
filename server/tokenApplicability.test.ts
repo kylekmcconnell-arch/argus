@@ -99,10 +99,54 @@ describe("deriveTokenApplicability", () => {
 
   it("keeps an official bio contract with no resolved market provisional", () => {
     const evidence = project("@declared", "A project with an official contract in its profile.");
+    evidence.unresolvedProjectToken = {
+      address: "0x39dBED3a2bd333467115dE45665cC57F813C4571",
+      via: "evm",
+      source: "official_bio",
+      state: "no_market",
+      capturedAt: "2026-09-02T00:00:00.000Z",
+    };
     expect(deriveTokenApplicability(evidence, [tokenCheck(
       "finding",
       "The official X bio declared a contract, but DexScreener returned no market for that exact address.",
-    )])).toMatchObject({ state: "unresolved_token_identity", axisTreatment: "provisional" });
+    )])).toMatchObject({
+      state: "unresolved_token_identity",
+      axisTreatment: "provisional",
+      evidence: expect.arrayContaining([expect.stringContaining("0x39dBED3a2bd333467115dE45665cC57F813C4571")]),
+    });
+  });
+
+  it("keeps a declared contract that conflicts with the identity-bound registry record provisional", () => {
+    const evidence = project("@migrated", "A project whose bio still names the old contract.");
+    evidence.unresolvedProjectToken = {
+      address: "0x39dBED3a2bd333467115dE45665cC57F813C4571",
+      via: "evm",
+      source: "official_bio",
+      state: "registry_conflict",
+      registry: {
+        provider: "coingecko",
+        address: "0x1111111111111111111111111111111111111111",
+        chain: "base",
+        name: "Pons",
+        symbol: "PONS",
+        sourceUrl: "https://www.coingecko.com/en/coins/pons",
+      },
+      capturedAt: "2026-09-02T00:00:00.000Z",
+    };
+    expect(deriveTokenApplicability(evidence, [tokenCheck("finding", "the two contracts differ")]))
+      .toMatchObject({
+        state: "unresolved_token_identity",
+        axisTreatment: "provisional",
+        evidence: expect.arrayContaining([expect.stringContaining("0x1111111111111111111111111111111111111111")]),
+      });
+  });
+
+  it("reads the structured candidate, not the wording of the check note", () => {
+    const evidence = project("@reworded", "A project with a completed, tokenless identity search.");
+    expect(deriveTokenApplicability(evidence, [tokenCheck(
+      "finding",
+      "The official X bio declared a contract, but DexScreener returned no market for that exact address.",
+    )])).toMatchObject({ state: "confirmed_tokenless", axisTreatment: "not_applicable" });
   });
 
   it("assesses token conduct once a live canonical token is bound", () => {

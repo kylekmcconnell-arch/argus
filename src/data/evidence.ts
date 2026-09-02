@@ -234,6 +234,32 @@ export interface TraceStep {
  * never enough. CoinGecko is preferred when available; identity-bound DEX
  * records cover new or chain-native assets that have not reached CoinGecko yet.
  */
+/**
+ * A first-party contract declaration the identity search could not turn into
+ * a bound token. The official X bio names a contract, but no exact-address DEX
+ * market exists (`no_market`), the provider could not be read
+ * (`provider_unavailable`), or the registry record that IS identity-bound to
+ * this account lists a different contract (`registry_conflict`, the stale or
+ * migrated-CA signal). Structured so token applicability never depends on the
+ * wording of a check note. Never a bound token and never scored.
+ */
+export interface UnresolvedProjectTokenSnapshot {
+  address: string;
+  via: "evm" | "solana";
+  source: "official_bio";
+  state: "no_market" | "provider_unavailable" | "registry_conflict";
+  /** The identity-bound registry record whose contract differs (registry_conflict only). */
+  registry?: {
+    provider: "coingecko" | "dexscreener" | "official_site";
+    address: string;
+    chain: string;
+    name: string;
+    symbol: string;
+    sourceUrl: string;
+  };
+  capturedAt: string;
+}
+
 export interface ProjectTokenSnapshot {
   verified: true;
   verification: "official_x" | "official_domain";
@@ -1078,6 +1104,8 @@ export interface CollectedEvidence {
   trustGraphScreen?: TrustGraphScreen;
   /** Verified project-owned token identity and frozen market snapshot. */
   projectToken?: ProjectTokenSnapshot;
+  /** A bio-declared contract the identity search completed without binding. Mutually exclusive with projectToken. */
+  unresolvedProjectToken?: UnresolvedProjectTokenSnapshot;
   /**
    * Fixed-block direct RPC observations for the verified canonical EVM token.
    * This lane is point-in-time context only and has no v1 scoring impact.

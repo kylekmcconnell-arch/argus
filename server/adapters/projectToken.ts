@@ -1,4 +1,4 @@
-import type { LaunchedProductLead, ProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
+import type { LaunchedProductLead, ProjectTokenSnapshot, UnresolvedProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
 import { canonicalOfficialWebsite, type OfficialWebsiteScope } from "../../src/lib/fundScaleEvidence";
 import { readCandle, summarizeCandles, type Candle } from "../../src/lib/priceHistory";
 import { declaredTokenFromBio, type TokenCandidate } from "../../src/lib/projectTokenLeg";
@@ -1388,6 +1388,64 @@ async function collectProfileDeclaredToken(
   };
 }
 
+type DeclaredOutcome = { candidate: TokenCandidate; result: DexFallbackResult };
+
+/**
+ * The registry platform whose listed address equals the bio-declared contract.
+ * CoinGecko lists every chain a token is deployed on under `platforms`, so a
+ * declared contract that is the token's Base deployment still matches when the
+ * record's canonical (first-ordered) platform is Ethereum.
+ */
+function registryContractMatchingDeclared(details: JsonRecord, candidate: TokenCandidate): ContractIdentity | null {
+  const platforms = isRecord(details.platforms) ? details.platforms : {};
+  for (const [platform, value] of Object.entries(platforms)) {
+    const address = cleanText(value);
+    if (!address || !sameAddress(address, candidate.address)) continue;
+    return { address: candidate.address, chain: PLATFORM_CHAIN[platform] ?? platform };
+  }
+  return null;
+}
+
+/**
+ * An identity-bound registry record whose contract differs from the contract
+ * the official bio declares. Neither side is chosen: a stale or migrated CA is
+ * exactly the entity-continuity signal an investigator needs to see, and a
+ * silent pick either way would attach the wrong token. Both contracts are
+ * disclosed and the row stays unresolved.
+ */
+function recordDeclaredConflict(
+  ctx: CollectContext,
+  declared: DeclaredOutcome,
+  registry: NonNullable<UnresolvedProjectTokenSnapshot["registry"]>,
+  attempts: number,
+): AdapterRunResult {
+  const handle = `@${normalizeHandle(ctx.handle)}`;
+  ctx.evidence.unresolvedProjectToken = {
+    address: declared.candidate.address,
+    via: declared.candidate.via,
+    source: "official_bio",
+    state: "registry_conflict",
+    registry,
+    capturedAt: captureTimestamp(),
+  };
+  const note = `the official X bio of ${handle} declares contract ${declared.candidate.address} (no exact-address DEX market), while the ${registry.provider === "official_site" ? "official site" : registry.provider} record bound to this account lists ${registry.name} ($${registry.symbol}) at ${registry.address} on ${registry.chain}. The two contracts differ, so no token was bound; a stale or migrated contract must be reconciled before token conduct is assessed.`;
+  ctx.recordCheck?.({
+    id: "project-token-identity",
+    status: "finding",
+    note,
+    provider: `twitterapi/${registry.provider}`,
+    sourceCount: 2,
+  });
+  ctx.emit({
+    phase: "P0 · Routing",
+    label: "Official bio contract and registry contract disagree",
+    detail: note,
+    source: `twitterapi / ${registry.provider}`,
+    tone: "warn",
+  });
+  return { state: "executed", detail: "official bio contract and identity-bound registry contract differ", attempts };
+}
+
 export async function collectProjectTokenIdentity(
   ctx: CollectContext,
   dependencies: { recoverOfficialText?: (url: string) => Promise<PublicTextWithRecoveryResult> } = {},
@@ -1430,6 +1488,7 @@ export async function collectProjectTokenIdentity(
     return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
   }
 
+  let declaredOutcome: DeclaredOutcome | null = null;
   if (profileDeclaredToken) {
     const declared = await collectProfileDeclaredToken(ctx, profileDeclaredToken);
     if (declared.state === "matched" && declared.snapshot) {
@@ -1473,26 +1532,21 @@ export async function collectProjectTokenIdentity(
       });
       return { state: "executed", detail: declared.detail, attempts: declared.attempts };
     }
-    const providerUnavailable = declared.state === "failed";
-    ctx.recordCheck?.({
-      id: "project-token-identity",
-      status: providerUnavailable ? "unavailable" : "finding",
-      note: declared.detail,
-      provider: "twitterapi/dexscreener",
-      sourceCount: 1,
-    });
+    // A declared contract with no DEX market does not end the identity
+    // search. The bio may name a stale or migrated contract while CoinGecko
+    // lists the current token under this exact official X account, or the
+    // contract may be right but CEX-only. The registry and official-site
+    // tiers still run; the declared contract is then either confirmed by an
+    // identity-bound record, contradicted by one (disclosed, never chosen
+    // between), or left unresolved after every tier completed.
+    declaredOutcome = { candidate: profileDeclaredToken, result: declared };
     ctx.emit({
       phase: "P0 · Routing",
-      label: providerUnavailable ? "Official bio contract could not be checked" : "Official bio contract has no resolved market",
-      detail: declared.detail,
+      label: declared.state === "failed" ? "Official bio contract could not be checked" : "Official bio contract has no resolved market",
+      detail: `${declared.detail} Continuing into the CoinGecko, DexScreener and official-site tiers before recording an outcome.`,
       source: "twitterapi / dexscreener",
       tone: "warn",
     });
-    return {
-      state: providerUnavailable ? "partial" : "executed",
-      detail: declared.detail,
-      attempts: declared.attempts,
-    };
   }
 
   const registryHomepages: string[] = [];
@@ -1613,9 +1667,20 @@ export async function collectProjectTokenIdentity(
         nameMatchCount: Math.max(dexNameMatchCount, dexNameMatches.size),
       };
     }
-    const attempts = (query.length >= 2 ? 1 : 0) + detailAttempts + seedPairAttempts + dexAttempts;
+    const attempts = (query.length >= 2 ? 1 : 0) + detailAttempts + seedPairAttempts + dexAttempts
+      + (declaredOutcome?.result.attempts ?? 0);
     if (dexFallback.state === "matched" && dexFallback.snapshot) {
       const snapshot = dexFallback.snapshot;
+      if (declaredOutcome && !sameAddress(snapshot.address, declaredOutcome.candidate.address)) {
+        return recordDeclaredConflict(ctx, declaredOutcome, {
+          provider: "dexscreener",
+          address: snapshot.address,
+          chain: snapshot.chain,
+          name: snapshot.name,
+          symbol: snapshot.symbol,
+          sourceUrl: snapshot.sourceUrl,
+        }, attempts);
+      }
       ctx.evidence.projectToken = snapshot;
       if (!canonicalOfficialWebsite(ctx.evidence.profile.website) && snapshot.homepage) {
         ctx.evidence.profile.website = snapshot.homepage;
@@ -1655,6 +1720,16 @@ export async function collectProjectTokenIdentity(
       registryHomepages,
       dependencies.recoverOfficialText ?? fetchPublicTextWithRecovery,
     );
+    if (declared && declaredOutcome && !sameAddress(declared.snapshot.address, declaredOutcome.candidate.address)) {
+      return recordDeclaredConflict(ctx, declaredOutcome, {
+        provider: "official_site",
+        address: declared.snapshot.address,
+        chain: declared.snapshot.chain,
+        name: declared.snapshot.name,
+        symbol: declared.snapshot.symbol,
+        sourceUrl: declared.sourceUrl,
+      }, attempts + 1);
+    }
     if (declared) {
       ctx.evidence.projectToken = declared.snapshot;
       ctx.recordCheck?.({
@@ -1676,17 +1751,47 @@ export async function collectProjectTokenIdentity(
 
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
     const coinSearchIncomplete = registryQueries.length > 0 && (!search || searchFailures > 0);
-    if (coinSearchIncomplete || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
-      const gaps = [
-        contractLookupFailed ? "CoinGecko contract lookup failed" : null,
-        coinSearchIncomplete
-          ? !search
-            ? "CoinGecko search failed"
-            : `CoinGecko search failed for ${searchFailures} of ${registryQueries.length} queries`
-          : null,
-        coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
-        dexSearchEverFailed ? "DexScreener project search failed" : null,
-      ].filter((part): part is string => Boolean(part));
+    const gaps = [
+      contractLookupFailed ? "CoinGecko contract lookup failed" : null,
+      coinSearchIncomplete
+        ? !search
+          ? "CoinGecko search failed"
+          : `CoinGecko search failed for ${searchFailures} of ${registryQueries.length} queries`
+        : null,
+      coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
+      dexSearchEverFailed ? "DexScreener project search failed" : null,
+      declaredOutcome?.result.state === "failed" ? "DexScreener could not read the contract declared in the official bio" : null,
+    ].filter((part): part is string => Boolean(part));
+
+    if (declaredOutcome) {
+      // Every tier ran and none bound a token to this account, so the
+      // declared contract is the whole story: unresolved, with the reason.
+      const providerGap = gaps.length > 0;
+      ctx.evidence.unresolvedProjectToken = {
+        address: declaredOutcome.candidate.address,
+        via: declaredOutcome.candidate.via,
+        source: "official_bio",
+        state: providerGap ? "provider_unavailable" : "no_market",
+        capturedAt: captureTimestamp(),
+      };
+      const note = providerGap
+        ? `${declaredOutcome.result.detail} The registry tiers could not be fully read either (${gaps.join("; ")}); this is a provider gap, not an assessed result, and a rescan can close it.`
+        : `${declaredOutcome.result.detail} The CoinGecko, DexScreener and official-site tiers also completed without binding a token to this account, so the declared contract stays unresolved.`;
+      ctx.recordCheck?.({
+        id: "project-token-identity",
+        status: providerGap ? "unavailable" : "finding",
+        note,
+        provider: "twitterapi/dexscreener/coingecko",
+        sourceCount: 1,
+      });
+      return {
+        state: providerGap ? "partial" : "executed",
+        detail: declaredOutcome.result.detail,
+        attempts,
+      };
+    }
+
+    if (gaps.length) {
       // A provider failure is not an assessed null, but it must still be
       // RECORDED: leaving this decision-critical row unwritten made the report
       // fall back to its placeholder note ("no official token identity was
@@ -1729,7 +1834,25 @@ export async function collectProjectTokenIdentity(
     };
   }
 
-  const { details, identity, contract } = selected;
+  const { details, identity } = selected;
+  let contract = selected.contract;
+  if (declaredOutcome) {
+    // The registry record is identity-bound to this account. It confirms the
+    // declared contract only when it lists that exact address on some chain;
+    // otherwise the two first-party statements disagree and neither wins.
+    const declaredMatch = registryContractMatchingDeclared(details, declaredOutcome.candidate);
+    if (!declaredMatch) {
+      return recordDeclaredConflict(ctx, declaredOutcome, {
+        provider: "coingecko",
+        address: contract.address,
+        chain: contract.chain,
+        name: cleanText(details.name),
+        symbol: cleanText(details.symbol).toUpperCase(),
+        sourceUrl: `https://www.coingecko.com/en/coins/${encodeURIComponent(cleanText(details.id))}`,
+      }, 1 + detailAttempts + declaredOutcome.result.attempts);
+    }
+    contract = declaredMatch;
+  }
   const market = isRecord(details.market_data) ? details.market_data : {};
   const currentPrice = isRecord(market.current_price) ? finiteNumber(market.current_price.usd) : undefined;
   const marketCap = isRecord(market.market_cap) ? finiteNumber(market.market_cap.usd) : undefined;
@@ -1837,9 +1960,9 @@ export async function collectProjectTokenIdentity(
   ctx.recordCheck?.({
     id: "project-token-identity",
     status: "confirmed",
-    note: `$${snapshot.symbol} matched this project through its ${snapshot.verification === "official_x" ? "official X account" : "official website domain"} and canonical ${snapshot.chain} contract`,
-    provider: "coingecko",
-    sourceCount: 1,
+    note: `$${snapshot.symbol} matched this project through its ${snapshot.verification === "official_x" ? "official X account" : "official website domain"} and canonical ${snapshot.chain} contract${declaredOutcome ? "; the registry lists the exact contract declared in the official X bio, which has no DEX market of its own" : ""}`,
+    provider: declaredOutcome ? "coingecko/twitterapi" : "coingecko",
+    sourceCount: declaredOutcome ? 2 : 1,
   });
   if (pair) {
     ctx.recordCheck?.({
