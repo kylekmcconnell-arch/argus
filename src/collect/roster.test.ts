@@ -79,8 +79,8 @@ describe("roster reader", () => {
     ]);
   });
 
-  it("reads one-line 'Name — Role' rows and 'Role / Name' stacks", () => {
-    const people = readRoster("Team\nJane Doe — CTO\nCEO\nRavi Patel\nHead of Growth | Mei Lin\n");
+  it("reads one-line 'Name - Role' rows and 'Role / Name' stacks", () => {
+    const people = readRoster("Team\nJane Doe - CTO\nCEO\nRavi Patel\nHead of Growth | Mei Lin\n");
 
     expect(people.map((p) => [p.name, p.role])).toEqual(expect.arrayContaining([
       ["Jane Doe", "CTO"],
