@@ -94,7 +94,7 @@ import { resolveForHandle } from "./adapters/wallet";
 import { collectTrustGraph } from "./adapters/trustgraph";
 import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
-import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adapters/projectToken";
+import { collectProjectTokenIdentity, collectVentureTokenIdentity, launchedProductSearchQueries } from "./adapters/projectToken";
 import {
   hydrateProjectTeamFromVerifiedFacts,
   isInstitutionalOrganizationSubject,
@@ -1954,6 +1954,28 @@ async function maybeOrientSubject(ctx: CollectContext, siteExcerpt?: string): Pr
     });
   }
   ctx.evidence.roles = providerBackedRoles(ctx.evidence);
+}
+
+/**
+ * Whether the token collector must run again for the products the orientation
+ * pass says this company launched.
+ *
+ * The first token pass runs before intake so a slogan-only brand can inherit
+ * its registry homepage, but orientation (the only producer of
+ * `launchedProducts`) runs inside intake. Without a second pass the launched
+ * product ticker never reaches a registry search: a company whose token is not
+ * named after the company ("CLUTCH" → $STONKBROKER) records an assessed
+ * "no token under a matching name" and the report normalizes token conduct away
+ * as if the project were tokenless. The re-run only widens the SEARCH; every
+ * hit still has to list this exact official X account or official domain.
+ */
+export function launchedProductTokenBindPending(
+  evidence: Pick<CollectedEvidence, "projectToken" | "subjectOrientation">,
+  roles: readonly SubjectClass[],
+): boolean {
+  if (!roles.includes(SubjectClass.PROJECT)) return false;
+  if (evidence.projectToken?.verified === true) return false;
+  return launchedProductSearchQueries(evidence.subjectOrientation?.launchedProducts).length > 0;
 }
 
 /**
@@ -4514,10 +4536,23 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     rolesAfterBasicFacts = providerBackedRoles(evidence);
     evidence.roles = rolesAfterBasicFacts;
   }
+  // Orientation is the only producer of launched-product tickers and it ran
+  // inside intake, after the first token pass. A PROJECT still unbound after
+  // that pass gets one more registry search with those tickers.
+  const launchedProductBindPending = launchedProductTokenBindPending(evidence, rolesAfterBasicFacts);
   if (
     capabilityIsAuthorized("token_and_market", "project_fundamentals")
-    && (fixture || (recoveredProjectSite && !evidence.projectToken?.verified))
+    && (fixture || ((recoveredProjectSite || launchedProductBindPending) && !evidence.projectToken?.verified))
   ) {
+    if (launchedProductBindPending && !recoveredProjectSite) {
+      emit({
+        phase: "Token",
+        label: "Searching registries for the launched product ticker",
+        detail: `${launchedProductSearchQueries(evidence.subjectOrientation?.launchedProducts).join(", ")}: the first token pass ran before orientation named these products. A hit still has to list ${ctx.handle} as its official X account or match the official domain.`,
+        source: "coingecko / dexscreener",
+        tone: "neutral",
+      });
+    }
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
   } else {

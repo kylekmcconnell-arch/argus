@@ -11434,6 +11434,12 @@ ${value.note}`;
     return true;
   });
 }
+var NULL_FINDING_SUPERSEDED_BY_CONFIRMED = /* @__PURE__ */ new Set(["project-token-identity"]);
+function supersededObservations(id, observations) {
+  if (!NULL_FINDING_SUPERSEDED_BY_CONFIRMED.has(id)) return [...observations];
+  if (!observations.some((item) => item.status === "confirmed")) return [...observations];
+  return observations.filter((item) => item.status !== "finding");
+}
 var PersonCheckTracker = class {
   observations = /* @__PURE__ */ new Map();
   providerRuns = /* @__PURE__ */ new Map();
@@ -11521,7 +11527,7 @@ var PersonCheckTracker = class {
           decisionCritical: false
         });
       }
-      const observations = this.observations.get(definition.id) ?? [];
+      const observations = supersededObservations(definition.id, this.observations.get(definition.id) ?? []);
       if (!observations.length) {
         return Object.freeze({
           checkId: definition.id,
@@ -13055,11 +13061,11 @@ async function collectCorpus(handle) {
   const searched = dedup(searchedRaw);
   const all = [...originals, ...searched];
   const now = Date.now();
-  const CASHTAG = /\$[A-Za-z][A-Za-z0-9]{1,9}\b/g;
+  const CASHTAG2 = /\$[A-Za-z][A-Za-z0-9]{1,9}\b/g;
   const CHARTLINK = /dexscreener\.com|pump\.fun|birdeye\.so|dextools\.io|geckoterminal\.com|photon-sol|\bCA[:\s]/i;
   const score = (p) => {
     const kw = (p.text.match(new RegExp(CLAIM_RE.source, "gi")) ?? []).length;
-    const cashtags = (p.text.match(CASHTAG) ?? []).length;
+    const cashtags = (p.text.match(CASHTAG2) ?? []).length;
     const call = (cashtags > 0 ? 2 : 0) + (CHARTLINK.test(p.text) ? 2 : 0);
     const reach = Math.log10(p.views + p.likes + 1);
     const recency = p.at ? Math.max(0, 1 - (now - p.at) / (365 * 864e5)) : 0;
@@ -18028,21 +18034,22 @@ async function lookupToken(address) {
     recordDex("token-pairs", "failed", "response_json_error");
     return null;
   }
-  if (!isRecord2(data) || !Array.isArray(data.pairs)) {
+  if (!isRecord2(data) || data.pairs !== null && !Array.isArray(data.pairs)) {
     recordDex("token-pairs", "partial", "result_shape_error");
     return null;
   }
-  if (!data.pairs.length) {
+  const rawPairs = Array.isArray(data.pairs) ? data.pairs : [];
+  if (!rawPairs.length) {
     recordDex("token-pairs", "succeeded", "no_pairs");
     return { address };
   }
-  const pairs = data.pairs.filter(isPair);
+  const pairs = rawPairs.filter(isPair);
   if (!pairs.length) {
     recordDex("token-pairs", "partial", "invalid_pair_rows");
     return null;
   }
   const top = pairs.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
-  const incomplete = pairs.length !== data.pairs.length || !top.chainId && !top.baseToken?.symbol && top.priceUsd == null && top.liquidity?.usd == null;
+  const incomplete = pairs.length !== rawPairs.length || !top.chainId && !top.baseToken?.symbol && top.priceUsd == null && top.liquidity?.usd == null;
   recordDex("token-pairs", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : void 0);
   return {
     address,
@@ -28198,10 +28205,39 @@ var finiteNumber2 = (value) => {
 };
 var cleanText2 = (value) => typeof value === "string" ? value.trim() : "";
 var normalized3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
-var projectName = (value) => value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*/)[0]?.trim() || value.trim();
+var projectName = (value) => value.split(/\s*(?:\||:|\u2013|\u2014|\u00b7)\s*|\s+-\s+/)[0]?.trim() || value.trim();
+var CASHTAG = /\$([A-Za-z][A-Za-z0-9]{1,11})(?![A-Za-z0-9])/g;
+var BRACKETED_TICKER_SHAPE = /^\$?[A-Z][A-Z0-9]{1,11}$/;
+var MAX_TICKER_QUERIES = 3;
+var MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION = 3;
+function cashtagTickers(text2) {
+  const out = [];
+  for (const match of (text2 ?? "").matchAll(CASHTAG)) {
+    const ticker = match[1].toUpperCase();
+    if (!out.includes(ticker)) out.push(ticker);
+  }
+  return out;
+}
+function bioTickerQueries(bio) {
+  const tickers = cashtagTickers(bio);
+  if (!tickers.length || tickers.length > MAX_BIO_CASHTAGS_FOR_SELF_DECLARATION) return [];
+  return tickers.slice(0, 2);
+}
+function cleanRegistryName(raw) {
+  return raw.replace(CASHTAG, " ").replace(/\([^)]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ").replace(/[^\p{L}\p{N}\s.&'-]/gu, " ").replace(/\s+/g, " ").replace(/^[\s.&'-]+|[\s.&'-]+$/g, "").trim();
+}
+var bracketedTickers = (raw) => {
+  const out = [];
+  for (const match of raw.matchAll(/\(([^)]{2,12})\)|\[([^\]]{2,12})\]/g)) {
+    const inner = (match[1] ?? match[2] ?? "").trim();
+    if (!BRACKETED_TICKER_SHAPE.test(inner)) continue;
+    const ticker = inner.replace(/^\$/, "").toUpperCase();
+    if (!out.includes(ticker)) out.push(ticker);
+  }
+  return out;
+};
 var GENERIC_NAME_SUFFIX = /^(?:finance|protocol|labs?|network|official|app|exchange|capital|fund|foundation|dao|token|coin|money|cash|club|world|games?|inu)$/i;
 function tokenSearchQueries(raw) {
-  const primary = projectName(raw);
   const queries = [];
   const push = (candidate) => {
     const trimmed = candidate.trim();
@@ -28209,12 +28245,15 @@ function tokenSearchQueries(raw) {
       queries.push(trimmed);
     }
   };
+  const primary = cleanRegistryName(projectName(raw)) || cleanRegistryName(raw);
   push(primary);
   const words = primary.split(/\s+/);
   while (words.length > 1 && GENERIC_NAME_SUFFIX.test(words[words.length - 1])) {
     words.pop();
     push(words.join(" "));
   }
+  const tickers = [...cashtagTickers(raw), ...bracketedTickers(raw)].filter((ticker, index, all) => all.indexOf(ticker) === index).slice(0, MAX_TICKER_QUERIES);
+  for (const ticker of tickers) push(ticker);
   return queries;
 }
 var MAX_LAUNCHED_PRODUCT_QUERIES = 4;
@@ -28426,13 +28465,13 @@ var domainsMatch = (left, right) => left === right || left.endsWith(`.${right}`)
 function verifyIdentity(ctx, details) {
   const links = isRecord4(details.links) ? details.links : {};
   const officialHandle = cleanText2(links.twitter_screen_name);
-  const exactX = officialHandle && normalizeHandle3(officialHandle) === normalizeHandle3(ctx.handle);
+  const matchedX = matchedOfficialX(ctx, details);
   const homepages = officialHomepages(details);
-  if (exactX) {
+  if (matchedX) {
     return {
       verification: "official_x",
       ...homepages[0] ? { homepage: homepages[0] } : {},
-      officialX: `@${officialHandle.replace(/^@/, "")}`
+      officialX: `@${matchedX}`
     };
   }
   const profile = ctx.evidence.profile;
@@ -28449,7 +28488,28 @@ function verifyIdentity(ctx, details) {
     ...officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}
   };
 }
-var xHandleFromUrl = (value) => {
+var X_RESERVED_PATHS = /* @__PURE__ */ new Set([
+  "i",
+  "home",
+  "search",
+  "intent",
+  "share",
+  "hashtag",
+  "explore",
+  "settings",
+  "messages",
+  "notifications",
+  "compose",
+  "login",
+  "signup",
+  "privacy",
+  "tos",
+  "about",
+  "download",
+  "jobs",
+  "help"
+]);
+var xHandleFromUrlRaw = (value) => {
   const raw = cleanText2(value);
   if (!raw) return null;
   try {
@@ -28457,11 +28517,43 @@ var xHandleFromUrl = (value) => {
     const host2 = url.hostname.toLowerCase().replace(/^www\./, "");
     if (host2 !== "x.com" && host2 !== "twitter.com") return null;
     const handle = url.pathname.split("/").filter(Boolean)[0] ?? "";
-    return handle ? normalizeHandle3(handle) : null;
+    if (!handle || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
+    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle)) return null;
+    return handle;
   } catch {
     return null;
   }
 };
+var xHandleFromUrl = (value) => {
+  const handle = xHandleFromUrlRaw(value);
+  return handle ? normalizeHandle3(handle) : null;
+};
+var COINGECKO_LINK_ARRAYS = [
+  "homepage",
+  "official_forum_url",
+  "announcement_url",
+  "blockchain_site",
+  "chat_url"
+];
+function firstMatchingOfficialX(details, auditedHandle) {
+  const audited = normalizeHandle3(auditedHandle);
+  if (!audited) return null;
+  const links = isRecord4(details.links) ? details.links : {};
+  const officialHandle = cleanText2(links.twitter_screen_name).replace(/^@/, "");
+  if (officialHandle && normalizeHandle3(officialHandle) === audited) return officialHandle;
+  for (const key of COINGECKO_LINK_ARRAYS) {
+    const value = links[key];
+    const rows = Array.isArray(value) ? value : value ? [value] : [];
+    for (const row of rows) {
+      const handle = xHandleFromUrlRaw(row);
+      if (handle && normalizeHandle3(handle) === audited) return handle;
+    }
+  }
+  return null;
+}
+function matchedOfficialX(ctx, details) {
+  return firstMatchingOfficialX(details, ctx.handle);
+}
 function dexIdentity(ctx, row) {
   const info = isRecord4(row.info) ? row.info : {};
   const websites = Array.isArray(info.websites) ? info.websites.flatMap((candidate) => {
@@ -28649,9 +28741,7 @@ async function collectDexProjectToken(ctx, query) {
   };
 }
 function cgHandleBoundHomepages(ctx, details) {
-  const links = isRecord4(details.links) ? details.links : {};
-  const officialHandle = cleanText2(links.twitter_screen_name);
-  if (!officialHandle || normalizeHandle3(officialHandle) !== normalizeHandle3(ctx.handle)) return [];
+  if (!matchedOfficialX(ctx, details)) return [];
   return officialHomepages(details);
 }
 function dexHandleBoundHomepages(ctx, row) {
@@ -28840,17 +28930,18 @@ async function dexPairs(address) {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless \xB7 response_json_error", "failed");
     return null;
   }
-  if (!isRecord4(payload) || !Array.isArray(payload.pairs)) {
+  if (!isRecord4(payload) || payload.pairs !== null && !Array.isArray(payload.pairs)) {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless \xB7 result_shape_error", "partial");
     return null;
   }
-  const pairs = payload.pairs.filter(isRecord4);
+  const rawPairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+  const pairs = rawPairs.filter(isRecord4);
   recordCall(
     "dexscreener",
     "project-token-pairs",
     0,
     `keyless \xB7 ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}`,
-    pairs.length === payload.pairs.length ? "succeeded" : "partial"
+    pairs.length === rawPairs.length ? "succeeded" : "partial"
   );
   return pairs;
 }
@@ -29056,13 +29147,28 @@ async function collectProfileDeclaredToken(ctx, candidate) {
   };
 }
 async function collectProjectTokenIdentity(ctx, dependencies = {}) {
-  const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
+  const handleQuery = ctx.handle.replace(/^@/, "");
+  const query = projectName(ctx.evidence.profile.display_name || handleQuery);
   const registryQueries = projectRegistrySearchQueries(
-    ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""),
+    ctx.evidence.profile.display_name || handleQuery,
     ctx.evidence.subjectOrientation?.launchedProducts
   );
+  const displayKey = normalized3(ctx.evidence.profile.display_name || handleQuery);
+  const handleKey = normalized3(handleQuery);
+  const handleAlreadyCovered = !handleKey || handleKey.length < 2 || displayKey === handleKey || displayKey.includes(handleKey) || handleKey.includes(displayKey) || registryQueries.some((existing) => existing.toLowerCase() === handleQuery.toLowerCase());
+  if (!handleAlreadyCovered) {
+    registryQueries.push(handleQuery);
+  }
+  const profileFrozen = ctx.evidence.profile.profile_collection_state === "resolved" && ctx.evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? ""));
+  if (profileFrozen) {
+    for (const ticker of bioTickerQueries(ctx.evidence.profile.bio)) {
+      if (!registryQueries.some((existing) => existing.toLowerCase() === ticker.toLowerCase())) {
+        registryQueries.push(ticker);
+      }
+    }
+  }
   const seeded = parseSeededContract(ctx);
-  const profileDeclaredToken = ctx.evidence.profile.profile_collection_state === "resolved" && ctx.evidence.profile.profile_provider === "twitterapi" && Number.isFinite(Date.parse(ctx.evidence.profile.profile_captured_at ?? "")) ? declaredTokenFromBio(ctx.evidence.profile.bio) : null;
+  const profileDeclaredToken = profileFrozen ? declaredTokenFromBio(ctx.evidence.profile.bio) : null;
   if (!registryQueries.length && !seeded && !profileDeclaredToken) {
     return { state: "skipped", detail: "project display name unavailable", attempts: 0 };
   }
@@ -29151,12 +29257,16 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       }
     }
   }
+  let searchFailures = 0;
   if (!selected && registryQueries.length) {
     const seenIds = /* @__PURE__ */ new Set();
     let anySearchCompleted = false;
     for (const registryQuery of registryQueries) {
       const rows = await coinSearch(registryQuery);
-      if (rows === null) continue;
+      if (rows === null) {
+        searchFailures += 1;
+        continue;
+      }
       anySearchCompleted = true;
       search = rows;
       for (const row of rankedCandidates(registryQuery, rows)) {
@@ -29267,10 +29377,11 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       return { state: "executed", detail: `bound $${declared.snapshot.symbol} from the project's own site`, attempts: attempts + 1 };
     }
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
-    if (registryQueries.length > 0 && !search || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
+    const coinSearchIncomplete = registryQueries.length > 0 && (!search || searchFailures > 0);
+    if (coinSearchIncomplete || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
       const gaps = [
         contractLookupFailed ? "CoinGecko contract lookup failed" : null,
-        registryQueries.length > 0 && !search ? "CoinGecko search failed" : null,
+        coinSearchIncomplete ? !search ? "CoinGecko search failed" : `CoinGecko search failed for ${searchFailures} of ${registryQueries.length} queries` : null,
         coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
         dexSearchEverFailed ? "DexScreener project search failed" : null
       ].filter((part) => Boolean(part));
@@ -29425,7 +29536,8 @@ async function collectVentureTokenIdentity(venture) {
     if (!details) continue;
     const links = isRecord4(details.links) ? details.links : {};
     const officialHandle = cleanText2(links.twitter_screen_name);
-    const exactX = Boolean(ventureHandle && officialHandle && normalizeHandle3(officialHandle) === ventureHandle);
+    const matchedVentureX = ventureHandle ? firstMatchingOfficialX(details, ventureHandle) : null;
+    const exactX = Boolean(matchedVentureX);
     const homepages = officialHomepages(details);
     const domainHomepage = ventureScope ? homepages.find((candidateHome) => {
       const tokenScope = canonicalOfficialWebsite(candidateHome);
@@ -29457,7 +29569,7 @@ async function collectVentureTokenIdentity(venture) {
       address: contract.address,
       chain: contract.chain,
       ...homepages[0] ? { homepage: homepages[0] } : {},
-      ...officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {},
+      ...matchedVentureX ? { officialX: `@${matchedVentureX}` } : officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {},
       sourceUrl: sourceUrl2,
       capturedAt,
       producerSources: {
@@ -34078,6 +34190,11 @@ async function maybeOrientSubject(ctx, siteExcerpt) {
   }
   ctx.evidence.roles = providerBackedRoles(ctx.evidence);
 }
+function launchedProductTokenBindPending(evidence, roles) {
+  if (!roles.includes("PROJECT" /* PROJECT */)) return false;
+  if (evidence.projectToken?.verified === true) return false;
+  return launchedProductSearchQueries(evidence.subjectOrientation?.launchedProducts).length > 0;
+}
 function providerBackedRoles(evidence) {
   const roles = /* @__PURE__ */ new Set();
   let bioPrimaryProjectVerified = false;
@@ -35842,7 +35959,17 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     rolesAfterBasicFacts = providerBackedRoles(evidence);
     evidence.roles = rolesAfterBasicFacts;
   }
-  if (capabilityIsAuthorized("token_and_market", "project_fundamentals") && (fixture || recoveredProjectSite && !evidence.projectToken?.verified)) {
+  const launchedProductBindPending = launchedProductTokenBindPending(evidence, rolesAfterBasicFacts);
+  if (capabilityIsAuthorized("token_and_market", "project_fundamentals") && (fixture || (recoveredProjectSite || launchedProductBindPending) && !evidence.projectToken?.verified)) {
+    if (launchedProductBindPending && !recoveredProjectSite) {
+      emit({
+        phase: "Token",
+        label: "Searching registries for the launched product ticker",
+        detail: `${launchedProductSearchQueries(evidence.subjectOrientation?.launchedProducts).join(", ")}: the first token pass ran before orientation named these products. A hit still has to list ${ctx.handle} as its official X account or match the official domain.`,
+        source: "coingecko / dexscreener",
+        tone: "neutral"
+      });
+    }
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
   } else {
