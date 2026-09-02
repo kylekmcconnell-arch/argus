@@ -1103,17 +1103,23 @@ async function dexPairs(address: string): Promise<JsonRecord[] | null> {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless · response_json_error", "failed");
     return null;
   }
-  if (!isRecord(payload) || !Array.isArray(payload.pairs)) {
+  // DexScreener answers an address with no market as `{"pairs": null}`, not an
+  // empty array. That is a completed empty read: an official bio declaring a
+  // contract with no pool must be recorded as "no market", never as "provider
+  // could not be read", and a registry-bound token without a DEX pool is still
+  // a fully executed bind.
+  if (!isRecord(payload) || (payload.pairs !== null && !Array.isArray(payload.pairs))) {
     recordCall("dexscreener", "project-token-pairs", 0, "keyless · result_shape_error", "partial");
     return null;
   }
-  const pairs = payload.pairs.filter(isRecord);
+  const rawPairs = Array.isArray(payload.pairs) ? payload.pairs : [];
+  const pairs = rawPairs.filter(isRecord);
   recordCall(
     "dexscreener",
     "project-token-pairs",
     0,
     `keyless · ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}`,
-    pairs.length === payload.pairs.length ? "succeeded" : "partial",
+    pairs.length === rawPairs.length ? "succeeded" : "partial",
   );
   return pairs;
 }

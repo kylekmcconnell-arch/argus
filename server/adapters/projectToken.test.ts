@@ -1541,3 +1541,45 @@ describe("registry queries for decorated display names", () => {
   });
 });
 
+describe("DexScreener's null-pairs answer is a completed empty market read", () => {
+  // Verified live on 2026-09-02: GET /latest/dex/tokens/<unknown address>
+  // returns {"schemaVersion":"1.0.0","pairs":null}, not an empty array.
+  it("records an official bio contract with no market as an assessed finding, not a provider outage", async () => {
+    const { ctx, evidence } = context("@prelaunchdex", "Prelaunch Dex", "");
+    evidence.profile.bio = `Launching soon. CA: ${PONS_TOKEN}`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({ schemaVersion: "1.0.0", pairs: null });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("no market for that exact address"),
+    });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "finding",
+      note: expect.stringContaining("no market for that exact address"),
+    }));
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ status: "unavailable" }));
+  });
+
+  it("keeps a registry-bound token without any DEX pool as a fully executed bind", async () => {
+    const { ctx, evidence } = context();
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
+      if (url.includes("/coins/project-token?")) return json(details());
+      if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({ schemaVersion: "1.0.0", pairs: null });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("without a price-corroborated DEX pair"),
+    });
+    expect(evidence.projectToken).toMatchObject({ verified: true, symbol: "PDX" });
+    expect(evidence.projectToken?.liquidityUsd).toBeUndefined();
+  });
+});

@@ -88,6 +88,21 @@ describe("keyed provider adapter outcome accounting", () => {
     ]));
   });
 
+  it("reads DexScreener's null-pairs answer as a completed no-market result for a promoted token", async () => {
+    // Live shape on 2026-09-02 for an address with no pool: {"pairs": null}.
+    // A promoted token whose pools are gone is the rug outcome the KOL screen
+    // exists to record, so it must not be dropped as a shape error.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json({ schemaVersion: "1.0.0", pairs: null })));
+    const captured = await withCostLedger(async () => ({
+      token: await lookupToken("0x1111111111111111111111111111111111111111"),
+      cost: getCost(),
+    }));
+    expect(captured.token).toEqual({ address: "0x1111111111111111111111111111111111111111" });
+    expect(captured.cost.calls).toContainEqual(
+      expect.objectContaining({ provider: "dexscreener", op: "token-pairs", calls: 1, succeeded: 1, status: "succeeded" }),
+    );
+  });
+
   it("aggregates two GitHub fetches from their observed result shapes", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(json({ unexpected: true }))
