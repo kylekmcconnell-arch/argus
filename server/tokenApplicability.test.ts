@@ -104,4 +104,33 @@ describe("deriveTokenApplicability", () => {
       "The official X bio declared a contract, but DexScreener returned no market for that exact address.",
     )])).toMatchObject({ state: "unresolved_token_identity", axisTreatment: "provisional" });
   });
+
+  it("assesses token conduct once a live canonical token is bound", () => {
+    const evidence = project("@altcoinist", "Social-trading infrastructure with a public Base token.");
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Altcoinist Token",
+      symbol: "ALTT",
+      rank: 1730,
+      address: "0x1b5ce2a593a840e3ad3549a34d7b3dec697c114d",
+      chain: "base",
+      officialX: "@altcoinist",
+      homepage: "https://www.altcoinist.com/",
+      sourceUrl: "https://www.coingecko.com/en/coins/altcoinist-token",
+      capturedAt: "2026-09-02T00:00:00.000Z",
+    };
+    expect(deriveTokenApplicability(evidence, [tokenCheck(
+      "confirmed",
+      "$ALTT matched this project through its official X account and canonical base contract",
+    )])).toMatchObject({ state: "verified_live_token", axisTreatment: "assess" });
+  });
+
+  it("withholds the overall score while token identity is still unavailable", () => {
+    const evidence = project("@altcoinist", "Social-trading infrastructure with a public Base token.");
+    expect(deriveTokenApplicability(evidence, [tokenCheck(
+      "unavailable",
+      "token-identity registries could not be fully read on this scan (CoinGecko search failed); this is a provider gap, not an assessed result, and a rescan can close it",
+    )])).toMatchObject({ state: "unresolved_token_identity", axisTreatment: "provisional" });
+  });
 });

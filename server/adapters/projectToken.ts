@@ -408,13 +408,13 @@ function verifyIdentity(
 ): { verification: ProjectTokenSnapshot["verification"]; homepage?: string; officialX?: string } | null {
   const links = isRecord(details.links) ? details.links : {};
   const officialHandle = cleanText(links.twitter_screen_name);
-  const exactX = officialHandle && normalizeHandle(officialHandle) === normalizeHandle(ctx.handle);
+  const matchedX = matchedOfficialX(ctx, details);
   const homepages = officialHomepages(details);
-  if (exactX) {
+  if (matchedX) {
     return {
       verification: "official_x",
       ...(homepages[0] ? { homepage: homepages[0] } : {}),
-      officialX: `@${officialHandle.replace(/^@/, "")}`,
+      officialX: `@${matchedX}`,
     };
   }
 
@@ -439,7 +439,29 @@ function verifyIdentity(
   };
 }
 
-const xHandleFromUrl = (value: unknown): string | null => {
+const X_RESERVED_PATHS = new Set([
+  "i",
+  "home",
+  "search",
+  "intent",
+  "share",
+  "hashtag",
+  "explore",
+  "settings",
+  "messages",
+  "notifications",
+  "compose",
+  "login",
+  "signup",
+  "privacy",
+  "tos",
+  "about",
+  "download",
+  "jobs",
+  "help",
+]);
+
+const xHandleFromUrlRaw = (value: unknown): string | null => {
   const raw = cleanText(value);
   if (!raw) return null;
   try {
@@ -447,11 +469,54 @@ const xHandleFromUrl = (value: unknown): string | null => {
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
     if (host !== "x.com" && host !== "twitter.com") return null;
     const handle = url.pathname.split("/").filter(Boolean)[0] ?? "";
-    return handle ? normalizeHandle(handle) : null;
+    if (!handle || X_RESERVED_PATHS.has(handle.toLowerCase())) return null;
+    if (!/^[A-Za-z0-9_]{2,30}$/.test(handle)) return null;
+    return handle;
   } catch {
     return null;
   }
 };
+
+const xHandleFromUrl = (value: unknown): string | null => {
+  const handle = xHandleFromUrlRaw(value);
+  return handle ? normalizeHandle(handle) : null;
+};
+
+/**
+ * CoinGecko often keeps a renamed or stale `twitter_screen_name` while the
+ * current official X URL is sitting in `links.homepage` (or another link
+ * array). ARGUS must treat those curated X URLs as official-X evidence —
+ * otherwise a live token whose registry row still says @project_com never
+ * binds to the audited @project account, and token conduct stays unmeasured.
+ */
+const COINGECKO_LINK_ARRAYS = [
+  "homepage",
+  "official_forum_url",
+  "announcement_url",
+  "blockchain_site",
+  "chat_url",
+] as const;
+
+function firstMatchingOfficialX(details: JsonRecord, auditedHandle: string): string | null {
+  const audited = normalizeHandle(auditedHandle);
+  if (!audited) return null;
+  const links = isRecord(details.links) ? details.links : {};
+  const officialHandle = cleanText(links.twitter_screen_name).replace(/^@/, "");
+  if (officialHandle && normalizeHandle(officialHandle) === audited) return officialHandle;
+  for (const key of COINGECKO_LINK_ARRAYS) {
+    const value = links[key];
+    const rows = Array.isArray(value) ? value : value ? [value] : [];
+    for (const row of rows) {
+      const handle = xHandleFromUrlRaw(row);
+      if (handle && normalizeHandle(handle) === audited) return handle;
+    }
+  }
+  return null;
+}
+
+function matchedOfficialX(ctx: CollectContext, details: JsonRecord): string | null {
+  return firstMatchingOfficialX(details, ctx.handle);
+}
 
 function dexIdentity(
   ctx: CollectContext,
@@ -713,9 +778,7 @@ async function collectDexProjectToken(
  * handle. Unique-id via the handle — not a search lead.
  */
 function cgHandleBoundHomepages(ctx: CollectContext, details: JsonRecord): string[] {
-  const links = isRecord(details.links) ? details.links : {};
-  const officialHandle = cleanText(links.twitter_screen_name);
-  if (!officialHandle || normalizeHandle(officialHandle) !== normalizeHandle(ctx.handle)) return [];
+  if (!matchedOfficialX(ctx, details)) return [];
   return officialHomepages(details);
 }
 
@@ -1233,11 +1296,23 @@ export async function collectProjectTokenIdentity(
   ctx: CollectContext,
   dependencies: { recoverOfficialText?: (url: string) => Promise<PublicTextWithRecoveryResult> } = {},
 ): Promise<AdapterRunResult> {
-  const query = projectName(ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""));
+  const handleQuery = ctx.handle.replace(/^@/, "");
+  const query = projectName(ctx.evidence.profile.display_name || handleQuery);
   const registryQueries = projectRegistrySearchQueries(
-    ctx.evidence.profile.display_name || ctx.handle.replace(/^@/, ""),
+    ctx.evidence.profile.display_name || handleQuery,
     ctx.evidence.subjectOrientation?.launchedProducts,
   );
+  const displayKey = normalized(ctx.evidence.profile.display_name || handleQuery);
+  const handleKey = normalized(handleQuery);
+  const handleAlreadyCovered = !handleKey
+    || handleKey.length < 2
+    || displayKey === handleKey
+    || displayKey.includes(handleKey)
+    || handleKey.includes(displayKey)
+    || registryQueries.some((existing) => existing.toLowerCase() === handleQuery.toLowerCase());
+  if (!handleAlreadyCovered) {
+    registryQueries.push(handleQuery);
+  }
   const seeded = parseSeededContract(ctx);
   const profileDeclaredToken = ctx.evidence.profile.profile_collection_state === "resolved"
     && ctx.evidence.profile.profile_provider === "twitterapi"
@@ -1700,7 +1775,8 @@ export async function collectVentureTokenIdentity(venture: {
     if (!details) continue;
     const links = isRecord(details.links) ? details.links : {};
     const officialHandle = cleanText(links.twitter_screen_name);
-    const exactX = Boolean(ventureHandle && officialHandle && normalizeHandle(officialHandle) === ventureHandle);
+    const matchedVentureX = ventureHandle ? firstMatchingOfficialX(details, ventureHandle) : null;
+    const exactX = Boolean(matchedVentureX);
     const homepages = officialHomepages(details);
     const domainHomepage = ventureScope
       ? homepages.find((candidateHome) => {
@@ -1736,7 +1812,9 @@ export async function collectVentureTokenIdentity(venture: {
       address: contract.address,
       chain: contract.chain,
       ...(homepages[0] ? { homepage: homepages[0] } : {}),
-      ...(officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}),
+      ...(matchedVentureX
+        ? { officialX: `@${matchedVentureX}` }
+        : officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}),
       sourceUrl,
       capturedAt,
       producerSources: {

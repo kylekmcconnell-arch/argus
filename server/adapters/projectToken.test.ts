@@ -1138,7 +1138,7 @@ describe("launched-product CoinGecko recall", () => {
       const url = String(input);
       if (url.includes("/search?")) {
         const query = decodeURIComponent((url.split("query=")[1] ?? "").split("&")[0] ?? "");
-        if (query.toLowerCase() === "clutch") return json({ coins: [] });
+        if (query.toLowerCase() === "clutch" || query.toLowerCase() === "clutchmarkets") return json({ coins: [] });
         if (query.toLowerCase() === "stonkbroker" || query.toLowerCase() === "stonkbrokers") {
           return json({ coins: [{ id: "stonkbroker", name: "StonkBroker", symbol: "STONKBROKER", market_cap_rank: 576 }] });
         }
@@ -1179,6 +1179,166 @@ describe("launched-product CoinGecko recall", () => {
       id: "project-token-identity",
       status: "confirmed",
     }));
+  });
+
+  it("binds a CoinGecko token whose current official X lives in homepage links after twitter_screen_name went stale", async () => {
+    // Altcoinist / $ALTT: CoinGecko still lists twitter_screen_name Altcoinist_com
+    // while homepage includes https://x.com/Altcoinist. The audited handle is
+    // @altcoinist, and the X profile may not even publish a website field.
+    // Official-X identity must still bind so token conduct can be assessed.
+    const ALTT = "0x1b5ce2a593a840e3ad3549a34d7b3dec697c114d";
+    const ALTT_POOL = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const { ctx, evidence } = context("@altcoinist", "Altcoinist", "");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        return json({ coins: [{ id: "altcoinist-token", name: "Altcoinist Token", symbol: "ALTT", market_cap_rank: 1730 }] });
+      }
+      if (url.includes("/coins/altcoinist-token?")) {
+        return json({
+          id: "altcoinist-token",
+          name: "Altcoinist Token",
+          symbol: "altt",
+          asset_platform_id: "base",
+          market_cap_rank: 1730,
+          last_updated: "2026-09-02T16:00:00.000Z",
+          platforms: { base: ALTT },
+          links: {
+            twitter_screen_name: "Altcoinist_com",
+            homepage: ["https://www.altcoinist.com/", "https://x.com/Altcoinist"],
+          },
+          market_data: {
+            current_price: { usd: 0.016 },
+            market_cap: { usd: 4_159_100 },
+            total_volume: { usd: 120_000 },
+          },
+        });
+      }
+      if (url.toLowerCase().includes(`/latest/dex/tokens/${ALTT}`)) {
+        return json({
+          pairs: [{
+            chainId: "base",
+            pairAddress: ALTT_POOL,
+            url: `https://dexscreener.com/base/${ALTT_POOL}`,
+            baseToken: { address: ALTT, name: "Altcoinist", symbol: "ALTT" },
+            quoteToken: { address: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", symbol: "USDC" },
+            priceUsd: "0.016",
+            liquidity: { usd: 205_000 },
+          }],
+        });
+      }
+      if (url.includes("/ohlcv/day?")) return json({
+        data: { attributes: { ohlcv_list: [
+          [300, 0.015, 0.018, 0.014, 0.016, 80_000],
+          [200, 0.014, 0.016, 0.013, 0.015, 70_000],
+          [100, 0.013, 0.015, 0.012, 0.014, 60_000],
+        ] } },
+      });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("official_x"),
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      name: "Altcoinist Token",
+      symbol: "ALTT",
+      coingeckoId: "altcoinist-token",
+      address: ALTT,
+      chain: "base",
+      officialX: "@Altcoinist",
+      homepage: "https://www.altcoinist.com/",
+    });
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+      note: expect.stringContaining("$ALTT"),
+    }));
+  });
+
+  it("does not bind a same-ticker CoinGecko namesake whose official X and domain are someone else", async () => {
+    const OTHER_ALTT = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const { ctx, evidence } = context("@altcoinist", "Altcoinist", "https://www.altcoinist.com/");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        return json({ coins: [{ id: "random-altt", name: "Altcoinist Token", symbol: "ALTT", market_cap_rank: 80 }] });
+      }
+      if (url.includes("/coins/random-altt?")) {
+        return json({
+          id: "random-altt",
+          name: "Altcoinist Token",
+          symbol: "altt",
+          asset_platform_id: "ethereum",
+          platforms: { ethereum: OTHER_ALTT },
+          links: {
+            twitter_screen_name: "SomeOtherALTT",
+            homepage: ["https://unrelated-altt.example/", "https://x.com/SomeOtherALTT"],
+          },
+          market_data: { current_price: { usd: 0.5 } },
+        });
+      }
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url.includes("dexscreener.com/latest/dex/tokens/")) return json({ pairs: [] });
+      if (url === "https://www.altcoinist.com/") return new Response("<html><p>Altcoinist</p></html>", { status: 200 });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("no identity-bound project token"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "finding",
+      note: expect.stringContaining("none links back to the official X account or website domain"),
+    }));
+  });
+
+  it("still finds the identity-bound token when the display name is a slogan and the handle matches", async () => {
+    const ALTT = "0x1b5ce2a593a840e3ad3549a34d7b3dec697c114d";
+    const { ctx, evidence } = context("@altcoinist", "The Trader In Your Pocket", "");
+    const searches: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        const query = decodeURIComponent((url.split("query=")[1] ?? "").split("&")[0] ?? "");
+        searches.push(query);
+        if (query.toLowerCase() === "altcoinist") {
+          return json({ coins: [{ id: "altcoinist-token", name: "Altcoinist Token", symbol: "ALTT", market_cap_rank: 1730 }] });
+        }
+        return json({ coins: [] });
+      }
+      if (url.includes("/coins/altcoinist-token?")) {
+        return json({
+          id: "altcoinist-token",
+          name: "Altcoinist Token",
+          symbol: "altt",
+          asset_platform_id: "base",
+          platforms: { base: ALTT },
+          links: {
+            twitter_screen_name: "Altcoinist_com",
+            homepage: ["https://www.altcoinist.com/", "https://x.com/Altcoinist"],
+          },
+          market_data: { current_price: { usd: 0.016 } },
+        });
+      }
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "executed" });
+    expect(searches.some((query) => query.toLowerCase() === "altcoinist")).toBe(true);
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      symbol: "ALTT",
+      officialX: "@Altcoinist",
+    });
   });
 
   it("does not bind a launched-product CoinGecko hit whose official X is someone else", async () => {
