@@ -12,6 +12,7 @@ describe("person roster names", () => {
   it("rejects organizations, job titles, and prose", () => {
     expect(isPlausiblePersonRosterName("Clutch Markets")).toBe(false);
     expect(isPlausiblePersonRosterName("Paradigm Capital")).toBe(false);
+    expect(isPlausiblePersonRosterName("Emerging Markets Digital")).toBe(false);
     expect(isPlausiblePersonRosterName("Chief Technical Officer")).toBe(false);
     expect(isPlausiblePersonRosterName("Alice is building the protocol")).toBe(false);
     expect(isPlausiblePersonRosterName("Meet the team: our founders")).toBe(false);

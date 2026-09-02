@@ -5,6 +5,7 @@
 //     penalty. The real negatives are evidence-based — a token you cannot verify
 //     on-chain, fabricated metrics, manipulation language.
 //   - Hard caps over scores: a disqualifying finding ceilings the result.
+import { isPlausiblePersonRosterName } from "../lib/personName";
 import type { Recon } from "./recon";
 
 export interface HypeSignals {
@@ -86,10 +87,19 @@ export function scoreProject(recon: Recon): ProjectVerdict {
   claims = Math.max(0, claims);
 
   // ---- Team & transparency (0-20). Pseudonymity is neutral. ----
+  // A Title-case org/desk phrase that slipped past extraction must not mint
+  // the named-team bonus. Honest unnamed / absent is the fallback.
+  const namedPeople = recon.team.names.filter((name) =>
+    !/[\n\r]/.test(name) && isPlausiblePersonRosterName(name.replace(/\s+/g, " ").trim()),
+  );
   let team: number;
-  if (recon.team.state === "named") { team = 18; reasons.push({ tone: "good", text: recon.identityLine }); }
-  else if (recon.team.state === "unnamed-section") { team = 11; reasons.push({ tone: "warn", text: "Stated-but-unnamed team: no disclosure bonus, but not penalized for pseudonymity alone." }); }
-  else { team = 9; reasons.push({ tone: "warn", text: "No team section on the rendered site." }); }
+  if (recon.team.state === "named" && namedPeople.length) {
+    team = 18;
+    reasons.push({ tone: "good", text: recon.identityLine });
+  } else if (recon.team.state === "unnamed-section" || recon.team.state === "named") {
+    team = 11;
+    reasons.push({ tone: "warn", text: "Stated-but-unnamed team: no disclosure bonus, but not penalized for pseudonymity alone." });
+  } else { team = 9; reasons.push({ tone: "warn", text: "No team section on the rendered site." }); }
   const hasDocs = recon.socials.some((s) => /github|gitbook|docs/i.test(s.label) || /docs|whitepaper/i.test(s.url));
   if (recon.socials.length) team += 1;
   if (hasDocs) team += 1;

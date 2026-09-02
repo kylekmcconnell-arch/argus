@@ -8,6 +8,7 @@
 //                      pioneers"), a real CAUTION grounded in rendered evidence
 //   absent           - rendered fine, no team section at all
 //   not-retrieved    - the site never rendered; a COVERAGE GAP, not a finding
+import { isPlausiblePersonRosterName } from "../lib/personName";
 import { retrieveSite, type Retrieval } from "./retrieve";
 import { pivotOnChain, type OnChainPivot } from "./onchain";
 import { scoreProject, type ProjectVerdict } from "./projectverdict";
@@ -52,30 +53,34 @@ const FUNDING = /\$[\d.]+\s?[mMbBkK](?:illion)?\b(?:[^.\n]{0,30}\b(?:raise|raise
 // Named individual: a 2–3 word proper name with a role IMMEDIATELY adjacent
 // (either order). Strict adjacency is deliberate — a forensic engine must not
 // promote a capitalized marketing phrase into a "named founder".
-const NAME = "[A-Z][a-z]+(?:\\s[A-Z][a-z]+){1,2}";
+// Spaces only: `\s` also matches newlines and glued "Al Yousuf\\nSenior Advisor"
+// into a fake three-word name sitting next to the role.
+const NAME = "[A-Z][a-z]+(?:[ \\t][A-Z][a-z]+){1,2}";
 const ROLES = "co-?founder|cofounder|founder|ceo|cto|coo|cfo|chief[\\w ]{2,24}officer|managing partner|general partner|head of [\\w ]{2,24}|advisor|lead engineer";
 const NAME_ROLE = new RegExp(`\\b(${NAME})\\b[\\s,\\u2013\\u2014|·\\-]{1,4}(?:${ROLES})\\b`, "gi");
 const ROLE_NAME = new RegExp(`\\b(?:${ROLES})\\b[\\s:\\u2013\\u2014\\-]{1,4}(${NAME})\\b`, "gi");
 // Words that begin a phrase but never a person's first name, and brand-ish
 // second tokens, both of which produce false "names".
-const FIRST_BAD = /^(Visit|Join|Read|Learn|Meet|Our|The|Built|Get|Start|Explore|Discover|View|See|Watch|Click|Live|Real|Privacy|Verified|Edge|Why|How|What|Contact|About|Back|Next|Powered|Coming|Buy|Trade|Connect)$/;
-const SECOND_BAD = /^(App|Protocol|Labs?|Partner|Marketplace|Ecosystem|Ecosistema|Network|Capital|Ventures?|Team|Model|Layer|Round|Raise|Introduction|Vault|Stack|Compute|Hoja|Officer|Officers)$/;
+const FIRST_BAD = /^(Visit|Join|Read|Learn|Meet|Our|The|Built|Get|Start|Explore|Discover|View|See|Watch|Click|Live|Real|Privacy|Verified|Edge|Why|How|What|Contact|About|Back|Next|Powered|Coming|Buy|Trade|Connect|Emerging|Alternative|Institutional|Global|Digital|Private|Public|Corporate|International|Advanced|Strategic|Native|Decentralized)$/;
+const SECOND_BAD = /^(App|Protocol|Labs?|Partner|Marketplace|Ecosystem|Ecosistema|Network|Capital|Ventures?|Team|Model|Layer|Round|Raise|Introduction|Vault|Stack|Compute|Hoja|Officer|Officers|Markets?|Digital|Assets?|Treasur(?:y|ies)|Management|Strateg(?:y|ies)|University|College|Holdings?|Group|Advisors?|Solutions?|Technologies|Services|Global|International|Institutional|Alternative|Equity|Credit|Infrastructure|Finance|Company|Companies|Corporation|Foundation|Exchange|Studios?|Systems|Wallet|Research|Consulting|Associates|Limited|Llc|Ltd|Inc|Dao)$/;
 
 function uniq(a: string[]): string[] { return [...new Set(a)]; }
 
 const CONNECTOR = /^(of|the|and|both|for|to|in|on|at|a|an|our|your|with|by|from|is|are|that|this)$/i;
 function validName(n: string): boolean {
+  if (/\n|\r/.test(n)) return false;
   const parts = n.split(/\s+/);
   if (parts.length < 2) return false;
   // every token must read like a real name part: Title-case, not a connector,
-  // not a brand/structure word. Kills "of both the" / "of the Fund".
+  // not a brand/structure/desk word. Kills "of both the" / "of the Fund" /
+  // "Emerging Markets Digital".
   for (const p of parts) {
     if (!/^[A-Z][A-Za-z.'-]{1,}$/.test(p)) return false;
     if (CONNECTOR.test(p)) return false;
     if (SECOND_BAD.test(p)) return false;
   }
   if (FIRST_BAD.test(parts[0])) return false;
-  return true;
+  return isPlausiblePersonRosterName(parts.join(" "));
 }
 
 function extractNames(content: string): string[] {
@@ -89,6 +94,37 @@ function extractNames(content: string): string[] {
     }
   }
   return uniq(out).slice(0, 12);
+}
+
+const JUNK_HANDLE = /^(gmail|outlook|hotmail|proton|icloud|yahoo|email|mail|university|college|network|capital|finance|protocol|official|home|about|team|contact|support|help|news|blog|info|admin|www|the|and|for)$/i;
+const FIRST_PARTY_HANDLE_CUE = /follow(?:\s+us)?(?:\s+on)?|twitter|\bx\b|t(?:elegram)?\.me|discord|github|linkedin|official(?:\s+account)?|socials?|handle/i;
+
+function escapeRe(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function handleHasFirstPartyCue(handle: string, content: string): boolean {
+  return new RegExp(
+    `(?:${FIRST_PARTY_HANDLE_CUE.source})\\b[:\\s@/]{0,16}${escapeRe(handle)}\\b`,
+    "i",
+  ).test(content);
+}
+
+function handleMatchesHost(handle: string, url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./i, "");
+    const label = (host.split(".")[0] ?? "").toLowerCase().replace(/-/g, "");
+    const h = handle.toLowerCase().replace(/_/g, "");
+    if (label.length < 4 || h.length < 3) return false;
+    return h === label || h.includes(label) || (label.includes(h) && h.length >= 5);
+  } catch {
+    return false;
+  }
+}
+
+function isProjectBareHandle(handle: string, content: string, pageUrl: string): boolean {
+  if (handle.length < 3 || /^\d+$/.test(handle) || JUNK_HANDLE.test(handle)) return false;
+  return handleHasFirstPartyCue(handle, content) || handleMatchesHost(handle, pageUrl);
 }
 
 export function analyzeContent(retrieval: Retrieval): Recon {
@@ -133,12 +169,15 @@ export function analyzeContent(retrieval: Retrieval): Recon {
     if (SHARE_INTENT.test(url)) continue;
     if (!socialSet.has(url.toLowerCase())) socialSet.set(url.toLowerCase(), { label: m[1].split("/")[0], url });
   }
-  // bare @handles (the common JS-rendered case) — conservative: real-looking
-  // usernames, not email local-parts, capped.
+  // Bare @handles are the common JS-rendered first-party case (@EnigmaFund),
+  // but bios also write affiliation mentions (MBA @UNC, CEO @Kraken, @Siemens
+  // AG). Those are not the project's accounts. Only promote a bare handle that
+  // is framed as first-party or matches the site host. Real x.com / t.me /
+  // linkedin URLs still come from the scans above.
   const handles = uniq(
     [...c.matchAll(/(?:^|[\s(:>])@([A-Za-z0-9_]{2,30})\b/g)]
       .map((m) => m[1])
-      .filter((h) => !/^(gmail|outlook|hotmail|proton|icloud|yahoo|email|mail)$/i.test(h) && !/^\d+$/.test(h)),
+      .filter((h) => isProjectBareHandle(h, c, retrieval.url)),
   ).slice(0, 6);
   for (const h of handles) {
     const url = "https://x.com/" + h;
