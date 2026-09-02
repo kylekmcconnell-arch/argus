@@ -667,18 +667,41 @@ function dexIdentity(
  * Addresses are extracted verbatim; which one is actually a token is settled
  * on-chain afterwards, never by guessing from page position.
  */
+const SITE_EVM_ADDRESS = /0x[a-fA-F0-9]{40}/g;
+// Base58 mint as a standalone word only (no base58 character on either side),
+// the same rule the bio parser uses, so prose and URLs never false-positive.
+const SITE_SOLANA_ADDRESS = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/g;
+// Address key for de-duplication and grouping: EVM addresses are case-
+// insensitive hex, base58 mints are case-sensitive.
+const addressKey = (address: string): string => address.startsWith("0x") ? address.toLowerCase() : address;
+
 export function siteContractCandidates(html: string, limit = 10): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const match of html.matchAll(/0x[a-fA-F0-9]{40}/g)) {
+  const take = (address: string): boolean => {
+    const key = addressKey(address);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(address);
+    }
+    return out.length >= limit;
+  };
+  for (const match of html.matchAll(SITE_EVM_ADDRESS)) {
     const address = match[0];
-    const key = address.toLowerCase();
     // The zero address and obvious burn sinks are never a project's token.
     if (/^0x0{40}$/i.test(address) || /^0x0{38}dead$/i.test(address)) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(address);
-    if (out.length >= limit) break;
+    if (take(address)) return out;
+  }
+  // Base58 mints fill only the slots the EVM candidates left, so a page that
+  // prints many hashed asset names can never evict a real EVM contract. The
+  // EVM matches are blanked first: the hex tail of a zero-free 0x address is
+  // itself a 41-character base58 word.
+  const rest = html.replace(SITE_EVM_ADDRESS, " ");
+  for (const match of rest.matchAll(SITE_SOLANA_ADDRESS)) {
+    const address = match[1];
+    // The system program and other all-ones sentinels are never a token.
+    if (/^1+$/.test(address)) continue;
+    if (take(address)) break;
   }
   return out;
 }
@@ -982,11 +1005,38 @@ async function resolveSiteDeclaredOnPage(
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
     return null;
   }
-  const resolved: Array<{ address: string; pairs: JsonRecord[]; capturedAt: string }> = [];
-  for (const address of candidates.slice(0, 6)) {
-    const pairs = await dexPairs(address);
-    if (pairs && pairs.length) resolved.push({ address, pairs, capturedAt: captureTimestamp() });
+  // One batched DexScreener read settles which of the page's strings is a
+  // token (the endpoint accepts up to 30 addresses). Hashed asset names and
+  // wallet addresses come back with no pairs and drop out here.
+  const batch = await dexTokenPairs(candidates);
+  if (!batch) {
+    recordCall("site-fetch", "token-declaration", 0, "candidate_resolution_failed", "failed");
+    return null;
   }
+  const pairsByAddress = new Map<string, JsonRecord[]>();
+  const candidateKeys = new Set(candidates.map(addressKey));
+  for (const pair of batch.pairs) {
+    const base = isRecord(pair.baseToken) ? pair.baseToken : {};
+    const key = addressKey(cleanText(base.address));
+    if (!candidateKeys.has(key)) continue;
+    pairsByAddress.set(key, [...(pairsByAddress.get(key) ?? []), pair]);
+  }
+  // The batch answer is capped at 30 pairs in total. When a deep token fills
+  // the whole answer, a second tradeable address on the same page would be
+  // invisible and the "exactly one token" rule would bind on false grounds.
+  // Only in that capped case are the unseen candidates read individually.
+  if (batch.capped) {
+    for (const address of candidates) {
+      if (pairsByAddress.has(addressKey(address))) continue;
+      const pairs = await dexPairs(address);
+      if (pairs && pairs.length) pairsByAddress.set(addressKey(address), pairs);
+    }
+  }
+  const capturedAt = captureTimestamp();
+  const resolved = candidates.flatMap((address) => {
+    const pairs = pairsByAddress.get(addressKey(address));
+    return pairs && pairs.length ? [{ address, pairs, capturedAt }] : [];
+  });
   if (resolved.length !== 1) {
     recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
     return null;
@@ -1099,10 +1149,25 @@ async function collectSiteDeclaredToken(
   return declared[0];
 }
 
+/** DexScreener returns at most this many pairs for one token-list read. */
+const DEX_BATCH_PAIR_CAP = 30;
+
 async function dexPairs(address: string): Promise<JsonRecord[] | null> {
+  const result = await dexTokenPairs([address]);
+  return result ? result.pairs : null;
+}
+
+/**
+ * Pairs for one or more token addresses in a single read. `capped` is true
+ * when the answer hit DexScreener's per-read pair limit, meaning a listed
+ * address with no pair in the answer may still have a market.
+ */
+async function dexTokenPairs(
+  addresses: readonly string[],
+): Promise<{ pairs: JsonRecord[]; capped: boolean } | null> {
   let response: Response;
   try {
-    response = await fetch(`${DEXSCREENER}/${encodeURIComponent(address)}`, {
+    response = await fetch(`${DEXSCREENER}/${addresses.map((address) => encodeURIComponent(address)).join(",")}`, {
       signal: AbortSignal.timeout(8_000),
     });
   } catch {
@@ -1135,10 +1200,10 @@ async function dexPairs(address: string): Promise<JsonRecord[] | null> {
     "dexscreener",
     "project-token-pairs",
     0,
-    `keyless · ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}`,
+    `keyless · ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}${addresses.length > 1 ? ` · ${addresses.length} addresses` : ""}`,
     pairs.length === rawPairs.length ? "succeeded" : "partial",
   );
-  return pairs;
+  return { pairs, capped: rawPairs.length >= DEX_BATCH_PAIR_CAP };
 }
 
 const quotePriority = (symbol: string): number => {
