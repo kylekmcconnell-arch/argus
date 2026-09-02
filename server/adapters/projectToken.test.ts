@@ -1541,6 +1541,38 @@ describe("registry queries for decorated display names", () => {
   });
 });
 
+describe("a throttled registry query never completes the identity search", () => {
+  it("records unavailable, not an assessed tokenless null, when one of the CoinGecko queries was throttled", async () => {
+    // Public CoinGecko returns HTTP 429 "Throttled" after a few quick queries.
+    // The name query is the one that would have found the token; the ticker
+    // query completed empty. That is an incomplete search, never "no token".
+    const { ctx, evidence } = context("@altcoinist", "Altcoinist ($ALTT)", "https://www.altcoinist.com/");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) {
+        const query = decodeURIComponent((url.split("query=")[1] ?? "").split("&")[0] ?? "");
+        if (query.toLowerCase() === "altcoinist") return new Response("Throttled", { status: 429 });
+        return json({ coins: [] });
+      }
+      if (url.includes("dexscreener.com")) return json({ pairs: [] });
+      if (url === "https://www.altcoinist.com/") return new Response("<html><p>Altcoinist</p></html>", { status: 200 });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "partial",
+      detail: expect.stringContaining("CoinGecko search failed for 1 of 2 queries"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "unavailable",
+      note: expect.stringContaining("provider gap, not an assessed result"),
+    }));
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ status: "finding" }));
+  });
+});
+
 describe("DexScreener's null-pairs answer is a completed empty market read", () => {
   // Verified live on 2026-09-02: GET /latest/dex/tokens/<unknown address>
   // returns {"schemaVersion":"1.0.0","pairs":null}, not an empty array.

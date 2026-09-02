@@ -1518,12 +1518,21 @@ export async function collectProjectTokenIdentity(
     }
   }
 
+  // Every registry query is part of one identity search. A query the registry
+  // never answered (throttled, transport error) leaves that search incomplete
+  // even when another query completed empty; the DexScreener leg already
+  // tracks this, and CoinGecko must not report "no token under a matching
+  // name" for a name it was never allowed to look up.
+  let searchFailures = 0;
   if (!selected && registryQueries.length) {
     const seenIds = new Set<string>();
     let anySearchCompleted = false;
     for (const registryQuery of registryQueries) {
       const rows = await coinSearch(registryQuery);
-      if (rows === null) continue;
+      if (rows === null) {
+        searchFailures += 1;
+        continue;
+      }
       anySearchCompleted = true;
       search = rows;
       for (const row of rankedCandidates(registryQuery, rows)) {
@@ -1649,10 +1658,15 @@ export async function collectProjectTokenIdentity(
     }
 
     const coinDetailsUnavailable = inspected.some((candidate) => candidate.details === null);
-    if ((registryQueries.length > 0 && !search) || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
+    const coinSearchIncomplete = registryQueries.length > 0 && (!search || searchFailures > 0);
+    if (coinSearchIncomplete || coinDetailsUnavailable || dexSearchEverFailed || contractLookupFailed) {
       const gaps = [
         contractLookupFailed ? "CoinGecko contract lookup failed" : null,
-        registryQueries.length > 0 && !search ? "CoinGecko search failed" : null,
+        coinSearchIncomplete
+          ? !search
+            ? "CoinGecko search failed"
+            : `CoinGecko search failed for ${searchFailures} of ${registryQueries.length} queries`
+          : null,
         coinDetailsUnavailable ? "one or more CoinGecko candidate records failed" : null,
         dexSearchEverFailed ? "DexScreener project search failed" : null,
       ].filter((part): part is string => Boolean(part));
