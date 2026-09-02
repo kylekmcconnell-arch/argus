@@ -95,7 +95,11 @@ import { collectTrustGraph } from "./adapters/trustgraph";
 import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adapters/projectToken";
-import { hydrateProjectTeamFromVerifiedFacts, projectProviderBackedBasicFacts } from "./basicFactsProjection";
+import {
+  hydrateProjectTeamFromVerifiedFacts,
+  isInstitutionalOrganizationSubject,
+  projectProviderBackedBasicFacts,
+} from "./basicFactsProjection";
 import { enforceProjectFactCoherence } from "./projectFactCoherence";
 import {
   collectProtocolAuditLinks,
@@ -743,8 +747,13 @@ export function applySiteSubstanceOutcome(
 
   // A personal profile URL is not automatically the website of a project the
   // person founded, advised, or invested in. Preserve the observed page state,
-  // but do not create project counter-evidence without a project route.
+  // but do not create project counter-evidence without a project route. The
+  // same holds for a fund or agency brand account: its site is not a product
+  // surface, and the copy must not call the organization a person.
   if (!isProject) {
+    const organization = isOrganizationAccount(ctx.evidence);
+    const profileKind = organization ? "organization-profile" : "personal-profile";
+    const subjectNoun = organization ? "organization" : "person";
     ctx.emit({
       phase: "P2 · Substance",
       label: verifiedNotLive
@@ -753,10 +762,10 @@ export function applySiteSubstanceOutcome(
           ? "Profile website check unavailable"
           : "Profile website checked",
       detail: verifiedNotLive
-        ? `${domain} serves a verified coming-soon or parked page. This personal-profile URL is not treated as project counter-evidence.`
+        ? `${domain} serves a verified coming-soon or parked page. This ${profileKind} URL is not treated as project counter-evidence.`
         : site.status === "coming_soon"
           ? `${domain} returned an ungrounded coming-soon label. No profile or project-liveness conclusion was drawn.`
-        : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this person profile.`,
+        : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this ${subjectNoun} profile.`,
       source: "site-fetch",
       tone: "neutral",
     });
@@ -2495,6 +2504,101 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
       });
     }
   }
+}
+
+/**
+ * The organization counterpart of projectVerifiedBasicFacts for a fund or
+ * agency brand account (INVESTOR / AGENCY routed, organization-shaped, not a
+ * PROJECT). The investor_org / organization question set asks the same
+ * identity and leadership questions a PROJECT is asked, and its answers pass
+ * the same independent fetch plus exact-excerpt verification. Only the PROJECT
+ * path turned those answers into checklist outcomes, so a fund whose brand and
+ * general partners were verified from fetched sources still published
+ * identity-resolution (never-waive, decision-critical for INVESTOR) and
+ * affiliations-associates as never recorded, and the report stayed
+ * "not ready" on a gate the frozen evidence had already closed.
+ *
+ * Same evidence standard as the PROJECT path: a strictly verified brand
+ * identity bound to the provider-resolved account's canonical official site, or
+ * founder / executive records verified from fetched, cited sources. Provider
+ * projections of the account's own self-description never qualify. Nothing
+ * here touches the legal-entity or entity-sanctions gates, which remain owned
+ * by the organization safety pass.
+ */
+export function organizationVerifiedBasicFacts(ctx: CollectContext): void {
+  const roles = providerBackedRoles(ctx.evidence);
+  if (!isInstitutionalOrganizationSubject({ ...ctx.evidence, roles })) return;
+  const facts = (ctx.evidence.basicFacts ?? []).filter(isRetainedSourceFact).filter(isStrictlyVerifiedFact);
+  if (!facts.length) return;
+  const audience = roles.includes(SubjectClass.INVESTOR) ? "fund" : "organization";
+
+  const brandIdentity = facts.find((fact) =>
+    fact.predicate === "official_identity"
+    && fact.sources.some((source) => source.sourceClass === "official_subject"));
+  const officialWebsite = canonicalOfficialWebsite(ctx.evidence.profile.website);
+  const officialWebsiteSources = officialWebsite
+    ? facts.flatMap((fact) => fact.sources).filter((source) => {
+      if (source.sourceClass !== "official_subject") return false;
+      try {
+        const host = new URL(source.url).hostname.replace(/^www\./, "").toLowerCase();
+        return host === officialWebsite.domain || host.endsWith(`.${officialWebsite.domain}`);
+      } catch {
+        return false;
+      }
+    })
+    : [];
+  const brandIdentityBound = Boolean(
+    brandIdentity
+    && officialWebsite
+    && ctx.evidence.profile.profile_collection_state === "resolved"
+    && ctx.evidence.profile.profile_provider === "twitterapi"
+    && (ctx.evidence.profile.site_substance_status === "live" || officialWebsiteSources.length > 0)
+    && ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation",
+  );
+  if (brandIdentityBound && brandIdentity && officialWebsite) {
+    ctx.evidence.profile.identity_confidence = "Confirmed";
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `${audience} brand identity confirmed by the provider-resolved official X account and official site ${officialWebsite.domain}; the people who run it remain a separate team finding`,
+      provider: "twitterapi/basic-facts-web/site-fetch",
+      sourceCount: brandIdentity.sources.length + Math.max(1, officialWebsiteSources.length),
+    });
+  }
+
+  const people = facts.filter((fact) =>
+    (fact.predicate === "founder" || fact.predicate === "executive")
+    && !handlesMatch(fact.value, ctx.handle));
+  if (!people.length) return;
+  const peopleSourceCount = people.reduce((total, fact) => total + fact.sources.length, 0);
+  const publicRecordIdentity = people.some((fact) => {
+    const domains = new Set(fact.sources
+      .filter((src) => src.sourceClass !== "official_subject")
+      .map((src) => registrableDomain(src.url))
+      .filter((domain): domain is string => Boolean(domain)));
+    return domains.size >= 2;
+  });
+  if (ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation") {
+    if (publicRecordIdentity) {
+      ctx.evidence.profile.identity_confidence = "Confirmed";
+    } else if (ctx.evidence.profile.identity_confidence === "Unverified") {
+      ctx.evidence.profile.identity_confidence = "Probable";
+    }
+  }
+  ctx.recordCheck?.({
+    id: "identity-resolution",
+    status: "confirmed",
+    note: `${audience} identity resolved through ${people.length} founder or executive record${people.length === 1 ? "" : "s"} verified from fetched, cited public sources`,
+    provider: "basic-facts-web",
+    sourceCount: peopleSourceCount,
+  });
+  ctx.recordCheck?.({
+    id: "affiliations-associates",
+    status: "confirmed",
+    note: `${people.length} ${audience} leadership affiliation${people.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+    provider: "basic-facts-web",
+    sourceCount: peopleSourceCount,
+  });
 }
 
 type FounderDecisionCheckId =
@@ -4655,6 +4759,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     });
   }
   projectVerifiedBasicFacts(ctx);
+  organizationVerifiedBasicFacts(ctx);
 
   // Post-discovery signal passes, all before the analyst so their findings feed
   // the scoring. Token lifecycle is keyless (DexScreener); cadence needs the

@@ -69,6 +69,25 @@ export const PERSON_SUPPLEMENTAL_CHECK_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The investigation contract requires the trust-graph screen because the bound
+ * project-account collector runs and persists it. When the investigation never
+ * bound a project account (the token's sources linked no official X account, or
+ * no analyst was available), reconcileInvestigationChecks stamps the row from
+ * the embedded-audit outcome as unavailable and not retryable: the token is
+ * exactly a standalone token scan, which has no producer for this screen and
+ * does not carry it in its denominator. Keeping it required here left every
+ * account-less token pasted into the default (investigation) search shell at
+ * "6 of 7 checks finished" forever, with PASS presented as provisional. A
+ * failed embedded audit of a real account keeps the row required: that gap can
+ * be closed by a rescan.
+ */
+function isUnboundInvestigationGraphRow(check: ScanCheck, checkId: string): boolean {
+  return checkId === "trust-graph-connections"
+    && check.provider === "project-account-audit"
+    && check.retryable === false;
+}
+
+/**
  * Apply one explicit completion contract at every read and write boundary.
  * Persisted flags are evidence metadata, not authority over current public
  * completion semantics, so token/investigation rows are normalized even when
@@ -84,6 +103,9 @@ export function applyReportCheckContract(
   const normalized = checks.map((check) => {
     const checkId = check.checkId?.trim() ?? "";
     if (kind === "token" || kind === "investigation") {
+      if (kind === "investigation" && isUnboundInvestigationGraphRow(check, checkId)) {
+        return { ...check, decisionCritical: false };
+      }
       if (checkId && requiredIds.has(checkId)) {
         return { ...check, decisionCritical: true };
       }

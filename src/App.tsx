@@ -35,6 +35,7 @@ import type { TokenDossier } from "./token/audit";
 import { resolveTokenSubject, type TokenCandidate } from "./token/resolveSubject";
 import type { NavTarget } from "./components/Sidebar";
 import { personChecks, reconcileInvestigationChecks, tokenChecks } from "./lib/scanChecklist";
+import { applyReportCheckContract } from "./lib/reportCheckContract";
 import { deriveDecisionReadiness } from "./lib/decisionReadiness";
 import { normalizeSubjectRef } from "./lib/subjectRef";
 import { useArgusAuth } from "./auth-context";
@@ -739,13 +740,18 @@ export default function App() {
     logAudit({
       kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
       summary: inv.founderNote,
-      coverage: deriveDecisionReadiness(reconcileInvestigationChecks(
+      // Same completion contract the investigation report and the stored
+      // version apply. The raw token checklist carries the org-side rows
+      // (docs, news, GitHub) as required, so without the contract every
+      // finished investigation logged "incomplete" to recents and the shared
+      // feed while its own report read complete.
+      coverage: deriveDecisionReadiness(applyReportCheckContract("investigation", reconcileInvestigationChecks(
         tokenChecks(inv.token),
         inv.token.address,
         inv.projectAccount,
         inv.projectAccountAudit,
         inv.projectAccountBinding,
-      )).status,
+      ))).status,
       flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
     });
     const c = investigationContribution(inv);
@@ -804,7 +810,7 @@ export default function App() {
     logAudit({
       kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
       summary: d.headline,
-      coverage: deriveDecisionReadiness(tokenChecks(d)).status,
+      coverage: deriveDecisionReadiness(applyReportCheckContract("token", tokenChecks(d))).status,
       flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
     });
     recordContribution(tokenContribution(d.symbol, d.verdict, d.graph.nodes, d.graph.edges));

@@ -549,8 +549,20 @@ export function corroborateVenturesAgainstFirstPartySources(evidence: CollectedE
  * them; keeping that answer trapped in one panel made the final report still
  * claim that no team was known.
  */
+/**
+ * A fund or agency brand account is an organization exactly the way a PROJECT
+ * account is: the people the investor_org / organization question set verifies
+ * as its founders and executives are the people behind the subject, and the
+ * roster is where the reader expects to find them.
+ */
+export function isInstitutionalOrganizationSubject(evidence: CollectedEvidence): boolean {
+  return !evidence.roles.includes(SubjectClass.PROJECT)
+    && evidence.roles.some((role) => role === SubjectClass.INVESTOR || role === SubjectClass.AGENCY)
+    && isOrganizationAccount(evidence);
+}
+
 export function hydrateProjectTeamFromVerifiedFacts(evidence: CollectedEvidence): void {
-  if (!evidence.roles.includes(SubjectClass.PROJECT)) return;
+  if (!evidence.roles.includes(SubjectClass.PROJECT) && !isInstitutionalOrganizationSubject(evidence)) return;
   const team = evidence.webTeam ?? (evidence.webTeam = []);
   const existing = new Set(team.flatMap((member) => [
     normalizeValue(member.name),
@@ -572,7 +584,8 @@ export function hydrateProjectTeamFromVerifiedFacts(evidence: CollectedEvidence)
       name,
       ...(name.startsWith("@") ? { handle: name } : {}),
       role,
-      source: supportingSource.title || "Verified project leadership source",
+      source: supportingSource.title
+        || (evidence.roles.includes(SubjectClass.PROJECT) ? "Verified project leadership source" : "Verified organization leadership source"),
       sourceUrl: supportingSource.url,
       evidence: supportingSource.excerpt,
       evidence_origin: "deterministic",

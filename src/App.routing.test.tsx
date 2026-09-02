@@ -1195,6 +1195,46 @@ describe("App routing safety", () => {
     }));
   });
 
+  it("logs a finished token scan to recents with the same completion contract its report applies", async () => {
+    const address = "0x7777777777777777777777777777777777777777";
+    // Every check the standalone token collector actually runs has an outcome.
+    // The org-side rows (docs, news, GitHub, trust graph) have no token-side
+    // producer and are supplemental under the report contract; the raw
+    // checklist still carries them as required, which used to log this same
+    // scan as "incomplete" while its report read complete.
+    const fullyCovered = {
+      ...tokenResult(address, "fully covered token"),
+      safety: {
+        available: true,
+        simChecked: true,
+        tradeabilityAssessed: true,
+        buyTax: 0,
+        sellTax: 0,
+        holderCount: 1200,
+        topHolderPct: 12,
+        ownerRenounced: true,
+        openSource: true,
+      },
+      topHolders: [{ address: "0xholder1", percent: 12 }, { address: "0xholder2", percent: 8 }],
+      holdersAssessed: true,
+      cg: { listed: true, cexCount: 2, rank: 400 },
+      sanctionsScreen: { available: true, checked: 3, sanctioned: [], completedAt: "2026-08-30T00:00:00.000Z" },
+    };
+    await renderApp();
+
+    await act(async () => {
+      harness.scanOnComplete?.({ id: "scan-full-token", kind: "token", priv: false, result: fullyCovered, creditKey: "credit-full-token", startedAt: Date.now() });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(harness.logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "token",
+      ref: address,
+      verdict: "PASS",
+      coverage: "ready",
+    })));
+  });
+
   it("runs deep investigation team discovery only after persistence with the exact capability", async () => {
     const address = "0x6666666666666666666666666666666666666666";
     harness.syncReport.mockResolvedValue({

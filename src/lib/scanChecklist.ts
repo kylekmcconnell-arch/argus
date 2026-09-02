@@ -545,6 +545,12 @@ export function reconcileInvestigationChecks(
       const note = projectAccountAudit.state === "complete"
         ? "Embedded project-account audit completed without a stored check ledger."
         : projectAccountAudit.note;
+      // "unavailable" means the embedded collector never had a project account
+      // to run against (no official X account resolved, or no analyst in this
+      // deployment). A rescan of the token cannot produce that account, so the
+      // org-side rows stay open with no retry on offer. A "failed" audit had an
+      // account and can be retried, so it keeps the default retry affordance.
+      const unbound = projectAccountAudit.state === "unavailable";
       for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
         const target = rows.find((row) =>
           row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
@@ -552,6 +558,7 @@ export function reconcileInvestigationChecks(
         target.status = "unavailable";
         target.note = note;
         target.provider = "project-account-audit";
+        if (unbound) target.retryable = false;
       }
     }
     return rows;
