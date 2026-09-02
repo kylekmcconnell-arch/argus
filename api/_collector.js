@@ -28197,6 +28197,8 @@ var DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens";
 var DEXSCREENER_SEARCH = "https://api.dexscreener.com/latest/dex/search";
 var GECKOTERMINAL = "https://api.geckoterminal.com/api/v2";
 var MAX_CANDIDATES3 = 3;
+var MAX_DETAIL_FETCHES = 6;
+var coingeckoThrottle = { backoffMs: 1500 };
 var MAX_HISTORY_POINTS = 90;
 var PRICE_TOLERANCE = 0.25;
 var MIN_POOL_LIQUIDITY_USD = 25e3;
@@ -28323,15 +28325,27 @@ var coingeckoConfig = () => {
     tier: key ? "subscription/keyed" : "keyless"
   };
 };
+async function coingeckoFetch(url, headers4, label, tier) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let response;
+    try {
+      response = await fetch(url, { headers: headers4, signal: AbortSignal.timeout(1e4) });
+    } catch {
+      return null;
+    }
+    if (response.status === 429 && attempt === 0) {
+      recordCall("coingecko", label, 0, `${tier} \xB7 http_429 \xB7 backing_off_once`, "partial");
+      await new Promise((resolve) => setTimeout(resolve, coingeckoThrottle.backoffMs));
+      continue;
+    }
+    return response;
+  }
+  return null;
+}
 async function coinSearch(query) {
   const { base, headers: headers4, tier } = coingeckoConfig();
-  let response;
-  try {
-    response = await fetch(`${base}/search?query=${encodeURIComponent(query)}`, {
-      headers: headers4,
-      signal: AbortSignal.timeout(1e4)
-    });
-  } catch {
+  const response = await coingeckoFetch(`${base}/search?query=${encodeURIComponent(query)}`, headers4, "project-search", tier);
+  if (!response) {
     recordCall("coingecko", "project-search", 0, `${tier} \xB7 transport_error`, "failed");
     return null;
   }
@@ -28393,10 +28407,8 @@ function rankedCandidates(query, rows) {
 async function coinDetails(id) {
   const { base, headers: headers4, tier } = coingeckoConfig();
   const url = `${base}/coins/${encodeURIComponent(id)}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`;
-  let response;
-  try {
-    response = await fetch(url, { headers: headers4, signal: AbortSignal.timeout(1e4) });
-  } catch {
+  const response = await coingeckoFetch(url, headers4, "project-details", tier);
+  if (!response) {
     recordCall("coingecko", "project-details", 0, `${tier} \xB7 transport_error`, "failed");
     return null;
   }
@@ -29223,6 +29235,15 @@ async function collectProfileDeclaredToken(ctx, candidate) {
     }
   };
 }
+var completedEmptyQueries = /* @__PURE__ */ new WeakMap();
+function emptyQueryLedger(evidence) {
+  let ledger = completedEmptyQueries.get(evidence);
+  if (!ledger) {
+    ledger = { coingecko: /* @__PURE__ */ new Set(), dexscreener: /* @__PURE__ */ new Set() };
+    completedEmptyQueries.set(evidence, ledger);
+  }
+  return ledger;
+}
 function registryContractMatchingDeclared(details, candidate) {
   const platforms = isRecord4(details.platforms) ? details.platforms : {};
   for (const [platform, value] of Object.entries(platforms)) {
@@ -29360,10 +29381,17 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     }
   }
   let searchFailures = 0;
+  const emptyLedger = emptyQueryLedger(ctx.evidence);
   if (!selected && registryQueries.length) {
     const seenIds = /* @__PURE__ */ new Set();
     let anySearchCompleted = false;
     for (const registryQuery of registryQueries) {
+      const queryKey = registryQuery.toLowerCase();
+      if (emptyLedger.coingecko.has(queryKey)) {
+        anySearchCompleted = true;
+        search ??= [];
+        continue;
+      }
       const rows = await coinSearch(registryQuery);
       if (rows === null) {
         searchFailures += 1;
@@ -29371,15 +29399,18 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
       }
       anySearchCompleted = true;
       search = rows;
-      for (const row of rankedCandidates(registryQuery, rows)) {
+      const ranked = rankedCandidates(registryQuery, rows);
+      if (!ranked.length) emptyLedger.coingecko.add(queryKey);
+      for (const row of ranked) {
         if (seenIds.has(row.id)) continue;
         seenIds.add(row.id);
         candidates.push(row);
       }
     }
     if (!anySearchCompleted) search = null;
-    detailAttempts += candidates.length;
-    inspected = await Promise.all(candidates.map(async (candidate) => {
+    const inspectedCandidates = candidates.slice(0, MAX_DETAIL_FETCHES);
+    detailAttempts += inspectedCandidates.length;
+    inspected = await Promise.all(inspectedCandidates.map(async (candidate) => {
       const details2 = await coinDetails(candidate.id);
       if (!details2) return { details: null, selected: null };
       registryHomepages.push(...cgHandleBoundHomepages(ctx, details2));
@@ -29403,16 +29434,26 @@ async function collectProjectTokenIdentity(ctx, dependencies = {}) {
     let dexSearchEverFailed = false;
     const dexNameMatches = /* @__PURE__ */ new Set();
     let dexNameMatchCount = 0;
+    let dexQueriesSkipped = 0;
     for (const fallbackQuery of dexQueries) {
       if (dexFallback.state === "matched") break;
+      const queryKey = fallbackQuery.toLowerCase();
+      if (emptyLedger.dexscreener.has(queryKey)) {
+        dexQueriesSkipped += 1;
+        continue;
+      }
       const retry = await collectDexProjectToken(ctx, fallbackQuery);
       dexAttempts += retry.attempts;
       if (retry.state === "failed") dexSearchEverFailed = true;
       if (retry.state === "empty") {
+        if (!(retry.nameMatchCount ?? 0) && !retry.nameMatches?.length) emptyLedger.dexscreener.add(queryKey);
         for (const match of retry.nameMatches ?? []) dexNameMatches.add(match);
         dexNameMatchCount = Math.max(dexNameMatchCount, retry.nameMatchCount ?? 0);
       }
       if (retry.state === "matched") dexFallback = retry;
+    }
+    if (dexFallback.state === "empty" && dexQueriesSkipped && dexQueriesSkipped === dexQueries.length) {
+      dexFallback = { ...dexFallback, detail: "DexScreener project search already completed empty earlier in this run" };
     }
     if (dexFallback.state !== "matched" && dexNameMatches.size) {
       dexFallback = {
