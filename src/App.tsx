@@ -286,6 +286,17 @@ function storedCaseRefsAreAmbiguous(subjects: StoredCaseSubject[]): boolean {
   return new Set(subjects.map((subject) => subject.ref)).size > 1;
 }
 
+/** One chooser row per exact (kind, ref) facet, in the order the server returned them. */
+function ambiguousCaseChoices(subjects: StoredCaseSubject[]): StoredCaseSubject[] {
+  const seen = new Set<string>();
+  return subjects.filter((subject) => {
+    const key = `${subject.kind}:${subject.ref}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * The durable token case bound to one exact contract, whichever report kind
  * saved it. A contract search prefers a fresh combined investigation, so this
@@ -367,6 +378,8 @@ export default function App() {
     kind?: ReportKind;
     mode?: TokenLaunchMode;
     reuseStored?: boolean;
+    /** The exact durable cases behind an ambiguous label, offered as a chooser (case-ambiguous only). */
+    subjects?: StoredCaseSubject[];
   } | null>(null);
   const [tokenChoices, setTokenChoices] = useState<TokenCandidate[]>([]);
   const [tokenChoicePrivate, setTokenChoicePrivate] = useState(false);
@@ -1108,6 +1121,15 @@ export default function App() {
       setPhase("notfound");
       return;
     }
+    if (lookup.status === "ambiguous") {
+      // Not an outage: the label maps to several durable cases. Offer them;
+      // never guess between refs and never start a paid scan to disambiguate.
+      setQuery(ref);
+      setCaseNotice({ reason: "case-ambiguous", ref, kind: requestedKind, subjects: lookup.subjects ?? [] });
+      setLiveError(null);
+      setPhase("notfound");
+      return;
+    }
     if (lookup.status === "unavailable") {
       setQuery(ref);
       setCaseNotice({ reason: "unavailable", ref, kind: requestedKind });
@@ -1255,7 +1277,7 @@ export default function App() {
         }
         if (storedCaseRefsAreAmbiguous(storedLookup.subjects)) {
           setQuery(candidate.canonicalRef);
-          setCaseNotice({ reason: "case-ambiguous", ref: candidate.canonicalRef });
+          setCaseNotice({ reason: "case-ambiguous", ref: candidate.canonicalRef, subjects: storedLookup.subjects });
           setLiveError(null);
           setPhase("notfound");
           return;
@@ -1345,7 +1367,7 @@ export default function App() {
         }
         if (storedLookup.subjects.length) {
           setQuery(raw);
-          setCaseNotice({ reason: "case-ambiguous", ref: raw });
+          setCaseNotice({ reason: "case-ambiguous", ref: raw, subjects: storedLookup.subjects });
           setLiveError(null);
           setPhase("notfound");
           return;
@@ -1398,7 +1420,7 @@ export default function App() {
         }
         if (storedCaseRefsAreAmbiguous(storedLookup.subjects)) {
           setQuery(raw);
-          setCaseNotice({ reason: "case-ambiguous", ref: raw });
+          setCaseNotice({ reason: "case-ambiguous", ref: raw, subjects: storedLookup.subjects });
           setLiveError(null);
           setPhase("notfound");
           return;
@@ -1878,9 +1900,29 @@ export default function App() {
                         : caseNotice.reason === "token-unresolved"
                           ? "No exact DexScreener contract matched that token input. ARGUS did not reinterpret it as a person or spend any investigation quota. Paste the contract address, a DexScreener URL, or an exact $TICKER."
                           : caseNotice.reason === "case-ambiguous"
-                            ? "Several durable cases share that label. Open the report library and choose the exact case facet; ARGUS will not guess or start a scan."
+                            ? caseNotice.subjects?.length
+                              ? "Several durable cases share that label. Choose the exact case below; ARGUS will not guess between them or start a scan."
+                              : "Several durable cases share that label. Open the report library and choose the exact case facet; ARGUS will not guess or start a scan."
                             : "ARGUS could not safely verify whether this case is active or archived. No cached report was opened and no paid scan was started."}
               </p>
+              {caseNotice.reason === "case-ambiguous" && caseNotice.subjects?.length ? (
+                <div className="mt-4 flex w-full max-w-md flex-col gap-2" data-testid="case-chooser">
+                  {ambiguousCaseChoices(caseNotice.subjects).map((subject) => (
+                    <button
+                      key={`${subject.kind}:${subject.ref}`}
+                      type="button"
+                      data-testid="case-choice"
+                      onClick={() => void onOpenRecent(subject.ref, subject.kind)}
+                      className="panel-inset flex items-center justify-between gap-3 rounded-lg px-3 py-2 text-left text-[13px] transition hover:border-line-2"
+                    >
+                      <span className="mono break-all text-ink">{subject.ref}</span>
+                      <span className="shrink-0 text-ink-dim">
+                        {subject.kind}{subject.status === "archived" ? " · archived" : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {caseNotice.reason === "launch-failed" && liveError && (
                 <div role="alert" className="mono panel-inset mt-3 max-w-md break-words px-3 py-2 text-left text-[12.5px] text-ink-dim">
                   {liveError}

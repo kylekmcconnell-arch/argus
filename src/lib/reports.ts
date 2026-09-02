@@ -364,8 +364,15 @@ export interface StoredReport {
 }
 
 export interface ReportLookup {
-  status: ReportStatus | "missing" | "unavailable";
+  status: ReportStatus | "missing" | "unavailable" | "ambiguous";
   report: StoredReport | null;
+  /**
+   * The distinct durable subjects a label resolved to when the server answered
+   * `409 case_subject_ambiguous`. Present only with status "ambiguous". This is
+   * a deterministic answer, not an outage: the analyst chooses one, ARGUS never
+   * guesses and never starts a scan.
+   */
+  subjects?: StoredCaseSubject[];
 }
 
 /** Attach read-only version context without modifying the immutable payload. */
@@ -503,6 +510,32 @@ export async function changeReportLifecycle(
   }
 }
 
+/** Strict shape check for server-supplied durable case subjects; null when any row is malformed. */
+function parseStoredCaseSubjects(rows: unknown): StoredCaseSubject[] | null {
+  if (!Array.isArray(rows)) return null;
+  const subjects: StoredCaseSubject[] = [];
+  for (const candidate of rows) {
+    if (!candidate || typeof candidate !== "object") return null;
+    const row = candidate as Record<string, unknown>;
+    if (
+      typeof row.caseId !== "string"
+      || (row.kind !== "person" && row.kind !== "token" && row.kind !== "investigation" && row.kind !== "site")
+      || typeof row.ref !== "string"
+      || typeof row.query !== "string"
+      || (row.status !== "open" && row.status !== "archived")
+    ) return null;
+    subjects.push({
+      caseId: row.caseId,
+      kind: row.kind,
+      ref: row.ref,
+      query: row.query,
+      status: row.status,
+      updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : undefined,
+    });
+  }
+  return subjects;
+}
+
 /**
  * Resolve user-facing labels and legacy case-folded refs to exact durable case
  * identities. This reads `cases`, not the active report cache, so archived
@@ -518,31 +551,9 @@ export async function resolveStoredCases(input: string): Promise<StoredCaseResol
         return { status: "unavailable", subjects: [] };
       }
       const body = await response.json() as { available?: unknown; subjects?: unknown };
-      if (body.available !== true || !Array.isArray(body.subjects)) {
-        return { status: "unavailable", subjects: [] };
-      }
-      const subjects: StoredCaseSubject[] = [];
-      for (const candidate of body.subjects) {
-        if (!candidate || typeof candidate !== "object") {
-          return { status: "unavailable", subjects: [] };
-        }
-        const row = candidate as Record<string, unknown>;
-        if (
-          typeof row.caseId !== "string"
-          || (row.kind !== "person" && row.kind !== "token" && row.kind !== "investigation" && row.kind !== "site")
-          || typeof row.ref !== "string"
-          || typeof row.query !== "string"
-          || (row.status !== "open" && row.status !== "archived")
-        ) return { status: "unavailable", subjects: [] };
-        subjects.push({
-          caseId: row.caseId,
-          kind: row.kind,
-          ref: row.ref,
-          query: row.query,
-          status: row.status,
-          updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : undefined,
-        });
-      }
+      if (body.available !== true) return { status: "unavailable", subjects: [] };
+      const subjects = parseStoredCaseSubjects(body.subjects);
+      if (!subjects) return { status: "unavailable", subjects: [] };
       return { status: "ok", subjects };
     } catch {
       if (attempt === 0) continue;
@@ -562,6 +573,16 @@ export async function fetchReportState(ref: string, kind?: ReportKind): Promise<
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (r.status === 409) {
+        // Deterministic: the label maps to more than one durable case. A retry
+        // returns the same answer, and "unavailable" would read as an outage
+        // and dead-end the analyst on a report that exists.
+        const body = await r.json().catch(() => null) as { error?: unknown; subjects?: unknown } | null;
+        const subjects = body?.error === "case_subject_ambiguous" ? parseStoredCaseSubjects(body.subjects) : null;
+        return subjects && subjects.length
+          ? { status: "ambiguous", report: null, subjects }
+          : { status: "unavailable", report: null };
+      }
       if (!r.ok) { if (attempt === 0) continue; return { status: "unavailable", report: null }; }
       const d = await r.json() as { report?: StoredReport | null; caseStatus?: ReportStatus | "missing" };
       const report = d?.report ?? null;

@@ -611,6 +611,51 @@ describe("App routing safety", () => {
     expectNoRunnerStarted();
   });
 
+  it("offers a chooser instead of the unavailable notice when a stored label resolves to two refs", async () => {
+    harness.shellInput = "@clutch";
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-clutch",
+        kind: "person",
+        ref: "clutch",
+        query: "@clutch",
+        status: "open",
+      }],
+    });
+    harness.fetchReportState
+      .mockResolvedValueOnce({
+        status: "ambiguous",
+        report: null,
+        subjects: [
+          { caseId: "case-clutch", kind: "person", ref: "clutch", query: "@clutch", status: "open" },
+          { caseId: "case-clutchmarkets", kind: "person", ref: "clutchmarkets", query: "@CLUTCHMARKETS", status: "open" },
+        ],
+      })
+      .mockResolvedValue({ status: "archived", report: null });
+    harness.getRun.mockReturnValue({ handle: "clutch", status: "running" });
+
+    const view = await renderApp();
+    await submitShell();
+
+    expect(view.textContent).toContain("More than one stored case matches");
+    expect(view.textContent).not.toContain("Stored case status is unavailable");
+    const choices = container?.querySelectorAll<HTMLButtonElement>("[data-testid='case-choice']") ?? [];
+    expect(choices).toHaveLength(2);
+    expect(choices[1].textContent).toContain("clutchmarkets");
+
+    await act(async () => {
+      choices[1].click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(harness.fetchReportState).toHaveBeenLastCalledWith("clutchmarkets", "person");
+    expect(view.textContent).toContain("This case is archived");
+    expect(harness.getRun).not.toHaveBeenCalled();
+    expectNoRunnerStarted();
+  });
+
   it.each([
     ["X profile URL", "https://x.com/Alice/status/123", "Alice"],
     ["site URL", "HTTPS://Example.COM/Path/", "example.com"],
