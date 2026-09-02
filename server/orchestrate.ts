@@ -747,8 +747,13 @@ export function applySiteSubstanceOutcome(
 
   // A personal profile URL is not automatically the website of a project the
   // person founded, advised, or invested in. Preserve the observed page state,
-  // but do not create project counter-evidence without a project route.
+  // but do not create project counter-evidence without a project route. The
+  // same holds for a fund or agency brand account: its site is not a product
+  // surface, and the copy must not call the organization a person.
   if (!isProject) {
+    const organization = isOrganizationAccount(ctx.evidence);
+    const profileKind = organization ? "organization-profile" : "personal-profile";
+    const subjectNoun = organization ? "organization" : "person";
     ctx.emit({
       phase: "P2 · Substance",
       label: verifiedNotLive
@@ -757,10 +762,10 @@ export function applySiteSubstanceOutcome(
           ? "Profile website check unavailable"
           : "Profile website checked",
       detail: verifiedNotLive
-        ? `${domain} serves a verified coming-soon or parked page. This personal-profile URL is not treated as project counter-evidence.`
+        ? `${domain} serves a verified coming-soon or parked page. This ${profileKind} URL is not treated as project counter-evidence.`
         : site.status === "coming_soon"
           ? `${domain} returned an ungrounded coming-soon label. No profile or project-liveness conclusion was drawn.`
-        : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this person profile.`,
+        : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this ${subjectNoun} profile.`,
       source: "site-fetch",
       tone: "neutral",
     });

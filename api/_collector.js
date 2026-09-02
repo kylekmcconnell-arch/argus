@@ -33181,10 +33181,13 @@ function applySiteSubstanceOutcome(ctx, domain, site) {
   const verifiedProjectToken = ctx.evidence.projectToken?.verified === true ? ctx.evidence.projectToken : void 0;
   const verifiedNotLive = site.status === "coming_soon" && (site.reason === "coming_soon" || site.reason === "parked");
   if (!isProject) {
+    const organization = isOrganizationAccount(ctx.evidence);
+    const profileKind = organization ? "organization-profile" : "personal-profile";
+    const subjectNoun = organization ? "organization" : "person";
     ctx.emit({
       phase: "P2 \xB7 Substance",
       label: verifiedNotLive ? "Profile website is not launched" : site.status === "coming_soon" ? "Profile website check unavailable" : "Profile website checked",
-      detail: verifiedNotLive ? `${domain} serves a verified coming-soon or parked page. This personal-profile URL is not treated as project counter-evidence.` : site.status === "coming_soon" ? `${domain} returned an ungrounded coming-soon label. No profile or project-liveness conclusion was drawn.` : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this person profile.`,
+      detail: verifiedNotLive ? `${domain} serves a verified coming-soon or parked page. This ${profileKind} URL is not treated as project counter-evidence.` : site.status === "coming_soon" ? `${domain} returned an ungrounded coming-soon label. No profile or project-liveness conclusion was drawn.` : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this ${subjectNoun} profile.`,
       source: "site-fetch",
       tone: "neutral"
     });
