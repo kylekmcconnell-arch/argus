@@ -49,10 +49,10 @@ function verifiedFact(
     questionId: `investor_org.${predicate}`,
     sources: [{
       url: `https://northstar.example/${predicate}`,
-      title: "Northstar Ventures — Team",
+      title: "Northstar Ventures: Team",
       sourceClass: "official_subject",
       relation: "supports",
-      excerpt: `${value} — ${predicate} at Northstar Ventures.`,
+      excerpt: `${value}, ${predicate} at Northstar Ventures.`,
       contentHash: predicate.padEnd(64, "0").slice(0, 64),
       capturedAt: "2026-08-30T12:00:00.000Z",
       provider: "public-web",
