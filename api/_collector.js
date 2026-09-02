@@ -29841,8 +29841,11 @@ function corroborateVenturesAgainstFirstPartySources(evidence) {
     }
   }
 }
+function isInstitutionalOrganizationSubject(evidence) {
+  return !evidence.roles.includes("PROJECT" /* PROJECT */) && evidence.roles.some((role) => role === "INVESTOR" /* INVESTOR */ || role === "AGENCY" /* AGENCY */) && isOrganizationAccount(evidence);
+}
 function hydrateProjectTeamFromVerifiedFacts(evidence) {
-  if (!evidence.roles.includes("PROJECT" /* PROJECT */)) return;
+  if (!evidence.roles.includes("PROJECT" /* PROJECT */) && !isInstitutionalOrganizationSubject(evidence)) return;
   const team = evidence.webTeam ?? (evidence.webTeam = []);
   const existing = new Set(team.flatMap((member) => [
     normalizeValue(member.name),
@@ -29861,7 +29864,7 @@ function hydrateProjectTeamFromVerifiedFacts(evidence) {
       name,
       ...name.startsWith("@") ? { handle: name } : {},
       role,
-      source: supportingSource.title || "Verified project leadership source",
+      source: supportingSource.title || (evidence.roles.includes("PROJECT" /* PROJECT */) ? "Verified project leadership source" : "Verified organization leadership source"),
       sourceUrl: supportingSource.url,
       evidence: supportingSource.excerpt,
       evidence_origin: "deterministic",
@@ -34387,6 +34390,65 @@ function projectVerifiedBasicFacts(ctx) {
     }
   }
 }
+function organizationVerifiedBasicFacts(ctx) {
+  const roles = providerBackedRoles(ctx.evidence);
+  if (!isInstitutionalOrganizationSubject({ ...ctx.evidence, roles })) return;
+  const facts = (ctx.evidence.basicFacts ?? []).filter(isRetainedSourceFact).filter(isStrictlyVerifiedFact);
+  if (!facts.length) return;
+  const audience = roles.includes("INVESTOR" /* INVESTOR */) ? "fund" : "organization";
+  const brandIdentity = facts.find((fact) => fact.predicate === "official_identity" && fact.sources.some((source2) => source2.sourceClass === "official_subject"));
+  const officialWebsite = canonicalOfficialWebsite(ctx.evidence.profile.website);
+  const officialWebsiteSources = officialWebsite ? facts.flatMap((fact) => fact.sources).filter((source2) => {
+    if (source2.sourceClass !== "official_subject") return false;
+    try {
+      const host2 = new URL(source2.url).hostname.replace(/^www\./, "").toLowerCase();
+      return host2 === officialWebsite.domain || host2.endsWith(`.${officialWebsite.domain}`);
+    } catch {
+      return false;
+    }
+  }) : [];
+  const brandIdentityBound = Boolean(
+    brandIdentity && officialWebsite && ctx.evidence.profile.profile_collection_state === "resolved" && ctx.evidence.profile.profile_provider === "twitterapi" && (ctx.evidence.profile.site_substance_status === "live" || officialWebsiteSources.length > 0) && ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation"
+  );
+  if (brandIdentityBound && brandIdentity && officialWebsite) {
+    ctx.evidence.profile.identity_confidence = "Confirmed";
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `${audience} brand identity confirmed by the provider-resolved official X account and official site ${officialWebsite.domain}; the people who run it remain a separate team finding`,
+      provider: "twitterapi/basic-facts-web/site-fetch",
+      sourceCount: brandIdentity.sources.length + Math.max(1, officialWebsiteSources.length)
+    });
+  }
+  const people = facts.filter((fact) => (fact.predicate === "founder" || fact.predicate === "executive") && !handlesMatch(fact.value, ctx.handle));
+  if (!people.length) return;
+  const peopleSourceCount = people.reduce((total, fact) => total + fact.sources.length, 0);
+  const publicRecordIdentity = people.some((fact) => {
+    const domains = new Set(fact.sources.filter((src) => src.sourceClass !== "official_subject").map((src) => registrableDomain(src.url)).filter((domain) => Boolean(domain)));
+    return domains.size >= 2;
+  });
+  if (ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation") {
+    if (publicRecordIdentity) {
+      ctx.evidence.profile.identity_confidence = "Confirmed";
+    } else if (ctx.evidence.profile.identity_confidence === "Unverified") {
+      ctx.evidence.profile.identity_confidence = "Probable";
+    }
+  }
+  ctx.recordCheck?.({
+    id: "identity-resolution",
+    status: "confirmed",
+    note: `${audience} identity resolved through ${people.length} founder or executive record${people.length === 1 ? "" : "s"} verified from fetched, cited public sources`,
+    provider: "basic-facts-web",
+    sourceCount: peopleSourceCount
+  });
+  ctx.recordCheck?.({
+    id: "affiliations-associates",
+    status: "confirmed",
+    note: `${people.length} ${audience} leadership affiliation${people.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+    provider: "basic-facts-web",
+    sourceCount: peopleSourceCount
+  });
+}
 var FOUNDER_DECISION_QUESTION_GROUPS = [
   {
     id: "founder-identity-authority",
@@ -35951,6 +36013,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     });
   }
   projectVerifiedBasicFacts(ctx);
+  organizationVerifiedBasicFacts(ctx);
   const trackedPass = (id, label, providers, work, onError) => {
     const before = attemptTotals(providers);
     return Promise.resolve().then(work).then(() => {
