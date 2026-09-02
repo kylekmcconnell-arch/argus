@@ -866,6 +866,28 @@ describe("token declared on the project's own site", () => {
     expect(siteContractCandidates(many).length).toBeLessThanOrEqual(10);
   });
 
+  it("extracts a base58 mint printed as a standalone word, after the EVM candidates", () => {
+    const html = `<footer>CA: ${SSR_TOKEN}</footer>
+      <a href="https://solscan.io/token/${SSR_TOKEN}">solscan</a>
+      <button>0xe934e36a439c94017b64a3fece66af12099abf50</button>
+      <span>11111111111111111111111111111111</span>`;
+    expect(siteContractCandidates(html)).toEqual([
+      "0xe934e36a439c94017b64a3fece66af12099abf50",
+      SSR_TOKEN,
+    ]);
+  });
+
+  it("never lets base58 words evict an EVM candidate under the cap", () => {
+    const evm = Array.from({ length: 10 }, (_, i) => `0x${String(i).padStart(2, "0")}${"a".repeat(38)}`);
+    const html = `${SSR_TOKEN} ${evm.join(" ")} ${SOLANA_TOKEN}`;
+    expect(siteContractCandidates(html)).toEqual(evm);
+  });
+
+  it("does not read the hex tail of a zero-free EVM address as a base58 word", () => {
+    const zeroFree = "0xabcdef123456789abcdef123456789abcdef1234";
+    expect(siteContractCandidates(`<p>${zeroFree}</p>`)).toEqual([zeroFree]);
+  });
+
   it("binds the CLUTCH / $STONKBROKER token from a second official first-party domain", async () => {
     // Live shape: @CLUTCHMARKETS lists clutch.markets (no contract) and
     // stonkbrokers.cash (vault + token). CoinGecko has no CLUTCH listing,
@@ -890,8 +912,8 @@ describe("token declared on the project's own site", () => {
       if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
       if (url === "https://clutch.markets/") return new Response("<html><p>CLUTCH markets</p></html>", { status: 200 });
       if (url === "https://stonkbrokers.cash/") return new Response(stonkHtml, { status: 200 });
-      if (url.includes(`/latest/dex/tokens/${vault}`)) return json({ pairs: [] });
-      if (url.includes(`/latest/dex/tokens/${token}`)) return json({
+      // One batched read for every address on the page; only the token has pairs.
+      if (url.includes(`/latest/dex/tokens/${vault},${token}`)) return json({
         pairs: [{
           chainId: "robinhood",
           pairAddress: pool,
@@ -1050,7 +1072,9 @@ describe("investigation contract bind", () => {
       if (url.includes("/coins/robinhood/contract/")) return json({}, 404);
       if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
       if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
-      if (url.toLowerCase().includes(`/latest/dex/tokens/${STONKBROKER_LC}`)) {
+      // The seeded read names the token alone; the site tier batches the
+      // vault and the token into one read. Either way only the token has pairs.
+      if (url.includes("/latest/dex/tokens/") && url.toLowerCase().includes(STONKBROKER_LC)) {
         return json({
           pairs: [{
             chainId: "robinhood",
@@ -1843,5 +1867,95 @@ describe("a bio-declared contract with no DEX market continues into the registry
     await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({ state: "partial" });
     expect(evidence.unresolvedProjectToken).toMatchObject({ address: PONS_TOKEN, state: "provider_unavailable" });
     expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "unavailable" }));
+  });
+});
+
+describe("a Solana mint published on the project's own verified site", () => {
+  // #335. The bio parser already read base58 mints; the site tier read only
+  // 0x addresses, so a Solana-native project printing "CA: ..." in its footer
+  // fell through to an assessed tokenless null.
+  const solanaPair = (address: string, pool: string, liquidity = 900_000) => ({
+    chainId: "solana",
+    pairAddress: pool,
+    url: `https://dexscreener.com/solana/${pool}`,
+    baseToken: { address, name: "Sunrise", symbol: "SSR" },
+    quoteToken: { address: OTHER_TOKEN, symbol: "SOL" },
+    priceUsd: "0.02",
+    liquidity: { usd: liquidity },
+  });
+
+  it("binds the mint as official_domain through one batched DexScreener read", async () => {
+    const { ctx, evidence } = context("@sunrise_sol", "Sunrise", "https://sunrise.example/");
+    const hashedAssets = ["9f8e7d6c5b4a3F2E1D9C8B7A6f5e4d3c2b1a9F8E", "Ab3Cd4Ef5Gh6Jk7Mn8Pq9Rs2Tu3Vw4Xy5Za6Bc7D"];
+    const html = `<script src="/assets/${hashedAssets[0]}.js"></script>
+      <p>CA: ${SSR_TOKEN}</p><img src="/img/${hashedAssets[1]}.png">`;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://sunrise.example/") return new Response(html, { status: 200 });
+      if (url.includes("/latest/dex/tokens/")) {
+        // Every candidate travels in one request; only the mint has a market.
+        expect(url).toContain(SSR_TOKEN);
+        return json({ schemaVersion: "1.0.0", pairs: [solanaPair(SSR_TOKEN, SSR_POOL)] });
+      }
+      if (url.includes("/ohlcv/")) return json({ data: { attributes: { ohlcv_list: [] } } });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("bound $SSR from the project's own site"),
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_domain",
+      symbol: "SSR",
+      address: SSR_TOKEN,
+      chain: "solana",
+      pairAddress: SSR_POOL,
+      homepage: "https://sunrise.example/",
+      producerSources: { identity: { provider: "official_site", sourceUrl: "https://sunrise.example/" } },
+    });
+    const tokenReads = fetchMock.mock.calls.filter(([input]) => String(input).includes("/latest/dex/tokens/"));
+    expect(tokenReads).toHaveLength(1);
+  });
+
+  it("binds nothing when the page's only base58 words are hashed asset names", async () => {
+    const { ctx, evidence } = context("@sunrise_sol", "Sunrise", "https://sunrise.example/");
+    const html = `<script src="/assets/9f8e7d6c5b4a3F2E1D9C8B7A6f5e4d3c2b1a9F8E.js"></script>`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://sunrise.example/") return new Response(html, { status: 200 });
+      if (url.includes("/latest/dex/tokens/")) return json({ schemaVersion: "1.0.0", pairs: null });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "finding" }));
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
+  });
+
+  it("still sees a second tradeable token hidden behind the 30-pair batch cap", async () => {
+    const { ctx, evidence } = context("@sunrise_sol", "Sunrise", "https://sunrise.example/");
+    const deepPools = Array.from({ length: 30 }, (_, i) => solanaPair(SSR_TOKEN, `pool-${i}`, 10_000 * (i + 1)));
+    const html = `<p>CA: ${SSR_TOKEN}</p><p>Treasury token: ${SOLANA_TOKEN}</p>`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url === "https://sunrise.example/") return new Response(html, { status: 200 });
+      if (url.includes(`/latest/dex/tokens/${SSR_TOKEN},${SOLANA_TOKEN}`)) return json({ pairs: deepPools });
+      if (url.endsWith(`/latest/dex/tokens/${SOLANA_TOKEN}`)) return json({ pairs: [{ ...solanaPair(SOLANA_TOKEN, "pool-jup"), baseToken: { address: SOLANA_TOKEN, name: "Jupiter", symbol: "JUP" } }] });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await collectProjectTokenIdentity(ctx);
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).not.toHaveBeenCalledWith(expect.objectContaining({ id: "project-token-identity", status: "confirmed" }));
   });
 });

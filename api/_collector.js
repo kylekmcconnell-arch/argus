@@ -28620,17 +28620,30 @@ function dexIdentity(ctx, row) {
     officialX: `@${exactHandle}`
   };
 }
+var SITE_EVM_ADDRESS = /0x[a-fA-F0-9]{40}/g;
+var SITE_SOLANA_ADDRESS = /(?:^|[^1-9A-HJ-NP-Za-km-z])([1-9A-HJ-NP-Za-km-z]{32,44})(?![1-9A-HJ-NP-Za-km-z])/g;
+var addressKey = (address) => address.startsWith("0x") ? address.toLowerCase() : address;
 function siteContractCandidates(html, limit = 10) {
   const out = [];
   const seen = /* @__PURE__ */ new Set();
-  for (const match of html.matchAll(/0x[a-fA-F0-9]{40}/g)) {
+  const take = (address) => {
+    const key = addressKey(address);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(address);
+    }
+    return out.length >= limit;
+  };
+  for (const match of html.matchAll(SITE_EVM_ADDRESS)) {
     const address = match[0];
-    const key = address.toLowerCase();
     if (/^0x0{40}$/i.test(address) || /^0x0{38}dead$/i.test(address)) continue;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(address);
-    if (out.length >= limit) break;
+    if (take(address)) return out;
+  }
+  const rest = html.replace(SITE_EVM_ADDRESS, " ");
+  for (const match of rest.matchAll(SITE_SOLANA_ADDRESS)) {
+    const address = match[1];
+    if (/^1+$/.test(address)) continue;
+    if (take(address)) break;
   }
   return out;
 }
@@ -28863,11 +28876,31 @@ async function resolveSiteDeclaredOnPage(ctx, scope, fetchImpl, recoverOfficialT
     recordCall("site-fetch", "token-declaration", 0, "no_contract_on_page", "succeeded");
     return null;
   }
-  const resolved = [];
-  for (const address of candidates.slice(0, 6)) {
-    const pairs = await dexPairs(address);
-    if (pairs && pairs.length) resolved.push({ address, pairs, capturedAt: captureTimestamp() });
+  const batch = await dexTokenPairs(candidates);
+  if (!batch) {
+    recordCall("site-fetch", "token-declaration", 0, "candidate_resolution_failed", "failed");
+    return null;
   }
+  const pairsByAddress = /* @__PURE__ */ new Map();
+  const candidateKeys = new Set(candidates.map(addressKey));
+  for (const pair of batch.pairs) {
+    const base2 = isRecord4(pair.baseToken) ? pair.baseToken : {};
+    const key = addressKey(cleanText2(base2.address));
+    if (!candidateKeys.has(key)) continue;
+    pairsByAddress.set(key, [...pairsByAddress.get(key) ?? [], pair]);
+  }
+  if (batch.capped) {
+    for (const address of candidates) {
+      if (pairsByAddress.has(addressKey(address))) continue;
+      const pairs = await dexPairs(address);
+      if (pairs && pairs.length) pairsByAddress.set(addressKey(address), pairs);
+    }
+  }
+  const capturedAt = captureTimestamp();
+  const resolved = candidates.flatMap((address) => {
+    const pairs = pairsByAddress.get(addressKey(address));
+    return pairs && pairs.length ? [{ address, pairs, capturedAt }] : [];
+  });
   if (resolved.length !== 1) {
     recordCall("site-fetch", "token-declaration", 0, resolved.length ? "ambiguous_multiple_tokens" : "no_tradeable_token", "succeeded");
     return null;
@@ -28948,10 +28981,15 @@ async function collectSiteDeclaredToken(ctx, fetchImpl = fetch, extraOfficialUrl
   }
   return declared[0];
 }
+var DEX_BATCH_PAIR_CAP = 30;
 async function dexPairs(address) {
+  const result = await dexTokenPairs([address]);
+  return result ? result.pairs : null;
+}
+async function dexTokenPairs(addresses) {
   let response;
   try {
-    response = await fetch(`${DEXSCREENER}/${encodeURIComponent(address)}`, {
+    response = await fetch(`${DEXSCREENER}/${addresses.map((address) => encodeURIComponent(address)).join(",")}`, {
       signal: AbortSignal.timeout(8e3)
     });
   } catch {
@@ -28979,10 +29017,10 @@ async function dexPairs(address) {
     "dexscreener",
     "project-token-pairs",
     0,
-    `keyless \xB7 ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}`,
+    `keyless \xB7 ${pairs.length ? `${pairs.length} pairs` : "no_pairs"}${addresses.length > 1 ? ` \xB7 ${addresses.length} addresses` : ""}`,
     pairs.length === rawPairs.length ? "succeeded" : "partial"
   );
-  return pairs;
+  return { pairs, capped: rawPairs.length >= DEX_BATCH_PAIR_CAP };
 }
 var quotePriority = (symbol) => {
   switch (symbol.toUpperCase()) {
