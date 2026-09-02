@@ -40,6 +40,54 @@ describe("PersonCheckTracker", () => {
     expect(check?.sourceCount).toBe(2);
   });
 
+  it("lets a later confirmed token bind supersede the earlier assessed-null token identity finding", () => {
+    // The token collector runs before intake and again after orientation names a
+    // launched product or source verification recovers the official site. The
+    // first pass's "searched, nothing bound" is answered by the second pass's
+    // bind; it is not an adverse finding that must survive a clean read.
+    const tracker = new PersonCheckTracker();
+    tracker.record({
+      id: "project-token-identity",
+      status: "finding",
+      note: "assessed token identity: CoinGecko and DexScreener searches completed and found no token under a matching name. A null result on this axis, not adverse conduct evidence.",
+      provider: "coingecko/dexscreener",
+    });
+    tracker.record({
+      id: "project-token-identity",
+      status: "confirmed",
+      note: "$STONKBROKER matched this project through its official X account and canonical robinhood contract",
+      provider: "coingecko",
+      sourceCount: 1,
+    });
+
+    const check = byId(tracker, ["PROJECT"], "project-token-identity");
+    expect(check?.status).toBe("confirmed");
+    expect(check?.note).toBe("$STONKBROKER matched this project through its official X account and canonical robinhood contract");
+    expect(check?.note).not.toContain("found no token");
+    expect(check?.provider).toBe("coingecko");
+  });
+
+  it("keeps an unresolved token identity finding when no later pass confirms a bind", () => {
+    const tracker = new PersonCheckTracker();
+    tracker.record({
+      id: "project-token-identity",
+      status: "finding",
+      note: "The official X bio declared a contract, but DexScreener returned no market for that exact address.",
+      provider: "twitterapi/dexscreener",
+    });
+    tracker.record({
+      id: "project-token-identity",
+      status: "unavailable",
+      note: "CoinGecko search failed",
+      provider: "coingecko/dexscreener",
+    });
+
+    expect(byId(tracker, ["PROJECT"], "project-token-identity")).toMatchObject({
+      status: "finding",
+      note: expect.stringContaining("no market for that exact address"),
+    });
+  });
+
   it("lets verified portfolio evidence outrank an unavailable optional vendor", () => {
     const tracker = new PersonCheckTracker();
     tracker.record({
